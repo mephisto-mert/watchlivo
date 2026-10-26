@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" fill="none">
+  <defs>
+    <linearGradient id="kxBg" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#11131c" />
+      <stop offset="100%" stop-color="#07080d" />
+    </linearGradient>
+    <linearGradient id="kxAccent" x1="34" y1="28" x2="90" y2="92" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="55%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#00f5d4" />
+    </linearGradient>
+    <linearGradient id="kxStroke" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.22" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05" />
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="108" height="108" rx="28" fill="url(#kxBg)" stroke="url(#kxStroke)" stroke-width="2" />
+  <rect x="33" y="30" width="13" height="60" rx="6.5" fill="#f8fafc" />
+  <path d="M53 60L79 32.5C81.6 29.8 86 29.8 88.5 32.5C91 35.1 91 39.4 88.4 42L68.5 60L88.4 78C91 80.6 91 84.9 88.5 87.5C86 90.2 81.6 90.2 79 87.5L53 60Z" fill="url(#kxAccent)" />
+  <circle cx="54" cy="60" r="4" fill="#00f5d4" />
+</svg>

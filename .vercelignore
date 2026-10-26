@@ -1,0 +1,17 @@
+rave_extracted/dist/
+rave_extracted/workers/
+rave_extracted/node_modules/
+rave_extracted/app.html
+rave_extracted/package.json
+.rave_browser_profile/
+uploads/
+*.db
+*.log
+*.txt
+!requirements.txt
+test_*.py
+audit_*.py
+tests/
+desktop/
+rave_*.json
+__pycache__/

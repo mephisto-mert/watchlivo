@@ -1,0 +1,130 @@
+import base64
+import unittest
+from unittest.mock import patch
+
+from starlette.testclient import TestClient
+
+import auth_engine
+import rooms
+import server
+
+
+class RegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(server.app)
+
+    def test_status_never_exposes_credentials(self):
+        with patch.object(server, 'OPENAI_API_KEY', 'private-test-secret'):
+            response = self.client.get('/api/rave/ai-status')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('private-test-secret', response.text)
+        self.assertTrue(all('apiKey' not in x for x in response.json()['engines']))
+
+    def test_bad_manifest_parameter_is_client_error(self):
+        self.assertEqual(self.client.get('/api/rave/stream?spt=bad').status_code, 400)
+
+    def test_manifest_failure_never_plays_another_movie(self):
+        sid = base64.urlsafe_b64encode(b'https://example.com/a.m3u8').decode()
+        with patch.object(server, 'public_http_url', return_value=True), patch.object(server, '_public_open', side_effect=OSError):
+            response = self.client.get('/api/rave/stream', params={'sid': sid})
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn('mux.dev', response.text)
+
+    def test_proxy_preserves_unsatisfiable_range(self):
+        with patch.object(server, '_proxy_chunk_sync', return_value=(b'', 416, 'bytes */100', 'video/mp4')):
+            response = self.client.get(server._proxy_u('https://example.com/a.mp4'))
+        self.assertEqual(response.status_code, 416)
+        self.assertEqual(response.headers['content-range'], 'bytes */100')
+
+    def test_proxy_rejects_unsigned_or_tampered_requests(self):
+        resp_unsigned = self.client.get('/api/rave/stream-proxy?url=https://example.com/a.mp4')
+        self.assertEqual(resp_unsigned.status_code, 403)
+        resp_tampered = self.client.get('/api/rave/stream-proxy?url=https://example.com/a.mp4&sig=deadbeef0000')
+        self.assertEqual(resp_tampered.status_code, 403)
+
+    def test_ssrf_guard_blocks_loopback_and_cloud_metadata(self):
+        self.assertFalse(server.public_http_url('http://127.0.0.1:8765/api/health'))
+        self.assertFalse(server.public_http_url('http://169.254.169.254/latest/meta-data/'))
+        self.assertFalse(server.public_http_url('http://10.0.0.1/admin'))
+        self.assertFalse(server.public_http_url('http://192.168.1.1/'))
+        self.assertFalse(server.public_http_url('file:///etc/passwd'))
+
+    def test_security_headers_present_on_responses(self):
+        response = self.client.get('/api/health')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get('x-content-type-options'), 'nosniff')
+        self.assertEqual(response.headers.get('x-frame-options'), 'SAMEORIGIN')
+        self.assertIn("frame-ancestors 'self'", response.headers.get('content-security-policy', ''))
+
+    def test_auth_token_hmac_tamper_resistance_and_pbkdf2(self):
+        h1 = auth_engine._hash_pw('GucluSifre!2026', 'salt_a')
+        h2 = auth_engine._hash_pw('GucluSifre!2026', 'salt_b')
+        self.assertNotEqual(h1, h2)
+        tok = auth_engine.sign_auth_token({'uid': 'usr_test_1', 'email': 'sec@watchlivo.online', 'handle': 'sec_audit', 'name': 'Sec Audit'})
+        verified = auth_engine.verify_auth_token(tok)
+        self.assertIsNotNone(verified)
+        self.assertEqual(verified['uid'], 'usr_test_1')
+        b64, sig = tok.rsplit('.', 1)
+        self.assertIsNone(auth_engine.verify_auth_token(f"{b64}.{'0' * len(sig)}"))
+        tampered_b64 = base64.urlsafe_b64encode(b'{"uid":"admin","email":"root@watchlivo.online"}').decode().rstrip('=')
+        self.assertIsNone(auth_engine.verify_auth_token(f"{tampered_b64}.{sig}"))
+
+    def test_room_path_traversal_and_leader_acl(self):
+        bad_resp = self.client.post('/api/rooms/..%2Fetc%2Fpasswd/sync', json={'type': 'init'})
+        self.assertIn(bad_resp.status_code, (400, 404))
+        bad_resp2 = self.client.post('/api/rooms/BAD..ID/sync', json={'type': 'init'})
+        self.assertEqual(bad_resp2.status_code, 400)
+
+    def test_platform_login_rejects_random_credentials_and_stores_zero_data(self):
+        r_rand1 = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'asdf@asdf.com', 'password': '1234'})
+        self.assertEqual(r_rand1.status_code, 401)
+        r_rand2 = self.client.post('/api/rave/accounts/login', json={'provider': 'disney', 'email': 'test@test.com', 'password': 'password'})
+        self.assertEqual(r_rand2.status_code, 401)
+        r_rand3 = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'kullanici@uydurmadomain999999.xyz', 'password': 'GucluSifre!2026'})
+        self.assertEqual(r_rand3.status_code, 401)
+        with patch.object(server, '_upstream_authenticate_sync', return_value=(False, 'Netflix hesap doğrulaması başarısız')):
+            r_unregistered = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
+            self.assertEqual(r_unregistered.status_code, 401)
+        with patch.object(server, '_upstream_authenticate_sync', return_value=(True, 'ok')):
+            r_valid = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
+            self.assertEqual(r_valid.status_code, 200)
+            vdata = r_valid.json()
+            self.assertTrue(vdata.get('zeroKnowledge'))
+            self.assertEqual(vdata.get('cookies'), [])
+            self.assertIn('***@gmail.com', vdata.get('accountEmail', ''))
+            seal = vdata.get('vaultSeal')
+            self.assertTrue(seal and len(seal) == 64)
+            r_wrong_pw = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'YanlisSifre#9999', 'vaultSeal': seal})
+            self.assertEqual(r_wrong_pw.status_code, 401)
+        r_real = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': '30012001Mertcan', 'profile': 'mert'})
+        self.assertEqual(r_real.status_code, 200)
+        rdata = r_real.json()
+        self.assertTrue(rdata.get('ok'))
+        self.assertTrue(rdata.get('zeroKnowledge'))
+        self.assertEqual(rdata.get('accountEmail'), 'jo***@hotmail.com')
+        r_real_wrong = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': 'YanlisSifre999!'})
+        self.assertEqual(r_real_wrong.status_code, 401)
+        r_accs = self.client.get('/api/rave/accounts').json()
+        self.assertEqual(r_accs['accounts']['netflix']['accountEmail'], '')
+        self.assertEqual(r_accs['accounts']['netflix']['cookies'], [])
+
+    def test_private_redirect_is_rejected(self):
+        with patch.object(server, 'public_http_url', return_value=False):
+            with self.assertRaises(Exception):
+                server._NoRedirect().redirect_request(None, None, 302, '', {}, 'http://127.0.0.1/')
+
+    def test_zero_heartbeat_and_explicit_seek(self):
+        room = rooms.new_room('regression')
+        rooms.add_participant(room, 'h', {'username': 'Host'}, 'http')
+        room['host_id'] = 'h'
+        rooms.set_media(room, {'url': 'https://example.com/a.mp4'}, 'Host', 120)
+        rooms.handle_action(room, 'h', {'type': 'heartbeat', 'currentTime': 0})
+        self.assertEqual(room['media']['currentTime'], 120)
+        restored = rooms.merge_sync_token(None, rooms.pack_sync_token(room), room['id'])
+        self.assertEqual(restored['media']['currentTime'], 120)
+        rooms.handle_action(room, 'h', {'type': 'seek', 'currentTime': 5})
+        self.assertEqual(room['media']['currentTime'], 5)
+
+
+if __name__ == '__main__':
+    unittest.main()

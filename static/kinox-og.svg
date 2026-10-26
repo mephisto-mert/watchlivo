@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" fill="none">
+  <defs>
+    <linearGradient id="ogBg" x1="0" y1="0" x2="1200" y2="630" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0d1020" />
+      <stop offset="100%" stop-color="#06070c" />
+    </linearGradient>
+    <radialGradient id="ogGlow" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#00f5d4" stop-opacity="0.15" />
+      <stop offset="60%" stop-color="#a855f7" stop-opacity="0.06" />
+      <stop offset="100%" stop-color="#06070c" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="ogAcc" x1="20" y1="26" x2="100" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00f5d4" />
+      <stop offset="52%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#ogBg)" />
+  <rect width="1200" height="630" fill="url(#ogGlow)" />
+  <rect x="40" y="40" width="1120" height="550" rx="32" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2" />
+  <g transform="translate(540, 150)">
+    <rect x="6" y="6" width="108" height="108" rx="28" fill="#0b0d18" stroke="#00f5d4" stroke-opacity="0.32" stroke-width="2.5" />
+    <path d="M26 36L41 84L60 50L79 84L94 36" stroke="url(#ogAcc)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="60" cy="31" r="5" fill="#00f5d4" />
+  </g>
+  <text x="600" y="346" text-anchor="middle" fill="#f8fafc" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" letter-spacing="14">WATCHLIVO</text>
+  <text x="600" y="402" text-anchor="middle" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="500" letter-spacing="2">Arkadaşlarınla aynı anda, tek kare gecikmesiz sinema, dizi ve müzik odaları.</text>
+  <text x="600" y="455" text-anchor="middle" fill="#00f5d4" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" letter-spacing="4">WATCHLIVO.ONLINE</text>
+</svg>

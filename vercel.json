@@ -1,0 +1,128 @@
+{
+  "version": 2,
+  "regions": [
+    "fra1"
+  ],
+  "builds": [
+    {
+      "src": "static/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "catalog_api.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "includeFiles": [
+          "server.py",
+          "rooms.py",
+          "music_engine.py",
+          "animecix_tau_map.json",
+          "hidden_titles.json",
+          "main_sites_vault.json"
+        ]
+      }
+    },
+    {
+      "src": "server.py",
+      "use": "@vercel/python",
+      "config": {
+        "maxLambdaSize": "50mb",
+        "includeFiles": [
+          "rooms.py",
+          "music_engine.py",
+          "static/index.html",
+          "animecix_tau_map.json",
+          "hidden_titles.json",
+          "main_sites_vault.json"
+        ]
+      }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "headers": {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Alt-Svc": "clear",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+      },
+      "dest": "/static/index.html"
+    },
+    {
+      "src": "/index.html",
+      "dest": "/static/index.html",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+      }
+    },
+    {
+      "src": "/(favicon\\.ico|apple-touch-icon.*\\.png)",
+      "dest": "/static/watchlivo-logo.svg",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+      }
+    },
+    {
+      "src": "/download/apk",
+      "dest": "/static/Watchlivo-v1.1.apk",
+      "headers": {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"Watchlivo-v1.1.0.apk\""
+      }
+    },
+    {
+      "src": "/download/windows",
+      "dest": "/static/Watchlivo.exe",
+      "headers": {
+        "Content-Type": "application/vnd.microsoft.portable-executable",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.exe\""
+      }
+    },
+    {
+      "src": "/static/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Alt-Svc": "clear",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+      },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/api/(search|rave|upload)(.*)",
+      "dest": "catalog_api.py"
+    },
+    {
+      "src": "/api/(.*)",
+      "dest": "server.py"
+    },
+    {
+      "src": "/(manifest\\.json|sw\\.js)",
+      "dest": "server.py"
+    },
+    {
+      "src": "/(.*)",
+      "headers": {
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Alt-Svc": "clear",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "X-Frame-Options": "SAMEORIGIN",
+        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+      },
+      "dest": "/static/index.html"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900" fill="none">
+  <defs>
+    <linearGradient id="pBg" x1="0" y1="0" x2="600" y2="900" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#101322" />
+      <stop offset="100%" stop-color="#06070d" />
+    </linearGradient>
+    <radialGradient id="pGlow" cx="50%" cy="42%" r="48%">
+      <stop offset="0%" stop-color="#00f5d4" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#06070d" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="pAcc" x1="20" y1="26" x2="100" y2="96" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#00f5d4" />
+      <stop offset="52%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#a855f7" />
+    </linearGradient>
+  </defs>
+  <rect width="600" height="900" fill="url(#pBg)" />
+  <rect width="600" height="900" fill="url(#pGlow)" />
+  <rect x="24" y="24" width="552" height="852" rx="28" stroke="#ffffff" stroke-opacity="0.07" stroke-width="2" />
+  <g transform="translate(240, 330)">
+    <rect x="6" y="6" width="108" height="108" rx="28" fill="#0b0d18" stroke="#00f5d4" stroke-opacity="0.28" stroke-width="2.5" />
+    <path d="M26 36L41 84L60 50L79 84L94 36" stroke="url(#pAcc)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="60" cy="31" r="5" fill="#00f5d4" />
+  </g>
+  <text x="300" y="505" text-anchor="middle" fill="#f8fafc" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="900" letter-spacing="8">WATCHLIVO</text>
+  <text x="300" y="540" text-anchor="middle" fill="#00f5d4" font-family="system-ui, -apple-system, sans-serif" font-size="13" font-weight="700" letter-spacing="4">SİNEMA · DİZİ · MÜZİK</text>
+</svg>

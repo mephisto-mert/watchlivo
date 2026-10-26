@@ -1,0 +1,12 @@
+{
+  "name": "vortex-desktop",
+  "version": "2.0.0",
+  "description": "VORTEX Desktop Shell — Rave-parity DRM WebView + VideoPlayerSync bridge",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^33.0.0"
+  }
+}
