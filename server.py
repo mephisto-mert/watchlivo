@@ -3487,7 +3487,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         if _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:3]
-        if not direct_list:
+        # Fallback to YouTube restricted strictly to youtube provider
+        if not direct_list and prov == "youtube":
             yt_res = _extract_official_yt_sync(tr_title or orig_title or disp or title, s, e, mtype)
             if yt_res:
                 vid = yt_res["videoId"]
@@ -3571,48 +3572,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "channel": f"{label} · {'Tam Bölüm (1080p HD)' if mtype == 'tv' else 'Tam Film (1080p HD)'}",
                 "duration": dur,
             }
-        if tid and tid.isdigit():
-            eff_prov = pmeta.get("prov") or (prov if prov in PROV_LABELS else "cinema")
-            label = PROV_LABELS.get(eff_prov, label)
-            embed_urls = (
-                [
-                    f"https://vidsrc.cc/v2/embed/tv/{tid}/{s}/{e}",
-                    f"https://vidlink.pro/tv/{tid}/{s}/{e}",
-                    f"https://autoembed.cc/embed/player.php?id={tid}&s={s}&e={e}",
-                    f"https://vidsrc.to/embed/tv/{tid}/{s}/{e}",
-                ]
-                if mtype == "tv"
-                else [
-                    f"https://vidsrc.cc/v2/embed/movie/{tid}",
-                    f"https://vidlink.pro/movie/{tid}",
-                    f"https://autoembed.cc/embed/player.php?id={tid}",
-                    f"https://vidsrc.to/embed/movie/{tid}",
-                ]
-            )
-            full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
-            dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
-            official_url = source_url or f"https://www.themoviedb.org/{mtype}/{tid}"
-            return {
-                "provider": eff_prov,
-                "catalogProvider": eff_prov,
-                "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
-                "streamType": "embed",
-                "url": embed_urls[0],
-                "embedUrl": embed_urls[0],
-                "altUrls": embed_urls[1:],
-                "subtitleTracks": [],
-                "audioTracks": [{"id": "orig", "label": "Orijinal / Dublaj", "language": "orig", "kind": "main"}],
-                "intro": None,
-                "platformAudioLangs": pmeta.get("audioLangs") or ["en", "tr"],
-                "platformSubLangs": pmeta.get("subLangs") or ["tr", "en"],
-                "officialUrl": official_url,
-                "providerUrl": official_url,
-                "title": full_title,
-                "thumbnail": poster,
-                "channel": f"{label} · Çoklu Akış Sunucusu",
-                "duration": dur,
-            }
-    return None
+        # REMOVED 4 FOREIGN EMBED FALLBACKS (vidsrc.cc, vidlink.pro, autoembed.cc, vidsrc.to)
+        return None
 
 
 _RESOLVE_RESP_CACHE: dict[str, tuple[float, dict]] = {}
