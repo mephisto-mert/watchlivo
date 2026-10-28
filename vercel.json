@@ -16,6 +16,8 @@
         "includeFiles": [
           "server.py",
           "rooms.py",
+          "auth_engine.py",
+          "security.py",
           "music_engine.py",
           "animecix_tau_map.json",
           "hidden_titles.json",
@@ -30,6 +32,8 @@
         "maxLambdaSize": "50mb",
         "includeFiles": [
           "rooms.py",
+          "auth_engine.py",
+          "security.py",
           "music_engine.py",
           "static/index.html",
           "animecix_tau_map.json",
@@ -48,6 +52,7 @@
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
       },
       "dest": "/static/index.html"
@@ -59,6 +64,7 @@
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
       }
     },
@@ -73,20 +79,8 @@
       }
     },
     {
-      "src": "/download/apk",
-      "dest": "/static/Watchlivo-v1.1.apk",
-      "headers": {
-        "Content-Type": "application/vnd.android.package-archive",
-        "Content-Disposition": "attachment; filename=\"Watchlivo-v1.1.0.apk\""
-      }
-    },
-    {
-      "src": "/download/windows",
-      "dest": "/static/Watchlivo.exe",
-      "headers": {
-        "Content-Type": "application/vnd.microsoft.portable-executable",
-        "Content-Disposition": "attachment; filename=\"Watchlivo.exe\""
-      }
+      "src": "/download/(apk|windows)",
+      "dest": "server.py"
     },
     {
       "src": "/static/(.*)",
@@ -96,6 +90,7 @@
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
       },
       "dest": "/static/$1"
@@ -120,6 +115,7 @@
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
       },
       "dest": "/static/index.html"

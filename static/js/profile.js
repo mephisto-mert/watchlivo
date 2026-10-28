@@ -325,7 +325,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               try {
                 const res = await api('/api/auth/profile', {
                   method: 'POST',
-                  body: { uid: current.id, name, handle, color, email: current.email, authToken: current.authToken },
+                  body: { name, handle, color, authToken: current.authToken },
                 });
                 const updated = saveProfile({ ...(res?.user || current), name, handle, color, authToken: res?.authToken || current.authToken, isGuest: false });
                 finish(updated, '✓ Profil bilgilerin güncellendi');

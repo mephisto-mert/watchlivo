@@ -31,6 +31,8 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, Redire
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
+from security import RateLimiter, client_ip, server_secret, too_many_response
+
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 STATIC_DIR = BASE_DIR / "static"
 
@@ -53,11 +55,30 @@ IS_VERCEL = bool(os.environ.get("VERCEL"))
 UPLOADS_DIR = pathlib.Path("/tmp/uploads") if IS_VERCEL else BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 ACC_DB_PATH = pathlib.Path("/tmp/vortex_accounts.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
-_PROXY_SECRET = (os.environ.get("VORTEX_SECRET") or hashlib.sha256(f"watchlivo-proxy-v1:{os.environ.get('TMDB_API_KEY') or '4f042878f22ef63cb94f25e60cb4ec6e'}".encode()).hexdigest()).encode()
+# Proxy URLs are signed and verified by this same process, so an instance-local
+# secret is safe and never leaks a global one.
+_PROXY_SECRET = server_secret("PROXY_SECRET")
+PROXY_URL_TTL = 3600.0
 
 
 def _proxy_sig(url: str, ref: str = "") -> str:
-    return hmac.new(_PROXY_SECRET, f"{url}|{ref}".encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+    exp = int(time.time()) + int(PROXY_URL_TTL)
+    return hmac.new(_PROXY_SECRET, f"{url}|{ref}|{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24] + f".{exp}"
+
+
+def _proxy_sig_ok(url: str, ref: str, sig: str) -> bool:
+    """Verify a signed proxy URL and enforce its expiry."""
+    if not sig or "." not in sig:
+        return False
+    digest, _, exp_raw = sig.rpartition(".")
+    try:
+        exp = int(exp_raw)
+    except (TypeError, ValueError):
+        return False
+    if exp < time.time():
+        return False
+    expected = hmac.new(_PROXY_SECRET, f"{url}|{ref}|{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+    return hmac.compare_digest(expected, digest)
 
 
 def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
@@ -95,7 +116,6 @@ def _get_acc_db():
             updated_at REAL DEFAULT 0
         )
     """)
-    conn.execute("DELETE FROM provider_accounts")
     conn.commit()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS resolved_streams (
@@ -122,12 +142,67 @@ class SecurityHeaders:
                 hdrs.append((b"x-content-type-options", b"nosniff"))
                 hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
-                hdrs.append((b"content-security-policy", b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'"))
+                hdrs.append((b"permissions-policy", b"camera=(), microphone=(self), geolocation=()"))
+                hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
+                hdrs.append((
+                    b"content-security-policy",
+                    b"default-src 'self'; "
+                    b"script-src 'self' 'unsafe-inline' https://www.gstatic.com https://apis.google.com; "
+                    b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                    b"font-src 'self' data: https://fonts.gstatic.com; "
+                    b"img-src 'self' data: blob: https:; "
+                    b"media-src 'self' blob: https:; "
+                    b"connect-src 'self' https: wss:; "
+                    b"frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com "
+                    b"https://accounts.google.com https://watchlivo-38ab6.firebaseapp.com; "
+                    b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+                ))
                 hdrs.append((b"alt-svc", b"clear"))
                 message = {**message, "headers": hdrs}
             await send(message)
 
         await self.app(scope, receive, send_wrapper)
+
+
+IDENTITY_HEADER = b"authorization"
+_UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+
+
+def _uid_from_token(token: str) -> str:
+    """Resolve a bearer token to a verified uid (small TTL cache, 5000 entries)."""
+    if not token:
+        return ""
+    now_ts = time.time()
+    hit = _UID_CACHE.get(token)
+    if hit and hit[1] > now_ts:
+        return hit[0]
+    try:
+        import auth_engine
+        claims = auth_engine.verify_auth_token(token)
+    except Exception:
+        claims = None
+    uid = str((claims or {}).get("uid") or "")
+    if uid:
+        _UID_CACHE[token] = (uid, now_ts + 60.0)
+        _UID_CACHE.move_to_end(token)
+        while len(_UID_CACHE) > 5000:
+            _UID_CACHE.popitem(last=False)
+    return uid
+
+
+class IdentityMiddleware(BaseHTTPMiddleware):
+    """Attach the verified account id to the request scope.
+
+    Downstream handlers read ``scope["wl_uid"]``. A client-supplied ``uid`` field
+    is never trusted, so identity cannot be spoofed by editing a JSON body.
+    """
+
+    async def dispatch(self, request, call_next):
+        header = request.headers.get("authorization") or ""
+        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        request.scope["wl_uid"] = _uid_from_token(token) if token else ""
+        return await call_next(request)
 
 
 # ---------------------------------------------------------------------------
@@ -3866,31 +3941,23 @@ _SYNTHETIC_UNREGISTERED_ACCOUNTS = {
     "ornek.hesap@gmail.com", "sahte.hesap@gmail.com", "unregistered@gmail.com",
     "nonexistent@gmail.com", "demo.user@gmail.com", "sample.user@gmail.com",
 }
-_ZK_ACCOUNT_SEALS: dict[str, str] = {}
 
 
 def _upstream_authenticate_sync(provider: str, spec: dict, id_clean: str, pw: str) -> tuple[bool, str]:
+    """Third-party credential check.
+
+    Watchlivo holds no credential bridge to these catalogues, so there is no
+    honest way to confirm a password. Pretending to verify would hand out a
+    session for any plausible-looking e-mail — the endpoint fails closed and
+    tells the user to open the provider page instead.
+    """
     pname = spec["name"]
-    not_found_err = f"{pname} hesap doğrulaması başarısız: Bu e-posta/telefon ve şifreye ait aktif bir {pname} hesabı doğrulanamadı. Yalnızca gerçek {pname} hesabınızla giriş yapabilirsiniz."
     if id_clean in _SYNTHETIC_UNREGISTERED_ACCOUNTS or id_clean.startswith(("test.", "fake.", "deneme.", "ornek.", "sallama.", "rastgele.", "sahte.")):
-        return False, not_found_err
-    login_url = (spec.get("loginUrl") or spec.get("browseUrl") or "").strip()
-    if login_url:
-        try:
-            u_host = urllib.parse.urlparse(login_url).hostname or ""
-            if u_host:
-                socket.getaddrinfo(u_host, 443, proto=socket.IPPROTO_TCP)
-        except Exception:
-            return False, f"{pname} kimlik doğrulama sunucusuna şu anda ulaşılamıyor."
-    salt = hashlib.sha256(f"wl_zk_prov:{provider}:{id_clean}".encode("utf-8")).hexdigest()[:24]
-    pw_derived = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
-    expected_seal = hmac.new(auth_engine.AUTH_SECRET, f"{provider}:{id_clean}:{pw_derived[:32]}".encode("utf-8"), hashlib.sha256).hexdigest()
-    acct_key = hashlib.sha256(f"wl_acct:{provider}:{id_clean}".encode("utf-8")).hexdigest()
-    existing_seal = _ZK_ACCOUNT_SEALS.get(acct_key)
-    if existing_seal and not hmac.compare_digest(existing_seal, expected_seal):
-        return False, f"{pname} şifreniz hatalı. Lütfen doğru {pname} şifrenizi girin."
-    _ZK_ACCOUNT_SEALS[acct_key] = expected_seal
-    return True, "ok"
+        return False, f"{pname} hesap doğrulaması başarısız: Bu e-posta/telefon ve şifreye ait aktif bir {pname} hesabı doğrulanamadı."
+    return False, (
+        f"{pname} için şifre ile doğrulama desteklenmiyor. "
+        "Platform oturumunu tarayıcı penceresinden açın."
+    )
 
 
 async def rave_get_accounts(request: Request):
@@ -3918,25 +3985,10 @@ async def rave_login_account(request: Request):
         return JSONResponse({"ok": False, "error": "Bilinmeyen platform"}, status_code=400)
     email = (payload.get("email") or "").strip()
     pwd = (payload.get("password") or "").strip()
-    profile = (payload.get("profile") or "Ana Profil").strip()[:32]
-    prev_seal = (payload.get("vaultSeal") or "").strip()
     ok_cred, err_msg = await asyncio.to_thread(_verify_provider_credentials_sync, provider, spec, email, pwd)
-    if not ok_cred:
-        return JSONResponse({"ok": False, "error": err_msg}, status_code=401)
-    norm_id = email.strip().lower()
-    salt = hashlib.sha256(f"wl_zk_prov:{provider}:{norm_id}".encode("utf-8")).hexdigest()[:24]
-    pw_derived = hashlib.pbkdf2_hmac("sha256", pwd.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
-    expected_seal = hmac.new(auth_engine.AUTH_SECRET, f"{provider}:{norm_id}:{pw_derived[:32]}".encode("utf-8"), hashlib.sha256).hexdigest()
-    if prev_seal and not hmac.compare_digest(prev_seal, expected_seal):
-        return JSONResponse({"ok": False, "error": f"{spec['name']} şifreniz hatalı. Lütfen doğru şifreyi girin."}, status_code=401)
-    masked_label = _mask_acct_identifier(email)
-    return JSONResponse({
-        "ok": True, "provider": provider, "loginSatisfied": True,
-        "accountEmail": masked_label, "profileName": profile,
-        "domain": spec["domain"], "cookieCount": 0, "cookies": [],
-        "vaultSeal": expected_seal, "zeroKnowledge": True,
-        "currentUrl": spec["browseUrl"], "bridgeProtocol": f"watchlivo-zk-aes256-{provider}",
-    }, headers={"Cache-Control": "no-store"})
+    if ok_cred:
+        return JSONResponse({"ok": False, "error": "Doğrulama köprüsü kapalı.", "code": "unsupported"}, status_code=501)
+    return JSONResponse({"ok": False, "error": err_msg, "code": "unsupported"}, status_code=501)
 
 
 async def rave_bridge(request: Request):
@@ -3960,8 +4012,13 @@ async def rave_browser_login(request: Request):
     spec = RAVE_PROVIDERS_SPEC.get(provider)
     if not spec:
         return JSONResponse({"ok": False, "error": "Bilinmeyen platform"}, status_code=400)
+    # ``ok`` only means "this request was well-formed". No credential is ever
+    # validated here, so ``verified`` stays False and ``loginSatisfied`` stays
+    # False — a client must never read this as an authenticated session.
     return JSONResponse({
-        "ok": True, "provider": provider, "loginSatisfied": False,
+        "ok": True, "verified": False, "loginSatisfied": False,
+        "reason": "manual-login-only",
+        "provider": provider,
         "accountEmail": "", "profileName": "", "domain": spec["domain"],
         "loginUrl": spec["loginUrl"], "browseUrl": spec["browseUrl"],
         "cookieCount": 0, "cookies": [], "openPopup": True, "zeroKnowledge": True,
@@ -4412,13 +4469,23 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
     return data, ct
 
 
+_POSTER_LIMIT = RateLimiter(120, 60.0, name="poster")
+
+
 async def poster_proxy(request: Request):
     url = (request.query_params.get("url") or "").strip()
+    ref = (request.query_params.get("referer") or "").strip()
+    sig = (request.query_params.get("sig") or "").strip()
+    if not _proxy_sig_ok(url, ref, sig):
+        return RedirectResponse("/static/watchlivo-poster.svg")
+    allowed, retry_after = _POSTER_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     if not url.startswith(("https://", "http://")) or not public_http_url(url):
         return RedirectResponse("/static/watchlivo-poster.svg")
     try:
         data, ct = await asyncio.wait_for(asyncio.to_thread(_fetch_poster_sync, url), timeout=6.0)
-        if data:
+        if data and ct.startswith("image/"):
             return Response(data, media_type=ct, headers={
                 "Access-Control-Allow-Origin": "*",
                 "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
@@ -4432,7 +4499,7 @@ async def stream_proxy(request: Request):
     url = (request.query_params.get("url") or "").strip()
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    if not sig or not hmac.compare_digest(sig, _proxy_sig(url, ref)):
+    if not url or not _proxy_sig_ok(url, ref, sig):
         return JSONResponse({"error": "İmzasız proxy isteği reddedildi"}, status_code=403, headers={"Cache-Control": "no-store"})
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
     try:
@@ -4995,12 +5062,39 @@ async def extract_video(request: Request):
     return JSONResponse(res)
 
 
+_UPLOAD_LIMIT = RateLimiter(20, 3600.0, name="upload")
+MAX_UPLOADS_TOTAL_BYTES = int(os.environ.get("MAX_UPLOADS_TOTAL_BYTES") or 5 * 1024 ** 3)
+
+
+def _uploads_dir_size() -> int:
+    total = 0
+    try:
+        for entry in UPLOADS_DIR.iterdir():
+            try:
+                if entry.is_file():
+                    total += entry.stat().st_size
+            except OSError:
+                continue
+    except OSError:
+        return 0
+    return total
+
+
 async def upload_file(request: Request):
     if IS_VERCEL:
         return JSONResponse({"error": "Dosya yükleme bulut sürümünde kapalı. Dosyanı Google Drive'a yükleyip bağlantısını kullanabilirsin."}, status_code=501)
+    # Uploads are expensive (disk, bandwidth): verified accounts only.
+    uid = str(request.scope.get("wl_uid") or "")
+    if not uid:
+        return JSONResponse({"error": "Yükleme için giriş yapmalısın."}, status_code=401)
+    allowed, retry_after = _UPLOAD_LIMIT.hit(uid)
+    if not allowed:
+        return too_many_response(retry_after)
     length = int(request.headers.get("content-length") or 0)
     if length > MAX_UPLOAD_BYTES:
         return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
+    if _uploads_dir_size() + max(0, length) > MAX_UPLOADS_TOTAL_BYTES:
+        return JSONResponse({"error": "Sunucu depolama alanı dolu. Lütfen daha sonra tekrar dene."}, status_code=507)
     form = await request.form(max_part_size=MAX_UPLOAD_BYTES)
     file = form.get("file")
     if not file or not getattr(file, "filename", None):
@@ -5018,7 +5112,7 @@ async def upload_file(request: Request):
                 (UPLOADS_DIR / name).unlink(missing_ok=True)
                 return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
             out.write(chunk)
-    return JSONResponse({"url": f"/uploads/{name}", "filename": file.filename, "size": size})
+    return JSONResponse({"url": f"/uploads/{name}", "filename": pathlib.Path(file.filename).name[:120], "size": size})
 
 
 async def manifest_json(request: Request):
@@ -5082,60 +5176,60 @@ async def download_windows_endpoint(request: Request):
     return JSONResponse({"ok": False, "error": "Windows uygulaması hazırlanıyor"}, status_code=404)
 
 
+_AI_LIMIT = RateLimiter(30, 3600.0, name="ai_chat")
+_SUNO_LIMIT = RateLimiter(10, 3600.0, name="suno")
+
+
 async def rave_ai_status(request: Request):
+    """Report which AI engines are configured — never expose key material."""
     return JSONResponse({
         "ok": True,
         "engines": [
-            {
-                "id": "openai",
-                "name": "OpenAI Frontier Direct API",
-                "activeModel": OPENAI_MODEL,
-                "availableModels": ["gpt-6.1-sol", "gpt-6-astra", "gpt-5.5", "gpt-5.4", "o3"],
-                "apiKeyMasked": "sk-proj-****" if OPENAI_API_KEY else "unconfigured",
-                "endpoint": "https://api.openai.com/v1/chat/completions",
-                "status": "active",
-            },
-            {
-                "id": "suno",
-                "name": "Suno v4.5 + Mureka 9.5 Studio API",
-                "activeModel": SUNO_MODEL,
-                "availableModels": ["suno-v4.5-mureka-9.5", "suno-v4.5-direct", "mureka-9.5-studio"],
-                "apiKeyMasked": "eyJhbG****" if SUNO_API_KEY else "unconfigured",
-                "endpoint": "https://xstzsqkfynhexvulcvab.supabase.co/functions/v1/generate-song",
-                "secondaryEndpoint": "https://aisongscreator.com/api/generate.php",
-                "status": "active",
-            },
+            {"id": "openai", "name": "OpenAI", "activeModel": OPENAI_MODEL, "configured": bool(OPENAI_API_KEY), "status": "active" if OPENAI_API_KEY else "unconfigured"},
+            {"id": "suno", "name": "Suno", "activeModel": SUNO_MODEL, "configured": bool(SUNO_API_KEY), "status": "active" if SUNO_API_KEY else "unconfigured"},
         ],
     })
 
 
-def _call_openai_sync(prompt: str, model: str, api_key: str) -> dict:
-    use_key = (api_key or OPENAI_API_KEY).strip()
-    if "..." in use_key or len(use_key) < 25:
-        use_key = OPENAI_API_KEY
+def _ai_guard(request: Request, limiter: RateLimiter):
+    """Return (uid, error_response). AI calls cost money, so they need an account."""
+    uid = str(request.scope.get("wl_uid") or "")
+    if not uid:
+        return "", JSONResponse({"ok": False, "error": "Yapay zeka özellikleri için giriş yapmalısın."}, status_code=401)
+    allowed, retry_after = limiter.hit(uid)
+    if not allowed:
+        return uid, too_many_response(retry_after)
+    return uid, None
+
+
+def _call_openai_sync(prompt: str, model: str) -> dict:
     use_model = (model or OPENAI_MODEL or "gpt-6.1-sol").split()[0].strip()
+    use_key = (OPENAI_API_KEY or "").strip()
     sys_msg = (
         "Sen dünyaca ünlü bir Türkçe/Global şarkı sözü yazarı, Suno v4.5 müzik prodüktörü ve Watchlivo sinema/müzik yapay zeka asistanısın. "
         "Şarkı/beste istendiğinde TITLE:, STYLE_PROMPT: (maksimum 120 karakter İngilizce prodüksiyon etiketleri) ve LYRICS: ([Intro], [Verse 1], [Chorus], [Bridge], [Outro]) üret."
     )
-    try:
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=json.dumps({
-                "model": use_model,
-                "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
-                "max_completion_tokens": 900,
-            }).encode("utf-8"),
-            headers={"Authorization": f"Bearer {use_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=16) as r:
-            d = json.loads(r.read().decode("utf-8"))
-            txt = (d.get("choices") or [{}])[0].get("message", {}).get("content") or ""
-            if txt:
-                return {"ok": True, "model": d.get("model") or use_model, "text": txt, "provider": "openai-direct"}
-    except Exception:
-        pass
+    if use_key:
+        try:
+            req = urllib.request.Request(
+                "https://api.openai.com/v1/chat/completions",
+                data=json.dumps({
+                    "model": use_model,
+                    "messages": [{"role": "system", "content": sys_msg}, {"role": "user", "content": prompt}],
+                    "max_completion_tokens": 900,
+                }).encode("utf-8"),
+                headers={"Authorization": f"Bearer {use_key}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=16) as r:
+                d = json.loads(r.read().decode("utf-8"))
+                txt = (d.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                if txt:
+                    return {"ok": True, "model": d.get("model") or use_model, "text": txt, "provider": "openai-direct"}
+        except Exception:
+            pass
+    if not OPENAI_CLOUD_FALLBACK_KEY:
+        return {"ok": False, "error": "Yapay zeka servisi yapılandırılmamış."}
     try:
         req2 = urllib.request.Request(
             "https://xstzsqkfynhexvulcvab.supabase.co/functions/v1/text-gen-live",
@@ -5164,26 +5258,29 @@ def _call_openai_sync(prompt: str, model: str, api_key: str) -> dict:
 
 
 async def rave_ai_chat(request: Request):
+    _uid, guard = _ai_guard(request, _AI_LIMIT)
+    if guard:
+        return guard
     try:
         body = await request.json()
     except Exception:
         body = {}
-    prompt = str(body.get("prompt") or request.query_params.get("prompt") or "").strip()
-    model = str(body.get("model") or request.query_params.get("model") or OPENAI_MODEL).strip()
-    api_key = str(body.get("apiKey") or "").strip()
+    prompt = str(body.get("prompt") or request.query_params.get("prompt") or "").strip()[:4000]
+    model = str(body.get("model") or request.query_params.get("model") or OPENAI_MODEL).strip()[:48]
     if not prompt:
         return JSONResponse({"ok": False, "error": "Prompt boş olamaz"}, status_code=400)
-    res = await asyncio.to_thread(_call_openai_sync, prompt, model, api_key)
+    res = await asyncio.to_thread(_call_openai_sync, prompt, model)
     return JSONResponse(res)
 
 
-def _submit_suno_sync(lyrics: str, style: str, title: str, api_key: str) -> dict:
-    use_key = (api_key or SUNO_API_KEY).strip()
-    if "..." in use_key or len(use_key) < 25:
-        use_key = SUNO_API_KEY
+def _submit_suno_sync(lyrics: str, style: str, title: str) -> dict:
+    use_key = (SUNO_API_KEY or "").strip()
     clean_lyrics = re.sub(r"\([^\)]*\)", "", lyrics or "").strip()[:1000]
     clean_style = (style or "Turkish Pop, Deep Bass, Catchy Synth, Studio Master, 124 BPM").replace("\n", " ").strip()[:125]
-    out = {"ok": True, "title": title or "Watchlivo AI Şarkı", "style": clean_style, "sunoTaskId": "", "murekaTokenId": ""}
+    out = {"ok": False, "title": title or "Watchlivo AI Şarkı", "style": clean_style, "sunoTaskId": "", "murekaTokenId": ""}
+    if not use_key:
+        out["error"] = "Müzik servisi yapılandırılmamış."
+        return out
     try:
         req1 = urllib.request.Request(
             "https://xstzsqkfynhexvulcvab.supabase.co/functions/v1/generate-song",
@@ -5208,19 +5305,24 @@ def _submit_suno_sync(lyrics: str, style: str, title: str, api_key: str) -> dict
             out["murekaTokenId"] = d2.get("token_id") or ""
     except Exception:
         pass
+    out["ok"] = bool(out["sunoTaskId"] or out["murekaTokenId"])
+    if not out["ok"]:
+        out["error"] = "Müzik üretim servisi görevi kabul etmedi."
     return out
 
 
 async def rave_suno_generate(request: Request):
+    _uid, guard = _ai_guard(request, _SUNO_LIMIT)
+    if guard:
+        return guard
     try:
         body = await request.json()
     except Exception:
         body = {}
-    lyrics = str(body.get("lyrics") or "").strip()
-    style = str(body.get("style") or "").strip()
-    title = str(body.get("title") or "Watchlivo AI Hit").strip()
-    api_key = str(body.get("apiKey") or "").strip()
-    res = await asyncio.to_thread(_submit_suno_sync, lyrics, style, title, api_key)
+    lyrics = str(body.get("lyrics") or "").strip()[:4000]
+    style = str(body.get("style") or "").strip()[:200]
+    title = str(body.get("title") or "Watchlivo AI Hit").strip()[:80]
+    res = await asyncio.to_thread(_submit_suno_sync, lyrics, style, title)
     return JSONResponse(res)
 
 
@@ -5287,5 +5389,21 @@ app = Starlette(
         Mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), check_dir=False), name="uploads"),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],
-    middleware=[Middleware(SecurityHeaders)],
+    middleware=[Middleware(SecurityHeaders), Middleware(IdentityMiddleware)],
 )
+
+
+def _serve() -> None:
+    """Run the Starlette app locally. Vercel imports `app` directly instead."""
+    host = os.environ.get("HOST") or "127.0.0.1"
+    port = int(os.environ.get("PORT") or 8000)
+    try:
+        import uvicorn
+    except ImportError:
+        raise SystemExit("uvicorn is missing. Run: pip install -r requirements.txt")
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+
+if __name__ == "__main__":
+    _serve()
+

@@ -76,37 +76,37 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(bad_resp2.status_code, 400)
 
     def test_platform_login_rejects_random_credentials_and_stores_zero_data(self):
-        r_rand1 = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'asdf@asdf.com', 'password': '1234'})
-        self.assertEqual(r_rand1.status_code, 401)
-        r_rand2 = self.client.post('/api/rave/accounts/login', json={'provider': 'disney', 'email': 'test@test.com', 'password': 'password'})
-        self.assertEqual(r_rand2.status_code, 401)
-        r_rand3 = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'kullanici@uydurmadomain999999.xyz', 'password': 'GucluSifre!2026'})
-        self.assertEqual(r_rand3.status_code, 401)
-        with patch.object(server, '_upstream_authenticate_sync', return_value=(False, 'Netflix hesap doğrulaması başarısız')):
-            r_unregistered = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
-            self.assertEqual(r_unregistered.status_code, 401)
+        """Provider passwords cannot be verified without a real bridge.
+
+        The server fails closed: 501 ``unsupported`` for every attempt, and no
+        e-mail/cookie is ever retained. It must never answer 200 for guessed
+        credentials.
+        """
+        attempts = [
+            {'provider': 'netflix', 'email': 'asdf@asdf.com', 'password': '1234'},
+            {'provider': 'disney', 'email': 'test@test.com', 'password': 'password'},
+            {'provider': 'netflix', 'email': 'kullanici@uydurmadomain999999.xyz', 'password': 'GucluSifre!2026'},
+            {'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'},
+            {'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': '30012001Mertcan', 'profile': 'mert'},
+        ]
+        for body in attempts:
+            resp = self.client.post('/api/rave/accounts/login', json=body)
+            self.assertEqual(resp.status_code, 501, body)
+            data = resp.json()
+            self.assertFalse(data.get('ok'), body)
+            self.assertEqual(data.get('code'), 'unsupported', body)
+            self.assertNotIn('vaultSeal', data, body)
+            self.assertNotIn('cookies', data, body)
+
         with patch.object(server, '_upstream_authenticate_sync', return_value=(True, 'ok')):
-            r_valid = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
-            self.assertEqual(r_valid.status_code, 200)
-            vdata = r_valid.json()
-            self.assertTrue(vdata.get('zeroKnowledge'))
-            self.assertEqual(vdata.get('cookies'), [])
-            self.assertIn('***@gmail.com', vdata.get('accountEmail', ''))
-            seal = vdata.get('vaultSeal')
-            self.assertTrue(seal and len(seal) == 64)
-            r_wrong_pw = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'YanlisSifre#9999', 'vaultSeal': seal})
-            self.assertEqual(r_wrong_pw.status_code, 401)
-        r_real = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': '30012001Mertcan', 'profile': 'mert'})
-        self.assertEqual(r_real.status_code, 200)
-        rdata = r_real.json()
-        self.assertTrue(rdata.get('ok'))
-        self.assertTrue(rdata.get('zeroKnowledge'))
-        self.assertEqual(rdata.get('accountEmail'), 'jo***@hotmail.com')
-        r_real_wrong = self.client.post('/api/rave/accounts/login', json={'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': 'YanlisSifre999!'})
-        self.assertEqual(r_real_wrong.status_code, 401)
+            still_501 = self.client.post('/api/rave/accounts/login', json={
+                'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
+            self.assertEqual(still_501.status_code, 501)
+
         r_accs = self.client.get('/api/rave/accounts').json()
         self.assertEqual(r_accs['accounts']['netflix']['accountEmail'], '')
         self.assertEqual(r_accs['accounts']['netflix']['cookies'], [])
+        self.assertTrue(r_accs['accounts']['netflix']['loginSatisfied'] is False)
 
     def test_private_redirect_is_rejected(self):
         with patch.object(server, 'public_http_url', return_value=False):

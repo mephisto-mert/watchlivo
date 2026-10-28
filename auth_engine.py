@@ -28,11 +28,18 @@ from starlette.responses import JSONResponse
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 AUTH_DB_PATH = pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
-AUTH_SECRET = (
-    os.environ.get("VORTEX_SECRET")
-    or os.environ.get("SUPABASE_JWT_SECRET")
-    or "watchlivo_supabase_cloud_auth_secret_v2_2026"
-).encode()
+
+from security import RateLimiter, client_ip, constant_time_eq, server_secret, too_many_response
+
+# Fail-closed: no public fallback secret. Without AUTH_SECRET the process uses an
+# unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
+AUTH_SECRET = server_secret("AUTH_SECRET") if not (os.environ.get("VORTEX_SECRET") or "").strip() else server_secret("VORTEX_SECRET")
+TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL") or 60 * 60 * 24 * 7)
+_LOGIN_LIMIT = RateLimiter(10, 300.0, name="login")
+_REGISTER_LIMIT = RateLimiter(5, 3600.0, name="register")
+_OTP_LIMIT = RateLimiter(5, 600.0, name="otp_send")
+_OTP_VERIFY_LIMIT = RateLimiter(10, 600.0, name="otp_verify")
+_RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -261,7 +268,18 @@ def _hash_pw(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
 
 
-def sign_auth_token(user: Dict[str, Any], pwh: str = "") -> str:
+def _new_salt() -> str:
+    """Cryptographically random per-account salt (never derived from the uid)."""
+    return secrets.token_hex(16)
+
+
+def sign_auth_token(user: Dict[str, Any]) -> str:
+    """Mint a short-lived HMAC session token.
+
+    The password hash never enters the token: a leaked token must not help an
+    attacker guess or reuse credentials.
+    """
+    issued = int(time.time())
     payload = {
         "uid": user["uid"],
         "email": user.get("email", ""),
@@ -271,8 +289,9 @@ def sign_auth_token(user: Dict[str, Any], pwh: str = "") -> str:
         "avatar": user.get("avatar", "🎬"),
         "provider": user.get("authProvider", "email"),
         "verified": bool(user.get("verified", True)),
-        "pwh": pwh or user.get("pwh", ""),
-        "iat": int(time.time()),
+        "iat": issued,
+        "exp": issued + TOKEN_TTL,
+        "jti": secrets.token_hex(8),
     }
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -290,9 +309,16 @@ def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         pad = "=" * (-len(b64) % 4)
         data = json.loads(base64.urlsafe_b64decode(b64 + pad).decode("utf-8"))
-        return data if isinstance(data, dict) and data.get("uid") else None
     except Exception:
         return None
+    if not isinstance(data, dict) or not data.get("uid"):
+        return None
+    try:
+        if float(data.get("exp") or 0.0) <= time.time():
+            return None
+    except (TypeError, ValueError):
+        return None
+    return data
 
 
 def _row_to_user(row: Any) -> Dict[str, Any]:
@@ -310,13 +336,16 @@ def _row_to_user(row: Any) -> Dict[str, Any]:
 
 
 async def auth_register(request: Request) -> JSONResponse:
+    allowed, retry_after = _REGISTER_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
     name = str(body.get("name") or "").strip()[:24]
     email = str(body.get("email") or "").strip().lower()[:120]
-    password = str(body.get("password") or "")
+    password = str(body.get("password") or "")[:256]
     color = str(body.get("color") or "#00f5d4").strip()[:16]
     avatar = str(body.get("avatar") or "🎬").strip()[:8]
     raw_handle = str(body.get("handle") or "").strip()
@@ -328,7 +357,7 @@ async def auth_register(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Şifre en az 4 karakter olmalıdır."}, status_code=400)
     handle = _norm_handle(raw_handle, name)
     uid = "u_wl_" + hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
-    salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+    salt = _new_salt()
     pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
     fb_pw = password if len(password) >= 6 else (password + "_wl26")
@@ -360,21 +389,23 @@ async def auth_register(request: Request) -> JSONResponse:
         ex_row = _user_get(uid)
         if ex_row and hmac.compare_digest(_hash_pw(password, ex_row["salt"]), ex_row["password_hash"]):
             user = _row_to_user(ex_row)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_hash[:24]), "emailSent": True})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user), "emailSent": True})
         return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen giriş yapın."}, status_code=409)
     user = _row_to_user(row)
-    token = sign_auth_token(user, pw_hash[:24])
+    token = sign_auth_token(user)
     return JSONResponse({"ok": True, "user": user, "authToken": token, "emailSent": True})
 
 
 async def auth_login(request: Request) -> JSONResponse:
+    allowed, retry_after = _LOGIN_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
-    identifier = str(body.get("identifier") or body.get("email") or body.get("handle") or "").strip().lower()
-    password = str(body.get("password") or "")
-    vault_token = str(body.get("vaultToken") or "").strip()
+    identifier = str(body.get("identifier") or body.get("email") or body.get("handle") or "").strip().lower()[:120]
+    password = str(body.get("password") or "")[:256]
     if not identifier or not password:
         return JSONResponse({"ok": False, "error": "E-posta / kullanıcı adı ve şifre zorunludur."}, status_code=400)
     clean_h = identifier.lstrip("@")
@@ -396,7 +427,7 @@ async def auth_login(request: Request) -> JSONResponse:
                 fb_verified = True
                 if not row:
                     uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
-                    salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+                    salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
                     disp = str(fb_res.get("displayName") or target_email.split("@")[0])[:24]
                     row = {
@@ -415,23 +446,6 @@ async def auth_login(request: Request) -> JSONResponse:
                     if row.get("password_hash") != new_hash:
                         row = _user_update(row["uid"], {"password_hash": new_hash}) or row
                 break
-    if not row and vault_token:
-        v_claims = verify_auth_token(vault_token)
-        if v_claims and (v_claims.get("email") == identifier or v_claims.get("handle") == clean_h):
-            v_uid = v_claims["uid"]
-            v_salt = hashlib.sha256((v_uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
-            v_pwh = _hash_pw(password, v_salt)
-            if v_claims.get("pwh") and hmac.compare_digest(v_pwh[:24], str(v_claims.get("pwh"))):
-                row = {
-                    "uid": v_uid, "email": v_claims.get("email", ""), "handle": v_claims.get("handle", ""),
-                    "name": v_claims.get("name", "Üye"), "password_hash": v_pwh, "salt": v_salt,
-                    "color": v_claims.get("color", "#00f5d4"), "avatar": v_claims.get("avatar", "🎬"),
-                    "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
-                }
-                try:
-                    _user_create(row)
-                except Exception:
-                    pass
     if not row and EMAIL_RE.match(identifier):
         sb_res = _supabase_auth_req("/auth/v1/token?grant_type=password", {
             "email": identifier,
@@ -441,7 +455,7 @@ async def auth_login(request: Request) -> JSONResponse:
             sb_u = sb_res["user"]
             meta = sb_u.get("user_metadata") or {}
             uid = "u_wl_" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:12]
-            salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+            salt = _new_salt()
             pw_hash = _hash_pw(password, salt)
             row = {
                 "uid": uid, "email": identifier,
@@ -461,7 +475,7 @@ async def auth_login(request: Request) -> JSONResponse:
     if not fb_verified and not hmac.compare_digest(expected, row["password_hash"]):
         return JSONResponse({"ok": False, "error": "Hesap bulunamadı veya bilgiler hatalı."}, status_code=401)
     user = _row_to_user(row)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, expected[:24])})
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
 
 
 PROVIDER_ICONS = {
@@ -538,7 +552,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
         if ex:
             user = _row_to_user(ex)
             return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
-    salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+    salt = _new_salt()
     pw_hash = _hash_pw(secrets.token_hex(12), salt)
     now_ts = time.time()
     row = {
@@ -569,7 +583,47 @@ def _clean_phone(raw: str) -> str:
     return ""
 
 
+def _sms_cfg() -> tuple:
+    sid = (os.environ.get("TWILIO_ACCOUNT_SID") or "").strip()
+    tok = (os.environ.get("TWILIO_AUTH_TOKEN") or "").strip()
+    frm = (os.environ.get("TWILIO_FROM_NUMBER") or "").strip()
+    return (sid, tok, frm) if (sid and tok and frm) else ("", "", "")
+
+
+def _sms_send(phone: str, text: str) -> bool:
+    """Send a real SMS through Twilio. Returns False when SMS is not configured."""
+    sid, tok, frm = _sms_cfg()
+    if not sid:
+        return False
+    body = urllib.parse.urlencode({"To": phone, "From": frm, "Body": text}).encode("utf-8")
+    req = urllib.request.Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+        data=body,
+        headers={
+            "Authorization": "Basic " + base64.b64encode(f"{sid}:{tok}".encode("utf-8")).decode("ascii"),
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return r.status in (200, 201)
+    except Exception:
+        return False
+
+
+_SMS_DISABLED = JSONResponse(
+    {
+        "ok": False,
+        "error": "SMS ile giriş bu kurulumda etkin değil. Lütfen e-posta ile giriş yapın.",
+    },
+    status_code=501,
+)
+
+
 async def auth_phone_send_code(request: Request) -> JSONResponse:
+    if not _sms_cfg()[0]:
+        return _SMS_DISABLED
     try:
         body = await request.json()
     except Exception:
@@ -577,32 +631,43 @@ async def auth_phone_send_code(request: Request) -> JSONResponse:
     phone = _clean_phone(str(body.get("phone") or ""))
     if not phone or len(phone) < 11:
         return JSONResponse({"ok": False, "error": "Geçerli bir telefon numarası girin (+90 5XX XXX XX XX)."}, status_code=400)
+    allowed, retry_after = _OTP_LIMIT.hit(f"{client_ip(request)}:{phone}")
+    if not allowed:
+        return too_many_response(retry_after)
     code = f"{secrets.randbelow(900000) + 100000}"
-    _PHONE_CODES[phone] = {"code": code, "exp": time.time() + 300}
-    return JSONResponse({
-        "ok": True,
-        "phone": phone,
-        "code": code,
-        "expiresIn": 300,
-        "message": f"Onay kodu oluşturuldu: {code}",
-    })
+    # Only the hash is kept: a memory dump must not hand out login codes.
+    _PHONE_CODES[phone] = {"hash": _hash_pw(code, phone), "exp": time.time() + 300, "tries": 0}
+    if not _sms_send(phone, f"Watchlivo giriş kodunuz: {code}"):
+        _PHONE_CODES.pop(phone, None)
+        return JSONResponse({"ok": False, "error": "SMS gönderilemedi. Lütfen tekrar deneyin."}, status_code=502)
+    return JSONResponse({"ok": True, "phone": phone, "expiresIn": 300,
+                         "message": "Doğrulama kodu telefonunuza gönderildi."})
 
 
 async def auth_phone_verify_code(request: Request) -> JSONResponse:
+    if not _sms_cfg()[0]:
+        return _SMS_DISABLED
     try:
         body = await request.json()
     except Exception:
         body = {}
     phone = _clean_phone(str(body.get("phone") or ""))
-    code = str(body.get("code") or "").strip()
+    code = str(body.get("code") or "").strip()[:12]
     color = str(body.get("color") or "#00f5d4").strip()[:16]
     name = str(body.get("name") or "").strip()[:24]
     if not phone:
         return JSONResponse({"ok": False, "error": "Geçersiz telefon numarası."}, status_code=400)
+    allowed, retry_after = _OTP_VERIFY_LIMIT.hit(f"{client_ip(request)}:{phone}")
+    if not allowed:
+        return too_many_response(retry_after)
     stored = _PHONE_CODES.get(phone)
     if not stored or time.time() > stored.get("exp", 0):
         return JSONResponse({"ok": False, "error": "Doğrulama kodunun süresi dolmuş veya kod gönderilmemiş. Lütfen yeni kod isteyin."}, status_code=400)
-    if not hmac.compare_digest(str(stored.get("code", "")), code):
+    if int(stored.get("tries") or 0) >= 5:
+        _PHONE_CODES.pop(phone, None)
+        return JSONResponse({"ok": False, "error": "Çok fazla hatalı deneme. Lütfen yeni kod isteyin."}, status_code=429)
+    if not hmac.compare_digest(str(stored.get("hash") or ""), _hash_pw(code, phone)):
+        stored["tries"] = int(stored.get("tries") or 0) + 1
         return JSONResponse({"ok": False, "error": "Hatalı doğrulama kodu. Lütfen tekrar deneyin."}, status_code=400)
     _PHONE_CODES.pop(phone, None)
 
@@ -616,7 +681,7 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
 
     raw_name = name or ("Üye " + digits[-4:])
     handle = _norm_handle("", raw_name)
-    salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+    salt = _new_salt()
     pw_hash = _hash_pw(secrets.token_hex(12), salt)
     now_ts = time.time()
     row = {
@@ -642,10 +707,14 @@ async def auth_email_action(request: Request) -> JSONResponse:
     if not EMAIL_RE.match(email):
         return JSONResponse({"ok": False, "error": "Lütfen geçerli bir e-posta adresi girin."}, status_code=400)
     if action == "reset_password":
-        # Ensure account exists in Firebase Auth so Firebase can dispatch the reset email
+        allowed, retry_after = _RESET_LIMIT.hit(f"{client_ip(request)}:{email}")
+        if not allowed:
+            return too_many_response(retry_after)
+        # Ensure account exists in Firebase Auth so Firebase can dispatch the reset email.
+        # The bootstrap password must be random: a derived one would be guessable.
         _firebase_auth_req("accounts:signUp", {
             "email": email,
-            "password": "Wl_" + hashlib.sha256(email.encode()).hexdigest()[:12],
+            "password": "Wl!" + secrets.token_urlsafe(24),
             "returnSecureToken": True,
         })
         res = _firebase_auth_req("accounts:sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
@@ -653,6 +722,9 @@ async def auth_email_action(request: Request) -> JSONResponse:
             return JSONResponse({"ok": True, "message": f"Şifre sıfırlama bağlantısı {email} adresine gönderildi."})
         return JSONResponse({"ok": False, "error": "Sıfırlama e-postası gönderilemedi. Lütfen adresi kontrol edin."}, status_code=400)
     if action == "magic_link":
+        allowed, retry_after = _RESET_LIMIT.hit(f"{client_ip(request)}:{email}")
+        if not allowed:
+            return too_many_response(retry_after)
         origin = str(body.get("origin") or "https://watchlivo.online").rstrip("/")
         cont_url = f"{origin}/?magic_email={urllib.parse.quote(email)}"
         res = _firebase_auth_req("accounts:sendOobCode", {
@@ -675,7 +747,7 @@ async def auth_email_action(request: Request) -> JSONResponse:
         row = _user_get(uid)
         if not row:
             name = email.split("@")[0][:24]
-            salt = hashlib.sha256((uid + ":wl_salt").encode("utf-8")).hexdigest()[:16]
+            salt = _new_salt()
             row = {
                 "uid": uid, "email": email, "handle": _norm_handle("", name), "name": name,
                 "password_hash": _hash_pw(secrets.token_hex(10), salt), "salt": salt,
@@ -730,14 +802,14 @@ async def auth_profile(request: Request) -> JSONResponse:
             "verified": True,
             "isGuest": False,
         }
-        return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, str(claims.get("pwh") or ""))})
+        return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
     user = _row_to_user(row)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, str(claims.get("pwh") or ""))})
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
 
 
 async def auth_me(request: Request) -> JSONResponse:
     auth_hdr = request.headers.get("Authorization", "")
-    token = auth_hdr.replace("Bearer ", "").strip() if auth_hdr.startswith("Bearer ") else request.query_params.get("token", "")
+    token = auth_hdr.replace("Bearer ", "").strip() if auth_hdr.startswith("Bearer ") else ""
     claims = verify_auth_token(token)
     if not claims:
         return JSONResponse({"ok": False, "authenticated": False}, status_code=200)

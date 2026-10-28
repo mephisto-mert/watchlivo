@@ -145,7 +145,7 @@ export function getRememberedRoom(roomId) {
 const recentIds = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch (e) { return []; } };
 
 export async function fetchRooms() {
-  const res = await api(`/api/rooms?${qs({ user: state.self?.name, uid: state.self?.id })}`, { timeout: 8000 });
+  const res = await api(`/api/rooms?${qs({ user: state.self?.name })}`, { timeout: 8000 });
   return res.rooms || [];
 }
 

@@ -40,34 +40,48 @@ s, r = call("/api/rave/extract-video?url=https://www.youtube.com/watch?v=dQw4w9W
 check("extract-video parses youtube", s == 200 and r.get("videoId") == "dQw4w9WgXcQ")
 s, r = call("/api/rave/oembed?url=https://vimeo.com/22439234")
 check("vimeo oembed", s == 200 and r.get("title"), r.get("title", ""))
-s, r = call("/api/rooms/create", {"name": "Test Odası", "creator": "Tester", "creatorId": "u1",
+s, r = call("/api/rooms/create", {"name": "Test Odası", "creator": "Tester",
                                   "media": {"provider": "youtube", "videoId": "dQw4w9WgXcQ", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "title": "Test"}})
 room = r.get("room", {})
 check("create room with media", s == 200 and room.get("media", {}).get("videoId") == "dQw4w9WgXcQ", room.get("id", ""))
 rid = room.get("id", "x")
-s, a = call(f"/api/rooms/{rid}/sync", {"type": "init", "clientId": "hA", "username": "Ayşe", "color": "#ff0000"})
+TOKENS = {}
+
+
+def sync(cid, **payload):
+    """Act as ``cid`` using the server-signed clientToken (never a bare id)."""
+    body = {"clientId": cid, "clientToken": TOKENS.get(cid, ""), **payload}
+    status, data = call(f"/api/rooms/{rid}/sync", body)
+    if data.get("clientToken"):
+        TOKENS[cid] = data["clientToken"]
+    return status, data
+
+
+s, a = sync("hA", type="init", username="Ayşe", color="#ff0000")
 check("http join â†’ host", s == 200 and a["room"]["host_id"] == "hA")
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "init", "clientId": "hB", "username": "Berk"})
+check("join returns a signed clientToken", bool(TOKENS.get("hA")))
+s, b = sync("hB", type="init", username="Berk")
 check("second joiner not host", b["room"]["host_id"] == "hA" and len(b["room"]["participants"]) == 2)
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "seek", "clientId": "hB", "currentTime": 99})
+s, b = sync("hB", type="seek", currentTime=99)
 check("non-leader seek rejected", b["room"]["media"]["meshStatePosition"] != 99 and b.get("errors"), str(b.get("errors")))
-s, a = call(f"/api/rooms/{rid}/sync", {"type": "seek", "clientId": "hA", "currentTime": 42})
-check("leader seek applied", abs(a["room"]["media"]["meshStatePosition"] - 42) < 0.01)
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "pause", "clientId": "hB", "currentTime": 43})
+s, a = sync("hA", type="seek", currentTime=42)
+check("leader seek applied", abs(a["room"]["media"]["meshStatePosition"] - 42) < 0.01, str(a.get("errors")))
+s, b = sync("hB", type="pause", currentTime=43)
 check("leader-choice blocks non-leader pause", b["room"]["media"]["meshStateStatus"] != "PAUSED" and b.get("errors"))
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "change_media", "clientId": "hB", "provider": "youtube", "videoId": "aaaaaaaaaaa", "title": "X"})
+s, b = sync("hB", type="change_media", provider="youtube", videoId="aaaaaaaaaaa", title="X")
 check("leader-choice blocks non-leader pick", b["room"]["media"]["videoId"] == "dQw4w9WgXcQ")
-s, a = call(f"/api/rooms/{rid}/sync", {"type": "host_action", "action": "set_privacy", "clientId": "hA", "playMode": "vote", "privacy": "friends"})
-check("leader changes play mode + privacy", a["room"]["playMode"] == "vote" and a["room"]["privacy"] == "friends")
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "queue_add", "clientId": "hB", "item": {"provider": "youtube", "videoId": "bbbbbbbbbbb", "title": "Oy videosu"}})
-check("vote mode: pick goes to queue", len(b["room"]["queue"]) == 1 and b["room"]["queue"][0]["votes"] == ["Berk"])
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "chat", "clientId": "hB", "text": "<script>alert(1)</script> merhaba"})
+s, a = sync("hA", type="host_action", action="set_privacy", playMode="vote", privacy="friends")
+check("leader changes play mode + privacy", a["room"]["playMode"] == "vote" and a["room"]["privacy"] == "friends", str(a.get("errors")))
+s, b = sync("hB", type="queue_add", item={"provider": "youtube", "videoId": "bbbbbbbbbbb", "title": "Oy videosu"})
+check("vote mode: pick goes to queue", len(b["room"]["queue"]) == 1 and b["room"]["queue"][0]["votes"] == ["Berk"], str(b.get("errors")))
+s, b = sync("hB", type="chat", text="<script>alert(1)</script> merhaba")
 last = b["room"]["chat"][-1]
 check("chat stored as plain text", last["text"].startswith("<script>") and last["user"] == "Berk")
-s, b = call(f"/api/rooms/{rid}/sync", {"type": "chat", "clientId": "hB", "gif": "https://evil.example/x.gif"})
+s, b = sync("hB", type="chat", gif="https://evil.example/x.gif")
 check("gif host allow-list", b["room"]["chat"][-1]["text"] != "" or b["room"]["chat"][-1].get("gif", "") == "")
 s, l = call("/api/rooms")
-check("lobby lists active room", any(x["id"] == rid and x["count"] == 2 for x in l.get("rooms", [])))
+check("lobby lists active room", any(x["id"] == rid and x["count"] == 2 for x in l.get("rooms", [])),
+      str([(x["id"], x["count"]) for x in l.get("rooms", []) if x["id"] == rid]))
 s, r = call("/api/rooms/BAD..id/sync", {"type": "init"})
 check("invalid room id rejected", s == 400)
 failed = [n for n, ok in results if not ok]

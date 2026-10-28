@@ -11,9 +11,11 @@ export class MeshConnection {
     this.pollTimer = null; this.pingTimer = null; this.clientId = null; this.lastRoomStamp = '';
     this.status = '';
     this.syncToken = '';
+    this.clientToken = '';
     try {
       localStorage.removeItem(`vortex_st_${roomId}`);
       this.syncToken = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
+      this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
     } catch (e) { /* ignore */ }
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
@@ -60,6 +62,14 @@ export class MeshConnection {
     }
   }
 
+  _rememberToken(token, cid) {
+    if (token) {
+      this.clientToken = token;
+      try { sessionStorage.setItem(`vortex_ct_${this.roomId}`, token); } catch (e) { /* ignore */ }
+    }
+    if (cid) this.clientId = cid;
+  }
+
   start() {
     const preferHttp = /(\.vercel\.app|watchlivo\.online)$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
     if (preferHttp) this.startHttp(); else this.startWs();
@@ -69,7 +79,8 @@ export class MeshConnection {
     this.mode = 'ws';
     this.emitStatus('connecting');
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const q = new URLSearchParams({ username: this.profile.name, color: this.profile.color, device: this.device, pwd: this.password, uid: this.profile.id, country: COUNTRY });
+    const q = new URLSearchParams({ username: this.profile.name, color: this.profile.color, device: this.device, pwd: this.password, country: COUNTRY });
+    if (this.profile.authToken) q.set('authToken', this.profile.authToken);
     let opened = false;
     let ws;
     try {
@@ -84,7 +95,7 @@ export class MeshConnection {
       let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.type === 'pong' && data.t0Epoch) clock.sample(Number(data.t0Epoch), Number(data.serverTime));
       if (data.type === 'init') {
-        this.clientId = data.clientId;
+        this._rememberToken(data.clientToken, data.clientId);
         this._markRoomEventsSeen(data.room);
       }
       if (data.type === 'password_required') this.close();
@@ -183,10 +194,10 @@ export class MeshConnection {
       const reqBody = {
         ...payload,
         clientId: this.clientId,
+        clientToken: this.clientToken,
         username: this.profile.name,
         color: this.profile.color,
         device: this.device,
-        uid: this.profile.id,
         pwd: this.password,
         country: COUNTRY,
       };
@@ -200,6 +211,12 @@ export class MeshConnection {
         method: 'POST', timeout: 8000,
         body: reqBody,
       });
+      if (res.clientToken || (res.clientId && res.clientId !== this.clientId)) {
+        this._rememberToken(res.clientToken, res.clientId);
+        if (!isPoll) {
+          try { sessionStorage.setItem('vortex_cid', this.clientId); } catch (e) { /* ignore */ }
+        }
+      }
       if (res.serverTime) clock.sample(t0, Number(res.serverTime));
       this.emitStatus('online');
       if (isPoll && (reqSeq !== this.actionSeq || this.outQueue.length > 0)) {

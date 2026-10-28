@@ -17,7 +17,11 @@ import urllib.request
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
-SYNC_SECRET = (os.environ.get("VORTEX_SECRET") or hashlib.sha256(b"watchlivo-vortex-mesh-sync-key-2026-prod").hexdigest()).encode()
+from security import RateLimiter, client_ip, constant_time_eq, server_secret
+
+# No hard-coded fallback: without VORTEX_SECRET the process gets an unguessable
+# per-instance secret (or refuses to boot when WATCHLIVO_STRICT_SECRETS=1).
+SYNC_SECRET = server_secret("VORTEX_SECRET")
 
 VALID_PRIVACY = ("public", "nearby", "friends", "private")
 VALID_PLAY_MODES = ("leader", "cohost", "autoplay", "quickplay", "vote")
@@ -28,6 +32,16 @@ VOTE_WINDOW = 8.0
 MAX_CHAT = 80
 MEDIA_FIELDS = ("provider", "videoId", "url", "title", "thumbnail", "channel", "duration")
 
+# Only these keys may ever be applied from a client-supplied sync snapshot.
+SAFE_MERGE_KEYS = (
+    "name", "privacy", "playMode", "voipMode", "queue", "skip_votes",
+    "voteEndsAt", "endedKey", "rev", "polls", "curated",
+)
+SYNC_TOKEN_TTL = 180.0
+CLIENT_TOKEN_TTL = 86400.0
+_JOIN_LIMITER = RateLimiter(12, 300.0, name="room_pwd")
+_PWD_ITERATIONS = 120_000
+
 
 def now() -> float:
     return time.time()
@@ -35,6 +49,130 @@ def now() -> float:
 
 def clean_str(v: Any, limit: int) -> str:
     return str(v or "").strip()[:limit]
+
+
+# ---------------------------------------------------------------------------
+# Room password + client identity helpers
+# ---------------------------------------------------------------------------
+def hash_room_password(raw: Any) -> str:
+    """Hash a room password. Empty input means "no password"."""
+    pw = clean_str(raw, 64)
+    if not pw:
+        return ""
+    salt = secrets.token_hex(8)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("utf-8"), _PWD_ITERATIONS).hex()
+    return f"pbkdf2${salt}${dk}"
+
+
+def has_password(room: Dict[str, Any]) -> bool:
+    return bool(room.get("passwordHash") or room.get("password"))
+
+
+def verify_room_password(room: Dict[str, Any], raw: Any) -> bool:
+    """Constant-time room password check (legacy plaintext rooms keep working)."""
+    stored = str(room.get("passwordHash") or "")
+    candidate = clean_str(raw, 64)
+    if not stored:
+        legacy = str(room.get("password") or "")
+        return constant_time_eq(legacy, candidate) if legacy else True
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt, dk = stored.split("$", 2)
+        except ValueError:
+            return False
+        calc = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt.encode("utf-8"), _PWD_ITERATIONS).hex()
+        return constant_time_eq(calc, dk)
+    return constant_time_eq(stored, candidate)
+
+
+def _b64_key(key: bytes, *parts: str) -> str:
+    msg = "|".join(str(p) for p in parts).encode("utf-8")
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()[:32]
+
+
+def sign_client_token(room_id: str, cid: str) -> str:
+    """Server-issued proof that ``cid`` belongs to the caller for this room."""
+    iat = int(now())
+    sig = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat // int(CLIENT_TOKEN_TTL)))
+    return f"{cid}.{iat}.{sig}"
+
+
+def verify_client_token(room_id: str, token: Any) -> str:
+    """Return the signed cid, or "" when the token is absent/invalid/expired."""
+    if not isinstance(token, str) or len(token) > 200:
+        return ""
+    parts = token.split(".")
+    if len(parts) != 3:
+        return ""
+    cid, iat_raw, sig = parts
+    # Must accept every cid this module can mint, including short ones.
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,24}", cid or ""):
+        return ""
+    try:
+        iat = int(iat_raw)
+    except (TypeError, ValueError):
+        return ""
+    if now() - iat > CLIENT_TOKEN_TTL or iat - now() > 300:
+        return ""
+    expected = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat // int(CLIENT_TOKEN_TTL)))
+    return cid if constant_time_eq(expected, sig) else ""
+
+
+def _ws_verified_uid(scope: Any, q: Any) -> str:
+    """Resolve the WebSocket caller's account id.
+
+    Middleware only covers HTTP, so a signed token may also arrive as the
+    ``authToken`` query parameter. Anything client-supplied is ignored.
+    """
+    try:
+        uid = str((scope or {}).get("wl_uid") or "")
+    except Exception:
+        uid = ""
+    if uid:
+        return uid
+    token = ""
+    try:
+        token = str(q.get("authToken") or q.get("token") or "")
+    except Exception:
+        token = ""
+    if not token:
+        return ""
+    try:
+        import auth_engine
+        claims = auth_engine.verify_auth_token(token)
+    except Exception:
+        claims = None
+    return str((claims or {}).get("uid") or "")
+
+
+def _cid_is_active(room: Dict[str, Any], cid: str) -> bool:
+    """True when ``cid`` is a live participant of ``room`` (prevents takeover)."""
+    p = (room.get("participants") or {}).get(cid)
+    if not isinstance(p, dict):
+        return False
+    try:
+        return now() - float(p.get("lastSeen") or 0.0) < 30.0
+    except (TypeError, ValueError):
+        return False
+
+
+def _media_defaults(room: Dict[str, Any]) -> Dict[str, Any]:
+    """Guarantee a fully-formed media dict so downstream code cannot KeyError."""
+    t = now()
+    md = room.get("media")
+    if not isinstance(md, dict):
+        md = empty_media()
+        room["media"] = md
+    for key, fallback in (("playing", False), ("currentTime", 0.0), ("updatedAt", t), ("rate", 1.0), ("duration", 0.0)):
+        try:
+            value = float(md.get(key))
+        except (TypeError, ValueError):
+            value = fallback
+        md[key] = bool(md.get(key)) if key == "playing" else max(0.0, value) if key != "rate" else value
+    if md["rate"] <= 0 or md["rate"] > 8:
+        md["rate"] = 1.0
+    return md
+
 
 
 def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -167,7 +305,7 @@ def new_room(room_id: str, name: str = "", privacy: str = "public", play_mode: s
         "privacy": privacy if privacy in VALID_PRIVACY else "public",
         "playMode": play_mode if play_mode in VALID_PLAY_MODES else "leader",
         "voipMode": "all",
-        "password": clean_str(password, 64),
+        "passwordHash": hash_room_password(password),
         "creator": clean_str(creator, 24),
         "creatorId": clean_str(creator_id, 64),
         "host_id": None,
@@ -224,9 +362,11 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
         p_map.items(),
         key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
     )[:24]
-    snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "password", "creator", "creatorId",
+    snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "creator",
                                      "host_id", "co_hosts", "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
                                      "endedKey", "kicked", "left", "rev", "curated")}
+    # Secrets never leave the server: no password hash, no creator identity.
+    snap["sigExp"] = t + SYNC_TOKEN_TTL
     snap["participants"] = dict(p_items)
     snap["chat"] = (room.get("chat") or [])[-25:]
     snap["polls"] = (room.get("polls") or [])[-10:]
@@ -258,6 +398,11 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if not isinstance(snap, dict) or snap.get("id") != room_id:
         return room
     t = now()
+    try:
+        if float(snap.get("sigExp") or 0.0) < t:
+            return room
+    except (TypeError, ValueError):
+        return room
     snap_active_humans = any(
         isinstance(sp, dict) and sp.get("transport") != "bot" and (t - float(sp.get("lastSeen") or 0) <= 120.0)
         for sp in (snap.get("participants") or {}).values()
@@ -265,10 +410,39 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if not snap_active_humans:
         return room
     if room is None:
-        snap.setdefault("events", [])
-        snap.setdefault("signals", [])
-        snap.setdefault("left", {})
-        return snap
+        fresh = new_room(
+            room_id,
+            clean_str(snap.get("name"), 45),
+            str(snap.get("privacy") or "public"),
+            str(snap.get("playMode") or "leader"),
+            clean_str(snap.get("creator"), 24),
+        )
+        for k in SAFE_MERGE_KEYS:
+            if k in snap:
+                fresh[k] = snap[k]
+        try:
+            fresh["createdAt"] = float(snap.get("createdAt") or now())
+        except (TypeError, ValueError):
+            fresh["createdAt"] = now()
+        fresh["participants"] = {
+            cid: sp for cid, sp in (snap.get("participants") or {}).items() if isinstance(sp, dict)
+        }
+        fresh["chat"] = [m for m in (snap.get("chat") or []) if isinstance(m, dict)][-MAX_CHAT:]
+        fresh["polls"] = [p for p in (snap.get("polls") or []) if isinstance(p, dict)][-10:]
+        fresh["events"] = [e for e in (snap.get("events") or []) if isinstance(e, dict)]
+        fresh["signals"] = [s for s in (snap.get("signals") or []) if isinstance(s, dict)]
+        # A cold instance restores from the signed snapshot, so the currently
+        # playing media has to come with it (the token is HMAC-signed + expiring).
+        snap_media = snap.get("media")
+        if isinstance(snap_media, dict) and (snap_media.get("url") or snap_media.get("videoId")):
+            md = dict(snap_media)
+            if md.get("url") and not re.match(r"^(https?://|/uploads/|/api/rave/)", str(md["url"])):
+                md["url"] = ""
+            if md.get("thumbnail") and not str(md["thumbnail"]).startswith(("https://", "http://", "/")):
+                md["thumbnail"] = ""
+            fresh["media"] = _media_defaults({"media": md})
+        fresh.setdefault("left", {})
+        return fresh
     room_has_humans = any(p.get("transport") != "bot" for p in (room.get("participants") or {}).values())
     if not room_has_humans and room.get("curated"):
         return room
@@ -340,8 +514,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     s_pos = float(s_media.get("currentTime") or 0)
     r_pos = float(r_media.get("currentTime") or 0)
     if (s_has_media and not r_has_media) or s_rev > r_rev or (s_rev == r_rev and s_ct < r_ct - 0.05):
-        for k in ("name", "privacy", "playMode", "voipMode", "password", "creator", "creatorId", "host_id", "co_hosts",
-                  "queue", "skip_votes", "voteEndsAt", "endedKey", "rev", "polls", "curated"):
+        for k in SAFE_MERGE_KEYS:
             if k in snap:
                 room[k] = snap[k]
     if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and media_key(s_media) == media_key(r_media))):
@@ -364,8 +537,6 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     room["chat"] = merged_c[-MAX_CHAT:]
     room["events"] = merged_ev[-35:]
     room["signals"] = merged_sig[-240:]
-    if room.get("host_id") not in room["participants"] and snap.get("host_id") in room["participants"]:
-        room["host_id"] = snap["host_id"]
     return room
 
 
@@ -396,7 +567,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     prune_chat(room)
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
-    m = dict(room["media"])
+    m = dict(_media_defaults(room))
     if not has_humans:
         room["media"]["currentTime"] = 0.0
         room["media"]["updatedAt"] = t
@@ -454,8 +625,8 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         recent_signals = []
     return {
         "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
-        "voipMode": room["voipMode"], "hasPassword": bool(room["password"]), "creator": room["creator"],
-        "creatorId": room.get("creatorId", ""), "host_id": host_id, "co_hosts": list(co_set),
+        "voipMode": room["voipMode"], "hasPassword": has_password(room), "creator": room["creator"],
+        "host_id": host_id, "co_hosts": list(co_set),
         "curated": bool(room.get("curated")), "polls": (room.get("polls") or [])[-10:],
         "voteEndsAt": room["voteEndsAt"], "media": m, "queue": room["queue"],
         "skip_votes": room["skip_votes"], "participants": ser_parts,
@@ -469,7 +640,7 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     t = now()
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
-    raw_m = room.get("media") or {}
+    raw_m = _media_defaults(room)
     playing = bool(raw_m.get("playing")) and has_humans
     rate = float(raw_m.get("rate") or 1.0)
     updated_at = float(raw_m.get("updatedAt") or t)
@@ -490,8 +661,8 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
         parts_preview.append(cp)
     return {
         "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
-        "hasPassword": bool(room.get("password")), "creator": room.get("creator", ""),
-        "creatorId": room.get("creatorId", ""), "host_id": host_id, "rev": int(room.get("rev") or 1),
+        "hasPassword": has_password(room), "creator": room.get("creator", ""),
+        "host_id": host_id, "rev": int(room.get("rev") or 1),
         "curated": bool(room.get("curated")), "media": m_summary,
         "count": len(p_map), "participantCount": len(p_map), "participants": parts_preview,
     }
@@ -1111,7 +1282,8 @@ def _handle_social(room, cid, data, out, name, is_host):
             if data.get("voipMode") in VALID_VOIP:
                 room["voipMode"] = data["voipMode"]
             if "password" in data:
-                room["password"] = clean_str(data.get("password"), 64)
+                room["passwordHash"] = hash_room_password(data.get("password"))
+                room.pop("password", None)
             if clean_str(data.get("name"), 45):
                 room["name"] = clean_str(data.get("name"), 45)
         elif act == "transfer_host" and data.get("targetId") in room["participants"]:
@@ -1357,13 +1529,18 @@ async def ws_endpoint(websocket: WebSocket):
         await websocket.close()
         return
     cid = uuid.uuid4().hex[:10]
+    verified_uid = _ws_verified_uid(websocket.scope, q)
+    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid")}
+    join_data["uid"] = verified_uid
     async with STORE.lock(room_id):
-        room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=q.get("uid", ""))
+        room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
         room.setdefault("kicked", [])
-        if room["password"] and q.get("pwd", "") != room["password"] and q.get("uid") != room.get("creatorId"):
-            await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
-            await websocket.close()
-            return
+        if has_password(room) and cid not in (room.get("participants") or {}):
+            allowed, _retry = _JOIN_LIMITER.hit(f"ws:{room_id}:{client_ip(websocket)}")
+            if not allowed or not verify_room_password(room, q.get("pwd", "")):
+                await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
+                await websocket.close()
+                return
         prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         if was_empty_humans:
@@ -1373,11 +1550,11 @@ async def ws_endpoint(websocket: WebSocket):
                 room["media"]["currentTime"] = 0.0
                 room["media"]["updatedAt"] = now()
                 room["media"]["playing"] = True
-        p, _ = add_participant(room, cid, dict(q), "ws")
+        p, _ = add_participant(room, cid, join_data, "ws")
         join_msg = sys_msg(room, "katıldı", p["name"])
         SOCKETS.setdefault(room_id, {})[cid] = websocket
         await STORE.put(room)
-    await websocket.send_json({"type": "init", "clientId": cid, "room": serialize(room)})
+    await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room)})
     await broadcast(room_id, {"type": "user_joined", "user": {"id": cid, "name": p["name"]}, "room": serialize(room)}, exclude=cid)
     await broadcast(room_id, {"type": "chat", "message": join_msg}, exclude=cid)
     try:
@@ -1437,7 +1614,9 @@ async def http_sync(request: Request):
         data = {}
     if not isinstance(data, dict):
         return JSONResponse({"error": "Geçersiz istek"}, status_code=400)
-    cid = re.sub(r"[^a-zA-Z0-9_]", "", str(data.get("clientId") or ""))[:24] or "h_" + uuid.uuid4().hex[:8]
+    requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(data.get("clientId") or ""))[:24]
+    signed_cid = verify_client_token(room_id, data.get("clientToken"))
+    verified_uid = str(request.scope.get("wl_uid") or "")
     try:
         since_rev = int(data.get("sinceRev") or 0)
     except (TypeError, ValueError):
@@ -1448,6 +1627,13 @@ async def http_sync(request: Request):
         is_action = data.get("type") not in (None, "", "poll", "init", "ping")
         if data.get("syncToken"):
             room = merge_sync_token(room, data.get("syncToken"), room_id)
+        # A cid is only trusted when the server signed it, or when nobody is
+        # currently using it (prevents session takeover by claiming a live cid).
+        cid = signed_cid or requested_cid
+        if not signed_cid and cid and room is not None and _cid_is_active(room, cid):
+            cid = ""
+        if not cid:
+            cid = requested_cid if data.get("type") == "leave" and requested_cid else "h_" + uuid.uuid4().hex[:8]
         if data.get("type") == "leave":
             if room and room["participants"].pop(cid, None):
                 room.setdefault("left", {})[cid] = now()
@@ -1462,12 +1648,16 @@ async def http_sync(request: Request):
                 room["rev"] = int(room.get("rev") or 1) + 1
                 await STORE.put(room, force_disk=True)
             return JSONResponse({"ok": True})
-        room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=data.get("uid", ""))
+        room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=verified_uid)
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
-        if room["password"] and data.get("pwd", "") != room["password"] and data.get("uid") != room.get("creatorId") and cid not in room["participants"]:
-            return JSONResponse({"error": "password_required"}, status_code=403)
+        if has_password(room) and cid not in (room.get("participants") or {}):
+            allowed, retry_after = _JOIN_LIMITER.hit(f"http:{room_id}:{client_ip(request)}")
+            if not allowed:
+                return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_after)}, status_code=429)
+            if not verify_room_password(room, data.get("pwd", "")):
+                return JSONResponse({"error": "password_required"}, status_code=403)
         prev_host = room.get("host_id")
         prev_seen = float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
         pruned = prune(room)
@@ -1485,7 +1675,7 @@ async def http_sync(request: Request):
                     room["creator"] = spec.get("creator", "Watchlivo 7/24")
                     if "kinox_bot" in room.get("participants", {}):
                         room["participants"]["kinox_bot"]["name"] = room["creator"]
-        p, is_new = add_participant(room, cid, data, "http")
+        p, is_new = add_participant(room, cid, {**data, "uid": verified_uid}, "http")
         if is_new and len(room.get("chat") or []) < 12:
             sys_msg(room, "katıldı", p["name"])
         voted = check_vote_end(room)
@@ -1510,7 +1700,7 @@ async def http_sync(request: Request):
             recent_ev = [e for e in (room.get("events") or []) if t_cur - float(e.get("ts") or 0) < 6.0][-15:]
             recent_sig = [s for s in (room.get("signals") or []) if s.get("targetId") == cid and t_cur - float(s.get("ts") or 0) < 12.0][-25:]
             return JSONResponse({
-                "ok": True, "unchanged": True, "clientId": cid, "rev": cur_rev, "serverTime": t_cur,
+                "ok": True, "unchanged": True, "clientId": cid, "clientToken": sign_client_token(room_id, cid), "rev": cur_rev, "serverTime": t_cur,
                 "participantCount": len(room["participants"]),
                 "media": {
                     "playing": bool(m.get("playing")), "currentTime": float(m.get("currentTime") or 0.0),
@@ -1526,7 +1716,7 @@ async def http_sync(request: Request):
             })
     if out:
         await deliver(room_id, out)
-    return JSONResponse({"ok": True, "clientId": cid, "room": serialize(room, for_cid=cid), "serverTime": now(),
+    return JSONResponse({"ok": True, "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid), "serverTime": now(),
                          "errors": [m.get("message") for m in out.get("reply", []) if m.get("type") == "error"]})
 
 
@@ -1539,7 +1729,7 @@ async def create_room(request: Request):
     slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
     room_id = f"{slug}-{uuid.uuid4().hex[:5]}"
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
-                    payload.get("creator", ""), payload.get("creatorId", ""), payload.get("password", ""))
+                    payload.get("creator", ""), str(request.scope.get("wl_uid") or ""), payload.get("password", ""))
     media = payload.get("media")
     if isinstance(media, dict) and (media.get("url") or media.get("videoId")):
         set_media(room, media, room["creator"] or "Lider", start=0.0)
