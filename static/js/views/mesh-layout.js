@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v16';
-import { state, setView, canSelectVideo } from '../store.js?v=20261030_v16';
-import { navIcon, logo } from './home.js?v=20261030_v16';
-import { createSelection } from './selection.js?v=20261030_v16';
-import { buildControls } from './controls.js?v=20261030_v16';
-import { buildChat } from './chat.js?v=20261030_v16';
-import { PANELS } from './panels.js?v=20261030_v16';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v17';
+import { state, setView, canSelectVideo } from '../store.js?v=20261030_v17';
+import { navIcon, logo } from './home.js?v=20261030_v17';
+import { createSelection } from './selection.js?v=20261030_v17';
+import { buildControls } from './controls.js?v=20261030_v17';
+import { buildChat } from './chat.js?v=20261030_v17';
+import { PANELS } from './panels.js?v=20261030_v17';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -17,12 +17,29 @@ export function buildLayout(app, ctx) {
   const rightPanel = h('aside', { class: 'panel-side panel-right', 'aria-label': 'Sağ panel' });
   ctx.host.container.className = 'player-host';
   const frame = h('div', { class: 'video-frame', id: 'video-frame' }, ctx.host.container);
-  const controls = buildControls(frame, ctx);
-  const chat = buildChat(ctx);
+  let theaterMode = false;
+  let controls = null;
+  let chat = null;
   const handle = h('div', { class: 'resize-handle', title: 'Sürükleyerek boyutlandır' });
-  const chatPanel = h('div', { class: 'panel-chat' }, chat.el);
+  const chatPanel = h('div', { class: 'panel-chat' });
   const videoChat = h('div', { class: 'video-chat' }, h('div', { class: 'panel-video' }, frame), handle, chatPanel);
   const layout = h('div', { class: 'mesh-layout' }, leftPanel, h('div'), videoChat, h('div'), rightPanel);
+
+  function toggleTheaterMode(force) {
+    theaterMode = typeof force === 'boolean' ? force : !theaterMode;
+    videoChat.classList.toggle('no-chat', theaterMode);
+    document.body.classList.toggle('theater-mode', theaterMode);
+    lastNavSig = '';
+    renderNav();
+    controls?.update?.();
+    return theaterMode;
+  }
+  ctx.toggleTheaterMode = toggleTheaterMode;
+  ctx.isTheaterMode = () => theaterMode;
+
+  controls = buildControls(frame, ctx);
+  chat = buildChat(ctx);
+  chatPanel.append(chat.el);
   app.replaceChildren(nav, h('main', { class: 'mesh' }, layout));
   initResize(handle, chatPanel);
 
@@ -69,7 +86,7 @@ export function buildLayout(app, ctx) {
     const voteCount = (m?.queue || []).length;
     const people = Number(m?.participantCount || m?.count || (m?.participants || []).length);
     const selDisabled = !canSelectVideo();
-    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}`;
+    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}`;
     if (navSig === lastNavSig) return;
     lastNavSig = navSig;
     const openSide = (side, tab) => {
@@ -88,7 +105,7 @@ export function buildLayout(app, ctx) {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');
         }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, id: 'nav-search-video' }),
-        navIcon('settings', 'Ayarlar', () => openSide('left', 'Settings'), { selected: L === 'Settings' })),
+        navIcon('settings', 'Oda Ayarları', () => openSide('left', 'Settings'), { selected: L === 'Settings' })),
       h('div', { class: 'navbar-center' }, logo(),
         m ? h('span', { class: 'mesh-title', title: m.name }, m.name) : null,
         m ? h('span', { class: 'privacy-chip', onclick: () => openSide('left', 'Settings') }, PRIVACY_LABEL[m.privacy] || 'Herkese Açık') : null,
@@ -96,8 +113,10 @@ export function buildLayout(app, ctx) {
           ? h('span', { class: 'privacy-chip sync-live-chip', title: 'Sıfır gecikmeli senkronizasyon aktif' }, h('span', { class: 'room-live-dot' }), 'SENKRON')
           : h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…')),
       h('div', { class: 'navbar-right' },
+        navIcon('vote', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
         navIcon('addUser', 'Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends' }),
-        navIcon('users', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R !== 'Collapsed' && R !== 'Friends', badge: people, id: 'nav-participants' })));
+        navIcon('users', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
+        navIcon(theaterMode ? 'panelRightOpen' : 'panelRightClose', theaterMode ? 'Sohbet Panelini Aç (T)' : 'Sinema Modu / Paneli Gizle (T)', () => toggleTheaterMode(), { selected: theaterMode, id: 'nav-toggle-chat' })));
   }
 
   function update() {
@@ -118,6 +137,7 @@ export function buildLayout(app, ctx) {
 
   return {
     update,
+    toggleTheaterMode,
     chatAppended: (msg) => chat.append(msg),
     pollsUpdated: () => chat.renderPolls?.(),
     reactionsUpdated: () => chat.renderReactions?.(),
@@ -128,7 +148,13 @@ export function buildLayout(app, ctx) {
     syncStatus: (s) => controls.syncStatus(s),
     playerEvent: (ev, arg) => controls.playerEvent(ev, arg),
     showUnmute: (b) => controls.showUnmute(b),
-    destroy: () => { controls.destroy?.(); chat.destroy?.(); leftInst?.destroy?.(); rightInst?.destroy?.(); },
+    destroy: () => {
+      document.body.classList.remove('theater-mode');
+      controls.destroy?.();
+      chat.destroy?.();
+      leftInst?.destroy?.();
+      rightInst?.destroy?.();
+    },
     openSearch: () => { if (state.view.left !== 'Search') { setView('left', 'Search'); update(); } },
   };
 }
@@ -141,7 +167,7 @@ function initResize(handle, chatPanel) {
     handle.classList.add('dragging');
     const startX = e.clientX, startW = chatPanel.getBoundingClientRect().width;
     const move = (ev) => {
-      const w = Math.max(230, Math.min(window.innerWidth * 0.6, startW - (ev.clientX - startX)));
+      const w = Math.max(250, Math.min(window.innerWidth * 0.55, startW - (ev.clientX - startX)));
       chatPanel.style.setProperty('--chat-w', `${w}px`);
     };
     const up = () => {

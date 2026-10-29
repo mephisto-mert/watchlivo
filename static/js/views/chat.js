@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v16';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v16';
-import { avatar } from '../profile.js?v=20261030_v16';
-import { api, qs } from '../api.js?v=20261030_v16';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v16';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v17';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v17';
+import { avatar } from '../profile.js?v=20261030_v17';
+import { api, qs } from '../api.js?v=20261030_v17';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v17';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -127,7 +127,7 @@ export function buildChat(ctx) {
       actions.clearChat?.();
       toast('🧹 Oda sohbeti temizlendi');
     },
-  }, '🗑️ Temizle');
+  }, h('span', { html: icons.trash, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Temizle');
   const snapSceneBtn = h('button', {
     type: 'button',
     class: 'sfx-pill',
@@ -138,7 +138,7 @@ export function buildChat(ctx) {
       const res = window.vortexCaptureSceneToChat?.(cap);
       if (res && cap) input.value = '';
     },
-  }, '📸 Sahne');
+  }, h('span', { html: icons.cameraSnap, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Sahne');
   const stampTimeBtn = h('button', {
     type: 'button',
     class: 'sfx-pill',
@@ -150,7 +150,7 @@ export function buildChat(ctx) {
       input.value = `${input.value ? input.value.trimEnd() + ' ' : ''}${stamp} `;
       input.focus();
     },
-  }, '⏱️ An');
+  }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
   const reactions = h('div', { class: 'reaction-bar' },
     ...REACTIONS.map((e) => h('button', { onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}` }, e)),
     snapSceneBtn,
@@ -166,28 +166,28 @@ export function buildChat(ctx) {
     class: 'discord-join-btn',
     id: 'btn-discord-call',
     onclick: () => toggleCallJoin(),
-  }, '📞 Aramaya Katıl');
+  }, h('span', { html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), 'Sesliye Katıl');
   const dSwapBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-swap',
     title: 'Kamera Ekranlarının Yerini Değiştir',
     onclick: () => { ctx.voice?.swapCameraPositions?.(); syncVoiceUi(); },
-  }, '⇄ Yer Değiştir');
+  }, h('span', { html: icons.swap, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Yer Değiştir');
   const dStripBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-strip',
     title: 'Kameraları Kanal Şeridine veya Video Köşelerine Al',
     onclick: () => { ctx.voice?.toggleStripMode?.(); syncVoiceUi(); },
-  }, '📌 Şerit');
+  }, h('span', { html: icons.theater, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Şerit');
   const dStageBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-stage',
     title: 'Kamera ve Ekran Paylaşımlarını Sahne / Izgara Görünümünde Aç',
     onclick: () => { ctx.voice?.toggleStageGrid?.(); syncVoiceUi(); },
-  }, '📐 Sahne');
+  }, h('span', { html: icons.layoutGrid, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Sahne');
   const dMicPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-mic', onclick: () => toggleMic() }, '🎙️ Mikrofon');
   const dDeafPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-deafen', onclick: () => toggleDeafen() }, '🎧 Ses Açık');
   const dCamPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-cam', onclick: () => toggleCam() }, '📷 Kamera');
@@ -197,7 +197,8 @@ export function buildChat(ctx) {
     h('div', { class: 'discord-call-head' },
       h('div', { class: 'discord-call-title' },
         h('span', { class: 'discord-live-dot' }),
-        h('span', {}, '🔊 Ses & Yayın Kanalı'),
+        h('span', { html: icons.audioWave, style: { display: 'inline-flex', width: '14px', height: '14px', color: '#27DCC8' } }),
+        h('span', {}, 'Ses Kanalı'),
         dCallStatusBadge),
       h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dJoinBtn)),
     discordCallPeers,
@@ -330,17 +331,17 @@ export function buildChat(ctx) {
 
     discordCallBar.classList.toggle('in-call', inCall);
     dJoinBtn.classList.toggle('active', inCall);
-    dJoinBtn.textContent = inCall ? '📴 Ayrıl' : '📞 Aramaya Katıl';
+    dJoinBtn.replaceChildren(h('span', { html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), inCall ? 'Ayrıl' : 'Sesliye Katıl');
     dStageBtn.classList.toggle('on', stageOn);
     dStripBtn.classList.toggle('on', Boolean(v?.stripMode));
     dMicPill.classList.toggle('on', micOn);
-    dMicPill.textContent = micOn ? '🎙️ Mikrofon Açık' : '🔇 Mikrofon';
+    dMicPill.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon' : 'Sessiz');
     dDeafPill.classList.toggle('on', deafened);
-    dDeafPill.textContent = deafened ? '🔇 Sağırlaştırıldı' : '🎧 Ses Açık';
+    dDeafPill.replaceChildren(h('span', { html: deafened ? icons.headphonesOff : icons.headphones, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), deafened ? 'Sağır' : 'Kulaklık');
     dCamPill.classList.toggle('on', camOn);
-    dCamPill.textContent = camOn ? '📷 Kamera Açık' : '📷 Kamera';
+    dCamPill.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
     dScreenPill.classList.toggle('on', screenOn);
-    dScreenPill.textContent = screenOn ? '🖥️ Yayını Durdur' : '🖥️ Ekran Yansıt';
+    dScreenPill.replaceChildren(h('span', { html: icons.screenShare, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), screenOn ? 'Durdur' : 'Ekran');
 
     const rawParts = state.mesh?.participants || [];
     const selfId = ctx.voice?.getSelfId?.() || state.clientId || state.self?.id;
@@ -369,11 +370,11 @@ export function buildChat(ctx) {
       discordCallPeers.replaceChildren(...shownPeers.map((p) => {
         const isAct = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
         const badges = [];
-        if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, '🖥️ YAYINDA'));
-        if (p.cam) badges.push(h('span', { class: 'd-peer-badge cam' }, '📷'));
-        if (p.deafened) badges.push(h('span', { class: 'd-peer-badge deaf' }, '🎧✕'));
-        else if (!p.muted) badges.push(h('span', { class: 'd-peer-badge mic-on' }, '🎙️'));
-        else badges.push(h('span', { class: 'd-peer-badge mic-off' }, '🔇'));
+        if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, 'YAYINDA'));
+        if (p.cam) badges.push(h('span', { class: 'd-peer-badge cam', html: icons.camera }));
+        if (p.deafened) badges.push(h('span', { class: 'd-peer-badge deaf', html: icons.headphonesOff }));
+        else if (!p.muted) badges.push(h('span', { class: 'd-peer-badge mic-on', html: icons.mic }));
+        else badges.push(h('span', { class: 'd-peer-badge mic-off', html: icons.micOff }));
         const av = avatar(p, 26);
         if (p.speaking) av.classList.add('speaking');
         return h('div', {
@@ -786,9 +787,10 @@ export function buildChat(ctx) {
     let barEl = null;
     barEl = h('div', { class: 'chat-quick-bar', id: 'privacy-card' },
       h('div', { class: 'chat-quick-pills' },
-        h('button', { type: 'button', class: 'chat-q-pill primary', onclick: copyInvite, title: 'Davet bağlantısını kopyala' }, '🔗 Davet Linki'),
-        h('a', { class: 'chat-q-pill', href: waUrl, target: '_blank', rel: 'noopener', title: 'WhatsApp ile davet et' }, '💬 WhatsApp'),
-        h('button', { type: 'button', class: 'chat-q-pill', onclick: () => { setView('right', 'Friends'); ctx.layout.update(); }, title: 'Davet Kartı & QR' }, '📲 QR'),
+        h('button', { type: 'button', class: 'chat-q-pill primary', onclick: copyInvite, title: 'Davet bağlantısını kopyala' }, h('span', { html: icons.link, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Davet Linki'),
+        h('a', { class: 'chat-q-pill', href: waUrl, target: '_blank', rel: 'noopener', title: 'WhatsApp ile davet et' }, h('span', { html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'WhatsApp'),
+        h('button', { type: 'button', class: 'chat-q-pill', onclick: () => { setView('right', 'Friends'); ctx.layout.update(); }, title: 'Davet Kartı & QR' }, h('span', { html: icons.qr, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'QR')),
+      h('div', { class: 'chat-access-seg' },
         ...PRIVACY.map(([k, label, ic, desc]) => h('button', {
           type: 'button',
           class: `chat-q-pill privacy-opt ${cur === k ? 'on' : ''}`,

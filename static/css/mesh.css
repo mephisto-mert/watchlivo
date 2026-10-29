@@ -1648,285 +1648,900 @@ body.mesh-minimized #mesh-root .mini-player-bar {
 }
 
 /* ============================================================================
-   WATCHLIVO CINEMA NOIR THEATER & PLAYER CONTROL DECK (v5.0)
-   High-Contrast Scrubber, Royal Indigo Controls & Decluttered Chat Sidebar
+   WATCHLIVO WATCH-PARTY ROOM & PLAYER UI REDESIGN (v6.0)
+   Controlled Turquoise (#27DCC8), Deep Cinema Slate (#080A0F / #10141D / #171D28),
+   Vimeo/shadcn Seamless Player Overlay, & 3-Zone Flat Discord/Taverns Sidebar
    ============================================================================ */
 
+:root {
+  --wl-bg-primary: #080A0F;
+  --wl-bg-secondary: #10141D;
+  --wl-bg-elevated: #171D28;
+  --wl-text-primary: #F5F7FA;
+  --wl-text-secondary: #A0A9B8;
+  --wl-accent: #27DCC8;
+  --wl-accent-hover: #34EAD6;
+  --wl-accent-soft: rgba(39, 220, 200, 0.14);
+  --wl-accent-border: rgba(39, 220, 200, 0.36);
+  --wl-divider: rgba(255, 255, 255, 0.06);
+  --wl-border: rgba(255, 255, 255, 0.08);
+}
+
+/* 1. Top Room Header (Slim 48px, Unified Hierarchy) */
+#mesh-root > .navbar {
+  height: 48px !important;
+  min-height: 48px !important;
+  max-height: 48px !important;
+  margin: 0 !important;
+  padding: 0 14px !important;
+  border-radius: 0 !important;
+  background: #080A0F !important;
+  border: none !important;
+  border-bottom: 1px solid var(--wl-divider) !important;
+  box-shadow: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+}
+
+#mesh-root > .navbar .navbar-left,
+#mesh-root > .navbar .navbar-right {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+#mesh-root > .navbar .navbar-center {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  min-width: 0 !important;
+}
+
+#mesh-root > .navbar .nav-icon {
+  width: 34px !important;
+  height: 34px !important;
+  min-width: 34px !important;
+  min-height: 34px !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--wl-text-secondary) !important;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease !important;
+}
+
+#mesh-root > .navbar .nav-icon:hover {
+  background: var(--wl-bg-elevated) !important;
+  color: var(--wl-text-primary) !important;
+}
+
+#mesh-root > .navbar .nav-icon.selected {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+#mesh-root > .navbar .mesh-title {
+  font-size: 0.88rem !important;
+  font-weight: 700 !important;
+  color: var(--wl-text-primary) !important;
+  max-width: 240px !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+#mesh-root > .navbar .privacy-chip {
+  padding: 3px 8px !important;
+  border-radius: 6px !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  background: var(--wl-bg-secondary) !important;
+  border: 1px solid var(--wl-border) !important;
+  color: var(--wl-text-secondary) !important;
+  box-shadow: none !important;
+}
+
+#mesh-root > .navbar .privacy-chip.sync-live-chip {
+  background: rgba(34, 197, 94, 0.1) !important;
+  border-color: rgba(34, 197, 94, 0.28) !important;
+  color: #4ade80 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+}
+
+#mesh-root > .navbar .room-live-dot {
+  width: 6px !important;
+  height: 6px !important;
+  border-radius: 50% !important;
+  background: #22c55e !important;
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.8) !important;
+}
+
+/* 2. Room Layout & Video Stage (Maximum Cinema Area, Theater Mode Support) */
+.mesh,
 .mesh-layout {
-  background: #06080f !important;
+  background: var(--wl-bg-primary) !important;
+}
+
+.mesh-layout {
+  padding: 8px 10px 10px !important;
+  gap: 0 !important;
+}
+
+.video-chat {
+  gap: 8px !important;
+}
+
+.video-chat.no-chat .panel-chat,
+.video-chat.no-chat .resize-handle,
+body.theater-mode .panel-chat,
+body.theater-mode .resize-handle {
+  display: none !important;
+}
+
+.panel-video {
+  background: #000000 !important;
+  border-radius: 12px !important;
+  border: 1px solid var(--wl-border) !important;
+  overflow: hidden !important;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65) !important;
+}
+
+.video-frame {
+  border-radius: 12px !important;
+  background: #000000 !important;
 }
 
 .panel-side {
-  background: #0a0d17 !important;
+  background: var(--wl-bg-secondary) !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border-color: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid var(--wl-border) !important;
+  border-radius: 12px !important;
 }
 
 .drawer-tabs {
-  background: #080a12 !important;
-  border-color: rgba(255, 255, 255, 0.07) !important;
+  background: var(--wl-bg-primary) !important;
+  border-color: var(--wl-divider) !important;
 }
+
 .drawer-tab {
-  color: #94a3b8 !important;
-  border-radius: 10px !important;
-  transition: background 0.16s ease, color 0.16s ease !important;
+  color: var(--wl-text-secondary) !important;
+  border-radius: 8px !important;
+  transition: background 150ms ease, color 150ms ease !important;
 }
+
 .drawer-tab:hover {
-  color: #f8fafc !important;
-  background: rgba(255, 255, 255, 0.06) !important;
+  color: var(--wl-text-primary) !important;
+  background: var(--wl-bg-elevated) !important;
 }
+
 .drawer-tab.on {
-  color: #ffffff !important;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.28), rgba(139, 92, 246, 0.22)) !important;
-  border-color: rgba(99, 102, 241, 0.5) !important;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25) !important;
+  color: #080A0F !important;
+  background: var(--wl-accent) !important;
+  border-color: var(--wl-accent) !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
 }
 
-/* --- Cinema Stage & Top Info Bar (.ctl-top) --- */
-.player-wrap {
-  background: #030408 !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 16px !important;
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.75) !important;
+/* 3. Video Player Controls: Seamless Vimeo/shadcn Scrim Overlay */
+.video-frame .controls {
+  background:
+    linear-gradient(to bottom, rgba(8, 10, 15, 0.84) 0%, rgba(8, 10, 15, 0.36) 14%, rgba(8, 10, 15, 0) 28%),
+    linear-gradient(to top, rgba(8, 10, 15, 0.92) 0%, rgba(8, 10, 15, 0.56) 15%, rgba(8, 10, 15, 0) 34%) !important;
+  transition: opacity 180ms ease !important;
 }
 
+/* 3A. Top Video Info Area (Clean Title + Compact Status, Zero 5-Badge Clutter) */
 .ctl-top {
-  background: rgba(9, 12, 22, 0.92) !important;
+  background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 14px 20px 8px !important;
+  box-shadow: none !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.ctl-thumb {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 6px !important;
+  object-fit: cover !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+}
+
+.ctl-title {
+  font-size: 0.94rem !important;
+  font-weight: 700 !important;
+  color: var(--wl-text-primary) !important;
+  letter-spacing: -0.01em !important;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85) !important;
+}
+
+.ctl-artist {
+  font-size: 0.74rem !important;
+  font-weight: 500 !important;
+  color: var(--wl-text-secondary) !important;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85) !important;
+}
+
+/* Hide redundant top-right capsules (available via bottom CC button & Gear menu) */
+#ctl-sub-pill,
+#ctl-orig-btn,
+#video-provider-logo {
+  display: none !important;
+}
+
+.ctl-pill,
+.ctl-quality-badge {
+  padding: 3px 9px !important;
+  border-radius: 6px !important;
+  font-size: 0.7rem !important;
+  font-weight: 700 !important;
+  background: rgba(16, 20, 29, 0.75) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  color: var(--wl-text-primary) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
+.ctl-quality-badge {
+  color: var(--wl-accent) !important;
+  border-color: var(--wl-accent-border) !important;
+  background: rgba(8, 10, 15, 0.72) !important;
+}
+
+/* 3B. Center Play/Pause Stage Button & Relocated Cinema Seats */
+.ctl-mid {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.ctl-center-play {
+  width: 58px !important;
+  height: 58px !important;
+  border-radius: 50% !important;
+  background: rgba(16, 20, 29, 0.76) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.2) !important;
+  color: var(--wl-text-primary) !important;
+  backdrop-filter: blur(10px) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55) !important;
+  opacity: 0 !important;
+  transform: scale(0.92) !important;
+  pointer-events: none !important;
+  transition: opacity 180ms ease, transform 180ms ease, border-color 180ms ease, background 180ms ease !important;
+}
+
+.ctl-center-play svg {
+  width: 24px !important;
+  height: 24px !important;
+}
+
+.ctl-center-play.is-paused {
+  opacity: 1 !important;
+  transform: scale(1) !important;
+  pointer-events: auto !important;
+}
+
+.ctl-center-play:hover {
+  background: rgba(39, 220, 200, 0.22) !important;
+  border-color: var(--wl-accent) !important;
+  color: #ffffff !important;
+  transform: scale(1.06) !important;
+}
+
+/* Move cinema-seats-bar to top-left below header & hide when solo with no reaction */
+.cinema-seats-bar {
+  top: 58px !important;
+  left: 20px !important;
+  bottom: auto !important;
+  padding: 4px 8px !important;
+  background: rgba(16, 20, 29, 0.72) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 14px !important;
-  padding: 8px 14px !important;
-  margin: 12px 14px 0 !important;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55) !important;
 }
 
-/* --- Floating Bottom Control Deck (.ctl-bottom) --- */
+.cinema-seats-bar:not(:has(.cinema-seat:nth-child(2))):not(:has(.seat-emoji-pop)) {
+  display: none !important;
+}
+
+/* 3C. Bottom Control Bar & Full-Width Interactive Timeline */
 .ctl-bottom {
-  background: rgba(9, 12, 22, 0.94) !important;
+  background: transparent !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 16px !important;
-  margin: 0 14px 12px !important;
-  padding: 10px 16px 12px !important;
-  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.7) !important;
+  border: none !important;
+  border-radius: 0 !important;
+  margin: 0 !important;
+  padding: 0 20px 14px !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  box-sizing: border-box !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 6px !important;
 }
 
-/* --- High-Contrast Interactive Timeline Scrubber (.timeline) --- */
 .timeline {
   position: relative !important;
-  height: 20px !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  align-self: stretch !important;
+  height: 18px !important;
   background: transparent !important;
   display: flex !important;
   align-items: center !important;
   cursor: pointer !important;
-  margin-bottom: 4px !important;
+  margin: 0 !important;
 }
+
 .timeline .track {
   position: relative !important;
   width: 100% !important;
-  height: 5px !important;
+  min-width: 100% !important;
+  height: 4px !important;
   border-radius: 999px !important;
-  background: rgba(255, 255, 255, 0.22) !important;
+  background: rgba(255, 255, 255, 0.24) !important;
   overflow: visible !important;
-  transition: height 0.15s ease, background 0.15s ease !important;
+  transition: height 140ms ease, background 140ms ease !important;
 }
+
 .timeline:hover .track {
-  height: 7px !important;
-  background: rgba(255, 255, 255, 0.3) !important;
+  height: 6px !important;
+  background: rgba(255, 255, 255, 0.34) !important;
 }
+
 .timeline .buf {
   position: absolute !important;
   inset: 0 auto 0 0 !important;
-  background: rgba(255, 255, 255, 0.35) !important;
+  background: rgba(255, 255, 255, 0.42) !important;
   border-radius: 999px !important;
 }
+
 .timeline .cur {
   position: absolute !important;
   inset: 0 auto 0 0 !important;
-  background: linear-gradient(90deg, #6366f1 0%, #8b5cf6 65%, #38bdf8 100%) !important;
+  background: var(--wl-accent) !important;
   border-radius: 999px !important;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.65) !important;
+  box-shadow: 0 0 10px rgba(39, 220, 200, 0.45) !important;
 }
+
 .timeline .knob {
   position: absolute !important;
   top: 50% !important;
-  width: 14px !important;
-  height: 14px !important;
+  width: 13px !important;
+  height: 13px !important;
   border-radius: 50% !important;
-  background: #ffffff !important;
-  border: 2.5px solid #6366f1 !important;
-  transform: translate(-50%, -50%) scale(0.9) !important;
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.85) !important;
-  transition: transform 0.15s ease !important;
+  background: var(--wl-text-primary) !important;
+  border: 2.5px solid var(--wl-accent) !important;
+  transform: translate(-50%, -50%) scale(0.85) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65) !important;
+  transition: transform 140ms ease !important;
 }
+
 .timeline:hover .knob {
   transform: translate(-50%, -50%) scale(1.18) !important;
 }
 
-/* --- Player Action Buttons (#ctl-play & .ctl-action) --- */
+/* 3D. Bottom Control Row Buttons & Settings Menu */
+.ctl-bar-row {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  width: 100% !important;
+}
+
 .ctl-action {
   width: 34px !important;
   height: 34px !important;
-  border-radius: 10px !important;
-  background: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  color: #e2e8f0 !important;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--wl-text-primary) !important;
+  opacity: 0.9 !important;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease, transform 140ms ease !important;
 }
+
 .ctl-action:hover {
-  background: rgba(99, 102, 241, 0.2) !important;
-  border-color: rgba(99, 102, 241, 0.48) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
   color: #ffffff !important;
-  transform: translateY(-1px);
+  opacity: 1 !important;
+  transform: none !important;
 }
-.ctl-action.on {
-  background: rgba(99, 102, 241, 0.26) !important;
-  border-color: rgba(99, 102, 241, 0.6) !important;
-  color: #ffffff !important;
+
+.ctl-action:active {
+  transform: scale(0.95) !important;
 }
+
+.ctl-action.on,
+.ctl-action.active-sub,
+#ctl-sub-btn.active-sub {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+  box-shadow: none !important;
+}
+
 #ctl-play {
-  width: 40px !important;
-  height: 40px !important;
-  border-radius: 50% !important;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  border: 1px solid rgba(255, 255, 255, 0.24) !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.48) !important;
+  width: 38px !important;
+  height: 38px !important;
+  border-radius: 10px !important;
+  background: var(--wl-accent) !important;
+  border: none !important;
+  color: #080A0F !important;
+  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.28) !important;
 }
+
 #ctl-play:hover {
-  transform: scale(1.06) !important;
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.65) !important;
+  background: var(--wl-accent-hover) !important;
+  color: #080A0F !important;
+  transform: scale(1.04) !important;
 }
 
 .ctl-time {
-  font-family: 'JetBrains Mono', ui-monospace, monospace !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+  font-variant-numeric: tabular-nums !important;
   font-size: 0.78rem !important;
   font-weight: 600 !important;
-  color: #cbd5e1 !important;
+  color: var(--wl-text-primary) !important;
+  background: transparent !important;
+  padding: 0 6px !important;
+  backdrop-filter: none !important;
 }
 
-.ctl-pill.live,
-.sync-pill.live {
-  background: rgba(99, 102, 241, 0.18) !important;
-  border: 1px solid rgba(99, 102, 241, 0.45) !important;
-  color: #c7d2fe !important;
+.ctl-speed-btn {
+  min-width: 36px !important;
+  width: auto !important;
+  height: 28px !important;
+  padding: 0 8px !important;
+  border-radius: 6px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
 }
 
-/* --- Decluttered Right Voice & Chat Sidebar --- */
-.discord-call-bar {
-  margin: 8px 8px 4px !important;
-  padding: 8px 10px !important;
+.ctl-speed-btn:hover {
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+.vol-wrap input[type="range"] {
+  accent-color: var(--wl-accent) !important;
+}
+
+.ctl-menu.acrylic {
+  background: rgba(16, 20, 29, 0.96) !important;
+  backdrop-filter: blur(18px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 12px !important;
-  background: #0d111e !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.72) !important;
 }
+
+.ctl-menu .opt.on {
+  background: var(--wl-accent-soft) !important;
+  box-shadow: inset 3px 0 0 var(--wl-accent) !important;
+}
+
+.ctl-menu .opt.on > span:last-child {
+  color: var(--wl-accent) !important;
+}
+
+.ctl-pref-pill.on,
+.ctl-pref-pill:hover {
+  border-color: var(--wl-accent) !important;
+  background: var(--wl-accent-soft) !important;
+  color: var(--wl-text-primary) !important;
+}
+
+/* 4. Right Panel: 3 Logical Areas (Voice, Invite/Access, Chat) with Subtle 1px Dividers */
+.panel-chat {
+  flex: 0 0 var(--chat-w, 336px);
+}
+
+.chat {
+  background: var(--wl-bg-secondary) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  border: 1px solid var(--wl-border) !important;
+  border-radius: 12px !important;
+  box-shadow: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+.resize-handle {
+  width: 6px !important;
+  cursor: col-resize !important;
+  background: transparent !important;
+  transition: background 150ms ease !important;
+}
+
+.resize-handle:hover,
+.resize-handle.dragging {
+  background: var(--wl-accent-border) !important;
+  border-radius: 99px !important;
+}
+
+/* Zone 1: Room Members & Voice Channel (.discord-call-bar) */
+.discord-call-bar {
+  margin: 0 !important;
+  padding: 10px 12px !important;
+  border-radius: 0 !important;
+  background: var(--wl-bg-secondary) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--wl-divider) !important;
+  box-shadow: none !important;
+  gap: 8px !important;
+}
+
 .discord-call-bar:not(.in-call) #btn-discord-swap,
 .discord-call-bar:not(.in-call) #btn-discord-strip,
 .discord-call-bar:not(.in-call) #btn-discord-stage,
-.discord-call-bar:not(.in-call) .discord-participants-grid {
+.discord-call-bar:not(.in-call) .discord-call-controls {
   display: none !important;
 }
-.discord-join-btn {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
-  border: none !important;
-  border-radius: 8px !important;
-  padding: 5px 11px !important;
-  font-size: 0.74rem !important;
-  font-weight: 700 !important;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.32) !important;
+
+.discord-live-dot {
+  width: 7px !important;
+  height: 7px !important;
+  background: var(--wl-accent) !important;
+  box-shadow: 0 0 6px rgba(39, 220, 200, 0.65) !important;
 }
 
+.discord-call-badge {
+  background: var(--wl-bg-elevated) !important;
+  color: var(--wl-text-secondary) !important;
+  border: 1px solid var(--wl-divider) !important;
+  font-size: 0.68rem !important;
+  padding: 1px 7px !important;
+}
+
+.discord-call-badge.live {
+  background: var(--wl-accent-soft) !important;
+  color: var(--wl-accent) !important;
+  border-color: var(--wl-accent-border) !important;
+}
+
+.discord-join-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 5px 10px !important;
+  border-radius: 7px !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  background: var(--wl-accent-soft) !important;
+  border: 1px solid var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+  box-shadow: none !important;
+  transition: background 150ms ease, color 150ms ease !important;
+}
+
+.discord-join-btn:hover {
+  background: var(--wl-accent) !important;
+  color: #080A0F !important;
+  transform: none !important;
+}
+
+.discord-join-btn.active {
+  background: rgba(239, 68, 68, 0.16) !important;
+  border-color: rgba(239, 68, 68, 0.45) !important;
+  color: #fca5a5 !important;
+}
+
+.discord-peer-chip {
+  padding: 2px 8px 2px 3px !important;
+  border-radius: 999px !important;
+  background: var(--wl-bg-elevated) !important;
+  border: 1px solid var(--wl-divider) !important;
+  color: var(--wl-text-primary) !important;
+  font-size: 0.72rem !important;
+}
+
+.discord-peer-chip.is-speaking {
+  border-color: var(--wl-accent) !important;
+  box-shadow: 0 0 0 1px var(--wl-accent) !important;
+}
+
+.d-peer-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  color: var(--wl-text-secondary) !important;
+}
+
+.d-peer-badge svg {
+  width: 12px !important;
+  height: 12px !important;
+}
+
+.d-peer-badge.mic-on {
+  color: var(--wl-accent) !important;
+}
+
+.discord-ctl-pill {
+  border-radius: 7px !important;
+  background: var(--wl-bg-elevated) !important;
+  border: 1px solid var(--wl-divider) !important;
+  color: var(--wl-text-secondary) !important;
+}
+
+.discord-ctl-pill.on {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+/* Zone 2: Invite & Room Access Settings (.chat-quick-bar) */
 .chat-quick-bar {
-  margin: 0 8px 6px !important;
-  padding: 6px 8px !important;
-  border-radius: 11px !important;
-  background: #0c101c !important;
-  border: 1px solid rgba(255, 255, 255, 0.07) !important;
+  position: relative !important;
+  margin: 0 !important;
+  padding: 8px 12px !important;
+  border-radius: 0 !important;
+  background: rgba(23, 29, 40, 0.45) !important;
+  border: none !important;
+  border-bottom: 1px solid var(--wl-divider) !important;
+  box-shadow: none !important;
   display: flex !important;
   flex-direction: column !important;
-  gap: 5px !important;
-}
-.chat-access-seg {
-  display: flex !important;
-  flex-wrap: nowrap !important;
-  gap: 4px !important;
-}
-.chat-access-btn {
-  flex: 1 1 0 !important;
-  padding: 4px 6px !important;
-  font-size: 0.69rem !important;
-  border-radius: 7px !important;
-}
-.chat-access-btn.on {
-  background: rgba(99, 102, 241, 0.22) !important;
-  border-color: rgba(99, 102, 241, 0.5) !important;
-  color: #c7d2fe !important;
+  gap: 6px !important;
 }
 
-/* Single-Row Scrollable Reaction Strip (Prevents 3-Row Wrap Covering Chat) */
+.chat-quick-pills {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding-right: 24px !important;
+  flex-wrap: nowrap !important;
+}
+
+.chat-q-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  padding: 4px 9px !important;
+  border-radius: 6px !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  background: var(--wl-bg-elevated) !important;
+  border: 1px solid var(--wl-border) !important;
+  color: var(--wl-text-secondary) !important;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease !important;
+}
+
+.chat-q-pill:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--wl-text-primary) !important;
+}
+
+.chat-q-pill.primary {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+.chat-access-seg {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr) !important;
+  gap: 3px !important;
+  padding: 2px !important;
+  border-radius: 8px !important;
+  background: var(--wl-bg-primary) !important;
+  border: 1px solid var(--wl-divider) !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.chat-access-seg .privacy-opt {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+  padding: 4px 6px !important;
+  border-radius: 6px !important;
+  flex-direction: row !important;
+  font-size: 0.68rem !important;
+  font-weight: 600 !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  color: var(--wl-text-secondary) !important;
+}
+
+.chat-access-seg .privacy-opt.on {
+  background: var(--wl-bg-elevated) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+  box-shadow: none !important;
+}
+
+.chat-q-close {
+  position: absolute !important;
+  top: 8px !important;
+  right: 10px !important;
+  width: 20px !important;
+  height: 20px !important;
+  border-radius: 5px !important;
+  background: transparent !important;
+  color: var(--wl-text-secondary) !important;
+}
+
+.chat-q-close:hover {
+  background: var(--wl-bg-elevated) !important;
+  color: var(--wl-text-primary) !important;
+}
+
+/* Zone 3: Chat Messages, Reactions & Message Input */
+.chat-list {
+  padding: 10px 12px 6px !important;
+  gap: 2px !important;
+}
+
+.msg:not(.cont):not(.system) {
+  background: transparent !important;
+  border-bottom: none !important;
+  padding: 5px 6px !important;
+  border-radius: 8px !important;
+}
+
+.msg:not(.system):hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.msg-text {
+  color: var(--wl-text-primary) !important;
+  font-size: 0.86rem !important;
+  line-height: 1.45 !important;
+}
+
 .reaction-bar {
   display: flex !important;
   flex-wrap: nowrap !important;
   overflow-x: auto !important;
   scrollbar-width: none !important;
-  gap: 5px !important;
+  align-items: center !important;
+  gap: 4px !important;
   padding: 6px 10px !important;
-  background: #090c15 !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.07) !important;
+  background: var(--wl-bg-secondary) !important;
+  border-top: 1px solid var(--wl-divider) !important;
 }
+
 .reaction-bar::-webkit-scrollbar {
-  display: none;
+  display: none !important;
 }
-.react-btn,
-.react-moment {
+
+.reaction-bar > button {
   flex-shrink: 0 !important;
-  border-radius: 8px !important;
-  background: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-}
-.react-btn:hover,
-.react-moment:hover {
-  background: rgba(99, 102, 241, 0.2) !important;
-  border-color: rgba(99, 102, 241, 0.45) !important;
-}
-
-.chatbar {
-  background: #080a12 !important;
-  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
-  padding: 8px 10px !important;
-}
-.chatbar input {
-  background: #0f1423 !important;
-  border: 1px solid rgba(255, 255, 255, 0.1) !important;
-  border-radius: 10px !important;
-  color: #f8fafc !important;
-}
-.chatbar input:focus {
-  border-color: #6366f1 !important;
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
-}
-
-
-/* === CHAT QUICK BAR COMPACT CLOSE BUTTON (v16.2) === */
-.chat-quick-bar {
-  position: relative !important;
-  padding: 8px 28px 8px 10px !important;
-}
-.chat-quick-close,
-.chat-quick-bar > .btn.ghost.sm:last-child {
-  position: absolute !important;
-  top: 6px !important;
-  right: 6px !important;
-  width: 20px !important;
-  height: 20px !important;
-  padding: 0 !important;
-  min-width: 20px !important;
+  height: 26px !important;
+  padding: 0 7px !important;
+  border-radius: 6px !important;
+  font-size: 0.72rem !important;
+  background: var(--wl-bg-elevated) !important;
+  border: 1px solid var(--wl-divider) !important;
+  color: var(--wl-text-secondary) !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
-  border-radius: 6px !important;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease !important;
+}
+
+.reaction-bar > button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--wl-text-primary) !important;
+  border-color: rgba(255, 255, 255, 0.16) !important;
+  transform: none !important;
+}
+
+.sfx-pill.poll-pill {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+.chatbar {
+  margin: 0 !important;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  border-radius: 0 !important;
+  background: var(--wl-bg-secondary) !important;
+  border: none !important;
+  border-top: 1px solid var(--wl-divider) !important;
+  box-shadow: none !important;
+  gap: 6px !important;
+}
+
+/* Hide duplicate mic/cam/screen circles inside chatbar (available in top voice bar) */
+.chatbar > .mic-btn {
+  display: none !important;
+}
+
+.chatbar .chat-input {
+  background: var(--wl-bg-elevated) !important;
+  border: 1px solid var(--wl-border) !important;
+  border-radius: 9px !important;
+  padding: 2px 4px 2px 10px !important;
+  width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  transition: border-color 150ms ease !important;
+}
+
+.chatbar .chat-input:focus-within {
+  border-color: var(--wl-accent-border) !important;
+}
+
+.chatbar .chat-input input {
+  background: transparent !important;
+  border: none !important;
+  color: var(--wl-text-primary) !important;
+  font-size: 0.85rem !important;
+  padding: 6px 0 !important;
+}
+
+.chatbar .chat-input .ctl-action {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 7px !important;
+}
+
+.chatbar .chat-input .ctl-action:last-child {
+  background: var(--wl-accent) !important;
+  color: #080A0F !important;
+}
+
+.chatbar .chat-input .ctl-action:last-child:hover {
+  background: var(--wl-accent-hover) !important;
+}
+
+/* 5. Reduced Motion Accessibility Support */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 6. Mobile Portrait Header & Control Bar Polish (<= 768px) */
+@media (max-width: 768px) {
+  #mesh-root > .navbar {
+    padding: 0 8px !important;
+    gap: 4px !important;
+  }
+  #mesh-root > .navbar #nav-toggle-chat,
+  #mesh-root > .navbar #nav-vote,
+  #mesh-root > .navbar .privacy-chip:not(.sync-live-chip),
+  #ctl-theater {
+    display: none !important;
+  }
+  #mesh-root > .navbar .navbar-center {
+    flex: 1 1 0% !important;
+    justify-content: center !important;
+    gap: 6px !important;
+    overflow: hidden !important;
+  }
+  #mesh-root > .navbar .mesh-title {
+    max-width: 110px !important;
+    font-size: 0.78rem !important;
+  }
+  #mesh-root > .navbar .nav-icon {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+  }
 }
