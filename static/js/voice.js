@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261029_v5';
+import { toast } from './ui.js?v=20261029_v6';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -597,7 +597,7 @@ export class Voice {
         const aStream = new MediaStream([e.track]);
         audio.srcObject = aStream;
         const volPct = this.getPeerVolume(id);
-        audio.muted = volPct === 0;
+        audio.muted = Boolean(this.deafened) || volPct === 0;
         audio.volume = Math.min(1.0, Math.max(0, volPct / 100));
         audio.play().catch(() => {});
       }
@@ -649,6 +649,9 @@ export class Voice {
         const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
         st.ignoreOffer = !polite && collision;
         if (st.ignoreOffer) return;
+        if (collision) {
+          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
+        }
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
         if (desc.type === 'offer') {
           const answer = await pc.createAnswer();
@@ -864,6 +867,10 @@ export class Voice {
         this.screenStream = this._createScreenShareFallbackStream();
       }
     } catch (e) {
+      if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
+        toast('Ekran paylaşımı iptal edildi');
+        return false;
+      }
       this.screenStream = this._createScreenShareFallbackStream();
     }
     if (!this.screenStream) {

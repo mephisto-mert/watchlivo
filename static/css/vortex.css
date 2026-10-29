@@ -235,14 +235,16 @@ a { color: var(--accent); }
 
 /* Provider Category Filter Pills + Provider Grid (Rave SuperSearch__provider-items 2-Row Compact Strip) */
 .provider-cat-bar {
-  display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px;
-  padding: 0;
+  display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 6px;
+  padding: 0; overflow-x: auto; scrollbar-width: none; max-width: 100%;
 }
-.provider-cat-bar.compact { padding: .35em 10px .1em; justify-content: center; gap: 5px; }
+.provider-cat-bar::-webkit-scrollbar { display: none; }
+.provider-cat-bar.compact { padding: .35em 10px .1em; justify-content: center; gap: 5px; flex-wrap: wrap; }
 .provider-cat-pill {
-  display: inline-flex; align-items: center; gap: 5px; padding: .34em .76em;
-  border-radius: 999px; font-size: .74em; font-weight: 700; color: var(--text-dim);
+  display: inline-flex; align-items: center; gap: 5px; padding: .32em .72em;
+  border-radius: 999px; font-size: .73em; font-weight: 700; color: var(--text-dim);
   background: var(--card-surface); border: 1px solid var(--border-soft);
+  white-space: nowrap; flex-shrink: 0;
   transition: background .18s, color .18s, border-color .18s, box-shadow .18s;
 }
 .provider-cat-bar.compact .provider-cat-pill { padding: .3em .65em; font-size: .7em; }
@@ -2425,10 +2427,17 @@ body {
   .platform-card.featured-glow { grid-column: span 1; }
   .gazestream-hero { flex-direction: column; height: auto; }
   .hero-stage-top { flex-direction: column; min-height: auto; }
-  .hero-art-stage { height: 180px; }
+  .hero-art-stage { height: 180px; -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%); mask-image: linear-gradient(to bottom, black 55%, transparent 100%); }
   .hero-showcase-strip { padding: 12px 14px 14px; }
   .hero-mini-card { flex: 0 0 116px; }
   .hero-mini-card img { height: 148px; }
+  .hero-mini-play { white-space: nowrap; font-size: 9.5px; padding: 3px 6px; }
+  .toast-root { bottom: calc(82px + env(safe-area-inset-bottom, 0px)) !important; }
+}
+@media (max-width: 640px) {
+  .top-nav-capsule { padding: 6px 10px; gap: 6px; }
+  .brand-wordmark { display: none; }
+  .nav-user-pill .wl-user-handle { display: none; }
 }
 @media (max-width: 400px) {
   .floating-dock {

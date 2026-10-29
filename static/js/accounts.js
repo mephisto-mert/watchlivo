@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261029_v5';
-import { api, qs } from './api.js?v=20261029_v5';
-import { state, set, setView } from './store.js?v=20261029_v5';
+import { h, toast, popup } from './ui.js?v=20261029_v6';
+import { api, qs } from './api.js?v=20261029_v6';
+import { state, set, setView } from './store.js?v=20261029_v6';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -359,7 +359,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
 
       const epGrid = h('div', { class: 'episode-grid' },
         ...episodes.map((ep) => {
-          const rawEpName = String(ep.name || '').trim();
+          const rawEpName = String(ep.name || '').replace(/\s*\([^)]*HD[^)]*\)/gi, '').trim();
           const isRedundantEpName = !rawEpName || new RegExp(`^(?:${ep.episode}\\.\\s*bölüm|bölüm\\s*${ep.episode}|episode\\s*${ep.episode})$`, 'i').test(rawEpName);
           const epTitleText = isRedundantEpName ? `${ep.episode}. Bölüm` : `${ep.episode}. Bölüm — ${rawEpName}`;
           return h('div', {
@@ -384,7 +384,6 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         epGrid);
     }
     container.replaceChildren(detail);
-    resetPickerScroll();
   };
 
   await loadSeason(initSeason);

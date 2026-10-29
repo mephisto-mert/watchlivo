@@ -1097,10 +1097,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         ev["ts"] = now()
         ev["cid"] = cid
         room["events"] = (room.get("events") or [])[-34:] + [ev]
-        out["broadcast"].append((ev, None))
+        out["broadcast"].append((ev, cid))
 
     elif mtype == "change_media":
-        if mode == "leader" and not can_control:
+        if room.get("curated"):
+            deny("7/24 canlı TV ve radyo odalarında yayın değiştirilemez.")
+            return out
+        if mode in ("leader", "autoplay", "vote") and not can_control:
             deny("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.")
             return out
         set_media(room, data, name, 0.0)
@@ -1319,8 +1322,14 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["co_hosts"] = co_list
         elif act == "kick" and data.get("targetId") in room["participants"] and data["targetId"] != cid:
             kicked = room["participants"].pop(data["targetId"])
+            k_list = list(room.get("kicked") or [])
+            if data["targetId"] not in k_list:
+                k_list.append(data["targetId"])
+            room["kicked"] = k_list
             sys_msg(room, f"{name} tarafından odadan çıkarıldı", kicked["name"])
             out["kick"] = data["targetId"]
+        room["_parts_list"] = None
+        room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append((_room_event(room), None))
     elif mtype in ("webrtc_offer", "webrtc_answer", "webrtc_ice"):
         target = data.get("targetId")
@@ -1465,18 +1474,27 @@ _LIVE_RADIO = [
 ]
 
 
+def _wrap_live_cors_url(u: str) -> str:
+    if any(d in u for d in ("ercdn.net", "daioncdn.net", "radyotvonline.")):
+        import urllib.parse
+        return f"/api/rave/stream?u={urllib.parse.quote(u, safe='')}&proxy_segs=1&ext=.m3u8"
+    return u
+
+
 def _tv_spec(rid: str, name: str, url: str) -> Dict[str, Any]:
+    play_u = _wrap_live_cors_url(url)
     return {
         "id": f"tv-{rid}", "name": f"7/24 {name} Canlı Yayın", "creator": "Watchlivo Canlı TV", "privacy": "public", "playMode": "cohost",
-        "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": url, "channel": "Canlı TV · 7/24",
+        "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": play_u, "altUrls": [url] if play_u != url else [], "channel": "Canlı TV · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "mediaType": "live", "duration": 0.0},
     }
 
 
 def _radio_spec(rid: str, name: str, url: str, kind: str) -> Dict[str, Any]:
+    play_u = _wrap_live_cors_url(url) if kind == "hls" else url
     return {
         "id": rid, "name": f"7/24 {name} Canlı Radyo", "creator": "Watchlivo Canlı Radyo", "privacy": "public", "playMode": "cohost",
-        "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": url, "channel": "Canlı Radyo · 7/24",
+        "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": play_u, "altUrls": [url] if play_u != url else [], "channel": "Canlı Radyo · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "isMusic": True, "mediaType": "music", "artist": name,
                   "songTitle": "Canlı Yayın", "musicPlatformLabel": "Canlı Radyo", "duration": 0.0},
     }
@@ -1568,13 +1586,15 @@ async def ws_endpoint(websocket: WebSocket):
                 return
         prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-        if was_empty_humans:
+        empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 9999.0
+        if was_empty_humans and (room.get("curated") or empty_elapsed > 45.0):
             room["chat"] = []
             room["polls"] = []
             if room.get("media"):
                 room["media"]["currentTime"] = 0.0
                 room["media"]["updatedAt"] = now()
                 room["media"]["playing"] = True
+        room.pop("emptySince", None)
         p, _ = add_participant(room, cid, join_data, "ws")
         join_msg = sys_msg(room, "katıldı", p["name"])
         SOCKETS.setdefault(room_id, {})[cid] = websocket
@@ -1611,10 +1631,15 @@ async def ws_endpoint(websocket: WebSocket):
             if room:
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                 if not has_humans:
-                    room["chat"] = []
-                    room["polls"] = []
-                    if room.get("media"):
-                        room["media"]["currentTime"] = 0.0
+                    room["emptySince"] = now()
+                    if room.get("curated"):
+                        room["chat"] = []
+                        room["polls"] = []
+                        if room.get("media"):
+                            room["media"]["currentTime"] = 0.0
+                            room["media"]["updatedAt"] = now()
+                    elif room.get("media"):
+                        room["media"]["currentTime"] = current_pos(room["media"])
                         room["media"]["updatedAt"] = now()
                 ensure_host(room)
                 msg = sys_msg(room, "ayrıldı", left["name"]) if (left and has_humans) else None
@@ -1805,10 +1830,12 @@ async def list_rooms(request: Request):
                     if "kinox_bot" in p_map:
                         p_map["kinox_bot"]["name"] = room["creator"]
                     needs_save = True
-                if not has_humans and (room.get("chat") or float((room.get("media") or {}).get("currentTime") or 0.0) > 0.0):
+                if not has_humans and (room.get("chat") or float((room.get("media") or {}).get("currentTime") or 0.0) > 0.0 or (spec and (room.get("media") or {}).get("url") != spec["media"]["url"])):
                     room["chat"] = []
                     room["polls"] = []
-                    if room.get("media"):
+                    if spec:
+                        set_media(room, spec["media"], spec.get("creator", "Watchlivo 7/24"), start=0.0)
+                    elif room.get("media"):
                         room["media"]["currentTime"] = 0.0
                         room["media"]["updatedAt"] = t
                     needs_save = True

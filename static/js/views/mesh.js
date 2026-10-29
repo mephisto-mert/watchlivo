@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v5';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v5';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v5';
-import { MeshConnection } from '../realtime.js?v=20261029_v5';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v5';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v5';
-import { buildLayout } from './mesh-layout.js?v=20261029_v5';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v5';
-import { Voice } from '../voice.js?v=20261029_v5';
-import { playRoomSfx } from './chat.js?v=20261029_v5';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v6';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v6';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v6';
+import { MeshConnection } from '../realtime.js?v=20261029_v6';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v6';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v6';
+import { buildLayout } from './mesh-layout.js?v=20261029_v6';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v6';
+import { Voice } from '../voice.js?v=20261029_v6';
+import { playRoomSfx } from './chat.js?v=20261029_v6';
 
 let ctx = null;
 
@@ -79,7 +79,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
     room = { ...room, media: { ...room.media, similar: curRoom.media.similar } };
   }
-  if (curRoom && isLeader() && nextKey && nextKey === prevKey) {
+  if (curRoom && isHostOnly() && nextKey && nextKey === prevKey) {
     const curMedia = curRoom.media || {};
     const nextMedia = room.media || {};
     if (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 8500) {
@@ -231,6 +231,7 @@ function onMessage(data) {
       }
       break;
     case 'sync':
+      if (data.cid && data.cid === state.clientId) break;
       if (room && data.media) {
         set({ mesh: { ...room, media: data.media } });
         if (ctx?.sync) {
@@ -619,7 +620,7 @@ function onPlayerEvent(ev, arg) {
       }
     }
   }
-  if ((ev === 'play' || ev === 'loaded') && isLeader() && !ctx.host.loading) {
+  if ((ev === 'play' || ev === 'loaded') && isHostOnly() && !ctx.host.loading) {
     const m = state.mesh?.media;
     const k = mediaKey(m);
     const ad = ctx.host.adapter;

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v5';
-import { expectedPosition } from '../sync.js?v=20261029_v5';
-import { state } from '../store.js?v=20261029_v5';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v6';
+import { expectedPosition } from '../sync.js?v=20261029_v6';
+import { state } from '../store.js?v=20261029_v6';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -322,8 +322,11 @@ export class Html5Adapter {
 
     const loadCandidateUrl = (nextUrl, doneCb) => {
       if (!nextUrl || this.video !== v) return;
-      const resumePos = Math.max(this.getTime() || 0, this.highestPlayedPos || 0, startAt || 0);
-      if (resumePos >= 5) {
+      const expT = expectedPosition(state.mesh?.media);
+      const curNow = Number(this.getTime() || 0);
+      const resumePos = curNow > 0.5 ? curNow : ((Number.isFinite(expT) && expT > 0.5) ? expT : (startAt || 0));
+      this.highestPlayedPos = resumePos;
+      if (resumePos >= 0.5) {
         this.lastSeekTarget = resumePos;
         this.lastSeekAt = Date.now();
         this.initialSeekPending = resumePos;
@@ -333,8 +336,8 @@ export class Html5Adapter {
         this._setMusicVisualMode?.(isAudioOnlyUrl(nextUrl) ? 'vinyl' : 'clip');
       }
       const restorePosOnLoad = () => {
-        if (this.video !== v || resumePos < 5) return;
-        if (Math.abs((v.currentTime || 0) - resumePos) > 3.0) {
+        if (this.video !== v || resumePos < 0.5) return;
+        if (Math.abs((v.currentTime || 0) - resumePos) > 1.5) {
           try { v.currentTime = resumePos; } catch (e) { /* ignore */ }
         }
       };
@@ -362,7 +365,7 @@ export class Html5Adapter {
 
     const attachHlsJs = (srcUrl, doneCb, customStart = null) => {
       try { this.hls?.destroy(); } catch (e) { /* ignore */ }
-      const effStart = Math.max(Number(customStart ?? startAt) || 0, this.highestPlayedPos || 0);
+      const effStart = Number(customStart ?? startAt) || 0;
       this.hls = new window.Hls({
         enableWorker: true,
         lowLatencyMode: false,
@@ -373,7 +376,7 @@ export class Html5Adapter {
         abrEwmaDefaultEstimate: 6000000,
         maxBufferLength: 45,
         maxMaxBufferLength: 90,
-        backBufferLength: 30,
+        backBufferLength: 90,
         maxBufferSize: 60 * 1000 * 1000,
         maxBufferHole: 0.8,
         maxAudioFramesDrift: 1,
@@ -664,7 +667,7 @@ export class Html5Adapter {
       if (cur < Math.max(0.5, this.initialSeekPending - 2.5)) return this.initialSeekPending;
       this.initialSeekPending = 0;
     }
-    if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 4000) {
+    if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 8500) {
       return this.lastSeekTarget;
     }
     return Number(this.video?.currentTime || 0);

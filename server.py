@@ -142,7 +142,7 @@ class SecurityHeaders:
                 hdrs.append((b"x-content-type-options", b"nosniff"))
                 hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
-                hdrs.append((b"permissions-policy", b"camera=(), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self), fullscreen=(self)"))
+                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self), fullscreen=(self)"))
                 hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
                 if scope.get("path") == "/api/rave/browser-proxy":
@@ -326,7 +326,7 @@ async def search_youtube(request: Request):
 PROVIDER_WATCH_IDS = {
     "netflix": "8", "disney": "337", "prime": "119", "max": "1899|384",
     "crunchyroll": "283", "tubi": "73", "mubi": "11", "apple": "350",
-    "hulu": "15", "paramount": "531", "peacock": "386", "plex": "538", "pluto": "300",
+    "hulu": "15", "paramount": "531|582|2303|2616", "peacock": "386", "plex": "538", "pluto": "300",
     "exxen": "1796|8", "blutv": "341|1899", "gain": "1796|8",
     "tod": "341|8", "tabii": "1796|8", "tvplus": "341|119", "puhutv": "341|8",
 }
@@ -342,15 +342,15 @@ TMDB_GENRE_BUCKETS = [
 ]
 
 CAT_TMDB_GENRES = {
-    "action": ("10759,37", "28,12,37"),
-    "scifi": ("10765", "878,14"),
-    "drama": ("18,80,9648", "18,80,9648"),
-    "comedy": ("35", "35,10749"),
-    "horror": ("9648,10765", "27,53"),
-    "animation": ("16,10751,10762", "16,10751"),
+    "action": ("10759|37", "28|12|37"),
+    "scifi": ("10765", "878|14"),
+    "drama": ("18|80|9648", "18|80|9648"),
+    "comedy": ("35", "35|10749"),
+    "horror": ("9648|10765", "27|53"),
+    "animation": ("16|10751|10762", "16|10751"),
     "anime": ("16&with_origin_country=JP", "16&with_origin_country=JP"),
-    "dublaj": ("10759,18,10765", "28,12,878,14"),
-    "doc": ("99", "99,36"),
+    "dublaj": ("10759|18|10765", "28|12|878|14"),
+    "doc": ("99", "99|36"),
 }
 
 _CATALOG_MEM_CACHE = {}
@@ -730,7 +730,11 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
             if not ac_id or not name or cid in seen:
                 continue
             seen.add(cid)
-            mtype = "movie" if bool(r.get("is_movie")) else "tv"
+            is_series_val = r.get("is_series")
+            if is_series_val is not None:
+                mtype = "tv" if bool(is_series_val) else "movie"
+            else:
+                mtype = "movie" if bool(r.get("is_movie")) else "tv"
             poster = str(r.get("poster") or r.get("backdrop") or "").strip()
             backdrop = str(r.get("backdrop") or poster).strip()
             year = str(r.get("year") or r.get("release_date") or "2024")[:4]
@@ -754,29 +758,29 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
 
 _DOMESTIC_TR_ORIGINALS = {
     "exxen": [
-        {"id": "116395", "tmdbId": "116395", "mediaType": "tv", "title": "Gibi", "originalTitle": "Gibi", "origLang": "tr", "year": "2021", "rating": 8.9, "voteCount": 4200, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg"},
-        {"id": "41727", "tmdbId": "41727", "mediaType": "tv", "title": "Leyla ile Mecnun", "originalTitle": "Leyla ile Mecnun", "origLang": "tr", "year": "2011", "rating": 9.1, "voteCount": 5800, "categories": ["series", "comedy", "drama", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Absürt Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/3jPLJJXbFabb29mOxZOK0xctcy6.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aEQEIXDmjd9otezUu64VFmpO51K.jpg"},
+        {"id": "115678", "tmdbId": "115678", "mediaType": "tv", "title": "Gibi", "originalTitle": "Gibi", "origLang": "tr", "year": "2021", "rating": 8.9, "voteCount": 4200, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg"},
+        {"id": "40417", "tmdbId": "40417", "mediaType": "tv", "title": "Leyla ile Mecnun", "originalTitle": "Leyla ile Mecnun", "origLang": "tr", "year": "2011", "rating": 9.1, "voteCount": 5800, "categories": ["series", "comedy", "drama", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Absürt Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/3jPLJJXbFabb29mOxZOK0xctcy6.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aEQEIXDmjd9otezUu64VFmpO51K.jpg"},
     ],
     "blutv": [
         {"id": "228853", "tmdbId": "228853", "mediaType": "tv", "title": "Prens", "originalTitle": "Prens", "origLang": "tr", "year": "2023", "rating": 8.6, "voteCount": 3100, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Komedi", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg"},
-        {"id": "37681", "tmdbId": "37681", "mediaType": "tv", "title": "Behzat Ç.: Bir Ankara Polisiyesi", "originalTitle": "Behzat Ç.", "origLang": "tr", "year": "2010", "rating": 8.8, "voteCount": 4900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Polisiye & Suç", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/aRqNQ5v2tvZ9ZRAXpYik0JamHkm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/pF1OQe4zaXX9vOwxbxjZzws0CAe.jpg"},
-        {"id": "131687", "tmdbId": "131687", "mediaType": "tv", "title": "İlk ve Son", "originalTitle": "İlk ve Son", "origLang": "tr", "year": "2021", "rating": 8.4, "voteCount": 1900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Romantik Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/epARLyo8ctJr4xVdS2DObuRiie8.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2UA95tbHkDuNtLjfkychP8Zv4gK.jpg"},
-        {"id": "232412", "tmdbId": "232412", "mediaType": "tv", "title": "Magarsus", "originalTitle": "Magarsus", "origLang": "tr", "year": "2023", "rating": 8.2, "voteCount": 1600, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/mDAVOY91MSq7CzQlhxfqqA8Xa9Y.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6UjnbGUjXEUrETYHbfkf0jQwAYR.jpg"},
+        {"id": "39176", "tmdbId": "39176", "mediaType": "tv", "title": "Behzat Ç.: Bir Ankara Polisiyesi", "originalTitle": "Behzat Ç.", "origLang": "tr", "year": "2010", "rating": 8.8, "voteCount": 4900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Polisiye & Suç", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/aRqNQ5v2tvZ9ZRAXpYik0JamHkm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/pF1OQe4zaXX9vOwxbxjZzws0CAe.jpg"},
+        {"id": "131906", "tmdbId": "131906", "mediaType": "tv", "title": "İlk ve Son", "originalTitle": "İlk ve Son", "origLang": "tr", "year": "2021", "rating": 8.4, "voteCount": 1900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Romantik Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/epARLyo8ctJr4xVdS2DObuRiie8.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2UA95tbHkDuNtLjfkychP8Zv4gK.jpg"},
+        {"id": "231254", "tmdbId": "231254", "mediaType": "tv", "title": "Magarsus", "originalTitle": "Magarsus", "origLang": "tr", "year": "2023", "rating": 8.2, "voteCount": 1600, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/mDAVOY91MSq7CzQlhxfqqA8Xa9Y.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6UjnbGUjXEUrETYHbfkf0jQwAYR.jpg"},
     ],
     "gain": [
-        {"id": "78223", "tmdbId": "78223", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Suç & Gerilim", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
-        {"id": "116154", "tmdbId": "116154", "mediaType": "tv", "title": "10 Bin Adım", "originalTitle": "10 Bin Adım", "origLang": "tr", "year": "2020", "rating": 8.1, "voteCount": 1400, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/s3qr2K8LjVCTIBoWOnkFd6bQqcM.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/cZBzydoCzbZr0lCK72oMkZTAtgq.jpg"},
-        {"id": "136283", "tmdbId": "136283", "mediaType": "tv", "title": "Ayak İşleri", "originalTitle": "Ayak İşleri", "origLang": "tr", "year": "2021", "rating": 8.5, "voteCount": 2600, "categories": ["series", "comedy", "action", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Aksiyon Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/w7Ye1LMhPlST5nvEcmOMJsQcCFf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7MSFsfEY4z9VAczH9flrY10vCzb.jpg"},
+        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Suç & Gerilim", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "115597", "tmdbId": "115597", "mediaType": "tv", "title": "10 Bin Adım", "originalTitle": "10 Bin Adım", "origLang": "tr", "year": "2020", "rating": 8.1, "voteCount": 1400, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/s3qr2K8LjVCTIBoWOnkFd6bQqcM.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/cZBzydoCzbZr0lCK72oMkZTAtgq.jpg"},
+        {"id": "125412", "tmdbId": "125412", "mediaType": "tv", "title": "Ayak İşleri", "originalTitle": "Ayak İşleri", "origLang": "tr", "year": "2021", "rating": 8.5, "voteCount": 2600, "categories": ["series", "comedy", "action", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Aksiyon Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/w7Ye1LMhPlST5nvEcmOMJsQcCFf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7MSFsfEY4z9VAczH9flrY10vCzb.jpg"},
     ],
     "tabii": [
-        {"id": "279886", "tmdbId": "279886", "mediaType": "tv", "title": "Gassal", "originalTitle": "Gassal", "origLang": "tr", "year": "2024", "rating": 8.7, "voteCount": 2900, "categories": ["series", "drama", "comedy", "trend"], "genreLabel": "🇹🇷 tabii Orijinal · Kara Komedi & Dram", "sourceBadge": "🟢 tabii 4K", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg"},
+        {"id": "280030", "tmdbId": "280030", "mediaType": "tv", "title": "Gassal", "originalTitle": "Gassal", "origLang": "tr", "year": "2024", "rating": 8.7, "voteCount": 2900, "categories": ["series", "drama", "comedy", "trend"], "genreLabel": "🇹🇷 tabii Orijinal · Kara Komedi & Dram", "sourceBadge": "🟢 tabii 4K", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg"},
     ],
     "tod": [
-        {"id": "274415", "tmdbId": "274415", "mediaType": "tv", "title": "Sorgu", "originalTitle": "Sorgu", "origLang": "tr", "year": "2024", "rating": 8.0, "voteCount": 1100, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 TOD Orijinal · Polisiye Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/5jhorUhgbIU9JajEqdzLVXwDyUC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/22cBQLvwhnLujGLzeOSJa9Tflih.jpg"},
+        {"id": "271596", "tmdbId": "271596", "mediaType": "tv", "title": "Sorgu", "originalTitle": "Sorgu", "origLang": "tr", "year": "2024", "rating": 8.0, "voteCount": 1100, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 TOD Orijinal · Polisiye Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/5jhorUhgbIU9JajEqdzLVXwDyUC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/22cBQLvwhnLujGLzeOSJa9Tflih.jpg"},
     ],
     "puhutv": [
-        {"id": "78223", "tmdbId": "78223", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Suç & Gerilim", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
-        {"id": "70796", "tmdbId": "70796", "mediaType": "tv", "title": "Fi", "originalTitle": "Fi", "origLang": "tr", "year": "2017", "rating": 8.1, "voteCount": 2200, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Psikolojik Dram", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/zor5X8aqT77E8FEQy4RCEeDOCGv.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/FOfZFc6tciIpQTafHfuWwr6A3m.jpg"},
+        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Suç & Gerilim", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "71036", "tmdbId": "71036", "mediaType": "tv", "title": "Fi", "originalTitle": "Fi", "origLang": "tr", "year": "2017", "rating": 8.1, "voteCount": 2200, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Psikolojik Dram", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/zor5X8aqT77E8FEQy4RCEeDOCGv.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/FOfZFc6tciIpQTafHfuWwr6A3m.jpg"},
     ],
 }
 
@@ -938,7 +942,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             no = _norm_title(it.get("originalTitle") or "")
             vc = int(it.get("voteCount") or 0)
             yr = str(it.get("year") or "")
-            is_tr_exact = 1 if ((nt == nq or no == nq) and (it.get("origLang") == "tr" or str(it.get("tmdbId")) in ("228853", "116395", "37681", "78223", "41727"))) else 0
+            is_tr_exact = 1 if ((nt == nq or no == nq) and (it.get("origLang") == "tr" or str(it.get("tmdbId")) in ("228853", "115678", "40417", "39176", "131906", "231254", "77994", "115597", "125412", "280030", "271596", "71036"))) else 0
             is_scr = 1 if str(it.get("id") or "").startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "ac-", "dp-")) else 0
             released = 1 if (yr and yr <= "2026" and (vc >= 5 or "voteCount" not in it)) else 0
             exact = 2 if ((nt == nq or no == nq) and released) else (1 if (nq and (nq in nt or nq in no)) else 0)
@@ -959,7 +963,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     pid = PROVIDER_WATCH_IDS.get(prov, "")
     reg = "TR" if (prov in ("netflix", "disney", "prime", "mubi") or is_domestic_tr or is_free_tr) else "US"
     if is_domestic_tr:
-        dom_sort = {"exxen": "&with_genres=35", "blutv": "&with_genres=18,80", "gain": "&with_genres=18,35", "tod": "&with_genres=80,9648", "tabii": "&with_genres=18,36", "tvplus": "", "puhutv": "&with_genres=18"}.get(prov, "")
+        dom_sort = {"exxen": "&with_genres=35", "blutv": "&with_genres=18|80", "gain": "&with_genres=18|35", "tod": "&with_genres=80|9648|18", "tabii": "&with_genres=18|36|35|10759", "tvplus": "", "puhutv": "&with_genres=18"}.get(prov, "")
         prov_q = f"&with_original_language=tr{dom_sort}"
     else:
         prov_q = f"&with_watch_providers={pid}&watch_region={reg}" if pid else ""
@@ -1039,10 +1043,11 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     scraped_live = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
         futs_live = []
-        if is_free_tr:
-            if cat == "anime":
+        if is_free_tr or prov == "crunchyroll":
+            if cat == "anime" or prov == "crunchyroll":
                 futs_live.append(pool.submit(_scrape_animecix_catalog_sync, cat, pg, ""))
-                futs_live.append(pool.submit(_scrape_hdfc_catalog_sync, cat, pg, ""))
+                if is_free_tr:
+                    futs_live.append(pool.submit(_scrape_hdfc_catalog_sync, cat, pg, ""))
             elif prov in ("cinema", "hdfilmcehennemi", "dizilife", "dizibox", "fullhdfilm", "yabancidizi", "dizipal"):
                 futs_live.append(pool.submit(_scrape_hdfc_catalog_sync, cat, pg, ""))
                 futs_live.append(pool.submit(_scrape_dizilife_catalog_sync, cat, pg, ""))
@@ -1080,7 +1085,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         no_k = _norm_title(it_obj.get("originalTitle") or "")
         if tid_k and tid_k in _ANIMECIX_KNOWN_TMDB:
             return 1
-        if nt_k in _ANIMECIX_KNOWN_NAMES or no_k in _ANIMECIX_KNOWN_NAMES:
+        if nt_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES or no_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES:
             return 1
         for ck in (f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"id:{tid_k}", f"id:{cid_k}", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"):
             if ck and ck in v_streams:
@@ -1159,7 +1164,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         if cat in ("all", "trend", "animation"):
             vault_pool.extend((v_cat.get("ac") or [])[:10])
 
-    if vault_pool and is_free_tr:
+    if vault_pool and (is_free_tr or prov == "crunchyroll"):
         slice_sz = 18
         start_i = (pg - 1) * slice_sz
         if start_i < len(vault_pool):
@@ -1173,15 +1178,22 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     seen_p.add(vk)
                     items.append(vit)
 
-    # Filter out unreleased 0-rating titles & enforce strict mediaType constraints
+    # Filter out unreleased 0-rating titles, hidden unstreamable titles & enforce strict mediaType constraints
     items = [x for x in items if not (float(x.get("rating") or 0) == 0.0 and str(x.get("year") or "") >= "2026")]
+    if _HIDDEN_TMDB_IDS:
+        items = [
+            x for x in items
+            if str(x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
+            and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
+            and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
+        ]
     if mt_flt in ("tv", "movie"):
         items = [x for x in items if x.get("mediaType") == mt_flt]
     elif prov in ("dizibox", "dizilife", "yabancidizi") or cat == "series":
         items = [x for x in items if x.get("mediaType") == "tv"]
     elif prov in ("hdfilmcehennemi", "fullhdfilm") and cat != "series":
         items = [x for x in items if x.get("mediaType") != "tv"]
-    elif cat in ("movies", "dublaj", "action", "scifi", "horror", "comedy", "animation", "doc") and prov not in ("dizibox", "dizilife", "yabancidizi"):
+    elif cat == "movies" and prov not in ("dizibox", "dizilife", "yabancidizi"):
         items = [x for x in items if x.get("mediaType") != "tv"]
 
     for it_x in items:
@@ -1685,8 +1697,6 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
         return False
     cn_no1 = re.sub(r"\s+1$", "", cn).strip()
     vn_set = {_norm_title(vt) for vt in (valid_titles or []) if _norm_title(vt)}
-    if mtype == "tv" and (cn in vn_set or cn_no1 in vn_set):
-        return True
     ty = str(target_year or "").strip()[:4]
     cy = str(cand_year or "").strip()[:4]
     year_ok = False
@@ -1698,6 +1708,8 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
     elif ty.isdigit() and mtype == "movie" and not cy.isdigit():
         # Movie cards without a year can only match on exact normalized title
         return cn in vn_set or (bool(cn_no1) and cn_no1 in vn_set)
+    if mtype == "tv" and (cn in vn_set or cn_no1 in vn_set):
+        return True
     if cn in vn_set or (cn_no1 and cn_no1 in vn_set):
         return True
     cn_words = set(cn.split())
@@ -1707,7 +1719,7 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
             if not vn_words:
                 continue
             inter = len(cn_words & vn_words)
-            if inter >= 2 and (inter / max(1, min(len(cn_words), len(vn_words)))) >= 0.72:
+            if inter >= 2 and (inter / max(1, len(cn_words), len(vn_words))) >= 0.72:
                 return True
     return False
 
@@ -1722,18 +1734,22 @@ def _stream_matches_title(stream_url: str, valid_titles: list) -> bool:
     if not stream_url or not isinstance(stream_url, str):
         return False
     u = stream_url.lower()
-    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidlink.", "tau-video.", "makesomthingup", "ag2m5")):
+    if u.startswith("/api/rave/") or "youtube.com/" in u or "youtu.be/" in u:
+        return True
+    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer")):
         return True
     parsed = urllib.parse.urlparse(stream_url)
     path = parsed.path
     m_hls = re.search(r"/hls/([^/]+)", path)
-    fn = m_hls.group(1) if m_hls else path.rstrip("/").rsplit("/", 1)[-1]
+    if not m_hls:
+        return True
+    fn = m_hls.group(1)
     fn = re.sub(r"\.(?:mp4|m3u8|txt|mkv|webm).*$", "", fn, flags=re.I)
     slug = re.split(r"-(?:19|20)\d{2}|-(?:webdl|bluray|cam|hdrip|trdual|dual|tt\d+)", fn, flags=re.I)[0]
     clean_slug = re.sub(r"[^a-z0-9]", "", slug.lower().replace("&", "and"))
     if not clean_slug or len(clean_slug) < 4 or re.fullmatch(r"[0-9a-f]{12,}", clean_slug):
         return True
-    if any(h in u for h in ("fastplay.", "pilavyer", "dplayer")) and clean_slug in ("master", "index", "playlist", "video", "stream"):
+    if clean_slug in ("master", "index", "playlist", "video", "stream", "streamproxy", "manifest", "hls") or re.fullmatch(r"s?\d+e?\d+|ep?\d+|\d+", clean_slug):
         return True
     stop_words = {"the", "a", "an", "ve", "bir", "in", "on", "of", "izle", "dizi", "film", "full", "hd"}
     slug_words = set(re.findall(r"[a-z0-9]+", slug.lower())) - stop_words
@@ -2147,7 +2163,8 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
     if source_url:
         (exact_ep_keys if (s == 1 and e == 1) else fb_ep_keys).append(f"url:{source_url}")
     if tid:
-        (exact_ep_keys if (s == 1 and e == 1) else fb_ep_keys).append(f"id:{tid}")
+        if mtype != "tv":
+            (exact_ep_keys if (s == 1 and e == 1) else fb_ep_keys).append(f"id:{tid}")
         if s > 1 or e > 1:
             fb_ep_keys.append(f"tmdb:{mtype}:{tid}:1:1")
     if s > 1 or e > 1:
@@ -2190,8 +2207,6 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         raw_su, st_t = str(u_st[0]), str(u_st[1])
                         if not _stream_matches_title(raw_su, valid_titles):
                             continue
-                        if st_t in ("mp4_ac_sub", "mp4_ac_dub") and not raw_su.startswith("/api/"):
-                            raw_su = _proxy_u(raw_su, "https://tau-video.xyz/", ".mp4")
                         if (raw_su, st_t) not in target_list:
                             target_list.append((raw_su, st_t))
                         if v_aud:
@@ -2370,13 +2385,13 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
     q_cands = [ _clean_query_title(x) for x in ([orig_title, tr_title] + list(extra_queries or [])) if _clean_query_title(x) ]
     if not ac_id:
         for qc in q_cands:
-            nk = _norm_title(qc)
+            nk = _norm_title(qc).replace(" ", "")
             if nk in _ANIMECIX_KNOWN_NAMES:
                 ac_id = _ANIMECIX_KNOWN_NAMES[nk]
                 break
     hdrs = {"User-Agent": UA137, "Referer": "https://animecix.tv/", "Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
-    if not ac_id and (orig_lang == "ja" or "anime" in str(source_url or "").lower()):
-        for qc in q_cands[:2]:
+    if not ac_id and (orig_lang in ("ja", "ko", "zh") or "anime" in str(source_url or "").lower()):
+        for qc in q_cands[:3]:
             try:
                 s_data = _raw_get_json(f"https://animecix.tv/secure/search/{urllib.parse.quote(qc)}?limit=6", headers=hdrs, timeout=2.8) or {}
                 for row in (s_data.get("results") or []):
@@ -2384,7 +2399,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                         rn = _norm_title(row.get("name") or "")
                         ro = _norm_title(row.get("original_title") or "")
                         nq = _norm_title(qc)
-                        if str(row.get("tmdb_id") or "") == str(tmdb_id) or (nq and (nq == rn or nq == ro or nq in rn)):
+                        if str(row.get("tmdb_id") or "") == str(tmdb_id) or (nq and (nq == rn or nq == ro or nq in rn or rn in nq or (ro and (nq in ro or ro in nq)))):
                             ac_id = int(row["id"])
                             break
                 if ac_id:
@@ -2400,7 +2415,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
             vids = _raw_get_json(ep_url, headers=hdrs, timeout=2.5)
         except Exception:
             vids = None
-        if not vids:
+        if not vids and s == 1 and e == 1:
             try:
                 t_data = _raw_get_json(f"https://animecix.tv/secure/titles/{ac_id}?titleId={ac_id}", headers=hdrs, timeout=2.5) or {}
                 vids = ((t_data.get("title") or {}).get("videos") if isinstance(t_data, dict) else None) or []
@@ -2445,8 +2460,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 if not best_u and fb_u.startswith("https://"):
                     best_u = fb_u
                 if best_u:
-                    prox_u = _proxy_u(best_u, "https://tau-video.xyz/", ".mp4")
-                    res.append((prox_u, "mp4_ac_dub" if is_dub else "mp4_ac_sub"))
+                    res.append((best_u, "mp4_ac_dub" if is_dub else "mp4_ac_sub"))
             except Exception:
                 continue
     except Exception:
@@ -2824,6 +2838,10 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     if stype == "hls_dp":
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=dp&proxy_segs=1&ext=.m3u8"
+    if stype in ("mp4_ac_sub", "mp4_ac_dub"):
+        return _proxy_u(u, "https://tau-video.xyz/", ".mp4")
+    if stype == "mp4_vl":
+        return _proxy_u(u, "https://filmboom.top/", ".mp4")
     if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ""
@@ -3042,8 +3060,11 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             if bad != "0":
                                 return -999999
                             it_imdb = str(it.get("IDMovieImdb") or "").lstrip("t0")
-                            if it_imdb and imdb_num.lstrip("0") and it_imdb != imdb_num.lstrip("0"):
-                                return -999999
+                            ser_imdb = str(it.get("SeriesIMDBID") or "").lstrip("t0")
+                            target_imdb = imdb_num.lstrip("0")
+                            if target_imdb and it_imdb and it_imdb != target_imdb:
+                                if not (mtype == "tv" and ser_imdb and ser_imdb == target_imdb):
+                                    return -999999
                             cd_val = str(it.get("SubSumCD") or "1")
                             if cd_val not in ("1", "0", ""):
                                 return -500000
@@ -3051,8 +3072,13 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                                 return -500000
                             if any(k in fn for k in ("ts.", "-ts", ".ts", "telesync", "cam.", "-cam", "camrip", "hdcam", "telecine", "tc.", "workprint", "dvdscr")):
                                 return -200000
-                            dl_cnt = int(it.get("SubDownloadsCnt") or 0)
+                            try:
+                                dl_cnt = int(str(it.get("SubDownloadsCnt") or "0").replace(",", "").strip() or 0)
+                            except (ValueError, TypeError):
+                                dl_cnt = 0
                             score = min(dl_cnt, 5000)
+                            if any(k in fn for k in ("forced", ".for.", "-for.", "foreign")):
+                                score -= 40000
                             if any(k in fn for k in ("extended", "director.s.cut", "directors.cut", "director's cut", "unrated", "remastered.extended")):
                                 score -= 25000
                             if str(it.get("SubAutoTranslation") or "0") == "1" or any(k in fn for k in ("autotrans", "makine", "google")):
@@ -3065,8 +3091,11 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                                 score += 10000
                             if "dvdrip" in fn:
                                 score += 10000
-                            fps_val = float(it.get("MovieFPS") or 0)
-                            if 23.970 <= fps_val <= 23.985:
+                            try:
+                                fps_val = float(str(it.get("MovieFPS") or "0").replace(",", ".").strip() or 0)
+                            except (ValueError, TypeError):
+                                fps_val = 0.0
+                            if 23.970 <= fps_val <= 24.020:
                                 score += 10000
                             elif fps_val == 0.0:
                                 score += 5000
@@ -3075,9 +3104,16 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             if mtype == "tv":
                                 tag = f"s{s:02d}e{e:02d}"
                                 tag2 = f"{s}x{e:02d}"
-                                ser_s = str(it.get("SeriesSeason") or "")
-                                ser_e = str(it.get("SeriesEpisode") or "")
-                                if tag in fn or tag2 in fn or (ser_s == str(s) and ser_e == str(e)):
+                                ser_s = str(it.get("SeriesSeason") or "").lstrip("0")
+                                ser_e = str(it.get("SeriesEpisode") or "").lstrip("0")
+                                tv_match = (
+                                    (ser_s == str(s) and ser_e == str(e))
+                                    or tag in fn
+                                    or tag2 in fn
+                                    or bool(re.search(rf"\b[sS]0?{s}[-._ ]*[eE]0?{e}\b", fn))
+                                    or bool(re.search(rf"\b0?{s}x0?{e}\b", fn))
+                                )
+                                if tv_match:
                                     score += 30000
                                 else:
                                     return -500000
@@ -3400,63 +3436,83 @@ def _tv_season_numbers(tid: str) -> set:
     return nums
 
 
-def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str) -> dict:
+def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titles: list = None) -> dict:
     if not title:
         return None
     try:
-        clean_t = _clean_query_title(title)
+        cand_titles = list(dict.fromkeys([_clean_query_title(x) for x in ([title] + list(extra_titles or [])) if _clean_query_title(x)]))
+        if not cand_titles:
+            cand_titles = [title]
+        clean_t = cand_titles[0]
+        valid_norms = {re.sub(r"\s+", "", _norm_title(ct)) for ct in cand_titles if _norm_title(ct)}
         if mtype == "tv":
             queries = [
-                f"{clean_t} {e}. Bölüm",
-                f"{clean_t} {s}. Sezon {e}. Bölüm" if s > 1 else "",
-                f"{e}. Bölüm {clean_t}"
+                f"{clean_t} {s}. Sezon {e}. Bölüm" if s > 1 else f"{clean_t} {e}. Bölüm",
+                f"{clean_t} {e}. Bölüm" if s == 1 else f"{clean_t} S{s:02d}E{e:02d}",
+                f"{e}. Bölüm {clean_t}" if s == 1 else "",
             ]
         else:
-            queries = [f"{clean_t} Full Film İzle", f"{clean_t} Tek Parça Full HD"]
+            queries = [f"{clean_t} Full Film İzle", f"{clean_t} Tek Parça Full HD", f"{clean_t} Full Movie"]
 
         for q in queries:
             if not q:
                 continue
-            u_yt = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"})
-            req = urllib.request.Request(u_yt, headers={"User-Agent": UA137})
-            with urllib.request.urlopen(req, timeout=3.8) as r:
-                html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-            m = re.search(r"var ytInitialData = ({.*?});</script>", html)
-            if not m:
-                continue
-            data = json.loads(m.group(1))
-            contents = data.get("contents", {}).get("twoColumnSearchResultsRenderer", {}).get("primaryContents", {}).get("sectionListRenderer", {}).get("contents", [])
-            for sec in contents:
-                items = sec.get("itemSectionRenderer", {}).get("contents", [])
-                for it in items[:8]:
-                    vr = it.get("videoRenderer")
-                    if not vr:
-                        continue
-                    v_title = "".join(r_t.get("text", "") for r_t in vr.get("title", {}).get("runs", []))
-                    dur_str = vr.get("lengthText", {}).get("simpleText", "")
-                    parts = dur_str.split(":")
-                    if len(parts) < 2:
-                        continue
-                    dur_secs = 0
-                    if len(parts) == 3:
-                        dur_secs = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-                    elif len(parts) == 2:
-                        dur_secs = int(parts[0]) * 60 + int(parts[1])
-                    if dur_secs < 1800:
+            try:
+                u_yt = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"})
+                req = urllib.request.Request(u_yt, headers={"User-Agent": UA137})
+                with urllib.request.urlopen(req, timeout=3.8) as r:
+                    html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                m = re.search(r"var ytInitialData = ({.*?});</script>", html)
+                if m:
+                    data = json.loads(m.group(1))
+                    contents = data.get("contents", {}).get("twoColumnSearchResultsRenderer", {}).get("primaryContents", {}).get("sectionListRenderer", {}).get("contents", [])
+                    for sec in contents:
+                        items = sec.get("itemSectionRenderer", {}).get("contents", [])
+                        for it in items[:10]:
+                            vr = it.get("videoRenderer")
+                            if not vr:
+                                continue
+                            v_title = "".join(r_t.get("text", "") for r_t in vr.get("title", {}).get("runs", []))
+                            dur_str = vr.get("lengthText", {}).get("simpleText", "")
+                            parts = dur_str.split(":")
+                            if len(parts) < 2:
+                                continue
+                            dur_secs = (int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])) if len(parts) == 3 else (int(parts[0]) * 60 + int(parts[1]) if len(parts) == 2 else 0)
+                            if dur_secs < (1400 if mtype == "tv" else 2400):
+                                continue
+                            if mtype == "tv":
+                                ep_pattern = rf"(?:^|[^\d]){e}\.?\s*b[oö]l[uü]m|s0?{s}e0?{e}|\bepisode\s*0?{e}\b"
+                                if not re.search(ep_pattern, v_title, re.I):
+                                    continue
+                                if s > 1 and not re.search(rf"(?:^|[^\d]){s}\.?\s*sezon|s0?{s}e0?{e}|\bseason\s*0?{s}\b", v_title, re.I):
+                                    continue
+                            vn_compact = re.sub(r"\s+", "", _norm_title(v_title))
+                            if valid_norms and not any(vn in vn_compact for vn in valid_norms if len(vn) >= 2):
+                                continue
+                            channel = "".join(r_t.get("text", "") for r_t in vr.get("ownerText", {}).get("runs", [])) or "YouTube"
+                            vid = vr.get("videoId")
+                            if vid:
+                                return {"videoId": vid, "title": v_title, "channel": channel, "duration": dur_secs}
+            except Exception:
+                pass
+            try:
+                it_rows = music_engine._yt_innertube_search_sync(q, 10) or []
+                for r_it in it_rows:
+                    vid = r_it.get("videoId")
+                    v_title = str(r_it.get("title") or r_it.get("songTitle") or "")
+                    dur_secs = int(r_it.get("duration") or 0)
+                    if not vid or dur_secs < (1400 if mtype == "tv" else 2400):
                         continue
                     if mtype == "tv":
-                        ep_pattern = rf"(?:^|[^\d]){e}\.?\s*b[oö]l[uü]m"
+                        ep_pattern = rf"(?:^|[^\d]){e}\.?\s*b[oö]l[uü]m|s0?{s}e0?{e}|\bepisode\s*0?{e}\b"
                         if not re.search(ep_pattern, v_title, re.I):
                             continue
-                    channel = "".join(r_t.get("text", "") for r_t in vr.get("ownerText", {}).get("runs", [])) or "YouTube"
-                    vid = vr.get("videoId")
-                    if vid:
-                        return {
-                            "videoId": vid,
-                            "title": v_title,
-                            "channel": channel,
-                            "duration": dur_secs
-                        }
+                    vn_compact = re.sub(r"\s+", "", _norm_title(v_title))
+                    if valid_norms and not any(vn in vn_compact for vn in valid_norms if len(vn) >= 2):
+                        continue
+                    return {"videoId": vid, "title": v_title, "channel": str(r_it.get("artist") or "YouTube"), "duration": dur_secs}
+            except Exception:
+                pass
     except Exception:
         pass
     return None
@@ -3514,7 +3570,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             v_streams = _MAIN_SITES_VAULT.get("streams") or {}
             fb_candidates = []
             cand_keys = [f"tmdb:{mtype}:{tid}:{s}:{e}"]
-            if mtype != "tv" or (s == 1 and e == 1):
+            if mtype != "tv":
                 cand_keys.append(f"id:{tid}")
                 cand_keys.append(f"tmdb:{mtype}:{tid}:1:1")
             for vk_try in cand_keys:
@@ -3525,13 +3581,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         if _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:3]
-        # Fallback to YouTube restricted strictly to youtube provider
-        if not direct_list and prov == "youtube":
-            yt_res = _extract_official_yt_sync(tr_title or orig_title or disp or title, s, e, mtype)
-            if yt_res:
-                vid = yt_res["videoId"]
-                dur = yt_res["duration"]
-                full_title = f"{disp or tr_title or orig_title} - {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
+        yt_vault_hit = next((u for u, st in (direct_list or []) if st == "yt" or "youtube.com/watch?v=" in str(u)), "")
+        if yt_vault_hit:
+            m_yv = YT_RE.search(yt_vault_hit)
+            if m_yv:
+                vid = m_yv.group(1)
+                dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
+                full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
                 return {
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
@@ -3542,15 +3598,42 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "embedUrl": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1",
                     "altUrls": [],
                     "subtitleTracks": [],
-                    "audioTracks": [{"id": "tr-dub", "label": "🇹🇷 Türkçe (Orijinal)", "language": "tr", "lang": "tr", "kind": "main"}],
+                    "audioTracks": [{"id": "tr-dub", "label": f"🇹🇷 Türkçe ({label} Orijinal Ses)", "language": "tr", "lang": "tr", "kind": "main"}],
                     "intro": None,
                     "platformAudioLangs": ["tr"],
                     "platformSubLangs": [],
                     "officialUrl": f"https://www.youtube.com/watch?v={vid}",
                     "providerUrl": f"https://www.youtube.com/watch?v={vid}",
                     "title": full_title,
-                    "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                    "channel": f"{yt_res['channel']} · Resmi Bölüm (1080p)",
+                    "thumbnail": poster or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "channel": f"{label} · Resmi Tam Yayın (1080p HD)",
+                    "duration": dur,
+                }
+        if not direct_list:
+            yt_res = _extract_official_yt_sync(tr_title or orig_title or disp or title, s, e, mtype, [orig_title, tr_title, disp, title])
+            if yt_res:
+                vid = yt_res["videoId"]
+                dur = yt_res["duration"]
+                full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
+                return {
+                    "provider": "youtube",
+                    "catalogProvider": prov if prov in PROV_LABELS else "youtube",
+                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                    "streamType": "youtube",
+                    "url": f"https://www.youtube.com/watch?v={vid}",
+                    "videoId": vid,
+                    "embedUrl": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1",
+                    "altUrls": [],
+                    "subtitleTracks": [],
+                    "audioTracks": [{"id": "tr-dub", "label": f"🇹🇷 Türkçe ({label} Orijinal Ses)", "language": "tr", "lang": "tr", "kind": "main"}],
+                    "intro": None,
+                    "platformAudioLangs": ["tr"],
+                    "platformSubLangs": [],
+                    "officialUrl": f"https://www.youtube.com/watch?v={vid}",
+                    "providerUrl": f"https://www.youtube.com/watch?v={vid}",
+                    "title": full_title,
+                    "thumbnail": poster or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "channel": f"{label} · {yt_res['channel']} (1080p HD)",
                     "duration": dur,
                 }
         if direct_list:
@@ -3988,7 +4071,12 @@ async def rave_get_accounts(request: Request):
 
 
 async def rave_login_account(request: Request):
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     provider = (payload.get("provider") or "netflix").strip().lower()
     spec = RAVE_PROVIDERS_SPEC.get(provider)
     if not spec:
@@ -4003,7 +4091,12 @@ async def rave_login_account(request: Request):
 
 async def rave_bridge(request: Request):
     """Zero-Knowledge Bridge: Never stores or exports raw platform session cookies."""
-    payload = await request.json() if request.method == "POST" else dict(request.query_params)
+    try:
+        payload = await request.json() if request.method == "POST" else dict(request.query_params)
+    except Exception:
+        payload = dict(request.query_params)
+    if not isinstance(payload, dict):
+        payload = {}
     action = (payload.get("action") or "mint-session-cookie").strip()
     provider = (payload.get("provider") or "netflix").strip().lower()
     spec = RAVE_PROVIDERS_SPEC.get(provider, RAVE_PROVIDERS_SPEC["netflix"])
@@ -4017,7 +4110,12 @@ async def rave_bridge(request: Request):
 
 
 async def rave_browser_login(request: Request):
-    payload = await request.json()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
     provider = (payload.get("provider") or "netflix").strip().lower()
     spec = RAVE_PROVIDERS_SPEC.get(provider)
     if not spec:
@@ -4095,7 +4193,14 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
     clean_u_path = url.lower().split("?", 1)[0]
     is_explicit_mp4 = any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower()
     is_seg_url = (not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer"))
-    is_full_mp4 = is_explicit_mp4 and not is_seg_url
+    has_high_range = False
+    if rng and rng.startswith("bytes="):
+        m_hi = re.match(r"bytes=(\d+)-", rng)
+        if m_hi and int(m_hi.group(1)) >= 8 * 1024 * 1024:
+            has_high_range = True
+        elif rng.startswith("bytes=-"):
+            has_high_range = True
+    is_full_mp4 = (is_explicit_mp4 and not is_seg_url) or has_high_range
     if not is_full_mp4:
         now = time.time()
         with _SEG_TABLE_LOCK:
@@ -4146,13 +4251,18 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
     chunk_sz = 2560 * 1024
     start, end = 0, chunk_sz - 1
     if rng and rng.startswith("bytes="):
+        m_suf = re.match(r"bytes=-(\d+)", rng)
         m = re.match(r"bytes=(\d+)-(\d*)", rng)
-        if m:
+        if m_suf:
+            hdrs["Range"] = f"bytes=-{min(int(m_suf.group(1)), chunk_sz)}"
+        elif m:
             start = int(m.group(1))
             end = int(m.group(2)) if m.group(2) else start + chunk_sz - 1
             if end - start >= chunk_sz:
                 end = start + chunk_sz - 1
-    hdrs["Range"] = f"bytes={start}-{end}"
+            hdrs["Range"] = f"bytes={start}-{end}"
+    if "Range" not in hdrs:
+        hdrs["Range"] = f"bytes={start}-{end}"
     req = urllib.request.Request(url, headers=hdrs)
     with _public_open(req, timeout=10) as r:
         data = r.read(chunk_sz + 1024)
@@ -4185,8 +4295,11 @@ async def rave_stream_manifest(request: Request):
             target = base64.urlsafe_b64decode(pad.encode("ascii")).decode("utf-8")
         except Exception:
             target = ""
+    if not target:
+        target = (request.query_params.get("u") or "").strip()
     if not target or not public_http_url(target):
         return JSONResponse({"error": "Geçersiz akış"}, status_code=400)
+    is_live_tv = any(d in target for d in ("ercdn.net", "daioncdn.net", "radyotvonline.", "trt.com.tr", "ensonhaber.com", "powerapp.com.tr"))
     is_ve = ref_mode == "ve" or any(d in target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top"))
     is_fp = ref_mode == "fp" or "fastplay." in target
     is_dp = ref_mode == "dp" or "ag2m5.cfd" in target or "uk-traffic-" in target
@@ -4197,10 +4310,11 @@ async def rave_stream_manifest(request: Request):
     m3u8_ckey = f"{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
-    if cached_m and now_m - cached_m[0] < 240:
+    ttl_m = 2.0 if is_live_tv else 240.0
+    if cached_m and now_m - cached_m[0] < ttl_m:
         return Response(cached_m[1], media_type="application/vnd.apple.mpegurl", headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=300",
+            "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=300",
         })
     try:
         def _fetch_m3u8():
@@ -5513,6 +5627,7 @@ app = Starlette(
         Route("/api/rave/supersearch", supersearch),
         Route("/api/rave/catalog", provider_catalog),
         Route("/api/rave/provider-catalog", provider_catalog),
+        Route("/api/rave/platform-catalog", provider_catalog),
         Route("/api/rave/seasons", title_seasons),
         Route("/api/rave/series-info", title_seasons),
         Route("/api/rave/resolve-catalog", resolve_catalog),

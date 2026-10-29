@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261029_v5';
-import { api } from './api.js?v=20261029_v5';
-import { state, set } from './store.js?v=20261029_v5';
+import { h, popup, toast } from './ui.js?v=20261029_v6';
+import { api } from './api.js?v=20261029_v6';
+import { state, set } from './store.js?v=20261029_v6';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -80,8 +80,9 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
   } catch (e) { /* ignore */ }
-  try { set({ self: null }); } catch (_) {}
-  return null;
+  const guest = loadProfile();
+  try { set({ self: guest }); } catch (_) {}
+  return guest;
 }
 
 export function initials(name) {
@@ -498,9 +499,10 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             try {
               const cred = await phoneConfirmation.confirm(code);
               const idToken = await cred.user.getIdToken();
+              const reqName = (!state.self?.isGuest && state.self?.name && state.self.name !== 'Hesap Girişi') ? state.self.name : '';
               const res = await api('/api/auth/oauth', {
                 method: 'POST',
-                body: { provider: 'phone', idToken, color, name: state.self?.name || '' },
+                body: { provider: 'phone', idToken, color, name: reqName },
               });
               if (res?.ok && res.user) {
                 const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
@@ -511,9 +513,10 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               console.warn('Firebase confirm failed, falling back to server verification:', fbConfirmErr);
             }
           }
+          const reqName = (!state.self?.isGuest && state.self?.name && state.self.name !== 'Hesap Girişi') ? state.self.name : '';
           const res = await api('/api/auth/phone/verify-code', {
             method: 'POST',
-            body: { phone: phonePendingNumber, code, color, name: state.self?.name || '' },
+            body: { phone: phonePendingNumber, code, color, name: reqName },
           });
           if (res?.ok && res.user) {
             const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });

@@ -634,7 +634,13 @@ async def auth_phone_send_code(request: Request) -> JSONResponse:
         return too_many_response(retry_after)
     code = f"{secrets.randbelow(900000) + 100000}"
     # Only the hash is kept: a memory dump must not hand out login codes.
-    _PHONE_CODES[phone] = {"hash": _hash_pw(code, phone), "exp": time.time() + 300, "tries": 0}
+    rec = {"hash": _hash_pw(code, phone), "exp": time.time() + 300, "tries": 0}
+    _PHONE_CODES[phone] = rec
+    if store_backend() == "redis":
+        try:
+            _kv("SET", f"{_kp()}otp:{phone}", json.dumps(rec), "EX", 300)
+        except Exception:
+            pass
     has_sms_provider = bool(_sms_cfg()[0])
     if has_sms_provider:
         if not _sms_send(phone, f"Watchlivo giriş kodunuz: {code}"):
@@ -661,15 +667,38 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
     if not allowed:
         return too_many_response(retry_after)
     stored = _PHONE_CODES.get(phone)
+    if not stored and store_backend() == "redis":
+        try:
+            raw_otp = _kv("GET", f"{_kp()}otp:{phone}")
+            if raw_otp:
+                stored = json.loads(raw_otp)
+                _PHONE_CODES[phone] = stored
+        except Exception:
+            stored = None
     if not stored or time.time() > stored.get("exp", 0):
         return JSONResponse({"ok": False, "error": "Doğrulama kodunun süresi dolmuş veya kod gönderilmemiş. Lütfen yeni kod isteyin."}, status_code=400)
     if int(stored.get("tries") or 0) >= 5:
         _PHONE_CODES.pop(phone, None)
+        if store_backend() == "redis":
+            try:
+                _kv("DEL", f"{_kp()}otp:{phone}")
+            except Exception:
+                pass
         return JSONResponse({"ok": False, "error": "Çok fazla hatalı deneme. Lütfen yeni kod isteyin."}, status_code=429)
     if not hmac.compare_digest(str(stored.get("hash") or ""), _hash_pw(code, phone)):
         stored["tries"] = int(stored.get("tries") or 0) + 1
+        if store_backend() == "redis":
+            try:
+                _kv("SET", f"{_kp()}otp:{phone}", json.dumps(stored), "EX", max(1, int(stored.get("exp", time.time()) - time.time())))
+            except Exception:
+                pass
         return JSONResponse({"ok": False, "error": "Hatalı doğrulama kodu. Lütfen tekrar deneyin."}, status_code=400)
     _PHONE_CODES.pop(phone, None)
+    if store_backend() == "redis":
+        try:
+            _kv("DEL", f"{_kp()}otp:{phone}")
+        except Exception:
+            pass
 
     digits = phone.lstrip("+")
     email = f"p{digits}@phone.watchlivo.online"
@@ -679,7 +708,8 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
         user = _row_to_user(ex)
         return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
 
-    raw_name = name or ("Üye " + digits[-4:])
+    clean_name = "" if name in ("Hesap Girişi", "Misafir", "KinoMisafir") else name
+    raw_name = clean_name or ("Üye " + digits[-4:])
     handle = _norm_handle("", raw_name)
     salt = _new_salt()
     pw_hash = _hash_pw(secrets.token_hex(12), salt)
@@ -725,7 +755,8 @@ async def auth_email_action(request: Request) -> JSONResponse:
         allowed, retry_after = _RESET_LIMIT.hit(f"{client_ip(request)}:{email}")
         if not allowed:
             return too_many_response(retry_after)
-        origin = str(body.get("origin") or "https://watchlivo.online").rstrip("/")
+        raw_origin = str(body.get("origin") or "https://watchlivo.online").rstrip("/")
+        origin = raw_origin if raw_origin in ("https://watchlivo.online", "https://www.watchlivo.online", "http://localhost:8765", "http://127.0.0.1:8765") else "https://watchlivo.online"
         cont_url = f"{origin}/?magic_email={urllib.parse.quote(email)}"
         res = _firebase_auth_req("accounts:sendOobCode", {
             "requestType": "EMAIL_SIGNIN",

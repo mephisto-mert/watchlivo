@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v5';
-import { state, set } from '../store.js?v=20261029_v5';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v5';
-import { api } from '../api.js?v=20261029_v5';
-import { createSelection } from './selection.js?v=20261029_v5';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v5';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v6';
+import { state, set } from '../store.js?v=20261029_v6';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v6';
+import { api } from '../api.js?v=20261029_v6';
+import { createSelection } from './selection.js?v=20261029_v6';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v6';
 
 let refreshTimer = null;
 let rooms = [];
@@ -28,14 +28,14 @@ export function openRoom(room) {
 }
 
 export async function createRoomWithMedia(media) {
-  const self = state.self;
+  const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
   const cleanMedia = media ? { ...media, currentTime: 0 } : media;
   let cid = '';
   try {
     cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
     sessionStorage.setItem('vortex_cid', cid);
   } catch (e) { /* ignore */ }
-  const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name} odası`, privacy: 'public', playMode: 'leader', creator: self.name, clientId: cid, media: cleanMedia } });
+  const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name || 'İzleyici'} odası`, privacy: 'public', playMode: 'leader', creator: self.name || 'İzleyici', clientId: cid, media: cleanMedia } });
   if (!res.room?.id) throw new Error('Oda oluşturulamadı');
   try {
     if (res.clientId) {
@@ -88,6 +88,7 @@ export function renderHome(app) {
         try {
           await createRoomWithMedia(null);
         } catch (e) {
+          toast(e?.message || 'Oda oluşturulamadı, lütfen tekrar deneyin.');
           document.getElementById('home-selection')?.scrollIntoView({ behavior: 'smooth' });
           setTimeout(() => document.querySelector('#home-selection .home-search input')?.focus(), 80);
         }
@@ -194,7 +195,17 @@ export function renderHome(app) {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 40);
     }),
-    makeDockBtn('watch', 'Canlı İzleme Odası', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>', false, async () => {
+    makeDockBtn('friends', 'Arkadaş Odaları & Çevre', icons.friends, false, () => {
+      selection.setProvider(null);
+      filter = 'friends';
+      tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b.textContent.includes('Arkadaşlar')));
+      draw(true);
+      setTimeout(() => {
+        const el = document.getElementById('lobby-anchor');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 40);
+    }),
+    makeDockBtn('watch', 'Canlı İzleme Odası', icons.rooms, false, async () => {
       try {
         const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
         if (rec) { openRoom({ id: rec }); return; }

@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v5';
-import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v5';
-import { getProvider } from '../providers.js?v=20261029_v5';
-import { expectedPosition } from '../sync.js?v=20261029_v5';
-import { thumbFor } from './lobby.js?v=20261029_v5';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v5';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v5';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v5';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v6';
+import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v6';
+import { getProvider } from '../providers.js?v=20261029_v6';
+import { expectedPosition } from '../sync.js?v=20261029_v6';
+import { thumbFor } from './lobby.js?v=20261029_v6';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v6';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v6';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v6';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -449,7 +449,7 @@ export function buildControls(frame, ctx) {
     seekPreviewChapter.textContent = chLabel;
     seekPreviewTime.textContent = `${fmtTime(target)} / ${fmtTime(d)}`;
     const subsObj = host.adapter?.subs;
-    const adjTarget = subsObj ? ((target - (subsObj.offsetSec || 0)) * (subsObj.fpsScale || 1.0)) : target;
+    const adjTarget = subsObj ? ((target * (subsObj.fpsScale || 1.0)) - (subsObj.offsetSec || 0)) : target;
     const cueAt = subsObj?.findCueAt?.(subsObj.subCues || [], adjTarget);
     seekPreviewSub.textContent = cueAt?.text ? `"${cueAt.text.slice(0, 48)}"` : '';
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
@@ -516,7 +516,7 @@ export function buildControls(frame, ctx) {
       fill(nextEpBanner,
         h('span', {}, `⏭️ Sonraki Bölüm (S${curSeason}:B${nextEp}) · ${Math.ceil(rem)} sn`),
         isLeader() ? h('button', { class: 'btn primary', style: { padding: '.28em .7em', fontSize: '.78em' }, onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); } }, 'Hemen Geç') : null);
-      if (rem <= 1.2 && isLeader()) triggerNextEpisode();
+      if (rem <= 1.2 && isHostOnly()) triggerNextEpisode();
     } else {
       nextEpBanner.classList.add('hidden');
     }
@@ -732,7 +732,7 @@ export function buildControls(frame, ctx) {
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(2.0); renderMenuView('subtitle'); } }, '+2s')),
         h('div', { class: 'dim', style: { fontSize: '.72em', marginBottom: '4px' } }, '🎞️ İleri Sahne FPS Hız Uyumu'),
         h('div', { class: 'ctl-pref-pills' },
-          ...[[1.0, 'Normal (1:1)'], [1.042709, 'PAL→NTSC (25→24)'], [0.95904, 'NTSC→PAL (24→25)']].map(([sc, lbl]) => h('button', {
+          ...[[1.0, 'Normal (1:1)'], [1.042709, 'NTSC→PAL (23.976→25)'], [0.95904, 'PAL→NTSC (25→23.976)']].map(([sc, lbl]) => h('button', {
             class: `ctl-pref-pill ${Math.abs(curFps - Number(sc)) < 0.005 ? 'on' : ''}`,
             onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleFpsScale?.(sc); renderMenuView('subtitle'); },
           }, lbl))));
@@ -750,6 +750,7 @@ export function buildControls(frame, ctx) {
           e.stopPropagation();
           if (host.autoplayBlocked || host.muted) doUnlockAudio();
           await host.adapter?.setAudioTrack?.(t.id);
+          ctx.sync?.kick();
           showOverlay(`🎙️ Ses: ${t.label}`, 2000);
           closeMenu();
           update();
@@ -1140,7 +1141,7 @@ export function buildControls(frame, ctx) {
         applyVideoFilter();
         host.adapter?.subs?.onTimeUpdate?.(position(), true);
       }
-      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isLeader()) {
+      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isHostOnly()) {
         triggerNextEpisode();
       }
       if (ev === 'unmuted') unmute.classList.add('hidden');

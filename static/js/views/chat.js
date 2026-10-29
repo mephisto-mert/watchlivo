@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, toast, popup } from '../ui.js?v=20261029_v5';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v5';
-import { avatar } from '../profile.js?v=20261029_v5';
-import { api, qs } from '../api.js?v=20261029_v5';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v5';
+import { h, icons, toast, popup } from '../ui.js?v=20261029_v6';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v6';
+import { avatar } from '../profile.js?v=20261029_v6';
+import { api, qs } from '../api.js?v=20261029_v6';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v6';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -112,8 +112,12 @@ export function buildChat(ctx) {
     type: 'button',
     class: 'sfx-pill',
     id: 'btn-chat-clear',
-    title: 'Oda Sohbetini Temizle',
+    title: 'Oda Sohbetini Temizle (Lider)',
     onclick: () => {
+      if (!isLeader()) {
+        toast('⚠️ Sohbeti yalnızca oda lideri temizleyebilir');
+        return;
+      }
       clear();
       actions.clearChat?.();
       toast('🧹 Oda sohbeti temizlendi');

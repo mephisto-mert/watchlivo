@@ -1158,3 +1158,4 @@ video::cue {
 .chat-input .ctl-action:last-child { background: linear-gradient(135deg, #00f5d4, #8b5cf6); color: #07090e; border-radius: 50%; }
 .sfx-pill { background: hsla(0,0%,100%,.08) !important; border: 1px solid hsla(0,0%,100%,.12) !important; backdrop-filter: blur(10px); transition: transform .3s var(--mac-spring, ease), background .2s !important; }
 .sfx-pill:hover { transform: translateY(-1px) scale(1.05); }
+.panel-side { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }

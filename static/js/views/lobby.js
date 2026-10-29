@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261029_v5';
-import { avatar } from '../profile.js?v=20261029_v5';
-import { getProvider } from '../providers.js?v=20261029_v5';
-import { api, qs } from '../api.js?v=20261029_v5';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261029_v5';
-import { expectedPosition } from '../sync.js?v=20261029_v5';
+import { h, icons, popup, toast } from '../ui.js?v=20261029_v6';
+import { avatar } from '../profile.js?v=20261029_v6';
+import { getProvider } from '../providers.js?v=20261029_v6';
+import { api, qs } from '../api.js?v=20261029_v6';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261029_v6';
+import { expectedPosition } from '../sync.js?v=20261029_v6';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -143,12 +143,13 @@ export function rememberRoom(room) {
     localStorage.removeItem(`vortex_st_${room.id}`);
     localStorage.removeItem(`vortex_room_${room.id}`);
     if (room.media || room.name) {
+      const savedPos = Number(room.media?.meshStatePosition ?? room.media?.currentTime ?? 0);
       const cleanSnap = {
         ...room,
         chat: [],
         polls: [],
         syncToken: undefined,
-        media: room.media ? { ...room.media, currentTime: 0, updatedAt: Date.now() / 1000 } : room.media,
+        media: room.media ? { ...room.media, currentTime: Number.isFinite(savedPos) && savedPos > 0 ? savedPos : 0, updatedAt: Date.now() / 1000 } : room.media,
       };
       sessionStorage.setItem(`vortex_room_${room.id}`, JSON.stringify(cleanSnap));
     }
@@ -165,7 +166,7 @@ export function getRememberedRoom(roomId) {
     const raw = sessionStorage.getItem(`vortex_room_${roomId}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed && parsed.media) parsed.media.currentTime = 0;
+    if (parsed && parsed.media && !Number.isFinite(Number(parsed.media.currentTime))) parsed.media.currentTime = 0;
     if (parsed) parsed.chat = [];
     return parsed;
   } catch (e) {

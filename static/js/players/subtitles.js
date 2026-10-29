@@ -417,7 +417,8 @@ export class SubtitleDubController {
     const nativeVideoFs = Boolean(
       v.webkitDisplayingFullscreen ||
       document.fullscreenElement === v ||
-      document.webkitFullscreenElement === v
+      document.webkitFullscreenElement === v ||
+      document.pictureInPictureElement === v
     );
     if (nativeVideoFs) return;
     for (let i = 0; i < v.textTracks.length; i += 1) {
@@ -434,11 +435,13 @@ export class SubtitleDubController {
     }
     if (!this.subCues || !this.subCues.length) return null;
     const fmt = (sec) => {
-      const s = Math.max(0, Number(sec) || 0);
-      const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-      const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-      const ss = (s % 60).toFixed(3).padStart(6, '0');
-      return `${hh}:${mm}:${ss}`;
+      const totalMs = Math.max(0, Math.round((Number(sec) || 0) * 1000));
+      const ms = totalMs % 1000;
+      const totalS = Math.floor(totalMs / 1000);
+      const ss = totalS % 60;
+      const mm = Math.floor(totalS / 60) % 60;
+      const hh = Math.floor(totalS / 3600);
+      return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
     };
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const off = this.offsetSec || 0;
@@ -491,6 +494,12 @@ export class SubtitleDubController {
       trEl.srclang = track.lang || 'tr';
       trEl.src = isAppleMobile ? (track.url || vttBlobUrl) : (vttBlobUrl || track.url);
       v.appendChild(trEl);
+      try {
+        if (trEl.track) {
+          const isFsOrPip = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v || document.pictureInPictureElement === v);
+          trEl.track.mode = isFsOrPip ? 'showing' : 'hidden';
+        }
+      } catch (e) { /* ignore */ }
       let srcSettled = false;
       const dedupTrackCues = (tt) => {
         if (!tt || !tt.cues || tt.cues.length < 1) return;
@@ -651,7 +660,14 @@ export class SubtitleDubController {
 
     if (!isInit && (track.id === 'tr-dub' || ((track.lang || track.audioLang) === 'tr' && track.mode !== 'tts' && /dublaj/i.test(track.label || '')))) {
       if (this.selectedSubId && this.selectedSubId !== 'off' && String(this.selectedSubId).startsWith('tr')) {
+        this._prevSubBeforeDub = this.selectedSubId;
         await this.setSubtitleTrack('off', true);
+      }
+    } else if (!isInit && (track.id === 'orig' || (track.lang !== 'tr' && track.audioLang !== 'tr'))) {
+      if (this._prevSubBeforeDub && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const restoreId = this._prevSubBeforeDub;
+        this._prevSubBeforeDub = null;
+        await this.setSubtitleTrack(restoreId, true);
       }
     }
 
@@ -724,12 +740,12 @@ export class SubtitleDubController {
     const curTrack = this.subtitleTracks.find((t) => t.id === this.selectedSubId);
     if (!curTrack) return;
     if (this._autoHealedLang === `${curTrack.id}:${Math.floor(adjT / 300)}`) return;
-    this._autoHealedLang = `${curTrack.id}:${Math.floor(adjT / 300)}`;
     const alts = this.subtitleTracks.filter((t) => t.id !== curTrack.id && t.lang === curTrack.lang);
     for (const alt of alts) {
       const altCues = await this._loadCuesForTrack(alt);
       const lastEnd = altCues.length ? altCues[altCues.length - 1].end : 0;
-      if (lastEnd >= adjT + 30 && this.findCueAt(altCues, adjT)) {
+      if (lastEnd >= adjT + 30 && altCues.length >= 40) {
+        this._autoHealedLang = `${curTrack.id}:${Math.floor(adjT / 300)}`;
         this.selectedSubId = alt.id;
         this.subCues = altCues;
         this._attachNativeTrack(alt);
@@ -745,7 +761,7 @@ export class SubtitleDubController {
     this._disableAllNativeTextTracks();
     const v = this.adapter?.video;
     const nativeVideoFs = Boolean(
-      v && (v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v)
+      v && (v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v || document.pictureInPictureElement === v)
     );
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
