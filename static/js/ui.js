@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v12';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v13';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -132,13 +132,13 @@ export function popup({ title, message, options = [], content = null, dismissabl
         class: 'popup-close-x',
         'aria-label': 'Kapat',
         title: 'Kapat (ESC)',
-        style: { position: 'absolute', top: '12px', right: '14px', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(255,255,255,.08)', color: '#fff', fontSize: '14px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
         onclick: () => close(),
-      }, '✕')
+        html: icons.close,
+      })
     : null;
-  const card = h('div', { class: 'popup acrylic', role: 'dialog', 'aria-modal': 'true', style: { position: 'relative' } },
+  const card = h('div', { class: 'popup acrylic', role: 'dialog', 'aria-modal': 'true' },
     closeBtn,
-    title ? h('h3', { style: dismissable ? { paddingRight: '32px' } : null }, title) : null,
+    title ? h('h3', { class: dismissable ? 'popup-title-pad' : '' }, title) : null,
     message ? h('p', {}, message) : null,
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
@@ -323,7 +323,7 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Windows Masaüstü'),
-          h('small', {}, 'v1.0 • Windows 10 / 11 64-bit'),
+          h('small', {}, 'v1.1.0 • Windows 10 / 11 64-bit'),
           h('p', {}, 'Masaüstü donma önleyici, ultra düşük gecikme ve sistem bildirimleri.')
         ),
         h('a', {

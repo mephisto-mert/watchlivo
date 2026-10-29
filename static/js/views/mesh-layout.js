@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v12';
-import { state, setView, canSelectVideo } from '../store.js?v=20261029_v12';
-import { navIcon, logo } from './home.js?v=20261029_v12';
-import { createSelection } from './selection.js?v=20261029_v12';
-import { buildControls } from './controls.js?v=20261029_v12';
-import { buildChat } from './chat.js?v=20261029_v12';
-import { PANELS } from './panels.js?v=20261029_v12';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v13';
+import { state, setView, canSelectVideo } from '../store.js?v=20261029_v13';
+import { navIcon, logo } from './home.js?v=20261029_v13';
+import { createSelection } from './selection.js?v=20261029_v13';
+import { buildControls } from './controls.js?v=20261029_v13';
+import { buildChat } from './chat.js?v=20261029_v13';
+import { PANELS } from './panels.js?v=20261029_v13';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -92,7 +92,9 @@ export function buildLayout(app, ctx) {
       h('div', { class: 'navbar-center' }, logo(),
         m ? h('span', { class: 'mesh-title', title: m.name }, m.name) : null,
         m ? h('span', { class: 'privacy-chip', onclick: () => openSide('left', 'Settings') }, PRIVACY_LABEL[m.privacy] || 'Herkese Açık') : null,
-        state.connection !== 'online' ? h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…') : null),
+        state.connection === 'online'
+          ? h('span', { class: 'privacy-chip sync-live-chip', title: 'Sıfır gecikmeli senkronizasyon aktif' }, h('span', { class: 'room-live-dot' }), 'SENKRON')
+          : h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…')),
       h('div', { class: 'navbar-right' },
         navIcon('addUser', 'Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends' }),
         navIcon('users', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R !== 'Collapsed' && R !== 'Friends', badge: people, id: 'nav-participants' })));

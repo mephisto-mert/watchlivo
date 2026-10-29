@@ -1671,14 +1671,10 @@ async def ws_endpoint(websocket: WebSocket):
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                 if not has_humans:
                     room["emptySince"] = now()
-                    if room.get("curated"):
-                        room["chat"] = []
-                        room["polls"] = []
-                        if room.get("media"):
-                            room["media"]["currentTime"] = 0.0
-                            room["media"]["updatedAt"] = now()
-                    elif room.get("media"):
-                        room["media"]["currentTime"] = current_pos(room["media"])
+                    room["chat"] = []
+                    room["polls"] = []
+                    if isinstance(room.get("media"), dict):
+                        room["media"]["currentTime"] = 0.0
                         room["media"]["updatedAt"] = now()
                 ensure_host(room)
                 msg = sys_msg(room, "ayrıldı", left["name"]) if (left and has_humans) else None
