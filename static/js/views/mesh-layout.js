@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v15';
-import { state, setView, canSelectVideo } from '../store.js?v=20261030_v15';
-import { navIcon, logo } from './home.js?v=20261030_v15';
-import { createSelection } from './selection.js?v=20261030_v15';
-import { buildControls } from './controls.js?v=20261030_v15';
-import { buildChat } from './chat.js?v=20261030_v15';
-import { PANELS } from './panels.js?v=20261030_v15';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v16';
+import { state, setView, canSelectVideo } from '../store.js?v=20261030_v16';
+import { navIcon, logo } from './home.js?v=20261030_v16';
+import { createSelection } from './selection.js?v=20261030_v16';
+import { buildControls } from './controls.js?v=20261030_v16';
+import { buildChat } from './chat.js?v=20261030_v16';
+import { PANELS } from './panels.js?v=20261030_v16';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };

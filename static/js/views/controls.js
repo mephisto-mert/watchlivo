@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v15';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v15';
-import { getProvider } from '../providers.js?v=20261030_v15';
-import { expectedPosition } from '../sync.js?v=20261030_v15';
-import { thumbFor } from './lobby.js?v=20261030_v15';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v15';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v15';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v15';
-import { avatar } from '../profile.js?v=20261030_v15';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v16';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v16';
+import { getProvider } from '../providers.js?v=20261030_v16';
+import { expectedPosition } from '../sync.js?v=20261030_v16';
+import { thumbFor } from './lobby.js?v=20261030_v16';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v16';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v16';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v16';
+import { avatar } from '../profile.js?v=20261030_v16';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -20,7 +20,7 @@ const VIDEO_FILTERS = {
 const PLAYER_THEMES = [
   { id: '#E50914', label: 'Netflix Red' },
   { id: '#3B82F6', label: 'Electric Blue' },
-  { id: '#10B981', label: 'Emerald Green' },
+  { id: '#6366f1', label: 'Emerald Green' },
   { id: '#F59E0B', label: 'Amber Gold' },
 ];
 

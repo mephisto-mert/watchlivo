@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261030_v15';
-import { api, qs } from '../api.js?v=20261030_v15';
-import { parseVideoUrl } from '../providers.js?v=20261030_v15';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261030_v15';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261030_v15';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261030_v15';
+import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261030_v16';
+import { api, qs } from '../api.js?v=20261030_v16';
+import { parseVideoUrl } from '../providers.js?v=20261030_v16';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261030_v16';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261030_v16';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261030_v16';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -644,7 +644,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
         h('b', {}, `${p.name} · Klip, Şarkı Sözleri & Ortak DJ Partisi`),
         h('span', { class: 'dim' }, 'Güncel hitler, eski klasikler, son çalınanlar ve YouTube Music benzer şarkı radyosu hazır.'))),
     h('div', { class: 'rab-actions', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
-      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#10b981', background: 'rgba(16,185,129,0.14)', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● OpenAI (${aiCfg.openaiModel}): AKTİF`),
+      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#6366f1', background: 'rgba(99, 102, 241,0.14)', border: '1px solid rgba(99, 102, 241,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● OpenAI (${aiCfg.openaiModel}): AKTİF`),
       h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, '● Suno v4.5 + Mureka 9.5: AKTİF'),
       h('button', { type: 'button', class: 'btn', style: { padding: '5px 11px', fontSize: '.76rem' }, onclick: () => openAiConfigModal() }, '🔑 API & Model Ayarları')));
 
@@ -683,7 +683,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
       h('div', { class: 'pt' }, it.songTitle || it.title),
       h('div', { class: 'offers' },
         h('span', { class: 'tr-dub-pill' }, `🎤 ${it.artist || 'Sanatçı'}`),
-        h('span', { class: 'tr-sub-pill', style: it.isRemix ? { background: 'rgba(245,158,11,.22)', borderColor: '#f59e0b', color: '#fde68a' } : { background: 'rgba(16,185,129,.2)', borderColor: '#10b981', color: '#a7f3d0' } }, verLabel),
+        h('span', { class: 'tr-sub-pill', style: it.isRemix ? { background: 'rgba(245,158,11,.22)', borderColor: '#f59e0b', color: '#fde68a' } : { background: 'rgba(99, 102, 241,.2)', borderColor: '#6366f1', color: '#a7f3d0' } }, verLabel),
         it.sourceBadge ? h('span', { class: 'tr-sub-pill' }, it.sourceBadge) : null),
       h('div', { style: { display: 'flex', gap: '4px', padding: '0 5px 6px' } },
         h('button', {

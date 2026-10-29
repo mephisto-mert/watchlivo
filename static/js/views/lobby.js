@@ -1,17 +1,17 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261030_v15';
-import { avatar } from '../profile.js?v=20261030_v15';
-import { getProvider } from '../providers.js?v=20261030_v15';
-import { api, qs } from '../api.js?v=20261030_v15';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261030_v15';
-import { expectedPosition } from '../sync.js?v=20261030_v15';
+import { h, icons, popup, toast } from '../ui.js?v=20261030_v16';
+import { avatar } from '../profile.js?v=20261030_v16';
+import { getProvider } from '../providers.js?v=20261030_v16';
+import { api, qs } from '../api.js?v=20261030_v16';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261030_v16';
+import { expectedPosition } from '../sync.js?v=20261030_v16';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
   'tv-atv':         { label: 'atv',          sub: 'ULUSAL · PRIME TIME',    c1: '#ef4444', c2: '#450a0a' },
   'tv-now-tv':      { label: 'NOW',          sub: 'ULUSAL · DİZİ & HABER',  c1: '#f97316', c2: '#431407' },
   'tv-star-tv':     { label: 'STAR TV',      sub: 'ULUSAL · EĞLENCE & DİZİ',c1: '#eab308', c2: '#422006' },
-  'tv-trt-spor':    { label: 'TRT SPOR',     sub: 'CANLI MAÇ & STÜDYO',     c1: '#10b981', c2: '#064e3b' },
+  'tv-trt-spor':    { label: 'TRT SPOR',     sub: 'CANLI MAÇ & STÜDYO',     c1: '#6366f1', c2: '#064e3b' },
   'tv-a-spor':      { label: 'A SPOR',       sub: 'FUTBOL & KUPA ÖZEL',     c1: '#dc2626', c2: '#3f0d12' },
   'tv-ntv':         { label: 'NTV',          sub: 'HABER & BELGESEL',       c1: '#3b82f6', c2: '#172554' },
   'tv-haberturk':   { label: 'HABERTÜRK',    sub: 'GÜNDEM & TARTIŞMA',      c1: '#e11d48', c2: '#3b071e' },
@@ -267,7 +267,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     const friendsBar = h('div', { class: 'friends-strip' },
       h('span', { class: 'friends-strip-title' }, `👥 Arkadaşlarım (${friends.length})`),
       ...friends.map((f) => h('span', { class: 'friend-pill' },
-        h('span', { class: 'friend-dot', style: { background: f.color || '#00f5d4' } }),
+        h('span', { class: 'friend-dot', style: { background: f.color || '#6366f1' } }),
         h('span', {}, f.name),
         h('button', {
           type: 'button',

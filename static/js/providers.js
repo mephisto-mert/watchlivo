@@ -80,7 +80,7 @@ export const LOGOS = {
   ),
   peacock: svgRaw(
     '<text x="64" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="19.5" letter-spacing="-0.3">peacock</text>' +
-    '<circle cx="114" cy="14" r="2.4" fill="#facc15"/><circle cx="119" cy="17" r="2.4" fill="#f97316"/><circle cx="121" cy="22" r="2.4" fill="#ef4444"/><circle cx="119" cy="27" r="2.4" fill="#a855f7"/><circle cx="114" cy="30" r="2.4" fill="#3b82f6"/><circle cx="109" cy="27" r="2.4" fill="#10b981"/>'
+    '<circle cx="114" cy="14" r="2.4" fill="#facc15"/><circle cx="119" cy="17" r="2.4" fill="#f97316"/><circle cx="121" cy="22" r="2.4" fill="#ef4444"/><circle cx="119" cy="27" r="2.4" fill="#a855f7"/><circle cx="114" cy="30" r="2.4" fill="#3b82f6"/><circle cx="109" cy="27" r="2.4" fill="#6366f1"/>'
   ),
   plex: svgRaw(
     '<text x="56" y="30" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="25" letter-spacing="-0.5">ple</text>' +
@@ -152,8 +152,8 @@ export const LOGOS = {
     '<text x="44" y="28" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="17">Web Video</text>'
   ),
   upload: svgRaw(
-    '<rect x="10" y="9" width="26" height="26" rx="8" fill="rgba(0,245,212,0.14)" stroke="#00f5d4" stroke-width="2"/>' +
-    '<path d="M23 27V15M18.5 19.5L23 15l4.5 4.5M16.5 30h13" stroke="#00f5d4" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '<rect x="10" y="9" width="26" height="26" rx="8" fill="rgba(99, 102, 241,0.14)" stroke="#6366f1" stroke-width="2"/>' +
+    '<path d="M23 27V15M18.5 19.5L23 15l4.5 4.5M16.5 30h13" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>' +
     '<text x="43" y="27.5" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="15.5">Dosya Yükle</text>'
   ),
   hdfilmcehennemi: svgRaw(
@@ -164,11 +164,11 @@ export const LOGOS = {
     '<text x="42" y="34" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="11.5" letter-spacing="0.4">1080p HD</text>'
   ),
   dizibox: svgRaw(
-    '<rect x="6" y="8" width="28" height="28" rx="7" fill="#10b981"/>' +
+    '<rect x="6" y="8" width="28" height="28" rx="7" fill="#6366f1"/>' +
     '<path d="M14 15h12v14H14z" fill="none" stroke="#09090b" stroke-width="2.4" rx="2"/>' +
     '<path d="M18 19v6l5-3-5-3z" fill="#09090b"/>' +
     '<text x="40" y="29" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="18.5" letter-spacing="0.6">DİZİ+</text>' +
-    '<text x="88" y="29" fill="#10b981" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="15.5" letter-spacing="0.5">ARŞİV</text>'
+    '<text x="88" y="29" fill="#6366f1" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="15.5" letter-spacing="0.5">ARŞİV</text>'
   ),
   dizilife: svgRaw(
     '<defs><linearGradient id="dlf" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs>' +

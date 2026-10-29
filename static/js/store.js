@@ -7,7 +7,7 @@ export const THEME_SCHEMAS = [
   { id: 'oled',     name: 'OLED Tam Siyah',  desc: 'Sıfır ışık sızıntılı #000000 sinema modu', swatch: '#000000', accent: '#38bdf8' },
   { id: 'crimson',  name: 'Kızıl Sinema',    desc: 'Netflix & Teleparty koyu kızıl ambiyans', swatch: '#0b0608', accent: '#f43f5e' },
   { id: 'midnight', name: 'Gece Safiri',     desc: 'Hyperbeam & IMAX gece mavisi tonları', swatch: '#070a10', accent: '#3b82f6' },
-  { id: 'emerald',  name: 'Zümrüt Matris',   desc: 'Koyu zümrüt ve siber siyah kontrast', swatch: '#050b09', accent: '#10b981' },
+  { id: 'emerald',  name: 'Zümrüt Matris',   desc: 'Koyu zümrüt ve siber siyah kontrast', swatch: '#050b09', accent: '#6366f1' },
 ];
 
 function loadUiPrefs() {
@@ -40,7 +40,7 @@ export function applyUiPrefs(prefs = state?.uiPrefs) {
   root.dataset.subSize = prefs.subSize || 'md';
   root.dataset.subColor = prefs.subColor || 'white';
   const sizeMap = { sm: '0.92rem', md: '1.15rem', lg: '1.42rem', xl: '1.72rem' };
-  const colorMap = { white: '#ffffff', yellow: '#fde047', cyan: '#00f5d4', box: '#ffffff' };
+  const colorMap = { white: '#ffffff', yellow: '#fde047', cyan: '#6366f1', box: '#ffffff' };
   const bgMap = { white: 'rgba(7, 8, 13, 0.72)', yellow: 'rgba(7, 8, 13, 0.78)', cyan: 'rgba(7, 8, 13, 0.82)', box: 'rgba(0, 0, 0, 0.92)' };
   root.style.setProperty('--sub-font-size', sizeMap[prefs.subSize] || sizeMap.md);
   root.style.setProperty('--sub-color', colorMap[prefs.subColor] || '#ffffff');
@@ -216,7 +216,7 @@ export function toggleFriend(user) {
   const name = (typeof user === 'string' ? user : (user.name || '')).trim().slice(0, 24);
   if (!name) return false;
   const id = (typeof user === 'object' && (user.id || user.uid)) ? String(user.id || user.uid) : `f_${name.toLowerCase()}`;
-  const color = (typeof user === 'object' && user.color) || '#00f5d4';
+  const color = (typeof user === 'object' && user.color) || '#6366f1';
   const list = getFriends();
   const exists = isFriend(user);
   const next = exists
@@ -227,7 +227,7 @@ export function toggleFriend(user) {
   return !exists;
 }
 
-export function addFriendByName(name, color = '#00f5d4') {
+export function addFriendByName(name, color = '#6366f1') {
   const clean = String(name || '').trim().slice(0, 24);
   if (!clean) return false;
   if (isFriend(clean)) return true;

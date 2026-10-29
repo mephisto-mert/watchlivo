@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v15';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v15';
-import { avatar } from '../profile.js?v=20261030_v15';
-import { api, qs } from '../api.js?v=20261030_v15';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v15';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v16';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v16';
+import { avatar } from '../profile.js?v=20261030_v16';
+import { api, qs } from '../api.js?v=20261030_v16';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v16';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -280,7 +280,7 @@ export function buildChat(ctx) {
   function setReplyTo(m) {
     if (!m || m.system) return;
     const snippet = (m.text || (m.gif ? 'GIF Gönderdi' : m.pollId ? '📊 Anket' : '')).slice(0, 110);
-    activeReply = { id: m.id, user: m.user, text: snippet, color: m.color || '#00f5d4' };
+    activeReply = { id: m.id, user: m.user, text: snippet, color: m.color || '#6366f1' };
     replyDraftBar.replaceChildren(
       h('div', { class: 'reply-draft-info', style: { '--quote-color': activeReply.color } },
         h('span', { class: 'reply-draft-user', style: { color: activeReply.color } }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '4px' } }), `${m.user} yanıtlanıyor`),
@@ -602,11 +602,11 @@ export function buildChat(ctx) {
 
   function buildQuoteBlock(rep) {
     if (!rep) return null;
-    const obj = typeof rep === 'object' ? rep : { id: '', user: 'Mesaj', text: String(rep), color: '#00f5d4' };
+    const obj = typeof rep === 'object' ? rep : { id: '', user: 'Mesaj', text: String(rep), color: '#6366f1' };
     if (!obj.user && !obj.text) return null;
     return h('div', {
       class: 'msg-quote',
-      style: { '--quote-color': obj.color || '#00f5d4' },
+      style: { '--quote-color': obj.color || '#6366f1' },
       onclick: (e) => {
         e.stopPropagation();
         if (!obj.id) return;
@@ -618,7 +618,7 @@ export function buildChat(ctx) {
         }
       },
     },
-      h('span', { class: 'msg-quote-user', style: { color: obj.color || '#00f5d4' } }, obj.user || 'Alıntı'),
+      h('span', { class: 'msg-quote-user', style: { color: obj.color || '#6366f1' } }, obj.user || 'Alıntı'),
       h('span', { class: 'msg-quote-text' }, obj.text || ''));
   }
 

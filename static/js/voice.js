@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261030_v15';
+import { toast } from './ui.js?v=20261030_v16';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -7,7 +7,7 @@ export class Voice {
   constructor({ send, getSelfId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
     this.send = send;
     this.getSelfId = getSelfId;
-    this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#00f5d4' }));
+    this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#6366f1' }));
     this.onDuckChange = onDuckChange;
     this.onMicLevel = onMicLevel;
     this.onP2pData = onP2pData;
@@ -740,11 +740,11 @@ export class Voice {
       const pulse = this.selfSpeaking ? 10 + Math.sin(tick * 4) * 6 : Math.sin(tick) * 2;
       ctx2d.beginPath();
       ctx2d.arc(160, 105, 44 + pulse, 0, Math.PI * 2);
-      ctx2d.fillStyle = 'rgba(0, 245, 212, 0.18)';
+      ctx2d.fillStyle = 'rgba(99, 102, 241, 0.18)';
       ctx2d.fill();
       ctx2d.beginPath();
       ctx2d.arc(160, 105, 38, 0, Math.PI * 2);
-      ctx2d.fillStyle = prof.color || '#00f5d4';
+      ctx2d.fillStyle = prof.color || '#6366f1';
       ctx2d.fill();
       ctx2d.fillStyle = '#07090e';
       ctx2d.font = 'bold 28px Inter, system-ui, sans-serif';
@@ -754,7 +754,7 @@ export class Voice {
       ctx2d.fillStyle = '#f5f7ff';
       ctx2d.font = '600 14px Inter, system-ui, sans-serif';
       ctx2d.fillText(prof.name || 'Katılımcı', 160, 178);
-      ctx2d.fillStyle = '#00f5d4';
+      ctx2d.fillStyle = '#6366f1';
       ctx2d.font = '500 11px Inter, system-ui, sans-serif';
       ctx2d.fillText(this.selfSpeaking ? '🎙️ Konuşuyor...' : '📷 Canlı Avatar Kamerası', 160, 200);
     };
@@ -798,12 +798,12 @@ export class Voice {
       if (mainVid && mainVid.readyState >= 2) {
         try { ctx2d.drawImage(mainVid, 20, 44, 600, 268); } catch (e) { /* cross-origin fallback */ }
       } else {
-        ctx2d.strokeStyle = 'rgba(0,245,212,0.28)';
+        ctx2d.strokeStyle = 'rgba(99, 102, 241,0.28)';
         ctx2d.lineWidth = 2;
         ctx2d.strokeRect(32, 52, 576, 250);
         for (let i = 0; i < 5; i += 1) {
           const y = 92 + i * 38;
-          ctx2d.fillStyle = i % 2 === 0 ? 'rgba(0,245,212,0.16)' : 'rgba(139,92,246,0.18)';
+          ctx2d.fillStyle = i % 2 === 0 ? 'rgba(99, 102, 241,0.16)' : 'rgba(139,92,246,0.18)';
           ctx2d.fillRect(56, y, 260 + Math.sin(tick + i) * 90, 18);
         }
       }
@@ -818,7 +818,7 @@ export class Voice {
       ctx2d.font = 'bold 14px Inter, system-ui, sans-serif';
       ctx2d.textAlign = 'left';
       ctx2d.fillText(`🖥️ ${prof.name || 'Sen'} · CANLI EKRAN YANSITMA (1080p 60fps)`, 40, 24);
-      ctx2d.fillStyle = '#00f5d4';
+      ctx2d.fillStyle = '#6366f1';
       ctx2d.font = '600 12px Inter, system-ui, sans-serif';
       ctx2d.fillText('📺 KINOX Discord Sahne & Ekran Paylaşımı Aktif', 20, 344);
     };

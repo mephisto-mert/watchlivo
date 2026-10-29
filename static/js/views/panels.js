@@ -1,10 +1,10 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v15';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261030_v15';
-import { avatar } from '../profile.js?v=20261030_v15';
-import { clock } from '../sync.js?v=20261030_v15';
-import { fetchRooms, meshThumb, thumbFor } from './lobby.js?v=20261030_v15';
-import { copyInvite, inviteUrl } from './chat.js?v=20261030_v15';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v16';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261030_v16';
+import { avatar } from '../profile.js?v=20261030_v16';
+import { clock } from '../sync.js?v=20261030_v16';
+import { fetchRooms, meshThumb, thumbFor } from './lobby.js?v=20261030_v16';
+import { copyInvite, inviteUrl } from './chat.js?v=20261030_v16';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -57,7 +57,7 @@ function Settings(ctx) {
       h('div', { class: 'settings-group' },
         h('h4', {}, 'Watchlivo Uygulamaları'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-          h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(0,245,212,.18), rgba(56,189,248,.18))', border: '1px solid rgba(0,245,212,.4)', color: '#00f5d4', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
+          h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
           h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
         )
       )
@@ -212,7 +212,7 @@ function Participants(ctx) {
             },
           }, friendAdded ? '✓ Arkadaş' : '+ Arkadaş') : null,
           hostOnly && !isMe && !isBot ? h('div', { class: 'raver-actions' },
-            h('button', { 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(0,245,212,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
+            h('button', { 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
             h('button', { 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }),
             h('button', { 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick })) : null);
       }),

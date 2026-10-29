@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v15';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v15';
-import { api, qs } from '../api.js?v=20261030_v15';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v15';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v15';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v15';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v16';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v16';
+import { api, qs } from '../api.js?v=20261030_v16';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v16';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v16';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v16';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -46,7 +46,7 @@ export function providerTile(p, onClick) {
     'data-provider': p.id,
     'data-brand': p.id,
     'data-category': p.cat || 'global',
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#00f5d4' },
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#6366f1' },
     onclick: () => onClick(p),
     onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
   },
@@ -54,7 +54,7 @@ export function providerTile(p, onClick) {
       h('div', { class: 'platform-top-brand' },
         p.logo
           ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
-          : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#00f5d4' }, html: icons[p.glyph] }) : null)),
+          : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#6366f1' }, html: icons[p.glyph] }) : null)),
       badgeEl),
     h('div', { class: 'p-title ptitle' }, p.name),
     p.badge ? h('div', { class: 'p-desc psub' }, p.badge) : null);
@@ -560,9 +560,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   function renderProvider(p, presetQuery) {
-    const head = h('div', { class: 'panel-head sel-prov-head', style: { '--prov-accent': p.accent || '#00f5d4' } },
+    const head = h('div', { class: 'panel-head sel-prov-head', style: { '--prov-accent': p.accent || '#6366f1' } },
       h('button', { class: 'panel-close', 'aria-label': 'Geri', html: icons.back, onclick: () => { provider = null; render(); } }),
-      h('div', { class: 'sel-provider-badge', style: { '--prov-accent': p.accent || '#00f5d4' } },
+      h('div', { class: 'sel-provider-badge', style: { '--prov-accent': p.accent || '#6366f1' } },
         p.logo ? h('img', { src: p.logo, alt: p.name }) : null,
         h('h3', {}, p.name),
         p.badge ? h('span', { class: 'sel-provider-tag' }, p.badge) : null),

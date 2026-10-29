@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261030_v15';
-import { api, qs } from './api.js?v=20261030_v15';
-import { state, set, setView } from './store.js?v=20261030_v15';
+import { h, toast, popup } from './ui.js?v=20261030_v16';
+import { api, qs } from './api.js?v=20261030_v16';
+import { state, set, setView } from './store.js?v=20261030_v16';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -59,7 +59,7 @@ const DEFAULT_SPECS = {
   vimeo:       { name: 'Vimeo', accent: '#1ab7ea', domain: '.vimeo.com', loginUrl: 'https://vimeo.com/log_in', browseUrl: 'https://vimeo.com/watch', authCookies: ['vimeo', 'vuid'] },
   cinema:          { name: 'Sinema, Dizi & Anime+', accent: '#ff6b00', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['cinema_free'], freeNoAuth: true },
   hdfilmcehennemi: { name: 'Sinema+ HD', accent: '#ff6b00', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['hdfc_free'], freeNoAuth: true },
-  dizibox:         { name: 'Dizi+ Arşiv', accent: '#10b981', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dbx_free'], freeNoAuth: true },
+  dizibox:         { name: 'Dizi+ Arşiv', accent: '#6366f1', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dbx_free'], freeNoAuth: true },
   dizilife:        { name: 'Sezon+ TV', accent: '#8b5cf6', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dl_free'], freeNoAuth: true },
   fullhdfilm:      { name: 'Vizyon 4K', accent: '#eab308', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['fhd_free'], freeNoAuth: true },
   yabancidizi:     { name: 'Maraton+', accent: '#06b6d4', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['yd_free'], freeNoAuth: true },
@@ -168,8 +168,8 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
       fontSize: '.8rem',
       padding: '8px 10px',
       borderRadius: '10px',
-      background: 'rgba(0, 245, 212, 0.08)',
-      border: '1px solid rgba(0, 245, 212, 0.25)',
+      background: 'rgba(99, 102, 241, 0.08)',
+      border: '1px solid rgba(99, 102, 241, 0.25)',
       color: '#cbd5e1',
       lineHeight: '1.4',
     },
@@ -190,8 +190,8 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
           onclick: () => {
             officialOpenedAt = Date.now();
             window.open(acct.loginUrl, 'wl_provider_login', 'width=520,height=680,noopener,noreferrer');
-            statusBox.style.borderColor = '#10b981';
-            statusBox.style.color = '#34d399';
+            statusBox.style.borderColor = '#6366f1';
+            statusBox.style.color = '#a5b4fc';
             statusBox.textContent = `⏳ ${p.name} resmi giriş penceresi açıldı. Giriş yaptıktan sonra aşağıdaki "2. Adım: Oturumu Doğrula & Bağla" butonuna tıklayın.`;
           },
         }, `🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç`),
