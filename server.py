@@ -1087,7 +1087,10 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             return 1
         if nt_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES or no_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES:
             return 1
-        for ck in (f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"id:{tid_k}", f"id:{cid_k}", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"):
+        c_keys = [f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"]
+        if mt_k == "movie":
+            c_keys.extend([f"id:{tid_k}", f"id:{cid_k}"])
+        for ck in c_keys:
             if ck and ck in v_streams:
                 c_st = v_streams[ck].get("streams") or []
                 if c_st and any(_stream_matches_title(s[0], [it_obj.get("title"), it_obj.get("originalTitle")]) for s in c_st if isinstance(s, (list, tuple)) and len(s) >= 1):
@@ -1187,6 +1190,9 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
             and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
         ]
+    verified_only = [x for x in items if _has_vault_stream(x)]
+    if verified_only:
+        items = verified_only
     if mt_flt in ("tv", "movie"):
         items = [x for x in items if x.get("mediaType") == mt_flt]
     elif prov in ("dizibox", "dizilife", "yabancidizi") or cat == "series":
@@ -1527,7 +1533,7 @@ def _gen_fp_xsp(sp: str, spt: int = 0) -> str:
 
 
 _TR_ASCII_MAP = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
-DIZIPAL_DOMAINS = [d.strip() for d in (os.environ.get("DIZIPAL_DOMAINS") or "dizipalw2.com,dizipalizm.com,dizipal863.com").split(",") if d.strip()]
+DIZIPAL_DOMAINS = [d.strip() for d in (os.environ.get("DIZIPAL_DOMAINS") or "dizipalw2.com").split(",") if d.strip()]
 DIZIPAL_PASSPHRASE = "3hPn4uCjTVtfYWcjIcoJQ4cL1WWk1qxXI39egLYOmNv6IblA7eKJz68uU3eLzux1biZLCms0quEjTYniGv5z1JcKbNIsDQFSeIZOBZJz4is6pD7UyWDggWWzTLBQbHcQFpBQdClnuQaMNUHtLHTpzCvZy33p6I7wFBvL4fnXBYH84aUIyWGTRvM2G5cfoNf4705tO2kv"
 _DP_M3U8_CACHE = {}
 
@@ -1535,19 +1541,13 @@ _DP_M3U8_CACHE = {}
 def _decrypt_dizipal_rmk(encrypted_json_str: str) -> str:
     try:
         import hashlib, base64, html as _h
-        from Cryptodome.Cipher import AES
         cleaned = _h.unescape(encrypted_json_str)
         data = json.loads(cleaned)
         ciphertext = base64.b64decode(data["ciphertext"])
         iv = bytes.fromhex(data["iv"])
         salt = bytes.fromhex(data["salt"])
         key = hashlib.pbkdf2_hmac("sha512", DIZIPAL_PASSPHRASE.encode("utf-8"), salt, 999, dklen=32)
-        cipher = AES.new(key, AES.MODE_CBC, iv)
-        decrypted = cipher.decrypt(ciphertext)
-        pad_len = decrypted[-1]
-        if 1 <= pad_len <= 16:
-            decrypted = decrypted[:-pad_len]
-        return decrypted.decode("utf-8", errors="ignore")
+        return _aes256_cbc_decrypt(ciphertext, key, iv).decode("utf-8", errors="ignore").strip()
     except Exception:
         return ""
 
@@ -1587,8 +1587,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 post_data = urllib.parse.urlencode({
                     "cKey": cKey,
                     "cValue": cValue,
-                    "type": "dizi" if mtype == "tv" else "film",
-                    "searchterm": q
+                    "searchterm": q,
                 }).encode("utf-8")
                 req_s = urllib.request.Request(f"{base}/bg/searchcontent", data=post_data, headers={
                     "User-Agent": UA137, "Referer": f"{base}/arama-yap",
@@ -1597,16 +1596,26 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 })
                 with urllib.request.urlopen(req_s, timeout=3.5) as rs:
                     s_data = json.loads(rs.read(131072).decode("utf-8", errors="ignore"))
-                s_html = (s_data.get("data") or {}).get("html") or ""
-                links = re.findall(r'href="([^"]+)"', s_html)
-                if not links:
-                    continue
+                d_obj = (s_data.get("data") or {}) if isinstance(s_data, dict) else {}
                 match_link = ""
-                for lk in links:
-                    sl = lk.rstrip("/").split("/")[-1]
-                    if _titles_match(sl.replace("-izle", "").replace("-", " "), titles, "", year, mtype):
-                        match_link = lk
+                for row in (d_obj.get("result") or []):
+                    if not isinstance(row, dict):
+                        continue
+                    u_type = str(row.get("used_type") or "").lower()
+                    if (mtype == "tv" and "movie" in u_type) or (mtype == "movie" and "serie" in u_type):
+                        continue
+                    u_slug = str(row.get("used_slug") or "").strip().lstrip("/")
+                    cands_r = [row.get("object_name"), row.get("object_alternative_name"), u_slug.rsplit("/", 1)[-1].replace("-izle", "").replace("-", " ")]
+                    if u_slug and any(ct and _titles_match(str(ct), titles, "", year, mtype) for ct in cands_r):
+                        match_link = f"{base}/{u_slug}"
                         break
+                if not match_link:
+                    s_html = d_obj.get("html") or ""
+                    for lk in re.findall(r'href="([^"]+)"', s_html):
+                        sl = lk.rstrip("/").split("/")[-1]
+                        if _titles_match(sl.replace("-izle", "").replace("-", " "), titles, "", year, mtype):
+                            match_link = lk if lk.startswith("http") else f"{base}/{lk.lstrip('/')}"
+                            break
                 if not match_link:
                     continue
 
@@ -1621,7 +1630,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 with urllib.request.urlopen(req_ep, timeout=3.5) as r_ep:
                     ep_html = r_ep.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
 
-                m_rmk = re.search(r'data-rm-k="true">({.*?})</div>', ep_html)
+                m_rmk = re.search(r'data-rm-k="true">(\{.*?\})</div>', ep_html)
                 if not m_rmk:
                     continue
                 iframe_src = _decrypt_dizipal_rmk(m_rmk.group(1))
@@ -1633,6 +1642,25 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 req_if = urllib.request.Request(iframe_src, headers={"User-Agent": UA137, "Referer": base + "/"})
                 with urllib.request.urlopen(req_if, timeout=3.5) as r_if:
                     if_html = r_if.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+
+                m_np = re.search(r"window\.NP_CONFIG\s*=\s*(\{.*?\});", if_html, re.S)
+                if m_np:
+                    np_cfg = json.loads(m_np.group(1))
+                    if ekey and isinstance(np_cfg.get("subtitles"), list):
+                        esubs = _EMBED_SUB_CACHE.setdefault(ekey, [])
+                        for sb in np_cfg["subtitles"]:
+                            if isinstance(sb, dict) and str(sb.get("src") or sb.get("file") or "").startswith("http"):
+                                su = str(sb.get("src") or sb.get("file")).strip()
+                                sl = str(sb.get("lang") or sb.get("label") or "tr").lower()[:2]
+                                if not any(x.get("url") == su for x in esubs):
+                                    esubs.insert(0, {"lang": "tr" if sl == "tu" else sl, "url": su, "source": "dp_embed"})
+                    for src_obj in (np_cfg.get("sources") or []):
+                        if isinstance(src_obj, dict):
+                            m_u = str(src_obj.get("master") or src_obj.get("file") or "").strip()
+                            if m_u.startswith("http"):
+                                res.append((m_u, "hls_dp"))
+                    if res:
+                        return res
 
                 m_tok = re.search(r"openPlayer\s*\(\s*['\"]([^'\"]+)['\"]", if_html)
                 if not m_tok:
@@ -1646,8 +1674,6 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 with urllib.request.urlopen(req_src, timeout=3.5) as r_src:
                     src_data = json.loads(r_src.read(131072).decode("utf-8", errors="ignore"))
                 playlist = src_data.get("playlist", [])
-                if not playlist:
-                    continue
                 for p_item in playlist:
                     for src_obj in p_item.get("sources", []):
                         f_u = src_obj.get("file", "")
@@ -1730,13 +1756,13 @@ def _to_ascii_slug(s_txt: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", t).strip("-")
 
 
-def _stream_matches_title(stream_url: str, valid_titles: list) -> bool:
+def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "") -> bool:
     if not stream_url or not isinstance(stream_url, str):
         return False
     u = stream_url.lower()
     if u.startswith("/api/rave/") or "youtube.com/" in u or "youtu.be/" in u:
         return True
-    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer")):
+    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.")):
         return True
     parsed = urllib.parse.urlparse(stream_url)
     path = parsed.path
@@ -2335,6 +2361,39 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             es_list.insert(0, sb)
         except Exception:
             pass
+    if res:
+        return res
+
+    # 4. Live extraction from https://www.dizibox.live/ (for series)
+    if mtype == "tv":
+        dbx_slugs = []
+        if source_url and "dizibox.live" in source_url:
+            m_dbx = re.search(r"dizibox\.live/(?:diziler/)?([a-z0-9-]+?)(?:-\d+-sezon.*)?/?$", source_url)
+            if m_dbx:
+                dbx_slugs.append(m_dbx.group(1))
+        for qc in list(dict.fromkeys(q_cands))[:3]:
+            sl = _to_ascii_slug(qc)
+            if sl and sl not in dbx_slugs:
+                dbx_slugs.append(sl)
+        for sl in dbx_slugs[:3]:
+            try:
+                ep_u = f"https://www.dizibox.live/{sl}-{s}-sezon-{e}-bolum-izle/"
+                dhtml = urllib.request.urlopen(urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": "https://www.dizibox.live/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                tm_d = re.search(r"<title>([^<]+)</title>", dhtml, re.I)
+                if tm_d and not (source_url and "dizibox.live" in source_url):
+                    dt = re.sub(r"\s+\d+\.\s*Sezon.*$", "", html_mod.unescape(tm_d.group(1)), flags=re.I).strip()
+                    if dt and not _titles_match(dt, valid_titles, "", year, "tv"):
+                        continue
+                m_king = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/king/king\.php\?v=[^"\']+)["\']', dhtml, re.I)
+                if m_king:
+                    ku = ("https:" + m_king.group(1)) if m_king.group(1).startswith("//") else m_king.group(1)
+                    khtml = urllib.request.urlopen(urllib.request.Request(ku, headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                    m_moly = re.search(r'https?://dbx\.molystream\.org/embed/([a-zA-Z0-9_-]+)', khtml)
+                    if m_moly:
+                        res.append((f"https://dbx.molystream.org/embed/sheila/{m_moly.group(1)}", "hls_dbx"))
+                        break
+            except Exception:
+                continue
     return res if res else fallback_res
 
 
@@ -2677,7 +2736,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     res.append((st["playlist"], "hls"))
                 else:
                     quals = st.get("qualities") or {}
-                    for qk in ("720", "1080", "480", "360"):
+                    for qk in ("2160", "4k", "1440", "1080", "720"):
                         qu = (quals.get(qk) or {}).get("url") or ""
                         if qu.startswith("https://") and "hakunaymatata.com" not in qu:
                             ref = ((quals.get(qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/"
@@ -4177,11 +4236,11 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
             eff_ref = "https://play2.pilavyerplay.top/"
         elif "dragonballzfans" in url:
             eff_ref = "https://flixer.su/"
-        elif "cdnimgs" in url or "cdnimage" in url or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/m", url):
-            eff_ref = "https://rapidvid.org/"
         elif "cdnimages" in url or "playmix.uno" in url or "hdfilmcehennemi.mobi" in url:
             eff_ref = "https://hdfilmcehennemi.mobi/"
-        elif "molystream" in url:
+        elif "cdnimgs" in url or ("cdnimage" in url and "cdnimages" not in url) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/m", url):
+            eff_ref = "https://rapidvid.org/"
+        elif "molystream" in url or "/sheila_" in url:
             eff_ref = "https://dbx.molystream.org/"
     hdrs = {"User-Agent": UA137}
     if eff_ref:
@@ -4192,7 +4251,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
             hdrs["Origin"] = orig
     clean_u_path = url.lower().split("?", 1)[0]
     is_explicit_mp4 = any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower()
-    is_seg_url = (not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer"))
+    is_seg_url = (not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer"))
     has_high_range = False
     if rng and rng.startswith("bytes="):
         m_hi = re.match(r"bytes=(\d+)-", rng)
@@ -4304,8 +4363,8 @@ async def rave_stream_manifest(request: Request):
     is_fp = ref_mode == "fp" or "fastplay." in target
     is_dp = ref_mode == "dp" or "ag2m5.cfd" in target or "uk-traffic-" in target
     is_pv = ref_mode == "pv" or "pilavyer" in target
-    is_fhd = ref_mode == "fhd" or "cdnimgs" in target or "cdnimage" in target or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target))
     is_hfnl = ref_mode == "hfnl" or ("cdnimages" in target and "/hls/" in target) or "playmix.uno" in target or "hdfilmcehennemi.mobi" in target
+    is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and "cdnimages" not in target) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     m3u8_ckey = f"{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
     now_m = time.time()
@@ -4326,12 +4385,12 @@ async def rave_stream_manifest(request: Request):
             if is_ve:
                 hdrs["Referer"] = "https://player.videasy.to/"
                 hdrs["Origin"] = "https://player.videasy.to"
-            elif is_fhd:
-                hdrs["Referer"] = "https://rapidvid.org/"
-                hdrs["Origin"] = "https://rapidvid.org"
             elif is_hfnl:
                 hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
                 hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
+            elif is_fhd:
+                hdrs["Referer"] = "https://rapidvid.org/"
+                hdrs["Origin"] = "https://rapidvid.org"
             elif is_dbx:
                 hdrs["Referer"] = target.replace("/embed/sheila/", "/embed/")
                 hdrs["X-Requested-With"] = "XMLHttpRequest"
@@ -4446,24 +4505,24 @@ async def rave_stream_manifest(request: Request):
             cur_is_ve = any(d in cur_target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")) or ("ve" in cur_k) or (cur_target == target and is_ve)
             cur_is_fp = ("fastplay." in cur_target) or (cur_target == target and is_fp)
             cur_is_pv = ("pilavyer" in cur_target) or (cur_target == target and is_pv)
-            cur_is_dp = ("uk-traffic-" in cur_target) or ("ag2m5.cfd" in cur_target) or is_dp
-            cur_is_fhd = ("cdnimgs" in cur_target) or ("cdnimage" in cur_target) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", cur_target)) or (cur_target == target and is_fhd)
+            cur_is_dp = ("uk-traffic-" in cur_target) or ("ag2m5.cfd" in cur_target) or ("dplayer" in cur_target) or is_dp
             cur_is_hfnl = ("cdnimages" in cur_target and "/hls/" in cur_target) or ("playmix.uno" in cur_target) or (cur_target == target and is_hfnl)
+            cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimage" in cur_target and "cdnimages" not in cur_target) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", cur_target)) or (cur_target == target and is_fhd))
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             is_master = "#EXT-X-STREAM-INF" in raw
-            ps_q = ("&proxy_segs=1" if (proxy_segs or cur_is_dp) else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
+            ps_q = ("&proxy_segs=1" if (proxy_segs or cur_is_dp or cur_is_hfnl or cur_is_dbx) else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
                 if cur_is_fp and "/subtitle/" in u_str:
                     return f"/api/rave/subtitle.vtt?url={urllib.parse.quote(u_str, safe='')}&lang=tr"
-                want_m3u8 = is_sub_playlist or is_master or (".m3u8" in u_str) or ("/manifests/" in u_str) or ("/index-" in u_str) or ("sublist_" in u_str)
+                want_m3u8 = is_sub_playlist or is_master or (".m3u8" in u_str) or ("/manifests/" in u_str) or ("/index-" in u_str) or ("sublist_" in u_str) or ("nm.php" in u_str) or ("nl.php" in u_str) or ("/q/" in u_str) or ("/embed/sheila/" in u_str)
                 if want_m3u8:
                     sub_sid = base64.urlsafe_b64encode(u_str.encode("utf-8")).decode("ascii").rstrip("=")
-                    if cur_is_fhd:
-                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=fhd{ps_q}&ext=.m3u8"
                     if cur_is_hfnl:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hfnl{ps_q}&ext=.m3u8"
+                    if cur_is_fhd:
+                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=fhd{ps_q}&ext=.m3u8"
                     if cur_is_dbx:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=dbx{ps_q}&ext=.m3u8"
                     if cur_is_ve:
@@ -4479,8 +4538,13 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, "https://play2.pilavyerplay.top/")
                 if cur_is_ve:
                     return _proxy_u(u_str, "https://player.videasy.to/", ".ts")
+                if cur_is_hfnl or ("cdnimages" in u_str and "/hls/" in u_str):
+                    return _proxy_u(u_str, "https://hdfilmcehennemi.mobi/", ".ts")
+                if cur_is_dbx or "molystream" in u_str or "/sheila_" in u_str:
+                    return _proxy_u(u_str, "https://dbx.molystream.org/", ".ts")
                 if cur_is_dp or "uk-traffic-" in u_str:
-                    return _proxy_u(u_str, "https://x.ag2m5.cfd/", ".ts")
+                    dp_ref = "https://sn.dplayer82.site/" if ("dplayer" in cur_target or ".com/f/" in u_str) else "https://x.ag2m5.cfd/"
+                    return _proxy_u(u_str, dp_ref, ".ts")
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
                 if "dragonballzfans" in u_str or proxy_segs:
@@ -4503,6 +4567,8 @@ async def rave_stream_manifest(request: Request):
             want_code = aud_pref if (aud_pref and aud_pref != "orig") else ""
             has_want = bool(want_code) and any(_line_lang(l) == want_code for l in valid_aud_lines)
             out_lines = []
+            variant_pairs = []
+            pending_inf = None
             has_default_aud = any('DEFAULT=YES' in l for l in valid_aud_lines)
             selected_aud_set = False
             for ln in raw.splitlines():
@@ -4530,6 +4596,8 @@ async def rave_stream_manifest(request: Request):
                             s_ln = re.sub(r',SUBTITLES="[^"]*"', '', s_ln)
                             if not valid_aud_lines:
                                 s_ln = re.sub(r',AUDIO="[^"]*"', '', s_ln)
+                            pending_inf = s_ln
+                            continue
                         if 'TYPE=AUDIO' in s_ln:
                             if 'URI="undefined' in s_ln:
                                 continue
@@ -4553,8 +4621,48 @@ async def rave_stream_manifest(request: Request):
                             is_media_tag = s_ln.startswith("#EXT-X-MEDIA") or s_ln.startswith("#EXT-X-I-FRAME-STREAM-INF")
                             s_ln = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{_rewrite_u(m.group(1), is_sub_playlist=is_media_tag)}"', s_ln)
                     else:
+                        raw_uri = s_ln
                         s_ln = _rewrite_u(s_ln, is_sub_playlist=is_master)
+                        if pending_inf is not None:
+                            inf_l = pending_inf
+                            pending_inf = None
+                            rm = re.search(r"RESOLUTION=(\d+)x(\d+)", inf_l, re.I)
+                            w, h = (int(rm.group(1)), int(rm.group(2))) if rm else (0, 0)
+                            if not w and not h:
+                                comb = (inf_l + " " + raw_uri).lower()
+                                if "2160" in comb or "4k" in comb:
+                                    w, h = 3840, 2160
+                                elif "1080" in comb or "/q/1" in comb:
+                                    w, h = 1920, 1080
+                                elif "720" in comb or "/q/2" in comb:
+                                    w, h = 1280, 720
+                                elif "480" in comb or "/q/3" in comb:
+                                    w, h = 854, 480
+                                elif "360" in comb or "240" in comb:
+                                    w, h = 640, 360
+                            eff_w = max(w, int(h * 16 / 9)) if (w or h) else 0
+                            bm = re.search(r"BANDWIDTH=(\d+)", inf_l, re.I)
+                            bw = int(bm.group(1)) if bm else 2500000
+                            if eff_w >= 3000 and bw > 20000000:
+                                bw = 12000000
+                                inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
+                            elif 1700 <= eff_w < 3000 and bw > 8500000:
+                                bw = 4500000
+                                inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
+                            elif 1150 <= eff_w < 1700 and bw > 5000000:
+                                bw = 2500000
+                                inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
+                            variant_pairs.append((eff_w, bw, inf_l, s_ln))
+                            continue
                 out_lines.append(s_ln)
+            if variant_pairs:
+                has_hd_var = any(v[0] >= 1150 for v in variant_pairs)
+                if has_hd_var:
+                    variant_pairs = [v for v in variant_pairs if v[0] >= 1150 or v[0] == 0]
+                variant_pairs.sort(key=lambda v: (v[0], v[1]), reverse=True)
+                for _, _, inf_l, uri_l in variant_pairs:
+                    out_lines.append(inf_l)
+                    out_lines.append(uri_l)
             return "\n".join(out_lines)
         body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=15.0)
         if body:

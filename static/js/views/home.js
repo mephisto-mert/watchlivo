@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v6';
-import { state, set } from '../store.js?v=20261029_v6';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v6';
-import { api } from '../api.js?v=20261029_v6';
-import { createSelection } from './selection.js?v=20261029_v6';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v6';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v7';
+import { state, set } from '../store.js?v=20261029_v7';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v7';
+import { api } from '../api.js?v=20261029_v7';
+import { createSelection } from './selection.js?v=20261029_v7';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v7';
 
 let refreshTimer = null;
 let rooms = [];

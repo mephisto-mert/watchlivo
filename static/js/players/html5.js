@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v6';
-import { expectedPosition } from '../sync.js?v=20261029_v6';
-import { state } from '../store.js?v=20261029_v6';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v7';
+import { expectedPosition } from '../sync.js?v=20261029_v7';
+import { state } from '../store.js?v=20261029_v7';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -373,7 +373,9 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 6000000,
+        abrEwmaDefaultEstimate: 25000000,
+        minAutoBitrate: 1500000,
+        autoLevelCapping: -1,
         maxBufferLength: 45,
         maxMaxBufferLength: 90,
         backBufferLength: 90,
@@ -395,10 +397,18 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
         if (data?.levels?.length > 1) {
-          const p720 = data.levels.findIndex((l) => (l.height || 0) === 720);
-          const hdIdx = p720 >= 0 ? p720 : data.levels.findIndex((l) => (l.height || 0) >= 720);
-          if (hdIdx >= 0) this.hls.startLevel = hdIdx;
+          let bestIdx = 0;
+          let bestScore = -1;
+          data.levels.forEach((l, idx) => {
+            const effW = Math.max(l.width || 0, Math.round((l.height || 0) * 16 / 9));
+            const score = effW * 1000 + Math.min(999, Math.round((l.bitrate || 0) / 100000));
+            if (score >= bestScore) { bestScore = score; bestIdx = idx; }
+          });
+          this.hls.startLevel = bestIdx;
+          this.hls.currentLevel = bestIdx;
+          this.hls.loadLevel = bestIdx;
         }
+        this.events.onTracksChanged?.();
         if (effStart >= 0.5 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
           try { v.currentTime = effStart; } catch (err) { /* ignore */ }
         }
@@ -798,6 +808,31 @@ export class Html5Adapter {
       }, { once: true });
       if (wasPlaying) this.tryPlay();
     }
+  }
+  getQualityLevels() {
+    const levels = this.hls?.levels || [];
+    if (!levels.length) {
+      const vw = this.video?.videoWidth || 0;
+      const vh = this.video?.videoHeight || 0;
+      const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : '1080p Full HD';
+      return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
+    }
+    const cur = this.hls.currentLevel;
+    const items = levels.map((l, idx) => {
+      const w = l.width || 0, h = l.height || 0;
+      const effW = Math.max(w, Math.round(h * 16 / 9));
+      const tag = effW >= 3200 ? '4K UHD (2160p)' : effW >= 1800 ? '1080p Full HD' : effW >= 1200 ? '720p HD' : `${h || 720}p`;
+      return { id: idx, label: `🎬 ${tag}${w && h ? ` (${w}×${h})` : ''}`, active: cur === idx };
+    });
+    items.push({ id: -1, label: '⚡ Otomatik (En Yüksek HD)', active: cur === -1 });
+    return items;
+  }
+  setQualityLevel(idx) {
+    if (!this.hls) return;
+    const n = Number(idx);
+    this.hls.currentLevel = n;
+    this.hls.loadLevel = n;
+    this.events.onTracksChanged?.();
   }
   destroy() {
     this.wantPlaying = false;

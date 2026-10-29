@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261029_v6';
+import { toast } from './ui.js?v=20261029_v7';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 

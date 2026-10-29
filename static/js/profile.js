@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261029_v6';
-import { api } from './api.js?v=20261029_v6';
-import { state, set } from './store.js?v=20261029_v6';
+import { h, popup, toast } from './ui.js?v=20261029_v7';
+import { api } from './api.js?v=20261029_v7';
+import { state, set } from './store.js?v=20261029_v7';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';

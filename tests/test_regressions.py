@@ -125,6 +125,15 @@ class RegressionTests(unittest.TestCase):
         rooms.handle_action(room, 'h', {'type': 'seek', 'currentTime': 5})
         self.assertEqual(room['media']['currentTime'], 5)
 
+    def test_stream_matches_title_3arg_and_trusted_domains(self):
+        self.assertTrue(server._stream_matches_title('https://srv29.cdnimages2.cyou/hls/abc/master.txt', ['Inception', 'Başlangıç'], '2010'))
+        self.assertTrue(server._stream_matches_title('https://dbx.molystream.org/embed/sheila/xyz', ['Breaking Bad'], '2008'))
+        self.assertTrue(server._stream_matches_title('https://sn.dplayer82.site/nm.php?v=123', ['Prens'], '2023'))
+
+    def test_dizipal_pure_python_aes_decrypt(self):
+        res = server._decrypt_dizipal_rmk('invalid')
+        self.assertEqual(res, '')
+
 
 if __name__ == '__main__':
     unittest.main()

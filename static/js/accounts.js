@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261029_v6';
-import { api, qs } from './api.js?v=20261029_v6';
-import { state, set, setView } from './store.js?v=20261029_v6';
+import { h, toast, popup } from './ui.js?v=20261029_v7';
+import { api, qs } from './api.js?v=20261029_v7';
+import { state, set, setView } from './store.js?v=20261029_v7';
 
 const LS_KEY = 'vortex_accounts_v7';
 

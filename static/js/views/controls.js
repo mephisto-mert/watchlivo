@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v6';
-import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v6';
-import { getProvider } from '../providers.js?v=20261029_v6';
-import { expectedPosition } from '../sync.js?v=20261029_v6';
-import { thumbFor } from './lobby.js?v=20261029_v6';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v6';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v6';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v6';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v7';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v7';
+import { getProvider } from '../providers.js?v=20261029_v7';
+import { expectedPosition } from '../sync.js?v=20261029_v7';
+import { thumbFor } from './lobby.js?v=20261029_v7';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v7';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v7';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v7';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -108,7 +108,13 @@ export function buildControls(frame, ctx) {
   const title = h('div', { class: 'ctl-title' });
   const artist = h('div', { class: 'ctl-artist' });
   const provLogo = h('img', { class: 'ctl-prov', id: 'video-provider-logo', alt: '' });
-  const qualityBadge = h('span', { class: 'ctl-quality-badge', id: 'ctl-quality-badge', title: 'Aktif Görüntü Kalitesi' }, '1080p HD');
+  const qualityBadge = h('span', {
+    class: 'ctl-quality-badge',
+    id: 'ctl-quality-badge',
+    title: 'Görüntü Kalitesini Seç (1080p / 4K)',
+    style: { cursor: 'pointer' },
+    onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('quality'); },
+  }, '1080p HD');
   const epBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', onclick: () => openEpisodeModal() }, '📺 S1:B1');
   const nextEpTopBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); } }, '⏭️ Sonraki Bölüm');
   const subPillBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('subtitle'); } }, '💬 Altyazı & Dublaj');
@@ -792,6 +798,24 @@ export function buildControls(frame, ctx) {
       return;
     }
 
+    if (view === 'quality') {
+      const qLevels = host.adapter?.getQualityLevels?.() || [{ id: 0, label: '✨ 1080p Full HD (Doğrudan Akış)', active: true }];
+      menu.replaceChildren(
+        backHeader('Görüntü Kalitesi', 'list'),
+        ...qLevels.map((q) => h('div', {
+          class: `opt ${q.active ? 'on' : ''}`,
+          onclick: (e) => {
+            e.stopPropagation();
+            host.adapter?.setQualityLevel?.(q.id);
+            showOverlay(`🎞️ Kalite: ${q.label}`, 1800);
+            closeMenu();
+            update();
+          },
+        }, h('span', {}, q.label), q.active ? h('span', {}, '✓') : null)),
+      );
+      return;
+    }
+
     if (view === 'effects') {
       const duckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
       menu.replaceChildren(
@@ -873,6 +897,9 @@ export function buildControls(frame, ctx) {
         optIconLbl('speed', 'Oynatma Hızı'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${rate}x ›`)));
     }
+    items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('quality'); } },
+      optIconLbl('sparkle', 'Görüntü Kalitesi'),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${qualityBadge.textContent || '1080p'} ›`)));
     items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('effects'); } },
       optIconLbl('sparkle', 'Sinema Efektleri & Araçlar'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${(VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal).label.replace(/^[^\s]+\s/, '').split(' ')[0]} ›`)));
@@ -1022,8 +1049,10 @@ export function buildControls(frame, ctx) {
       nextEpTopBtn.replaceChildren(ico('skip'), `B${Number(m.episode || 1) + 1}`);
     }
     const vEl = host.adapter?.video || frame.querySelector('video');
+    const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
-    qualityBadge.textContent = vh >= 2160 ? '4K' : vh >= 1080 ? '1080p' : vh >= 720 ? '720p' : '1080p';
+    const effW = Math.max(vw, Math.round(vh * 16 / 9));
+    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : '1080p';
     const curRate = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
     speedBtn.querySelector('span').textContent = `${curRate}x`;
     const availSubs = host.adapter?.getSubtitleTracks?.() || m.subtitleTracks || [];
