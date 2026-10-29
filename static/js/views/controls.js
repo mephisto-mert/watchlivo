@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v11';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v11';
-import { getProvider } from '../providers.js?v=20261029_v11';
-import { expectedPosition } from '../sync.js?v=20261029_v11';
-import { thumbFor } from './lobby.js?v=20261029_v11';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v11';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v11';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v11';
-import { avatar } from '../profile.js?v=20261029_v11';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v12';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v12';
+import { getProvider } from '../providers.js?v=20261029_v12';
+import { expectedPosition } from '../sync.js?v=20261029_v12';
+import { thumbFor } from './lobby.js?v=20261029_v12';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v12';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v12';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v12';
+import { avatar } from '../profile.js?v=20261029_v12';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1320,6 +1320,26 @@ export function buildControls(frame, ctx) {
             }
           },
         }, h('span', {}, '🖼️ Pencere İçinde Pencere (PiP)')),
+        ...(typeof window !== 'undefined' && (window.isWatchlivoDesktop || window.pywebview?.api) ? [
+          h('div', {
+            class: 'opt',
+            onclick: async (e) => {
+              e.stopPropagation();
+              closeMenu();
+              const res = await window.pywebview?.api?.toggle_always_on_top?.();
+              showOverlay(res?.onTop ? '📌 Pencere Üstte Tut: Açık (F9)' : '📌 Pencere Üstte Tut: Kapalı', 2000);
+            },
+          }, h('span', {}, '📌 Pencereyi Üstte Tut (F9)')),
+          h('div', {
+            class: 'opt',
+            onclick: async (e) => {
+              e.stopPropagation();
+              closeMenu();
+              const res = await window.pywebview?.api?.toggle_mini_window?.();
+              showOverlay(res?.mini ? '🗗 Masaüstü Mini Pencere: Açık (F10)' : '🗖 Standart Pencere Boyutu', 2000);
+            },
+          }, h('span', {}, '🗗 Masaüstü Mini Pencere Modu (F10)')),
+        ] : []),
       );
       return;
     }
@@ -1496,8 +1516,41 @@ export function buildControls(frame, ctx) {
 
   let lastMediaSessionKey = '';
   let lastMediaPosSyncAt = 0;
+  let lastDesktopRpcAt = 0;
+  let lastDesktopRpcKey = '';
+
+  function syncDesktopPresence(m, prov, playing) {
+    if (typeof window === 'undefined' || !window.pywebview?.api?.update_presence) return;
+    const now = Date.now();
+    const pCount = Array.isArray(state.mesh?.participants) ? state.mesh.participants.length : 1;
+    const roomName = state.mesh?.name || 'Sinema Odası';
+    const titleStr = m?.title
+      ? `${m.mediaType === 'tv' ? '📺' : m.isMusic ? '🎵' : '🎬'} ${m.title}`
+      : 'Watchlivo — Birlikte İzle';
+    const stateStr = m?.title
+      ? `${playing ? '▶ İzliyor' : '⏸ Duraklatıldı'} · 👥 ${pCount} Kişi (${roomName})`
+      : `Lobide · 👥 ${pCount} Kişi (${roomName})`;
+    const rpcKey = `${titleStr}|${stateStr}|${playing}`;
+    if (rpcKey === lastDesktopRpcKey && now - lastDesktopRpcAt < 12000) return;
+    lastDesktopRpcKey = rpcKey;
+    lastDesktopRpcAt = now;
+    const d = duration();
+    const p = position();
+    const nowSec = Math.floor(now / 1000);
+    const startTs = (playing && p >= 0) ? Math.max(0, nowSec - Math.floor(p)) : null;
+    const endTs = (playing && d > 0 && d > p) ? (nowSec + Math.floor(d - p)) : null;
+    try {
+      window.pywebview.api.update_presence({
+        details: titleStr,
+        state: stateStr,
+        startTs,
+        endTs,
+      });
+    } catch (e) { /* ignore */ }
+  }
 
   function syncMediaSession(m, prov, thumbUrl, playing, curRate) {
+    syncDesktopPresence(m, prov, playing);
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
     try {
       const ms = navigator.mediaSession;
