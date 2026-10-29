@@ -56,8 +56,10 @@ export function parseVtt(vttText) {
           .replace(/&quot;/g, '"')
           .replace(/&#39;/g, "'")
           .replace(/&nbsp;/g, ' ')
+          .replace(/[♪♫♬♩]+/g, ' ')
+          .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$/g, '')
           .trim())
-        .filter(Boolean);
+        .filter((l) => l && !/^(?:müzik|şarkı|music|song|alkış|applause|gülüşmeler|kahkaha|laughter|sessizlik|silence|iç çeker|sighs|inler|groans|nefes alır|gasps)$/i.test(l));
       const dedupLines = [];
       for (const rl of rawLines) {
         if (!dedupLines.length || dedupLines[dedupLines.length - 1] !== rl) {
@@ -68,7 +70,7 @@ export function parseVtt(vttText) {
         dedupLines.splice(2, 2);
       }
       const clean = dedupLines.join('\n').trim();
-      if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|yutukluklar)/i.test(clean)) {
+      if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz)/i.test(clean)) {
         rawCues.push({ start, end, text: clean });
       }
     } else {
@@ -245,9 +247,18 @@ export class SubtitleDubController {
         if (r.ok) {
           const data = await r.json();
           if (Array.isArray(data.subtitleTracks) && data.subtitleTracks.length) {
-            this.subtitleTracks = data.subtitleTracks;
-            if (this.media) this.media.subtitleTracks = data.subtitleTracks;
-            this.cuesCache.clear();
+            const existing = Array.isArray(this.subtitleTracks) ? this.subtitleTracks : [];
+            const seenUrls = new Set(existing.map((t) => t.url));
+            const merged = [...existing];
+            for (const incoming of data.subtitleTracks) {
+              if (!incoming || !incoming.url || seenUrls.has(incoming.url)) continue;
+              seenUrls.add(incoming.url);
+              const langCnt = merged.filter((x) => x.lang === incoming.lang).length;
+              const nextId = langCnt === 0 ? incoming.lang : `${incoming.lang}-${langCnt + 1}`;
+              merged.push({ ...incoming, id: nextId });
+            }
+            this.subtitleTracks = merged;
+            if (this.media) this.media.subtitleTracks = merged;
           }
           if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
             this.audioTracks = data.audioTracks.filter(Boolean);
@@ -259,23 +270,11 @@ export class SubtitleDubController {
         }
       } catch (e) { /* ignore */ }
     }
-    if (!media?.isMusic && !media?.isLive) {
-      const isOrigTr = (media?.origLang || '').toLowerCase() === 'tr'
-        || this.audioTracks.some((t) => /türkçe.*orijinal/i.test(t.label || ''));
-      const hasTrDub = this.audioTracks.some((t) => t.id === 'tr-dub' || t.id === 'tr-ai-dub' || (t.audioLang || t.targetLang || t.lang) === 'tr');
-      if (!hasTrDub && !isOrigTr && this.subtitleTracks.length > 0) {
-        this.audioTracks.push({
-          id: 'tr-ai-dub',
-          lang: 'tr',
-          targetLang: 'tr',
-          audioLang: 'tr',
-          label: '🇹🇷 Türkçe Dublaj (Akıllı Seslendirme)',
-          mode: 'tts',
-        });
-      }
-    }
     if (!this.subtitleTracks.length) {
       this.selectedSubId = 'off';
+    }
+    if (this.selectedAudioId === 'tr-ai-dub' || this.selectedAudioId === 'en-ai-dub') {
+      this.selectedAudioId = 'orig';
     }
     await this.setSubtitleTrack(this.selectedSubId, true);
     await this.setAudioTrack(this.selectedAudioId, true);
@@ -593,6 +592,18 @@ export class SubtitleDubController {
       this.selectedSubId = track.id;
       this.subCues = cues;
       this.secondaryCues = [];
+      if (this.fpsScale === 1.0 && cues.length > 80 && track.source === 'opensubtitles') {
+        const vDur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
+        const cEnd = cues[cues.length - 1]?.end || 0;
+        if (vDur > 1800 && cEnd > 1800) {
+          const ratio = cEnd / vDur;
+          if (ratio >= 0.945 && ratio <= 0.968) {
+            this.fpsScale = 23.976 / 25.0;
+          } else if (ratio >= 1.032 && ratio <= 1.055) {
+            this.fpsScale = 25.0 / 23.976;
+          }
+        }
+      }
       this._attachNativeTrack(track);
       this.adapter?._syncYtNativeCaptions?.();
       this.onTimeUpdate(this.adapter.getTime(), true);

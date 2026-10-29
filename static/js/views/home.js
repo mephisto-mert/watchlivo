@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261027_v1';
-import { state, set } from '../store.js';
-import { avatar, profileSetup } from '../profile.js?v=20261025_v10';
-import { api } from '../api.js';
-import { createSelection } from './selection.js?v=20261025_v10';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261025_v10';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v1';
+import { state, set } from '../store.js?v=20261029_v1';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v1';
+import { api } from '../api.js?v=20261029_v1';
+import { createSelection } from './selection.js?v=20261029_v1';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v1';
 
 let refreshTimer = null;
 let rooms = [];
@@ -38,7 +38,10 @@ export async function createRoomWithMedia(media) {
   const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name} odası`, privacy: 'public', playMode: 'leader', creator: self.name, clientId: cid, media: cleanMedia } });
   if (!res.room?.id) throw new Error('Oda oluşturulamadı');
   try {
-    if (res.clientId) sessionStorage.setItem('vortex_cid', res.clientId);
+    if (res.clientId) {
+      sessionStorage.setItem('vortex_cid', res.clientId);
+      sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
+    }
     if (res.clientToken) sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
     if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
   } catch (e) { /* ignore */ }

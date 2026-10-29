@@ -36,6 +36,7 @@ MEDIA_FIELDS = ("provider", "videoId", "url", "title", "thumbnail", "channel", "
 SAFE_MERGE_KEYS = (
     "name", "privacy", "playMode", "voipMode", "queue", "skip_votes",
     "voteEndsAt", "endedKey", "rev", "polls", "curated",
+    "creatorId", "host_id", "co_hosts", "host_transferred",
 )
 SYNC_TOKEN_TTL = 180.0
 CLIENT_TOKEN_TTL = 86400.0
@@ -363,7 +364,8 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
         key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
     )[:24]
     snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "creator",
-                                     "host_id", "co_hosts", "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
+                                     "creatorId", "host_id", "co_hosts", "host_transferred",
+                                     "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
                                      "endedKey", "kicked", "left", "rev", "curated")}
     # Secrets never leave the server: no password hash, no creator identity.
     snap["sigExp"] = t + SYNC_TOKEN_TTL
@@ -406,7 +408,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     snap_active_humans = any(
         isinstance(sp, dict) and sp.get("transport") != "bot" and (t - float(sp.get("lastSeen") or 0) <= 120.0)
         for sp in (snap.get("participants") or {}).values()
-    )
+    ) or bool(snap.get("creatorId") or snap.get("host_id"))
     if not snap_active_humans:
         return room
     if room is None:
@@ -416,6 +418,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             str(snap.get("privacy") or "public"),
             str(snap.get("playMode") or "leader"),
             clean_str(snap.get("creator"), 24),
+            clean_str(snap.get("creatorId"), 64),
         )
         for k in SAFE_MERGE_KEYS:
             if k in snap:
@@ -517,6 +520,11 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         for k in SAFE_MERGE_KEYS:
             if k in snap:
                 room[k] = snap[k]
+    elif snap.get("creatorId") and not room.get("host_transferred"):
+        if not room.get("creatorId") or s_ct < r_ct - 0.05:
+            room["creatorId"] = snap["creatorId"]
+            if snap.get("host_id"):
+                room["host_id"] = snap["host_id"]
     if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and media_key(s_media) == media_key(r_media))):
         room["media"] = s_media
     if snap.get("polls") and not room.get("polls"):
@@ -957,6 +965,10 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     )
     if is_creator and not room.get("host_transferred"):
         room["host_id"] = cid
+        co = list(room.get("co_hosts") or [])
+        if cid not in co:
+            co.append(cid)
+            room["co_hosts"] = co
     elif not (cur_host and cur_host.get("transport") != "bot"):
         if not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
             room["host_id"] = cid

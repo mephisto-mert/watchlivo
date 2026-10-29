@@ -1122,18 +1122,13 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         rest_tmdb = [x for x in items if f"{x['mediaType']}:{x['tmdbId']}" not in used_tmdb_keys]
         rest_tmdb.sort(key=lambda x: (_has_vault_stream(x), int(x.get("voteCount") or 0), float(x.get("rating") or 0)), reverse=True)
         if is_free_tr and pg == 1:
-            if prov == "fullhdfilm":
-                fhd_first = [x for x in merged_live if str(x.get("id") or "").startswith("fhd-")]
-                other_live = [x for x in merged_live if not str(x.get("id") or "").startswith("fhd-")]
-                items = fhd_first[:30] + rest_tmdb[:24] + other_live[:20] + rest_tmdb[24:]
-            elif prov == "hdfilmcehennemi":
-                hfnl_first = [x for x in merged_live if str(x.get("id") or "").startswith("hfnl-")]
-                other_live = [x for x in merged_live if not str(x.get("id") or "").startswith("hfnl-")]
-                items = hfnl_first[:30] + rest_tmdb[:24] + other_live[:20] + rest_tmdb[24:]
-            else:
-                items = rest_tmdb[:24] + merged_live[:36] + rest_tmdb[24:]
+            verified_first = [x for x in merged_live + rest_tmdb if _has_vault_stream(x)]
+            seen_vf = {f"{x.get('mediaType')}:{x.get('tmdbId') or x.get('id')}" for x in verified_first}
+            rem_pool = [x for x in merged_live + rest_tmdb if f"{x.get('mediaType')}:{x.get('tmdbId') or x.get('id')}" not in seen_vf]
+            items = verified_first + rem_pool
         else:
             items = rest_tmdb + merged_live
+            items.sort(key=lambda x: (_has_vault_stream(x), int(x.get("voteCount") or 0), float(x.get("rating") or 0)), reverse=True)
     else:
         items.sort(key=lambda x: (_has_vault_stream(x), int(x.get("voteCount") or 0), float(x.get("rating") or 0)), reverse=True)
 
@@ -1697,6 +1692,9 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
         if abs(int(cy) - int(ty)) > tol:
             return False
         year_ok = True
+    elif ty.isdigit() and mtype == "movie" and not cy.isdigit():
+        # Movie cards without a year can only match on exact normalized title
+        return cn in vn_set or (bool(cn_no1) and cn_no1 in vn_set)
     if cn in vn_set or (cn_no1 and cn_no1 in vn_set):
         return True
     cn_words = set(cn.split())
@@ -1706,18 +1704,7 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
             if not vn_words:
                 continue
             inter = len(cn_words & vn_words)
-            if inter >= 2 and (inter / max(1, min(len(cn_words), len(vn_words)))) >= 0.65:
-                return True
-    if year_ok and ":" in str(cand_title or ""):
-        c_sub = _norm_title(str(cand_title).split(":", 1)[1])
-        if len(c_sub.split()) >= 2:
-            for vt in (valid_titles or []):
-                if ":" in str(vt or "") and _norm_title(str(vt).split(":", 1)[1]) == c_sub:
-                    return True
-    for vt in (valid_titles or []):
-        if ":" in str(vt or ""):
-            v_pre = _norm_title(str(vt).split(":", 1)[0])
-            if v_pre and len(v_pre.split()) >= 2 and cn == v_pre:
+            if inter >= 2 and (inter / max(1, min(len(cn_words), len(vn_words)))) >= 0.72:
                 return True
     return False
 
@@ -1815,6 +1802,11 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                 pt = re.sub(r"\s+(?:izle|Full|HD|ddizimag).*$", "", pt, flags=re.I).strip()
                 if pt and not _titles_match(pt, valid_titles, "", year, mtype):
                     return []
+                if mtype == "movie" and year and str(year)[:4].isdigit():
+                    ym_pv = re.search(r'(?:Yapım Yılı|Yıl|Release)\s*[:<][^0-9]*((?:19|20)\d{2})|<title>[^<]*\(((?:19|20)\d{2})\)', html, re.I)
+                    pvy_str = next((g for g in (ym_pv.groups() if ym_pv else []) if g), "") if ym_pv else ""
+                    if pvy_str.isdigit() and abs(int(pvy_str) - int(str(year)[:4])) > 1:
+                        return []
             m_core = re.search(r'src="https://([^/"]+)/assets/js/core\.js"', html)
             pv_dom = m_core.group(1) if m_core else "play2.pilavyerplay.top"
             s_u = f"https://{pv_dom}/assets/js/s.php?s={urllib.parse.quote(m_pv.group(1))}"
@@ -2289,6 +2281,11 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 slug = h_u.rstrip("/").rsplit("/", 1)[-1]
                 h_u = f"https://www.hdfilmcehennemi.nl/dizi/{slug}/sezon-{s}/bolum-{e}/"
             phtml = urllib.request.urlopen(urllib.request.Request(h_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+            if mtype == "movie" and year and str(year)[:4].isdigit():
+                ym_h = re.search(r'<span class="year">(\d{4})</span>|releaseDate["\']?\s*:\s*["\'](\d{4})|<title>[^<]*\((\d{4})\)', phtml, re.I)
+                hy_str = next((g for g in (ym_h.groups() if ym_h else []) if g), "") if ym_h else ""
+                if hy_str.isdigit() and abs(int(hy_str) - int(str(year)[:4])) > 1:
+                    continue
             ifrs = re.findall(r'<iframe[^>]+(?:src|data-src)=["\'](https://hdfilmcehennemi\.mobi/video/embed/[^"\']+)["\']', phtml)
             for emb_u in list(dict.fromkeys(ifrs))[:2]:
                 emb_html = urllib.request.urlopen(urllib.request.Request(emb_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
@@ -3546,18 +3543,6 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             sub_tracks = _filter_live_subs(sub_tracks)
             if not audio_tracks:
                 audio_tracks = [{"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({label})", "mode": "stream", "url": wrapped[0][0]}]
-            is_tr_orig = str((m_cached or {}).get("origLang") or "").lower() == "tr" or eff_prov in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv")
-            has_tr_dub_stream = is_tr_orig or any(t.get("id") == "tr-dub" or t.get("audioLang") == "tr" for t in audio_tracks)
-            has_tr_sub_track = any((t.get("lang") or "").startswith("tr") for t in sub_tracks)
-            if not has_tr_dub_stream and has_tr_sub_track:
-                audio_tracks.append({
-                    "id": "tr-ai-dub",
-                    "lang": "tr",
-                    "targetLang": "tr",
-                    "audioLang": "tr",
-                    "label": f"🇹🇷 Türkçe ({label} Akıllı Seslendirme Dublaj)",
-                    "mode": "tts",
-                })
             stream_url = audio_tracks[0]["url"] if audio_tracks else wrapped[0][0]
             stype = "mp4" if ("&ext=.mp4" in stream_url or ".mp4" in stream_url) else wrapped[0][1]
             alt_urls = [u for u, _ in wrapped]
@@ -4248,10 +4233,10 @@ async def rave_stream_manifest(request: Request):
             cur_k = ""
             if not raw and tid.isdigit() and not is_probe:
                 s_i, e_i = int(s_num or 1), int(e_num or 1)
-                mt_guess = "tv" if (f"v26:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v22:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v26:movie:{tid}:1:1" in _STREAM_CACHE or f"v22:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                mt_guess = "tv" if (f"v27:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v26:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v27:movie:{tid}:1:1" in _STREAM_CACHE or f"v26:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                 cands = []
                 for mt_try in (mt_guess, "movie" if mt_guess == "tv" else "tv"):
-                    for ver_p in ("v26", "v22"):
+                    for ver_p in ("v27", "v26", "v22"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
@@ -4548,10 +4533,12 @@ def _srt_to_vtt(raw_bytes: bytes) -> str:
             return f"{_fmt(s1)} --> {_fmt(s2)}"
         txt = re.sub(r"(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})", _shift_ts, txt)
     txt = re.sub(
-        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org).*$\n?",
+        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
         "",
         txt,
     )
+    txt = re.sub(r"[♪♫♬♩]+", " ", txt)
+    txt = re.sub(r"(?im)^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$\n?", "", txt)
     if not txt.startswith("WEBVTT"):
         txt = "WEBVTT\n\n" + txt
     return txt + "\n"
@@ -4921,17 +4908,6 @@ async def rave_subtitles(request: Request):
         audio = await asyncio.wait_for(asyncio.to_thread(_build_audio_tracks, stream_url, direct_list, prov, tid, s, e, pmeta, mtype), timeout=9)
         intro_seg = await asyncio.wait_for(asyncio.to_thread(_detect_intro_sync, imdb_id, tid, mtype, s, e, subs), timeout=4)
         subs = await asyncio.to_thread(_filter_live_subs, subs)
-        has_tr_dub_stream = any(t.get("id") == "tr-dub" or t.get("audioLang") == "tr" for t in audio)
-        has_tr_sub_track = any((t.get("lang") or "").startswith("tr") for t in subs)
-        if not has_tr_dub_stream and has_tr_sub_track:
-            audio.append({
-                "id": "tr-ai-dub",
-                "lang": "tr",
-                "targetLang": "tr",
-                "audioLang": "tr",
-                "label": "🇹🇷 Türkçe Dublaj (Akıllı Seslendirme)",
-                "mode": "tts",
-            })
         payload = {"subtitleTracks": subs, "subtitles": subs, "audioTracks": audio, "intro": intro_seg, "platformAudioLangs": pmeta.get("audioLangs") or [], "platformSubLangs": pmeta.get("subLangs") or []}
         if len(_SUB_RESP_CACHE) >= 300:
             _SUB_RESP_CACHE.pop(next(iter(_SUB_RESP_CACHE)), None)

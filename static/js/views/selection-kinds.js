@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, openThemeModal, getAiApiConfig } from '../ui.js';
-import { api, qs } from '../api.js';
-import { parseVideoUrl } from '../providers.js';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js';
+import { h, icons, toast, openThemeModal, getAiApiConfig } from '../ui.js?v=20261029_v1';
+import { api, qs } from '../api.js?v=20261029_v1';
+import { parseVideoUrl } from '../providers.js?v=20261029_v1';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261029_v1';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261029_v1';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261029_v1';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -257,19 +257,13 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const refreshAuth = () => {
-    const isConnected = getAccount(p.id).loginSatisfied;
     authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl));
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {
       catalogLoaded = true;
       run(input.value || presetQuery || '');
     }
-    if (isConnected) {
-      if (window.innerWidth > 960) setTimeout(() => input.focus(), 30);
-    } else {
-      detailWrap.classList.add('hidden');
-      if (window.innerWidth > 960) setTimeout(() => authHolder.querySelector('#rave-auth-email')?.focus(), 30);
-    }
+    if (window.innerWidth > 960) setTimeout(() => input.focus(), 30);
   };
 
   const scrollDetailIntoView = () => {

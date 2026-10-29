@@ -96,7 +96,12 @@ export const isHostOnly = () => {
   if (!state.mesh) return false;
   const myCid = state.clientId;
   const hostId = state.mesh.host_id;
-  return Boolean(hostId && myCid && hostId === myCid);
+  if (hostId && myCid && hostId === myCid) return true;
+  try {
+    const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`);
+    if (savedCreator && myCid && savedCreator === myCid) return true;
+  } catch (e) { /* ignore */ }
+  return false;
 };
 export const isLeader = () => {
   if (!state.mesh) return false;

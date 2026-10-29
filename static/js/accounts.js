@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast } from './ui.js';
-import { api, qs } from './api.js';
-import { state, set, setView } from './store.js';
+import { h, toast } from './ui.js?v=20261029_v1';
+import { api, qs } from './api.js?v=20261029_v1';
+import { state, set, setView } from './store.js?v=20261029_v1';
 
 const LS_KEY = 'vortex_accounts_v6';
 
@@ -90,8 +90,8 @@ export function getAccount(providerId) {
     ...spec,
     provider: providerId,
     freeNoAuth: isFree,
-    loginSatisfied: true,
-    accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : 'Doğrudan Katalog & Senkron Erişimi',
+    loginSatisfied: Boolean(local.userAuthenticated),
+    accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : '',
     profileName: local.profileName || state.self?.name || '4K UHD',
     cookieCount: 0,
     cookies: [],
@@ -140,101 +140,18 @@ export async function logoutAccount(providerId, onReload) {
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
-export function renderAccountBar(p, onReload, onPickUrl) {
+export function renderAccountBar(p, _onReload, onPickUrl) {
   const acct = getAccount(p.id);
   const wrap = h('div', { class: 'rave-auth-wrap' });
 
-  if (acct.loginSatisfied) {
-    wrap.append(
-      h('div', { id: 'rave-account-status-bar', class: 'rave-auth-bar connected', style: { '--prov-accent': acct.accent || '#10b981' } },
-        h('div', { class: 'rave-auth-info', style: { display: 'flex', alignItems: 'center', gap: '.6em', minWidth: '0', flex: '1' } },
-          p.logo ? h('span', { class: 'rave-auth-brand-logo' }, h('img', { src: p.logo, alt: p.name })) : null,
-          h('div', { style: { minWidth: '0' } },
-            h('div', { class: 'rave-auth-title ok' },
-              p.id === 'cinema'
-                ? '🍿 Sinema, Dizi & Anime+ · Doğrulanmış HD Arşiv (Sinema+ · Dizi+ · Animetrix · Vizyon 4K)'
-                : `🟢 ${p.name} · Doğrudan Katalog & 4K Senkron Aktif`),
-            h('div', { class: 'rave-auth-sub' },
-              '1080p HD • 🇹🇷 Türkçe Dublaj & Orijinal Altyazı • Ek Giriş Gerekmeden Tek Tıkla Odada Başlat'))),
-        h('div', { class: 'rave-auth-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
-          h('span', { class: 'badge ok', style: { background: 'rgba(16,185,129,.16)', color: '#10b981', border: '1px solid rgba(16,185,129,.35)', padding: '.35em .75em', borderRadius: '999px', fontSize: '.76em', fontWeight: '700' } }, '✓ AKTİF'))));
-  } else {
-    let selectedProfile = state.self?.name || 'Ana Profil';
-    const profInp = h('input', {
-      id: 'rave-auth-profile',
-      class: 'input rave-inp sm',
-      value: selectedProfile,
-      placeholder: 'Profil adı (Örn: Ana Profil)',
-    });
-    const profilePresets = [state.self?.name || 'Ana Profil', '4K UHD', 'Misafir'].filter((v, i, a) => v && a.indexOf(v) === i);
-    const profPills = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '4px' } },
-      ...profilePresets.map((pname) => h('button', {
-        type: 'button',
-        class: 'btn',
-        style: { fontSize: '.76em', padding: '.3em .7em', borderRadius: '99px' },
-        onclick: () => { selectedProfile = pname; profInp.value = pname; },
-      }, `👤 ${pname}`)));
-
-    const doLink = () => {
-      const profile = profInp.value.trim() || selectedProfile || 'Ana Profil';
-      const local = readLocalAccounts();
-      local[p.id] = {
-        provider: p.id,
-        accountEmail: '',
-        profileName: profile,
-        loginSatisfied: true,
-        userAuthenticated: false,
-        browseUrl: acct.browseUrl || acct.loginUrl || '',
-      };
-      saveLocalAccounts(local);
-      toast(`✅ ${p.name} oturumu bu tarayıcıda işaretlendi.`);
-      onReload?.();
-    };
-
-    const openProvider = () => {
-      const target = acct.loginUrl || acct.browseUrl;
-      if (target) window.open(target, '_blank', 'noopener,noreferrer');
-    };
-
-    wrap.append(
-      h('div', { id: 'rave-account-login-box', class: 'rave-auth-bar', style: { '--prov-accent': acct.accent || '#e50914', padding: '1em' } },
-        h('div', { class: 'rave-webview-bar' },
-          h('span', {}, '🔒'),
-          h('code', { style: { flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, acct.loginUrl || acct.browseUrl || ''),
-          h('span', { style: { opacity: '.85', color: '#10b981', fontWeight: '600' } }, '🛡️ Şifre istenmez')),
-        h('div', { class: 'rave-auth-info', style: { display: 'flex', alignItems: 'center', gap: '.75em', marginBottom: '.55em' } },
-          p.logo ? h('span', { class: 'rave-auth-brand-logo' }, h('img', { src: p.logo, alt: p.name })) : null,
-          h('div', {},
-            h('div', { class: 'rave-auth-title', style: { fontSize: '1.02em' } }, `${p.name} oturumunu kendi sayfanızda açın`),
-            h('div', { class: 'rave-auth-sub' }, `Watchlivo ${p.name} şifrenizi istemez, doğrulamaz ve saklamaz. Girişi ${p.name} sayfasında yapın; sonra içerik bağlantısını aşağıya yapıştırın.`))),
-        h('div', { class: 'rave-auth-form', style: { display: 'flex', flexDirection: 'column', gap: '.55em' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: '.5em', flexWrap: 'wrap' } },
-            h('span', { style: { fontSize: '.78em', opacity: '.8' } }, 'Kim İzliyor?'),
-            profInp,
-            profPills),
-          h('div', { style: { display: 'flex', gap: '.5em', flexWrap: 'wrap' } },
-            h('button', {
-              type: 'button',
-              class: 'btn primary rave-login-submit',
-              style: { '--prov-accent': acct.accent || '#e50914' },
-              onclick: openProvider,
-            }, `🔗 ${p.name} Giriş Sayfasını Aç`),
-            h('button', {
-              type: 'button',
-              class: 'btn',
-              id: 'btn-rave-login-submit',
-              onclick: doLink,
-            }, '✓ Giriş Yaptım, Bağlantıyı Aç')))));
-  }
-
-  if (onPickUrl && acct.loginSatisfied) {
+  if (onPickUrl) {
     const ph = acct.freeNoAuth || !acct.browseUrl
-      ? `${p.name} veya doğrudan video/bölüm bağlantısını buraya yapıştırıp oynatabilirsiniz...`
-      : `${p.name} içerik bağlantısını buraya yapıştırıp doğrudan oynatabilirsiniz (${acct.browseUrl}/...)`;
+      ? `${p.name} veya doğrudan video/bölüm bağlantısını (.m3u8 / .mp4 / URL) buraya yapıştırıp oynatabilirsiniz...`
+      : `${p.name} içerik veya doğrudan video bağlantısını buraya yapıştırıp oynatabilirsiniz...`;
     const urlInp = h('input', { id: 'hub-direct-url', class: 'input rave-inp flex', placeholder: ph });
     const goUrl = () => { const u = urlInp.value.trim(); if (u) onPickUrl(u, `${p.name} İçeriği`); };
     urlInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') goUrl(); });
-    wrap.append(h('div', { class: 'rave-url-catcher' }, urlInp, h('button', { class: 'btn', onclick: goUrl }, '▶ Oynat')));
+    wrap.append(h('div', { class: 'rave-url-catcher' }, urlInp, h('button', { class: 'btn', onclick: goUrl }, '▶ Bağlantıyı Oynat')));
   }
   return wrap;
 }

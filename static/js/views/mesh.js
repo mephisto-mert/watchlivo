@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js';
-import { resolveMusicItem } from './selection-kinds.js?v=20261025_v10';
-import { MeshConnection } from '../realtime.js?v=20261025_v10';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261025_v10';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261025_v10';
-import { buildLayout } from './mesh-layout.js?v=20261025_v10';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js';
-import { Voice } from '../voice.js?v=20261025_v10';
-import { playRoomSfx } from './chat.js?v=20261025_v10';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v1';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v1';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v1';
+import { MeshConnection } from '../realtime.js?v=20261029_v1';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v1';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v1';
+import { buildLayout } from './mesh-layout.js?v=20261029_v1';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v1';
+import { Voice } from '../voice.js?v=20261029_v1';
+import { playRoomSfx } from './chat.js?v=20261029_v1';
 
 let ctx = null;
 
@@ -545,7 +545,10 @@ const actions = {
 export async function enterMesh(app, params) {
   leaveMeshView();
   let initialCid = null;
-  try { initialCid = sessionStorage.getItem('vortex_cid') || null; } catch (e) { /* ignore */ }
+  try {
+    initialCid = sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || null;
+    if (initialCid) sessionStorage.setItem('vortex_cid', initialCid);
+  } catch (e) { /* ignore */ }
   set({ mesh: null, clientId: initialCid, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting' });
   const host = new PlayerHost(h('div'), { onEvent: (ev, arg) => onPlayerEvent(ev, arg) });
   const sync = new SyncEngine({

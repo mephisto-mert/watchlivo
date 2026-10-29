@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261027_v4';
-import { renderHome, destroyHome } from './views/home.js?v=20261027_v4';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261027_v4';
-import { api } from './api.js';
-import { toast } from './ui.js';
+import { state, set } from './store.js?v=20261029_v1';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261029_v1';
+import { renderHome, destroyHome } from './views/home.js?v=20261029_v1';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261029_v1';
+import { api } from './api.js?v=20261029_v1';
+import { toast } from './ui.js?v=20261029_v1';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -44,9 +44,6 @@ async function boot() {
   try {
     for (const k of Object.keys(localStorage)) {
       if (k.startsWith('vortex_st_') || k.startsWith('vortex_room_')) localStorage.removeItem(k);
-    }
-    for (const k of Object.keys(sessionStorage)) {
-      if (k.startsWith('vortex_st_') || k.startsWith('vortex_room_')) sessionStorage.removeItem(k);
     }
   } catch (e) { /* ignore */ }
   const sp = new URLSearchParams(location.search);

@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js';
-import { api, qs } from '../api.js';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261025_v10';
-import { fetchAccounts, getAccount, renderSeriesPicker } from '../accounts.js';
-import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v1';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v1';
+import { api, qs } from '../api.js?v=20261029_v1';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v1';
+import { fetchAccounts, getAccount, renderSeriesPicker } from '../accounts.js?v=20261029_v1';
+import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v1';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -46,9 +46,7 @@ export function providerTile(p, onClick) {
     h('div', { class: 'provider-meta' },
       h('span', { class: 'ptitle' }, p.name),
       p.badge ? h('span', { class: 'psub' }, p.badge) : null),
-    p.freeNoAuth
-      ? h('span', { class: 'rave-login-dot free-dot', title: `${p.name} — Üyeliksiz açık erişim` }, isHero ? '4K · AÇIK' : '')
-      : (acct.loginSatisfied ? h('span', { class: 'rave-login-dot', title: `${acct.accountEmail || p.name} bağlı` }, '✓ Bağlı') : null),
+    isHero ? h('span', { class: 'rave-login-dot free-dot', title: `${p.name} — Üyeliksiz açık erişim` }, '4K · AÇIK') : null,
     providerUsable(p) ? null : h('span', { class: 'lock', title: 'Masaüstü uygulamasında' }, 'MASAÜSTÜ'));
 }
 
