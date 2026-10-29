@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v3';
-import { state, set } from '../store.js?v=20261029_v3';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v3';
-import { api } from '../api.js?v=20261029_v3';
-import { createSelection } from './selection.js?v=20261029_v3';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v3';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v4';
+import { state, set } from '../store.js?v=20261029_v4';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v4';
+import { api } from '../api.js?v=20261029_v4';
+import { createSelection } from './selection.js?v=20261029_v4';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v4';
 
 let refreshTimer = null;
 let rooms = [];
@@ -204,37 +204,6 @@ export function renderHome(app) {
     makeDockBtn('settings', 'Ayarlar & Tema', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', false, () => openAppSettings())
   );
 
-  let recentRoomSnap = null;
-  try {
-    const recId = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
-    if (recId) {
-      const rawSnap = sessionStorage.getItem(`vortex_room_${recId}`);
-      recentRoomSnap = rawSnap ? JSON.parse(rawSnap) : { id: recId, name: `${recId} Odası` };
-    }
-  } catch (e) { /* ignore */ }
-
-  const miniPip = recentRoomSnap?.id ? h('div', {
-    id: 'mini-pip',
-    class: 'mini-pip-player active',
-    onclick: () => openRoom({ id: recentRoomSnap.id }),
-  },
-    h('div', { class: 'pip-info' },
-      h('span', { class: 'pip-title' }, recentRoomSnap.media?.title || recentRoomSnap.name || 'Son İzleme Odası'),
-      h('span', { class: 'pip-sub' }, '● Canlı Senkron Odaya Dön')),
-    h('div', { class: 'pip-ctrls' },
-      h('div', { class: 'equalizer-bars' }, h('span'), h('span'), h('span')),
-      h('button', { type: 'button', class: 'pip-btn', title: 'Sinema Odasına Büyüt' }, '⛶'),
-      h('button', {
-        type: 'button',
-        class: 'pip-btn pip-close-btn',
-        title: 'Mini Oynatıcıyı Kapat',
-        onclick: (e) => {
-          e.stopPropagation();
-          try { localStorage.removeItem('vortex_recent_rooms'); } catch (_) {}
-          miniPip.remove();
-        },
-      }, '✕'))) : null;
-
   const glassWindow = h('div', { class: 'glass-main-window' },
     appBanner,
     selection,
@@ -247,8 +216,7 @@ export function renderHome(app) {
     lobbyBox);
 
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
-    h('div', { class: 'app-layout' }, dockEl, glassWindow),
-    ...(miniPip ? [miniPip] : []));
+    h('div', { class: 'app-layout' }, dockEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
   const home = h('main', { class: 'home' }, homeScroll);
 

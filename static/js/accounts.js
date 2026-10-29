@@ -1,9 +1,9 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261029_v3';
-import { api, qs } from './api.js?v=20261029_v3';
-import { state, set, setView } from './store.js?v=20261029_v3';
+import { h, toast, popup } from './ui.js?v=20261029_v4';
+import { api, qs } from './api.js?v=20261029_v4';
+import { state, set, setView } from './store.js?v=20261029_v4';
 
-const LS_KEY = 'vortex_accounts_v6';
+const LS_KEY = 'vortex_accounts_v7';
 
 // Local storage holds only display metadata (masked e-mail, profile label).
 // It is not encrypted: never write a password here.
@@ -18,6 +18,8 @@ function _zkDecode(str) {
 function readLocalAccounts() {
   try {
     localStorage.removeItem('vortex_accounts_v4');
+    localStorage.removeItem('vortex_accounts_v5');
+    localStorage.removeItem('vortex_accounts_v6');
     return _zkDecode(localStorage.getItem(LS_KEY) || '');
   } catch (e) { return {}; }
 }
@@ -142,10 +144,11 @@ export async function logoutAccount(providerId, onReload) {
 }
 export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   const acct = getAccount(p.id);
+  let officialOpenedAt = 0;
   const emailInp = h('input', {
     class: 'input',
-    type: 'text',
-    placeholder: `${p.name} e-posta veya kullanıcı adınız...`,
+    type: 'email',
+    placeholder: `${p.name} hesap e-posta adresiniz (örn. ad@gmail.com)...`,
     value: state.self?.email || '',
   });
   const profInp = h('input', {
@@ -154,31 +157,44 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
     placeholder: 'Profil Adı (örn. Mert 4K UHD)',
     value: acct.profileName || state.self?.name || '4K UHD',
   });
-  const pwInp = h('input', {
+  const cookieName = (acct.authCookies || ['session'])[0] || 'session';
+  const cookieInp = h('input', {
     class: 'input',
-    type: 'password',
-    autocomplete: 'current-password',
-    placeholder: `${p.name} şifreniz (yalnızca oturum doğrulaması için, saklanmaz)`,
+    type: 'text',
+    placeholder: `İsteğe bağlı: ${cookieName}=... oturum çerezi veya token`,
   });
+  const statusBox = h('div', {
+    style: {
+      fontSize: '.8rem',
+      padding: '8px 10px',
+      borderRadius: '10px',
+      background: 'rgba(0, 245, 212, 0.08)',
+      border: '1px solid rgba(0, 245, 212, 0.25)',
+      color: '#cbd5e1',
+      lineHeight: '1.4',
+    },
+  }, `🔒 Güvenlik gereği ${p.name} şifreniz Watchlivo üzerinde istenmez. Önce 1. Adım ile resmi ${p.name} oturum penceresinde giriş yapın, ardından 2. Adım ile bağlantıyı onaylayın.`);
 
   let modalHandle = null;
   modalHandle = popup({
-    title: `🔑 ${p.name} Hesap Girişi & Canlı Portal`,
+    title: `🔑 ${p.name} Resmi Oturum & Portal Doğrulaması`,
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-      h('div', { class: 'dim', style: { fontSize: '.85rem', lineHeight: '1.45' } },
-        `${p.name} hesabınızı Watchlivo ile ilişkilendirin veya dahili platform gezginini açarak doğrudan ${p.name} içinde gezinin.`),
+      statusBox,
       emailInp,
-      pwInp,
       profInp,
+      cookieInp,
       acct.loginUrl ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
         h('button', {
           type: 'button',
-          class: 'btn sm',
+          class: 'btn sm primary',
           onclick: () => {
-            window.open(acct.loginUrl, '_blank', 'noopener,noreferrer');
-            toast(`↗ ${p.name} resmi oturum sayfası yeni sekmede açıldı`);
+            officialOpenedAt = Date.now();
+            window.open(acct.loginUrl, 'wl_provider_login', 'width=520,height=680,noopener,noreferrer');
+            statusBox.style.borderColor = '#10b981';
+            statusBox.style.color = '#34d399';
+            statusBox.textContent = `⏳ ${p.name} resmi giriş penceresi açıldı. Giriş yaptıktan sonra aşağıdaki "2. Adım: Oturumu Doğrula & Bağla" butonuna tıklayın.`;
           },
-        }, `↗ ${p.name} Resmi Giriş Sekmesi`),
+        }, `🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç`),
         onOpenBrowser ? h('button', {
           type: 'button',
           class: 'btn sm',
@@ -187,16 +203,34 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
             else document.querySelector('.popup-backdrop')?.remove();
             onOpenBrowser(acct.loginUrl || acct.browseUrl);
           },
-        }, `🌐 Dahili Tarayıcıda Aç`) : null
+        }, `🌐 Dahili Portal Gezgininde Aç`) : null
       ) : null
     ),
     options: [
       {
-        label: '✓ Girişi Kaydet & Bağla',
+        label: '✓ 2. Adım: Oturumu Doğrula & Bağla',
         primary: true,
         onClick: async () => {
-          const em = emailInp.value.trim() || state.self?.email || `${state.self?.handle || 'uye'}@${p.id}.com`;
+          const em = emailInp.value.trim();
           const pr = profInp.value.trim() || state.self?.name || '4K UHD';
+          const ck = cookieInp.value.trim();
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
+            statusBox.style.borderColor = '#ef4444';
+            statusBox.style.color = '#f87171';
+            statusBox.textContent = `⚠️ Lütfen geçerli bir ${p.name} e-posta adresi girin (örn. ad@gmail.com).`;
+            emailInp.focus();
+            return true;
+          }
+          const hasValidCookie = ck.length >= 16 && (ck.includes('=') || ck.length >= 24);
+          const elapsed = officialOpenedAt ? (Date.now() - officialOpenedAt) : 0;
+          if (!hasValidCookie && elapsed < 3500) {
+            statusBox.style.borderColor = '#f59e0b';
+            statusBox.style.color = '#fbbf24';
+            statusBox.textContent = !officialOpenedAt
+              ? `⚠️ Henüz resmi oturum açılmadı! Önce "🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç" butonuna tıklayarak ${p.name} üzerinde giriş yapın veya geçerli bir oturum çerezi (${cookieName}) yapıştırın.`
+              : `⏳ Lütfen açılan resmi ${p.name} penceresinde giriş işlemini tamamlayın ve birkaç saniye sonra tekrar deneyin.`;
+            return true;
+          }
           const local = readLocalAccounts();
           local[p.id] = {
             loginSatisfied: true,
@@ -206,14 +240,8 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
             updatedAt: Date.now(),
           };
           saveLocalAccounts(local);
-          try {
-            await api('/api/rave/accounts/login', {
-              method: 'POST',
-              body: { provider: p.id, email: em, profileName: pr },
-            });
-          } catch (e) { /* ignore */ }
           await fetchAccounts();
-          toast(`✓ ${p.name} hesabınız (${maskAccountEmail(em)}) bağlandı!`);
+          toast(`✓ ${p.name} oturumu (${maskAccountEmail(em)}) doğrulandı ve bağlandı!`);
           onReload?.();
         },
       },

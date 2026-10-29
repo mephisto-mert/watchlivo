@@ -1854,11 +1854,17 @@ body {
   background: linear-gradient(135deg, rgba(14, 20, 36, 0.96) 0%, rgba(10, 14, 26, 0.86) 58%, rgba(10, 14, 26, 0.35) 100%);
   border: 1px solid rgba(255, 255, 255, 0.12);
   display: flex;
+  flex-direction: column;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+}
+.hero-stage-top {
+  display: flex;
+  min-height: 280px;
+  width: 100%;
 }
 .hero-left-info {
   flex: 1.25;
-  padding: 28px 34px;
+  padding: 26px 32px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1914,7 +1920,11 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+}
+.hero-nav-btn {
+  padding: 10px 14px;
+  font-size: 12px;
 }
 .btn-watch-cyan {
   display: inline-flex;
@@ -1963,6 +1973,102 @@ body {
   object-fit: cover;
   mask-image: linear-gradient(to left, black 65%, transparent 100%);
   -webkit-mask-image: linear-gradient(to left, black 65%, transparent 100%);
+}
+.hero-showcase-strip {
+  width: 100%;
+  padding: 14px 24px 18px;
+  background: rgba(6, 9, 18, 0.72);
+  border-top: 1px solid rgba(255, 255, 255, 0.09);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.hero-showcase-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hero-showcase-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #e2e8f0;
+  letter-spacing: 0.01em;
+}
+.hero-showcase-arrows {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hero-showcase-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.hero-mini-card {
+  flex: 0 0 138px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(15, 21, 36, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+.hero-mini-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(0, 245, 212, 0.55);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.55);
+}
+.hero-mini-card.active {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 18px rgba(0, 245, 212, 0.35);
+}
+.hero-mini-card img {
+  width: 100%;
+  height: 175px;
+  object-fit: cover;
+  background: #0a0d16;
+}
+.hero-mini-body {
+  padding: 8px 9px 9px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hero-mini-title {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hero-mini-meta {
+  font-size: 10.5px;
+  color: #94a3b8;
+}
+.hero-mini-play {
+  margin-top: 3px;
+  width: 100%;
+  padding: 5px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(0, 245, 212, 0.35);
+  background: rgba(0, 245, 212, 0.14);
+  color: var(--neon-cyan);
+  font-size: 10.5px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+.hero-mini-play:hover {
+  background: var(--neon-cyan);
+  color: #05070f;
 }
 
 /* Platform Glass Cards & Shimmer Beam */
@@ -2196,28 +2302,9 @@ body {
   100% { opacity: 0; transform: translateY(-160px) scale(1) rotate(-20deg); }
 }
 
-.mini-pip-player {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  width: 310px;
-  border-radius: var(--radius-md);
-  background: rgba(12, 17, 32, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(0, 245, 212, 0.38);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 25px rgba(0, 245, 212, 0.25);
-  padding: 10px 14px;
-  display: none;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  z-index: 1000;
-  cursor: pointer;
-  animation: pipSlide 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
+.mini-pip-player,
 .mini-pip-player.active {
-  display: flex;
+  display: none !important;
 }
 @keyframes pipSlide {
   from { opacity: 0; transform: translateY(20px) scale(0.95); }
@@ -2337,7 +2424,11 @@ body {
   .platform-glass-grid, .tv-channels-grid { grid-template-columns: 1fr; }
   .platform-card.featured-glow { grid-column: span 1; }
   .gazestream-hero { flex-direction: column; height: auto; }
+  .hero-stage-top { flex-direction: column; min-height: auto; }
   .hero-art-stage { height: 180px; }
+  .hero-showcase-strip { padding: 12px 14px 14px; }
+  .hero-mini-card { flex: 0 0 116px; }
+  .hero-mini-card img { height: 148px; }
 }
 @media (max-width: 400px) {
   .floating-dock {

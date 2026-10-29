@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v3';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v3';
-import { api, qs } from '../api.js?v=20261029_v3';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v3';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v3';
-import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v3';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v4';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v4';
+import { api, qs } from '../api.js?v=20261029_v4';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v4';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v4';
+import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v4';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -121,6 +121,19 @@ export function desktopOnlyCard(p) {
     h('button', { class: 'btn', onclick: () => popup({ title: 'Watchlivo Masaüstü', message: 'Masaüstü uygulaması Windows için hazırlanıyor. Kurulum dosyası yayınlandığında bu ekrandan indirebileceksin.', options: [{ label: 'Tamam' }] }) }, h('span', { html: icons.desktop }), 'Masaüstü Uygulaması'));
 }
 
+const HERO_DEFAULT_POOL = [
+  { id: '27205', tmdbId: '27205', mediaType: 'movie', title: 'Başlangıç', originalTitle: 'Inception', year: '2010', rating: '8.4', overview: 'Hedeflerinin bilinçaltına sızarak kurumsal casusluk yapan yetenekli bir hırsız olan Cobb\'a, imkansız olduğu düşünülen bir görev karşılığında eski hayatını geri kazanma şansı sunulur.', backdrop: 'https://image.tmdb.org/t/p/w780/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg', poster: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg' },
+  { id: '550', tmdbId: '550', mediaType: 'movie', title: 'Dövüş Kulübü', originalTitle: 'Fight Club', year: '1999', rating: '8.4', overview: 'Uykusuzluk çeken bir ofis çalışanı ile umursamaz bir sabun satıcısı, yeraltında gizli bir dövüş kulübü kurar.', backdrop: 'https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg', poster: 'https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg' },
+  { id: '438631', tmdbId: '438631', mediaType: 'movie', title: 'Dune: Çöl Gezegeni', originalTitle: 'Dune', year: '2021', rating: '8.0', overview: 'Uzak bir gelecekte ailesi çöl gezegeni Arrakis\'in yönetimini devralan Paul Atreides, galaksinin en değerli kaynağını korumak için destansı bir mücadeleye girer.', backdrop: 'https://image.tmdb.org/t/p/w780/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg', poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg' },
+  { id: '157336', tmdbId: '157336', mediaType: 'movie', title: 'Yıldızlararası', originalTitle: 'Interstellar', year: '2014', rating: '8.4', overview: 'İnsanlığın geleceğini kurtarmak için bir solucan deliğinden geçerek yıldızlararası yolculuğa çıkan kaşiflerin hikayesi.', backdrop: 'https://image.tmdb.org/t/p/w780/xJHokMbljvjADYdit5fK5VQsXEG.jpg', poster: 'https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg' },
+  { id: '155', tmdbId: '155', mediaType: 'movie', title: 'Kara Şövalye', originalTitle: 'The Dark Knight', year: '2008', rating: '8.5', overview: 'Batman, Teğmen Gordon ve Savcı Harvey Dent, Gotham sokaklarını kaosa sürükleyen Joker\'e karşı amansız bir mücadeleye girişir.', backdrop: 'https://image.tmdb.org/t/p/w780/nMKdUUepR0i5zn0y1T4CsSB5chy.jpg', poster: 'https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg' },
+  { id: '872585', tmdbId: '872585', mediaType: 'movie', title: 'Oppenheimer', originalTitle: 'Oppenheimer', year: '2023', rating: '8.1', overview: 'Amerikalı bilim insanı J. Robert Oppenheimer\'ın Manhattan Projesi ve atom bombasının geliştirilmesindeki rolünü konu alır.', backdrop: 'https://image.tmdb.org/t/p/w780/fm6KqXpk3M2HVveHwCrBSSBaO0V.jpg', poster: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg' },
+  { id: '68718', tmdbId: '68718', mediaType: 'movie', title: 'Zincirsiz', originalTitle: 'Django Unchained', year: '2012', rating: '8.2', overview: 'Alman bir ödül avcısının yardımıyla özgürlüğüne kavuşan Django, eşini acımasız bir çiftlik sahibinden kurtarmak için yola çıkar.', backdrop: 'https://image.tmdb.org/t/p/w780/2oZklIzUbvZXXzIFzv7Hi68d6xf.jpg', poster: 'https://image.tmdb.org/t/p/w500/7oWY8VDWW7thTzWh3OKYRkWUlD5.jpg' },
+  { id: '475557', tmdbId: '475557', mediaType: 'movie', title: 'Joker', originalTitle: 'Joker', year: '2019', rating: '8.1', overview: 'Toplum tarafından dışlanan başarısız komedyen Arthur Fleck, Gotham şehrinde adım adım suç ve kaosun sembolüne dönüşür.', backdrop: 'https://image.tmdb.org/t/p/w780/n6bUvigpRFqSwmPp1m2YADdbRBc.jpg', poster: 'https://image.tmdb.org/t/p/w500/udDclJoHjfjb8Ekgsd4FDteOkCU.jpg' },
+  { id: '634649', tmdbId: '634649', mediaType: 'movie', title: 'Örümcek-Adam: Eve Dönüş Yok', originalTitle: 'Spider-Man: No Way Home', year: '2021', rating: '8.0', overview: 'Kimliği açığa çıkan Peter Parker, Doktor Strange\'den yardım ister ancak büyü ters gidince çoklu evrenden düşmanlar ortaya çıkar.', backdrop: 'https://image.tmdb.org/t/p/w780/14QbnygCuTO0vl7CAFmPf1fgZfV.jpg', poster: 'https://image.tmdb.org/t/p/w500/1g0dhYtq4irTY1GPXvft6k4YLjm.jpg' },
+  { id: '66732', tmdbId: '66732', mediaType: 'tv', title: 'Stranger Things', originalTitle: 'Stranger Things', year: '2016', rating: '8.6', overview: 'Küçük bir kasabada küçük bir çocuğun gizemli şekilde kaybolması, doğaüstü güçleri ve gizli deneyleri gün yüzüne çıkarır.', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', poster: 'https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg' },
+];
+
 export function createSelection({ onPick, compact = false, initialProvider = null } = {}) {
   const root = h('div', { class: 'selection fade-in' });
   let provider = initialProvider ? getProvider(initialProvider) : null;
@@ -128,8 +141,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let catFilter = 'all';
   let showAllProviders = false;
   let showTrending = false;
-  let trendingItems = [];
+  let trendingItems = [...HERO_DEFAULT_POOL];
   let trendingLoading = false;
+  let heroIndex = 0;
   fetchAccounts().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
 
   const pickSafe = async (media) => {
@@ -139,13 +153,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   };
 
   async function ensureTrending() {
-    if (trendingItems.length || trendingLoading) return trendingItems;
+    if (trendingLoading) return trendingItems;
     trendingLoading = true;
     try {
       const res = await api('/api/rave/catalog?provider=netflix', { timeout: 10000 });
-      trendingItems = (res.items || []).slice(0, 12);
+      const fetched = (res.items || []).slice(0, 16);
+      if (fetched.length) {
+        const seenIds = new Set(fetched.map((x) => String(x.tmdbId || x.id)));
+        trendingItems = [...fetched, ...HERO_DEFAULT_POOL.filter((d) => !seenIds.has(String(d.tmdbId || d.id)))].slice(0, 16);
+      }
     } catch (e) {
-      trendingItems = [];
+      if (!trendingItems.length) trendingItems = [...HERO_DEFAULT_POOL];
     } finally {
       trendingLoading = false;
     }
@@ -300,67 +318,123 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('span', { class: 'ptitle' }, 'Tüm Platformlar'),
         h('span', { class: 'psub' }, `${PROVIDERS.length} Platform`))) : null;
 
-    const heroItem = trendingItems[0] || {
-      id: '438631',
-      tmdbId: '438631',
-      mediaType: 'movie',
-      title: 'Dune: Çöl Gezegeni (2021)',
-      originalTitle: 'Dune',
-      year: '2021',
-      rating: '8.0',
-      overview: 'Arkadaşlarınızla aynı anda, sıfır milisaniye gecikmeyle 1080p/4K Türkçe Dublaj & Altyazılı izleyin. HLS drift kilidi ve sesli sohbet aktif.',
-      backdrop: 'https://image.tmdb.org/t/p/original/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg',
-      poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg',
-    };
-    if (!trendingItems.length && !trendingLoading && !compact) {
+    const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
+    const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
+    const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
+    if (trendingItems.length <= HERO_DEFAULT_POOL.length && !trendingLoading && !compact) {
       ensureTrending().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
     }
 
-    const heroBanner = (!compact && !superQuery) ? h('div', { class: 'gazestream-hero' },
-      h('div', { class: 'hero-left-info' },
-        h('div', { class: 'hero-trending-tag' },
-          h('span', {}, '🔥'),
-          h('span', {}, `Şimdi Trend — 4K Senkron Sinema Vitrini`)),
-        h('div', { class: 'hero-category-tags' },
-          h('span', { class: 'tag-badge' }, 'Sinema & Dizi (40.000+)'),
-          h('span', { class: 'tag-badge' }, '4K HDR'),
-          h('span', { class: 'tag-badge' }, '🇹🇷 Türkçe Dublaj & Altyazı')),
-        h('h1', { class: 'hero-main-title' }, `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`),
-        h('p', { class: 'hero-synopsis' }, heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.'),
-        h('div', { class: 'hero-btn-row' },
-          h('button', {
-            type: 'button',
-            class: 'btn-watch-cyan',
-            onclick: async (e) => {
-              const btn = e.currentTarget;
-              btn.disabled = true;
-              toast(`🎬 ${heroItem.title} odası hazırlanıyor...`);
-              try {
-                const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-                const media = await resolveCatalogItem(heroItem, defProv, 1, 1);
-                if (media) await pickSafe(media);
-              } finally {
-                btn.disabled = false;
-              }
-            },
+    const heroStripRow = h('div', { class: 'hero-showcase-row' },
+      ...heroPool.map((item, idx) => {
+        const isActive = idx === safeHeroIdx;
+        const prov = getProvider(item.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
+        return h('div', {
+          class: `hero-mini-card ${isActive ? 'active' : ''}`,
+          role: 'button',
+          tabindex: '0',
+          onclick: () => {
+            heroIndex = idx;
+            renderGrid();
           },
-            h('span', {}, '▶'),
-            h('span', {}, 'Odaya Katıl & Şimdi İzle')),
-          h('button', {
-            type: 'button',
-            class: 'btn-download-glass',
-            onclick: () => {
-              provider = getProvider('cinema');
-              render();
+        },
+          h('img', {
+            src: item.poster || item.backdrop || '/static/watchlivo-poster.svg',
+            alt: item.title,
+            loading: 'lazy',
+            onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
+          }),
+          h('div', { class: 'hero-mini-body' },
+            h('div', { class: 'hero-mini-title' }, item.title),
+            h('div', { class: 'hero-mini-meta' }, `${item.year || '2024'} · ⭐ ${item.rating || '8.2'}`),
+            h('button', {
+              type: 'button',
+              class: 'hero-mini-play',
+              onclick: async (e) => {
+                e.stopPropagation();
+                const btnEl = e.currentTarget;
+                if (btnEl.disabled) return;
+                btnEl.disabled = true;
+                btnEl.textContent = '⏳ Açılıyor...';
+                toast(`🎬 ${item.title} odası hazırlanıyor...`);
+                try {
+                  const media = await resolveCatalogItem(item, prov, 1, 1);
+                  if (media) await pickSafe(media);
+                } finally {
+                  btnEl.disabled = false;
+                  btnEl.textContent = '▶ Hemen İzle';
+                }
+              },
+            }, '▶ Hemen İzle')));
+      }));
+
+    const heroBanner = (!compact && !superQuery) ? h('div', { class: 'gazestream-hero hero-with-rail' },
+      h('div', { class: 'hero-stage-top' },
+        h('div', { class: 'hero-left-info' },
+          h('div', { class: 'hero-trending-tag' },
+            h('span', {}, '🔥'),
+            h('span', {}, `Şimdi Trend (${safeHeroIdx + 1}/${heroPool.length}) — 4K Senkron Sinema Vitrini`)),
+          h('div', { class: 'hero-category-tags' },
+            h('span', { class: 'tag-badge' }, heroItem.mediaType === 'tv' ? '📺 Popüler Dizi' : '🎬 Sinema Filmi'),
+            h('span', { class: 'tag-badge' }, `⭐ IMDb ${heroItem.rating || '8.3'}`),
+            h('span', { class: 'tag-badge' }, '4K HDR'),
+            h('span', { class: 'tag-badge' }, '🇹🇷 Türkçe Dublaj & Altyazı')),
+          h('h1', { class: 'hero-main-title' }, `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`),
+          h('p', { class: 'hero-synopsis' }, heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.'),
+          h('div', { class: 'hero-btn-row' },
+            h('button', {
+              type: 'button',
+              class: 'btn-watch-cyan',
+              onclick: async (e) => {
+                const btn = e.currentTarget;
+                btn.disabled = true;
+                toast(`🎬 ${heroItem.title} odası hazırlanıyor...`);
+                try {
+                  const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
+                  const media = await resolveCatalogItem(heroItem, defProv, 1, 1);
+                  if (media) await pickSafe(media);
+                } finally {
+                  btn.disabled = false;
+                }
+              },
             },
-          }, '🎬 40.000+ Kataloğu Aç'))),
-      h('div', { class: 'hero-art-stage' },
-        h('img', {
-          class: 'hero-main-img',
-          src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
-          alt: heroItem.title,
-          onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
-        }))) : null;
+              h('span', {}, '▶'),
+              h('span', {}, 'Odaya Katıl & Şimdi İzle')),
+            h('button', {
+              type: 'button',
+              class: 'btn-download-glass',
+              onclick: () => {
+                provider = getProvider('cinema');
+                render();
+              },
+            }, '🎬 40.000+ Kataloğu Aç'),
+            h('button', {
+              type: 'button',
+              class: 'btn-download-glass hero-nav-btn',
+              title: 'Önceki Film',
+              onclick: () => { heroIndex = (safeHeroIdx - 1 + heroPool.length) % heroPool.length; renderGrid(); },
+            }, '‹ Önceki'),
+            h('button', {
+              type: 'button',
+              class: 'btn-download-glass hero-nav-btn',
+              title: 'Sonraki Film',
+              onclick: () => { heroIndex = (safeHeroIdx + 1) % heroPool.length; renderGrid(); },
+            }, 'Sonraki ›'))),
+        h('div', { class: 'hero-art-stage' },
+          h('img', {
+            class: 'hero-main-img',
+            src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
+            alt: heroItem.title,
+            onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
+          }))),
+      h('div', { class: 'hero-showcase-strip' },
+        h('div', { class: 'hero-showcase-head' },
+          h('span', { class: 'hero-showcase-title' }, '🎬 Vitrindeki Diğer Filmler & Diziler (Seç veya Hemen Odada Başlat)'),
+          h('div', { class: 'hero-showcase-arrows' },
+            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
+            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: 420, behavior: 'smooth' }); } }, '▶'),
+            h('button', { type: 'button', class: 'btn sm', onclick: () => { provider = getProvider('cinema'); render(); } }, 'Tümünü Gör →'))),
+        heroStripRow)) : null;
 
     const gridSection = h('div', { class: 'section-row' },
       !compact ? h('div', { class: 'section-heading' },
