@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v1';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v1';
-import { api, qs } from '../api.js?v=20261029_v1';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v1';
-import { fetchAccounts, getAccount, renderSeriesPicker } from '../accounts.js?v=20261029_v1';
-import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v1';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v2';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v2';
+import { api, qs } from '../api.js?v=20261029_v2';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v2';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v2';
+import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v2';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -29,25 +29,63 @@ const OFFER_MAP = [
 ];
 const offerProvider = (name) => (OFFER_MAP.find(([re]) => re.test(name)) || [])[1] || null;
 
-export function providerTile(p, onClick) {
+export function attachTilt(card) {
+  card.addEventListener('mousemove', (e) => {
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const rotateX = ((y - centerY) / centerY) * -7;
+    const rotateY = ((x - centerX) / centerX) * 7;
+    card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.025, 1.025, 1.025)`;
+  });
+  card.addEventListener('mouseleave', () => {
+    card.style.transform = '';
+  });
+  return card;
+}
+
+export function providerTile(p, onClick, onRefresh) {
   const acct = getAccount(p.id);
   const isHero = p.id === 'cinema' || p.id === 'music';
-  return h('div', {
-    class: `provider-tile ${isHero ? 'hero-provider-tile' : ''}`,
+  const badgeEl = isHero
+    ? h('span', { class: 'p-badge-live' }, '4K • AÇIK')
+    : acct.loginSatisfied
+      ? h('span', {
+          class: 'p-badge-connected',
+          title: `${acct.accountEmail || acct.profileName} bağlı — Hesap ayarları için tıkla`,
+          onclick: (e) => { e.stopPropagation(); openProviderLoginModal(p, onRefresh); },
+        }, '✓ Bağlı')
+      : (!acct.freeNoAuth && (acct.loginUrl || acct.browseUrl))
+        ? h('span', {
+            class: 'p-badge-portal',
+            title: `${p.name} hesabıyla giriş yap veya katalogda gezin`,
+            onclick: (e) => { e.stopPropagation(); openProviderLoginModal(p, onRefresh); },
+          }, '🔑 Giriş / Katalog')
+        : h('span', { class: 'p-badge-portal' }, 'AÇIK');
+
+  const card = h('div', {
+    class: `platform-card provider-tile ${isHero ? 'featured-glow hero-provider-tile' : ''}`,
     role: 'button',
     tabindex: '0',
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#00f5d4' },
     'data-provider': p.id,
+    'data-brand': p.id,
+    'data-category': p.cat || 'global',
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#00f5d4' },
     onclick: () => onClick(p),
     onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
   },
-    h('div', { class: 'provider-logo-wrap' },
-      p.logo ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } }) : (p.glyph ? h('span', { html: icons[p.glyph], style: { display: 'flex', fontSize: '1.6em' } }) : null)),
-    h('div', { class: 'provider-meta' },
-      h('span', { class: 'ptitle' }, p.name),
-      p.badge ? h('span', { class: 'psub' }, p.badge) : null),
-    isHero ? h('span', { class: 'rave-login-dot free-dot', title: `${p.name} — Üyeliksiz açık erişim` }, '4K · AÇIK') : null,
-    providerUsable(p) ? null : h('span', { class: 'lock', title: 'Masaüstü uygulamasında' }, 'MASAÜSTÜ'));
+    h('div', { class: 'platform-top' },
+      h('div', { class: 'platform-top-brand' },
+        p.logo
+          ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
+          : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#00f5d4' }, html: icons[p.glyph] }) : null)),
+      badgeEl),
+    h('div', { class: 'p-title ptitle' }, p.name),
+    p.badge ? h('div', { class: 'p-desc psub' }, p.badge) : null);
+
+  return attachTilt(card);
 }
 
 export function videoCard(media, onPick) {
@@ -262,14 +300,83 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('span', { class: 'ptitle' }, 'Tüm Platformlar'),
         h('span', { class: 'psub' }, `${PROVIDERS.length} Platform`))) : null;
 
+    const heroItem = trendingItems[0] || {
+      id: '438631',
+      tmdbId: '438631',
+      mediaType: 'movie',
+      title: 'Dune: Çöl Gezegeni (2021)',
+      originalTitle: 'Dune',
+      year: '2021',
+      rating: '8.0',
+      overview: 'Arkadaşlarınızla aynı anda, sıfır milisaniye gecikmeyle 1080p/4K Türkçe Dublaj & Altyazılı izleyin. HLS drift kilidi ve sesli sohbet aktif.',
+      backdrop: 'https://image.tmdb.org/t/p/original/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg',
+      poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg',
+    };
+    if (!trendingItems.length && !trendingLoading && !compact) {
+      ensureTrending().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
+    }
+
+    const heroBanner = (!compact && !superQuery) ? h('div', { class: 'gazestream-hero' },
+      h('div', { class: 'hero-left-info' },
+        h('div', { class: 'hero-trending-tag' },
+          h('span', {}, '🔥'),
+          h('span', {}, `Şimdi Trend — 4K Senkron Sinema Vitrini`)),
+        h('div', { class: 'hero-category-tags' },
+          h('span', { class: 'tag-badge' }, 'Sinema & Dizi (40.000+)'),
+          h('span', { class: 'tag-badge' }, '4K HDR'),
+          h('span', { class: 'tag-badge' }, '🇹🇷 Türkçe Dublaj & Altyazı')),
+        h('h1', { class: 'hero-main-title' }, `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`),
+        h('p', { class: 'hero-synopsis' }, heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.'),
+        h('div', { class: 'hero-btn-row' },
+          h('button', {
+            type: 'button',
+            class: 'btn-watch-cyan',
+            onclick: async (e) => {
+              const btn = e.currentTarget;
+              btn.disabled = true;
+              toast(`🎬 ${heroItem.title} odası hazırlanıyor...`);
+              try {
+                const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
+                const media = await resolveCatalogItem(heroItem, defProv, 1, 1);
+                if (media) await pickSafe(media);
+              } finally {
+                btn.disabled = false;
+              }
+            },
+          },
+            h('span', {}, '▶'),
+            h('span', {}, 'Odaya Katıl & Şimdi İzle')),
+          h('button', {
+            type: 'button',
+            class: 'btn-download-glass',
+            onclick: () => {
+              provider = getProvider('cinema');
+              render();
+            },
+          }, '🎬 40.000+ Kataloğu Aç'))),
+      h('div', { class: 'hero-art-stage' },
+        h('img', {
+          class: 'hero-main-img',
+          src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
+          alt: heroItem.title,
+          onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
+        }))) : null;
+
+    const gridSection = h('div', { class: 'section-row' },
+      !compact ? h('div', { class: 'section-heading' },
+        h('h2', {}, 'Streaming Ağ Geçitleri & Platformlar'),
+        h('span', { class: 'section-sub' }, `${PROVIDERS.length} Doğrulanmış Canlı Platform & Katalog Entegrasyonu`)) : null,
+      h('div', { class: compact ? 'provider-grid compact' : 'platform-glass-grid' },
+        ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
+        ...(moreTile ? [moreTile] : [])));
+
     root.replaceChildren(
       topBar,
       results,
+      ...(heroBanner ? [heroBanner] : []),
       ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
-      h('div', { class: `provider-grid ${compact ? 'compact' : 'rave-rows'}` },
-        ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); })),
-        ...(moreTile ? [moreTile] : [])));
+      gridSection);
     if (superQuery) runSuperSearch(superQuery, results);
   }
 

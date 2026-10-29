@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261029_v1';
-import { avatar } from '../profile.js?v=20261029_v1';
-import { getProvider } from '../providers.js?v=20261029_v1';
-import { api, qs } from '../api.js?v=20261029_v1';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261029_v1';
-import { expectedPosition } from '../sync.js?v=20261029_v1';
+import { h, icons, popup, toast } from '../ui.js?v=20261029_v2';
+import { avatar } from '../profile.js?v=20261029_v2';
+import { getProvider } from '../providers.js?v=20261029_v2';
+import { api, qs } from '../api.js?v=20261029_v2';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261029_v2';
+import { expectedPosition } from '../sync.js?v=20261029_v2';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -55,6 +55,36 @@ function fmtRoomClock(sec) {
   return hh > 0
     ? `${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
     : `${mm}:${String(ss).padStart(2, '0')}`;
+}
+
+export function tvGlassCard(room, onOpen) {
+  const brand = LIVE_BRANDS[room.id] || { label: room.name || 'TV', sub: '7/24 CANLI', c1: '#e11d48', c2: '#4c0519' };
+  const isRadio = Boolean(room.media?.isMusic || String(room.id).startsWith('radyo-'));
+  const eq = h('div', { class: 'equalizer-bars' }, h('span'), h('span'), h('span'));
+  const card = h('div', {
+    class: 'tv-glass-card meshthumb curated-room',
+    role: 'button',
+    tabindex: '0',
+    'data-room': room.id,
+    style: { '--room-accent': brand.c1 },
+    onclick: () => onOpen(room),
+    onkeydown: (e) => { if (e.key === 'Enter') onOpen(room); },
+  },
+    h('div', { class: 'tv-badge' }, isRadio ? '7/24 RADYO' : '7/24 CANLI', eq),
+    h('div', { class: 'tv-logo-box', style: { background: `linear-gradient(135deg, ${brand.c1}, ${brand.c2})` } }, brand.label),
+    h('div', { class: 'tv-info' },
+      h('div', { class: 'tv-name meshthumb-title' }, room.media?.title || room.name || brand.label),
+      h('div', { class: 'tv-desc' }, `${brand.sub} · Herkese Açık`)));
+  card.addEventListener('mousemove', (e) => {
+    const rect = card.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const rotateX = (((y - rect.height / 2) / (rect.height / 2)) * -6);
+    const rotateY = (((x - rect.width / 2) / (rect.width / 2)) * 6);
+    card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+  });
+  card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+  return card;
 }
 
 export function meshThumb(room, onOpen) {
@@ -257,8 +287,9 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     const list = filter === 'all' ? s.list.filter((r) => !renderedRoomIds.has(r.id)) : s.list;
     list.forEach((r) => renderedRoomIds.add(r.id));
     if (!list.length && (s.key === 'recent' || (filter === 'all' && s.key !== 'public'))) continue;
-    container.append(h('div', { class: 'section-head' }, h('h2', {}, s.title), h('span', { class: 'dim' }, list.length ? `${list.length} aktif oda` : '')));
+    container.append(h('div', { class: 'section-head', id: `lobby-sec-${s.key}` }, h('h2', {}, s.title), h('span', { class: 'dim' }, list.length ? `${list.length} aktif oda` : '')));
     if (!list.length) container.append(h('div', { class: 'lobby-empty' }, s.empty));
+    else if (s.key === 'tv' || s.key === 'radio') container.append(h('div', { class: 'tv-channels-grid' }, list.map((r) => tvGlassCard(r, onOpen))));
     else container.append(h('div', { class: 'lobby-grid' }, list.map((r) => meshThumb(r, onOpen))));
   }
   requestAnimationFrame(() => container.classList.add('is-hydrated'));

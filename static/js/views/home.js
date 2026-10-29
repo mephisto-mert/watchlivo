@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v1';
-import { state, set } from '../store.js?v=20261029_v1';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v1';
-import { api } from '../api.js?v=20261029_v1';
-import { createSelection } from './selection.js?v=20261029_v1';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v1';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v2';
+import { state, set } from '../store.js?v=20261029_v2';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v2';
+import { api } from '../api.js?v=20261029_v2';
+import { createSelection } from './selection.js?v=20261029_v2';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v2';
 
 let refreshTimer = null;
 let rooms = [];
@@ -54,33 +54,28 @@ export function renderHome(app) {
   setBackground(null);
   const self = state.self;
   const isMember = Boolean(self && !self.isGuest && (self.email || self.authToken));
-  const nav = h('nav', { class: 'navbar' },
-    h('div', { class: 'navbar-left' },
+  const nav = h('header', { class: 'top-nav-capsule navbar' },
+    h('div', { class: 'nav-left navbar-left' },
       h('button', {
-        class: 'wl-nav-account-btn',
+        class: 'user-profile-badge wl-nav-account-btn',
         id: 'nav-account-btn',
         title: isMember ? `${self.name} (@${self.handle}) — Hesap Ayarları` : 'Watchlivo Giriş Yap / Kayıt Ol',
         onclick: () => profileSetup({ current: self, dismissable: isMember, onDone: (p) => { set({ self: p }); renderHome(app); } }),
       },
-      avatar(self, 28),
-      h('span', { class: 'wl-nav-account-text' },
-        h('span', {}, isMember ? self.name : 'Giriş Yap / Kayıt Ol'),
-        h('span', { class: 'wl-nav-account-sub' }, isMember ? `✓ @${self.handle || 'uye'}` : '🔒 Resmi Hesap Girişi'))),
+      avatar(self, 30),
+      h('div', { class: 'user-meta wl-nav-account-text' },
+        h('span', { class: 'uname' }, isMember ? self.name : 'Giriş Yap / Kayıt Ol'),
+        h('span', { class: 'utag wl-nav-account-sub' }, isMember ? `✓ @${self.handle || 'uye'}` : '🔒 Resmi Hesap Girişi'))),
       navIcon('rooms', 'Odalar', () => {
         const anchor = document.getElementById('lobby-anchor');
-        if (anchor) {
-          anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          anchor.style.transition = 'box-shadow .3s ease';
-          anchor.style.boxShadow = '0 0 0 2px var(--accent)';
-          setTimeout(() => { anchor.style.boxShadow = ''; }, 1200);
-        }
+        if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
         toast('🎬 Aktif izleme odaları listesi');
       }),
       navIcon('settings', 'Ayarlar & Tema', () => openAppSettings(), { id: 'nav-theme-btn' })),
-    h('div', { class: 'navbar-center' }, logo()),
-    h('div', { class: 'navbar-right' },
+    h('div', { class: 'nav-center navbar-center' }, logo()),
+    h('div', { class: 'nav-right navbar-right' },
       h('a', {
-        class: 'btn wl-btn-apk',
+        class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
         href: '/download/apk',
         download: 'Watchlivo-v1.1.0.apk',
@@ -89,14 +84,14 @@ export function renderHome(app) {
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
       h('span', { class: 'wl-btn-apk-text' }, 'APK İndir')),
-      h('button', { class: 'btn primary', id: 'btn-create-room', onclick: async () => {
+      h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async () => {
         try {
           await createRoomWithMedia(null);
         } catch (e) {
           document.getElementById('home-selection')?.scrollIntoView({ behavior: 'smooth' });
           setTimeout(() => document.querySelector('#home-selection .home-search input')?.focus(), 80);
         }
-      } }, h('span', { html: icons.plus, style: { display: 'flex' } }), 'Oda Oluştur'),
+      } }, h('span', { html: icons.plus, style: { display: 'flex' } }), '+ Oda Oluştur'),
       navIcon('download', 'Tüm Uygulamaları İndir (APK & Windows)', () => openDownloadModal(), { id: 'nav-download-btn' }),
       navIcon('link', 'Kodla katıl', () => joinByCode())));
 
@@ -148,16 +143,90 @@ export function renderHome(app) {
         onclick: () => openDownloadModal()
       }, 'Uygulamalar')));
 
-  const homeScroll = h('div', { class: 'home-scroll' },
+  const makeDockBtn = (id, title, svgHtml, isAct, onClick) => {
+    const b = h('button', {
+      type: 'button',
+      class: `dock-btn ${isAct ? 'active' : ''}`,
+      'data-view': id,
+      title,
+      html: svgHtml,
+      onclick: () => {
+        dockEl.querySelectorAll('.dock-btn').forEach((x) => x.classList.toggle('active', x === b));
+        onClick();
+      },
+    });
+    b.addEventListener('mousemove', (e) => {
+      const rect = b.getBoundingClientRect();
+      const x = e.clientX - rect.left - rect.width / 2;
+      const y = e.clientY - rect.top - rect.height / 2;
+      b.style.transform = `translate(${x * 0.25}px, ${y * 0.25}px) scale(1.12)`;
+    });
+    b.addEventListener('mouseleave', () => { b.style.transform = ''; });
+    return b;
+  };
+
+  const dockEl = h('nav', { class: 'floating-dock', 'aria-label': 'Hızlı Gezinti' },
+    makeDockBtn('home', 'Ana Hub & Platformlar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>', true, () => {
+      selection.setProvider(null);
+      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    }),
+    makeDockBtn('cinema', '40.000+ Sinema, Dizi & Anime', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
+      selection.setProvider('cinema');
+      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    }),
+    makeDockBtn('tv', '7/24 Canlı TV Kanalları', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
+      const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }),
+    makeDockBtn('radio', '7/24 Canlı Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.5 3.24 6.15zM12 11c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/></svg>', false, () => {
+      const el = document.getElementById('lobby-sec-radio') || document.getElementById('lobby-anchor');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }),
+    makeDockBtn('watch', 'Canlı İzleme Odası', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>', false, async () => {
+      try {
+        const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
+        if (rec) { openRoom({ id: rec }); return; }
+      } catch (e) { /* ignore */ }
+      try { await createRoomWithMedia(null); } catch (e) { toast('Oda oluşturulamadı'); }
+    }),
+    makeDockBtn('settings', 'Ayarlar & Tema', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', false, () => openAppSettings())
+  );
+
+  let recentRoomSnap = null;
+  try {
+    const recId = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
+    if (recId) {
+      const rawSnap = sessionStorage.getItem(`vortex_room_${recId}`);
+      recentRoomSnap = rawSnap ? JSON.parse(rawSnap) : { id: recId, name: `${recId} Odası` };
+    }
+  } catch (e) { /* ignore */ }
+
+  const miniPip = recentRoomSnap?.id ? h('div', {
+    id: 'mini-pip',
+    class: 'mini-pip-player active',
+    onclick: () => openRoom({ id: recentRoomSnap.id }),
+  },
+    h('div', { class: 'pip-info' },
+      h('span', { class: 'pip-title' }, recentRoomSnap.media?.title || recentRoomSnap.name || 'Son İzleme Odası'),
+      h('span', { class: 'pip-sub' }, '● Canlı Senkron Odaya Dön')),
+    h('div', { class: 'pip-ctrls' },
+      h('div', { class: 'equalizer-bars' }, h('span'), h('span'), h('span')),
+      h('button', { type: 'button', class: 'pip-btn', title: 'Sinema Odasına Büyüt' }, '⛶'))) : null;
+
+  const glassWindow = h('div', { class: 'glass-main-window' },
     appBanner,
     selection,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },
       h('div', { class: 'lobby-toolbar-left' },
-        h('h2', { class: 'lobby-heading' }, 'Odalar'),
+        h('h2', { class: 'lobby-heading' }, 'Odalar & 7/24 Canlı Yayınlar'),
         tabs),
       h('div', { class: 'lobby-toolbar-right' },
         lobbySearch)),
     lobbyBox);
+
+  const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
+    h('div', { class: 'app-layout' }, dockEl, glassWindow),
+    ...(miniPip ? [miniPip] : []));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
   const home = h('main', { class: 'home' }, homeScroll);
 

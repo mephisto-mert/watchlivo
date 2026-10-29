@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast } from './ui.js?v=20261029_v1';
-import { api, qs } from './api.js?v=20261029_v1';
-import { state, set, setView } from './store.js?v=20261029_v1';
+import { h, toast, popup } from './ui.js?v=20261029_v2';
+import { api, qs } from './api.js?v=20261029_v2';
+import { state, set, setView } from './store.js?v=20261029_v2';
 
 const LS_KEY = 'vortex_accounts_v6';
 
@@ -140,9 +140,187 @@ export async function logoutAccount(providerId, onReload) {
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
-export function renderAccountBar(p, _onReload, onPickUrl) {
+export function openProviderLoginModal(p, onReload, onOpenBrowser) {
+  const acct = getAccount(p.id);
+  const emailInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: `${p.name} e-posta veya kullanıcı adınız...`,
+    value: state.self?.email || '',
+  });
+  const profInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'Profil Adı (örn. Mert 4K UHD)',
+    value: acct.profileName || state.self?.name || '4K UHD',
+  });
+
+  popup({
+    title: `🔑 ${p.name} Hesap Girişi & Canlı Portal`,
+    content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+      h('div', { class: 'dim', style: { fontSize: '.85rem', lineHeight: '1.45' } },
+        `${p.name} hesabınızı Watchlivo ile ilişkilendirin veya dahili platform gezginini açarak doğrudan ${p.name} içinde gezinin.`),
+      emailInp,
+      profInp,
+      acct.loginUrl ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
+        h('button', {
+          type: 'button',
+          class: 'btn sm',
+          onclick: () => {
+            window.open(acct.loginUrl, '_blank', 'noopener,noreferrer');
+            toast(`↗ ${p.name} resmi oturum sayfası yeni sekmede açıldı`);
+          },
+        }, `↗ ${p.name} Resmi Giriş Sekmesi`),
+        onOpenBrowser ? h('button', {
+          type: 'button',
+          class: 'btn sm',
+          onclick: () => {
+            document.querySelector('#popup-root .modal-backdrop')?.remove();
+            onOpenBrowser(acct.loginUrl || acct.browseUrl);
+          },
+        }, `🌐 Dahili Tarayıcıda Aç`) : null
+      ) : null
+    ),
+    options: [
+      {
+        label: '✓ Girişi Kaydet & Bağla',
+        primary: true,
+        onClick: async () => {
+          const em = emailInp.value.trim() || state.self?.email || `${state.self?.handle || 'uye'}@${p.id}.com`;
+          const pr = profInp.value.trim() || state.self?.name || '4K UHD';
+          const local = readLocalAccounts();
+          local[p.id] = {
+            loginSatisfied: true,
+            userAuthenticated: true,
+            accountEmail: em,
+            profileName: pr,
+            updatedAt: Date.now(),
+          };
+          saveLocalAccounts(local);
+          try {
+            await api('/api/rave/accounts/login', {
+              method: 'POST',
+              body: { provider: p.id, email: em, profileName: pr },
+            });
+          } catch (e) { /* ignore */ }
+          await fetchAccounts();
+          toast(`✓ ${p.name} hesabınız (${maskAccountEmail(em)}) bağlandı!`);
+          onReload?.();
+        },
+      },
+      ...(acct.loginSatisfied ? [{
+        label: 'Bağlantıyı Kes',
+        onClick: () => logoutAccount(p.id, onReload),
+      }] : []),
+      { label: 'Kapat' },
+    ],
+  });
+}
+
+export function renderAccountBar(p, onReload, onPickUrl) {
   const acct = getAccount(p.id);
   const wrap = h('div', { class: 'rave-auth-wrap' });
+  const browserHost = h('div', { class: 'wl-portal-browser-slot' });
+  let currentPortalUrl = acct.browseUrl || acct.loginUrl || 'https://www.google.com';
+  let browserOpen = false;
+
+  const openEmbeddedPortal = (targetUrl) => {
+    currentPortalUrl = targetUrl || acct.browseUrl || acct.loginUrl;
+    browserOpen = true;
+    const addrInput = h('input', {
+      class: 'input rave-inp flex',
+      value: currentPortalUrl,
+      placeholder: `${p.name} adresi veya film/dizi bağlantısı...`,
+    });
+    const iframeEl = h('iframe', {
+      class: 'wl-browser-frame',
+      src: `/api/rave/browser-proxy?provider=${encodeURIComponent(p.id)}&url=${encodeURIComponent(currentPortalUrl)}`,
+      sandbox: 'allow-forms allow-scripts allow-same-origin allow-popups',
+    });
+    const navTo = (u) => {
+      let clean = String(u || '').trim();
+      if (!clean) return;
+      if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
+      currentPortalUrl = clean;
+      addrInput.value = clean;
+      iframeEl.src = `/api/rave/browser-proxy?provider=${encodeURIComponent(p.id)}&url=${encodeURIComponent(clean)}`;
+    };
+    addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navTo(addrInput.value); });
+
+    const onMsg = (ev) => {
+      const d = ev.data;
+      if (!d || typeof d !== 'object') return;
+      if (d.type === 'watchlivo_portal_nav' && d.url) {
+        currentPortalUrl = d.url;
+        addrInput.value = d.url;
+      } else if (d.type === 'watchlivo_portal_pick' && d.url && onPickUrl) {
+        toast(`🎬 ${d.title || p.name} odaya aktarılıyor...`);
+        onPickUrl(d.url, d.title || `${p.name} İçeriği`);
+      }
+    };
+    window.addEventListener('message', onMsg);
+
+    browserHost.replaceChildren(
+      h('div', { class: 'wl-embedded-browser fade-in' },
+        h('div', { class: 'wl-browser-Addressbar' },
+          h('button', { class: 'btn sm', onclick: () => navTo(acct.browseUrl || acct.loginUrl) }, '🏠 Ana Sayfa'),
+          acct.loginUrl ? h('button', { class: 'btn sm', onclick: () => navTo(acct.loginUrl) }, '🔑 Giriş Ekranı') : null,
+          addrInput,
+          h('button', { class: 'btn sm', onclick: () => navTo(addrInput.value) }, 'Git'),
+          h('button', {
+            class: 'btn sm primary',
+            onclick: () => {
+              if (onPickUrl) onPickUrl(addrInput.value.trim() || currentPortalUrl, `${p.name} İçeriği`);
+            },
+          }, '▶ Bu Sayfayı Odada Başlat'),
+          h('button', {
+            class: 'btn sm',
+            onclick: () => {
+              browserOpen = false;
+              window.removeEventListener('message', onMsg);
+              browserHost.replaceChildren();
+            },
+          }, '✕ Kapat')
+        ),
+        iframeEl
+      )
+    );
+  };
+
+  if (!acct.freeNoAuth && (acct.loginUrl || acct.browseUrl)) {
+    const statusBadge = acct.loginSatisfied
+      ? h('span', { class: 'p-badge-connected' }, `✓ Bağlı · ${acct.accountEmail || acct.profileName}`)
+      : h('span', { class: 'p-badge-portal' }, '🔑 Hesap Girişi & Canlı Katalog');
+
+    const portalCard = h('div', { class: 'wl-portal-card', style: { borderColor: `${acct.accent || '#00f5d4'}44` } },
+      h('div', { class: 'wl-portal-top' },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+            h('strong', { style: { fontSize: '14px', color: '#fff' } }, `${p.name} Platform Portalı`),
+            statusBadge),
+          h('span', { class: 'dim', style: { fontSize: '12px' } },
+            `${p.name} hesabınızla giriş yapabilir, dahili tarayıcıyla platform içinde gezinebilir veya aşağıdaki 4K katalogdan doğrudan film/dizi seçebilirsiniz.`)),
+        h('div', { class: 'wl-portal-actions' },
+          h('button', {
+            type: 'button',
+            class: 'btn sm primary',
+            onclick: () => openProviderLoginModal(p, onReload, openEmbeddedPortal),
+          }, acct.loginSatisfied ? `⚙️ Hesap (${acct.profileName})` : `🔑 ${p.name} Giriş Yap`),
+          h('button', {
+            type: 'button',
+            class: 'btn sm',
+            onclick: () => {
+              if (browserOpen) {
+                browserOpen = false;
+                browserHost.replaceChildren();
+              } else {
+                openEmbeddedPortal(acct.browseUrl || acct.loginUrl);
+              }
+            },
+          }, `🌐 ${p.name} İçinde Gezin`))));
+
+    wrap.append(portalCard, browserHost);
+  }
 
   if (onPickUrl) {
     const ph = acct.freeNoAuth || !acct.browseUrl

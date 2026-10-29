@@ -5269,6 +5269,83 @@ async def rave_suno_generate(request: Request):
     return JSONResponse(res)
 
 
+
+async def rave_browser_proxy(request: Request):
+    target_url = (request.query_params.get("url") or "").strip()[:2000]
+    prov = (request.query_params.get("provider") or "netflix").strip().lower()[:32]
+    if not target_url.startswith(("http://", "https://")) or not public_http_url(target_url):
+        return HTMLResponse("<h3>Geçersiz bağlantı</h3>", status_code=400)
+    parsed = urllib.parse.urlparse(target_url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+
+    def _fetch_portal_html() -> str:
+        try:
+            req = urllib.request.Request(
+                target_url,
+                headers={
+                    "User-Agent": UA137,
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+                },
+            )
+            with _public_open(req, timeout=6.5) as r:
+                raw = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                final_u = r.geturl() or target_url
+        except Exception:
+            raw = ""
+            final_u = target_url
+
+        helper_bar = f"""
+<base href="{html.escape(origin)}/" />
+<style>
+  #wl-portal-helper {{
+    position: fixed; bottom: 14px; right: 14px; z-index: 2147483647;
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(10, 15, 28, 0.94); color: #fff;
+    border: 1px solid #00f5d4; border-radius: 999px;
+    padding: 8px 16px; font-family: system-ui, sans-serif; font-size: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 18px rgba(0,245,212,0.35);
+  }}
+  #wl-portal-helper button {{
+    background: #00f5d4; color: #05070f; border: none; border-radius: 999px;
+    padding: 6px 14px; font-weight: 800; font-size: 12px; cursor: pointer;
+  }}
+</style>
+<div id="wl-portal-helper">
+  <span>🟢 Watchlivo Canlı Platform Gezgini ({html.escape(prov.upper())})</span>
+  <button type="button" onclick="window.parent.postMessage({{type:'watchlivo_portal_pick', url:{json.dumps(final_u)}, title:document.title||{json.dumps(prov.upper())}, provider:{json.dumps(prov)}}}, '*')">▶ Bu Sayfayı Odada Başlat</button>
+</div>
+<script>
+document.addEventListener('click', function(e) {{
+  var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+  if (!a) return;
+  var href = a.href;
+  if (href && /^https?:\/\//i.test(href)) {{
+    e.preventDefault();
+    var ttl = (a.innerText || a.getAttribute('aria-label') || a.title || '').trim();
+    window.parent.postMessage({{type:'watchlivo_portal_nav', url: href, title: ttl, provider: {json.dumps(prov)}}}, '*');
+    window.location.href = '/api/rave/browser-proxy?provider=' + encodeURIComponent({json.dumps(prov)}) + '&url=' + encodeURIComponent(href);
+  }}
+}}, true);
+</script>
+"""
+        if raw and len(raw) > 400 and ("<body" in raw.lower() or "<html" in raw.lower()):
+            raw = re.sub(r'<meta[^>]+http-equiv=["\']?Content-Security-Policy["\']?[^>]*>', '', raw, flags=re.I)
+            raw = re.sub(r'<meta[^>]+http-equiv=["\']?X-Frame-Options["\']?[^>]*>', '', raw, flags=re.I)
+            if "<head" in raw.lower():
+                raw = re.sub(r'(<head[^>]*>)', r'\1' + helper_bar, raw, count=1, flags=re.I)
+            else:
+                raw = helper_bar + raw
+            return raw
+        return helper_bar
+
+    html_out = await asyncio.to_thread(_fetch_portal_html)
+    return HTMLResponse(html_out, headers={
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": "*",
+    })
+
+
 import auth_engine
 import music_engine
 
@@ -5316,6 +5393,7 @@ app = Starlette(
         Route("/api/rave/accounts/login", rave_login_account, methods=["POST"]),
         Route("/api/rave/accounts/browser-login", rave_browser_login, methods=["POST"]),
         Route("/api/rave/accounts/logout", rave_logout_account, methods=["POST"]),
+        Route("/api/rave/browser-proxy", rave_browser_proxy, methods=["GET", "POST"]),
         Route("/api/rave/bridge", rave_bridge, methods=["GET", "POST"]),
         Route("/api/rave/site-data", rave_site_data),
         Route("/api/rave/gifs", gifs),
