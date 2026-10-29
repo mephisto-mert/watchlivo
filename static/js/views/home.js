@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v13';
-import { state, set } from '../store.js?v=20261029_v13';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v13';
-import { api } from '../api.js?v=20261029_v13';
-import { createSelection } from './selection.js?v=20261029_v13';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v13';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261030_v15';
+import { state, set } from '../store.js?v=20261030_v15';
+import { avatar, profileSetup } from '../profile.js?v=20261030_v15';
+import { api } from '../api.js?v=20261030_v15';
+import { createSelection } from './selection.js?v=20261030_v15';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261030_v15';
 
 let refreshTimer = null;
 let rooms = [];
@@ -161,25 +161,31 @@ export function renderHome(app) {
         onclick: () => openDownloadModal()
       }, 'Uygulamalar')));
 
+  const makeDockLabel = (id) => ({
+    home: 'Keşfet',
+    cinema: 'Sinema & Dizi',
+    tv: 'Canlı TV',
+    radio: 'Radyo',
+    friends: 'Odalar',
+    favs: 'Favoriler',
+    watch: 'Canlı Oda',
+    settings: 'Tema'
+  }[id] || id);
+
   const makeDockBtn = (id, title, svgHtml, isAct, onClick) => {
     const b = h('button', {
       type: 'button',
       class: `dock-btn ${isAct ? 'active' : ''}`,
       'data-view': id,
       title,
-      html: svgHtml,
       onclick: () => {
         dockEl.querySelectorAll('.dock-btn').forEach((x) => x.classList.toggle('active', x === b));
         onClick();
       },
-    });
-    b.addEventListener('mousemove', (e) => {
-      const rect = b.getBoundingClientRect();
-      const x = e.clientX - rect.left - rect.width / 2;
-      const y = e.clientY - rect.top - rect.height / 2;
-      b.style.transform = `translate(${x * 0.25}px, ${y * 0.25}px) scale(1.12)`;
-    });
-    b.addEventListener('mouseleave', () => { b.style.transform = ''; });
+    },
+      h('span', { class: 'dock-ico', html: svgHtml }),
+      h('span', { class: 'dock-lbl' }, makeDockLabel(id))
+    );
     return b;
   };
 

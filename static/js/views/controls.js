@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v13';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v13';
-import { getProvider } from '../providers.js?v=20261029_v13';
-import { expectedPosition } from '../sync.js?v=20261029_v13';
-import { thumbFor } from './lobby.js?v=20261029_v13';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v13';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v13';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v13';
-import { avatar } from '../profile.js?v=20261029_v13';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v15';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v15';
+import { getProvider } from '../providers.js?v=20261030_v15';
+import { expectedPosition } from '../sync.js?v=20261030_v15';
+import { thumbFor } from './lobby.js?v=20261030_v15';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v15';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v15';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v15';
+import { avatar } from '../profile.js?v=20261030_v15';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -250,8 +250,7 @@ export function buildControls(frame, ctx) {
   const ambilightCanvas = h('canvas', { class: 'ambilight-canvas', width: '32', height: '18' });
   let curFilter = localStorage.getItem('vortex_video_filter') || 'normal';
   let danmakuEnabled = localStorage.getItem('vortex_danmaku') !== 'off';
-  let ambilightEnabled = localStorage.getItem('vortex_ambilight') === 'on';
-  if (ambilightEnabled) ambilightCanvas.classList.add('on');
+  let ambilightEnabled = false;
   let autoAdvancingKey = '';
   let cancelledNextEpKey = '';
   const seatReactions = new Map();

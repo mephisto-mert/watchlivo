@@ -3,10 +3,10 @@ const listeners = new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
 
 export const THEME_SCHEMAS = [
-  { id: 'obsidian', name: 'Obsidyen Karbon', desc: 'Rave & Discord koyu karbon şeması', swatch: '#07080c', accent: '#00f5d4' },
+  { id: 'obsidian', name: 'Sinema İndigo',   desc: 'Watchlivo Studio koyu karbon & kraliyet indigosu', swatch: '#07080d', accent: '#6366f1' },
   { id: 'oled',     name: 'OLED Tam Siyah',  desc: 'Sıfır ışık sızıntılı #000000 sinema modu', swatch: '#000000', accent: '#38bdf8' },
-  { id: 'crimson',  name: 'Kızıl Sinema',    desc: 'Netflix & Teleparty koyu kızıl ambiyans', swatch: '#0b0608', accent: '#e50914' },
-  { id: 'midnight', name: 'Gece Safiri',     desc: 'Hyperbeam & IMAX gece mavisi tonları', swatch: '#070a10', accent: '#38bdf8' },
+  { id: 'crimson',  name: 'Kızıl Sinema',    desc: 'Netflix & Teleparty koyu kızıl ambiyans', swatch: '#0b0608', accent: '#f43f5e' },
+  { id: 'midnight', name: 'Gece Safiri',     desc: 'Hyperbeam & IMAX gece mavisi tonları', swatch: '#070a10', accent: '#3b82f6' },
   { id: 'emerald',  name: 'Zümrüt Matris',   desc: 'Koyu zümrüt ve siber siyah kontrast', swatch: '#050b09', accent: '#10b981' },
 ];
 

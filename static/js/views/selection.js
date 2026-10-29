@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v13';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v13';
-import { api, qs } from '../api.js?v=20261029_v13';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v13';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v13';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v13';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v15';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v15';
+import { api, qs } from '../api.js?v=20261030_v15';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v15';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v15';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v15';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -30,25 +30,6 @@ const OFFER_MAP = [
 const offerProvider = (name) => (OFFER_MAP.find(([re]) => re.test(name)) || [])[1] || null;
 
 export function attachTilt(card) {
-  if (typeof window !== 'undefined') {
-    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return card;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return card;
-  }
-  card.addEventListener('mouseenter', () => { card.style.transition = 'box-shadow 0.2s, border-color 0.2s'; });
-  card.addEventListener('mousemove', (e) => {
-    const rect = card.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const centerX = rect.width / 2;
-    const centerY = rect.height / 2;
-    const rotateX = ((y - centerY) / centerY) * -6;
-    const rotateY = ((x - centerX) / centerX) * 6;
-    card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
-  });
-  card.addEventListener('mouseleave', () => {
-    card.style.transition = '';
-    card.style.transform = '';
-  });
   return card;
 }
 
