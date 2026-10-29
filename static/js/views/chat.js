@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, toast, popup } from '../ui.js?v=20261029_v7';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v7';
-import { avatar } from '../profile.js?v=20261029_v7';
-import { api, qs } from '../api.js?v=20261029_v7';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v7';
+import { h, icons, toast, popup } from '../ui.js?v=20261029_v8';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v8';
+import { avatar } from '../profile.js?v=20261029_v8';
+import { api, qs } from '../api.js?v=20261029_v8';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v8';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -84,7 +84,12 @@ const PRIVACY = [
   ['private', 'Gizli', 'lock', 'Yalnızca davet edilenler katılabilir'],
 ];
 
-export const inviteUrl = () => `${location.origin}/#/mesh/${encodeURIComponent(state.mesh?.id || state.route.params.id || '')}`;
+export const inviteUrl = () => {
+  const rid = state.mesh?.id || state.route.params.id || '';
+  const base = `${location.origin}/#/mesh/${encodeURIComponent(rid)}`;
+  const tok = state.mesh?.syncToken || (rid ? sessionStorage.getItem(`vortex_st_${rid}`) : '') || '';
+  return tok ? `${base}?r_tok=${encodeURIComponent(tok)}` : base;
+};
 
 export async function copyInvite() {
   try { await navigator.clipboard.writeText(inviteUrl()); toast('Paylaşım bağlantısı panoya kopyalandı'); }

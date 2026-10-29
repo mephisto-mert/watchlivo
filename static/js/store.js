@@ -122,15 +122,23 @@ const FAV_KEY = 'vortex_favorites_v1';
 export function getWatchHistory() {
   try {
     const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
-    return Array.isArray(raw) ? raw.map((it) => ({ ...it, currentTime: 0 })) : [];
+    return Array.isArray(raw) ? raw : [];
   } catch (e) {
     return [];
   }
 }
 
-export function saveWatchProgress(media, _currentTime, duration) {
+export function clearWatchHistory() {
+  try {
+    localStorage.setItem(HISTORY_KEY, '[]');
+    set({});
+  } catch (e) { /* ignore */ }
+}
+
+export function saveWatchProgress(media, currentTime, duration) {
   if (!media || (!media.url && !media.videoId && !media.tmdbId)) return;
   const dur = Math.floor(Number(duration || media.duration || 0));
+  const resumeTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 5 ? Math.floor(Number(currentTime)) : 0;
   try {
     const id = media.tmdbId ? `${media.mediaType || 'movie'}:${media.tmdbId}` : (media.videoId || media.url || media.title);
     const list = getWatchHistory().filter((item) => item.historyId !== id);
@@ -147,7 +155,7 @@ export function saveWatchProgress(media, _currentTime, duration) {
       episode: media.episode || 1,
       url: media.url || '',
       videoId: media.videoId || '',
-      currentTime: 0,
+      currentTime: resumeTime,
       duration: dur,
       updatedAt: Date.now(),
     });

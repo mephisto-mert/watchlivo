@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v7';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v7';
-import { api, qs } from '../api.js?v=20261029_v7';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v7';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v7';
-import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v7';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v8';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v8';
+import { api, qs } from '../api.js?v=20261029_v8';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v8';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v8';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v8';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -166,13 +166,20 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   async function pickRandomMovie(btnEl) {
     if (btnEl) { btnEl.disabled = true; btnEl.textContent = '🎲 Seçiliyor...'; }
     try {
-      const items = await ensureTrending();
+      let items = [];
+      if (provider && provider.kind === 'catalog') {
+        try {
+          const res = await api(`/api/rave/catalog?${qs({ provider: provider.id, page: 1 })}`, { timeout: 10000 });
+          items = res.items || [];
+        } catch (e) { /* fallback to trending */ }
+      }
+      if (!items.length) items = await ensureTrending();
       const movies = items.filter((it) => it.mediaType !== 'tv');
       const pool = movies.length ? movies : items;
       if (!pool.length) { toast('Katalog yüklenemedi, lütfen tekrar dene'); return; }
       const chosen = pool[Math.floor(Math.random() * pool.length)];
       toast(`🎲 Rastgele Seçim: ${chosen.title} hazırlanıyor...`);
-      const defProv = getProvider(chosen.provider || 'netflix') || { id: 'netflix', name: 'Netflix' };
+      const defProv = provider || getProvider(chosen.provider || 'netflix') || { id: 'netflix', name: 'Netflix' };
       const media = await resolveCatalogItem(chosen, defProv, 1, 1);
       if (media) await pickSafe(media);
     } finally {
@@ -290,24 +297,36 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const historyList = !compact ? getWatchHistory().slice(0, 4) : [];
     const historyRail = historyList.length ? h('div', { class: 'continue-strip' },
-      h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar (Baştan):'),
+      h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar:'),
       ...historyList.map((item) => {
         const prov = getProvider(item.catalogProvider || item.provider || 'netflix');
+        const resumeSec = Number(item.currentTime) > 5 ? Math.floor(Number(item.currentTime)) : 0;
         return h('button', {
           type: 'button',
           class: 'continue-chip',
           onclick: async () => {
             if (item.tmdbId) {
               const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: item.title.split(' — ')[0], backdrop: item.thumbnail }, prov || { id: 'netflix', name: 'Netflix' }, item.season || 1, item.episode || 1);
-              if (resolved) { resolved.currentTime = 0; await pickSafe(resolved); return; }
+              if (resolved) { resolved.currentTime = resumeSec; await pickSafe(resolved); return; }
             }
-            await pickSafe({ ...item, currentTime: 0 });
+            await pickSafe({ ...item, currentTime: resumeSec });
           },
         },
           prov?.logo ? h('img', { src: prov.logo, alt: '' }) : null,
           h('span', { class: 'c-title' }, item.title),
-          h('span', { class: 'c-pct' }, '0:00'));
-      })) : null;
+          h('span', { class: 'c-pct' }, resumeSec > 0 ? fmtDur(resumeSec) : '0:00'));
+      }),
+      h('button', {
+        type: 'button',
+        class: 'btn sm ghost continue-clear-btn',
+        title: 'İzleme geçmişini temizle',
+        style: { marginLeft: 'auto', fontSize: '.74rem', opacity: '.78' },
+        onclick: () => {
+          clearWatchHistory();
+          renderGrid();
+          toast('🧹 Son açılanlar geçmişi temizlendi');
+        },
+      }, 'Temizle ×')) : null;
 
     const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
@@ -586,6 +605,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   root.render = render;
   root.setProvider = (id) => { provider = id ? getProvider(id) : null; render(); };
+  root.openFavorites = () => {
+    provider = getProvider('cinema');
+    render();
+    setTimeout(() => {
+      const favTab = root.querySelector('.cat-tab-pill[data-cat="favs"]');
+      if (favTab) favTab.click();
+    }, 60);
+  };
   return root;
 }
 

@@ -154,6 +154,9 @@ class RateLimiter:
                         retry = float(ttl)  # type: ignore[arg-type]
                     except (TypeError, ValueError):
                         retry = self.window
+                    if retry < 0:
+                        self._kv("EXPIRE", key, int(self.window) or 1)
+                        retry = self.window
                     return False, max(1.0, retry)
                 return True, 0.0
         t = time.time()
@@ -187,19 +190,13 @@ def client_ip(scope_or_request) -> str:
         headers = scope_or_request.headers  # type: ignore[assignment]
     except Exception:
         pass
-    fwd = ""
-    try:
-        fwd = (headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    except Exception:
-        fwd = ""
-    if fwd:
-        return fwd[:64]
-    try:
-        real = headers.get("x-real-ip") or ""
-        if real:
-            return str(real)[:64]
-    except Exception:
-        pass
+    for hdr_name in ("x-vercel-forwarded-for", "cf-connecting-ip", "x-forwarded-for", "x-real-ip"):
+        try:
+            val = (headers.get(hdr_name) or "").split(",")[0].strip()
+            if val:
+                return val[:64]
+        except Exception:
+            continue
     try:
         client = getattr(scope_or_request, "client", None)
         if client and getattr(client, "host", None):

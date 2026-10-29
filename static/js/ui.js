@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v7';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v8';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -94,13 +94,26 @@ export const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).f
 
 export function toast(text, ms = 2600) {
   const t = h('div', { class: 'toast acrylic' }, text);
-  document.getElementById('toast-root').append(t);
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  let host = document.getElementById('toast-root');
+  if (fsEl && host && !fsEl.contains(host)) {
+    fsEl.appendChild(host);
+  } else if (!fsEl && host && host.parentElement !== document.body) {
+    document.body.appendChild(host);
+  }
+  (host || document.body).append(t);
   setTimeout(() => t.remove(), ms);
 }
 
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable }
 export function popup({ title, message, options = [], content = null, dismissable = true } = {}) {
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   const root = document.getElementById('popup-root');
+  if (fsEl && root && !fsEl.contains(root)) {
+    fsEl.appendChild(root);
+  } else if (!fsEl && root && root.parentElement !== document.body) {
+    document.body.appendChild(root);
+  }
   const onKey = (e) => {
     if (e.key === 'Escape' && dismissable) {
       close();

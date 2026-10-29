@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v7';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v7';
-import { getProvider } from '../providers.js?v=20261029_v7';
-import { expectedPosition } from '../sync.js?v=20261029_v7';
-import { thumbFor } from './lobby.js?v=20261029_v7';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v7';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v7';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v7';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v8';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v8';
+import { getProvider } from '../providers.js?v=20261029_v8';
+import { expectedPosition } from '../sync.js?v=20261029_v8';
+import { thumbFor } from './lobby.js?v=20261029_v8';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v8';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v8';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v8';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -75,7 +75,10 @@ export function buildControls(frame, ctx) {
   const revealControls = (ms = 3200) => {
     controls.classList.add('ui-active');
     clearTimeout(uiTimer);
-    uiTimer = setTimeout(() => controls.classList.remove('ui-active'), ms);
+    uiTimer = setTimeout(() => {
+      if (!menu.classList.contains('hidden')) return;
+      controls.classList.remove('ui-active');
+    }, ms);
   };
   const doUnlockAudio = (e) => {
     if (e) { e.stopPropagation(); }
@@ -276,17 +279,20 @@ export function buildControls(frame, ctx) {
 
   async function triggerNextEpisode() {
     const m = state.mesh?.media;
-    if (!m || m.mediaType !== 'tv' || !m.tmdbId || !isLeader()) return;
-    const curKey = `${m.tmdbId}:${m.season || 1}:${m.episode || 1}`;
+    if (!m || m.mediaType !== 'tv' || !isLeader()) return;
+    if ((state.mesh?.queue || []).length > 0) return;
+    const cleanTitle = (m.seriesTitle || (m.title || 'Dizi').split(' — ')[0]).trim();
+    const seriesIdKey = m.tmdbId || m.id || cleanTitle;
+    if (!seriesIdKey) return;
+    const curKey = `${seriesIdKey}:${m.season || 1}:${m.episode || 1}`;
     if (autoAdvancingKey === curKey) return;
     autoAdvancingKey = curKey;
     nextEpBanner.classList.add('hidden');
     let targetSeason = Number(m.season || 1) || 1;
     let targetEp = (Number(m.episode || 1) || 1) + 1;
     let epName = '';
-    const cleanTitle = (m.title || 'Dizi').split(' — ')[0].trim();
     try {
-      const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId)}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+      const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
       if (r.ok) {
         const sData = await r.json();
         const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
@@ -294,21 +300,24 @@ export function buildControls(frame, ctx) {
         const foundEp = eps.find((x) => Number(x.episode) === targetEp);
         if (foundEp) {
           const rawName = String(foundEp.name || '').trim();
-          const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})$`, 'i').test(rawName);
+          const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
           epName = isRedundant ? '' : rawName;
         } else if (eps.length > 0 && targetEp > eps.length) {
           const hasNextSeason = seasons.some((s) => Number(s.season) === targetSeason + 1);
           if (hasNextSeason) {
             targetSeason += 1;
             targetEp = 1;
-            const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId)}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+            const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
             if (r2.ok) {
               const s2 = await r2.json();
               const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
-              if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)$/i.test(ep1.name.trim())) {
+              if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
                 epName = ep1.name.trim();
               }
             }
+          } else {
+            toast('🏁 Dizinin son bölümüne ulaşıldı');
+            return;
           }
         }
       }
@@ -316,7 +325,7 @@ export function buildControls(frame, ctx) {
     const prov = getProvider(m.catalogProvider || m.provider) || { id: 'cinema', name: 'Sinema & Dizi' };
     showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
     const nextMedia = await resolveCatalogItem(
-      { tmdbId: m.tmdbId, imdbId: m.imdbId, title: cleanTitle, originalTitle: m.originalTitle || cleanTitle, year: m.year || '', mediaType: 'tv', backdrop: m.thumbnail },
+      { tmdbId: m.tmdbId || '', imdbId: m.imdbId || '', title: cleanTitle, originalTitle: m.originalTitle || cleanTitle, year: m.year || '', mediaType: 'tv', backdrop: m.thumbnail },
       prov,
       targetSeason,
       targetEp,
@@ -356,12 +365,22 @@ export function buildControls(frame, ctx) {
     if (e.pointerType === 'touch') return;
     revealControls(3200);
   }, { passive: true });
+  frame.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch' && !controls.classList.contains('ui-active')) {
+      revealControls(4000);
+    }
+  }, { passive: true });
   frame.prepend(ambilightCanvas);
   frame.append(empty, loading, danmakuLayer, subOverlay, skipIntroBtn, nextEpBanner, controls, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target?.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
+    if (e.key === 'Escape') {
+      if (!menu.classList.contains('hidden')) { e.preventDefault(); closeMenu(); }
+      return;
+    }
     if (e.key === ' ' || e.key === 'k') {
       e.preventDefault();
       if (!isLeader()) {
@@ -387,17 +406,34 @@ export function buildControls(frame, ctx) {
       if (isLeader()) seekStep(10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
+    else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const nv = Math.min(100, Number(host.volume || 80) + 5);
+      host.setVolume(nv);
+      if (isActuallyMuted()) doUnlockAudio();
+      showOverlay(`🔊 Ses: %${nv}`, 1000);
+      update();
+    }
+    else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const nv = Math.max(0, Number(host.volume || 80) - 5);
+      host.setVolume(nv);
+      showOverlay(`🔉 Ses: %${nv}`, 1000);
+      update();
+    }
     else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
     else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }
-    else if (e.key === '[' || e.key === 'z' || e.key === 'Z') {
+    else if (e.key === '[' || e.key === 'z' || e.key === 'Z' || e.key === ',') {
       e.preventDefault();
-      const off = host.adapter?.subs?.setSubtitleOffset?.(-0.5);
+      const step = e.key === ',' ? -0.2 : -0.5;
+      const off = host.adapter?.subs?.setSubtitleOffset?.(step);
       showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
       revealControls();
     }
-    else if (e.key === ']' || e.key === 'x' || e.key === 'X') {
+    else if (e.key === ']' || e.key === 'x' || e.key === 'X' || e.key === '.') {
       e.preventDefault();
-      const off = host.adapter?.subs?.setSubtitleOffset?.(0.5);
+      const step = e.key === '.' ? 0.2 : 0.5;
+      const off = host.adapter?.subs?.setSubtitleOffset?.(step);
       showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
       revealControls();
     }
@@ -443,7 +479,10 @@ export function buildControls(frame, ctx) {
     const d = duration();
     if (!d) { seekPreview.classList.add('hidden'); return; }
     const r = timeline.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (e.clientX - r.left) / (r.width || 1)));
+    const isRotated = r.height > r.width;
+    const ratio = isRotated
+      ? Math.max(0, Math.min(1, (e.clientY - r.top) / (r.height || 1)))
+      : Math.max(0, Math.min(1, (e.clientX - r.left) / (r.width || 1)));
     const target = ratio * d;
     seekPreview.classList.remove('hidden');
     seekPreview.style.left = `${Math.max(8, Math.min(92, ratio * 100))}%`;
@@ -595,14 +634,15 @@ export function buildControls(frame, ctx) {
 
   function openEpisodeModal() {
     const m = state.mesh?.media;
-    if (!m?.tmdbId) return;
+    if (!m || m.mediaType !== 'tv') return;
     const prov = getProvider(m.catalogProvider || m.provider) || getProvider('cinema') || getProvider('netflix');
-    const cleanTitle = (m.title || 'Dizi').split(' — ')[0].trim();
+    const cleanTitle = (m.seriesTitle || (m.title || 'Dizi').split(' — ')[0]).trim();
     const box = h('div', { style: { minHeight: '280px' } });
     popup({ title: `📺 ${cleanTitle} — Sezon & Bölüm Seç`, content: box, options: [{ label: 'Kapat' }] });
     renderSeriesPicker(
       {
-        tmdbId: m.tmdbId,
+        id: m.id || '',
+        tmdbId: m.tmdbId || '',
         imdbId: m.imdbId || '',
         title: cleanTitle,
         originalTitle: m.originalTitle || cleanTitle,
@@ -713,6 +753,28 @@ export function buildControls(frame, ctx) {
             update();
           },
         }, h('span', {}, t.label), curSubId === t.id ? h('span', {}, '✓') : null)),
+        h('div', {
+          class: 'opt',
+          onclick: (e) => {
+            e.stopPropagation();
+            const fIn = document.createElement('input');
+            fIn.type = 'file';
+            fIn.accept = '.srt,.vtt,.ass,.ssa,.sub';
+            fIn.onchange = async () => {
+              const f = fIn.files?.[0];
+              if (!f) return;
+              const trk = await host.adapter?.subs?.loadLocalSubtitleFile?.(f);
+              if (trk) {
+                showOverlay(`📁 Altyazı yüklendi: ${f.name}`, 2000);
+                closeMenu();
+                update();
+              } else {
+                toast('Altyazı dosyası okunamadı (.srt, .vtt veya .ass seçin)');
+              }
+            };
+            fIn.click();
+          },
+        }, h('span', {}, '📁 Bilgisayardan Altyazı Seç (.srt, .vtt, .ass)')),
       ];
       const quickStyleRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.3em' } },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, '🔤 Altyazı Boyutu & Rengi'),
@@ -730,10 +792,12 @@ export function buildControls(frame, ctx) {
       const curFps = Number(host.adapter?.subs?.fpsScale || 1.0);
       const offsetRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.2em' } },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, `⏱️ Altyazı Senkron Kaydırma (${curOff >= 0 ? '+' : ''}${curOff} sn)`),
-        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '4px' } },
+        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' } },
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-2.0); renderMenuView('subtitle'); } }, '-2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.5); renderMenuView('subtitle'); } }, '-0.5s'),
+          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.2); renderMenuView('subtitle'); } }, '-0.2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0, true); host.adapter?.subs?.setSubtitleFpsScale?.(1.0); renderMenuView('subtitle'); } }, 'Sıfırla'),
+          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.2); renderMenuView('subtitle'); } }, '+0.2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.5); renderMenuView('subtitle'); } }, '+0.5s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(2.0); renderMenuView('subtitle'); } }, '+2s')),
         h('div', { class: 'dim', style: { fontSize: '.72em', marginBottom: '4px' } }, '🎞️ İleri Sahne FPS Hız Uyumu'),
@@ -1041,7 +1105,7 @@ export function buildControls(frame, ctx) {
     title.textContent = m.title || 'Video';
     artist.textContent = m.channel || prov?.name || '';
     provLogo.src = prov?.logo || ''; provLogo.style.display = prov?.logo ? '' : 'none';
-    const isSeries = !!(m.tmdbId && m.mediaType === 'tv');
+    const isSeries = !!(m.mediaType === 'tv');
     epBtn.classList.toggle('hidden', !isSeries);
     nextEpTopBtn.classList.toggle('hidden', !isSeries || !isLeader());
     if (isSeries) {

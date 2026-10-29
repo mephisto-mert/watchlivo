@@ -271,6 +271,11 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
             if isinstance(s, dict) and (s.get("songTitle") or s.get("title"))
         ],
         "altVideoIds": [clean_str(v, 20) for v in (data.get("altVideoIds") or [])[:6] if isinstance(v, str) and v.strip()],
+        "id": clean_str(data.get("id"), 64),
+        "seriesTitle": clean_str(data.get("seriesTitle"), 160),
+        "originalTitle": clean_str(data.get("originalTitle"), 160),
+        "year": clean_str(data.get("year"), 12),
+        "origLang": clean_str(data.get("origLang"), 12),
         "tmdbId": clean_str(data.get("tmdbId"), 40),
         "imdbId": clean_str(data.get("imdbId"), 40),
         "mediaType": clean_str(data.get("mediaType"), 16),
@@ -539,7 +544,8 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
                 if pid not in by_id or sum(len(o.get("votes") or []) for o in sp.get("options") or []) >= sum(len(o.get("votes") or []) for o in by_id[pid].get("options") or []):
                     by_id[pid] = sp
         room["polls"] = list(by_id.values())[-10:]
-    room["rev"] = max(s_rev, r_rev, int(room.get("rev") or 1))
+    prev_c_len = len(room.get("chat") or [])
+    room["rev"] = max(s_rev, r_rev, int(room.get("rev") or 1)) + (1 if len(merged_c) > prev_c_len else 0)
     room["createdAt"] = min(s_ct, r_ct)
     room["kicked"] = list(kicked)[-50:]
     room["left"] = left_map
@@ -903,7 +909,6 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
             continue
         if p.get("transport") == "http" and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL:
             gone.append(room["participants"].pop(cid))
-            left_map[cid] = t
         elif p.get("transport") == "ws" and not STORE.shared and cid not in live_ws:
             gone.append(room["participants"].pop(cid))
             left_map[cid] = t
@@ -1142,6 +1147,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             room["queue"][idx]["votes"] = votes
             if mode == "vote":
                 room["queue"].sort(key=lambda x: len(x.get("votes") or []), reverse=True)
+            room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "vote_updated", "queue": room["queue"], "voteEndsAt": room["voteEndsAt"]}, None))
 
     elif mtype in ("queue_play_index", "queue_remove"):
@@ -1154,6 +1160,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             return out
         if 0 <= idx < len(room["queue"]):
             item = room["queue"].pop(idx)
+            room["rev"] = int(room.get("rev") or 1) + 1
             if mtype == "queue_play_index":
                 set_media(room, item, name)
                 sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}")
@@ -1164,6 +1171,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     elif mtype == "vote_skip":
         if cid not in room["skip_votes"]:
             room["skip_votes"].append(cid)
+        room["rev"] = int(room.get("rev") or 1) + 1
         needed = max(1, len(room["participants"]) // 2 + 1)
         if len(room["skip_votes"]) >= needed and room["queue"]:
             _play_next(room, "Atlama oylaması")
@@ -1176,6 +1184,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if key and key == media_key(room["media"]) and room["endedKey"] != key:
             room["endedKey"] = key
             room["media"]["playing"] = False
+            room["rev"] = int(room.get("rev") or 1) + 1
             if room["queue"] and mode == "vote":
                 room["voteEndsAt"] = now() + VOTE_WINDOW
                 out["broadcast"].append(({"type": "vote_updated", "queue": room["queue"], "voteEndsAt": room["voteEndsAt"]}, None))
@@ -1226,6 +1235,7 @@ def _handle_social(room, cid, data, out, name, is_host):
             msg = {"id": uuid.uuid4().hex[:10], "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
                    "time": time.strftime("%H:%M"), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
             room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]
+            room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "clear_chat":
         if not (is_host or cid in (room.get("co_hosts") or [])):
@@ -1344,6 +1354,8 @@ def _handle_social(room, cid, data, out, name, is_host):
     elif mtype == "profile_update":
         me["name"] = clean_str(data.get("name"), 24) or me["name"]
         me["color"] = clean_str(data.get("color"), 16) or me["color"]
+        room["_parts_list"] = None
+        room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
     elif mtype == "poll_create":
         question = clean_str(data.get("question"), 140)
@@ -1368,6 +1380,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 "ts": t_now,
             }
             room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]
+            room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "poll_updated", "poll": poll, "polls": room["polls"]}, None))
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "poll_vote":
@@ -1385,6 +1398,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                     o["votes"] = [v for v in (o.get("votes") or []) if v != voter_tag and (name == "Misafir" or v != name)]
                 if not already:
                     poll["options"][opt_idx]["votes"].append(voter_tag)
+                room["rev"] = int(room.get("rev") or 1) + 1
                 out["broadcast"].append(({"type": "poll_updated", "poll": poll, "polls": room["polls"]}, None))
                 break
     return out
@@ -1625,6 +1639,8 @@ async def ws_endpoint(websocket: WebSocket):
         print("[ws] error", repr(e))
     finally:
         SOCKETS.get(room_id, {}).pop(cid, None)
+        if room_id in SOCKETS and not SOCKETS[room_id]:
+            SOCKETS.pop(room_id, None)
         async with STORE.lock(room_id):
             room = await STORE.get(room_id)
             left = room["participants"].pop(cid, None) if room else None
@@ -1714,10 +1730,11 @@ async def http_sync(request: Request):
         prev_seen = float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
         pruned = prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-        if was_empty_humans:
+        empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
+        if was_empty_humans and (room.get("curated") or empty_elapsed > 45.0):
             room["chat"] = []
             room["polls"] = []
-            if room.get("media"):
+            if room.get("media") and not data.get("syncToken"):
                 room["media"]["currentTime"] = 0.0
                 room["media"]["updatedAt"] = now()
                 room["media"]["playing"] = True
@@ -1727,6 +1744,7 @@ async def http_sync(request: Request):
                     room["creator"] = spec.get("creator", "Watchlivo 7/24")
                     if "kinox_bot" in room.get("participants", {}):
                         room["participants"]["kinox_bot"]["name"] = room["creator"]
+        room.pop("emptySince", None)
         p, is_new = add_participant(room, cid, {**data, "uid": verified_uid}, "http")
         if is_new and len(room.get("chat") or []) < 12:
             sys_msg(room, "katıldı", p["name"])

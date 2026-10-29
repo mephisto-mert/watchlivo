@@ -2436,9 +2436,12 @@ body {
 }
 @media (max-width: 640px) {
   .top-nav-capsule { padding: 6px 10px; gap: 6px; }
-  .brand-wordmark { display: none; }
-  .nav-user-pill .wl-user-handle { display: none; }
+  .brand-wordmark, .logo-wordmark { display: none; }
+  .nav-user-pill .wl-user-handle, .wl-nav-account-sub, .wl-btn-apk-text { display: none; }
+  .btn-create-room { padding: 6px 10px; font-size: 11.5px; }
 }
+.popup-backdrop { z-index: 10000 !important; }
+.toast-root { z-index: 10100 !important; }
 @media (max-width: 400px) {
   .floating-dock {
     gap: 4px;

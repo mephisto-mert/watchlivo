@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v7';
-import { state, set } from '../store.js?v=20261029_v7';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v7';
-import { api } from '../api.js?v=20261029_v7';
-import { createSelection } from './selection.js?v=20261029_v7';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v7';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v8';
+import { state, set } from '../store.js?v=20261029_v8';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v8';
+import { api } from '../api.js?v=20261029_v8';
+import { createSelection } from './selection.js?v=20261029_v8';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v8';
 
 let refreshTimer = null;
 let rooms = [];
@@ -29,7 +29,8 @@ export function openRoom(room) {
 
 export async function createRoomWithMedia(media) {
   const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
-  const cleanMedia = media ? { ...media, currentTime: 0 } : media;
+  const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
+  const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
   let cid = '';
   try {
     cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
@@ -205,6 +206,10 @@ export function renderHome(app) {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 40);
     }),
+    makeDockBtn('favs', 'Favori Dizi & Filmlerim', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>', false, () => {
+      selection.openFavorites?.();
+      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    }),
     makeDockBtn('watch', 'Canlı İzleme Odası', icons.rooms, false, async () => {
       try {
         const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
@@ -232,6 +237,7 @@ export function renderHome(app) {
   const home = h('main', { class: 'home' }, homeScroll);
 
   app.replaceChildren(nav, home);
+  updateMiniPip();
   let emptyStreak = 0;
   const load = async () => {
     try {
@@ -270,4 +276,48 @@ function joinByCode() {
 
 function openAppSettings() {
   openThemeModal();
+}
+
+function updateMiniPip() {
+  const pipEl = document.getElementById('mini-pip');
+  if (!pipEl) return;
+  let activeId = '';
+  let activeTitle = 'Watchlivo Odası';
+  try {
+    const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
+    if (rec) {
+      activeId = rec;
+      const saved = JSON.parse(localStorage.getItem('vortex_room_snapshots_v1') || '{}')[rec];
+      if (saved?.media?.title) activeTitle = saved.media.title;
+      else if (saved?.name) activeTitle = saved.name;
+    }
+  } catch (e) { /* ignore */ }
+  const dismissed = sessionStorage.getItem('vortex_pip_dismissed');
+  if (!activeId || dismissed === activeId) {
+    pipEl.classList.remove('active');
+    return;
+  }
+  const titleEl = document.getElementById('pip-room-title');
+  if (titleEl) titleEl.textContent = activeTitle;
+  pipEl.classList.add('active');
+  const expandBtn = document.getElementById('pip-expand-btn');
+  const closeBtn = document.getElementById('pip-close-btn');
+  if (expandBtn) {
+    expandBtn.onclick = (e) => {
+      e.stopPropagation();
+      pipEl.classList.remove('active');
+      openRoom({ id: activeId });
+    };
+  }
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      try { sessionStorage.setItem('vortex_pip_dismissed', activeId); } catch {}
+      pipEl.classList.remove('active');
+    };
+  }
+  pipEl.onclick = () => {
+    pipEl.classList.remove('active');
+    openRoom({ id: activeId });
+  };
 }

@@ -434,10 +434,20 @@ def _tmdb_sync(q: str):
 FREE_TR_PROVIDERS = {"cinema", "hdfilmcehennemi", "dizibox", "dizilife", "fullhdfilm", "yabancidizi", "plex", "pluto", "tubi", "dizipal"}
 
 _MAIN_SITES_VAULT: dict = {"catalog": {"fhd": [], "hfnl": [], "dbx": []}, "streams": {}}
+_STREAM_URL_TO_SUBS: dict[str, list] = {}
 try:
     _ms_vault_path = BASE_DIR / "main_sites_vault.json"
     if _ms_vault_path.exists():
         _MAIN_SITES_VAULT = json.loads(_ms_vault_path.read_text(encoding="utf-8"))
+        for _vk, _vent in (_MAIN_SITES_VAULT.get("streams") or {}).items():
+            if isinstance(_vent, dict) and _vent.get("subs") and _vent.get("streams"):
+                _vsubs = [s for s in _vent["subs"] if isinstance(s, dict) and s.get("url")]
+                if _vsubs:
+                    for _st_pair in _vent["streams"]:
+                        if isinstance(_st_pair, (list, tuple)) and len(_st_pair) >= 1 and _st_pair[0]:
+                            _su_k = str(_st_pair[0]).strip()
+                            if _su_k and _su_k not in _STREAM_URL_TO_SUBS:
+                                _STREAM_URL_TO_SUBS[_su_k] = _vsubs
 except Exception:
     _MAIN_SITES_VAULT = {"catalog": {"fhd": [], "hfnl": [], "dbx": []}, "streams": {}}
 
@@ -927,8 +937,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     dom_hits.append(dict(d_it))
         for item in dom_hits + scraped_q + tmdb_items + jw_items:
             p_u = str(item.get("poster") or "").strip()
-            if p_u and "wsrv.nl" not in p_u and any(d in p_u for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
-                item["poster"] = f"https://wsrv.nl/?url={urllib.parse.quote(p_u, safe='')}&w=500&output=webp"
+            if p_u and "/api/rave/poster" not in p_u and any(d in p_u for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
+                item["poster"] = f"/api/rave/poster?u={urllib.parse.quote(p_u, safe='')}"
                 item["backdrop"] = item["poster"]
             tid = str(item.get("tmdbId") or item.get("id") or "")
             nt_key = _norm_title(item.get("title") or "")
@@ -951,7 +961,13 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         merged.sort(key=_rank, reverse=True)
         if mt_flt in ("tv", "movie"):
             merged = [x for x in merged if x.get("mediaType") == mt_flt]
-        return {"items": merged[:48], "totalAvailable": len(merged), "totalTv": sum(1 for x in merged if x.get("mediaType") == "tv"), "totalMovies": sum(1 for x in merged if x.get("mediaType") != "tv"), "page": 1, "hasMore": False}
+        elif cat == "series" or prov in ("dizibox", "dizilife", "yabancidizi"):
+            merged = [x for x in merged if x.get("mediaType") == "tv"]
+        elif cat == "movies" or (prov in ("hdfilmcehennemi", "fullhdfilm") and cat != "series"):
+            merged = [x for x in merged if x.get("mediaType") != "tv"]
+        start_q = max(0, (pg - 1) * 48)
+        sliced_q = merged[start_q:start_q + 48]
+        return {"items": sliced_q, "totalAvailable": len(merged), "totalTv": sum(1 for x in merged if x.get("mediaType") == "tv"), "totalMovies": sum(1 for x in merged if x.get("mediaType") != "tv"), "page": pg, "hasMore": len(merged) > start_q + 48}
 
     now_ts = time.time()
     cache_key = f"v2:{prov}:{cat}:{pg}:{mt_flt}"
@@ -1099,12 +1115,19 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
 
     def _safe_poster_url(u_img: str) -> str:
         u_img = str(u_img or "").strip()
-        if not u_img or u_img.startswith("/") or "wsrv.nl" in u_img:
+        if not u_img or u_img.startswith("/"):
             return u_img
+        if "wsrv.nl/?url=" in u_img:
+            try:
+                raw_inner = urllib.parse.unquote(u_img.split("url=", 1)[1].split("&", 1)[0])
+                if raw_inner.startswith("http"):
+                    u_img = raw_inner
+            except Exception:
+                pass
         if "image.tmdb.org" in u_img:
             return u_img
         if any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
-            return f"https://wsrv.nl/?url={urllib.parse.quote(u_img, safe='')}&w=500&output=webp"
+            return f"/api/rave/poster?u={urllib.parse.quote(u_img, safe='')}"
         return u_img
 
     if scraped_live:
@@ -1186,12 +1209,15 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     if _HIDDEN_TMDB_IDS:
         items = [
             x for x in items
-            if str(x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
-            and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
-            and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
+            if _has_vault_stream(x)
+            or (
+                str(x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
+                and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
+                and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or x.get('id') or ''}" not in _HIDDEN_TMDB_IDS
+            )
         ]
     verified_only = [x for x in items if _has_vault_stream(x)]
-    if verified_only:
+    if verified_only and (pg == 1 or len(verified_only) >= 12):
         items = verified_only
     if mt_flt in ("tv", "movie"):
         items = [x for x in items if x.get("mediaType") == mt_flt]
@@ -1229,7 +1255,7 @@ def _provider_catalog_sync(prov: str, q: str = ""):
 
 def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
     tid = str(tmdb_id or "").strip()
-    mtype = "tv" if media_type == "tv" else "movie"
+    mtype = "tv" if str(media_type or "").lower() in ("tv", "series", "show") else "movie"
     if not tid.isdigit() and title:
         hits = _tmdb_sync(title)
         if hits:
@@ -2181,11 +2207,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
     fb_ep_keys = []
     if tid:
         exact_ep_keys.append(f"tmdb:{mtype}:{tid}:{s}:{e}")
-    else:
-        for vt in valid_titles:
-            nt = _norm_title(vt)
-            if nt:
-                exact_ep_keys.append(f"{mtype}:{nt}:{s}:{e}")
+    for vt in valid_titles:
+        nt = _norm_title(vt)
+        if nt:
+            k_nt = f"{mtype}:{nt}:{s}:{e}"
+            if k_nt not in exact_ep_keys:
+                exact_ep_keys.append(k_nt)
     if source_url:
         (exact_ep_keys if (s == 1 and e == 1) else fb_ep_keys).append(f"url:{source_url}")
     if tid:
@@ -2218,9 +2245,9 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 continue
             if mtype == "tv" and (s > 1 or e > 1) and vk.startswith(("id:", "url:")):
                 continue
-            if v_su and min_vt_len == 1 and all_vt_words:
+            if v_su and min_vt_len == 1 and all_vt_words and not vk.startswith("tmdb:"):
                 v_slug = re.sub(r"-(?:izle|full-hd|turkce-dublaj|altyazili|hd|fh\d+|1080p|\d{4}|\d+)$", "", v_su.rstrip("/").rsplit("/", 1)[-1])
-                v_slug_w = set(_norm_title(v_slug.replace("-", " ")).split()) - {"fh", "the", "and", "of", "in", "la", "le", "el", "ve", "bir"}
+                v_slug_w = set(_norm_title(v_slug.replace("-", " ")).split()) - {"fh", "the", "and", "of", "in", "la", "le", "el", "ve", "bir", "turk", "filmi", "izle", "yerli", "full", "hd", "sansursuz"}
                 if len(v_slug_w - all_vt_words) >= 2:
                     continue
             if v_ent.get("streams"):
@@ -3030,12 +3057,21 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         base_n = raw_name.split("[")[0].strip().replace("İ", "i").replace("I", "ı").lower()
         if base_n in SUB_LANG_MAP:
             allow_subs.add(SUB_LANG_MAP[base_n][0])
-    ckey = f"sub:v13:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
+    ckey = f"sub:v14:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
     now_t = time.time()
     cached = _SUB_CACHE.get(ckey)
     if cached and cached["exp"] > now_t:
         return cached["val"]
-    all_embed = list(_EMBED_SUB_CACHE.get(f"{mtype}:{tid}:{s}:{e}") or [])
+    all_embed = []
+    for u_dir, _ in (direct_list or []):
+        u_clean = str(u_dir or "").strip()
+        if u_clean and u_clean in _STREAM_URL_TO_SUBS:
+            for sb_u in _STREAM_URL_TO_SUBS[u_clean]:
+                if isinstance(sb_u, dict) and sb_u.get("url") and not any(x.get("url") == sb_u["url"] for x in all_embed):
+                    all_embed.append(dict(sb_u))
+    for sb_c in (_EMBED_SUB_CACHE.get(f"{mtype}:{tid}:{s}:{e}") or []):
+        if isinstance(sb_c, dict) and sb_c.get("url") and not any(x.get("url") == sb_c["url"] for x in all_embed):
+            all_embed.append(dict(sb_c))
     if not all_embed:
         v_streams = _MAIN_SITES_VAULT.get("streams") or {}
         for vk in (f"tmdb:{mtype}:{tid}:{s}:{e}", f"id:{tid}", f"id:{mtype}:{tid}:{s}:{e}"):
@@ -3044,9 +3080,11 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 all_embed = list(v_ent["subs"])
                 _EMBED_SUB_CACHE[f"{mtype}:{tid}:{s}:{e}"] = list(all_embed)
                 break
+    fhd_embed = [x for x in all_embed if x.get("source") == "fhd_embed"]
+    hfnl_embed = [x for x in all_embed if x.get("source") == "hfnl_embed"]
     pv_embed = [x for x in all_embed if x.get("source") == "pv_embed"]
-    primary_embed = [x for x in all_embed if x.get("source") not in ("dl_embed", "pv_embed")]
     dl_embed = [x for x in all_embed if x.get("source") == "dl_embed"]
+    other_embed = [x for x in all_embed if x.get("source") not in ("fhd_embed", "hfnl_embed", "pv_embed", "dl_embed")]
     first_st = str((direct_list[0][1] if direct_list else "") or "")
     for u, st in (direct_list or []):
         if st == "hls_dl" and "/master.m3u8" in u:
@@ -3069,12 +3107,16 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         seen_vtt_urls.add(sub_url)
         raw_cands.append((prio, tier, len(raw_cands), lcode, llabel, sub_url, is_orig, src_tag))
 
-    if first_st in ("hls_pv", "hls_pv_multi"):
-        ordered_embeds = pv_embed + primary_embed + dl_embed
-    elif first_st == "hls_dl" and not primary_embed and not pv_embed:
-        ordered_embeds = dl_embed + pv_embed + primary_embed
+    if first_st.startswith("hls_fhd"):
+        ordered_embeds = fhd_embed + other_embed + hfnl_embed + pv_embed + dl_embed
+    elif first_st.startswith("hls_hfnl"):
+        ordered_embeds = hfnl_embed + other_embed + fhd_embed + pv_embed + dl_embed
+    elif first_st in ("hls_pv", "hls_pv_multi"):
+        ordered_embeds = pv_embed + other_embed + fhd_embed + hfnl_embed + dl_embed
+    elif first_st == "hls_dl":
+        ordered_embeds = dl_embed + other_embed + pv_embed + fhd_embed + hfnl_embed
     else:
-        ordered_embeds = primary_embed + pv_embed + dl_embed
+        ordered_embeds = other_embed + fhd_embed + hfnl_embed + pv_embed + dl_embed
     for idx_e, esub in enumerate(ordered_embeds):
         eu = str(esub.get("url") or "")
         esrc = str(esub.get("source") or "")
@@ -3111,7 +3153,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                     if isinstance(os_items, list):
                         valid_os = [
                             it for it in os_items
-                            if isinstance(it, dict) and str(it.get("SubFormat") or "").lower() in ("srt", "vtt", "sub") and str(it.get("SubBad") or "0") == "0"
+                            if isinstance(it, dict) and str(it.get("SubFormat") or "").lower() in ("srt", "vtt", "sub", "ass", "ssa") and str(it.get("SubBad") or "0") == "0"
                         ]
                         def _os_rank(it):
                             fn = str(it.get("SubFileName") or "").lower()
@@ -3122,7 +3164,10 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             ser_imdb = str(it.get("SeriesIMDBID") or "").lstrip("t0")
                             target_imdb = imdb_num.lstrip("0")
                             if target_imdb and it_imdb and it_imdb != target_imdb:
-                                if not (mtype == "tv" and ser_imdb and ser_imdb == target_imdb):
+                                if mtype == "tv":
+                                    if ser_imdb and ser_imdb != target_imdb:
+                                        return -999999
+                                else:
                                     return -999999
                             cd_val = str(it.get("SubSumCD") or "1")
                             if cd_val not in ("1", "0", ""):
@@ -3142,14 +3187,14 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                                 score -= 25000
                             if str(it.get("SubAutoTranslation") or "0") == "1" or any(k in fn for k in ("autotrans", "makine", "google")):
                                 score -= 50000
+                            if any(k in fn for k in ("web-dl", "webrip", "web.dl", "web.rip", ".nf.", "nf.web", "amzn", "dsnp", "atvp", "hmax")):
+                                score += 25000
                             if any(k in fn for k in ("1080p", "720p", "2160p", "bluray", "bdrip", "brrip", "web-dl", "webrip", "yify", "yts", "ctrlhd", "remux", "repack")):
-                                score += 30000
+                                score += 20000
                             if "yify" in fn or "yts" in fn:
-                                score += 15000
+                                score += 5000
                             if "ctrlhd" in fn or "chd" in fn:
-                                score += 10000
-                            if "dvdrip" in fn:
-                                score += 10000
+                                score += 5000
                             try:
                                 fps_val = float(str(it.get("MovieFPS") or "0").replace(",", ".").strip() or 0)
                             except (ValueError, TypeError):
@@ -3159,7 +3204,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             elif fps_val == 0.0:
                                 score += 5000
                             elif 24.99 <= fps_val <= 25.01:
-                                score -= 25000
+                                score -= 2000
                             if mtype == "tv":
                                 tag = f"s{s:02d}e{e:02d}"
                                 tag2 = f"{s}x{e:02d}"
@@ -3183,7 +3228,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             dl_link = str(it.get("SubDownloadLink") or "").strip()
                             if dl_link.startswith("http"):
                                 is_auto_os = str(it.get("SubAutoTranslation") or "0") == "1"
-                                _add_sub(dl_link, lang3, 1 if is_auto_os else (-4 if idx_os == 0 else -3), not is_auto_os, "auto" if is_auto_os else "fansub")
+                                _add_sub(dl_link, lang3, 1 if is_auto_os else (-4 if idx_os == 0 else -3), not is_auto_os, "auto" if is_auto_os else "opensubtitles")
                 except Exception:
                     pass
             try:
@@ -3603,7 +3648,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 poster = poster or hits[0].get("backdrop") or hits[0].get("poster") or ""
                 year = year or hits[0].get("year") or ""
                 title = hits[0].get("originalTitle") or hits[0].get("title") or title
-    if mtype == "tv" and tid.isdigit():
+    if mtype == "tv" and tid.isdigit() and prov != "crunchyroll" and not str(source_url or "").startswith("animecix:"):
         tv_seasons = _tv_season_numbers(tid)
         if tv_seasons and s not in tv_seasons:
             return None
@@ -3614,6 +3659,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
         tr_title = m_cached.get("trTitle") or disp or orig_title
         year = m_cached.get("year") or year or ""
         imdb_id = m_cached.get("imdbId") or imdb_id or ""
+        orig_lang = m_cached.get("origLang") or ""
         disp = _clean_query_title(disp) or tr_title
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as cat_pool:
@@ -3632,6 +3678,12 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             if mtype != "tv":
                 cand_keys.append(f"id:{tid}")
                 cand_keys.append(f"tmdb:{mtype}:{tid}:1:1")
+            for tc in (tr_title, orig_title, disp, title):
+                nt = _norm_title(tc or "")
+                if nt:
+                    cand_keys.append(f"{mtype}:{nt}:{s}:{e}")
+                    if mtype != "tv":
+                        cand_keys.append(f"{mtype}:{nt}:1:1")
             for vk_try in cand_keys:
                 v_ent = v_streams.get(vk_try) or {}
                 for st_item in (v_ent.get("streams") or []):
@@ -3651,6 +3703,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                    "seriesTitle": disp or tr_title or orig_title,
+                    "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "streamType": "youtube",
                     "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
@@ -3678,6 +3732,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                    "seriesTitle": disp or tr_title or orig_title,
+                    "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "streamType": "youtube",
                     "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
@@ -3731,6 +3787,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "provider": eff_prov,
                 "catalogProvider": eff_prov,
                 "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                "seriesTitle": disp or tr_title or orig_title,
+                "originalTitle": orig_title, "year": year, "origLang": orig_lang,
                 "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:5],
                 "subtitleTracks": sub_tracks, "audioTracks": audio_tracks, "intro": intro_seg,
                 "platformAudioLangs": pmeta.get("audioLangs") or [],
@@ -3765,7 +3823,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v13|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v14|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     cached = _RESOLVE_RESP_CACHE.get(ckey)
@@ -3798,7 +3856,7 @@ async def provider_catalog(request: Request):
         page = 1
     category = (request.query_params.get("category") or "all").strip()[:40]
     mt_filter = (request.query_params.get("mediaType") or request.query_params.get("type") or "").strip()[:20]
-    ckey = f"v2:{prov}:{category}:{page}:{mt_filter}:{q.lower()}"
+    ckey = f"v3:{prov}:{category}:{page}:{mt_filter}:{q.lower()}"
     lock = _CATALOG_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         try:
@@ -3813,9 +3871,11 @@ async def provider_catalog(request: Request):
     if _HIDDEN_TMDB_IDS and res.get("items"):
         res["items"] = [
             x for x in res["items"]
-            if str(x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
-            and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
-            and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            if _has_vault_stream(x) or (
+                str(x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
+                and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+                and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            )
         ]
     return JSONResponse(
         {"provider": prov, "query": q, **res},
@@ -3837,13 +3897,17 @@ async def supersearch(request: Request):
     if _HIDDEN_TMDB_IDS:
         tmdb = [
             x for x in tmdb
-            if str(x.get("id") or x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
-            and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('id') or x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            if _has_vault_stream(x) or (
+                str(x.get("id") or x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
+                and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('id') or x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            )
         ]
         jw = [
             x for x in jw
-            if str(x.get("id") or x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
-            and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('id') or x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            if _has_vault_stream(x) or (
+                str(x.get("id") or x.get("tmdbId") or "") not in _HIDDEN_TMDB_IDS
+                and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('id') or x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
+            )
         ]
     payload = {"query": q, "youtube": yt, "tmdb": tmdb, "justwatch": jw}
     if len(_SUPERSEARCH_CACHE) >= 250:
@@ -4705,10 +4769,11 @@ _POSTER_LIMIT = RateLimiter(120, 60.0, name="poster")
 
 
 async def poster_proxy(request: Request):
-    url = (request.query_params.get("url") or "").strip()
+    url = (request.query_params.get("url") or request.query_params.get("u") or "").strip()
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    if not _proxy_sig_ok(url, ref, sig):
+    is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter."))
+    if not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig):
         return RedirectResponse("/static/watchlivo-poster.svg")
     allowed, retry_after = _POSTER_LIMIT.hit(client_ip(request))
     if not allowed:
@@ -4755,14 +4820,17 @@ async def stream_proxy(request: Request):
         return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
 
 
-def _srt_to_vtt(raw_bytes: bytes) -> str:
+def _srt_to_vtt(raw_bytes) -> str:
     txt = ""
-    for enc in ("utf-8-sig", "utf-8", "cp1254", "latin-1"):
-        try:
-            txt = raw_bytes.decode(enc)
-            break
-        except Exception:
-            continue
+    if isinstance(raw_bytes, str):
+        txt = raw_bytes
+    else:
+        for enc in ("utf-8-sig", "utf-8", "cp1254", "latin-1"):
+            try:
+                txt = raw_bytes.decode(enc)
+                break
+            except Exception:
+                continue
     txt = txt.replace("\r\n", "\n").replace("\r", "\n").strip()
     if "<p " in txt and "begin=" in txt:
         cues = []
@@ -4791,32 +4859,30 @@ def _srt_to_vtt(raw_bytes: bytes) -> str:
                 cues.append(f"{idx}\n{_fmt_sec(st_f)} --> {_fmt_sec(st_f + max(0.5, dur_f))}\n{body}")
         return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
     txt = re.sub(r"\{\\[^}]*\}", "", txt)
-    xts_m = re.search(r"^X-TIMESTAMP-MAP=.*?\bMPEGTS:(\d+).*?\bLOCAL:(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})", txt, flags=re.M | re.I)
-    xts_offset = 0.0
-    if xts_m:
-        try:
-            mpegts_s = int(xts_m.group(1)) / 90000.0
-            local_s = int(xts_m.group(2)) * 3600 + int(xts_m.group(3)) * 60 + int(xts_m.group(4)) + int(xts_m.group(5)) / 1000.0
-            diff_s = mpegts_s - local_s
-            if 0.25 <= abs(diff_s) <= 7200.0:
-                xts_offset = diff_s
-        except Exception:
-            xts_offset = 0.0
+    if "[Events]" in txt or re.search(r"(?m)^Dialogue:\s*\d+,", txt):
+        cues = []
+        for idx, m in enumerate(re.finditer(r"(?m)^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{2,3}),(\d+:\d{2}:\d{2}[.,]\d{2,3}),(?:[^,]*,){6}(.+)$", txt), 1):
+            def _norm_ass_ts(ts_s: str) -> str:
+                ts_s = ts_s.replace(",", ".")
+                parts = ts_s.split(":")
+                hh = int(parts[0])
+                mm = int(parts[1])
+                ss_p = parts[2].split(".")
+                ss = int(ss_p[0])
+                ms_raw = (ss_p[1] if len(ss_p) > 1 else "000").ljust(3, "0")[:3]
+                return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms_raw}"
+            b_ts = _norm_ass_ts(m.group(1))
+            e_ts = _norm_ass_ts(m.group(2))
+            body = re.sub(r"\\[nN]", "\n", m.group(3)).replace("\\h", " ")
+            body = html_mod.unescape(re.sub(r"<[^>]+>", "", body)).strip()
+            if body:
+                cues.append(f"{idx}\n{b_ts} --> {e_ts}\n{body}")
+        if cues:
+            return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
+    txt = html_mod.unescape(txt)
     txt = re.sub(r"^X-TIMESTAMP-MAP[^\n]*\n?", "", txt, flags=re.M)
     txt = re.sub(r"(\d{1,2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}),(\d{3})", r"\1.\2 --> \3.\4", txt)
     txt = re.sub(r"(?m)^(\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}[.,]\d{3})", lambda m: f"00:{m.group(1).replace(',', '.')} --> 00:{m.group(2).replace(',', '.')}", txt)
-    if xts_offset != 0.0:
-        def _shift_ts(m):
-            def _fmt(sec):
-                sec = max(0.0, sec)
-                hh = int(sec // 3600)
-                mm = int((sec % 3600) // 60)
-                ss = sec % 60
-                return f"{hh:02d}:{mm:02d}:{ss:06.3f}"
-            s1 = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0 + xts_offset
-            s2 = int(m.group(5)) * 3600 + int(m.group(6)) * 60 + int(m.group(7)) + int(m.group(8)) / 1000.0 + xts_offset
-            return f"{_fmt(s1)} --> {_fmt(s2)}"
-        txt = re.sub(r"(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})\.(\d{3})", _shift_ts, txt)
     txt = re.sub(
         r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
         "",
@@ -5151,9 +5217,12 @@ async def rave_subtitles(request: Request):
         if m_yt:
             vid = m_yt.group(1)
     if vid and re.match(r"^[A-Za-z0-9_-]{11}$", vid) and not tid.isdigit() and not imdb_id:
-        yt_res = await asyncio.wait_for(asyncio.to_thread(_fetch_yt_subtitles_and_audio_sync, vid), timeout=7.5)
+        try:
+            yt_res = await asyncio.wait_for(asyncio.to_thread(_fetch_yt_subtitles_and_audio_sync, vid), timeout=7.5)
+        except Exception:
+            yt_res = {"subtitleTracks": [], "audioTracks": []}
         return JSONResponse(yt_res, headers={"Cache-Control": "public, max-age=180, s-maxage=900"})
-    s_ckey = f"v16|{prov}|{mtype}|{tid or imdb_id or title.lower()}|{s}|{e}"
+    s_ckey = f"v17|{prov}|{mtype}|{tid or imdb_id or title.lower()}|{s}|{e}"
     cc_hdrs = {"Cache-Control": "no-cache, no-store, must-revalidate", "CDN-Cache-Control": "no-store"}
     cached_s = _SUB_RESP_CACHE.get(s_ckey)
     if cached_s and time.time() - cached_s[0] < 600:
@@ -5188,10 +5257,23 @@ async def rave_subtitles(request: Request):
                 direct_list = await asyncio.wait_for(asyncio.to_thread(_extract_direct_stream_sync, tid, mtype, s, e, orig_title, year, imdb_id, tr_title), timeout=9.5)
             except Exception:
                 direct_list = []
-        pmeta = await asyncio.wait_for(asyncio.to_thread(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype), timeout=5)
-        subs = await asyncio.wait_for(asyncio.to_thread(_fetch_subtitles_sync, tid, imdb_id, mtype, s, e, prov, pmeta, direct_list), timeout=8)
-        audio = await asyncio.wait_for(asyncio.to_thread(_build_audio_tracks, stream_url, direct_list, prov, tid, s, e, pmeta, mtype), timeout=9)
-        intro_seg = await asyncio.wait_for(asyncio.to_thread(_detect_intro_sync, imdb_id, tid, mtype, s, e, subs), timeout=4)
+        try:
+            pmeta = await asyncio.wait_for(asyncio.to_thread(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype), timeout=5)
+        except Exception:
+            def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
+            pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
+        try:
+            subs = await asyncio.wait_for(asyncio.to_thread(_fetch_subtitles_sync, tid, imdb_id, mtype, s, e, prov, pmeta, direct_list), timeout=8)
+        except Exception:
+            subs = []
+        try:
+            audio = await asyncio.wait_for(asyncio.to_thread(_build_audio_tracks, stream_url, direct_list, prov, tid, s, e, pmeta, mtype), timeout=9)
+        except Exception:
+            audio = []
+        try:
+            intro_seg = await asyncio.wait_for(asyncio.to_thread(_detect_intro_sync, imdb_id, tid, mtype, s, e, subs), timeout=4)
+        except Exception:
+            intro_seg = None
         subs = await asyncio.to_thread(_filter_live_subs, subs)
         payload = {"subtitleTracks": subs, "subtitles": subs, "audioTracks": audio, "intro": intro_seg, "platformAudioLangs": pmeta.get("audioLangs") or [], "platformSubLangs": pmeta.get("subLangs") or []}
         if len(_SUB_RESP_CACHE) >= 300:
@@ -5365,7 +5447,7 @@ async def manifest_json(request: Request):
 
 async def service_worker(request: Request):
     js = "self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.registration.unregister()));"
-    return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate", "Clear-Site-Data": '"storage"'})
+    return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 async def health(request: Request):
@@ -5720,6 +5802,7 @@ app = Starlette(
         Route("/api/health", health),
         Route("/download/apk", download_apk_endpoint),
         Route("/download/windows", download_windows_endpoint),
+        Route("/download/exe", download_windows_endpoint),
         Route("/api/auth/register", auth_engine.auth_register, methods=["POST"]),
         Route("/api/auth/login", auth_engine.auth_login, methods=["POST"]),
         Route("/api/auth/oauth", auth_engine.auth_oauth, methods=["POST"]),
@@ -5750,8 +5833,10 @@ app = Starlette(
         Route("/api/rave/stream", rave_stream_manifest),
         Route("/api/rave/stream-proxy", stream_proxy, methods=["GET", "HEAD"]),
         Route("/api/rave/poster-proxy", poster_proxy, methods=["GET", "HEAD"]),
+        Route("/api/rave/poster", poster_proxy, methods=["GET", "HEAD"]),
         Route("/api/rave/subtitles", rave_subtitles),
         Route("/api/rave/subtitle.vtt", rave_subtitle_vtt),
+        Route("/api/rave/sub-proxy", rave_subtitle_vtt),
         Route("/api/rave/tts", rave_tts),
         Route("/api/rave/accounts", rave_get_accounts),
         Route("/api/rave/accounts/login", rave_login_account, methods=["POST"]),

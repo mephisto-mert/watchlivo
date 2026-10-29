@@ -1,124 +1,64 @@
 {
   "version": 2,
-  "regions": [
-    "fra1"
-  ],
   "builds": [
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    },
     {
       "src": "static/**",
       "use": "@vercel/static"
-    },
-    {
-      "src": "catalog_api.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb",
-        "includeFiles": [
-          "server.py",
-          "rooms.py",
-          "auth_engine.py",
-          "security.py",
-          "music_engine.py",
-          "animecix_tau_map.json",
-          "hidden_titles.json",
-          "main_sites_vault.json"
-        ]
-      }
-    },
-    {
-      "src": "server.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb",
-        "includeFiles": [
-          "rooms.py",
-          "auth_engine.py",
-          "security.py",
-          "music_engine.py",
-          "static/index.html",
-          "animecix_tau_map.json",
-          "hidden_titles.json",
-          "main_sites_vault.json"
-        ]
-      }
     }
   ],
   "routes": [
     {
-      "src": "/",
-      "headers": {
-        "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
-      },
-      "dest": "/static/index.html"
+      "src": "/sw\\.js",
+      "dest": "/api/index.py"
     },
     {
-      "src": "/index.html",
-      "dest": "/static/index.html",
+      "src": "/manifest\\.json",
+      "dest": "/static/manifest.json",
       "headers": {
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Content-Type": "application/manifest+json; charset=utf-8"
       }
     },
     {
-      "src": "/(favicon\\.ico|apple-touch-icon.*\\.png)",
-      "dest": "/static/watchlivo-logo.svg",
+      "src": "/download/apk",
+      "dest": "/static/Watchlivo-v1.1.apk",
       "headers": {
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"Watchlivo-v1.1.apk\""
       }
     },
     {
-      "src": "/download/(apk|windows)",
-      "dest": "server.py"
+      "src": "/download/(windows|exe)",
+      "dest": "/static/Watchlivo.exe",
+      "headers": {
+        "Content-Type": "application/vnd.microsoft.portable-executable",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.exe\""
+      }
     },
     {
       "src": "/static/(.*)",
+      "dest": "/static/$1",
       "headers": {
-        "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
-      },
-      "dest": "/static/$1"
-    },
-    {
-      "src": "/api/(search|rave|upload)(.*)",
-      "dest": "catalog_api.py"
+        "Cache-Control": "public, max-age=0, must-revalidate"
+      }
     },
     {
       "src": "/api/(.*)",
-      "dest": "server.py"
+      "dest": "/api/index.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js)",
-      "dest": "server.py"
+      "src": "/healthz",
+      "dest": "/api/index.py"
     },
     {
       "src": "/(.*)",
+      "dest": "/static/index.html",
       "headers": {
-        "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "strict-origin-when-cross-origin",
-        "X-Frame-Options": "SAMEORIGIN",
-        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
-      },
-      "dest": "/static/index.html"
+        "Cache-Control": "no-cache, no-store, must-revalidate"
+      }
     }
   ]
 }

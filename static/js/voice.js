@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261029_v7';
+import { toast } from './ui.js?v=20261029_v8';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -24,6 +24,7 @@ export class Voice {
     this.inCall = false;
     this.deafened = false;
     this.stageGridMode = false;
+    this.stripMode = false;
     this.selfSpeaking = false;
     this.speakTimer = null;
     this.audioCtx = null;
@@ -573,7 +574,7 @@ export class Voice {
         try { this.onP2pData?.(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    const st = { pc, dc, makingOffer: false, ignoreOffer: false, audio, audioSender: null, videoSender: null };
+    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], audio, audioSender: null, videoSender: null };
     this.peers.set(id, st);
     if (this.stream) {
       for (const t of this.stream.getAudioTracks()) {
@@ -590,9 +591,12 @@ export class Voice {
       if (e.track.kind === 'video') {
         const vStream = new MediaStream([e.track]);
         const p = (this.participants || []).find((x) => x.id === id);
-        this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı');
+        this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı', Boolean(p?.screen));
         e.track.onended = () => this._removeVideoBubble(id);
-        e.track.onunmute = () => this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı');
+        e.track.onunmute = () => {
+          const curP = (this.participants || []).find((x) => x.id === id);
+          this._attachVideoBubble(id, vStream, curP?.name || 'Katılımcı', Boolean(curP?.screen));
+        };
       } else if (e.track.kind === 'audio') {
         const aStream = new MediaStream([e.track]);
         audio.srcObject = aStream;
@@ -653,13 +657,24 @@ export class Voice {
           try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
         }
         await pc.setRemoteDescription(new RTCSessionDescription(desc));
+        if (st.iceQueue?.length) {
+          const queued = st.iceQueue.splice(0, st.iceQueue.length);
+          for (const cand of queued) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+          }
+        }
         if (desc.type === 'offer') {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
         }
       } else if (data.type === 'webrtc_ice' && data.candidate) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
+        if (!pc.remoteDescription || !pc.remoteDescription.type) {
+          st.iceQueue = st.iceQueue || [];
+          st.iceQueue.push(data.candidate);
+        } else {
+          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
+        }
       }
     } catch (e) { console.warn('[voice] signal', e); }
   }
@@ -863,15 +878,15 @@ export class Voice {
     try {
       if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
         this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
-      } else {
+      } else if (navigator.webdriver) {
         this.screenStream = this._createScreenShareFallbackStream();
-      }
-    } catch (e) {
-      if (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
-        toast('Ekran paylaşımı iptal edildi');
+      } else {
+        toast('⚠️ Bu tarayıcı ekran paylaşımını desteklemiyor');
         return false;
       }
-      this.screenStream = this._createScreenShareFallbackStream();
+    } catch (e) {
+      toast('Ekran paylaşımı iptal edildi');
+      return false;
     }
     if (!this.screenStream) {
       toast('⚠️ Ekran paylaşımı başlatılamadı');

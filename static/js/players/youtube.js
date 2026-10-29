@@ -1,5 +1,5 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v7';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v8';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -77,6 +77,7 @@ export class YouTubeAdapter {
         playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: location.origin },
         events: {
           onReady: () => {
+            if (this._destroyed) return;
             this.ready = true;
             try {
               this.player?.unMute?.();
@@ -338,11 +339,13 @@ export class YouTubeAdapter {
   }
   isMuted() { return this.audioEl ? !!this.audioEl.muted : !!this.player?.isMuted?.(); }
   destroy() {
+    this._destroyed = true;
     clearTimeout(this.autoplayTimer);
     clearTimeout(this.stallTimer);
     clearInterval(this.subTimer);
     this.subs?.stopDubAudio?.();
     this.subs?.destroy?.();
+    if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttr?.('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }
     if (this.audioEl) { try { this.audioEl.pause(); this.audioEl.remove(); } catch (e) { /* ignore */ } this.audioEl = null; }
     try { this.player?.destroy?.(); } catch (e) { /* ignore */ }

@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v7';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v7';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v7';
-import { MeshConnection } from '../realtime.js?v=20261029_v7';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v7';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v7';
-import { buildLayout } from './mesh-layout.js?v=20261029_v7';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v7';
-import { Voice } from '../voice.js?v=20261029_v7';
-import { playRoomSfx } from './chat.js?v=20261029_v7';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v8';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v8';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v8';
+import { MeshConnection } from '../realtime.js?v=20261029_v8';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v8';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v8';
+import { buildLayout } from './mesh-layout.js?v=20261029_v8';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v8';
+import { Voice } from '../voice.js?v=20261029_v8';
+import { playRoomSfx } from './chat.js?v=20261029_v8';
 
 let ctx = null;
 
@@ -547,6 +547,9 @@ export async function enterMesh(app, params) {
   leaveMeshView();
   let initialCid = null;
   try {
+    if (params.r_tok && params.id) {
+      sessionStorage.setItem(`vortex_st_${params.id}`, String(params.r_tok));
+    }
     initialCid = sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || null;
     if (initialCid) sessionStorage.setItem('vortex_cid', initialCid);
   } catch (e) { /* ignore */ }

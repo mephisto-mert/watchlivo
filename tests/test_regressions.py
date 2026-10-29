@@ -134,6 +134,21 @@ class RegressionTests(unittest.TestCase):
         res = server._decrypt_dizipal_rmk('invalid')
         self.assertEqual(res, '')
 
+    def test_srt_to_vtt_zero_offset_and_ass_conversion(self):
+        vtt_with_map = "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:180000,LOCAL:00:00:00.000\n\n00:00:10.000 --> 00:00:12.500\nMerhaba\n"
+        converted = server._srt_to_vtt(vtt_with_map)
+        self.assertIn("00:00:10.000 --> 00:00:12.500", converted)
+        ass_raw = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\nDialogue: 0,0:01:05.20,0:01:08.45,Default,,0,0,0,,{\\an8}Gördüm.\\NGördün mü gerçekten?\n"
+        ass_vtt = server._srt_to_vtt(ass_raw)
+        self.assertIn("00:01:05.200 --> 00:01:08.450", ass_vtt)
+        self.assertIn("Gördüm.\nGördün mü gerçekten?", ass_vtt)
+
+    def test_domestic_movies_and_series_in_vault_and_not_hidden(self):
+        streams = server._MAIN_SITES_VAULT.get("streams") or {}
+        for title in ("Kış Uykusu", "Bir Zamanlar Anadolu'da", "Ayla", "Babam ve Oğlum", "G.O.R.A.", "Dabbe", "Eşkıya", "7. Koğuştaki Mucize"):
+            nt = server._norm_title(title)
+            self.assertTrue(bool(streams.get(f"movie:{nt}:1:1")), f"Missing vault stream for {title} ({nt})")
+
 
 if __name__ == '__main__':
     unittest.main()

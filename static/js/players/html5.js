@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v7';
-import { expectedPosition } from '../sync.js?v=20261029_v7';
-import { state } from '../store.js?v=20261029_v7';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v8';
+import { expectedPosition } from '../sync.js?v=20261029_v8';
+import { state } from '../store.js?v=20261029_v8';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -215,8 +215,15 @@ export class Html5Adapter {
       }
       if (v.currentTime > 0 && !v.paused) reportPlay();
       if (v.seeking) return;
-      this.subs.onTimeUpdate(this.getTime());
+      this.subs.onTimeUpdate(v.currentTime);
     });
+    clearInterval(this.subTickTimer);
+    this.subTickTimer = setInterval(() => {
+      if (this._destroyed || !this.video || this.video.paused || this.video.seeking) return;
+      if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
+        this.subs.onTimeUpdate(this.video.currentTime);
+      }
+    }, 100);
     this.hasEnded = false;
     const fireEndedOnce = () => {
       if (this.hasEnded) return;
@@ -835,7 +842,9 @@ export class Html5Adapter {
     this.events.onTracksChanged?.();
   }
   destroy() {
+    this._destroyed = true;
     this.wantPlaying = false;
+    clearInterval(this.subTickTimer);
     clearTimeout(this.waitTimer);
     clearTimeout(this.resumeTimer);
     clearTimeout(this.watchdogTimer);

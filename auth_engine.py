@@ -800,7 +800,7 @@ async def auth_profile(request: Request) -> JSONResponse:
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz veri."}, status_code=400)
     auth_hdr = request.headers.get("Authorization", "")
-    token = auth_hdr.replace("Bearer ", "").strip() if auth_hdr.startswith("Bearer ") else str(body.get("authToken") or "")
+    token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else str(body.get("authToken") or "")
     claims = verify_auth_token(token)
     if not claims:
         return JSONResponse({"ok": False, "error": "Oturum doğrulanamadı. Lütfen tekrar giriş yapın."}, status_code=401)
@@ -833,6 +833,24 @@ async def auth_profile(request: Request) -> JSONResponse:
             "verified": True,
             "isGuest": False,
         }
+        try:
+            salt = _new_salt()
+            _user_create({
+                "uid": uid,
+                "email": user["email"] or f"{uid}@watchlivo.online",
+                "handle": user["handle"],
+                "name": user["name"],
+                "password_hash": _hash_pw(secrets.token_hex(12), salt),
+                "salt": salt,
+                "color": user["color"],
+                "avatar": user["avatar"],
+                "auth_provider": user["authProvider"],
+                "verified": 1,
+                "created_at": time.time(),
+                "updated_at": time.time(),
+            })
+        except Exception:
+            pass
         return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
     user = _row_to_user(row)
     return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
@@ -840,7 +858,7 @@ async def auth_profile(request: Request) -> JSONResponse:
 
 async def auth_me(request: Request) -> JSONResponse:
     auth_hdr = request.headers.get("Authorization", "")
-    token = auth_hdr.replace("Bearer ", "").strip() if auth_hdr.startswith("Bearer ") else ""
+    token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
     claims = verify_auth_token(token)
     if not claims:
         return JSONResponse({"ok": False, "authenticated": False}, status_code=200)

@@ -32,9 +32,13 @@ export class WebviewAdapter {
         const v = document.querySelector('video');
         if (!v) return null;
         const b = v.buffered?.length ? v.buffered.end(v.buffered.length - 1) : 0;
-        return { t: v.currentTime || 0, d: v.duration || 0, paused: v.paused, buffering: v.readyState < 3, rate: v.playbackRate || 1, buf: b };
+        return { t: v.currentTime || 0, d: v.duration || 0, paused: v.paused, ended: Boolean(v.ended), buffering: v.readyState < 3, rate: v.playbackRate || 1, buf: b };
       })()`);
-      if (s) this.state = s;
+      if (s) {
+        const wasEnded = Boolean(this.state?.ended);
+        this.state = s;
+        if (s.ended && !wasEnded) this.events.onEnded?.();
+      }
     } catch (e) { /* cross-navigation */ }
   }
 

@@ -31,6 +31,29 @@ export function parseVtt(vttText) {
   if (!vttText || typeof vttText !== 'string') return [];
   const lines = vttText.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   const rawCues = [];
+  if (vttText.includes('[Events]') || /^Dialogue:\s*\d+,/m.test(vttText)) {
+    const assRe = /^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{2,3}),(\d+:\d{2}:\d{2}[.,]\d{2,3}),(?:[^,]*,){6}(.+)$/;
+    const parseAssSec = (ts) => {
+      const p = ts.replace(',', '.').split(':');
+      const sp = (p[2] || '0').split('.');
+      const ms = (sp[1] || '0').padEnd(3, '0').slice(0, 3);
+      return parseTimeSec(p[0], p[1], sp[0], ms);
+    };
+    for (const rawLn of lines) {
+      const mAss = assRe.exec(rawLn.trim());
+      if (mAss) {
+        const start = parseAssSec(mAss[1]);
+        const end = Math.min(parseAssSec(mAss[2]), start + 22.0);
+        const body = mAss[3]
+          .replace(/\\[nN]/g, '\n')
+          .replace(/\\h/g, ' ')
+          .replace(/\{\\[^}]*\}/g, '')
+          .replace(/<[^>]+>/g, '')
+          .trim();
+        if (body && end > start) rawCues.push({ start, end, text: body });
+      }
+    }
+  }
   const timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})/;
   let i = 0;
   while (i < lines.length) {
@@ -259,7 +282,7 @@ export class SubtitleDubController {
           title: (media.title || '').split(' — ')[0],
           season: String(media.season || 1),
           episode: String(media.episode || 1),
-          _v: '20261025L',
+          _v: '20261029V8',
         };
         if (!media.tmdbId && baseUrl) queryParams.url = baseUrl;
         const qs = new URLSearchParams(queryParams);
@@ -295,6 +318,23 @@ export class SubtitleDubController {
     }
     if (this.selectedAudioId === 'tr-ai-dub' || this.selectedAudioId === 'en-ai-dub') {
       this.selectedAudioId = 'orig';
+    }
+    const initAudTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId)
+      || this.audioTracks.find((t) => (t.targetLang || t.lang) === this.selectedAudioId)
+      || this.audioTracks[0];
+    const isTurkishSpeechActive = Boolean(
+      initAudTrack && (
+        initAudTrack.id === 'tr-orig'
+        || initAudTrack.id === 'tr-dub'
+        || initAudTrack.audioLang === 'tr'
+        || initAudTrack.lang === 'tr'
+        || (media?.origLang === 'tr' && (!this.selectedAudioId || this.selectedAudioId === 'orig'))
+        || (Array.isArray(media?.platformAudioLangs) && media.platformAudioLangs.length === 1 && media.platformAudioLangs[0] === 'tr')
+      )
+    );
+    if (isTurkishSpeechActive && String(this.selectedSubId || '').startsWith('tr')) {
+      this._prevSubBeforeDub = this.selectedSubId;
+      this.selectedSubId = 'off';
     }
     await this.setSubtitleTrack(this.selectedSubId, true);
     await this.setAudioTrack(this.selectedAudioId, true);
@@ -604,7 +644,10 @@ export class SubtitleDubController {
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
       const minEnd = dur > 600 ? (dur * 0.5) : 900;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
-      const isForcedOrTruncated = cues.length < 35 || (isInit && (cues.length < 60 || getSpan(cues) < minEnd));
+      const isStreamEmbeddedFansub = track.source === 'fansub' || track.source === 'local';
+      const isForcedOrTruncated = isStreamEmbeddedFansub
+        ? (cues.length < 20)
+        : (cues.length < 35 || (isInit && cues.length < 45 && getSpan(cues) < minEnd));
       if (isForcedOrTruncated) {
         const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === track.lang);
         for (const alt of alts) {
@@ -628,6 +671,46 @@ export class SubtitleDubController {
       return track;
     } finally {
       this._loadingSubTrack = false;
+    }
+  }
+
+  async loadLocalSubtitleFile(file) {
+    if (!file) return null;
+    try {
+      const buf = await file.arrayBuffer();
+      let text = new TextDecoder('utf-8').decode(buf);
+      if (text.includes('\uFFFD')) {
+        try { text = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
+      }
+      const cues = parseVtt(text);
+      if (!cues.length) return null;
+      const customUrl = `local://sub/${Date.now()}-${encodeURIComponent(file.name)}`;
+      const vttLines = ['WEBVTT', ''];
+      cues.forEach((c, idx) => {
+        const fmt = (sec) => {
+          const s = Math.max(0, Number(sec) || 0);
+          const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+          const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+          const ss = (s % 60).toFixed(3).padStart(6, '0');
+          return `${hh}:${mm}:${ss}`;
+        };
+        vttLines.push(`${idx + 1}\n${fmt(c.start)} --> ${fmt(c.end)}\n${c.text}`);
+      });
+      const vttStr = vttLines.join('\n\n') + '\n';
+      this.cuesCache.set(customUrl, { vtt: vttStr, cues });
+      const customTrack = {
+        id: `local-${Date.now()}`,
+        lang: 'tr',
+        label: `📁 ${file.name.slice(0, 28)}`,
+        url: customUrl,
+        source: 'local',
+      };
+      this.subtitleTracks = [customTrack, ...this.subtitleTracks];
+      if (this.media) this.media.subtitleTracks = this.subtitleTracks;
+      await this.setSubtitleTrack(customTrack.id, false);
+      return customTrack;
+    } catch (e) {
+      return null;
     }
   }
 
