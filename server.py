@@ -2959,7 +2959,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                         qu = (quals.get(qk) or {}).get("url") or ""
                         if qu.startswith("https://"):
                             ref = "" if "hakunaymatata.com" in qu else (((quals.get(qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/")
-                            res.append((_proxy_u(qu, ref, ".mp4"), "mp4"))
+                            st_tag = "mp4_vl_1080" if qk in ("2160", "4k", "1440", "1080") else ("mp4_vl_720" if qk == "720" else "mp4_vl_sd")
+                            res.append((_proxy_u(qu, ref, ".mp4"), st_tag))
                             break
         except Exception:
             pass
@@ -3066,7 +3067,6 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(main_single)
             out_urls.extend(ve_res)
             out_urls.extend(hexa_res)
-            out_urls.extend(vid_res)
             out_urls.extend(dp_only)
             out_urls.extend(dl_only)
             out_urls.extend(ac_720)
@@ -3074,6 +3074,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(pv_multi)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
+            out_urls.extend(vid_res)
             out_urls.extend(vault_yt)
         elif orig_lang == "tr":
             out_urls.extend(main_multi)
@@ -3083,12 +3084,12 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(ac_1080)
             out_urls.extend(ve_res)
             out_urls.extend(hexa_res)
-            out_urls.extend(vid_res)
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
             out_urls.extend(ac_720)
+            out_urls.extend(vid_res)
             out_urls.extend(vault_yt)
         else:
             out_urls.extend(main_multi)
@@ -3096,7 +3097,6 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(ac_1080)
             out_urls.extend(ve_res)
             out_urls.extend(hexa_res)
-            out_urls.extend(vid_res)
             out_urls.extend(dl_only)
             out_urls.extend(dp_only)
             out_urls.extend(fp_multi)
@@ -3104,6 +3104,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
             out_urls.extend(ac_720)
+            out_urls.extend(vid_res)
             out_urls.extend(vault_yt)
 
     else:
@@ -3665,18 +3666,24 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         srcs = alive_srcs
     def _src_res_tier(pair):
         u, st = pair
-        if str(st).startswith("mp4"):
+        if st in ("mp4_ac_sub", "mp4_ac_dub"):
             return 3 if "_720p" not in str(u).lower() else 1
+        if str(st).startswith("mp4"):
+            if st == "mp4_vl_sd":
+                return 0.2
+            if st == "mp4_vl_720":
+                return 0.7
+            return 0.6 if "%2fh265%2f" in str(u).lower() or "/h265/" in str(u).lower() else 1.2
         w = _STREAM_RES_HINT.get(u, 0)
         if w > 0:
             if w >= 1880 and st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr"):
                 return 4
             if w >= 2500:
                 return 3
-            return 2 if w >= 1880 else 1
+            return 2 if w >= 1880 else 1.5
         if st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr"):
             return 4
-        return 2 if st in ("hls_ve", "hls_ve_multi", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dp") else 1
+        return 2 if st in ("hls_ve", "hls_ve_multi", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dp") else 1.5
     srcs.sort(key=_src_res_tier, reverse=True)
     by_lang: dict[str, list] = {}
     unknown: list = []
@@ -3699,7 +3706,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
-        if not langs and st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "mp4", "mp4_vl"):
+        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "mp4", "mp4_vl") or str(st).startswith("mp4_vl")):
             langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
