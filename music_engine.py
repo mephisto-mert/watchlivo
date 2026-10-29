@@ -1035,26 +1035,27 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     if exact_mv:
         audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": "🎬 Resmi HD Video Klip (Apple Music 1080p)", "mode": "stream", "url": exact_mv})
 
-    if mode_norm == "video" and exact_mv:
+    is_preview_mv = bool(exact_mv and re.search(r"Video211|mzvf_|AudioPreview", str(exact_mv), re.I))
+    if sc_url:
+        primary_prov = "direct"
+        primary_stype = sc_stype
+        primary_url = sc_url
+        alt_urls = [u for u in (sc_alts + ([exact_mv] if not is_preview_mv else []) + [audio_stream]) if u and u != primary_url]
+    elif mode_norm == "video" and exact_mv and not is_preview_mv:
         primary_prov = "direct"
         primary_stype = "mp4"
         primary_url = exact_mv
         alt_urls = [u for u in ([sc_url] + sc_alts + [audio_stream, artist_mv]) if u and u != primary_url]
-    elif sc_url:
-        primary_prov = "direct"
-        primary_stype = sc_stype
-        primary_url = sc_url
-        alt_urls = [u for u in (sc_alts + [exact_mv, audio_stream]) if u and u != primary_url]
-    elif exact_mv:
-        primary_prov = "direct"
-        primary_stype = "mp4"
-        primary_url = exact_mv
-        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
     elif primary_vid:
         primary_prov = "youtube"
         primary_stype = "youtube"
         primary_url = f"https://www.youtube.com/watch?v={clip_vid if mode_norm == 'video' and clip_vid else primary_vid}"
         alt_urls = []
+    elif exact_mv:
+        primary_prov = "direct"
+        primary_stype = "mp4"
+        primary_url = exact_mv
+        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
     else:
         primary_prov = "direct"
         primary_stype = "mp4"

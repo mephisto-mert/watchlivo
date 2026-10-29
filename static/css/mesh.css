@@ -1145,7 +1145,7 @@ video::cue {
 .msg.system, .msg.sys { justify-content: center; font-size: .78em; opacity: .75; }
 .typing { padding: 0 1em .3em; color: #7ef0dd; opacity: .85; }
 .chatbar {
-  margin: .35em .55em .55em; padding: .35em; gap: .3em; border-radius: 999px;
+  margin: .35em .55em calc(.55em + env(safe-area-inset-bottom, 0px)); padding: .35em; gap: .3em; border-radius: 999px;
   background: hsla(0,0%,100%,.07); border: 1px solid hsla(0,0%,100%,.12);
   box-shadow: 0 6px 20px rgba(0,0,0,.35); transition: border-color .2s, box-shadow .25s;
 }

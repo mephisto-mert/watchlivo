@@ -1,11 +1,29 @@
-// HTTP API helpers with explicit timeouts.
-export async function api(path, { method = 'GET', body, timeout = 12000 } = {}) {
+// HTTP API helpers with explicit timeouts and automatic Bearer token injection.
+function _getAuthToken() {
+  try {
+    for (const k of ['vortex_profile_v2', 'vortex_profile_v1', 'vortex_self']) {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const p = JSON.parse(raw);
+      if (p && p.authToken && !p.isGuest) return String(p.authToken);
+    }
+  } catch (_) {}
+  return '';
+}
+
+export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000 } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
   try {
+    const hdrs = { ...(extraHeaders || {}) };
+    if (body) hdrs['Content-Type'] = 'application/json';
+    const tok = _getAuthToken();
+    if (tok && !hdrs.Authorization && !hdrs.authorization) {
+      hdrs.Authorization = `Bearer ${tok}`;
+    }
     const res = await fetch(path, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      headers: Object.keys(hdrs).length ? hdrs : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
     });

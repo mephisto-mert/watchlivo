@@ -192,10 +192,29 @@ export class SubtitleDubController {
     return null;
   }
 
+  _rebuildNativeTrackCues() {
+    try {
+      const v = this.adapter?.video;
+      const trEl = v?.querySelector?.('track');
+      const tt = trEl?.track;
+      const CueCls = window.VTTCue || window.TextTrackCue;
+      if (!tt || !CueCls || !this.subCues.length) return;
+      while (tt.cues && tt.cues.length > 0) {
+        tt.removeCue(tt.cues[0]);
+      }
+      const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
+      const off = this.offsetSec || 0;
+      for (const c of this.subCues) {
+        try { tt.addCue(new CueCls(Math.max(0, (c.start + off) / scale), Math.max(0.1, (c.end + off) / scale), c.text)); } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
   setSubtitleOffset(deltaOrVal, absolute = false) {
     const next = absolute ? Number(deltaOrVal || 0) : (this.offsetSec + Number(deltaOrVal || 0));
     this.offsetSec = Math.round(Math.max(-120, Math.min(120, next)) * 10) / 10;
     this._saveMediaSyncPrefs();
+    this._rebuildNativeTrackCues();
     this.onTimeUpdate(this.adapter.getTime(), true);
     return this.offsetSec;
   }
@@ -204,6 +223,7 @@ export class SubtitleDubController {
     const val = Number(scale) || 1.0;
     this.fpsScale = (val > 0.85 && val < 1.15) ? Math.round(val * 1000000) / 1000000 : 1.0;
     this._saveMediaSyncPrefs();
+    this._rebuildNativeTrackCues();
     this.onTimeUpdate(this.adapter.getTime(), true);
     return this.fpsScale;
   }
@@ -592,18 +612,6 @@ export class SubtitleDubController {
       this.selectedSubId = track.id;
       this.subCues = cues;
       this.secondaryCues = [];
-      if (this.fpsScale === 1.0 && cues.length > 80 && track.source === 'opensubtitles') {
-        const vDur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
-        const cEnd = cues[cues.length - 1]?.end || 0;
-        if (vDur > 1800 && cEnd > 1800) {
-          const ratio = cEnd / vDur;
-          if (ratio >= 0.945 && ratio <= 0.968) {
-            this.fpsScale = 23.976 / 25.0;
-          } else if (ratio >= 1.032 && ratio <= 1.055) {
-            this.fpsScale = 25.0 / 23.976;
-          }
-        }
-      }
       this._attachNativeTrack(track);
       this.adapter?._syncYtNativeCaptions?.();
       this.onTimeUpdate(this.adapter.getTime(), true);

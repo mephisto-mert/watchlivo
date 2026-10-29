@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v2';
-import { state, set } from '../store.js?v=20261029_v2';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v2';
-import { api } from '../api.js?v=20261029_v2';
-import { createSelection } from './selection.js?v=20261029_v2';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v2';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v3';
+import { state, set } from '../store.js?v=20261029_v3';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v3';
+import { api } from '../api.js?v=20261029_v3';
+import { createSelection } from './selection.js?v=20261029_v3';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v3';
 
 let refreshTimer = null;
 let rooms = [];
@@ -175,12 +175,24 @@ export function renderHome(app) {
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
     makeDockBtn('tv', '7/24 Canlı TV Kanalları', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
-      const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      selection.setProvider(null);
+      filter = 'all';
+      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      draw(true);
+      setTimeout(() => {
+        const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 40);
     }),
     makeDockBtn('radio', '7/24 Canlı Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.5 3.24 6.15zM12 11c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/></svg>', false, () => {
-      const el = document.getElementById('lobby-sec-radio') || document.getElementById('lobby-anchor');
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      selection.setProvider(null);
+      filter = 'all';
+      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      draw(true);
+      setTimeout(() => {
+        const el = document.getElementById('lobby-sec-radio') || document.getElementById('lobby-anchor');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 40);
     }),
     makeDockBtn('watch', 'Canlı İzleme Odası', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>', false, async () => {
       try {
@@ -211,7 +223,17 @@ export function renderHome(app) {
       h('span', { class: 'pip-sub' }, '● Canlı Senkron Odaya Dön')),
     h('div', { class: 'pip-ctrls' },
       h('div', { class: 'equalizer-bars' }, h('span'), h('span'), h('span')),
-      h('button', { type: 'button', class: 'pip-btn', title: 'Sinema Odasına Büyüt' }, '⛶'))) : null;
+      h('button', { type: 'button', class: 'pip-btn', title: 'Sinema Odasına Büyüt' }, '⛶'),
+      h('button', {
+        type: 'button',
+        class: 'pip-btn pip-close-btn',
+        title: 'Mini Oynatıcıyı Kapat',
+        onclick: (e) => {
+          e.stopPropagation();
+          try { localStorage.removeItem('vortex_recent_rooms'); } catch (_) {}
+          miniPip.remove();
+        },
+      }, '✕'))) : null;
 
   const glassWindow = h('div', { class: 'glass-main-window' },
     appBanner,

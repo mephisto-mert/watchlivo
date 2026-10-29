@@ -1,10 +1,10 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261029_v2';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261029_v2';
-import { avatar } from '../profile.js?v=20261029_v2';
-import { clock } from '../sync.js?v=20261029_v2';
-import { fetchRooms, meshThumb, thumbFor } from './lobby.js?v=20261029_v2';
-import { copyInvite, inviteUrl } from './chat.js?v=20261029_v2';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261029_v3';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261029_v3';
+import { avatar } from '../profile.js?v=20261029_v3';
+import { clock } from '../sync.js?v=20261029_v3';
+import { fetchRooms, meshThumb, thumbFor } from './lobby.js?v=20261029_v3';
+import { copyInvite, inviteUrl } from './chat.js?v=20261029_v3';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -28,7 +28,7 @@ function Settings(ctx) {
   const update = () => {
     const m = state.mesh;
     if (!m || el.contains(document.activeElement)) return;
-    const lead = isLeader();
+    const lead = isHostOnly();
     const sig = `${m.name}|${m.privacy}|${m.playMode}|${m.voipMode}|${m.hasPassword}|${lead}`;
     if (sig === lastSig) return;
     lastSig = sig;
@@ -57,7 +57,7 @@ function Settings(ctx) {
       h('div', { class: 'settings-group' },
         h('h4', {}, 'Watchlivo Uygulamaları'),
         h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-          h('a', { href: '/download/apk', download: 'Watchlivo-v1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(0,245,212,.18), rgba(56,189,248,.18))', border: '1px solid rgba(0,245,212,.4)', color: '#00f5d4', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
+          h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(0,245,212,.18), rgba(56,189,248,.18))', border: '1px solid rgba(0,245,212,.4)', color: '#00f5d4', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
           h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
         )
       )

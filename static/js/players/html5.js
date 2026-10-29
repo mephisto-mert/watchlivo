@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v2';
-import { expectedPosition } from '../sync.js?v=20261029_v2';
-import { state } from '../store.js?v=20261029_v2';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v3';
+import { expectedPosition } from '../sync.js?v=20261029_v3';
+import { state } from '../store.js?v=20261029_v3';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -755,6 +755,14 @@ export class Html5Adapter {
     }
     if (!this.hls && isNextHls && !/stream-proxy/i.test(newUrl) && window.Hls && window.Hls.isSupported() && !this.useNativeHls) {
       this.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+      this.hls.on(window.Hls.Events.ERROR, (_ev, data) => {
+        if (!data?.fatal || !this.hls) return;
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
+          try { this.hls.recoverMediaError(); } catch (_) {}
+        } else if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+          try { this.hls.startLoad(); } catch (_) {}
+        }
+      });
       this.hls.attachMedia(this.video);
     }
     if (this.hls && isNextHls && !/stream-proxy/i.test(newUrl)) {

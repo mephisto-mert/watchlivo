@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261029_v2';
-import { api, qs } from './api.js?v=20261029_v2';
-import { state, set, setView } from './store.js?v=20261029_v2';
+import { h, toast, popup } from './ui.js?v=20261029_v3';
+import { api, qs } from './api.js?v=20261029_v3';
+import { state, set, setView } from './store.js?v=20261029_v3';
 
 const LS_KEY = 'vortex_accounts_v6';
 
@@ -154,13 +154,21 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
     placeholder: 'Profil Adı (örn. Mert 4K UHD)',
     value: acct.profileName || state.self?.name || '4K UHD',
   });
+  const pwInp = h('input', {
+    class: 'input',
+    type: 'password',
+    autocomplete: 'current-password',
+    placeholder: `${p.name} şifreniz (yalnızca oturum doğrulaması için, saklanmaz)`,
+  });
 
-  popup({
+  let modalHandle = null;
+  modalHandle = popup({
     title: `🔑 ${p.name} Hesap Girişi & Canlı Portal`,
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
       h('div', { class: 'dim', style: { fontSize: '.85rem', lineHeight: '1.45' } },
         `${p.name} hesabınızı Watchlivo ile ilişkilendirin veya dahili platform gezginini açarak doğrudan ${p.name} içinde gezinin.`),
       emailInp,
+      pwInp,
       profInp,
       acct.loginUrl ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
         h('button', {
@@ -175,7 +183,8 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
           type: 'button',
           class: 'btn sm',
           onclick: () => {
-            document.querySelector('#popup-root .modal-backdrop')?.remove();
+            if (modalHandle?.close) modalHandle.close();
+            else document.querySelector('.popup-backdrop')?.remove();
             onOpenBrowser(acct.loginUrl || acct.browseUrl);
           },
         }, `🌐 Dahili Tarayıcıda Aç`) : null
@@ -223,8 +232,13 @@ export function renderAccountBar(p, onReload, onPickUrl, onPickItem) {
   const browserHost = h('div', { class: 'wl-portal-browser-slot' });
   let currentPortalUrl = acct.browseUrl || acct.loginUrl || 'https://www.google.com';
   let browserOpen = false;
+  let activePortalMsgHandler = null;
 
   const openEmbeddedPortal = (targetUrl) => {
+    if (activePortalMsgHandler) {
+      window.removeEventListener('message', activePortalMsgHandler);
+      activePortalMsgHandler = null;
+    }
     currentPortalUrl = targetUrl || acct.browseUrl || acct.loginUrl;
     browserOpen = true;
     const addrInput = h('input', {
@@ -261,6 +275,7 @@ export function renderAccountBar(p, onReload, onPickUrl, onPickItem) {
         onPickItem(d.item);
       }
     };
+    activePortalMsgHandler = onMsg;
     window.addEventListener('message', onMsg);
 
     browserHost.replaceChildren(
@@ -281,6 +296,7 @@ export function renderAccountBar(p, onReload, onPickUrl, onPickItem) {
             onclick: () => {
               browserOpen = false;
               window.removeEventListener('message', onMsg);
+              activePortalMsgHandler = null;
               browserHost.replaceChildren();
             },
           }, '✕ Kapat')
@@ -423,7 +439,17 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       const seasonBar = h('div', { class: 'season-tabs' },
         ...seasons.map((s) => h('button', {
           class: `btn season-tab ${s.season === curSeason ? 'primary' : ''}`,
-          onclick: () => loadSeason(s.season),
+          onclick: (ev) => {
+            if (s.season === curSeason) return;
+            const btn = ev.currentTarget;
+            if (btn) {
+              btn.disabled = true;
+              btn.textContent = `⏳ ${s.name || `${s.season}. Sezon`}`;
+            }
+            const gridEl = container.querySelector('.episode-grid');
+            if (gridEl) gridEl.style.opacity = '0.45';
+            loadSeason(s.season);
+          },
         }, s.name || `${s.season}. Sezon`)));
 
       const epGrid = h('div', { class: 'episode-grid' },

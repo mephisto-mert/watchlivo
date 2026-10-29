@@ -146,10 +146,12 @@ def _ws_verified_uid(scope: Any, q: Any) -> str:
     return str((claims or {}).get("uid") or "")
 
 
-def _cid_is_active(room: Dict[str, Any], cid: str) -> bool:
+def _cid_is_active(room: Dict[str, Any], cid: str, verified_uid: str = "") -> bool:
     """True when ``cid`` is a live participant of ``room`` (prevents takeover)."""
     p = (room.get("participants") or {}).get(cid)
     if not isinstance(p, dict):
+        return False
+    if verified_uid and (p.get("uid") == verified_uid or room.get("creatorId") == verified_uid):
         return False
     try:
         return now() - float(p.get("lastSeen") or 0.0) < 30.0
@@ -1223,6 +1225,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "clear_chat":
+        if not (is_host or cid in (room.get("co_hosts") or [])):
+            out["reply"].append({"type": "error", "message": "Sohbeti yalnızca oda lideri temizleyebilir."})
+            return out
         room["chat"] = []
         room["polls"] = []
         room["rev"] = int(room.get("rev") or 1) + 1
@@ -1548,7 +1553,7 @@ async def ws_endpoint(websocket: WebSocket):
     async with STORE.lock(room_id):
         room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
         cid = signed_cid or requested_cid
-        if not signed_cid and cid and _cid_is_active(room, cid):
+        if not signed_cid and cid and _cid_is_active(room, cid, verified_uid):
             cid = ""
         if not cid:
             cid = uuid.uuid4().hex[:10]
@@ -1650,7 +1655,7 @@ async def http_sync(request: Request):
         # A cid is only trusted when the server signed it, or when nobody is
         # currently using it (prevents session takeover by claiming a live cid).
         cid = signed_cid or requested_cid
-        if not signed_cid and cid and room is not None and _cid_is_active(room, cid):
+        if not signed_cid and cid and room is not None and _cid_is_active(room, cid, verified_uid):
             cid = ""
         if not cid:
             cid = requested_cid if data.get("type") == "leave" and requested_cid else "h_" + uuid.uuid4().hex[:8]

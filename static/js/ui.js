@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v2';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v3';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -177,6 +177,45 @@ export function getAiApiConfig() {
   };
 }
 
+export function openAiConfigModal(onSaved) {
+  const cur = getAiApiConfig();
+  const modelInp = h('input', { class: 'input', value: cur.openaiModel, placeholder: 'Dil & DJ Modeli (örn. claude-sonnet-4-5, deepseek-v3)' });
+  const keyInp = h('input', { class: 'input', type: 'password', value: cur.openaiKey, placeholder: 'Özel AI API Anahtarı (isteğe bağlı)' });
+  const sunoModelInp = h('input', { class: 'input', value: cur.sunoModel, placeholder: 'Müzik Motoru (örn. suno-v4.5-mureka-9.5)' });
+  const sunoKeyInp = h('input', { class: 'input', type: 'password', value: cur.sunoKey, placeholder: 'Özel Suno/Mureka API Anahtarı (isteğe bağlı)' });
+  const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+    h('div', { class: 'dim', style: { fontSize: '.83rem', lineHeight: '1.45' } },
+      'Watchlivo AI DJ, şarkı sözü senkronizasyonu ve müzik üretim motoru ayarlarını buradan yapılandırabilirsiniz.'),
+    h('label', { style: { fontSize: '.78rem', fontWeight: '700' } }, 'AI DJ & Sohbet Modeli'),
+    modelInp,
+    keyInp,
+    h('label', { style: { fontSize: '.78rem', fontWeight: '700' } }, 'Suno / Mureka Müzik Motoru'),
+    sunoModelInp,
+    sunoKeyInp
+  );
+  popup({
+    title: '🔑 AI & Müzik Motoru Yapılandırması',
+    content: box,
+    options: [
+      {
+        label: '✓ Ayarları Kaydet',
+        primary: true,
+        onClick: () => {
+          try {
+            localStorage.setItem('kinox_openai_model', modelInp.value.trim() || 'gpt-6.1-sol');
+            localStorage.setItem('kinox_openai_key', keyInp.value.trim());
+            localStorage.setItem('kinox_suno_model', sunoModelInp.value.trim() || 'suno-v4.5-mureka-9.5');
+            localStorage.setItem('kinox_suno_key', sunoKeyInp.value.trim());
+          } catch (_) {}
+          toast('✓ AI & Model yapılandırması kaydedildi');
+          onSaved?.(getAiApiConfig());
+        },
+      },
+      { label: 'Kapat' },
+    ],
+  });
+}
+
 export function buildThemeStudio() {
   const wrap = h('div', { class: 'theme-studio' });
   const draw = () => {
@@ -261,7 +300,7 @@ export function openDownloadModal() {
         h('a', {
           class: 'btn primary wl-download-action',
           href: '/download/apk',
-          download: 'Watchlivo-v1.0.apk',
+          download: 'Watchlivo-v1.1.0.apk',
           onclick: () => toast('📱 Android APK indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')
       ),

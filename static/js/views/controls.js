@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v2';
-import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v2';
-import { getProvider } from '../providers.js?v=20261029_v2';
-import { expectedPosition } from '../sync.js?v=20261029_v2';
-import { thumbFor } from './lobby.js?v=20261029_v2';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v2';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v2';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v2';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v3';
+import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v3';
+import { getProvider } from '../providers.js?v=20261029_v3';
+import { expectedPosition } from '../sync.js?v=20261029_v3';
+import { thumbFor } from './lobby.js?v=20261029_v3';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v3';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v3';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v3';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -448,7 +448,9 @@ export function buildControls(frame, ctx) {
       : 'Bölüm 4 · Final';
     seekPreviewChapter.textContent = chLabel;
     seekPreviewTime.textContent = `${fmtTime(target)} / ${fmtTime(d)}`;
-    const cueAt = host.adapter?.subs?.findCueAt?.(host.adapter?.subs?.subCues || [], target);
+    const subsObj = host.adapter?.subs;
+    const adjTarget = subsObj ? ((target - (subsObj.offsetSec || 0)) * (subsObj.fpsScale || 1.0)) : target;
+    const cueAt = subsObj?.findCueAt?.(subsObj.subCues || [], adjTarget);
     seekPreviewSub.textContent = cueAt?.text ? `"${cueAt.text.slice(0, 48)}"` : '';
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
     if (v && v.videoWidth > 0) {
@@ -734,7 +736,10 @@ export function buildControls(frame, ctx) {
             class: `ctl-pref-pill ${Math.abs(curFps - Number(sc)) < 0.005 ? 'on' : ''}`,
             onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleFpsScale?.(sc); renderMenuView('subtitle'); },
           }, lbl))));
-      menu.replaceChildren(backHeader('Altyazı & Dublaj', 'list', prefBtn), h('div', { class: 'ctl-menu-scroll' }, ...rows, quickStyleRow, offsetRow));
+      const prevMenuScroll = menu.querySelector('.ctl-menu-scroll')?.scrollTop || 0;
+      const scrollBox = h('div', { class: 'ctl-menu-scroll' }, ...rows, quickStyleRow, offsetRow);
+      menu.replaceChildren(backHeader('Altyazı & Dublaj', 'list', prefBtn), scrollBox);
+      if (prevMenuScroll > 0) scrollBox.scrollTop = prevMenuScroll;
       return;
     }
 

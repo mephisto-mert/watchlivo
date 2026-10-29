@@ -1664,9 +1664,10 @@ body {
   align-items: center;
   justify-content: space-between;
   width: min(96vw, 1380px);
-  height: 54px;
-  padding: 0 20px;
-  margin: 12px auto 14px auto;
+  min-height: 54px;
+  height: auto;
+  padding: 6px 20px;
+  margin: max(12px, env(safe-area-inset-top, 12px)) auto 14px auto;
   border-radius: var(--radius-pill);
   background: rgba(18, 24, 42, 0.68);
   backdrop-filter: blur(20px);
@@ -1746,7 +1747,8 @@ body {
 .apk-badge:hover {
   transform: scale(1.03);
 }
-.btn-create-room {
+.btn-create-room,
+.btn.primary.btn-create-room {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2310,19 +2312,40 @@ body {
   .tv-channels-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 900px) {
+  .glass-home-shell {
+    padding: 4px 12px calc(108px + env(safe-area-inset-bottom, 0px)) 12px;
+  }
   .app-layout { flex-direction: column; }
   .floating-dock {
     position: fixed;
-    bottom: 14px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     top: auto;
     left: 50%;
     transform: translateX(-50%);
     flex-direction: row;
-    padding: 8px 16px;
+    gap: 8px;
+    padding: 8px 12px;
+    max-width: calc(100vw - 16px);
+  }
+  .mini-pip-player {
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    right: 12px;
+    left: 12px;
+    width: auto;
   }
   .glass-main-window { padding: 16px; width: 100%; }
   .platform-glass-grid, .tv-channels-grid { grid-template-columns: 1fr; }
   .platform-card.featured-glow { grid-column: span 1; }
   .gazestream-hero { flex-direction: column; height: auto; }
   .hero-art-stage { height: 180px; }
+}
+@media (max-width: 400px) {
+  .floating-dock {
+    gap: 4px;
+    padding: 6px 8px;
+  }
+  .dock-btn {
+    width: 38px;
+    height: 38px;
+  }
 }

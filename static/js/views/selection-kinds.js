@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, openThemeModal, getAiApiConfig } from '../ui.js?v=20261029_v2';
-import { api, qs } from '../api.js?v=20261029_v2';
-import { parseVideoUrl } from '../providers.js?v=20261029_v2';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261029_v2';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261029_v2';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261029_v2';
+import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261029_v3';
+import { api, qs } from '../api.js?v=20261029_v3';
+import { parseVideoUrl } from '../providers.js?v=20261029_v3';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261029_v3';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261029_v3';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261029_v3';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -213,6 +213,8 @@ function itemMatchesCat(it, catId) {
   const cats = Array.isArray(it.categories) ? it.categories : [];
   if (catId === 'anime') {
     return (
+      cats.includes('anime') ||
+      it.origLang === 'ja' ||
       String(it.sourceBadge || '').includes('Animetrix') ||
       /Naruto|One Piece|Bleach|Attack on Titan|Shingeki|Jujutsu|Kimetsu|İblis Keser|Solo Leveling|Death Note|Dragon Ball|Fullmetal|Hunter|Tokyo Ghoul|Demon Slayer|Doraemon|One Punch|Haikyuu|Chainsaw|Spy x Family|Boku no Hero|Fairy Tail|Gintama|Black Clover|Steins|Boruto|Frieren|Vinland|Code Geass|Evangelion|Ghibli|Spirited Away|Ruhların Kaçışı|Yürüyen Şato|Prenses Mononoke|Senin Adın|Your Name|Suzume/i.test(`${it.title || ''} ${it.originalTitle || ''}`)
     );
@@ -644,7 +646,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
     h('div', { class: 'rab-actions', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
       h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#10b981', background: 'rgba(16,185,129,0.14)', border: '1px solid rgba(16,185,129,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● OpenAI (${aiCfg.openaiModel}): AKTİF`),
       h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, '● Suno v4.5 + Mureka 9.5: AKTİF'),
-      h('button', { type: 'button', class: 'btn', style: { padding: '5px 11px', fontSize: '.76rem' }, onclick: () => openThemeModal() }, '🔑 API & Model Ayarları')));
+      h('button', { type: 'button', class: 'btn', style: { padding: '5px 11px', fontSize: '.76rem' }, onclick: () => openAiConfigModal() }, '🔑 API & Model Ayarları')));
 
   const input = h('input', { placeholder: p.placeholder || 'Şarkı, sanatçı, klip ara veya bağlantı yapıştır...', value: currentQuery, 'aria-label': `${p.name} ara` });
   const catBar = h('div', { class: 'cat-filter-bar', id: 'music-cat-bar' });

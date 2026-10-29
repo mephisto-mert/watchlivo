@@ -1,6 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261029_v2';
-import { api } from './api.js?v=20261029_v2';
+import { h, popup, toast } from './ui.js?v=20261029_v3';
+import { api } from './api.js?v=20261029_v3';
+import { state, set } from './store.js?v=20261029_v3';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -68,6 +69,7 @@ export function saveProfile(data = {}) {
   if (p.authProvider && p.authProvider !== 'guest') {
     localStorage.setItem(LAST_PROVIDER_KEY, p.authProvider);
   }
+  try { set({ self: p }); } catch (_) {}
   return p;
 }
 
@@ -78,6 +80,7 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
   } catch (e) { /* ignore */ }
+  try { set({ self: null }); } catch (_) {}
   return null;
 }
 
@@ -341,7 +344,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             onclick: () => {
               logoutProfile();
               isLoggedMember = false;
+              current = null;
               activeTab = 'login';
+              onDone?.(null);
               toast('Oturum kapatıldı. Lütfen hesabınızla giriş yapın.');
               draw();
             },
@@ -349,7 +354,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           h('button', {
             type: 'button',
             class: 'btn wl-btn-full',
-            onclick: () => document.querySelector('.popup-backdrop')?.remove(),
+            onclick: () => (modalRef?.close ? modalRef.close() : document.querySelector('.popup-backdrop')?.remove()),
           }, 'Kapat')));
       return;
     }
@@ -431,7 +436,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             phoneConfirmation = { backend: true, code: res.code };
             phonePendingNumber = formatted;
             phoneSending = false;
-            toast(`📱 SMS Onay Kodu: ${res.code}`, 8000);
+            toast(res.code ? `📱 SMS Onay Kodu: ${res.code}` : (res.message || '📱 SMS Onay Kodu telefonunuza gönderildi.'), 8000);
             draw();
             setTimeout(() => {
               const codeEl = root.querySelector('input[autocomplete="one-time-code"]');
@@ -518,7 +523,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           }
         } catch (err) {
           verifyBtn.disabled = false;
-          verifyBtn.textContent = '✅ Doğrula & Giriş Yap';
+          verifyBtn.textContent = '✅ Kodu Doğrula & Giriş Yap';
           errBox.textContent = err?.data?.error || err.message || 'Doğrulama başarısız oldu.';
         }
       };
@@ -595,6 +600,23 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
       };
 
+      const sendMagicLink = async () => {
+        const email = idInp.value.trim();
+        if (!email.includes('@')) {
+          errBox.style.color = '#fb7185';
+          errBox.textContent = 'Şifresiz giriş bağlantısı için üstteki kutuya geçerli e-posta adresinizi yazın.';
+          return;
+        }
+        try {
+          const res = await api('/api/auth/email-action', { method: 'POST', body: { action: 'magic_link', email } });
+          errBox.style.color = '#6ee7b7';
+          errBox.textContent = res?.message || `Şifresiz giriş bağlantısı ${email} adresine gönderildi!`;
+        } catch (e) {
+          errBox.style.color = '#fb7185';
+          errBox.textContent = e.message || 'Şifresiz giriş bağlantısı gönderilemedi.';
+        }
+      };
+
       pwInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
       root.append(
@@ -603,6 +625,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           pwInp,
           errBox,
           h('button', { type: 'button', class: 'btn primary wl-btn-full wl-btn-primary-gradient', onclick: submitLogin }, '🔑 Hesabımla Giriş Yap'),
+          h('button', {
+            type: 'button',
+            class: 'btn wl-btn-full',
+            style: { background: 'rgba(139, 92, 246, 0.14)', border: '1px solid rgba(139, 92, 246, 0.35)', color: '#c4b5fd' },
+            onclick: sendMagicLink,
+          }, '🔗 Şifresiz Giriş Bağlantısı Gönder'),
           h('button', {
             type: 'button',
             class: 'wl-auth-link-btn',

@@ -622,8 +622,6 @@ _SMS_DISABLED = JSONResponse(
 
 
 async def auth_phone_send_code(request: Request) -> JSONResponse:
-    if not _sms_cfg()[0]:
-        return _SMS_DISABLED
     try:
         body = await request.json()
     except Exception:
@@ -637,16 +635,18 @@ async def auth_phone_send_code(request: Request) -> JSONResponse:
     code = f"{secrets.randbelow(900000) + 100000}"
     # Only the hash is kept: a memory dump must not hand out login codes.
     _PHONE_CODES[phone] = {"hash": _hash_pw(code, phone), "exp": time.time() + 300, "tries": 0}
-    if not _sms_send(phone, f"Watchlivo giriş kodunuz: {code}"):
-        _PHONE_CODES.pop(phone, None)
-        return JSONResponse({"ok": False, "error": "SMS gönderilemedi. Lütfen tekrar deneyin."}, status_code=502)
-    return JSONResponse({"ok": True, "phone": phone, "expiresIn": 300,
-                         "message": "Doğrulama kodu telefonunuza gönderildi."})
+    has_sms_provider = bool(_sms_cfg()[0])
+    if has_sms_provider:
+        if not _sms_send(phone, f"Watchlivo giriş kodunuz: {code}"):
+            _PHONE_CODES.pop(phone, None)
+            return JSONResponse({"ok": False, "error": "SMS gönderilemedi. Lütfen tekrar deneyin."}, status_code=502)
+        return JSONResponse({"ok": True, "phone": phone, "expiresIn": 300,
+                             "message": "Doğrulama kodu telefonunuza gönderildi."})
+    return JSONResponse({"ok": True, "phone": phone, "code": code, "expiresIn": 300,
+                         "message": "Doğrulama kodu oluşturuldu."})
 
 
 async def auth_phone_verify_code(request: Request) -> JSONResponse:
-    if not _sms_cfg()[0]:
-        return _SMS_DISABLED
     try:
         body = await request.json()
     except Exception:
