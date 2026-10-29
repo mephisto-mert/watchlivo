@@ -380,8 +380,8 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 25000000,
-        minAutoBitrate: 1500000,
+        abrEwmaDefaultEstimate: 50000000,
+        minAutoBitrate: 4500000,
         autoLevelCapping: -1,
         maxBufferLength: 45,
         maxMaxBufferLength: 90,
@@ -414,6 +414,7 @@ export class Html5Adapter {
           this.hls.startLevel = bestIdx;
           this.hls.currentLevel = bestIdx;
           this.hls.loadLevel = bestIdx;
+          this.hls.nextLevel = bestIdx;
         }
         this.events.onTracksChanged?.();
         if (effStart >= 0.5 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
