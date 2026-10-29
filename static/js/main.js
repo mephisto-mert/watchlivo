@@ -41,6 +41,9 @@ export function navigate(path) {
 window.vortexNavigate = navigate;
 
 async function boot() {
+  if (navigator.userAgent.includes('WatchlivoApp') || window.Android || window.matchMedia('(display-mode: standalone)').matches) {
+    document.documentElement.classList.add('is-apk');
+  }
   try {
     for (const k of Object.keys(localStorage)) {
       if (k.startsWith('vortex_st_') || k.startsWith('vortex_room_')) localStorage.removeItem(k);
