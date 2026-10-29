@@ -951,7 +951,7 @@ def _has_vault_stream(it_obj: dict) -> int:
                     or "dbx.molystream.org" in su
                     or "dplayer" in su
                     or "hdfilmcehennemi.mobi" in su
-                    or "cdnimages" in su
+                    or ("cdnimages" in su and "/hls/" in su)
                     or "playmix.uno" in su
                     or "master.txt?s=" in su
                 ):
@@ -2420,7 +2420,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             "dbx.molystream.org" in raw_su.lower()
                             or "dplayer" in raw_su.lower()
                             or "hdfilmcehennemi.mobi" in raw_su.lower()
-                            or "cdnimages" in raw_su.lower()
+                            or ("cdnimages" in raw_su.lower() and "/hls/" in raw_su.lower())
                             or "playmix.uno" in raw_su.lower()
                             or "master.txt?s=" in raw_su.lower()
                             or st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
@@ -2875,7 +2875,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                         srvs = (_raw_get_json("https://enc-dec.app/api/dec-vidfast", headers={"Content-Type": "application/json"}, data=json.dumps({"text": srv_enc}).encode("utf-8"), timeout=3.8) or {}).get("result") or []
                         srvs = [x for x in srvs if isinstance(x, dict) and x.get("data")]
                         srvs.sort(key=lambda x: 0 if x.get("name") == "vRapid" else (1 if x.get("name") == "Bravo" else (2 if x.get("name") == "Horizon" else 3)))
-                        for s_item in srvs[:3]:
+                        for s_item in srvs[:4]:
                             try:
                                 with urllib.request.urlopen(urllib.request.Request(f"{p2['stream']}/{s_item['data']}", data=b"", headers=vf_hdrs), timeout=2.8) as r_st:
                                     st_enc = r_st.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
@@ -2955,11 +2955,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     res.append((st["playlist"], "hls"))
                 else:
                     quals = st.get("qualities") or {}
-                    for qk in ("2160", "4k", "1440", "1080", "720"):
+                    for qk in ("2160", "4k", "1440", "1080", "720", "480", "360"):
                         qu = (quals.get(qk) or {}).get("url") or ""
-                        if qu.startswith("https://") and "hakunaymatata.com" not in qu:
-                            ref = ((quals.get(qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/"
-                            res.append((_proxy_u(qu, ref), "mp4"))
+                        if qu.startswith("https://"):
+                            ref = "" if "hakunaymatata.com" in qu else (((quals.get(qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/")
+                            res.append((_proxy_u(qu, ref, ".mp4"), "mp4"))
                             break
         except Exception:
             pass
@@ -2980,9 +2980,9 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower()
     _VERCEL_1080_TAGS = (
-        (("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub") if orig_lang == "tr" else ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls", "mp4_ac_sub", "mp4_ac_dub"))
+        (("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4") if orig_lang == "tr" else ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4"))
         if IS_VERCEL
-        else ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls", "mp4_ac_sub", "mp4_ac_dub")
+        else ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     )
     while time.time() - t_start < 5.6:
         ac_ok = f_ac.done() and not f_ac.exception() and bool(f_ac.result())
@@ -2993,7 +2993,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         dp_ok = f_dp.done() and not f_dp.exception() and bool(f_dp.result())
         ve_ok = f_ve.done() and not f_ve.exception() and bool(f_ve.result())
         hx_ok = f_hexa.done() and not f_hexa.exception() and bool(f_hexa.result())
-        has_glob_ready = ve_ok or (hx_ok and f_ve.done())
+        vl_ok = f_vid.done() and not f_vid.exception() and bool(f_vid.result())
+        has_glob_ready = ve_ok or (hx_ok and f_ve.done()) or (vl_ok and f_ve.done() and f_hexa.done())
         if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.2):
             time.sleep(0.08)
             continue
@@ -3161,7 +3162,7 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     if stype in ("mp4_ac_sub", "mp4_ac_dub"):
         return _proxy_u(u, "https://tau-video.xyz/", ".mp4")
     if stype == "mp4_vl":
-        return _proxy_u(u, "https://filmboom.top/", ".mp4")
+        return _proxy_u(u, "" if "hakunaymatata.com" in u else "https://filmboom.top/", ".mp4")
     if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ("&ref=dl" if stype == "hls_dl" else ("&ref=hx" if "dragonballzfans" in u else ""))
@@ -3698,7 +3699,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
-        if not langs and st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve"):
+        if not langs and st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "mp4", "mp4_vl"):
             langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
@@ -3955,7 +3956,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             or "dbx.molystream.org" in st_u.lower()
                             or "dplayer" in st_u.lower()
                             or "hdfilmcehennemi.mobi" in st_u.lower()
-                            or "cdnimages" in st_u.lower()
+                            or ("cdnimages" in st_u.lower() and "/hls/" in st_u.lower())
                             or "playmix.uno" in st_u.lower()
                             or "master.txt?s=" in st_u.lower()
                         ):
@@ -4557,9 +4558,10 @@ def _get_seg_lock(url: str) -> threading.Lock:
 def _proxy_chunk_sync(url: str, ref: str, rng: str):
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
-    eff_ref = (ref or "").strip()
-    if not eff_ref:
-        if "hakunaymatata" in url or "filmboom" in url:
+    is_hakuna = "hakunaymatata.com" in url
+    eff_ref = "" if is_hakuna else (ref or "").strip()
+    if not eff_ref and not is_hakuna:
+        if "filmboom" in url:
             eff_ref = "https://filmboom.top/"
         elif any(d in url for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")):
             eff_ref = "https://player.videasy.to/"
@@ -4570,19 +4572,25 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
         elif "uk-traffic-" in url or "cdn77s.com" in url:
             eff_ref = "https://x.ag2m5.cfd/"
         elif "pilavyer" in url:
-            eff_ref = "https://play2.pilavyerplay.top/"
+            eff_ref = f"https://{urllib.parse.urlparse(url).netloc or 'play2.pilavyerplay.top'}/"
         elif "dragonballzfans" in url:
             eff_ref = "https://flixer.su/"
-        elif "cdnimages" in url or "playmix.uno" in url or "hdfilmcehennemi.mobi" in url:
+        elif ("cdnimages" in url and "/hls/" in url) or "playmix.uno" in url or "hdfilmcehennemi.mobi" in url:
             eff_ref = "https://hdfilmcehennemi.mobi/"
-        elif "cdnimgs" in url or ("cdnimage" in url and "cdnimages" not in url) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/m", url):
+        elif "cdnimgs" in url or ("cdnimage" in url and not ("cdnimages" in url and "/hls/" in url)) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/m", url):
             eff_ref = "https://rapidvid.org/"
         elif "molystream" in url or "/sheila_" in url:
             eff_ref = "https://dbx.molystream.org/"
         elif "makesomthingup" in url or "centralodsseyproud" in url or "/r6/" in url:
             eff_ref = "https://one.makesomthingup.click/"
-    hdrs = {"User-Agent": UA137}
-    if eff_ref:
+    hdrs = {
+        "User-Agent": (
+            "com.community.oneroom/50020115 (Linux; U; Android 15; en_US; OPPO CPH2579; Build/AP3A.240905.015.A2; Cronet/140.0.7339.51)"
+            if is_hakuna
+            else UA137
+        )
+    }
+    if eff_ref and not is_hakuna:
         p = urllib.parse.urlparse(eff_ref)
         orig = f"{p.scheme}://{p.netloc}" if p.scheme and p.netloc else ""
         hdrs["Referer"] = eff_ref
@@ -4703,7 +4711,7 @@ async def rave_stream_manifest(request: Request):
     is_dp = ref_mode == "dp" or "ag2m5.cfd" in target or "uk-traffic-" in target
     is_pv = ref_mode == "pv" or "pilavyer" in target
     is_hfnl = ref_mode == "hfnl" or ("cdnimages" in target and "/hls/" in target) or "playmix.uno" in target or "hdfilmcehennemi.mobi" in target
-    is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and "cdnimages" not in target) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
+    is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
     m3u8_ckey = f"v2|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
@@ -4740,8 +4748,9 @@ async def rave_stream_manifest(request: Request):
             elif is_fp:
                 hdrs["Referer"] = f"https://fastplay.mom/video/{fp_id}"
             elif is_pv:
-                hdrs["Referer"] = "https://play2.pilavyerplay.top/"
-                hdrs["Origin"] = "https://play2.pilavyerplay.top"
+                pv_orig = f"https://{urllib.parse.urlparse(target).netloc or 'play2.pilavyerplay.top'}"
+                hdrs["Referer"] = f"{pv_orig}/"
+                hdrs["Origin"] = pv_orig
             elif is_dp or "dplayer" in target:
                 parsed_dp = urllib.parse.urlparse(target)
                 dp_origin = f"{parsed_dp.scheme}://{parsed_dp.netloc}"
@@ -4889,8 +4898,9 @@ async def rave_stream_manifest(request: Request):
                             c_hdrs["Referer"] = "https://one.makesomthingup.click/"
                             c_hdrs["Origin"] = "https://one.makesomthingup.click"
                         elif "pilavyer" in cand_u or "pv" in str(cand_k):
-                            c_hdrs["Referer"] = "https://play2.pilavyerplay.top/"
-                            c_hdrs["Origin"] = "https://play2.pilavyerplay.top"
+                            pv_orig = f"https://{urllib.parse.urlparse(cand_u).netloc or 'play2.pilavyerplay.top'}"
+                            c_hdrs["Referer"] = f"{pv_orig}/"
+                            c_hdrs["Origin"] = pv_orig
                         elif "dragonballzfans" in cand_u:
                             c_hdrs["Referer"] = "https://flixer.su/"
                             c_hdrs["Origin"] = "https://flixer.su"
@@ -4911,7 +4921,7 @@ async def rave_stream_manifest(request: Request):
             cur_is_pv = ("pilavyer" in cur_target) or (cur_target == target and is_pv)
             cur_is_dp = ("uk-traffic-" in cur_target) or ("ag2m5.cfd" in cur_target) or ("dplayer" in cur_target) or is_dp
             cur_is_hfnl = ("cdnimages" in cur_target and "/hls/" in cur_target) or ("playmix.uno" in cur_target) or (cur_target == target and is_hfnl)
-            cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimage" in cur_target and "cdnimages" not in cur_target) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", cur_target)) or (cur_target == target and is_fhd))
+            cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimage" in cur_target and not ("cdnimages" in cur_target and "/hls/" in cur_target)) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", cur_target)) or (cur_target == target and is_fhd))
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             is_master = "#EXT-X-STREAM-INF" in raw
@@ -4944,7 +4954,7 @@ async def rave_stream_manifest(request: Request):
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
                 if "key.php" in u_str:
-                    return _proxy_u(u_str, "https://play2.pilavyerplay.top/")
+                    return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
                 if cur_is_ve:
                     return _proxy_u(u_str, "https://player.videasy.to/", ".ts")
                 if cur_is_hfnl or ("cdnimages" in u_str and "/hls/" in u_str):
@@ -4964,7 +4974,7 @@ async def rave_stream_manifest(request: Request):
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (
                         "https://dbx.molystream.org/" if cur_is_dbx else (
                         "https://one.makesomthingup.click/" if cur_is_dl else (
-                        "https://play2.pilavyerplay.top/" if cur_is_pv else "")))))
+                        f"https://{urllib.parse.urlparse(cur_target).netloc or 'play2.pilavyerplay.top'}/" if cur_is_pv else "")))))
                     return _proxy_u(u_str, ref_p, ".ts")
                 return u_str
 
