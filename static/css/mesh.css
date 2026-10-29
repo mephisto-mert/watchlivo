@@ -1324,3 +1324,136 @@ video::cue {
 .sfx-pill { background: hsla(0,0%,100%,.08) !important; border: 1px solid hsla(0,0%,100%,.12) !important; backdrop-filter: blur(10px); transition: transform .3s var(--mac-spring, ease), background .2s !important; }
 .sfx-pill:hover { transform: translateY(-1px) scale(1.05); }
 .panel-side { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+
+/* ===== In-App Floating Mini-Player (Odayı Kapatmadan Ana Sayfada Gezinme) ===== */
+.app-view-root {
+  flex: 1 1 0%;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.mini-player-bar {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: linear-gradient(180deg, rgba(6, 8, 15, .82) 0%, rgba(6, 8, 15, .08) 42%, rgba(6, 8, 15, .86) 100%);
+  cursor: pointer;
+}
+.mini-player-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mini-player-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #00f5d4;
+  box-shadow: 0 0 8px #00f5d4;
+  flex-shrink: 0;
+}
+.mini-player-title {
+  font-size: .74rem;
+  font-weight: 800;
+  color: #f8fafc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0,0,0,.9);
+}
+.mini-player-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.mini-player-btn {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: .7rem;
+  font-weight: 800;
+  color: #fff;
+  background: rgba(12, 16, 28, .88);
+  border: 1px solid rgba(255, 255, 255, .22);
+  backdrop-filter: blur(8px);
+}
+.mini-player-btn.expand {
+  background: rgba(0, 245, 212, .22);
+  border-color: #00f5d4;
+  color: #00f5d4;
+}
+.mini-player-btn.expand:hover {
+  background: #00f5d4;
+  color: #05080f;
+}
+.mini-player-btn.close:hover {
+  background: rgba(239, 68, 68, .35);
+  border-color: #ef4444;
+}
+body.mesh-minimized #mesh-root {
+  position: fixed !important;
+  right: 16px !important;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px)) !important;
+  width: 320px !important;
+  height: 180px !important;
+  flex: none !important;
+  z-index: 9400 !important;
+  border-radius: 16px !important;
+  overflow: hidden !important;
+  background: #05070d !important;
+  box-shadow: 0 20px 52px rgba(0, 0, 0, .86), 0 0 0 1.5px rgba(0, 245, 212, .52) !important;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+body.mesh-minimized #mesh-root:hover {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .92), 0 0 0 2px #00f5d4 !important;
+}
+body.mesh-minimized #mesh-root > .navbar,
+body.mesh-minimized #mesh-root .panel-side,
+body.mesh-minimized #mesh-root .panel-chat,
+body.mesh-minimized #mesh-root .resize-handle,
+body.mesh-minimized #mesh-root .controls,
+body.mesh-minimized #mesh-root .skip-intro-pill,
+body.mesh-minimized #mesh-root .next-ep-banner {
+  display: none !important;
+}
+body.mesh-minimized #mesh-root .mesh,
+body.mesh-minimized #mesh-root .mesh-layout,
+body.mesh-minimized #mesh-root .video-chat,
+body.mesh-minimized #mesh-root .panel-video,
+body.mesh-minimized #mesh-root .video-frame {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+  border: 0 !important;
+  display: flex !important;
+  flex: 1 1 100% !important;
+}
+body.mesh-minimized #mesh-root .mini-player-bar {
+  display: flex !important;
+}
+@media (max-width: 640px) {
+  body.mesh-minimized #mesh-root {
+    width: 228px !important;
+    height: 128px !important;
+    right: 10px !important;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: 13px !important;
+  }
+  .mini-player-bar { padding: 6px 8px; }
+  .mini-player-title { font-size: .66rem; }
+  .mini-player-btn { padding: 3px 8px; font-size: .64rem; }
+}

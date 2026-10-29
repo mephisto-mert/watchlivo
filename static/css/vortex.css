@@ -114,7 +114,7 @@ a { color: var(--accent); }
 .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; background: radial-gradient(1100px 650px at 15% 10%, var(--bg-nebula-1) 0%, transparent 62%), radial-gradient(900px 600px at 88% 88%, var(--bg-nebula-2) 0%, transparent 62%), var(--bg-base); }
 :root[data-ambient="off"] .bg { background: var(--bg-base); }
 .bg-img { position: absolute; inset: -6%; width: 112%; height: 112%; object-fit: cover; filter: blur(56px) brightness(26%) saturate(0.9); opacity: 0; transition: opacity 1s ease-in; }
-:root[data-ambient="off"] .bg-img, body:has(main.mesh) .bg-img { display: none !important; }
+:root[data-ambient="off"] .bg-img, body:not(.mesh-minimized):has(main.mesh) .bg-img { display: none !important; }
 :root[data-ambient="medium"] .bg-img { filter: blur(48px) brightness(42%) saturate(1.15); }
 .bg-img.on { opacity: 1; }
 .bg-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(4,5,8,.72), rgba(4,5,8,.92)); }

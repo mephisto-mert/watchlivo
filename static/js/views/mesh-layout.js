@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v9';
-import { state, setView, canSelectVideo } from '../store.js?v=20261029_v9';
-import { navIcon, logo } from './home.js?v=20261029_v9';
-import { createSelection } from './selection.js?v=20261029_v9';
-import { buildControls } from './controls.js?v=20261029_v9';
-import { buildChat } from './chat.js?v=20261029_v9';
-import { PANELS } from './panels.js?v=20261029_v9';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v10';
+import { state, setView, canSelectVideo } from '../store.js?v=20261029_v10';
+import { navIcon, logo } from './home.js?v=20261029_v10';
+import { createSelection } from './selection.js?v=20261029_v10';
+import { buildControls } from './controls.js?v=20261029_v10';
+import { buildChat } from './chat.js?v=20261029_v10';
+import { PANELS } from './panels.js?v=20261029_v10';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -83,6 +83,7 @@ export function buildLayout(app, ctx) {
     nav.replaceChildren(
       h('div', { class: 'navbar-left' },
         navIcon('close', 'Ayrıl', async () => { if (await confirmPopup('Odadan ayrılmak istediğinize emin misiniz?', 'Ayrıl', 'Kal')) actions.leave(); }),
+        navIcon('minimize', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' }),
         navIcon('searchVideo', 'Video Ara', () => {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');

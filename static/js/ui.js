@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v9';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261029_v10';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -35,6 +35,8 @@ export const icons = {
   sparkle: SVG('<path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16v4M17 18h4"/>'),
   audioWave: SVG('<path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/>'),
   pip: SVG('<rect x="2" y="4" width="20" height="15" rx="2.5"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/>'),
+  minimize: SVG('<rect x="2" y="4" width="20" height="15" rx="2.5"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/><path d="M6 8l4 4M10 8v4H6"/>'),
+  expand: SVG('<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>'),
   speed: SVG('<path d="M12 14 15.5 9.5"/><path d="M3.3 17a10 10 0 1 1 17.4 0"/>'),
   externalLink: SVG('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
   reply: SVG('<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>'),

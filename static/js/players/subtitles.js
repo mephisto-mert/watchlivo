@@ -1,10 +1,12 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
 
 const DEFAULT_PREFS = {
-  color: 'white',       // 'white' | 'yellow' | 'cyan'
+  color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
   font: 'sans-serif',   // 'sans-serif' | 'serif' | 'monospace' | 'cursive'
-  size: 1.0,            // 0.8 | 1.0 | 1.25 | 1.5
-  bgOpacity: 0.65,      // 0..1
+  size: 1.0,            // 0.75 | 0.85 | 1.0 | 1.25 | 1.5
+  bgOpacity: 0.65,      // 0 | 0.4 | 0.65 | 0.92
+  bottomOffset: 0,      // 0 | 24 | 48
+  edgeStyle: 'drop',    // 'outline' | 'drop' | 'none'
   shadow: true,
 };
 

@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v9';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v9';
-import { getProvider } from '../providers.js?v=20261029_v9';
-import { expectedPosition } from '../sync.js?v=20261029_v9';
-import { thumbFor } from './lobby.js?v=20261029_v9';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v9';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v9';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v9';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v10';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v10';
+import { getProvider } from '../providers.js?v=20261029_v10';
+import { expectedPosition } from '../sync.js?v=20261029_v10';
+import { thumbFor } from './lobby.js?v=20261029_v10';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v10';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v10';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v10';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -49,7 +49,13 @@ export function buildControls(frame, ctx) {
 
   function applySubPrefsStyle() {
     const p = getSubPrefs();
-    const colorMap = { white: '#ffffff', yellow: '#ffe600', cyan: '#00f0ff' };
+    const colorMap = {
+      white: '#ffffff',
+      yellow: '#ffe600',
+      cyan: '#00f0ff',
+      green: '#4ade80',
+      pink: '#f472b6',
+    };
     const fontMap = {
       'sans-serif': 'Inter, system-ui, -apple-system, sans-serif',
       serif: 'Georgia, Cambria, serif',
@@ -67,7 +73,16 @@ export function buildControls(frame, ctx) {
         : `calc(clamp(14px, 2.0vmax, 22px) * ${Number(p.size || 1)})`;
     subCue.style.padding = (isMob && !fs) ? '.15em .48em' : '.24em .68em';
     subCue.style.background = `rgba(8, 8, 14, ${Number(p.bgOpacity ?? 0.65)})`;
-    subCue.style.textShadow = p.shadow ? '0 2px 6px rgba(0,0,0,.95), 0 0 2px #000' : 'none';
+    const edge = p.edgeStyle || (p.shadow === false ? 'none' : 'drop');
+    if (edge === 'outline') {
+      subCue.style.textShadow = '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 2px 6px rgba(0,0,0,.9)';
+    } else if (edge === 'none') {
+      subCue.style.textShadow = 'none';
+    } else {
+      subCue.style.textShadow = '0 2px 6px rgba(0,0,0,.95), 0 0 2px #000';
+    }
+    const lift = Number(p.bottomOffset || 0);
+    subOverlay.style.transform = lift > 0 ? `translateY(-${lift}px)` : '';
   }
   applySubPrefsStyle();
 
@@ -497,6 +512,31 @@ export function buildControls(frame, ctx) {
     if (e.pointerType === 'touch') return;
     toggleFullscreen();
   });
+  const miniTitle = h('span', { class: 'mini-player-title' }, 'Canlı Oda');
+  const miniBar = h('div', {
+    class: 'mini-player-bar',
+    onclick: (e) => {
+      e.stopPropagation();
+      window.vortexRestoreRoom?.();
+    },
+  },
+    h('div', { class: 'mini-player-meta' },
+      h('span', { class: 'mini-player-dot' }),
+      miniTitle),
+    h('div', { class: 'mini-player-actions' },
+      h('button', {
+        type: 'button',
+        class: 'mini-player-btn expand',
+        title: 'Odaya Dön',
+        onclick: (e) => { e.stopPropagation(); window.vortexRestoreRoom?.(); },
+      }, '⤢ Odaya Dön'),
+      h('button', {
+        type: 'button',
+        class: 'mini-player-btn close',
+        title: 'Odadan Çık',
+        onclick: (e) => { e.stopPropagation(); window.vortexCloseMinimizedRoom?.(); },
+      }, '✕')));
+
   const barRow = h('div', { class: 'ctl-bar-row' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time, h('div', { class: 'ctl-spacer' }), skipBtn, speedBtn, subBtn, snapBtn, gearBtn, fsBtn);
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' }, thumb, h('div', { class: 'ctl-info' }, title, artist), epBtn, nextEpTopBtn, subPillBtn, origBtn, qualityBadge, syncDot, syncText, provLogo),
@@ -513,7 +553,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -722,6 +762,13 @@ export function buildControls(frame, ctx) {
       ambilightCanvas.classList.remove('on');
     }
     host.adapter?.subs?.onTimeUpdate?.(p);
+    if (m && d > 0 && Date.now() - lastMediaPosSyncAt > 2500 && typeof navigator !== 'undefined' && navigator.mediaSession?.setPositionState) {
+      try {
+        lastMediaPosSyncAt = Date.now();
+        const r = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
+        navigator.mediaSession.setPositionState({ duration: d, playbackRate: r > 0 ? r : 1, position: Math.max(0, Math.min(d, p)) });
+      } catch (e) { /* ignore */ }
+    }
     const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
     if (curSub === 'off' || !subCue.textContent) {
       if (curSub === 'off') {
@@ -974,16 +1021,21 @@ export function buildControls(frame, ctx) {
         }, h('span', {}, '📁 Bilgisayardan Altyazı Seç (.srt, .vtt, .ass)')),
       ];
       const quickStyleRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.3em' } },
-        h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, '🔤 Altyazı Boyutu & Rengi'),
+        h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, '🔤 Altyazı Boyutu, Rengi & Konumu'),
         h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px' } },
-          ...[[0.85, 'Küçük'], [1.0, 'Normal'], [1.25, 'Büyük'], [1.5, 'Dev']].map(([val, txt]) => h('button', {
+          ...[[0.75, '%75'], [0.85, '%85'], [1.0, '%100'], [1.25, '%125'], [1.5, '%150']].map(([val, txt]) => h('button', {
             class: `ctl-pref-pill ${Number(prefs.size) === Number(val) ? 'on' : ''}`,
             onclick: (e) => { e.stopPropagation(); setSubPrefs({ size: val }); applySubPrefsStyle(); renderMenuView('subtitle'); },
           }, txt))),
-        h('div', { class: 'ctl-pref-pills' },
-          ...[['white', '⚪ Beyaz'], ['yellow', '🟡 Sarı'], ['cyan', '🔵 Turkuaz']].map(([val, txt]) => h('button', {
+        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px' } },
+          ...[['white', '⚪ Beyaz'], ['yellow', '🟡 Sarı'], ['cyan', '🔵 Turkuaz'], ['green', '🟢 Yeşil'], ['pink', '🩷 Pembe']].map(([val, txt]) => h('button', {
             class: `ctl-pref-pill ${prefs.color === val ? 'on' : ''}`,
             onclick: (e) => { e.stopPropagation(); setSubPrefs({ color: val }); applySubPrefsStyle(); renderMenuView('subtitle'); },
+          }, txt))),
+        h('div', { class: 'ctl-pref-pills' },
+          ...[[0, '⬇️ Alt'], [24, '↕️ Orta-Alt'], [48, '⬆️ Yukarı']].map(([val, txt]) => h('button', {
+            class: `ctl-pref-pill ${Number(prefs.bottomOffset || 0) === Number(val) ? 'on' : ''}`,
+            onclick: (e) => { e.stopPropagation(); setSubPrefs({ bottomOffset: val }); applySubPrefsStyle(); renderMenuView('subtitle'); },
           }, txt))));
       const curOff = host.adapter?.subs?.offsetSec || 0;
       const curFps = Number(host.adapter?.subs?.fpsScale || 1.0);
@@ -1040,12 +1092,17 @@ export function buildControls(frame, ctx) {
           onclick: (e) => { e.stopPropagation(); onPick(val); applySubPrefsStyle(); renderMenuView('subtitlePreferences'); },
         }, txt))),
       );
+      const scrollBox = h('div', { class: 'ctl-menu-scroll' },
+        segRow('Yazı Rengi', [['white', '⚪ Beyaz'], ['yellow', '🟡 Sarı'], ['cyan', '🔵 Turkuaz'], ['green', '🟢 Yeşil'], ['pink', '🩷 Pembe']], prefs.color, (v) => setSubPrefs({ color: v })),
+        segRow('Yazı Boyutu', [[0.75, '%75'], [0.85, '%85'], [1.0, '%100'], [1.25, '%125'], [1.5, '%150']], prefs.size, (v) => setSubPrefs({ size: v })),
+        segRow('Yazı Tipi', [['sans-serif', 'Sans'], ['serif', 'Serif'], ['monospace', 'Mono'], ['cursive', 'El Yazısı']], prefs.font, (v) => setSubPrefs({ font: v })),
+        segRow('Arka Plan Saydamlığı', [[0, 'Yok (%0)'], [0.4, 'Hafif (%40)'], [0.65, 'Yarı (%65)'], [0.92, 'Koyu (%92)']], prefs.bgOpacity, (v) => setSubPrefs({ bgOpacity: v })),
+        segRow('Dikey Konum (Yükseklik)', [[0, '⬇️ Alt'], [24, '↕️ Orta-Alt'], [48, '⬆️ Yukarı']], Number(prefs.bottomOffset || 0), (v) => setSubPrefs({ bottomOffset: v })),
+        segRow('Kenarlık & Gölge', [['outline', 'Keskin Kontur'], ['drop', 'Yumuşak Gölge'], ['none', 'Yok']], prefs.edgeStyle || 'drop', (v) => setSubPrefs({ edgeStyle: v, shadow: v !== 'none' })),
+      );
       menu.replaceChildren(
         backHeader('Altyazı Görünümü', 'subtitle'),
-        segRow('Yazı Rengi', [['white', 'Beyaz'], ['yellow', 'Sarı'], ['cyan', 'Turkuaz']], prefs.color, (v) => setSubPrefs({ color: v })),
-        segRow('Yazı Boyutu', [[0.85, 'Küçük'], [1.0, 'Normal'], [1.25, 'Büyük'], [1.5, 'Dev']], prefs.size, (v) => setSubPrefs({ size: v })),
-        segRow('Yazı Tipi', [['sans-serif', 'Sans'], ['serif', 'Serif'], ['monospace', 'Mono']], prefs.font, (v) => setSubPrefs({ font: v })),
-        segRow('Arka Plan', [[0, 'Yok'], [0.65, 'Yarı Saydam'], [0.92, 'Koyu']], prefs.bgOpacity, (v) => setSubPrefs({ bgOpacity: v })),
+        scrollBox,
       );
       return;
     }
@@ -1222,8 +1279,31 @@ export function buildControls(frame, ctx) {
     );
   }
 
+  let lastMobileLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight * 1.15;
+
   function onViewportChange() {
     try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+    if (typeof window !== 'undefined') {
+      const isTouchPhone = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && Math.min(window.innerWidth, window.innerHeight) <= 540;
+      const isLandscape = window.innerWidth > window.innerHeight * 1.15;
+      const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
+      const isMinimized = document.body.classList.contains('mesh-minimized');
+      if (isTouchPhone && hasMedia && !isMinimized) {
+        if (!lastMobileLandscape && isLandscape && !isFullscreenActive()) {
+          frame.classList.add('fullscreen');
+          document.body.classList.add('vortex-fs');
+          frame.dataset.fsMode = 'auto-rotate';
+          revealControls(2500);
+        } else if (lastMobileLandscape && !isLandscape && isFullscreenActive()) {
+          frame.classList.remove('fullscreen');
+          document.body.classList.remove('vortex-fs');
+          frame.dataset.fsMode = '';
+          if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+          if (document.webkitFullscreenElement) document.webkitExitFullscreen?.();
+        }
+      }
+      lastMobileLandscape = isLandscape;
+    }
     applySubPrefsStyle();
     host.adapter?.subs?.onTimeUpdate?.(position(), true);
     [120, 450, 1100].forEach((ms) => setTimeout(() => {
@@ -1310,10 +1390,72 @@ export function buildControls(frame, ctx) {
     }
   }
 
+  let lastMediaSessionKey = '';
+  let lastMediaPosSyncAt = 0;
+
+  function syncMediaSession(m, prov, thumbUrl, playing, curRate) {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
+    try {
+      const ms = navigator.mediaSession;
+      const metaKey = `${m?.title || ''}|${m?.channel || prov?.name || ''}|${thumbUrl || ''}`;
+      if (metaKey !== lastMediaSessionKey) {
+        lastMediaSessionKey = metaKey;
+        const absThumb = thumbUrl && !thumbUrl.startsWith('data:')
+          ? new URL(thumbUrl, window.location.origin).href
+          : `${window.location.origin}/static/watchlivo-icon-512.png`;
+        ms.metadata = new MediaMetadata({
+          title: m?.title || 'Watchlivo',
+          artist: m?.channel || prov?.name || 'Birlikte İzle',
+          album: state.mesh?.name ? `Watchlivo · ${state.mesh.name}` : 'Watchlivo Sinema',
+          artwork: [
+            { src: absThumb, sizes: '512x512', type: 'image/png' },
+          ],
+        });
+        const safeHandler = (act, fn) => { try { ms.setActionHandler(act, fn); } catch (e) { /* ignore */ } };
+        safeHandler('play', () => {
+          if (isLeader()) actions.play?.() || actions.toggle?.();
+          else host.adapter?.play?.();
+        });
+        safeHandler('pause', () => {
+          if (isLeader()) actions.pause?.() || actions.toggle?.();
+        });
+        safeHandler('seekbackward', (details) => {
+          if (isLeader()) seekStep(-(details?.seekOffset || 10));
+        });
+        safeHandler('seekforward', (details) => {
+          if (isLeader()) seekStep(details?.seekOffset || 10);
+        });
+        safeHandler('seekto', (details) => {
+          if (isLeader() && Number.isFinite(details?.seekTime)) actions.seek(details.seekTime);
+        });
+        safeHandler('nexttrack', () => {
+          if (!isLeader()) return;
+          if (m?.mediaType === 'tv') triggerNextEpisode();
+          else if ((state.mesh?.queue || []).length) actions.skip();
+        });
+      }
+      ms.playbackState = playing ? 'playing' : 'paused';
+      const now = Date.now();
+      if (now - lastMediaPosSyncAt > 2000 && typeof ms.setPositionState === 'function') {
+        const d = duration();
+        const p = position();
+        if (d > 0 && Number.isFinite(d) && Number.isFinite(p)) {
+          lastMediaPosSyncAt = now;
+          ms.setPositionState({
+            duration: d,
+            playbackRate: Number(curRate || 1) > 0 ? Number(curRate || 1) : 1,
+            position: Math.max(0, Math.min(d, p)),
+          });
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
   let lastStatus = '';
   function update() {
     const m = state.mesh?.media;
     const has = !!(m && (m.url || m.videoId));
+    miniTitle.textContent = m?.title || state.mesh?.name || 'Canlı Oda';
     if (!state.mesh) {
       empty.classList.add('hidden');
       loading.classList.remove('hidden');
@@ -1405,6 +1547,7 @@ export function buildControls(frame, ctx) {
     }
     skipBtn.style.display = (state.mesh?.queue || []).length ? '' : 'none';
     gearBtn.style.display = (host.adapter?.caps.rate || m.tmdbId || hasSubsOrDub) ? '' : 'none';
+    syncMediaSession(m, prov, t, playing, curRate);
   }
 
   let overlayTimer = null;

@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v9';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v9';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v9';
-import { MeshConnection } from '../realtime.js?v=20261029_v9';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v9';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v9';
-import { buildLayout } from './mesh-layout.js?v=20261029_v9';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v9';
-import { Voice } from '../voice.js?v=20261029_v9';
-import { playRoomSfx } from './chat.js?v=20261029_v9';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v10';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v10';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v10';
+import { MeshConnection } from '../realtime.js?v=20261029_v10';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v10';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v10';
+import { buildLayout } from './mesh-layout.js?v=20261029_v10';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v10';
+import { Voice } from '../voice.js?v=20261029_v10';
+import { playRoomSfx } from './chat.js?v=20261029_v10';
 
 let ctx = null;
 
@@ -540,7 +540,11 @@ const actions = {
     }
     ctx.conn.send('video_ended', { key: mediaKey(m) });
   },
-  async leave() { clearSavedChat(state.mesh?.id); window.vortexNavigate('/'); },
+  async leave() {
+    document.body.classList.remove('mesh-minimized');
+    clearSavedChat(state.mesh?.id);
+    window.vortexNavigate('/');
+  },
 };
 
 export async function enterMesh(app, params) {

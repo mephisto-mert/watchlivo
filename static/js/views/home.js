@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v9';
-import { state, set } from '../store.js?v=20261029_v9';
-import { avatar, profileSetup } from '../profile.js?v=20261029_v9';
-import { api } from '../api.js?v=20261029_v9';
-import { createSelection } from './selection.js?v=20261029_v9';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v9';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261029_v10';
+import { state, set } from '../store.js?v=20261029_v10';
+import { avatar, profileSetup } from '../profile.js?v=20261029_v10';
+import { api } from '../api.js?v=20261029_v10';
+import { createSelection } from './selection.js?v=20261029_v10';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261029_v10';
 
 let refreshTimer = null;
 let rooms = [];
@@ -16,7 +16,16 @@ export function navIcon(name, tip, onClick, { selected = false, disabled = false
 }
 
 export function logo() {
-  return h('div', { class: 'logo', onclick: () => window.vortexNavigate('/') },
+  return h('div', {
+    class: 'logo',
+    onclick: () => {
+      if (state.route?.name === 'mesh' && typeof window.vortexMinimizeRoom === 'function') {
+        window.vortexMinimizeRoom();
+      } else {
+        window.vortexNavigate('/');
+      }
+    },
+  },
     h('img', { src: '/static/watchlivo-logo.svg?v=20261024m', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
@@ -98,6 +107,13 @@ export function renderHome(app) {
       navIcon('link', 'Kodla katıl', () => joinByCode())));
 
   const selection = createSelection({ onPick: async (media) => {
+    if (document.body.classList.contains('mesh-minimized') && state.mesh && typeof window.vortexActions?.pickMedia === 'function') {
+      try {
+        await window.vortexActions.pickMedia(media);
+        window.vortexRestoreRoom?.();
+        return;
+      } catch (e) { /* fallback to createRoomWithMedia */ }
+    }
     try { await createRoomWithMedia(media); } catch (e) { toast(e.message || 'Oda oluşturulamadı'); }
   } });
   selection.id = 'home-selection';

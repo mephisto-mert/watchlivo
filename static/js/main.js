@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261029_v9';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261029_v9';
-import { renderHome, destroyHome } from './views/home.js?v=20261029_v9';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261029_v9';
-import { api } from './api.js?v=20261029_v9';
-import { toast } from './ui.js?v=20261029_v9';
+import { state, set } from './store.js?v=20261029_v10';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261029_v10';
+import { renderHome, destroyHome } from './views/home.js?v=20261029_v10';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261029_v10';
+import { api } from './api.js?v=20261029_v10';
+import { toast } from './ui.js?v=20261029_v10';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -20,16 +20,84 @@ function parseRoute() {
 }
 
 let current = null;
+let activeMeshRoomId = null;
+
+function ensureViewRoots(app) {
+  let homeRoot = document.getElementById('home-root');
+  let meshRoot = document.getElementById('mesh-root');
+  if (!homeRoot || !meshRoot) {
+    homeRoot = document.createElement('div');
+    homeRoot.id = 'home-root';
+    homeRoot.className = 'app-view-root hidden';
+    meshRoot = document.createElement('div');
+    meshRoot.id = 'mesh-root';
+    meshRoot.className = 'app-view-root hidden';
+    app.replaceChildren(homeRoot, meshRoot);
+  }
+  return { homeRoot, meshRoot };
+}
+
+window.vortexMinimizeRoom = () => {
+  if (!activeMeshRoomId) {
+    navigate('/');
+    return;
+  }
+  document.body.classList.add('mesh-minimized');
+  document.body.classList.remove('vortex-fs');
+  toast('🗗 Oda sağ alta küçültüldü · Gezinmeye devam edebilirsin');
+  navigate('/');
+};
+
+window.vortexRestoreRoom = () => {
+  if (!activeMeshRoomId) return;
+  document.body.classList.remove('mesh-minimized');
+  navigate(`/mesh/${encodeURIComponent(activeMeshRoomId)}`);
+};
+
+window.vortexCloseMinimizedRoom = () => {
+  document.body.classList.remove('mesh-minimized');
+  activeMeshRoomId = null;
+  leaveMeshView();
+  const meshRoot = document.getElementById('mesh-root');
+  if (meshRoot) {
+    meshRoot.replaceChildren();
+    meshRoot.classList.add('hidden');
+  }
+  toast('Odadan ayrıldın');
+};
+
 async function route() {
   const r = parseRoute();
   const app = document.getElementById('app');
-  if (current === 'mesh' && (r.name !== 'mesh' || r.params.id !== state.route.params.id)) leaveMeshView();
-  if (current === 'home' && r.name !== 'home') destroyHome();
+  const { homeRoot, meshRoot } = ensureViewRoots(app);
   set({ route: r });
   if (r.name === 'mesh') {
-    if (current !== 'mesh' || state.mesh?.id !== r.params.id) await enterMesh(app, r.params);
+    document.body.classList.remove('mesh-minimized');
+    if (current === 'home') destroyHome();
+    homeRoot.classList.add('hidden');
+    meshRoot.classList.remove('hidden');
+    if (activeMeshRoomId !== r.params.id || !state.mesh) {
+      if (activeMeshRoomId) leaveMeshView();
+      activeMeshRoomId = r.params.id;
+      await enterMesh(meshRoot, r.params);
+    } else {
+      window.dispatchEvent(new Event('resize'));
+    }
   } else {
-    renderHome(app);
+    const keepMinimized = Boolean(activeMeshRoomId && document.body.classList.contains('mesh-minimized') && state.mesh);
+    if (!keepMinimized) {
+      document.body.classList.remove('mesh-minimized');
+      if (activeMeshRoomId) {
+        activeMeshRoomId = null;
+        leaveMeshView();
+      }
+      meshRoot.replaceChildren();
+      meshRoot.classList.add('hidden');
+    } else {
+      meshRoot.classList.remove('hidden');
+    }
+    homeRoot.classList.remove('hidden');
+    renderHome(homeRoot);
   }
   current = r.name;
 }
