@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261029_v8';
-import { api, qs } from '../api.js?v=20261029_v8';
-import { parseVideoUrl } from '../providers.js?v=20261029_v8';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261029_v8';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261029_v8';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261029_v8';
+import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261029_v9';
+import { api, qs } from '../api.js?v=20261029_v9';
+import { parseVideoUrl } from '../providers.js?v=20261029_v9';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261029_v9';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261029_v9';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261029_v9';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');

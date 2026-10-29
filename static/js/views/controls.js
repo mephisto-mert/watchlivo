@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v8';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v8';
-import { getProvider } from '../providers.js?v=20261029_v8';
-import { expectedPosition } from '../sync.js?v=20261029_v8';
-import { thumbFor } from './lobby.js?v=20261029_v8';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v8';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v8';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v8';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v9';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v9';
+import { getProvider } from '../providers.js?v=20261029_v9';
+import { expectedPosition } from '../sync.js?v=20261029_v9';
+import { thumbFor } from './lobby.js?v=20261029_v9';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v9';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v9';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v9';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -817,6 +817,52 @@ export function buildControls(frame, ctx) {
     frame.classList.add('menu-open');
   }
 
+  const cleanSrvUrl = (u) => String(u || '').replace(/&aud=[^&]+/g, '').replace(/&proxy_segs=1/g, '').trim();
+
+  async function refreshCurrentStreamSources() {
+    const m = state.mesh?.media;
+    if (!m || (!m.tmdbId && !m.imdbId && !m.title)) return;
+    closeMenu();
+    errorBox.classList.add('hidden');
+    loading.classList.remove('hidden');
+    showOverlay('🔄 Yayın kaynakları canlı yenileniyor…', 3500);
+    try {
+      const qs = new URLSearchParams({
+        provider: String(m.catalogProvider || m.provider || 'cinema'),
+        title: String(m.originalTitle || m.seriesTitle || m.title || ''),
+        displayTitle: String(m.seriesTitle || m.title || ''),
+        year: String(m.year || ''),
+        tmdbId: String(m.tmdbId || ''),
+        imdbId: String(m.imdbId || ''),
+        mediaType: String(m.mediaType || 'movie'),
+        season: String(m.season || 1),
+        episode: String(m.episode || 1),
+        refresh: '1',
+      });
+      const r = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
+      if (r.ok) {
+        const fresh = await r.json();
+        if (fresh && fresh.url) {
+          m.url = fresh.url;
+          if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
+          if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
+          if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
+          if (host.adapter?.switchStreamSource) {
+            host.adapter.switchStreamSource(fresh.url);
+          } else {
+            await host.setMedia(m, position(), true);
+          }
+          loading.classList.add('hidden');
+          showOverlay('✅ Yayın kaynağı yenilendi', 2200);
+          update();
+          return;
+        }
+      }
+    } catch (e) { /* ignore */ }
+    loading.classList.add('hidden');
+    toast('Alternatif yayın kaynağı bulunamadı.');
+  }
+
   function renderMenuView(view) {
     currentMenuView = view;
     const m = state.mesh?.media || {};
@@ -835,6 +881,15 @@ export function buildControls(frame, ctx) {
             ]);
     const curAudioId = host.adapter?.getSelectedAudioId?.() || 'orig';
     const curAudioObj = audioTracks.find((t) => t.id === curAudioId) || audioTracks[0];
+    const rawServers = Array.isArray(m.servers) && m.servers.length
+      ? m.servers
+      : Array.from(new Set([m.url, ...(m.altUrls || [])].map((u) => cleanSrvUrl(u)).filter(Boolean))).map((u, idx) => ({
+          id: `srv-${idx + 1}`,
+          label: `📡 Sunucu ${idx + 1} · ${u.includes('ref=fhd') ? 'FullHD (1080p)' : u.includes('ref=pv') ? 'Pilavyer (HD)' : u.includes('ref=ve') ? 'VidFast (1080p)' : u.includes('ref=dl') ? 'DiziLife (1080p)' : 'Alternatif Yayın (HD)'}`,
+          url: u,
+        }));
+    const curStreamClean = cleanSrvUrl(host.adapter?.currentUrl || m.url || '');
+    const curSrvObj = rawServers.find((s) => cleanSrvUrl(s.url) === curStreamClean) || rawServers[0] || null;
 
     const closeBtn = () => h('button', {
       class: 'ctl-menu-close',
@@ -1004,6 +1059,34 @@ export function buildControls(frame, ctx) {
       return;
     }
 
+    if (view === 'servers') {
+      const srvRows = rawServers.map((srv) => {
+        const isOn = curSrvObj ? curSrvObj.id === srv.id : cleanSrvUrl(srv.url) === curStreamClean;
+        return h('div', {
+          class: `opt ${isOn ? 'on' : ''}`,
+          onclick: (e) => {
+            e.stopPropagation();
+            if (host.autoplayBlocked || host.muted) doUnlockAudio();
+            m.url = srv.url;
+            host.adapter?.switchStreamSource?.(srv.url);
+            showOverlay(srv.label, 2200);
+            closeMenu();
+            update();
+          },
+        }, h('span', {}, srv.label), isOn ? h('span', {}, '✓') : null);
+      });
+      const refreshRow = h('div', {
+        class: 'opt ctl-menu-switch-tab',
+        onclick: (e) => { e.stopPropagation(); refreshCurrentStreamSources(); },
+      }, h('span', {}, '🔄 Kaynakları Canlı Yenile (Önbelleği Temizle)'), h('span', {}, '↻'));
+      menu.replaceChildren(
+        backHeader('Yayın Sunucusu Seçimi', 'list'),
+        h('div', { class: 'ctl-menu-scroll' }, ...srvRows),
+        refreshRow,
+      );
+      return;
+    }
+
     if (view === 'quality') {
       const qLevels = host.adapter?.getQualityLevels?.() || [{ id: 0, label: '✨ 1080p Full HD (Doğrudan Akış)', active: true }];
       menu.replaceChildren(
@@ -1097,6 +1180,12 @@ export function buildControls(frame, ctx) {
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('audio'); } },
         optIconLbl('audioWave', 'Ses & Dublaj (Audio)'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${curAudioObj ? curAudioObj.label.replace(/^[^\s]+\s/, '') : 'Orijinal'} ›`)));
+    }
+    if (!m.isMusic && !m.isLive && (rawServers.length > 0 || m.tmdbId)) {
+      const srvIdx = curSrvObj ? (rawServers.indexOf(curSrvObj) + 1) : 1;
+      items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); } },
+        optIconLbl('globe', 'Yayın Sunucusu (Kaynak)'),
+        h('span', { class: 'dim', style: { fontSize: '.85em' } }, `Sunucu ${srvIdx} (${rawServers.length}) ›`)));
     }
     if (host.adapter?.caps.rate) {
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('speed'); } },
@@ -1386,7 +1475,20 @@ export function buildControls(frame, ctx) {
       }
       if (ev === 'unmuted') unmute.classList.add('hidden');
       if (ev === 'autoplay-blocked') unmute.classList.remove('hidden');
-      if (ev === 'error') { fill(errorBox, h('b', {}, 'Oynatıcı hatası'), h('div', { class: 'dim' }, arg || ''), canSelectVideo() ? h('button', { class: 'btn', onclick: () => { setView('left', 'Search'); ctx.layout.update(); } }, 'Başka video seç') : null); errorBox.classList.remove('hidden'); }
+      if (ev === 'error') {
+        const mErr = state.mesh?.media;
+        const canRefresh = Boolean(mErr && !mErr.isMusic && !mErr.live && (mErr.tmdbId || mErr.imdbId || mErr.title));
+        fill(
+          errorBox,
+          h('b', {}, 'Oynatıcı hatası'),
+          h('div', { class: 'dim' }, arg || ''),
+          h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '6px' } },
+            canRefresh ? h('button', { class: 'btn primary', onclick: () => refreshCurrentStreamSources() }, '🔄 Yayını Yenile') : null,
+            canSelectVideo() ? h('button', { class: 'btn', onclick: () => { setView('left', 'Search'); ctx.layout.update(); } }, 'Başka video seç') : null,
+          ),
+        );
+        errorBox.classList.remove('hidden');
+      }
       if (ev === 'loading' || ev === 'empty') { errorBox.classList.add('hidden'); unmute.classList.add('hidden'); subOverlay.classList.add('hidden'); }
       update();
     },

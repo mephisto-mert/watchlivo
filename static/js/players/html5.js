@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261029_v8';
-import { expectedPosition } from '../sync.js?v=20261029_v8';
-import { state } from '../store.js?v=20261029_v8';
+import { SubtitleDubController } from './subtitles.js?v=20261029_v9';
+import { expectedPosition } from '../sync.js?v=20261029_v9';
+import { state } from '../store.js?v=20261029_v9';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -315,12 +315,53 @@ export class Html5Adapter {
       ? String(u).replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
       : u);
 
-    const handleExhaustedCandidates = (srcUrl, doneCb) => {
+    let triedLiveRefresh = false;
+    const handleExhaustedCandidates = async (srcUrl, doneCb) => {
       const proxied = withProxySegs(srcUrl || this.currentUrl);
       if (!triedProxySegs && proxied && proxied !== (srcUrl || this.currentUrl)) {
         triedProxySegs = true;
         loadCandidateUrl(proxied, doneCb);
         return;
+      }
+      if (!triedLiveRefresh && !this.isMusic && !media?.live && (media?.tmdbId || media?.imdbId || media?.title)) {
+        triedLiveRefresh = true;
+        try {
+          const qs = new URLSearchParams({
+            provider: String(media.catalogProvider || media.provider || 'cinema'),
+            title: String(media.originalTitle || media.seriesTitle || media.title || ''),
+            displayTitle: String(media.seriesTitle || media.title || ''),
+            year: String(media.year || ''),
+            tmdbId: String(media.tmdbId || ''),
+            imdbId: String(media.imdbId || ''),
+            mediaType: String(media.mediaType || 'movie'),
+            season: String(media.season || 1),
+            episode: String(media.episode || 1),
+            refresh: '1',
+          });
+          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
+          if (resp.ok && this.video === v) {
+            const fresh = await resp.json();
+            if (fresh && fresh.url) {
+              if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
+              if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
+              const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
+              let addedAny = false;
+              for (const fu of freshList) {
+                const s = String(fu || '').trim();
+                if (s && !isDrmUrl(s) && !isDemoTestUrl(s) && !seenUrls.has(s)) {
+                  seenUrls.add(s);
+                  alts.push(s);
+                  addedAny = true;
+                }
+              }
+              if (addedAny && nativeAltIdx < alts.length) {
+                triedProxySegs = false;
+                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                return;
+              }
+            }
+          }
+        } catch (err) { /* ignore and fall through */ }
       }
       clearBuf();
       this.events.onError?.('Akış yüklenemedi');

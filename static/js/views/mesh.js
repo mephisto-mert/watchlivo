@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v8';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v8';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v8';
-import { MeshConnection } from '../realtime.js?v=20261029_v8';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v8';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v8';
-import { buildLayout } from './mesh-layout.js?v=20261029_v8';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v8';
-import { Voice } from '../voice.js?v=20261029_v8';
-import { playRoomSfx } from './chat.js?v=20261029_v8';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v9';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v9';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v9';
+import { MeshConnection } from '../realtime.js?v=20261029_v9';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v9';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v9';
+import { buildLayout } from './mesh-layout.js?v=20261029_v9';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v9';
+import { Voice } from '../voice.js?v=20261029_v9';
+import { playRoomSfx } from './chat.js?v=20261029_v9';
 
 let ctx = null;
 

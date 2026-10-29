@@ -2344,7 +2344,24 @@ def _decode_rapidvid_embed(vod_url: str, ref: str = "https://www.fullhdfilmizles
     return "", []
 
 
-def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, ekey: str, year: str = "", imdb_id: str = "", extra_titles: list = None, source_url: str = "", tid: str = "") -> list:
+def _is_vault_url_expired(url: str) -> bool:
+    u_low = str(url or "").lower()
+    if "pilavyer" in u_low and "token=" in str(url or ""):
+        try:
+            qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+            tok = str(qs.get("token") or "").split(".")[0]
+            if tok:
+                pad = tok + "=" * ((4 - len(tok) % 4) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(pad.encode("ascii")).decode("utf-8", errors="ignore"))
+                exp = payload.get("exp")
+                if exp and float(exp) < time.time() + 300:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, ekey: str, year: str = "", imdb_id: str = "", extra_titles: list = None, source_url: str = "", tid: str = "", refresh: bool = False) -> list:
     import codecs
     res = []
     fallback_res = []
@@ -2416,6 +2433,8 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         raw_su, st_t = str(u_st[0]), str(u_st[1])
                         if not raw_su.startswith("http") or "ineedskin.cfd" in raw_su.lower() or "shrek.dragonballzfans.xyz" in raw_su.lower() or "goldenkite.top" in raw_su.lower():
                             continue
+                        if _is_vault_url_expired(raw_su):
+                            continue
                         if IS_VERCEL and (
                             "dbx.molystream.org" in raw_su.lower()
                             or "dplayer" in raw_su.lower()
@@ -2431,12 +2450,14 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         if not _stream_matches_title(raw_su, valid_titles):
                             continue
                         is_true_1080_vault = (
-                            st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr")
-                            or (IS_VERCEL and st_t in ("hls_dl", "hls_pv", "hls_pv_multi"))
-                            or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
-                            or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
-                            or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su))
-                            or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
+                            not refresh and (
+                                st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr")
+                                or (IS_VERCEL and st_t == "hls_dl")
+                                or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
+                                or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
+                                or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su))
+                                or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
+                            )
                         )
                         dest_l = target_list if is_true_1080_vault else fallback_res
                         if (raw_su, st_t) not in dest_l:
@@ -2447,7 +2468,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                                 _AUDIO_LANG_HINT[str(u_st[0])] = list(v_aud)
 
     _collect_vault_keys(exact_ep_keys, res)
-    if res:
+    if res and not refresh:
         return res + [x for x in fallback_res if x not in res]
     _collect_vault_keys(fb_ep_keys, fallback_res)
 
@@ -2820,44 +2841,50 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
         return {"title": fallback_title, "trTitle": fallback_title, "originalTitle": fallback_title, "altTitles": [], "year": fallback_year, "imdbId": fallback_imdb, "origLang": "en", "transLangs": ["tr", "en"], "runtime": 48 if mtype == "tv" else 120, "primaryProv": ""}
 
 
-def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = ""):
+def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = "", refresh: bool = False):
     ckey = f"v32:{mtype}:{tid}:{s}:{e}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
-    cached = _STREAM_CACHE.get(ckey)
+    if refresh:
+        old_c = _STREAM_CACHE.pop(ckey, None)
+        for u_old, _ in ((old_c or {}).get("val") or []):
+            _STREAM_RES_HINT.pop(u_old, None)
+            _AUDIO_PROBE_CACHE.pop(u_old, None)
+    cached = None if refresh else _STREAM_CACHE.get(ckey)
     if cached and cached["exp"] > now_t:
-        c_val = cached.get("val") or []
+        c_val = [u for u in (cached.get("val") or []) if not _is_vault_url_expired(u[0])]
         check_titles = [x for x in (title, disp_title) if x]
         if c_val and (not check_titles or all(_stream_matches_title(u[0], check_titles) for u in c_val)):
             if cached.get("subs"):
                 _EMBED_SUB_CACHE[ekey] = list(cached["subs"])
             return c_val
-    try:
-        conn = _get_acc_db()
-        row = conn.execute("SELECT val_json, exp FROM resolved_streams WHERE ckey = ?", (ckey,)).fetchone()
-        conn.close()
-        if row and row["exp"] > now_t:
-            parsed = json.loads(row["val_json"] or "{}")
-            if isinstance(parsed, dict):
-                val = [tuple(x) for x in (parsed.get("urls") or [])]
-                subs = parsed.get("subs") or []
-            else:
-                val = [tuple(x) for x in parsed]
-                subs = []
-            check_titles = [x for x in (title, disp_title) if x]
-            if val and (not check_titles or all(_stream_matches_title(u[0], check_titles) for u in val)):
-                if subs:
-                    _EMBED_SUB_CACHE[ekey] = list(subs)
-                v_streams = _MAIN_SITES_VAULT.get("streams") or {}
-                for u_c, _ in val:
-                    for vk_c, ve_c in v_streams.items():
-                        if isinstance(ve_c, dict) and ve_c.get("audioLangs") and any(s_p[0] == u_c for s_p in (ve_c.get("streams") or []) if isinstance(s_p, (list, tuple))):
-                            _AUDIO_LANG_HINT[u_c] = list(ve_c["audioLangs"])
-                            break
-                _STREAM_CACHE[ckey] = {"val": val, "subs": subs, "exp": row["exp"]}
-                return val
-    except Exception:
-        pass
+    if not refresh:
+        try:
+            conn = _get_acc_db()
+            row = conn.execute("SELECT val_json, exp FROM resolved_streams WHERE ckey = ?", (ckey,)).fetchone()
+            conn.close()
+            if row and row["exp"] > now_t:
+                parsed = json.loads(row["val_json"] or "{}")
+                if isinstance(parsed, dict):
+                    val = [tuple(x) for x in (parsed.get("urls") or []) if not _is_vault_url_expired(x[0])]
+                    subs = parsed.get("subs") or []
+                else:
+                    val = [tuple(x) for x in parsed if not _is_vault_url_expired(x[0])]
+                    subs = []
+                check_titles = [x for x in (title, disp_title) if x]
+                if val and (not check_titles or all(_stream_matches_title(u[0], check_titles) for u in val)):
+                    if subs:
+                        _EMBED_SUB_CACHE[ekey] = list(subs)
+                    v_streams = _MAIN_SITES_VAULT.get("streams") or {}
+                    for u_c, _ in val:
+                        for vk_c, ve_c in v_streams.items():
+                            if isinstance(ve_c, dict) and ve_c.get("audioLangs") and any(s_p[0] == u_c for s_p in (ve_c.get("streams") or []) if isinstance(s_p, (list, tuple))):
+                                _AUDIO_LANG_HINT[u_c] = list(ve_c["audioLangs"])
+                                break
+                    _STREAM_CACHE[ckey] = {"val": val, "subs": subs, "exp": row["exp"]}
+                    return val
+        except Exception:
+            pass
 
     meta = _get_tmdb_meta_sync(tid, mtype, title or disp_title, year, imdb_id)
     orig_title = meta.get("originalTitle") or title or disp_title
@@ -2988,7 +3015,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     f_pv = pool.submit(_extract_ddizimag_sync, mtype, s, e, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
     f_dl = pool.submit(_extract_dizilife_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
     f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
-    f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid)
+    f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid, refresh)
     f_ve = pool.submit(_job_videasy)
     f_hexa = pool.submit(_job_hexa)
     f_vid = pool.submit(_job_vidlink)
@@ -3034,10 +3061,12 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             ac_res = f_ac.result() or []
         except Exception:
             ac_res = []
-    for f_sub in (f_hf, f_dp, f_dl, f_pv):
+    for f_sub in (f_pv, f_dl, f_dp, f_hf):
         if f_sub.done():
             try:
-                tr_res.extend(f_sub.result() or [])
+                for item_tr in (f_sub.result() or []):
+                    if item_tr not in tr_res:
+                        tr_res.append(item_tr)
             except Exception:
                 pass
     if f_ve.done():
@@ -3906,7 +3935,43 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
     return None
 
 
-def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_type: str, poster: str, season: int = 1, episode: int = 1, imdb_id: str = "", display_title: str = "", source_url: str = ""):
+def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
+    u_l = str(raw_u or "").lower()
+    st_s = str(st or "")
+    if st_s == "hls_fhd_multi":
+        return f"📡 Sunucu {idx} · FullHD Dual (TR Dublaj & Orijinal · 1080p)"
+    if st_s == "hls_fhd_tr":
+        return f"📡 Sunucu {idx} · FullHD (TR Dublaj · 1080p)"
+    if st_s == "hls_fhd" or "rapidvid" in u_l or "cdnimgs" in u_l:
+        return f"📡 Sunucu {idx} · FullHD Sinema (1080p HD)"
+    if st_s in ("hls_hfnl_multi", "hls_hfnl") or "hdfilmcehennemi" in u_l or "playmix" in u_l:
+        return f"📡 Sunucu {idx} · HDCehennemi ({'Dual ' if 'multi' in st_s else ''}1080p HD)"
+    if st_s == "mp4_ac_sub":
+        return f"📡 Sunucu {idx} · AnimeciX Fansub ({'720p' if '_720p' in u_l else '1080p'} HD)"
+    if st_s == "mp4_ac_dub":
+        return f"📡 Sunucu {idx} · AnimeciX (TR Dublaj · {'720p' if '_720p' in u_l else '1080p'} HD)"
+    if st_s in ("hls_ve", "hls_ve_multi"):
+        return f"📡 Sunucu {idx} · VidFast Global (1080p HD)"
+    if st_s == "hls_dl" or "makesomthingup" in u_l:
+        return f"📡 Sunucu {idx} · DiziLife (1080p HD)"
+    if st_s == "hls_dp" or "dplayer" in u_l or "ag2m5" in u_l:
+        return f"📡 Sunucu {idx} · DiziPal (1080p HD)"
+    if st_s == "hls_dbx" or "molystream" in u_l:
+        return f"📡 Sunucu {idx} · DiziBox (1080p HD)"
+    if st_s == "hls_pv_multi":
+        return f"📡 Sunucu {idx} · Pilavyer Dual (TR Dublaj & Altyazı · HD)"
+    if st_s == "hls_pv" or "pilavyer" in u_l:
+        return f"📡 Sunucu {idx} · Pilavyer (HD)"
+    if st_s.startswith("hls_fp:") or "fastplay" in u_l:
+        return f"📡 Sunucu {idx} · FastPlay (1080p HD)"
+    if st_s.startswith("mp4_vl"):
+        return f"📡 Sunucu {idx} · VidLink MP4 ({'1080p' if '1080' in st_s else '720p'} HD)"
+    if st_s == "hls" or "dragonballzfans" in u_l:
+        return f"📡 Sunucu {idx} · Flixer / Hexa (1080p HD)"
+    return f"📡 Sunucu {idx} · Yüksek Hızlı Yayın (HD)"
+
+
+def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_type: str, poster: str, season: int = 1, episode: int = 1, imdb_id: str = "", display_title: str = "", source_url: str = "", refresh: bool = False):
     s = max(1, int(season or 1))
     e = max(1, int(episode or 1))
     label = PROV_LABELS.get(prov, prov.capitalize())
@@ -3947,7 +4012,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
         disp = _clean_query_title(disp) or tr_title
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as cat_pool:
-            fut_direct = cat_pool.submit(_extract_direct_stream_sync, eff_tid, mtype, s, e, orig_title, year, imdb_id, tr_title, source_url)
+            fut_direct = cat_pool.submit(_extract_direct_stream_sync, eff_tid, mtype, s, e, orig_title, year, imdb_id, tr_title, source_url, refresh)
             fut_pmeta = cat_pool.submit(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype)
             direct_list = fut_direct.result()
             try:
@@ -3973,6 +4038,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 for st_item in (v_ent.get("streams") or []):
                     if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
                         st_u, st_t = str(st_item[0]), str(st_item[1])
+                        if _is_vault_url_expired(st_u):
+                            continue
                         if IS_VERCEL and (
                             st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                             or "dbx.molystream.org" in st_u.lower()
@@ -4078,11 +4145,27 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             stream_url = audio_tracks[0]["url"] if audio_tracks else alive_wrapped[0][0]
             stype = "mp4" if ("&ext=.mp4" in stream_url or ".mp4" in stream_url) else alive_wrapped[0][1]
             alt_urls = list(dict.fromkeys([t["url"] for t in audio_tracks if t.get("url")] + [_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e) for u, st in direct_list if _STREAM_RES_HINT.get(u, 0) != -1])) or [u for u, _ in wrapped]
+            servers = []
+            seen_srv_u = set()
+            for u_raw, st_raw in direct_list:
+                if _STREAM_RES_HINT.get(u_raw, 0) == -1 and len(alive_wrapped) > 0:
+                    continue
+                wu_srv = _wrap_first_party_stream(u_raw, st_raw, eff_prov, eff_tid, s, e)
+                if not wu_srv or wu_srv in seen_srv_u:
+                    continue
+                seen_srv_u.add(wu_srv)
+                idx_srv = len(servers) + 1
+                servers.append({
+                    "id": f"srv-{idx_srv}",
+                    "label": _server_label_for_stream(u_raw, st_raw, idx_srv),
+                    "url": wu_srv,
+                    "streamType": "mp4" if str(st_raw).startswith("mp4") else "hls",
+                })
             full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
             dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
             off_tpl = OFFICIAL_SEARCH_URLS.get(eff_prov, "https://www.netflix.com/search?q={q}")
             official_url = source_url or pmeta.get("officialUrl") or off_tpl.format(q=urllib.parse.quote(disp or orig_title))
-            is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd") for _, st in (direct_list or []))
+            is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd", "hls_fhd_multi", "hls_fhd_tr") for _, st in (direct_list or []))
             res_str = "720p HD" if is_720_likely else "1080p HD"
             return {
                 "provider": eff_prov,
@@ -4090,7 +4173,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
                 "seriesTitle": disp or tr_title or orig_title,
                 "originalTitle": orig_title, "year": year, "origLang": orig_lang,
-                "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:5],
+                "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:6], "servers": servers[:8],
                 "subtitleTracks": sub_tracks, "audioTracks": audio_tracks, "intro": intro_seg,
                 "platformAudioLangs": pmeta.get("audioLangs") or [],
                 "platformSubLangs": pmeta.get("subLangs") or [],
@@ -4119,6 +4202,7 @@ async def resolve_catalog(request: Request):
     media_type = (request.query_params.get("mediaType") or request.query_params.get("type") or "movie").strip().lower()
     poster = (request.query_params.get("poster") or "").strip()[:600]
     source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
+    force_refresh = (request.query_params.get("refresh") or "").strip().lower() in ("1", "true", "yes")
     try:
         season = max(1, int(request.query_params.get("season") or request.query_params.get("s") or 1))
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
@@ -4126,17 +4210,19 @@ async def resolve_catalog(request: Request):
         season, episode = 1, 1
     ckey = f"v21|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
-    cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
-    cached = _RESOLVE_RESP_CACHE.get(ckey)
-    if cached and now_t - cached[0] < 120:
-        return JSONResponse(cached[1], headers=cc_hdrs)
+    cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
+    if not force_refresh:
+        cached = _RESOLVE_RESP_CACHE.get(ckey)
+        if cached and now_t - cached[0] < 120:
+            return JSONResponse(cached[1], headers=cc_hdrs)
     lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
-        cached = _RESOLVE_RESP_CACHE.get(ckey)
-        if cached and time.time() - cached[0] < 120:
-            return JSONResponse(cached[1], headers=cc_hdrs)
+        if not force_refresh:
+            cached = _RESOLVE_RESP_CACHE.get(ckey)
+            if cached and time.time() - cached[0] < 120:
+                return JSONResponse(cached[1], headers=cc_hdrs)
         try:
-            res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url), timeout=18)
+            res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh), timeout=18)
         except Exception:
             res = None
         if res:

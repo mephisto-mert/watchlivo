@@ -198,6 +198,15 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError):
         episode = 1
     alt_urls = [clean_str(u, 1500) for u in (data.get("altUrls") or []) if isinstance(u, str) and u.startswith(("https://", "/api/rave/"))][:6]
+    servers = []
+    for srv in (data.get("servers") or [])[:8]:
+        if isinstance(srv, dict) and srv.get("url") and str(srv.get("url")).startswith(("https://", "/api/rave/")):
+            servers.append({
+                "id": clean_str(srv.get("id"), 24) or f"srv-{len(servers) + 1}",
+                "label": clean_str(srv.get("label"), 80) or f"📡 Sunucu {len(servers) + 1}",
+                "url": clean_str(srv.get("url"), 1500),
+                "streamType": clean_str(srv.get("streamType"), 16) or "hls",
+            })
     sub_tracks = []
     for st in (data.get("subtitleTracks") or [])[:12]:
         if isinstance(st, dict) and st.get("url"):
@@ -244,6 +253,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "providerUrl": clean_str(data.get("providerUrl"), 2000),
         "officialUrl": clean_str(data.get("officialUrl"), 2000),
         "altUrls": alt_urls,
+        "servers": servers,
         "subtitleTracks": sub_tracks,
         "audioTracks": aud_tracks,
         "intro": intro,
