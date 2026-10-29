@@ -16,6 +16,7 @@ export class MeshConnection {
       localStorage.removeItem(`vortex_st_${roomId}`);
       this.syncToken = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
       this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
+      this.clientId = sessionStorage.getItem('vortex_cid') || null;
     } catch (e) { /* ignore */ }
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
@@ -67,7 +68,10 @@ export class MeshConnection {
       this.clientToken = token;
       try { sessionStorage.setItem(`vortex_ct_${this.roomId}`, token); } catch (e) { /* ignore */ }
     }
-    if (cid) this.clientId = cid;
+    if (cid) {
+      this.clientId = cid;
+      try { sessionStorage.setItem('vortex_cid', cid); } catch (e) { /* ignore */ }
+    }
   }
 
   start() {
@@ -81,6 +85,8 @@ export class MeshConnection {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const q = new URLSearchParams({ username: this.profile.name, color: this.profile.color, device: this.device, pwd: this.password, country: COUNTRY });
     if (this.profile.authToken) q.set('authToken', this.profile.authToken);
+    if (this.clientId) q.set('clientId', this.clientId);
+    if (this.clientToken) q.set('clientToken', this.clientToken);
     let opened = false;
     let ws;
     try {

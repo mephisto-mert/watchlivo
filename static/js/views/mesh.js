@@ -544,7 +544,9 @@ const actions = {
 
 export async function enterMesh(app, params) {
   leaveMeshView();
-  set({ mesh: null, clientId: null, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting' });
+  let initialCid = null;
+  try { initialCid = sessionStorage.getItem('vortex_cid') || null; } catch (e) { /* ignore */ }
+  set({ mesh: null, clientId: initialCid, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting' });
   const host = new PlayerHost(h('div'), { onEvent: (ev, arg) => onPlayerEvent(ev, arg) });
   const sync = new SyncEngine({
     getMedia: () => state.mesh?.media,
