@@ -5950,6 +5950,11 @@ async def index(request: Request):
 
 
 async def download_apk_endpoint(request: Request):
+    if IS_VERCEL:
+        return RedirectResponse(
+            "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo-v1.1.apk",
+            status_code=302,
+        )
     apk_file = STATIC_DIR / "Watchlivo-v1.1.apk"
     if not apk_file.exists():
         apk_file = STATIC_DIR / "Watchlivo-v1.0.apk"
@@ -5960,10 +5965,18 @@ async def download_apk_endpoint(request: Request):
             filename="Watchlivo-v1.1.0.apk",
             headers={"Content-Disposition": 'attachment; filename="Watchlivo-v1.1.0.apk"'},
         )
-    return JSONResponse({"ok": False, "error": "APK hazırlanıyor"}, status_code=404)
+    return RedirectResponse(
+        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo-v1.1.apk",
+        status_code=302,
+    )
 
 
 async def download_windows_endpoint(request: Request):
+    if IS_VERCEL:
+        return RedirectResponse(
+            "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.exe",
+            status_code=302,
+        )
     exe_file = STATIC_DIR / "Watchlivo.exe"
     if exe_file.exists():
         return FileResponse(
@@ -5972,7 +5985,10 @@ async def download_windows_endpoint(request: Request):
             filename="Watchlivo.exe",
             headers={"Content-Disposition": 'attachment; filename="Watchlivo.exe"'},
         )
-    return JSONResponse({"ok": False, "error": "Windows uygulaması hazırlanıyor"}, status_code=404)
+    return RedirectResponse(
+        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.exe",
+        status_code=302,
+    )
 
 
 _AI_LIMIT = RateLimiter(30, 3600.0, name="ai_chat")
