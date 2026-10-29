@@ -952,6 +952,8 @@ def _has_vault_stream(it_obj: dict) -> int:
                     or "dplayer" in su
                     or "hdfilmcehennemi.mobi" in su
                     or "cdnimages" in su
+                    or "playmix.uno" in su
+                    or "master.txt?s=" in su
                 ):
                     continue
                 if not _stream_matches_title(su, [it_obj.get("title"), it_obj.get("originalTitle")]):
@@ -2419,6 +2421,8 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             or "dplayer" in raw_su.lower()
                             or "hdfilmcehennemi.mobi" in raw_su.lower()
                             or "cdnimages" in raw_su.lower()
+                            or "playmix.uno" in raw_su.lower()
+                            or "master.txt?s=" in raw_su.lower()
                             or st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                         ):
                             continue
@@ -2428,6 +2432,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         is_true_1080_vault = (
                             st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr")
+                            or (IS_VERCEL and st_t in ("hls_dl", "hls_pv", "hls_pv_multi"))
                             or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
                             or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
                             or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su))
@@ -2966,7 +2971,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     f_ac = pool.submit(_extract_animecix_sync, mtype, s, e, orig_title, tr_title, tid, extra_titles, source_url, orig_lang)
     f_pv = pool.submit(_extract_ddizimag_sync, mtype, s, e, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
     f_dl = pool.submit(_extract_dizilife_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
-    f_dp = pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
+    f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
     f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid)
     f_ve = pool.submit(_job_videasy)
     f_hexa = pool.submit(_job_hexa)
@@ -3043,8 +3048,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         if x not in hexa_res:
             hexa_res.insert(0, x)
     vault_yt = [x for x in tr_res if x[1] == "yt"]
-    main_multi = [x for x in tr_res if x[1] in ("hls_fhd_multi", "hls_hfnl_multi")]
-    main_single = [x for x in tr_res if x[1] in (("hls_fhd", "hls_fhd_tr", "hls_hfnl") if IS_VERCEL else ("hls_fhd", "hls_fhd_tr", "hls_hfnl", "hls_dbx"))]
+    main_multi = [x for x in tr_res if x[1] in (("hls_fhd_multi",) if IS_VERCEL else ("hls_fhd_multi", "hls_hfnl_multi"))]
+    main_single = [x for x in tr_res if x[1] in (("hls_fhd", "hls_fhd_tr") if IS_VERCEL else ("hls_fhd", "hls_fhd_tr", "hls_hfnl", "hls_dbx"))]
     ac_1080 = [x for x in ac_res if "_720p" not in str(x[0]).lower()]
     ac_720 = [x for x in ac_res if "_720p" in str(x[0]).lower()]
     pv_multi = [x for x in tr_res if x[1] == "hls_pv_multi"]
@@ -3945,6 +3950,16 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 for st_item in (v_ent.get("streams") or []):
                     if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
                         st_u, st_t = str(st_item[0]), str(st_item[1])
+                        if IS_VERCEL and (
+                            st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
+                            or "dbx.molystream.org" in st_u.lower()
+                            or "dplayer" in st_u.lower()
+                            or "hdfilmcehennemi.mobi" in st_u.lower()
+                            or "cdnimages" in st_u.lower()
+                            or "playmix.uno" in st_u.lower()
+                            or "master.txt?s=" in st_u.lower()
+                        ):
+                            continue
                         if _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:3]
@@ -4081,7 +4096,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v20|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v21|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     cached = _RESOLVE_RESP_CACHE.get(ckey)
