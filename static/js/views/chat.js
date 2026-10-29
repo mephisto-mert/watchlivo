@@ -791,6 +791,17 @@ export function buildChat(ctx) {
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
 
+  const onVisualViewportResize = () => {
+    if (!window.visualViewport) return;
+    document.documentElement.style.setProperty('--vvh', `${window.visualViewport.height}px`);
+    list.scrollTop = list.scrollHeight;
+  };
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onVisualViewportResize);
+    window.visualViewport.addEventListener('scroll', onVisualViewportResize);
+    onVisualViewportResize();
+  }
+
   let typingTimer = null;
   setTimeout(() => { syncVoiceUi(); syncMusicSimilarUi(true); }, 0);
   return {
@@ -842,6 +853,10 @@ export function buildChat(ctx) {
     destroy() {
       clearTimeout(typingTimer);
       document.removeEventListener('pointerdown', onDocOutsideTap);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', onVisualViewportResize);
+        window.visualViewport.removeEventListener('scroll', onVisualViewportResize);
+      }
     },
   };
 }

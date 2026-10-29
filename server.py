@@ -1490,7 +1490,7 @@ def _parse_dur_sec(s: str) -> int:
 
 
 PROV_LABELS = {
-    "netflix": "Netflix", "disney": "Disney+", "prime": "Prime Video", "max": "Max",
+    "netflix": "Netflix", "disney": "Disney+", "prime": "Prime Video", "max": "HBO · Max",
     "crunchyroll": "Crunchyroll", "tubi": "Tubi", "exxen": "Exxen", "blutv": "BluTV",
     "gain": "GAİN", "tod": "TOD", "tabii": "tabii", "tvplus": "TV+", "puhutv": "puhutv",
     "mubi": "MUBI", "apple": "Apple TV+", "hulu": "Hulu", "paramount": "Paramount+",
@@ -2788,6 +2788,20 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
             for x in ((info.get("translations") or {}).get("translations") or [])
             if x.get("iso_639_1")
         ]))
+        net_ids = {str(n.get("id")) for n in (info.get("networks") or []) if n.get("id")}
+        net_names = {str(n.get("name") or "").lower() for n in (info.get("networks") or [])}
+        prod_names = {str(c.get("name") or "").lower() for c in (info.get("production_companies") or [])}
+        primary_prov = ""
+        if "49" in net_ids or "3186" in net_ids or "3308" in net_ids or any("hbo" in x or "max" in x for x in (net_names | prod_names)):
+            primary_prov = "max"
+        elif "213" in net_ids or any("netflix" in x for x in (net_names | prod_names)):
+            primary_prov = "netflix"
+        elif "2739" in net_ids or "420" in net_ids or any("disney" in x for x in (net_names | prod_names)):
+            primary_prov = "disney"
+        elif "2552" in net_ids or any("apple" in x for x in (net_names | prod_names)):
+            primary_prov = "apple"
+        elif "1024" in net_ids or any("amazon" in x or "prime video" in x for x in (net_names | prod_names)):
+            primary_prov = "prime"
         res = {
             "title": orig_t or tr_t,
             "trTitle": tr_t or orig_t,
@@ -2798,11 +2812,12 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
             "origLang": str(info.get("original_language") or "en").lower(),
             "transLangs": trans_langs or ["tr", "en"],
             "runtime": int((info.get("episode_run_time") or [info.get("runtime") or (48 if mtype == "tv" else 120)])[0] or (48 if mtype == "tv" else 120)),
+            "primaryProv": primary_prov,
         }
         _TMDB_META_CACHE[ck] = res
         return res
     except Exception:
-        return {"title": fallback_title, "trTitle": fallback_title, "originalTitle": fallback_title, "altTitles": [], "year": fallback_year, "imdbId": fallback_imdb, "origLang": "en", "transLangs": ["tr", "en"], "runtime": 48 if mtype == "tv" else 120}
+        return {"title": fallback_title, "trTitle": fallback_title, "originalTitle": fallback_title, "altTitles": [], "year": fallback_year, "imdbId": fallback_imdb, "origLang": "en", "transLangs": ["tr", "en"], "runtime": 48 if mtype == "tv" else 120, "primaryProv": ""}
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = ""):
@@ -4032,7 +4047,10 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "duration": dur,
                 }
         if direct_list:
+            primary_p = (m_cached or {}).get("primaryProv") or ""
             eff_prov = pmeta.get("prov") or (prov if prov in PROV_LABELS else "cinema")
+            if primary_p and (eff_prov in ("cinema", "web") or (eff_prov == "prime" and primary_p == "max")):
+                eff_prov = primary_p
             label = PROV_LABELS.get(eff_prov, label)
             wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as sub_pool:
@@ -4064,6 +4082,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
             off_tpl = OFFICIAL_SEARCH_URLS.get(eff_prov, "https://www.netflix.com/search?q={q}")
             official_url = source_url or pmeta.get("officialUrl") or off_tpl.format(q=urllib.parse.quote(disp or orig_title))
+            is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd") for _, st in (direct_list or []))
+            res_str = "720p HD" if is_720_likely else "1080p HD"
             return {
                 "provider": eff_prov,
                 "catalogProvider": eff_prov,
@@ -4076,7 +4096,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "platformSubLangs": pmeta.get("subLangs") or [],
                 "officialUrl": official_url, "providerUrl": official_url,
                 "title": full_title, "thumbnail": poster,
-                "channel": f"{label} · {'Tam Bölüm (1080p HD)' if mtype == 'tv' else 'Tam Film (1080p HD)'}",
+                "channel": f"{label} · {'Tam Bölüm' if mtype == 'tv' else 'Tam Film'} ({res_str})",
                 "duration": dur,
             }
         # REMOVED 4 FOREIGN EMBED FALLBACKS (vidsrc.cc, vidlink.pro, autoembed.cc, vidsrc.to)

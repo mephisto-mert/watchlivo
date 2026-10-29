@@ -341,19 +341,161 @@ export function buildControls(frame, ctx) {
     menu.classList.add('hidden');
     frame.classList.remove('menu-open');
   };
-  const mid = h('div', {
-    class: 'ctl-mid',
-    onclick: () => {
-      if (!menu.classList.contains('hidden')) { closeMenu(); return; }
-      if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
-      if (controls.classList.contains('ui-active')) {
-        clearTimeout(uiTimer);
-        controls.classList.remove('ui-active');
-      } else {
-        revealControls(3500);
+
+  const rippleLeft = h('div', { class: 'ctl-seek-ripple left hidden' },
+    h('div', { class: 'seek-ripple-body' },
+      h('span', { class: 'seek-ripple-icon' }, '⏪'),
+      h('span', { class: 'seek-ripple-text' }, '10 sn'),
+    ),
+  );
+  const rippleRight = h('div', { class: 'ctl-seek-ripple right hidden' },
+    h('div', { class: 'seek-ripple-body' },
+      h('span', { class: 'seek-ripple-icon' }, '⏩'),
+      h('span', { class: 'seek-ripple-text' }, '10 sn'),
+    ),
+  );
+
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchStartTime = 0;
+  let isSwiping = false;
+  let swipeMode = null;
+  let startVolume = 80;
+  let startBrightness = 100;
+  let currentBrightness = 100;
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
+  let tapTimer = null;
+  let accumulatedSeek = 0;
+  let rippleTimer = null;
+
+  const triggerSeekRipple = (dir, totalSec) => {
+    const el = dir === 'left' ? rippleLeft : rippleRight;
+    const other = dir === 'left' ? rippleRight : rippleLeft;
+    other.classList.add('hidden');
+    el.querySelector('.seek-ripple-text').textContent = `${Math.abs(totalSec)} sn`;
+    el.classList.remove('hidden');
+    el.classList.remove('animate');
+    void el.offsetWidth;
+    el.classList.add('animate');
+    clearTimeout(rippleTimer);
+    rippleTimer = setTimeout(() => {
+      el.classList.add('hidden');
+      el.classList.remove('animate');
+      accumulatedSeek = 0;
+    }, 800);
+  };
+
+  const mid = h('div', { class: 'ctl-mid' });
+
+  mid.addEventListener('touchstart', (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    touchStartX = t.clientX;
+    touchStartY = t.clientY;
+    touchStartTime = Date.now();
+    isSwiping = false;
+    swipeMode = null;
+    startVolume = Number(host.volume || 80);
+    startBrightness = currentBrightness;
+  }, { passive: true });
+
+  mid.addEventListener('touchmove', (e) => {
+    if (!e.touches || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = t.clientX - touchStartX;
+    const dy = t.clientY - touchStartY;
+    const rect = frame.getBoundingClientRect();
+    if (!isSwiping && Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) * 1.3) {
+      isSwiping = true;
+      clearTimeout(tapTimer);
+      const relX = touchStartX - rect.left;
+      swipeMode = relX < rect.width * 0.5 ? 'brightness' : 'volume';
+    }
+    if (isSwiping) {
+      if (e.cancelable) e.preventDefault();
+      const deltaPct = -(dy / (rect.height * 0.75)) * 100;
+      if (swipeMode === 'brightness') {
+        currentBrightness = Math.max(30, Math.min(150, Math.round(startBrightness + deltaPct)));
+        frame.style.setProperty('--video-brightness', `${currentBrightness}%`);
+        showOverlay(`☀️ Parlaklık: %${currentBrightness}`, 900);
+      } else if (swipeMode === 'volume') {
+        const nv = Math.max(0, Math.min(100, Math.round(startVolume + deltaPct)));
+        host.setVolume(nv);
+        if (isActuallyMuted() && nv > 0) doUnlockAudio();
+        showOverlay(`🔊 Ses: %${nv}`, 900);
+        update();
       }
-    },
-    ondblclick: () => toggleFullscreen(),
+    }
+  }, { passive: false });
+
+  mid.addEventListener('touchend', (e) => {
+    if (isSwiping) {
+      isSwiping = false;
+      swipeMode = null;
+      return;
+    }
+    const t = e.changedTouches ? e.changedTouches[0] : e;
+    const dx = Math.abs(t.clientX - touchStartX);
+    const dy = Math.abs(t.clientY - touchStartY);
+    if (dx > 25 || dy > 25) return;
+
+    const now = Date.now();
+    const rect = frame.getBoundingClientRect();
+    const tapX = t.clientX - rect.left;
+    const ratio = tapX / rect.width;
+
+    if (now - lastTapTime < 320 && Math.abs(t.clientX - lastTapX) < 70 && Math.abs(t.clientY - lastTapY) < 70) {
+      clearTimeout(tapTimer);
+      lastTapTime = 0;
+      if (ratio < 0.38) {
+        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        accumulatedSeek = (accumulatedSeek <= 0 ? accumulatedSeek : 0) - 10;
+        seekStep(-10);
+        triggerSeekRipple('left', accumulatedSeek);
+        revealControls(2200);
+      } else if (ratio > 0.62) {
+        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        accumulatedSeek = (accumulatedSeek >= 0 ? accumulatedSeek : 0) + 10;
+        seekStep(10);
+        triggerSeekRipple('right', accumulatedSeek);
+        revealControls(2200);
+      } else {
+        toggleFullscreen();
+      }
+    } else {
+      lastTapTime = now;
+      lastTapX = t.clientX;
+      lastTapY = t.clientY;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(() => {
+        if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+        if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
+        if (controls.classList.contains('ui-active')) {
+          clearTimeout(uiTimer);
+          controls.classList.remove('ui-active');
+        } else {
+          revealControls(3500);
+        }
+      }, 260);
+    }
+  }, { passive: true });
+
+  mid.addEventListener('click', (e) => {
+    if (e.pointerType === 'touch' || ('ontouchstart' in window && Date.now() - touchStartTime < 450)) return;
+    if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+    if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
+    if (controls.classList.contains('ui-active')) {
+      clearTimeout(uiTimer);
+      controls.classList.remove('ui-active');
+    } else {
+      revealControls(3500);
+    }
+  });
+  mid.addEventListener('dblclick', (e) => {
+    if (e.pointerType === 'touch') return;
+    toggleFullscreen();
   });
   const barRow = h('div', { class: 'ctl-bar-row' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time, h('div', { class: 'ctl-spacer' }), skipBtn, speedBtn, subBtn, snapBtn, gearBtn, fsBtn);
   const controls = h('div', { class: 'controls' },
@@ -371,7 +513,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, subOverlay, skipIntroBtn, nextEpBanner, controls, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1117,6 +1259,11 @@ export function buildControls(frame, ctx) {
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
     qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : '1080p';
+    if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '720p') {
+      artist.textContent = artist.textContent.replace('1080p HD', '720p HD');
+    } else if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '4K') {
+      artist.textContent = artist.textContent.replace('1080p HD', '4K UHD');
+    }
     const curRate = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
     speedBtn.querySelector('span').textContent = `${curRate}x`;
     const availSubs = host.adapter?.getSubtitleTracks?.() || m.subtitleTracks || [];
