@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v10';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v10';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v10';
-import { MeshConnection } from '../realtime.js?v=20261029_v10';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v10';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v10';
-import { buildLayout } from './mesh-layout.js?v=20261029_v10';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v10';
-import { Voice } from '../voice.js?v=20261029_v10';
-import { playRoomSfx } from './chat.js?v=20261029_v10';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261029_v11';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261029_v11';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v11';
+import { MeshConnection } from '../realtime.js?v=20261029_v11';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261029_v11';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261029_v11';
+import { buildLayout } from './mesh-layout.js?v=20261029_v11';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261029_v11';
+import { Voice } from '../voice.js?v=20261029_v11';
+import { playRoomSfx } from './chat.js?v=20261029_v11';
 
 let ctx = null;
 
@@ -285,8 +285,8 @@ function onMessage(data) {
       }
       break;
     case 'typing': ctx?.layout.showTyping(data.user); break;
-    case 'reaction': ctx?.layout.floatEmoji(data.emoji); break;
-    case 'soundfx': playRoomSfx(data.sfx); ctx?.layout.floatEmoji(data.sfx === 'clap' ? '👏' : data.sfx === 'laugh' ? '😂' : data.sfx === 'suspense' ? '🥁' : '🎉'); break;
+    case 'reaction': ctx?.layout.floatEmoji(data.emoji, data.user); break;
+    case 'soundfx': playRoomSfx(data.sfx); ctx?.layout.floatEmoji(data.sfx === 'clap' ? '👏' : data.sfx === 'laugh' ? '😂' : data.sfx === 'suspense' ? '🥁' : '🎉', data.user); break;
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
     case 'participants_updated': if (room) { set({ mesh: { ...room, participants: data.participants } }); ctx.layout.update(); ctx.voice?.syncPeers(data.participants); } break;
@@ -430,7 +430,7 @@ const actions = {
   voteVideo(index) { ctx.conn.send('vote_video', { index }); },
   playQueueIndex(index) { ctx.conn.send('queue_play_index', { index }); },
   removeQueueItem(index) { ctx.conn.send('queue_remove', { index }); },
-  sendChat(text, extra = {}) { if (text.trim() || extra.gif) ctx.conn.send('chat', { text: text.trim().slice(0, 1000), ...extra }); },
+  sendChat(text, extra = {}) { if (String(text || '').trim() || extra.gif || extra.snapshot) ctx.conn.send('chat', { text: String(text || '').trim().slice(0, 1000), ...extra }); },
   clearChat() {
     if (!ctx) return;
     clearSavedChat(state.mesh?.id);
@@ -468,8 +468,8 @@ const actions = {
     ctx.conn.send('msg_react', { msgId, emoji });
   },
   typing() { ctx.conn.send('typing', { user: state.self.name }); },
-  reaction(emoji) { ctx.layout.floatEmoji(emoji); ctx.conn.send('reaction', { emoji }); },
-  soundfx(sfx) { playRoomSfx(sfx); ctx.layout.floatEmoji(sfx === 'clap' ? '👏' : sfx === 'laugh' ? '😂' : sfx === 'suspense' ? '🥁' : '🎉'); ctx.conn.send('soundfx', { sfx }); },
+  reaction(emoji) { ctx.layout.floatEmoji(emoji, state.self?.name); ctx.conn.send('reaction', { emoji }); },
+  soundfx(sfx) { playRoomSfx(sfx); ctx.layout.floatEmoji(sfx === 'clap' ? '👏' : sfx === 'laugh' ? '😂' : sfx === 'suspense' ? '🥁' : '🎉', state.self?.name); ctx.conn.send('soundfx', { sfx }); },
   hostAction(action, extra = {}) {
     if (action === 'set_privacy' && state.mesh) {
       const patch = {};

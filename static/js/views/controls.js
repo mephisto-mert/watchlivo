@@ -1,12 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v10';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v10';
-import { getProvider } from '../providers.js?v=20261029_v10';
-import { expectedPosition } from '../sync.js?v=20261029_v10';
-import { thumbFor } from './lobby.js?v=20261029_v10';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v10';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v10';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v10';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v11';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261029_v11';
+import { getProvider } from '../providers.js?v=20261029_v11';
+import { expectedPosition } from '../sync.js?v=20261029_v11';
+import { thumbFor } from './lobby.js?v=20261029_v11';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v11';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v11';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v11';
+import { avatar } from '../profile.js?v=20261029_v11';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -244,6 +245,7 @@ export function buildControls(frame, ctx) {
     },
   }, '⏩ İntroyu Atla');
   const nextEpBanner = h('div', { class: 'next-ep-banner acrylic hidden', id: 'ctl-next-ep' });
+  const cinemaSeatsBar = h('div', { class: 'cinema-seats-bar', id: 'cinema-seats-bar' });
   const danmakuLayer = h('div', { class: 'danmaku-layer', id: 'danmaku-layer' });
   const ambilightCanvas = h('canvas', { class: 'ambilight-canvas', width: '32', height: '18' });
   let curFilter = localStorage.getItem('vortex_video_filter') || 'normal';
@@ -251,6 +253,8 @@ export function buildControls(frame, ctx) {
   let ambilightEnabled = localStorage.getItem('vortex_ambilight') === 'on';
   if (ambilightEnabled) ambilightCanvas.classList.add('on');
   let autoAdvancingKey = '';
+  let cancelledNextEpKey = '';
+  const seatReactions = new Map();
 
   function applyVideoFilter() {
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
@@ -258,9 +262,9 @@ export function buildControls(frame, ctx) {
     if (v) v.style.filter = spec.css;
   }
 
-  function takeVideoSnapshot() {
+  function takeVideoSnapshot(opts = {}) {
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
-    if (!v || !v.videoWidth) { toast('Yalnızca aktif video oynatılırken kare yakalanabilir.'); return; }
+    if (!v || !v.videoWidth) { toast('Yalnızca aktif video oynatılırken kare yakalanabilir.'); return null; }
     try {
       const flash = h('div', { class: 'snap-flash' });
       frame.append(flash);
@@ -278,19 +282,51 @@ export function buildControls(frame, ctx) {
         c2d.shadowBlur = 8;
         c2d.fillText(subCue.textContent, c.width / 2, c.height - Math.round(c.height * 0.07));
       }
+      const cSmall = document.createElement('canvas');
+      cSmall.width = 360;
+      cSmall.height = Math.max(160, Math.round((v.videoHeight / v.videoWidth) * 360));
+      cSmall.getContext('2d').drawImage(c, 0, 0, cSmall.width, cSmall.height);
+      const chatJpegUrl = cSmall.toDataURL('image/jpeg', 0.62);
+      const curSec = Math.max(0, Math.round(position()));
+      window.__lastSnapshotChatJpeg = chatJpegUrl;
+      window.__lastSnapshotVideoTime = curSec;
+
+      if (opts.shareToChat) {
+        const caption = String(opts.caption || '').trim() || `📸 ${fmtTime(curSec)} sahnesi`;
+        actions.sendChat?.(caption, { snapshot: chatJpegUrl, videoTime: curSec });
+        showOverlay(`📸 Sahne sohbette paylaşıldı (${fmtTime(curSec)})`, 2000);
+        toast('📸 Anlık sahne odadaki sohbette paylaşıldı!');
+        return { snapshot: chatJpegUrl, videoTime: curSec };
+      }
+
       const dataUrl = c.toDataURL('image/png');
       window.__lastSnapshotDataUrl = dataUrl;
       const a = document.createElement('a');
       a.href = dataUrl;
-      const stamp = fmtTime(position()).replace(':', 'm') + 's';
-      a.download = `kinox-sahne-${stamp}.png`;
+      const stamp = fmtTime(curSec).replace(':', 'm') + 's';
+      a.download = `watchlivo-sahne-${stamp}.png`;
       a.click();
-      showOverlay(`📸 Sahne yakalandı (${fmtTime(position())})`, 1800);
-      toast('📸 Sahne görüntüsü (PNG) indirildi!');
+      showOverlay(`📸 Sahne yakalandı (${fmtTime(curSec)})`, 2200);
+      toast('📸 Sahne (PNG) indirildi ve sohbette paylaşıldı!');
+      actions.sendChat?.(`📸 ${fmtTime(curSec)} sahnesi`, { snapshot: chatJpegUrl, videoTime: curSec });
+      return { snapshot: chatJpegUrl, videoTime: curSec };
     } catch (e) {
       toast('Bu video kaynağından güvenlik nedeniyle kare alınamadı.');
+      return null;
     }
   }
+  window.vortexCaptureSceneToChat = (caption = '') => takeVideoSnapshot({ shareToChat: true, caption });
+  window.vortexGetVideoPosition = () => Math.max(0, Math.round(position()));
+  window.vortexSeekToTimestamp = (sec) => {
+    const target = Math.max(0, Number(sec) || 0);
+    if (!isLeader()) {
+      toast(`⏱️ ${fmtTime(target)} sahnesi (Videoyu yalnızca oda başkanı sarabilir)`);
+      return;
+    }
+    actions.seek(target);
+    showOverlay(`⏱️ ${fmtTime(target)} sahnesine gidildi`, 1800);
+    revealControls(2600);
+  };
 
   async function triggerNextEpisode() {
     const m = state.mesh?.media;
@@ -553,7 +589,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -718,6 +754,43 @@ export function buildControls(frame, ctx) {
   const duration = () => Number(host.adapter?.getDuration?.() || state.mesh?.media?.duration || 0);
   const position = () => (host.adapter ? host.adapter.getTime() : 0);
 
+  function renderCinemaSeats() {
+    const parts = Array.isArray(state.mesh?.participants) ? state.mesh.participants : [];
+    const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
+    if (!hasMedia || !parts.length) {
+      cinemaSeatsBar.classList.add('hidden');
+      return;
+    }
+    cinemaSeatsBar.classList.remove('hidden');
+    const now = Date.now();
+    const visibleParts = parts.slice(0, 8);
+    fill(
+      cinemaSeatsBar,
+      ...visibleParts.map((p) => {
+        const uName = String(p.name || 'Misafir');
+        const reactObj = seatReactions.get(uName);
+        const activeEmoji = (reactObj && now - reactObj.at < 2600) ? reactObj.emoji : '';
+        const isSpeaking = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+        const isRoomHost = Boolean(p.isHost || p.id === state.mesh?.hostId || p.id === state.mesh?.leaderId);
+        return h(
+          'div',
+          {
+            class: `cinema-seat ${isSpeaking ? 'is-speaking' : ''} ${isRoomHost ? 'is-host' : ''}`,
+            'data-seat-user': uName,
+            title: `${uName}${isRoomHost ? ' (Oda Başkanı)' : ''}${isSpeaking ? ' · Konuşuyor' : ''}`,
+          },
+          activeEmoji ? h('div', { class: 'seat-emoji-pop' }, activeEmoji) : null,
+          h('div', { class: 'seat-avatar-wrap' },
+            avatar(p, 24),
+            isRoomHost ? h('span', { class: 'seat-crown' }, '👑') : null,
+          ),
+          h('span', { class: 'seat-name' }, uName.slice(0, 10)),
+        );
+      }),
+      parts.length > 8 ? h('div', { class: 'cinema-seat seat-more' }, `+${parts.length - 8}`) : null,
+    );
+  }
+
   function tick() {
     const d = duration(), p = Math.min(position(), d || Infinity);
     if (!scrubbing) {
@@ -728,6 +801,7 @@ export function buildControls(frame, ctx) {
     }
     buf.style.width = d ? `${Math.min(100, ((host.adapter?.getBuffered?.() || 0) / d) * 100)}%` : '0%';
     updateUnmuteVisibility();
+    renderCinemaSeats();
     const m = state.mesh?.media;
     const intro = getActiveIntro();
     const canSkipIntro = Boolean(isLeader() && intro && Number(intro.end) > Number(intro.start) && p >= Number(intro.start) && p < Number(intro.end) - 1.5);
@@ -736,13 +810,43 @@ export function buildControls(frame, ctx) {
     }
     skipIntroBtn.classList.toggle('hidden', !canSkipIntro);
     const rem = d > 300 ? d - p : 9999;
-    if (m?.mediaType === 'tv' && m?.tmdbId && rem <= 35 && rem > 0) {
+    const curEpKey = m ? `${m.tmdbId || m.id || m.title}:${m.season || 1}:${m.episode || 1}` : '';
+    if (m?.mediaType === 'tv' && m?.tmdbId && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
       const nextEp = Number(m.episode || 1) + 1;
       const curSeason = Number(m.season || 1);
+      const cleanSeries = (m.seriesTitle || (m.title || 'Dizi').split(' — ')[0]).trim();
+      const pctCountdown = Math.max(0, Math.min(100, ((35 - rem) / 35) * 100));
+      const posterSrc = thumbFor(m) || '/static/watchlivo-logo.svg';
       nextEpBanner.classList.remove('hidden');
-      fill(nextEpBanner,
-        h('span', {}, `⏭️ Sonraki Bölüm (S${curSeason}:B${nextEp}) · ${Math.ceil(rem)} sn`),
-        isLeader() ? h('button', { class: 'btn primary', style: { padding: '.28em .7em', fontSize: '.78em' }, onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); } }, 'Hemen Geç') : null);
+      fill(
+        nextEpBanner,
+        h('div', { class: 'next-ep-card' },
+          h('img', { class: 'next-ep-thumb', src: posterSrc, alt: cleanSeries }),
+          h('div', { class: 'next-ep-info' },
+            h('div', { class: 'next-ep-kicker' }, `SIRADAKİ BÖLÜM · ${Math.ceil(rem)} SN`),
+            h('div', { class: 'next-ep-title' }, `${cleanSeries} · S${curSeason}:B${nextEp}`),
+            h('div', { class: 'next-ep-progress' },
+              h('div', { class: 'next-ep-progress-bar', style: { width: `${pctCountdown.toFixed(1)}%` } }),
+            ),
+            h('div', { class: 'next-ep-actions' },
+              isLeader()
+                ? h('button', {
+                    class: 'btn primary next-ep-go',
+                    onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); },
+                  }, '▶ Hemen Geç')
+                : h('span', { class: 'dim', style: { fontSize: '.74em' } }, 'Oda başkanı bekleniyor…'),
+              h('button', {
+                class: 'btn next-ep-cancel',
+                onclick: (e) => {
+                  e.stopPropagation();
+                  cancelledNextEpKey = curEpKey;
+                  nextEpBanner.classList.add('hidden');
+                },
+              }, '✕ İptal'),
+            ),
+          ),
+        ),
+      );
       if (rem <= 1.2 && isHostOnly()) triggerNextEpisode();
     } else {
       nextEpBanner.classList.add('hidden');
@@ -1547,6 +1651,7 @@ export function buildControls(frame, ctx) {
     }
     skipBtn.style.display = (state.mesh?.queue || []).length ? '' : 'none';
     gearBtn.style.display = (host.adapter?.caps.rate || m.tmdbId || hasSubsOrDub) ? '' : 'none';
+    renderCinemaSeats();
     syncMediaSession(m, prov, t, playing, curRate);
   }
 
@@ -1639,7 +1744,11 @@ export function buildControls(frame, ctx) {
       if (!b) host.userUnlocked = true;
       updateUnmuteVisibility();
     },
-    floatEmoji: (emoji) => {
+    floatEmoji: (emoji, senderName) => {
+      if (senderName) {
+        seatReactions.set(String(senderName), { emoji, at: Date.now() });
+        renderCinemaSeats();
+      }
       const existing = frame.querySelectorAll('.float-emoji');
       if (existing.length >= 16) existing[0].remove();
       const el = h('div', { class: 'float-emoji', style: { left: `${10 + Math.random() * 80}%` } }, emoji);

@@ -1222,7 +1222,16 @@ def _handle_social(room, cid, data, out, name, is_host):
         gif = clean_str(data.get("gif"), 600)
         if gif and not re.match(r"^https://(media\d*\.giphy\.com|i\.giphy\.com|media\.tenor\.com)/", gif):
             gif = ""
-        if text or gif:
+        snap = str(data.get("snapshot") or "").strip()
+        if snap and (not snap.startswith("data:image/jpeg;base64,") or len(snap) > 48000):
+            snap = ""
+        try:
+            vid_t = float(data.get("videoTime")) if data.get("videoTime") is not None else None
+            if vid_t is not None and (vid_t < 0 or vid_t > 86400):
+                vid_t = None
+        except (TypeError, ValueError):
+            vid_t = None
+        if text or gif or snap:
             raw_rep = data.get("replyTo")
             reply_obj = None
             if isinstance(raw_rep, dict) and (raw_rep.get("user") or raw_rep.get("text")):
@@ -1239,11 +1248,15 @@ def _handle_social(room, cid, data, out, name, is_host):
                     reply_obj = {
                         "id": target_m.get("id", ""),
                         "user": target_m.get("user", ""),
-                        "text": clean_str(target_m.get("text") or ("GIF" if target_m.get("gif") else ""), 140),
+                        "text": clean_str(target_m.get("text") or ("📸 Sahne" if target_m.get("snapshot") else "GIF" if target_m.get("gif") else ""), 140),
                         "color": target_m.get("color") or "#00f5d4",
                     }
             msg = {"id": uuid.uuid4().hex[:10], "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
                    "time": time.strftime("%H:%M"), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
+            if snap:
+                msg["snapshot"] = snap
+            if vid_t is not None:
+                msg["videoTime"] = round(vid_t, 1)
             room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]
             room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "chat", "message": msg}, None))

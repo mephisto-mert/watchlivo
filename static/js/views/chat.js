@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, toast, popup } from '../ui.js?v=20261029_v10';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v10';
-import { avatar } from '../profile.js?v=20261029_v10';
-import { api, qs } from '../api.js?v=20261029_v10';
-import { resolveMusicItem } from './selection-kinds.js?v=20261029_v10';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261029_v11';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261029_v11';
+import { avatar } from '../profile.js?v=20261029_v11';
+import { api, qs } from '../api.js?v=20261029_v11';
+import { resolveMusicItem } from './selection-kinds.js?v=20261029_v11';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -128,8 +128,33 @@ export function buildChat(ctx) {
       toast('🧹 Oda sohbeti temizlendi');
     },
   }, '🗑️ Temizle');
+  const snapSceneBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-snap',
+    title: 'Oynatılan Sahneden Kare Yakala ve Sohbette Paylaş',
+    onclick: () => {
+      const cap = input.value.trim();
+      const res = window.vortexCaptureSceneToChat?.(cap);
+      if (res && cap) input.value = '';
+    },
+  }, '📸 Sahne');
+  const stampTimeBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-ts',
+    title: 'Videodaki Anlık Dakika:Saniye Damgasını Mesaja Ekle',
+    onclick: () => {
+      const sec = Number(window.vortexGetVideoPosition?.() || 0);
+      const stamp = fmtTime(sec);
+      input.value = `${input.value ? input.value.trimEnd() + ' ' : ''}${stamp} `;
+      input.focus();
+    },
+  }, '⏱️ An');
   const reactions = h('div', { class: 'reaction-bar' },
     ...REACTIONS.map((e) => h('button', { onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}` }, e)),
+    snapSceneBtn,
+    stampTimeBtn,
     ...SOUNDBOARD.map(([k, lbl]) => h('button', { class: 'sfx-pill', onclick: () => actions.soundfx?.(k), title: `Sesli Efekt: ${lbl}` }, lbl)),
     pollBtn,
     clearChatBtn);
@@ -597,6 +622,72 @@ export function buildChat(ctx) {
       h('span', { class: 'msg-quote-text' }, obj.text || ''));
   }
 
+  function parseStampToSec(stamp) {
+    const parts = String(stamp || '').split(':').map((x) => Number(x));
+    if (parts.some((n) => !Number.isFinite(n))) return null;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return null;
+  }
+
+  function renderRichMessageText(rawText) {
+    const text = String(rawText || '');
+    if (!text) return [];
+    const re = /\b((?:\d{1,2}:)?\d{1,2}:\d{2})\b/g;
+    const out = [];
+    let lastIdx = 0;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        out.push(text.slice(lastIdx, match.index));
+      }
+      const stamp = match[1];
+      const sec = parseStampToSec(stamp);
+      if (sec !== null) {
+        out.push(h('button', {
+          type: 'button',
+          class: 'chat-ts-badge',
+          title: `${stamp} sahnesine git`,
+          onclick: (e) => {
+            e.stopPropagation();
+            window.vortexSeekToTimestamp?.(sec);
+          },
+        }, `⏱️ ${stamp}`));
+      } else {
+        out.push(stamp);
+      }
+      lastIdx = re.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      out.push(text.slice(lastIdx));
+    }
+    return out;
+  }
+
+  function buildSnapshotWidget(m) {
+    if (!m?.snapshot) return null;
+    const hasTime = Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
+    const sec = hasTime ? Math.round(Number(m.videoTime)) : null;
+    return h('div', {
+      class: 'chat-snapshot-card',
+      onclick: (e) => {
+        e.stopPropagation();
+        if (sec !== null) window.vortexSeekToTimestamp?.(sec);
+      },
+    },
+      h('img', { class: 'chat-snapshot-img', src: m.snapshot, alt: 'Sahne', loading: 'lazy' }),
+      sec !== null
+        ? h('button', {
+            type: 'button',
+            class: 'chat-snapshot-time',
+            onclick: (e) => {
+              e.stopPropagation();
+              window.vortexSeekToTimestamp?.(sec);
+            },
+          }, `▶ ${fmtTime(sec)} Sahnesine Git`)
+        : null);
+  }
+
   function msgNode(m) {
     if (m.system) {
       const t = h('div', { class: 'sysmsg' });
@@ -604,8 +695,8 @@ export function buildChat(ctx) {
       t.append(m.text || '');
       return t;
     }
-    const cont = lastUser === m.user && !m.pollId && !m.replyTo;
-    lastUser = m.pollId ? null : m.user;
+    const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot;
+    lastUser = (m.pollId || m.snapshot) ? null : m.user;
     const reactWrap = h('div', { class: 'msg-reactions empty', 'data-react-for': m.id });
     fillReactionBadges(reactWrap, m.id);
     let row = null;
@@ -642,7 +733,7 @@ export function buildChat(ctx) {
       'data-id': m.id,
       onmouseleave: () => row.classList.remove('msg-closing'),
       onclick: (e) => {
-        if (e.target.closest('button, a, .chat-poll-card, .msg-actions, .msg-reactions')) return;
+        if (e.target.closest('button, a, .chat-poll-card, .chat-snapshot-card, .msg-actions, .msg-reactions')) return;
         const wasOpen = row.classList.contains('msg-active');
         list.querySelectorAll('.msg.msg-active').forEach((n) => n.classList.remove('msg-active'));
         row.classList.remove('msg-closing');
@@ -657,7 +748,10 @@ export function buildChat(ctx) {
         buildQuoteBlock(m.replyTo),
         m.pollId
           ? buildPollWidget(m.pollId)
-          : h('div', { class: 'msg-text' }, m.text || '', m.gif ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
+          : h('div', { class: 'msg-text' },
+              ...renderRichMessageText(m.text || ''),
+              buildSnapshotWidget(m),
+              m.gif ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
         reactWrap));
     return row;
   }

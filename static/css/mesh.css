@@ -1421,7 +1421,8 @@ body.mesh-minimized #mesh-root .panel-chat,
 body.mesh-minimized #mesh-root .resize-handle,
 body.mesh-minimized #mesh-root .controls,
 body.mesh-minimized #mesh-root .skip-intro-pill,
-body.mesh-minimized #mesh-root .next-ep-banner {
+body.mesh-minimized #mesh-root .next-ep-banner,
+body.mesh-minimized #mesh-root .cinema-seats-bar {
   display: none !important;
 }
 body.mesh-minimized #mesh-root .mesh,
@@ -1456,4 +1457,192 @@ body.mesh-minimized #mesh-root .mini-player-bar {
   .mini-player-bar { padding: 6px 8px; }
   .mini-player-title { font-size: .66rem; }
   .mini-player-btn { padding: 3px 8px; font-size: .64rem; }
+}
+
+/* ── Category 3: Cinema Seats Bar, Rich Next-Ep Card & Chat Scene Snapshots ── */
+.cinema-seats-bar {
+  position: absolute;
+  left: 14px;
+  bottom: 76px;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(8, 12, 22, .62);
+  border: 1px solid rgba(255, 255, 255, .12);
+  backdrop-filter: blur(10px);
+  pointer-events: none;
+  transition: opacity .25s ease, transform .25s ease;
+}
+.cinema-seat {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px 2px 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .06);
+  border: 1.5px solid transparent;
+  transition: border-color .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.cinema-seat.is-speaking {
+  border-color: #10b981;
+  box-shadow: 0 0 12px rgba(16, 185, 129, .65);
+  transform: translateY(-2px);
+}
+.seat-avatar-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.seat-crown {
+  position: absolute;
+  top: -7px;
+  right: -5px;
+  font-size: .62rem;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.9));
+}
+.seat-name {
+  font-size: .68rem;
+  font-weight: 700;
+  color: #e2e8f0;
+  max-width: 68px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seat-emoji-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, .94);
+  border: 1px solid rgba(0, 245, 212, .5);
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: .92rem;
+  box-shadow: 0 6px 16px rgba(0,0,0,.6);
+  animation: seatEmojiPop .25s cubic-bezier(.18,.89,.32,1.28);
+  white-space: nowrap;
+}
+@keyframes seatEmojiPop {
+  from { opacity: 0; transform: translate(-50%, 6px) scale(.6); }
+  to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+.next-ep-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 260px;
+  max-width: 340px;
+}
+.next-ep-thumb {
+  width: 54px;
+  height: 76px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255,255,255,.18);
+}
+.next-ep-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.next-ep-kicker {
+  font-size: .64rem;
+  font-weight: 800;
+  letter-spacing: .06em;
+  color: #00f5d4;
+}
+.next-ep-title {
+  font-size: .82rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.next-ep-progress {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.16);
+  overflow: hidden;
+  margin: 2px 0;
+}
+.next-ep-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00f5d4, #6366f1);
+  transition: width .4s linear;
+}
+.next-ep-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+}
+.next-ep-go, .next-ep-cancel {
+  padding: 4px 10px !important;
+  font-size: .72rem !important;
+  border-radius: 8px !important;
+}
+.chat-ts-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 2px;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: rgba(0, 245, 212, .14);
+  border: 1px solid rgba(0, 245, 212, .38);
+  color: #00f5d4;
+  font-size: .76em;
+  font-weight: 800;
+  cursor: pointer;
+}
+.chat-ts-badge:hover {
+  background: #00f5d4;
+  color: #050811;
+}
+.chat-snapshot-card {
+  position: relative;
+  margin-top: 6px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(0, 245, 212, .35);
+  max-width: 250px;
+  cursor: pointer;
+  background: #050811;
+}
+.chat-snapshot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 145px;
+  object-fit: cover;
+}
+.chat-snapshot-time {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(6, 10, 20, .88);
+  border: 1px solid rgba(0, 245, 212, .55);
+  color: #00f5d4;
+  font-size: .68rem;
+  font-weight: 800;
+  backdrop-filter: blur(6px);
+}
+@media (max-width: 640px) {
+  .cinema-seats-bar { left: 8px; bottom: 58px; padding: 3px 7px; gap: 5px; }
+  .seat-name { display: none; }
+  .next-ep-card { min-width: 210px; max-width: 265px; gap: 8px; }
+  .next-ep-thumb { width: 42px; height: 60px; }
 }

@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v10';
-import { state, setView, canSelectVideo } from '../store.js?v=20261029_v10';
-import { navIcon, logo } from './home.js?v=20261029_v10';
-import { createSelection } from './selection.js?v=20261029_v10';
-import { buildControls } from './controls.js?v=20261029_v10';
-import { buildChat } from './chat.js?v=20261029_v10';
-import { PANELS } from './panels.js?v=20261029_v10';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261029_v11';
+import { state, setView, canSelectVideo } from '../store.js?v=20261029_v11';
+import { navIcon, logo } from './home.js?v=20261029_v11';
+import { createSelection } from './selection.js?v=20261029_v11';
+import { buildControls } from './controls.js?v=20261029_v11';
+import { buildChat } from './chat.js?v=20261029_v11';
+import { PANELS } from './panels.js?v=20261029_v11';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -122,7 +122,7 @@ export function buildLayout(app, ctx) {
     danmaku: (msg) => controls.danmaku?.(msg),
     showTyping: (u) => chat.showTyping(u),
     setMicLevel: (lvl) => chat.setMicLevel?.(lvl),
-    floatEmoji: (e) => controls.floatEmoji(e),
+    floatEmoji: (e, user) => controls.floatEmoji(e, user),
     syncStatus: (s) => controls.syncStatus(s),
     playerEvent: (ev, arg) => controls.playerEvent(ev, arg),
     showUnmute: (b) => controls.showUnmute(b),
