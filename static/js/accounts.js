@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261029_v4';
-import { api, qs } from './api.js?v=20261029_v4';
-import { state, set, setView } from './store.js?v=20261029_v4';
+import { h, toast, popup } from './ui.js?v=20261029_v5';
+import { api, qs } from './api.js?v=20261029_v5';
+import { state, set, setView } from './store.js?v=20261029_v5';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -254,131 +254,8 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   });
 }
 
-export function renderAccountBar(p, onReload, onPickUrl, onPickItem) {
-  const acct = getAccount(p.id);
-  const wrap = h('div', { class: 'rave-auth-wrap' });
-  const browserHost = h('div', { class: 'wl-portal-browser-slot' });
-  let currentPortalUrl = acct.browseUrl || acct.loginUrl || 'https://www.google.com';
-  let browserOpen = false;
-  let activePortalMsgHandler = null;
-
-  const openEmbeddedPortal = (targetUrl) => {
-    if (activePortalMsgHandler) {
-      window.removeEventListener('message', activePortalMsgHandler);
-      activePortalMsgHandler = null;
-    }
-    currentPortalUrl = targetUrl || acct.browseUrl || acct.loginUrl;
-    browserOpen = true;
-    const addrInput = h('input', {
-      class: 'input rave-inp flex',
-      value: currentPortalUrl,
-      placeholder: `${p.name} adresi veya film/dizi bağlantısı...`,
-    });
-    const iframeEl = h('iframe', {
-      class: 'wl-browser-frame',
-      src: `/api/rave/browser-proxy?provider=${encodeURIComponent(p.id)}&url=${encodeURIComponent(currentPortalUrl)}`,
-      sandbox: 'allow-forms allow-scripts allow-same-origin allow-popups',
-    });
-    const navTo = (u) => {
-      let clean = String(u || '').trim();
-      if (!clean) return;
-      if (!/^https?:\/\//i.test(clean)) clean = `https://${clean}`;
-      currentPortalUrl = clean;
-      addrInput.value = clean;
-      iframeEl.src = `/api/rave/browser-proxy?provider=${encodeURIComponent(p.id)}&url=${encodeURIComponent(clean)}`;
-    };
-    addrInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navTo(addrInput.value); });
-
-    const onMsg = (ev) => {
-      const d = ev.data;
-      if (!d || typeof d !== 'object') return;
-      if (d.type === 'watchlivo_portal_nav' && d.url) {
-        currentPortalUrl = d.url;
-        addrInput.value = d.url;
-      } else if (d.type === 'watchlivo_portal_pick' && d.url && onPickUrl) {
-        toast(`🎬 ${d.title || p.name} odaya aktarılıyor...`);
-        onPickUrl(d.url, d.title || `${p.name} İçeriği`);
-      } else if (d.type === 'watchlivo_portal_item' && d.item && onPickItem) {
-        toast(`🎬 ${d.item.title || p.name} açılıyor...`);
-        onPickItem(d.item);
-      }
-    };
-    activePortalMsgHandler = onMsg;
-    window.addEventListener('message', onMsg);
-
-    browserHost.replaceChildren(
-      h('div', { class: 'wl-embedded-browser fade-in' },
-        h('div', { class: 'wl-browser-Addressbar' },
-          h('button', { class: 'btn sm', onclick: () => navTo(acct.browseUrl || acct.loginUrl) }, '🏠 Ana Sayfa'),
-          acct.loginUrl ? h('button', { class: 'btn sm', onclick: () => navTo(acct.loginUrl) }, '🔑 Giriş Ekranı') : null,
-          addrInput,
-          h('button', { class: 'btn sm', onclick: () => navTo(addrInput.value) }, 'Git'),
-          h('button', {
-            class: 'btn sm primary',
-            onclick: () => {
-              if (onPickUrl) onPickUrl(addrInput.value.trim() || currentPortalUrl, `${p.name} İçeriği`);
-            },
-          }, '▶ Bu Sayfayı Odada Başlat'),
-          h('button', {
-            class: 'btn sm',
-            onclick: () => {
-              browserOpen = false;
-              window.removeEventListener('message', onMsg);
-              activePortalMsgHandler = null;
-              browserHost.replaceChildren();
-            },
-          }, '✕ Kapat')
-        ),
-        iframeEl
-      )
-    );
-  };
-
-  if (!acct.freeNoAuth && (acct.loginUrl || acct.browseUrl)) {
-    const statusBadge = acct.loginSatisfied
-      ? h('span', { class: 'p-badge-connected' }, `✓ Bağlı · ${acct.accountEmail || acct.profileName}`)
-      : h('span', { class: 'p-badge-portal' }, '🔑 Hesap Girişi & Canlı Katalog');
-
-    const portalCard = h('div', { class: 'wl-portal-card', style: { borderColor: `${acct.accent || '#00f5d4'}44` } },
-      h('div', { class: 'wl-portal-top' },
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
-            h('strong', { style: { fontSize: '14px', color: '#fff' } }, `${p.name} Platform Portalı`),
-            statusBadge),
-          h('span', { class: 'dim', style: { fontSize: '12px' } },
-            `${p.name} hesabınızla giriş yapabilir, dahili tarayıcıyla platform içinde gezinebilir veya aşağıdaki 4K katalogdan doğrudan film/dizi seçebilirsiniz.`)),
-        h('div', { class: 'wl-portal-actions' },
-          h('button', {
-            type: 'button',
-            class: 'btn sm primary',
-            onclick: () => openProviderLoginModal(p, onReload, openEmbeddedPortal),
-          }, acct.loginSatisfied ? `⚙️ Hesap (${acct.profileName})` : `🔑 ${p.name} Giriş Yap`),
-          h('button', {
-            type: 'button',
-            class: 'btn sm',
-            onclick: () => {
-              if (browserOpen) {
-                browserOpen = false;
-                browserHost.replaceChildren();
-              } else {
-                openEmbeddedPortal(acct.browseUrl || acct.loginUrl);
-              }
-            },
-          }, `🌐 ${p.name} İçinde Gezin`))));
-
-    wrap.append(portalCard, browserHost);
-  }
-
-  if (onPickUrl) {
-    const ph = acct.freeNoAuth || !acct.browseUrl
-      ? `${p.name} veya doğrudan video/bölüm bağlantısını (.m3u8 / .mp4 / URL) buraya yapıştırıp oynatabilirsiniz...`
-      : `${p.name} içerik veya doğrudan video bağlantısını buraya yapıştırıp oynatabilirsiniz...`;
-    const urlInp = h('input', { id: 'hub-direct-url', class: 'input rave-inp flex', placeholder: ph });
-    const goUrl = () => { const u = urlInp.value.trim(); if (u) onPickUrl(u, `${p.name} İçeriği`); };
-    urlInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') goUrl(); });
-    wrap.append(h('div', { class: 'rave-url-catcher' }, urlInp, h('button', { class: 'btn', onclick: goUrl }, '▶ Bağlantıyı Oynat')));
-  }
-  return wrap;
+export function renderAccountBar(_p, _onReload, _onPickUrl, _onPickItem) {
+  return h('div', { class: 'rave-auth-wrap', style: { display: 'none' } });
 }
 export async function renderSeriesPicker(item, prov, container, onBack, onPick, resolveFn) {
   const mtype = item.mediaType || (item.type === 'SHOW' ? 'tv' : 'movie');

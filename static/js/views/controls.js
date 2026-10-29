@@ -1,12 +1,12 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v4';
-import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v4';
-import { getProvider } from '../providers.js?v=20261029_v4';
-import { expectedPosition } from '../sync.js?v=20261029_v4';
-import { thumbFor } from './lobby.js?v=20261029_v4';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v4';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v4';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v4';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261029_v5';
+import { state, isLeader, canSelectVideo, setView } from '../store.js?v=20261029_v5';
+import { getProvider } from '../providers.js?v=20261029_v5';
+import { expectedPosition } from '../sync.js?v=20261029_v5';
+import { thumbFor } from './lobby.js?v=20261029_v5';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261029_v5';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261029_v5';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261029_v5';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },

@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v4';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v4';
-import { api, qs } from '../api.js?v=20261029_v4';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v4';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v4';
-import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v4';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261029_v5';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261029_v5';
+import { api, qs } from '../api.js?v=20261029_v5';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261029_v5';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261029_v5';
+import { getWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261029_v5';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -46,24 +46,11 @@ export function attachTilt(card) {
   return card;
 }
 
-export function providerTile(p, onClick, onRefresh) {
-  const acct = getAccount(p.id);
-  const isHero = p.id === 'cinema' || p.id === 'music';
+export function providerTile(p, onClick) {
+  const isHero = p.id === 'cinema';
   const badgeEl = isHero
     ? h('span', { class: 'p-badge-live' }, '4K • AÇIK')
-    : acct.loginSatisfied
-      ? h('span', {
-          class: 'p-badge-connected',
-          title: `${acct.accountEmail || acct.profileName} bağlı — Hesap ayarları için tıkla`,
-          onclick: (e) => { e.stopPropagation(); openProviderLoginModal(p, onRefresh); },
-        }, '✓ Bağlı')
-      : (!acct.freeNoAuth && (acct.loginUrl || acct.browseUrl))
-        ? h('span', {
-            class: 'p-badge-portal',
-            title: `${p.name} hesabıyla giriş yap veya katalogda gezin`,
-            onclick: (e) => { e.stopPropagation(); openProviderLoginModal(p, onRefresh); },
-          }, '🔑 Giriş / Katalog')
-        : h('span', { class: 'p-badge-portal' }, 'AÇIK');
+    : h('span', { class: 'p-badge-portal' }, '4K VİTRİN');
 
   const card = h('div', {
     class: `platform-card provider-tile ${isHero ? 'featured-glow hero-provider-tile' : ''}`,
@@ -187,15 +174,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     }
   }
 
-  // Rave SuperSearch__provider-items 2-row default showcase order (Unified Cinema 40K + Unified Music + Global + TR + Live + Web/Upload)
   const RAVE_TOP_IDS = [
-    'cinema', 'music',
-    'netflix', 'disney', 'prime', 'max', 'youtube', 'apple', 'exxen', 'blutv', 'gain',
-    'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'twitch', 'kick', 'drive', 'web', 'upload',
+    'cinema',
+    'netflix', 'disney', 'prime', 'max', 'apple', 'exxen', 'blutv', 'gain',
+    'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'hulu', 'paramount', 'peacock',
   ];
 
   function renderGrid() {
-    const input = h('input', { placeholder: 'Video, dizi, film veya doğrudan bağlantı ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { placeholder: 'Film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
     const run = () => { superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
@@ -206,8 +192,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           ...filteredProviders.filter((p) => !RAVE_TOP_IDS.includes(p.id)),
         ]
       : filteredProviders;
-    const isMobileView = typeof window !== 'undefined' && window.innerWidth <= 768;
-    const defaultCap = compact ? 30 : (isMobileView ? 11 : 17);
+    const defaultCap = 30;
     const isCollapsedGrid = !compact && catFilter === 'all' && !showAllProviders && orderedAll.length > defaultCap;
     const visibleProviders = isCollapsedGrid ? orderedAll.slice(0, defaultCap) : orderedAll;
     const hiddenCount = orderedAll.length - visibleProviders.length;

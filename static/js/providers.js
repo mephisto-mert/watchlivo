@@ -234,13 +234,10 @@ export const LOGOS = {
 };
 
 export const PROVIDER_CATEGORIES = [
-  { id: 'all', label: '🌐 Tümü' },
-  { id: 'free_tr', label: '🍿 40.000+ Sinema & Dizi' },
-  { id: 'music', label: '🎵 Müzik & Klip' },
-  { id: 'global', label: '🎬 Global Platformlar' },
+  { id: 'all', label: '🌐 Tüm Platformlar' },
+  { id: 'free_tr', label: '🍿 40.000+ Ana Arşiv' },
+  { id: 'global', label: '🎬 Global Sinema & Anime' },
   { id: 'tr', label: '🇹🇷 Yerli Platformlar' },
-  { id: 'live', label: '🔴 Canlı & Sosyal' },
-  { id: 'cloud', label: '☁️ Bulut & Araçlar' },
 ];
 
 export const PROVIDERS = [
@@ -257,111 +254,76 @@ export const PROVIDERS = [
       (u.match(/pluto\.tv\/.*?(?:movies|series|live-tv)\/([\w-]+)/i) || [])[1] ||
       (u.match(/tubitv\.com\/(?:video|movies|tv-shows|series)\/(\d+)/i) || [])[1] || null
     ) },
-  { id: 'music', name: 'Müzik & Klip', cat: 'music', badge: 'Spotify · Apple Music · Deezer · YT Music · SoundCloud', logo: LOGOS.music, bg: '#10121a', accent: '#1db954', web: true, kind: 'music', freeNoAuth: true,
-    homeUrl: '', placeholder: 'Spotify, Apple Music, Deezer, YouTube Music veya SoundCloud şarkı/klip ara veya bağlantı yapıştır...',
-    idParser: (u) => (
-      (u.match(/music\.youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})/i) || [])[1] ||
-      (u.match(/open\.spotify\.com\/(?:intl-[a-z]+\/)?(?:track|album|playlist)\/([A-Za-z0-9]+)/i) || [])[1] ||
-      (u.match(/deezer\.com\/(?:[a-z]+\/)?(?:track|album|playlist)\/(\d+)/i) || [])[1] ||
-      (u.match(/music\.apple\.com\/[a-z]{2}\/(?:album|playlist|music-video|song)\/[^/]+\/(\d+)/i) || [])[1] ||
-      (u.match(/soundcloud\.com\/([\w-]+\/[\w-]+)/i) || [])[1] || null
-    ) },
-  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Dizi & Film', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog',
-    homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix'te dizi, film ara veya bağlantı yapıştır...",
+  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Dizi & Film Vitrini', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
-  { id: 'youtube', name: 'YouTube', cat: 'live', badge: '4K · Canlı & Video', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search',
-    placeholder: "YouTube'da video, dizi veya film ara...", defaultQuery: 'resmi fragman 4K',
-    idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
-  { id: 'disney', name: 'Disney+', cat: 'global', badge: 'Orijinal & Sinema', logo: LOGOS.disney, bg: '#10121a', accent: '#0063e5', web: true, kind: 'catalog',
-    homeUrl: 'https://www.disneyplus.com', placeholder: "Disney+'ta dizi, film ara veya bağlantı yapıştır...",
+  { id: 'disney', name: 'Disney+', cat: 'global', badge: 'Orijinal & Sinema Vitrini', logo: LOGOS.disney, bg: '#10121a', accent: '#0063e5', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.disneyplus.com', placeholder: "Disney+ vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/disneyplus\.com\/(?:[a-z-]+\/)?(?:play|video|movies|series)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'prime', name: 'Prime Video', cat: 'global', badge: 'Amazon Originals', logo: LOGOS.prime, bg: '#10121a', accent: '#00a8e1', web: true, kind: 'catalog',
-    homeUrl: 'https://www.primevideo.com', placeholder: "Prime Video'da dizi, film ara veya bağlantı yapıştır...",
+  { id: 'prime', name: 'Prime Video', cat: 'global', badge: 'Amazon Originals Vitrini', logo: LOGOS.prime, bg: '#10121a', accent: '#00a8e1', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.primevideo.com', placeholder: "Prime Video vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/(?:primevideo|amazon)\.[a-z.]+\/.*?(?:gti=|asin=|detail\/)([\w.-]+)/i) || [])[1] || null },
-  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Warner Bros', logo: LOGOS.max, bg: '#10121a', accent: '#2563eb', web: true, kind: 'catalog',
-    homeUrl: 'https://play.max.com', placeholder: "Max'te dizi, film ara veya bağlantı yapıştır...",
+  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Warner Bros Vitrini', logo: LOGOS.max, bg: '#10121a', accent: '#2563eb', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://play.max.com', placeholder: "Max vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/(?:hbomax|max)\.com\/.*?(?:video\/watch|play|movies|series)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'apple', name: 'Apple TV+', cat: 'global', badge: 'Apple Originals 4K', logo: LOGOS.apple, bg: '#10121a', accent: '#f8fafc', web: true, kind: 'catalog',
-    homeUrl: 'https://tv.apple.com/tr', placeholder: "Apple TV+'ta dizi veya film ara...",
+  { id: 'apple', name: 'Apple TV+', cat: 'global', badge: 'Apple Originals 4K Vitrini', logo: LOGOS.apple, bg: '#10121a', accent: '#f8fafc', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://tv.apple.com/tr', placeholder: "Apple TV+ vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/tv\.apple\.com\/.*?(?:movie|show|episode)\/[\w-]+\/([\w.]+)/i) || [])[1] || null },
-  { id: 'mubi', name: 'MUBI', cat: 'global', badge: 'Kült & Festival Sineması', logo: LOGOS.mubi, bg: '#10121a', accent: '#0057ff', web: true, kind: 'catalog',
-    homeUrl: 'https://mubi.com/tr', placeholder: "MUBI'de seçkin film ara...",
-    idParser: (u) => (u.match(/mubi\.com\/.*?(?:films)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'tod', name: 'TOD', cat: 'tr', badge: 'beIN · Dizi, Film & Spor', logo: LOGOS.tod, bg: '#10121a', accent: '#d946ef', web: true, kind: 'catalog',
-    homeUrl: 'https://www.todtv.com.tr', placeholder: "TOD'da dizi veya film ara...",
-    idParser: (u) => (u.match(/todtv\.com\.tr\/(?:icerik|izle|film|dizi)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'tabii', name: 'tabii', cat: 'tr', badge: 'TRT Dijital Orijinal', logo: LOGOS.tabii, bg: '#10121a', accent: '#00e5a3', web: true, kind: 'catalog',
-    homeUrl: 'https://www.tabii.com/tr', placeholder: "tabii'de orijinal dizi veya film ara...",
-    idParser: (u) => (u.match(/tabii\.com\/.*?(?:watch|detail)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'exxen', name: 'Exxen', cat: 'tr', badge: 'Yerli Dizi & Şov', logo: LOGOS.exxen, bg: '#10121a', accent: '#ffcb05', web: true, kind: 'catalog',
-    homeUrl: 'https://www.exxen.com/tr', placeholder: "Exxen'de dizi, program veya film ara...",
+  { id: 'exxen', name: 'Exxen', cat: 'tr', badge: 'Yerli Dizi & Şov Vitrini', logo: LOGOS.exxen, bg: '#10121a', accent: '#ffcb05', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.exxen.com/tr', placeholder: "Exxen vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/exxen\.com\/.*?(?:detail|watch)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'blutv', name: 'BluTV', cat: 'tr', badge: 'Yerli & HBO', logo: LOGOS.blutv, bg: '#10121a', accent: '#00a8ff', web: true, kind: 'catalog',
-    homeUrl: 'https://www.blutv.com', placeholder: "BluTV'de dizi veya film ara...",
+  { id: 'blutv', name: 'BluTV', cat: 'tr', badge: 'Yerli & HBO Vitrini', logo: LOGOS.blutv, bg: '#10121a', accent: '#00a8ff', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.blutv.com', placeholder: "BluTV vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/blutv\.com\/(?:diziler|filmler|izle)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'gain', name: 'GAİN', cat: 'tr', badge: 'Yeni Nesil İçerik', logo: LOGOS.gain, bg: '#10121a', accent: '#e11d48', web: true, kind: 'catalog',
-    homeUrl: 'https://www.gain.tv', placeholder: "GAİN'de dizi, program veya film ara...",
+  { id: 'gain', name: 'GAİN', cat: 'tr', badge: 'Yeni Nesil Yerli İçerik', logo: LOGOS.gain, bg: '#10121a', accent: '#e11d48', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.gain.tv', placeholder: "GAİN vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/gain\.tv\/(?:icerik|izle)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'tvplus', name: 'TV+', cat: 'tr', badge: 'Turkcell TV+ Sinema', logo: LOGOS.tvplus, bg: '#10121a', accent: '#facc15', web: true, kind: 'catalog',
-    homeUrl: 'https://tvplus.com.tr', placeholder: "TV+'ta film veya dizi ara...",
+  { id: 'tod', name: 'TOD', cat: 'tr', badge: 'beIN · Dizi & Film Vitrini', logo: LOGOS.tod, bg: '#10121a', accent: '#d946ef', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.todtv.com.tr', placeholder: "TOD vitrininde dizi veya film ara...",
+    idParser: (u) => (u.match(/todtv\.com\.tr\/(?:icerik|izle|film|dizi)\/([\w-]+)/i) || [])[1] || null },
+  { id: 'tabii', name: 'tabii', cat: 'tr', badge: 'TRT Dijital Orijinal Vitrini', logo: LOGOS.tabii, bg: '#10121a', accent: '#00e5a3', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.tabii.com/tr', placeholder: "tabii vitrininde orijinal dizi veya film ara...",
+    idParser: (u) => (u.match(/tabii\.com\/.*?(?:watch|detail)\/([\w-]+)/i) || [])[1] || null },
+  { id: 'tvplus', name: 'TV+', cat: 'tr', badge: 'Turkcell TV+ Sinema Vitrini', logo: LOGOS.tvplus, bg: '#10121a', accent: '#facc15', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://tvplus.com.tr', placeholder: "TV+ vitrininde film veya dizi ara...",
     idParser: (u) => (u.match(/tvplus\.com\.tr\/(?:izle|film|dizi)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'puhutv', name: 'puhutv', cat: 'tr', badge: 'Yerli Dizi & Yeşilçam', logo: LOGOS.puhutv, bg: '#10121a', accent: '#ef4444', web: true, kind: 'catalog',
-    homeUrl: 'https://puhutv.com', placeholder: "puhutv'de dizi veya film ara...",
+  { id: 'puhutv', name: 'puhutv', cat: 'tr', badge: 'Yerli Dizi & Yeşilçam Vitrini', logo: LOGOS.puhutv, bg: '#10121a', accent: '#ef4444', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://puhutv.com', placeholder: "puhutv vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/puhutv\.com\/([\w-]+)-izle/i) || [])[1] || null },
-  { id: 'crunchyroll', name: 'Crunchyroll', cat: 'global', badge: 'Anime · Simulcast', logo: LOGOS.crunchyroll, bg: '#10121a', accent: '#f47521', web: true, kind: 'catalog',
-    homeUrl: 'https://www.crunchyroll.com', placeholder: "Crunchyroll'da anime ara veya bağlantı yapıştır...",
+  { id: 'mubi', name: 'MUBI', cat: 'global', badge: 'Kült & Festival Sineması', logo: LOGOS.mubi, bg: '#10121a', accent: '#0057ff', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://mubi.com/tr', placeholder: "MUBI vitrininde seçkin film ara...",
+    idParser: (u) => (u.match(/mubi\.com\/.*?(?:films)\/([\w-]+)/i) || [])[1] || null },
+  { id: 'crunchyroll', name: 'Crunchyroll', cat: 'global', badge: 'Anime · Simulcast Vitrini', logo: LOGOS.crunchyroll, bg: '#10121a', accent: '#f47521', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.crunchyroll.com', placeholder: "Crunchyroll vitrininde anime ara...",
     idParser: (u) => (u.match(/crunchyroll\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|series)\/([A-Z0-9]+)/i) || [])[1] || null },
-  { id: 'hulu', name: 'Hulu', cat: 'global', badge: 'FX & Hulu Originals', logo: LOGOS.hulu, bg: '#10121a', accent: '#1ce783', web: true, kind: 'catalog',
-    homeUrl: 'https://www.hulu.com', placeholder: "Hulu'da dizi veya film ara...",
+  { id: 'hulu', name: 'Hulu', cat: 'global', badge: 'FX & Hulu Originals Vitrini', logo: LOGOS.hulu, bg: '#10121a', accent: '#1ce783', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.hulu.com', placeholder: "Hulu vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/hulu\.com\/(?:watch|series|movie)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'paramount', name: 'Paramount+', cat: 'global', badge: 'Showtime & CBS', logo: LOGOS.paramount, bg: '#10121a', accent: '#0064ff', web: true, kind: 'catalog',
-    homeUrl: 'https://www.paramountplus.com', placeholder: "Paramount+'ta film veya dizi ara...",
+  { id: 'paramount', name: 'Paramount+', cat: 'global', badge: 'Showtime & CBS Vitrini', logo: LOGOS.paramount, bg: '#10121a', accent: '#0064ff', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.paramountplus.com', placeholder: "Paramount+ vitrininde film veya dizi ara...",
     idParser: (u) => (u.match(/paramountplus\.com\/(?:movies|shows|video)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'peacock', name: 'Peacock', cat: 'global', badge: 'Universal & NBC', logo: LOGOS.peacock, bg: '#10121a', accent: '#a855f7', web: true, kind: 'catalog',
-    homeUrl: 'https://www.peacocktv.com', placeholder: "Peacock'ta film veya dizi ara...",
+  { id: 'peacock', name: 'Peacock', cat: 'global', badge: 'Universal & NBC Vitrini', logo: LOGOS.peacock, bg: '#10121a', accent: '#a855f7', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://www.peacocktv.com', placeholder: "Peacock vitrininde film veya dizi ara...",
     idParser: (u) => (u.match(/peacocktv\.com\/watch\/(?:asset|playback)\/([\w-]+)/i) || [])[1] || null },
-  { id: 'twitch', name: 'Twitch', cat: 'live', badge: 'Canlı Yayın', logo: LOGOS.twitch, bg: '#10121a', accent: '#9146ff', web: true, kind: 'link', live: true,
-    placeholder: 'Twitch kanal adı veya bağlantısı (twitch.tv/kanal)',
-    idParser: (u) => (
-      (u.match(/(?:www\.|m\.)?twitch\.tv\/(?:videos\/(\d+)|[\w-]+\/clip\/([\w-]+)|([a-z0-9_]{3,25}))/i) || []).slice(1).find(Boolean) ||
-      (u.match(/clips\.twitch\.tv\/([\w-]+)/i) || [])[1] || null
-    ) },
-  { id: 'kick', name: 'Kick', cat: 'live', badge: 'Canlı Yayın · 60fps', logo: LOGOS.kick, bg: '#10121a', accent: '#53fc18', web: true, kind: 'link', live: true,
-    placeholder: 'Kick kanal adı veya bağlantısı (kick.com/kanal)',
-    idParser: (u) => (u.match(/kick\.com\/([a-z0-9_.-]{2,30})/i) || [])[1] || null },
-  { id: 'tiktok', name: 'TikTok', cat: 'live', badge: 'Kısa Video & Reels', logo: LOGOS.tiktok, bg: '#10121a', accent: '#fe2c55', web: true, kind: 'link',
-    placeholder: 'TikTok video bağlantısı yapıştır (tiktok.com/@.../video/...)',
-    idParser: (u) => (u.match(/tiktok\.com\/.*?(?:video)\/(\d+)/i) || [])[1] || null },
-  { id: 'dailymotion', name: 'Dailymotion', cat: 'live', badge: 'HD Video & Dizi', logo: LOGOS.dailymotion, bg: '#10121a', accent: '#6366f1', web: true, kind: 'link',
-    placeholder: 'Dailymotion video bağlantısı yapıştır (dailymotion.com/video/...)',
-    idParser: (u) => (u.match(/(?:dailymotion\.com\/video\/|dai\.ly\/)([a-z0-9]+)/i) || [])[1] || null },
-  { id: 'vimeo', name: 'Vimeo', cat: 'live', badge: '4K Yönetmen Kurgu', logo: LOGOS.vimeo, bg: '#10121a', accent: '#1ab7ea', web: true, kind: 'link',
-    placeholder: 'Vimeo video bağlantısı yapıştır (vimeo.com/...)',
-    idParser: (u) => (u.match(/vimeo\.com\/(?:channels\/[\w]+\/|groups\/[^/]+\/videos\/|video\/)?(\d+)/i) || [])[1] || null },
-  { id: 'drive', name: 'Google Drive', cat: 'cloud', badge: 'Bulut Video', logo: LOGOS.drive, bg: '#10121a', accent: '#10b981', web: true, kind: 'link', embedOnly: true,
-    placeholder: 'Herkese açık Drive video bağlantısı (drive.google.com/file/d/...)',
-    idParser: (u) => (u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]{20,})/i) || [])[1] || null },
-  { id: 'dropbox', name: 'Dropbox', cat: 'cloud', badge: 'Bulut MP4 / MKV', logo: LOGOS.dropbox, bg: '#10121a', accent: '#0061ff', web: true, kind: 'link',
-    placeholder: 'Dropbox paylaşılan video bağlantısı yapıştır (dropbox.com/s/...)',
-    idParser: (u) => (/dropbox\.com\/(?:s|scl\/fi)\//i.test(u) ? u : null) },
-  { id: 'web', name: 'Web', cat: 'cloud', badge: 'MP4 · M3U8 · URL', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link',
-    placeholder: 'Video sayfası, .mp4 veya .m3u8 bağlantısı yapıştır',
+];
+
+const INTERNAL_FALLBACK_PROVIDERS = [
+  { id: 'youtube', name: 'YouTube', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
+    idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
+  { id: 'web', name: 'Web', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link', freeNoAuth: true,
     idParser: (u) => (/^https?:\/\//i.test(u) ? u : null) },
-  { id: 'upload', name: 'Dosya Yükle', cat: 'cloud', badge: 'Yerel Video', logo: LOGOS.upload, glyph: 'upload', bg: '#10121a', accent: '#00f5d4', web: true, kind: 'upload' },
 ];
 
 const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi', 'plex', 'pluto', 'tubi'];
 export const getProvider = (id) => {
-  const norm = ['ytmusic', 'spotify', 'deezer', 'applemusic', 'soundcloud'].includes(id)
-    ? 'music'
-    : (CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id));
-  return PROVIDERS.find((p) => p.id === norm) || null;
+  const norm = CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id);
+  return PROVIDERS.find((p) => p.id === norm) || INTERNAL_FALLBACK_PROVIDERS.find((p) => p.id === norm) || null;
 };
 
 export function parseVideoUrl(raw) {
   const url = String(raw || '').trim();
   if (!url) return null;
-  for (const p of PROVIDERS) {
+  for (const p of [...PROVIDERS, ...INTERNAL_FALLBACK_PROVIDERS]) {
     if (p.id === 'web') continue;
     const id = p.idParser?.(url);
     if (id) return { provider: p.id, id, url };
