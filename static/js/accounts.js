@@ -217,7 +217,7 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   });
 }
 
-export function renderAccountBar(p, onReload, onPickUrl) {
+export function renderAccountBar(p, onReload, onPickUrl, onPickItem) {
   const acct = getAccount(p.id);
   const wrap = h('div', { class: 'rave-auth-wrap' });
   const browserHost = h('div', { class: 'wl-portal-browser-slot' });
@@ -256,6 +256,9 @@ export function renderAccountBar(p, onReload, onPickUrl) {
       } else if (d.type === 'watchlivo_portal_pick' && d.url && onPickUrl) {
         toast(`🎬 ${d.title || p.name} odaya aktarılıyor...`);
         onPickUrl(d.url, d.title || `${p.name} İçeriği`);
+      } else if (d.type === 'watchlivo_portal_item' && d.item && onPickItem) {
+        toast(`🎬 ${d.item.title || p.name} açılıyor...`);
+        onPickItem(d.item);
       }
     };
     window.addEventListener('message', onMsg);

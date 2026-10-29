@@ -257,7 +257,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const refreshAuth = () => {
-    authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl));
+    authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)));
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {
       catalogLoaded = true;

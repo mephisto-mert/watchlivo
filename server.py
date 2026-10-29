@@ -145,19 +145,21 @@ class SecurityHeaders:
                 hdrs.append((b"permissions-policy", b"camera=(), microphone=(self), geolocation=()"))
                 hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
-                hdrs.append((
-                    b"content-security-policy",
-                    b"default-src 'self'; "
-                    b"script-src 'self' 'unsafe-inline' https://www.gstatic.com https://apis.google.com; "
-                    b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                    b"font-src 'self' data: https://fonts.gstatic.com; "
-                    b"img-src 'self' data: blob: https:; "
-                    b"media-src 'self' blob: https:; "
-                    b"connect-src 'self' https: wss:; "
-                    b"frame-src 'self' https://www.youtube.com https://www.youtube-nocookie.com "
-                    b"https://accounts.google.com https://watchlivo-38ab6.firebaseapp.com; "
-                    b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-                ))
+                if scope.get("path") == "/api/rave/browser-proxy":
+                    hdrs.append((b"content-security-policy", b"frame-ancestors 'self'; object-src 'none'"))
+                else:
+                    hdrs.append((
+                        b"content-security-policy",
+                        b"default-src 'self'; "
+                        b"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com; "
+                        b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                        b"font-src 'self' data: https://fonts.gstatic.com; "
+                        b"img-src 'self' data: blob: https:; "
+                        b"media-src 'self' blob: https:; "
+                        b"connect-src 'self' https: wss:; "
+                        b"frame-src 'self' https:; "
+                        b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+                    ))
                 hdrs.append((b"alt-svc", b"clear"))
                 message = {**message, "headers": hdrs}
             await send(message)
@@ -5271,80 +5273,128 @@ async def rave_suno_generate(request: Request):
 
 
 async def rave_browser_proxy(request: Request):
+    import html
     target_url = (request.query_params.get("url") or "").strip()[:2000]
     prov = (request.query_params.get("provider") or "netflix").strip().lower()[:32]
     if not target_url.startswith(("http://", "https://")) or not public_http_url(target_url):
         return HTMLResponse("<h3>Geçersiz bağlantı</h3>", status_code=400)
-    parsed = urllib.parse.urlparse(target_url)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
 
-    def _fetch_portal_html() -> str:
-        try:
-            req = urllib.request.Request(
-                target_url,
-                headers={
-                    "User-Agent": UA137,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                    "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-                },
-            )
-            with _public_open(req, timeout=6.5) as r:
-                raw = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-                final_u = r.geturl() or target_url
-        except Exception:
-            raw = ""
-            final_u = target_url
+    prov_upper = html.escape(prov.upper())
+    safe_target = html.escape(target_url)
 
-        helper_bar = f"""
-<base href="{html.escape(origin)}/" />
-<style>
-  #wl-portal-helper {{
-    position: fixed; bottom: 14px; right: 14px; z-index: 2147483647;
-    display: flex; align-items: center; gap: 10px;
-    background: rgba(10, 15, 28, 0.94); color: #fff;
-    border: 1px solid #00f5d4; border-radius: 999px;
-    padding: 8px 16px; font-family: system-ui, sans-serif; font-size: 12px;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 18px rgba(0,245,212,0.35);
-  }}
-  #wl-portal-helper button {{
-    background: #00f5d4; color: #05070f; border: none; border-radius: 999px;
-    padding: 6px 14px; font-weight: 800; font-size: 12px; cursor: pointer;
-  }}
-</style>
-<div id="wl-portal-helper">
-  <span>🟢 Watchlivo Canlı Platform Gezgini ({html.escape(prov.upper())})</span>
-  <button type="button" onclick="window.parent.postMessage({{type:'watchlivo_portal_pick', url:{json.dumps(final_u)}, title:document.title||{json.dumps(prov.upper())}, provider:{json.dumps(prov)}}}, '*')">▶ Bu Sayfayı Odada Başlat</button>
-</div>
-<script>
-document.addEventListener('click', function(e) {{
-  var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
-  if (!a) return;
-  var href = a.href;
-  if (href && /^https?:\/\//i.test(href)) {{
-    e.preventDefault();
-    var ttl = (a.innerText || a.getAttribute('aria-label') || a.title || '').trim();
-    window.parent.postMessage({{type:'watchlivo_portal_nav', url: href, title: ttl, provider: {json.dumps(prov)}}}, '*');
-    window.location.href = '/api/rave/browser-proxy?provider=' + encodeURIComponent({json.dumps(prov)}) + '&url=' + encodeURIComponent(href);
-  }}
-}}, true);
-</script>
-"""
-        if raw and len(raw) > 400 and ("<body" in raw.lower() or "<html" in raw.lower()):
-            raw = re.sub(r'<meta[^>]+http-equiv=["\']?Content-Security-Policy["\']?[^>]*>', '', raw, flags=re.I)
-            raw = re.sub(r'<meta[^>]+http-equiv=["\']?X-Frame-Options["\']?[^>]*>', '', raw, flags=re.I)
-            if "<head" in raw.lower():
-                raw = re.sub(r'(<head[^>]*>)', r'\1' + helper_bar, raw, count=1, flags=re.I)
-            else:
-                raw = helper_bar + raw
-            return raw
-        return helper_bar
-
-    html_out = await asyncio.to_thread(_fetch_portal_html)
-    return HTMLResponse(html_out, headers={
+    portal_html = f"""<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{prov_upper} — Watchlivo Canlı Platform Gezgini</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(0,245,212,0.12), transparent 55%), #070913;
+      color: #fff; padding: 20px; min-height: 100vh;
+    }}
+    .portal-head {{
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+      padding: 16px 20px; border-radius: 16px;
+      background: rgba(16, 22, 38, 0.88); border: 1px solid rgba(255,255,255,0.14);
+      margin-bottom: 18px;
+    }}
+    .portal-login-row {{
+      display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    }}
+    .portal-inp {{
+      height: 36px; padding: 0 12px; border-radius: 999px;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.16);
+      color: #fff; font-size: 12px; outline: none; min-width: 210px;
+    }}
+    .portal-btn {{
+      height: 36px; padding: 0 16px; border-radius: 999px; border: none;
+      background: #00f5d4; color: #05070f; font-weight: 800; font-size: 12px; cursor: pointer;
+    }}
+    .portal-btn.sec {{
+      background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.18);
+    }}
+    .portal-grid {{
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 14px;
+    }}
+    .p-item {{
+      border-radius: 12px; overflow: hidden; background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.09); cursor: pointer; transition: transform 0.2s, border-color 0.2s;
+      display: flex; flex-direction: column;
+    }}
+    .p-item:hover {{ transform: translateY(-4px); border-color: #00f5d4; }}
+    .p-item img {{ width: 100%; aspect-ratio: 2/3; object-fit: cover; background: #0f1424; }}
+    .p-item-body {{ padding: 10px; display: flex; flex-direction: column; gap: 4px; }}
+    .p-item-title {{ font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+    .p-item-sub {{ font-size: 10px; color: #94a3b8; }}
+    .p-item-play {{
+      margin-top: 6px; padding: 5px 8px; border-radius: 999px; background: rgba(0,245,212,0.16);
+      color: #00f5d4; font-size: 11px; font-weight: 700; text-align: center;
+    }}
+  </style>
+</head>
+<body>
+  <div class="portal-head">
+    <div>
+      <div style="font-size:15px;font-weight:800;color:#00f5d4;">🌐 {prov_upper} Canlı Platform & Katalog Gezgini</div>
+      <div style="font-size:11px;color:#94a3b8;margin-top:3px;">Hesabınızla bağlanın veya {prov_upper} içeriklerini doğrudan seçip odada başlatın.</div>
+    </div>
+    <div class="portal-login-row">
+      <input id="q-inp" class="portal-inp" placeholder="{prov_upper} içinde film veya dizi ara..." />
+      <button class="portal-btn" onclick="loadCatalog(document.getElementById('q-inp').value)">🔍 Ara</button>
+      <button class="portal-btn sec" onclick="window.open({json.dumps(target_url)}, '_blank', 'noopener')">↗ {prov_upper} Resmi Site</button>
+    </div>
+  </div>
+  <div id="grid" class="portal-grid">Yükleniyor...</div>
+  <script>
+    const PROV = {json.dumps(prov)};
+    document.getElementById('q-inp').addEventListener('keydown', (e) => {{
+      if (e.key === 'Enter') loadCatalog(e.target.value);
+    }});
+    async function loadCatalog(q = '') {{
+      const g = document.getElementById('grid');
+      g.innerHTML = '<div style="grid-column:1/-1;padding:24px;color:#94a3b8;">{prov_upper} kataloğu yükleniyor...</div>';
+      try {{
+        const r = await fetch('/api/rave/catalog?provider=' + encodeURIComponent(PROV) + '&q=' + encodeURIComponent(q || ''));
+        const d = await r.json();
+        const items = d.items || [];
+        if (!items.length) {{
+          g.innerHTML = '<div style="grid-column:1/-1;padding:24px;color:#94a3b8;">Sonuç bulunamadı.</div>';
+          return;
+        }}
+        g.innerHTML = '';
+        items.slice(0, 24).forEach(it => {{
+          const card = document.createElement('div');
+          card.className = 'p-item';
+          card.innerHTML = '<img src="' + (it.poster || it.backdrop || '/static/watchlivo-poster.svg') + '" alt="" />' +
+            '<div class="p-item-body">' +
+              '<div class="p-item-title">' + (it.title || '') + '</div>' +
+              '<div class="p-item-sub">' + (it.year || '2025') + ' · ⭐ ' + (it.rating || '8.2') + '</div>' +
+              '<div class="p-item-play">▶ Odada Başlat</div>' +
+            '</div>';
+          card.onclick = () => {{
+            window.parent.postMessage({{
+              type: 'watchlivo_portal_item',
+              item: it,
+              provider: PROV
+            }}, '*');
+          }};
+          g.appendChild(card);
+        }});
+      }} catch (e) {{
+        g.innerHTML = '<div style="grid-column:1/-1;padding:24px;color:#f87171;">Katalog yüklenemedi.</div>';
+      }}
+    }}
+    loadCatalog('');
+  </script>
+</body>
+</html>"""
+    return HTMLResponse(portal_html, headers={
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": "*",
     })
-
 
 import auth_engine
 import music_engine
