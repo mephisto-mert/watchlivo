@@ -149,6 +149,16 @@ class RegressionTests(unittest.TestCase):
             nt = server._norm_title(title)
             self.assertTrue(bool(streams.get(f"movie:{nt}:1:1")), f"Missing vault stream for {title} ({nt})")
 
+    def test_provider_catalog_and_resolve_domestic_endpoints(self):
+        import catalog_api
+        c = TestClient(catalog_api.app)
+        r_cat = c.get("/api/rave/catalog?provider=tvplus&page=1")
+        self.assertEqual(r_cat.status_code, 200)
+        self.assertTrue(len(r_cat.json().get("items") or []) > 0)
+        r_res = c.get("/api/rave/resolve-catalog?tmdbId=225565&title=K%C4%B1%C5%9F+Uykusu&mediaType=movie&year=2014")
+        self.assertEqual(r_res.status_code, 200)
+        self.assertTrue(bool(r_res.json().get("url")))
+
 
 if __name__ == '__main__':
     unittest.main()

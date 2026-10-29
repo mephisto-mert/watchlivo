@@ -882,6 +882,33 @@ def _scrape_dizipal_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -
     return out
 
 
+def _has_vault_stream(it_obj: dict) -> int:
+    if not isinstance(it_obj, dict):
+        return 0
+    v_streams = _MAIN_SITES_VAULT.get("streams") or {}
+    mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
+    tid_k = str(it_obj.get("tmdbId") or it_obj.get("id") or "")
+    cid_k = str(it_obj.get("id") or "")
+    off_k = str(it_obj.get("officialUrl") or "")
+    nt_k = _norm_title(it_obj.get("title") or "")
+    no_k = _norm_title(it_obj.get("originalTitle") or "")
+    ac_tmdb = globals().get("_ANIMECIX_KNOWN_TMDB") or ()
+    ac_names = globals().get("_ANIMECIX_KNOWN_NAMES") or ()
+    if tid_k and tid_k in ac_tmdb:
+        return 1
+    if nt_k.replace(" ", "") in ac_names or no_k.replace(" ", "") in ac_names:
+        return 1
+    c_keys = [f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"]
+    if mt_k == "movie":
+        c_keys.extend([f"id:{tid_k}", f"id:{cid_k}"])
+    for ck in c_keys:
+        if ck and ck in v_streams:
+            c_st = v_streams[ck].get("streams") or []
+            if c_st and any(_stream_matches_title(s[0], [it_obj.get("title"), it_obj.get("originalTitle")]) for s in c_st if isinstance(s, (list, tuple)) and len(s) >= 1):
+                return 1
+    return 0
+
+
 def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category: str = "all", media_type_filter: str = "") -> dict:
     pg = max(1, min(200, int(page or 1)))
     cat = (category or "all").strip().lower()
@@ -1092,26 +1119,6 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
 
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     v_cat = _MAIN_SITES_VAULT.get("catalog") or {}
-    def _has_vault_stream(it_obj: dict) -> int:
-        mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
-        tid_k = str(it_obj.get("tmdbId") or "")
-        cid_k = str(it_obj.get("id") or "")
-        off_k = str(it_obj.get("officialUrl") or "")
-        nt_k = _norm_title(it_obj.get("title") or "")
-        no_k = _norm_title(it_obj.get("originalTitle") or "")
-        if tid_k and tid_k in _ANIMECIX_KNOWN_TMDB:
-            return 1
-        if nt_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES or no_k.replace(" ", "") in _ANIMECIX_KNOWN_NAMES:
-            return 1
-        c_keys = [f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"]
-        if mt_k == "movie":
-            c_keys.extend([f"id:{tid_k}", f"id:{cid_k}"])
-        for ck in c_keys:
-            if ck and ck in v_streams:
-                c_st = v_streams[ck].get("streams") or []
-                if c_st and any(_stream_matches_title(s[0], [it_obj.get("title"), it_obj.get("originalTitle")]) for s in c_st if isinstance(s, (list, tuple)) and len(s) >= 1):
-                    return 1
-        return 0
 
     def _safe_poster_url(u_img: str) -> str:
         u_img = str(u_img or "").strip()
