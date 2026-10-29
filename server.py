@@ -1598,7 +1598,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                         match_link = lk
                         break
                 if not match_link:
-                    match_link = links[0]
+                    continue
 
                 if mtype == "tv":
                     slug = match_link.rstrip("/").split("/")[-1]
@@ -2114,7 +2114,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
     res = []
     fallback_res = []
     es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
-    q_cands = [_clean_query_title(x) for x in ([title, disp_title] + list(extra_titles or [])) if _clean_query_title(x)]
+    q_cands = [_clean_query_title(x) for x in ([disp_title, title] + list(extra_titles or [])) if _clean_query_title(x)]
     for qc in list(q_cands):
         if "&" in qc:
             q_cands.append(qc.replace("&", " "))
@@ -2128,10 +2128,11 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
     fb_ep_keys = []
     if tid:
         exact_ep_keys.append(f"tmdb:{mtype}:{tid}:{s}:{e}")
-    for vt in valid_titles:
-        nt = _norm_title(vt)
-        if nt:
-            exact_ep_keys.append(f"{mtype}:{nt}:{s}:{e}")
+    else:
+        for vt in valid_titles:
+            nt = _norm_title(vt)
+            if nt:
+                exact_ep_keys.append(f"{mtype}:{nt}:{s}:{e}")
     if source_url:
         (exact_ep_keys if (s == 1 and e == 1) else fb_ep_keys).append(f"url:{source_url}")
     if tid:
@@ -2225,6 +2226,11 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
         for f_u in fhd_targets[:2]:
             try:
                 mhtml = urllib.request.urlopen(urllib.request.Request(f_u, headers={"User-Agent": UA137, "Referer": "https://www.fullhdfilmizlesene.now/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                if year and str(year)[:4].isdigit():
+                    ym_p = re.search(r'<span class="film-yil">(\d{4})</span>|<title>[^<]*\((\d{4})\)</title>', mhtml, re.I)
+                    py_str = next((g for g in (ym_p.groups() if ym_p else []) if g), "") if ym_p else ""
+                    if py_str.isdigit() and abs(int(py_str) - int(str(year)[:4])) > 1:
+                        continue
                 scx_m = re.search(r"scx\s*=\s*(\{.*?\});", mhtml, re.S)
                 if scx_m:
                     scx = json.loads(scx_m.group(1))
@@ -2483,7 +2489,7 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = ""):
-    ckey = f"v26:{mtype}:{tid}:{s}:{e}"
+    ckey = f"v27:{mtype}:{tid}:{s}:{e}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     cached = _STREAM_CACHE.get(ckey)
@@ -2922,7 +2928,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         base_n = raw_name.split("[")[0].strip().replace("İ", "i").replace("I", "ı").lower()
         if base_n in SUB_LANG_MAP:
             allow_subs.add(SUB_LANG_MAP[base_n][0])
-    ckey = f"sub:v12:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
+    ckey = f"sub:v13:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
     now_t = time.time()
     cached = _SUB_CACHE.get(ckey)
     if cached and cached["exp"] > now_t:
@@ -2974,7 +2980,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         if is_mt_garbage:
             _add_sub(eu, esub.get("lang") or esub.get("label"), 2, False, "auto")
         else:
-            _add_sub(eu, esub.get("lang") or esub.get("label"), -4 if idx_e < 2 else -3, True, "fansub")
+            _add_sub(eu, esub.get("lang") or esub.get("label"), -6 if idx_e < 2 else -5, True, "fansub")
 
     if not imdb_id and str(tid or "").isdigit():
         imdb_id = (_get_tmdb_meta_sync(tid, mtype).get("imdbId") or "").strip()
@@ -3597,7 +3603,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v12|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v13|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     cached = _RESOLVE_RESP_CACHE.get(ckey)

@@ -949,16 +949,16 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     cur_host_id = room.get("host_id")
     cur_host = room["participants"].get(cur_host_id) if cur_host_id else None
 
-    # If there is already an active human host, keep the host unchanged!
-    # Name similarity must NEVER transfer host_id!
-    if not (cur_host and cur_host.get("transport") != "bot"):
-        is_creator = bool(
-            (p.get("uid") and room.get("creatorId") and p["uid"] == room["creatorId"])
-            or (room.get("creatorId") and cid == room["creatorId"])
-        )
-        if is_creator and not room.get("host_transferred"):
-            room["host_id"] = cid
-        elif not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
+    # Creator or designated host preservation:
+    # If the joining user is the verified creator (by uid or signed creator cid), restore host_id.
+    is_creator = bool(
+        (p.get("uid") and room.get("creatorId") and p["uid"] == room["creatorId"])
+        or (room.get("creatorId") and cid == room["creatorId"])
+    )
+    if is_creator and not room.get("host_transferred"):
+        room["host_id"] = cid
+    elif not (cur_host and cur_host.get("transport") != "bot"):
+        if not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
             room["host_id"] = cid
     room["lastActiveAt"] = now()
     return p, existing is None
@@ -1528,12 +1528,20 @@ async def ws_endpoint(websocket: WebSocket):
         await websocket.send_json({"type": "error", "message": "Geçersiz oda"})
         await websocket.close()
         return
-    cid = uuid.uuid4().hex[:10]
+    requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(q.get("clientId") or ""))[:24]
+    signed_cid = verify_client_token(room_id, q.get("clientToken"))
     verified_uid = _ws_verified_uid(websocket.scope, q)
-    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid")}
+    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid", "clientId", "clientToken")}
     join_data["uid"] = verified_uid
     async with STORE.lock(room_id):
         room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
+        cid = signed_cid or requested_cid
+        if not signed_cid and cid and _cid_is_active(room, cid):
+            cid = ""
+        if not cid:
+            cid = uuid.uuid4().hex[:10]
+        if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
+            room["creatorId"] = verified_uid or cid
         room.setdefault("kicked", [])
         if has_password(room) and cid not in (room.get("participants") or {}):
             allowed, _retry = _JOIN_LIMITER.hit(f"ws:{room_id}:{client_ip(websocket)}")
@@ -1649,6 +1657,8 @@ async def http_sync(request: Request):
                 await STORE.put(room, force_disk=True)
             return JSONResponse({"ok": True})
         room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=verified_uid)
+        if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
+            room["creatorId"] = verified_uid or cid
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
@@ -1728,8 +1738,12 @@ async def create_room(request: Request):
     name = clean_str(payload.get("name"), 45) or "Watchlivo Odası"
     slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
     room_id = f"{slug}-{uuid.uuid4().hex[:5]}"
+    req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
+    creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
+    verified_uid = str(request.scope.get("wl_uid") or "")
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
-                    payload.get("creator", ""), str(request.scope.get("wl_uid") or ""), payload.get("password", ""))
+                    payload.get("creator", ""), verified_uid or creator_cid, payload.get("password", ""))
+    room["host_id"] = creator_cid
     media = payload.get("media")
     if isinstance(media, dict) and (media.get("url") or media.get("videoId")):
         set_media(room, media, room["creator"] or "Lider", start=0.0)
@@ -1738,7 +1752,8 @@ async def create_room(request: Request):
     async with STORE.lock(room_id):
         await STORE.put(room, force_disk=True)
     _LOBBY_CACHE["ts"] = 0.0
-    return JSONResponse({"ok": True, "room": serialize(room)})
+    client_token = sign_client_token(room_id, creator_cid)
+    return JSONResponse({"ok": True, "clientId": creator_cid, "clientToken": client_token, "room": serialize(room, for_cid=creator_cid)})
 
 
 async def list_rooms(request: Request):

@@ -43,12 +43,12 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
             "WATCHLIVO_STRICT_SECRETS=1 iken uygulama başlamaz."
         )
     if name not in _EPHEMERAL:
-        _EPHEMERAL[name] = secrets.token_bytes(32)
+        seed = f"watchlivo-deterministic-secret-v1:{name}:{os.environ.get('VERCEL_GIT_COMMIT_SHA', 'default')}"
+        _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
         if name not in _WARNED:
             _WARNED.add(name)
             print(
-                f"[security] {name} tanımlı değil — süreç içi rastgele sır üretildi. "
-                "Çok örnekli kurulumda ortam değişkeni tanımlayın."
+                f"[security] {name} tanımlı değil — deterministik çalışma sırrı üretildi."
             )
     return _EPHEMERAL[name]
 

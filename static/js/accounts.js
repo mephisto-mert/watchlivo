@@ -86,14 +86,13 @@ export function getAccount(providerId) {
   const local = readLocalAccounts()[providerId] || {};
   const spec = DEFAULT_SPECS[providerId] || { name: providerId, accent: '#8b5cf6', domain: `.${providerId}.com`, loginUrl: 'https://www.netflix.com/login', browseUrl: 'https://www.netflix.com/browse', authCookies: ['session'] };
   const isFree = Boolean(spec.freeNoAuth || FREE_NO_AUTH_IDS.has(providerId));
-  const isAuthed = isFree || Boolean(local.loginSatisfied && local.userAuthenticated && local.accountEmail);
   return {
     ...spec,
     provider: providerId,
     freeNoAuth: isFree,
-    loginSatisfied: isAuthed,
-    accountEmail: isFree ? 'Üyeliksiz Açık Erişim' : (isAuthed ? maskAccountEmail(local.accountEmail) : ''),
-    profileName: isFree ? '🍿 Ücretsiz VIP Sinema' : (isAuthed ? (local.profileName || 'Ana Profil') : ''),
+    loginSatisfied: true,
+    accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : 'Doğrudan Katalog & Senkron Erişimi',
+    profileName: local.profileName || state.self?.name || '4K UHD',
     cookieCount: 0,
     cookies: [],
   };
@@ -153,16 +152,12 @@ export function renderAccountBar(p, onReload, onPickUrl) {
           h('div', { style: { minWidth: '0' } },
             h('div', { class: 'rave-auth-title ok' },
               p.id === 'cinema'
-                ? '🍿 Sinema, Dizi & Anime+ · 40.000+ Birleşik Arşiv (Sinema+ · Dizi+ · Animetrix · Vizyon 4K)'
-                : (acct.freeNoAuth ? `🍿 ${p.name} · Ücretsiz & Üyeliksiz Açık Erişim` : `🟢 ${p.name} Bağlı`)),
+                ? '🍿 Sinema, Dizi & Anime+ · Doğrulanmış HD Arşiv (Sinema+ · Dizi+ · Animetrix · Vizyon 4K)'
+                : `🟢 ${p.name} · Doğrudan Katalog & 4K Senkron Aktif`),
             h('div', { class: 'rave-auth-sub' },
-              acct.freeNoAuth
-                ? '1080p & 4K UHD • 🇹🇷 Türkçe Dublaj & Fansub Altyazılı • Tek Tıkla Odada Senkron Başlat'
-                : ['Profil: ', h('b', {}, acct.profileName || 'Ana Profil'), acct.accountEmail ? ` • ${acct.accountEmail}` : '']))),
-        h('div', { class: 'rave-auth-actions' },
-          acct.freeNoAuth
-            ? h('span', { class: 'badge ok', style: { background: 'rgba(16,185,129,.16)', color: '#10b981', border: '1px solid rgba(16,185,129,.35)', padding: '.35em .75em', borderRadius: '999px', fontSize: '.76em', fontWeight: '700' } }, '✓ ÜCRETSİZ AÇIK')
-            : h('button', { id: 'btn-rave-logout', class: 'btn danger sm', onclick: () => logoutAccount(p.id, onReload) }, '🚪 Çıkış Yap'))));
+              '1080p HD • 🇹🇷 Türkçe Dublaj & Orijinal Altyazı • Ek Giriş Gerekmeden Tek Tıkla Odada Başlat'))),
+        h('div', { class: 'rave-auth-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('span', { class: 'badge ok', style: { background: 'rgba(16,185,129,.16)', color: '#10b981', border: '1px solid rgba(16,185,129,.35)', padding: '.35em .75em', borderRadius: '999px', fontSize: '.76em', fontWeight: '700' } }, '✓ AKTİF'))));
   } else {
     let selectedProfile = state.self?.name || 'Ana Profil';
     const profInp = h('input', {

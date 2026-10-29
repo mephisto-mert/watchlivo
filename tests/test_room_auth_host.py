@@ -1,7 +1,7 @@
 import sys
 import os
 sys.path.insert(0, os.path.abspath('c:/Users/pc/Documents/projelerim/rave_web_platform'))
-from rooms import new_room, add_participant, handle_action, ensure_host, set_media
+from rooms import new_room, add_participant, handle_action, ensure_host, set_media, sign_client_token, verify_client_token
 
 def test_room_host_authorization():
     # 1. Create room
@@ -40,6 +40,16 @@ def test_room_host_authorization():
     ensure_host(room)
     assert room['host_id'] == 'phone_client_2', f"Phone was not promoted after PC left: {room.get('host_id')}"
     print('Check 6 (Phone promoted when PC leaves): PASS')
+
+    # 8. PC refreshes / reconnects with signed clientToken or creatorId -> reclaims host!
+    token = sign_client_token('test_room', 'pc_client_1')
+    verified_cid = verify_client_token('test_room', token)
+    assert verified_cid == 'pc_client_1', f"Token verification failed: {verified_cid}"
+    add_participant(room, verified_cid, {'username': 'Mert Can Yıldız', 'uid': 'uid_mert_pc'}, 'http')
+    assert room['host_id'] == 'pc_client_1', f"Creator did not reclaim host on refresh! Got {room.get('host_id')}"
+    out_pause = handle_action(room, 'pc_client_1', {'type': 'pause', 'currentTime': 50.0})
+    assert room['media']['playing'] is False, "Creator could not pause after refresh!"
+    print('Check 7 (Creator preserves/reclaims host on page refresh & can pause): PASS')
 
     print('ALL BACKEND ROOM TESTS PASSED!')
 

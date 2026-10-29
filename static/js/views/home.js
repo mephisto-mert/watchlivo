@@ -30,8 +30,18 @@ export function openRoom(room) {
 export async function createRoomWithMedia(media) {
   const self = state.self;
   const cleanMedia = media ? { ...media, currentTime: 0 } : media;
-  const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name} odası`, privacy: 'public', playMode: 'leader', creator: self.name, media: cleanMedia } });
+  let cid = '';
+  try {
+    cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+    sessionStorage.setItem('vortex_cid', cid);
+  } catch (e) { /* ignore */ }
+  const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name} odası`, privacy: 'public', playMode: 'leader', creator: self.name, clientId: cid, media: cleanMedia } });
   if (!res.room?.id) throw new Error('Oda oluşturulamadı');
+  try {
+    if (res.clientId) sessionStorage.setItem('vortex_cid', res.clientId);
+    if (res.clientToken) sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
+    if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
+  } catch (e) { /* ignore */ }
   rememberRoom(res.room);
   window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1`);
 }
