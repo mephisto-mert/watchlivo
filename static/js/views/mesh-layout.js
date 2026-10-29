@@ -1,11 +1,11 @@
-// Mesh layout: NavBar (Rave icon order) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v17';
-import { state, setView, canSelectVideo } from '../store.js?v=20261030_v17';
-import { navIcon, logo } from './home.js?v=20261030_v17';
-import { createSelection } from './selection.js?v=20261030_v17';
-import { buildControls } from './controls.js?v=20261030_v17';
-import { buildChat } from './chat.js?v=20261030_v17';
-import { PANELS } from './panels.js?v=20261030_v17';
+// Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v18';
+import { state, setView, canSelectVideo } from '../store.js?v=20261030_v18';
+import { navIcon, logo } from './home.js?v=20261030_v18';
+import { createSelection } from './selection.js?v=20261030_v18';
+import { buildControls } from './controls.js?v=20261030_v18';
+import { buildChat } from './chat.js?v=20261030_v18';
+import { PANELS } from './panels.js?v=20261030_v18';
 
 const PRIVACY_LABEL = { public: 'Herkese Açık', nearby: 'Çevremdekiler', friends: 'Arkadaşlar', private: 'Gizli', hidden: 'Gizli' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet Et', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -79,14 +79,29 @@ export function buildLayout(app, ctx) {
     return inst;
   }
 
+  function roomActionBtn(iconName, labelText, tip, onClick, { selected = false, disabled = false, badge = 0, variant = '', id } = {}) {
+    return h('button', {
+      type: 'button',
+      class: `nav-icon room-nav-pill ${variant} ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`.trim(),
+      'data-tip': tip,
+      'aria-label': tip,
+      id,
+      onclick: onClick,
+    },
+      h('span', { class: 'room-nav-ico', html: icons[iconName], style: { display: 'inline-flex' } }),
+      labelText ? h('span', { class: 'room-nav-lbl' }, labelText) : null,
+      badge > 0 ? h('span', { class: 'badge' }, badge > 9999 ? '9.9B+' : badge) : null);
+  }
+
   let lastNavSig = '';
   function renderNav() {
     const m = state.mesh;
     const L = state.view.left, R = state.view.right;
     const voteCount = (m?.queue || []).length;
-    const people = Number(m?.participantCount || m?.count || (m?.participants || []).length);
+    const people = Number(m?.participantCount || m?.count || (m?.participants || []).length) || 1;
     const selDisabled = !canSelectVideo();
-    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}`;
+    const mediaTitle = m?.media?.title || '';
+    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}|${mediaTitle}`;
     if (navSig === lastNavSig) return;
     lastNavSig = navSig;
     const openSide = (side, tab) => {
@@ -99,24 +114,27 @@ export function buildLayout(app, ctx) {
     };
     nav.replaceChildren(
       h('div', { class: 'navbar-left' },
-        navIcon('close', 'Ayrıl', async () => { if (await confirmPopup('Odadan ayrılmak istediğinize emin misiniz?', 'Ayrıl', 'Kal')) actions.leave(); }),
-        navIcon('minimize', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' }),
-        navIcon('searchVideo', 'Video Ara', () => {
+        roomActionBtn('close', 'Ayrıl', 'Odadan Ayrıl', async () => { if (await confirmPopup('Odadan ayrılmak istediğinize emin misiniz?', 'Ayrıl', 'Kal')) actions.leave(); }, { variant: 'leave-pill' }),
+        roomActionBtn('searchVideo', 'İçerik Seç', 'Video & Katalog Ara', () => {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');
-        }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, id: 'nav-search-video' }),
-        navIcon('settings', 'Oda Ayarları', () => openSide('left', 'Settings'), { selected: L === 'Settings' })),
-      h('div', { class: 'navbar-center' }, logo(),
-        m ? h('span', { class: 'mesh-title', title: m.name }, m.name) : null,
-        m ? h('span', { class: 'privacy-chip', onclick: () => openSide('left', 'Settings') }, PRIVACY_LABEL[m.privacy] || 'Herkese Açık') : null,
-        state.connection === 'online'
-          ? h('span', { class: 'privacy-chip sync-live-chip', title: 'Sıfır gecikmeli senkronizasyon aktif' }, h('span', { class: 'room-live-dot' }), 'SENKRON')
-          : h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…')),
+        }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, variant: 'primary-pill', id: 'nav-search-video' }),
+        roomActionBtn('minimize', 'Küçült', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' }),
+        roomActionBtn('settings', 'Oda Ayarı', 'Oda Ayarları', () => openSide('left', 'Settings'), { selected: L === 'Settings' })),
+      h('div', { class: 'navbar-center' },
+        h('div', { class: 'room-brand-capsule' },
+          logo(),
+          h('span', { class: 'room-header-sep' }),
+          m ? h('span', { class: 'mesh-title', title: m.name }, m.name) : null,
+          m ? h('span', { class: 'privacy-chip', onclick: () => openSide('left', 'Settings') }, PRIVACY_LABEL[m.privacy] || 'Herkese Açık') : null,
+          state.connection === 'online'
+            ? h('span', { class: 'privacy-chip sync-live-chip', title: 'Sıfır gecikmeli senkronizasyon aktif' }, h('span', { class: 'room-live-dot' }), 'CANLI SENKRON')
+            : h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…'))),
       h('div', { class: 'navbar-right' },
-        navIcon('vote', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
-        navIcon('addUser', 'Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends' }),
-        navIcon('users', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
-        navIcon(theaterMode ? 'panelRightOpen' : 'panelRightClose', theaterMode ? 'Sohbet Panelini Aç (T)' : 'Sinema Modu / Paneli Gizle (T)', () => toggleTheaterMode(), { selected: theaterMode, id: 'nav-toggle-chat' })));
+        roomActionBtn('vote', 'Sıra', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
+        roomActionBtn('addUser', 'Davet Et', 'Arkadaş Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends', variant: 'invite-pill' }),
+        roomActionBtn('users', 'Kişiler', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
+        roomActionBtn(theaterMode ? 'panelRightOpen' : 'panelRightClose', theaterMode ? 'Sohbeti Aç' : 'Sinema Modu', theaterMode ? 'Sohbet Panelini Aç (T)' : 'Sinema Modu / Paneli Gizle (T)', () => toggleTheaterMode(), { selected: theaterMode, id: 'nav-toggle-chat' })));
   }
 
   function update() {
@@ -132,7 +150,6 @@ export function buildLayout(app, ctx) {
     chat.update();
   }
 
-  // Rave: a fresh mesh opens with invite + privacy prompts in chat and the selection panel ready.
   if (ctx.isNew) chat.showOnboarding();
 
   return {

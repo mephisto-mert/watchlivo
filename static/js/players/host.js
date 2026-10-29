@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261030_v17';
-import { Html5Adapter } from './html5.js?v=20261030_v17';
-import { VimeoAdapter } from './vimeo.js?v=20261030_v17';
-import { EmbedAdapter } from './embed.js?v=20261030_v17';
-import { WebviewAdapter } from './webview.js?v=20261030_v17';
+import { YouTubeAdapter } from './youtube.js?v=20261030_v18';
+import { Html5Adapter } from './html5.js?v=20261030_v18';
+import { VimeoAdapter } from './vimeo.js?v=20261030_v18';
+import { EmbedAdapter } from './embed.js?v=20261030_v18';
+import { WebviewAdapter } from './webview.js?v=20261030_v18';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',

@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v17';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v17';
-import { getProvider } from '../providers.js?v=20261030_v17';
-import { expectedPosition } from '../sync.js?v=20261030_v17';
-import { thumbFor } from './lobby.js?v=20261030_v17';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v17';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v17';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v17';
-import { avatar } from '../profile.js?v=20261030_v17';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v18';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v18';
+import { getProvider } from '../providers.js?v=20261030_v18';
+import { expectedPosition } from '../sync.js?v=20261030_v18';
+import { thumbFor } from './lobby.js?v=20261030_v18';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v18';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v18';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v18';
+import { avatar } from '../profile.js?v=20261030_v18';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -123,6 +123,8 @@ export function buildControls(frame, ctx) {
     unmute.classList.toggle('hidden', !needUnmute);
   };
 
+  const stageBackdrop = h('div', { class: 'stage-ambient-poster', id: 'stage-ambient-poster' });
+  const kickerBadge = h('div', { class: 'ctl-kicker-badge' }, h('span', { class: 'ctl-kicker-dot' }), 'ŞİMDİ OYNATILIYOR');
   const thumb = h('img', { class: 'ctl-thumb', alt: '' });
   const title = h('div', { class: 'ctl-title' });
   const artist = h('div', { class: 'ctl-artist' });
@@ -212,16 +214,20 @@ export function buildControls(frame, ctx) {
   const seekPreviewSub = h('div', { class: 'seek-preview-sub' }, '');
   const seekPreviewTime = h('div', { class: 'seek-preview-time' }, '0:00');
   const seekPreview = h('div', { class: 'seek-preview-card hidden', id: 'ctl-seek-preview' }, seekPreviewCanvas, seekPreviewChapter, seekPreviewSub, seekPreviewTime);
-  const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
+  const trackTicks = h('div', { class: 'track-ticks', 'aria-hidden': 'true' },
+    h('span', { style: { left: '25%' } }),
+    h('span', { style: { left: '50%' } }),
+    h('span', { style: { left: '75%' } }));
+  const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, trackTicks, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const volRange = h('input', { type: 'range', min: '0', max: '100', value: String(host.volume), 'aria-label': 'Ses', oninput: (e) => { host.setVolume(e.target.value); unmute.classList.add('hidden'); update(); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', onclick: () => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } } });
   const skipBtn = h('button', { class: 'ctl-action', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', onclick: () => actions.skip() }, ico('skip'));
   const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('speed'); } }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
-  const subBtn = h('button', { class: 'ctl-action', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('subtitle'); } }, ico('subtitles'));
+  const subBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('subtitle'); } }, ico('subtitles'), h('span', { class: 'ctl-btn-lbl' }, 'Altyazı & Ses'));
   const snapBtn = h('button', { class: 'ctl-action', id: 'ctl-snap', 'data-tip': 'Anlık Kare Yakala (PNG)', 'aria-label': 'Ekran Görüntüsü', onclick: (e) => { e.stopPropagation(); takeVideoSnapshot(); } }, ico('snapshot'));
-  const gearBtn = h('button', { class: 'ctl-action', id: 'ctl-gear', 'aria-label': 'Ayarlar', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('list'); } }, ico('settings'));
-  const theaterBtn = h('button', { class: 'ctl-action', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', onclick: (e) => { e.stopPropagation(); ctx.toggleTheaterMode?.(); } }, ico('theater'));
+  const gearBtn = h('button', { class: 'ctl-action', id: 'ctl-gear', 'data-tip': 'Oynatıcı Ayarları', 'aria-label': 'Ayarlar', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('list'); } }, ico('settings'));
+  const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', onclick: (e) => { e.stopPropagation(); ctx.toggleTheaterMode?.(); } }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', onclick: (e) => { e.stopPropagation(); if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); } }, ico('fullscreen'));
   const menu = h('div', { class: 'ctl-menu acrylic hidden' });
   const getActiveIntro = () => {
@@ -438,6 +444,14 @@ export function buildControls(frame, ctx) {
     }, 800);
   };
 
+  const centerBack10Btn = h('button', {
+    type: 'button',
+    class: 'ctl-center-side',
+    id: 'ctl-center-back10',
+    'aria-label': '10 saniye geri',
+    title: '10 saniye geri',
+    onclick: (e) => { e.stopPropagation(); back10Btn.click(); },
+  }, ico('rewind10'));
   const centerPlayBtn = h('button', {
     type: 'button',
     class: 'ctl-center-play',
@@ -448,7 +462,16 @@ export function buildControls(frame, ctx) {
       playBtn.click();
     },
   }, ico('play'));
-  const mid = h('div', { class: 'ctl-mid' }, centerPlayBtn);
+  const centerFwd10Btn = h('button', {
+    type: 'button',
+    class: 'ctl-center-side',
+    id: 'ctl-center-fwd10',
+    'aria-label': '10 saniye ileri',
+    title: '10 saniye ileri',
+    onclick: (e) => { e.stopPropagation(); fwd10Btn.click(); },
+  }, ico('forward10'));
+  const centerHud = h('div', { class: 'ctl-center-hud', id: 'ctl-center-hud' }, centerBack10Btn, centerPlayBtn, centerFwd10Btn);
+  const mid = h('div', { class: 'ctl-mid' }, centerHud);
 
   mid.addEventListener('touchstart', (e) => {
     if (!e.touches || e.touches.length !== 1) return;
@@ -583,9 +606,15 @@ export function buildControls(frame, ctx) {
         onclick: (e) => { e.stopPropagation(); window.vortexCloseMinimizedRoom?.(); },
       }, '✕')));
 
-  const barRow = h('div', { class: 'ctl-bar-row' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time, h('div', { class: 'ctl-spacer' }), skipBtn, speedBtn, subBtn, snapBtn, gearBtn, theaterBtn, fsBtn);
+  const syncPill = h('div', { class: 'ctl-sync-pill', id: 'ctl-sync-pill', title: 'Canlı oda senkronizasyon durumu' }, syncDot, syncText);
+  const barRow = h('div', { class: 'ctl-bar-row' },
+    h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time),
+    h('div', { class: 'ctl-spacer' }),
+    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
-    h('div', { class: 'ctl-top' }, thumb, h('div', { class: 'ctl-info' }, title, artist), epBtn, nextEpTopBtn, subPillBtn, origBtn, qualityBadge, syncDot, syncText, provLogo),
+    h('div', { class: 'ctl-top' },
+      h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
+      h('div', { class: 'ctl-top-right' }, epBtn, nextEpTopBtn, subPillBtn, origBtn, qualityBadge, syncPill, provLogo)),
     mid,
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
@@ -598,7 +627,7 @@ export function buildControls(frame, ctx) {
       revealControls(4000);
     }
   }, { passive: true });
-  frame.prepend(ambilightCanvas);
+  frame.prepend(stageBackdrop, ambilightCanvas);
   frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
@@ -804,6 +833,7 @@ export function buildControls(frame, ctx) {
 
   function tick() {
     const d = duration(), p = Math.min(position(), d || Infinity);
+    stageBackdrop.classList.toggle('is-hero-cover', p < 2.2);
     if (!scrubbing) {
       const pct = d ? (p / d) * 100 : 0;
       cur.style.width = `${pct}%`;
@@ -1643,6 +1673,11 @@ export function buildControls(frame, ctx) {
     const prov = getProvider(m.catalogProvider || m.provider);
     const t = thumbFor(m);
     if (thumb.getAttribute('src') !== t) thumb.src = t || '/static/watchlivo-logo.svg';
+    const backdropImg = m.backdrop || m.backdropUrl || t;
+    const bgUrl = backdropImg ? `url("${backdropImg}")` : 'none';
+    if (stageBackdrop.style.backgroundImage !== bgUrl) stageBackdrop.style.backgroundImage = bgUrl;
+    stageBackdrop.classList.toggle('is-hero-cover', position() < 2.2);
+    if (!syncText.textContent) syncText.textContent = '0ms · Senkron';
     title.textContent = m.title || 'Video';
     artist.textContent = m.channel || prov?.name || '';
     provLogo.src = prov?.logo || ''; provLogo.style.display = prov?.logo ? '' : 'none';
@@ -1688,7 +1723,9 @@ export function buildControls(frame, ctx) {
     controls.classList.toggle('show', !playing && !embedOnly);
     playBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
     centerPlayBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
-    centerPlayBtn.classList.toggle('is-paused', !playing);
+    const showCenterHud = !playing || position() < 1.5;
+    centerPlayBtn.classList.toggle('is-paused', showCenterHud);
+    centerHud.classList.toggle('is-paused', showCenterHud);
     theaterBtn.classList.toggle('on', Boolean(ctx.isTheaterMode?.()));
     volBtn.replaceChildren(ico(isActuallyMuted() ? 'mute' : 'volume'));
     volRange.value = String(host.volume);
@@ -1756,8 +1793,8 @@ export function buildControls(frame, ctx) {
     },
     syncStatus: (s) => {
       const ms = Math.round((s.delta || 0) * 1000);
-      syncDot.style.background = s.mode === 'inSync' || s.mode === 'paused' || s.mode === 'live' || s.mode === 'embed' ? '#0fff0c' : Math.abs(ms) < 400 ? '#f59e0b' : '#ff3b5c';
-      syncText.textContent = s.mode === 'idle' || s.mode === 'live' || s.mode === 'embed' ? '' : `${ms >= 0 ? '+' : ''}${ms}ms`;
+      syncDot.style.background = s.mode === 'inSync' || s.mode === 'paused' || s.mode === 'live' || s.mode === 'embed' ? '#27DCC8' : Math.abs(ms) < 400 ? '#f59e0b' : '#ff3b5c';
+      syncText.textContent = s.mode === 'idle' || s.mode === 'live' || s.mode === 'embed' ? 'Senkron' : `${ms >= 0 ? '+' : ''}${ms}ms · Senkron`;
       frame.dataset.syncMode = s.mode;
       frame.dataset.syncDelta = String(ms);
     },

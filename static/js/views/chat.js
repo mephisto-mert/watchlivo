@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v17';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v17';
-import { avatar } from '../profile.js?v=20261030_v17';
-import { api, qs } from '../api.js?v=20261030_v17';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v17';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v18';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v18';
+import { avatar } from '../profile.js?v=20261030_v18';
+import { api, qs } from '../api.js?v=20261030_v18';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v18';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -100,7 +100,7 @@ export function buildChat(ctx) {
   const { actions } = ctx;
   const list = h('div', { class: 'chat-list', id: 'chat-list' });
   const typing = h('div', { class: 'typing' });
-  const input = h('input', { placeholder: 'Sohbet', maxlength: '1000', 'aria-label': 'Mesaj', id: 'chat-input' });
+  const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', 'aria-label': 'Mesaj', id: 'chat-input' });
   const micBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Mikrofon', 'data-tip': 'Mikrofon', id: 'btn-mic', onclick: () => toggleMic() }, h('span', { html: icons.micOff, style: { display: 'flex' } }));
   const camBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Kamera', 'data-tip': 'Kamera Aç/Kapat', id: 'btn-cam', onclick: () => toggleCam() }, h('span', { html: icons.cameraOff, style: { display: 'flex' } }));
   const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
@@ -152,12 +152,14 @@ export function buildChat(ctx) {
     },
   }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
   const reactions = h('div', { class: 'reaction-bar' },
-    ...REACTIONS.map((e) => h('button', { onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}` }, e)),
-    snapSceneBtn,
-    stampTimeBtn,
-    ...SOUNDBOARD.map(([k, lbl]) => h('button', { class: 'sfx-pill', onclick: () => actions.soundfx?.(k), title: `Sesli Efekt: ${lbl}` }, lbl)),
-    pollBtn,
-    clearChatBtn);
+    h('div', { class: 'reaction-emoji-grid' },
+      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e))),
+    h('div', { class: 'reaction-tools-row' },
+      snapSceneBtn,
+      stampTimeBtn,
+      pollBtn,
+      ...SOUNDBOARD.map(([k, lbl]) => h('button', { type: 'button', class: 'sfx-pill', onclick: () => actions.soundfx?.(k), title: `Sesli Efekt: ${lbl}` }, lbl)),
+      clearChatBtn));
 
   const discordCallPeers = h('div', { class: 'discord-call-peers', id: 'discord-call-peers' });
   const dCallStatusBadge = h('span', { class: 'discord-call-badge', id: 'discord-call-badge' }, 'Canlı');
@@ -263,10 +265,50 @@ export function buildChat(ctx) {
       h('div', { class: 'music-similar-tabs' }, btnTabSimilar, btnTabRecent, btnVinylToggle, btnNextSim)),
     musicStrip);
 
+  const toggleRightDrawer = (tabName) => {
+    const curR = state.view.right;
+    setView('right', curR === tabName ? 'Collapsed' : tabName);
+    ctx.layout?.update?.();
+  };
+  const chatLoungeHead = h('div', { class: 'chat-lounge-head' },
+    h('div', { class: 'chat-lounge-brand' },
+      h('span', { class: 'chat-lounge-dot' }),
+      h('span', { class: 'chat-lounge-title' }, 'ODA SALONU')),
+    h('div', { class: 'chat-lounge-tabs' },
+      h('button', { type: 'button', class: 'chat-lounge-tab', title: 'Oynatma Sırası & Oylama', onclick: () => toggleRightDrawer('Vote') }, h('span', { html: icons.vote, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Sıra'),
+      h('button', { type: 'button', class: 'chat-lounge-tab', title: 'Odadaki Katılımcılar', onclick: () => toggleRightDrawer('Participants') }, h('span', { html: icons.users, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Kişiler'),
+      h('button', { type: 'button', class: 'chat-lounge-tab accent', title: 'Arkadaş Davet Et', onclick: () => toggleRightDrawer('Friends') }, h('span', { html: icons.addUser, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Davet')));
+
+  const welcomeHub = h('div', { class: 'chat-welcome-hub', id: 'chat-welcome-hub' },
+    h('div', { class: 'chat-hub-top' },
+      h('div', { class: 'chat-hub-badge' }, h('span', { class: 'chat-hub-pulse' }), 'CANLI SENKRON STÜDYO'),
+      h('button', { type: 'button', class: 'chat-hub-close', title: 'Gizle', onclick: () => welcomeHub.remove() }, '✕')),
+    h('div', { class: 'chat-hub-desc' }, 'Odadaki herkes videoyu milisaniye senkronla aynı anda izler. Hızlı oda araçları:'),
+    h('div', { class: 'chat-hub-grid' },
+      h('button', { type: 'button', class: 'chat-hub-action primary', onclick: () => { setView('left', 'Search'); ctx.layout?.update?.(); } },
+        h('span', { class: 'hub-act-ico', html: icons.searchVideo }),
+        h('span', { class: 'hub-act-txt' }, h('b', {}, 'İçerik Seç'), h('small', {}, 'Film, Dizi, Platform'))),
+      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => openPollModal() },
+        h('span', { class: 'hub-act-ico', html: icons.poll }),
+        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Anket Başlat'), h('small', {}, 'Canlı Oda Oylaması'))),
+      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => window.vortexCaptureSceneToChat?.('') },
+        h('span', { class: 'hub-act-ico', html: icons.cameraSnap }),
+        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Sahne Paylaş'), h('small', {}, 'Anlık Kare Gönder'))),
+      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => copyInvite() },
+        h('span', { class: 'hub-act-ico', html: icons.link }),
+        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Link Kopyala'), h('small', {}, 'Arkadaşlarını Çağır')))),
+    h('div', { class: 'chat-hub-keys' },
+      h('span', {}, h('kbd', {}, 'Space'), ' Oynat'),
+      h('span', {}, h('kbd', {}, 'T'), ' Sinema'),
+      h('span', {}, h('kbd', {}, 'F'), ' Tam Ekran'),
+      h('span', {}, h('kbd', {}, 'M'), ' Sessiz')));
+  list.append(welcomeHub);
+
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
+  const quickAccessZone = h('div', { class: 'chat-access-zone', id: 'chat-access-zone' });
   const bar = h('div', { class: 'chatbar' }, micBtn, camBtn, screenBtn, h('div', { class: 'chat-input' }, input, gifBtn, sendBtn), gifPanel);
-  const el = h('div', { class: 'chat' }, discordCallBar, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
+  const el = h('div', { class: 'chat' }, chatLoungeHead, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
   let onboarding = false;
@@ -920,7 +962,11 @@ export function buildChat(ctx) {
       for (const m of chatArr) append(m);
       renderPolls();
       renderReactions();
-      const card = list.querySelector('#privacy-card');
+      if (!onboarding && state.mesh) {
+        onboarding = true;
+        quickAccessZone.replaceChildren(quickRoomBar());
+      }
+      const card = el.querySelector('#privacy-card');
       if (card) {
         const cur = state.mesh?.privacy || 'public';
         card.querySelectorAll('.privacy-opt').forEach((btn) => {
@@ -931,7 +977,7 @@ export function buildChat(ctx) {
     showOnboarding() {
       if (onboarding) return;
       onboarding = true;
-      list.append(quickRoomBar());
+      quickAccessZone.replaceChildren(quickRoomBar());
     },
     showTyping(user) {
       if (!user || user === state.self?.name) return;

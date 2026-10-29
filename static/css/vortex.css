@@ -2509,28 +2509,29 @@ html.is-apk .wl-btn-apk {
    Zero-Lag 60FPS GPU Pipeline + Full-Width Streaming Architecture
    ========================================================================== */
 :root, :root[data-theme="obsidian"] {
-  --bg-0: #07080d;
-  --bg-1: #0c0f19;
-  --bg-2: #121726;
-  --bg-dark: #07080d;
+  --bg-0: #080A0F;
+  color-scheme: dark !important;
+  --bg-1: #10141D;
+  --bg-2: #171D28;
+  --bg-dark: #080A0F;
   --surface: rgba(15, 19, 32, 0.94);
   --surface-2: rgba(22, 28, 45, 0.96);
-  --glass-panel: #0c0f19;
+  --glass-panel: #10141D;
   --glass-border: rgba(255, 255, 255, 0.08);
   --stroke: rgba(255, 255, 255, 0.08);
   --stroke-strong: rgba(255, 255, 255, 0.15);
-  --fg-0: #f8fafc;
-  --fg-1: #cbd5e1;
+  --fg-0: #F5F7FA;
+  --fg-1: #A0A9B8;
   --fg-2: #94a3b8;
   --fg-3: #64748b;
   --text-main: #f8fafc;
-  --accent: #6366f1;
-  --accent-2: #8b5cf6;
-  --accent-3: #4f46e5;
-  --accent-glow: rgba(99, 102, 241, 0.32);
-  --neon-cyan: #6366f1;
-  --neon-cyan-glow: rgba(99, 102, 241, 0.32);
-  --neon-green: #6366f1;
+  --accent: #27DCC8;
+  --accent-2: #17B8A6;
+  --accent-3: #0D9488;
+  --accent-glow: rgba(39, 220, 200, 0.28);
+  --neon-cyan: #27DCC8;
+  --neon-cyan-glow: rgba(39, 220, 200, 0.28);
+  --neon-green: #27DCC8;
   --radius-xl: 20px;
   --radius-lg: 14px;
   --radius-md: 10px;
@@ -2538,8 +2539,8 @@ html.is-apk .wl-btn-apk {
 }
 
 body {
-  background-color: #07080d !important;
-  background-image: radial-gradient(ellipse 85% 45% at 50% -10%, rgba(99, 102, 241, 0.15), transparent 70%) !important;
+  background-color: #080A0F !important;
+  background-image: radial-gradient(ellipse 85% 45% at 50% -10%, rgba(39, 220, 200, 0.15), transparent 70%) !important;
   background-attachment: scroll !important;
   color: #f8fafc;
   margin: 0;
@@ -2568,16 +2569,16 @@ body {
 
 /* --- Primary Buttons Override (Eliminate Hot-Pink & Neon-Cyan) --- */
 .btn.primary {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  color: #080A0F !important;
   border: 1px solid rgba(255, 255, 255, 0.16) !important;
-  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.28) !important;
+  box-shadow: 0 6px 18px rgba(39, 220, 200, 0.28) !important;
   font-weight: 700 !important;
 }
 .btn.primary:hover {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(99, 102, 241, 0.42) !important;
+  box-shadow: 0 8px 22px rgba(39, 220, 200, 0.42) !important;
 }
 
 /* --- Full-Bleed Sticky Studio Navbar --- */
@@ -2619,18 +2620,18 @@ header.navbar.top-nav-capsule {
 }
 
 .btn-create-room {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  color: #080A0F !important;
   font-weight: 700 !important;
   padding: 8px 16px !important;
   border-radius: 10px !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 4px 16px rgba(39, 220, 200, 0.35) !important;
   transition: transform 0.18s ease, box-shadow 0.18s ease !important;
 }
 .btn-create-room:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 22px rgba(99, 102, 241, 0.5) !important;
+  box-shadow: 0 6px 22px rgba(39, 220, 200, 0.5) !important;
 }
 
 .apk-badge,
@@ -2646,8 +2647,8 @@ header.navbar.top-nav-capsule {
 }
 .apk-badge:hover,
 .btn.wl-btn-apk:hover {
-  background: rgba(99, 102, 241, 0.15) !important;
-  border-color: rgba(99, 102, 241, 0.45) !important;
+  background: rgba(39, 220, 200, 0.15) !important;
+  border-color: rgba(39, 220, 200, 0.45) !important;
   color: #ffffff !important;
 }
 
@@ -2731,10 +2732,10 @@ header.navbar.top-nav-capsule {
   background: rgba(255, 255, 255, 0.06) !important;
 }
 .dock-btn.active {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  color: #080A0F !important;
   border-color: rgba(255, 255, 255, 0.18) !important;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.35) !important;
   transform: none !important;
 }
 
@@ -2757,17 +2758,17 @@ header.navbar.top-nav-capsule {
   padding: 9px 14px !important;
   margin: 0 0 14px 0 !important;
   border-radius: 12px !important;
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.13) 0%, rgba(13, 17, 29, 0.95) 100%) !important;
-  border: 1px solid rgba(99, 102, 241, 0.26) !important;
+  background: linear-gradient(90deg, rgba(39, 220, 200, 0.13) 0%, rgba(13, 17, 29, 0.95) 100%) !important;
+  border: 1px solid rgba(39, 220, 200, 0.26) !important;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32) !important;
 }
 .wl-app-banner-icon {
   width: 34px !important;
   height: 34px !important;
   border-radius: 9px !important;
-  background: rgba(99, 102, 241, 0.18) !important;
-  border: 1px solid rgba(99, 102, 241, 0.38) !important;
-  color: #818cf8 !important;
+  background: rgba(39, 220, 200, 0.18) !important;
+  border: 1px solid rgba(39, 220, 200, 0.38) !important;
+  color: #27DCC8 !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -2795,8 +2796,8 @@ header.navbar.top-nav-capsule {
 .wl-app-banner-badge {
   padding: 2px 7px !important;
   border-radius: 6px !important;
-  background: rgba(99, 102, 241, 0.24) !important;
-  color: #a5b4fc !important;
+  background: rgba(39, 220, 200, 0.24) !important;
+  color: #5EEAD4 !important;
   font-size: 0.65rem !important;
   font-weight: 800 !important;
   letter-spacing: 0.06em !important;
@@ -2812,14 +2813,14 @@ header.navbar.top-nav-capsule {
   flex-shrink: 0;
 }
 .wl-banner-apk-btn {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  color: #080A0F !important;
   border: none !important;
   font-weight: 700 !important;
   padding: 6px 12px !important;
   border-radius: 8px !important;
   font-size: 0.76rem !important;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3) !important;
+  box-shadow: 0 4px 12px rgba(39, 220, 200, 0.3) !important;
 }
 .wl-banner-info-btn {
   background: rgba(255, 255, 255, 0.05) !important;
@@ -2839,8 +2840,8 @@ header.navbar.top-nav-capsule {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
 }
 .global-search-pill:focus-within {
-  border-color: rgba(99, 102, 241, 0.65) !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18) !important;
+  border-color: rgba(39, 220, 200, 0.65) !important;
+  box-shadow: 0 0 0 3px rgba(39, 220, 200, 0.18) !important;
 }
 
 .provider-cat-bar,
@@ -2876,10 +2877,10 @@ header.navbar.top-nav-capsule {
 .provider-cat-pill.active,
 .cat-tab-pill.active,
 .lobby-tab.on {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.32) !important;
+  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.32) !important;
 }
 
 /* --- Cinema Noir Hero Stage (.gazestream-hero) --- */
@@ -2924,9 +2925,9 @@ header.navbar.top-nav-capsule {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(99, 102, 241, 0.16) !important;
-  border: 1px solid rgba(99, 102, 241, 0.42) !important;
-  color: #c7d2fe !important;
+  background: rgba(39, 220, 200, 0.16) !important;
+  border: 1px solid rgba(39, 220, 200, 0.42) !important;
+  color: #99F6E4 !important;
   padding: 5px 12px !important;
   border-radius: 8px !important;
   font-size: 0.72rem !important;
@@ -2936,9 +2937,9 @@ header.navbar.top-nav-capsule {
 .pulse-dot {
   width: 7px;
   height: 7px;
-  background: #818cf8 !important;
+  background: #27DCC8 !important;
   border-radius: 50%;
-  box-shadow: 0 0 8px #6366f1 !important;
+  box-shadow: 0 0 8px #27DCC8 !important;
 }
 .hero-meta-row {
   display: flex;
@@ -2986,14 +2987,14 @@ header.navbar.top-nav-capsule {
   gap: 10px;
 }
 .btn-watch-cyan {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
-  color: #ffffff !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  color: #080A0F !important;
   font-weight: 700 !important;
   padding: 10px 20px !important;
   border-radius: 11px !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.38) !important;
+  box-shadow: 0 8px 24px rgba(39, 220, 200, 0.38) !important;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3002,7 +3003,7 @@ header.navbar.top-nav-capsule {
 }
 .btn-watch-cyan:hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(99, 102, 241, 0.52) !important;
+  box-shadow: 0 12px 28px rgba(39, 220, 200, 0.52) !important;
 }
 .btn-trailer-glass {
   background: rgba(255, 255, 255, 0.07) !important;
@@ -3059,8 +3060,8 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-nav-btn:hover,
 .hero-mini-all-btn:hover {
-  border-color: rgba(99, 102, 241, 0.55);
-  background: rgba(99, 102, 241, 0.18);
+  border-color: rgba(39, 220, 200, 0.55);
+  background: rgba(39, 220, 200, 0.18);
   color: #ffffff;
 }
 .hero-mini-strip {
@@ -3085,11 +3086,11 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-card:hover {
   transform: translateY(-3px);
-  border-color: rgba(99, 102, 241, 0.55) !important;
+  border-color: rgba(39, 220, 200, 0.55) !important;
 }
 .hero-mini-card.is-active {
-  border-color: #6366f1 !important;
-  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.28) !important;
+  border-color: #27DCC8 !important;
+  box-shadow: 0 6px 18px rgba(39, 220, 200, 0.28) !important;
 }
 .hero-mini-poster {
   width: 100%;
@@ -3121,9 +3122,9 @@ header.navbar.top-nav-capsule {
   width: 100%;
   padding: 5px 6px !important;
   border-radius: 7px !important;
-  border: 1px solid rgba(99, 102, 241, 0.32) !important;
-  background: rgba(99, 102, 241, 0.14) !important;
-  color: #c7d2fe !important;
+  border: 1px solid rgba(39, 220, 200, 0.32) !important;
+  background: rgba(39, 220, 200, 0.14) !important;
+  color: #99F6E4 !important;
   font-size: 0.67rem !important;
   font-weight: 700 !important;
   cursor: pointer;
@@ -3131,7 +3132,7 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-play:hover,
 .hero-mini-card:hover .hero-mini-play {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
   border-color: transparent !important;
   color: #ffffff !important;
 }
@@ -3146,14 +3147,14 @@ header.navbar.top-nav-capsule {
 }
 .poster.catalog-card:hover {
   transform: translateY(-4px) !important;
-  border-color: rgba(99, 102, 241, 0.55) !important;
+  border-color: rgba(39, 220, 200, 0.55) !important;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55) !important;
 }
 .poster-cta,
 .btn.primary.poster-cta {
-  background: rgba(99, 102, 241, 0.14) !important;
-  border: 1px solid rgba(99, 102, 241, 0.3) !important;
-  color: #e0e7ff !important;
+  background: rgba(39, 220, 200, 0.14) !important;
+  border: 1px solid rgba(39, 220, 200, 0.3) !important;
+  color: #CCFBF1 !important;
   box-shadow: none !important;
   border-radius: 8px !important;
   font-size: 0.74rem !important;
@@ -3162,10 +3163,10 @@ header.navbar.top-nav-capsule {
 }
 .poster.catalog-card:hover .poster-cta,
 .poster-cta:hover {
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
   border-color: transparent !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35) !important;
+  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.35) !important;
 }
 
 /* --- Platform Bento Grid --- */
@@ -3191,16 +3192,16 @@ header.navbar.top-nav-capsule {
 }
 .platform-card:hover {
   transform: translateY(-3px) !important;
-  border-color: rgba(99, 102, 241, 0.5) !important;
+  border-color: rgba(39, 220, 200, 0.5) !important;
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.48) !important;
 }
 .p-badge-live {
   font-size: 0.65rem;
-  background: rgba(99, 102, 241, 0.16) !important;
-  color: #a5b4fc !important;
+  background: rgba(39, 220, 200, 0.16) !important;
+  color: #5EEAD4 !important;
   padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(99, 102, 241, 0.32) !important;
+  border: 1px solid rgba(39, 220, 200, 0.32) !important;
   font-weight: 700;
 }
 
@@ -3306,9 +3307,9 @@ header.navbar.top-nav-capsule {
   z-index: 2 !important;
 }
 .hero-trending-tag {
-  background: rgba(99, 102, 241, 0.16) !important;
-  border: 1px solid rgba(99, 102, 241, 0.42) !important;
-  color: #c7d2fe !important;
+  background: rgba(39, 220, 200, 0.16) !important;
+  border: 1px solid rgba(39, 220, 200, 0.42) !important;
+  color: #99F6E4 !important;
 }
 .hero-art-stage {
   flex: 0.9 !important;
