@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v26';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v26';
-import { avatar } from '../profile.js?v=20261030_v26';
-import { api, qs } from '../api.js?v=20261030_v26';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v26';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v27';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v27';
+import { avatar } from '../profile.js?v=20261030_v27';
+import { api, qs } from '../api.js?v=20261030_v27';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v27';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -305,7 +305,7 @@ export function buildChat(ctx) {
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
   const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
-  const bar = h('div', { class: 'chatbar' }, micBtn, camBtn, screenBtn, h('div', { class: 'chat-input' }, toolsBtn, input, gifBtn, sendBtn), toolsPopover, gifPanel);
+  const bar = h('div', { class: 'chatbar' }, h('div', { class: 'chat-input' }, toolsBtn, input, gifBtn, sendBtn), toolsPopover, gifPanel);
   const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
@@ -385,7 +385,7 @@ export function buildChat(ctx) {
 
     const rawParts = state.mesh?.participants || [];
     const selfId = ctx.voice?.getSelfId?.() || state.clientId || state.self?.id;
-    const callPeers = rawParts.map((p) => {
+    const mappedPeers = rawParts.map((p) => {
       if (p.id === selfId) {
         return {
           ...p,
@@ -399,6 +399,15 @@ export function buildChat(ctx) {
       }
       return p;
     });
+    const peerByName = new Map();
+    for (const p of mappedPeers) {
+      const key = (p.name && p.name !== 'Misafir') ? p.name.trim().toLowerCase() : p.id;
+      const prev = peerByName.get(key);
+      if (!prev || p.id === selfId || (!prev.inCall && p.inCall) || (!prev.isHost && p.isHost)) {
+        peerByName.set(key, p);
+      }
+    }
+    const callPeers = Array.from(peerByName.values());
     const activeVoiceCount = callPeers.filter((p) => p.inCall || !p.muted || p.cam || p.screen || p.speaking).length;
     dCallStatusBadge.textContent = activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`;
     dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0);
@@ -738,10 +747,14 @@ export function buildChat(ctx) {
       const isJoin = /katıldı/i.test(txt);
       const isLeave = /ayrıldı/i.test(txt);
       const isMedia = /oynatılıyor|başlatıldı|eklendi/i.test(txt);
+      const sysKind = (isJoin || isLeave) ? 'presence' : isMedia ? 'media' : 'other';
       const badgeIcon = isJoin ? '🟢' : isLeave ? '🔴' : isMedia ? '🎬' : '✨';
       const displayTxt = txt === 'katıldı' ? 'odaya katıldı' : txt === 'ayrıldı' ? 'odadan ayrıldı' : txt;
       const t = h('div', {
         class: `sysmsg ${isJoin ? 'sysmsg-join' : isLeave ? 'sysmsg-leave' : isMedia ? 'sysmsg-media' : ''}`,
+        'data-sys-user': m.user || '',
+        'data-sys-kind': sysKind,
+        'data-ts': String(m.ts || (Date.now() / 1000)),
       },
         h('span', { class: 'sysmsg-ico' }, badgeIcon),
         m.user ? h('b', { class: 'sysmsg-user' }, m.user) : null,
@@ -814,16 +827,35 @@ export function buildChat(ctx) {
   const recentSysMap = new Map();
   function append(m) {
     if (!m || !m.id || rendered.has(m.id)) return;
-    if (m.system && m.user) {
-      const normAct = /katıldı/i.test(m.text || '') ? 'join' : (/ayrıldı/i.test(m.text || '') ? 'leave' : (m.text || ''));
-      const sysKey = `${m.user}:${normAct}`;
-      const prevTs = recentSysMap.get(sysKey) || 0;
-      const curTs = Number(m.ts || (Date.now() / 1000));
-      if (prevTs && Math.abs(curTs - prevTs) < 12) {
+    const nowSec = Date.now() / 1000;
+    const curTs = Number(m.ts || nowSec);
+    if (m.system) {
+      if (nowSec - curTs > 45) {
         rendered.add(m.id);
         return;
       }
-      recentSysMap.set(sysKey, curTs);
+      const txt = String(m.text || '');
+      const isPresence = /katıldı|ayrıldı/i.test(txt);
+      const isMedia = /oynatılıyor|başlatıldı|eklendi/i.test(txt);
+      if (m.user && isPresence) {
+        const normAct = /katıldı/i.test(txt) ? 'join' : 'leave';
+        const sysKey = `${m.user}:${normAct}`;
+        const prevTs = recentSysMap.get(sysKey) || 0;
+        if (prevTs && Math.abs(curTs - prevTs) < 25) {
+          rendered.add(m.id);
+          return;
+        }
+        recentSysMap.set(sysKey, curTs);
+        list.querySelectorAll('.sysmsg[data-sys-kind="presence"]').forEach((node) => {
+          if (node.dataset.sysUser === m.user) node.remove();
+        });
+        const remPresence = Array.from(list.querySelectorAll('.sysmsg[data-sys-kind="presence"]'));
+        while (remPresence.length >= 2) {
+          remPresence.shift()?.remove();
+        }
+      } else if (isMedia) {
+        list.querySelectorAll('.sysmsg[data-sys-kind="media"]').forEach((node) => node.remove());
+      }
     }
     rendered.add(m.id);
     if (m.system) lastUser = null;
@@ -971,6 +1003,11 @@ export function buildChat(ctx) {
       }
       syncVoiceUi();
       syncMusicSimilarUi();
+      const nowSec = Date.now() / 1000;
+      list.querySelectorAll('.sysmsg').forEach((node) => {
+        const ts = Number(node.dataset.ts || 0);
+        if (ts > 0 && nowSec - ts > 45) node.remove();
+      });
       const chatArr = state.mesh?.chat || [];
       for (const m of chatArr) append(m);
       renderPolls();

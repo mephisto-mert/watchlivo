@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v26';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v26';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v26';
-import { MeshConnection } from '../realtime.js?v=20261030_v26';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v26';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v26';
-import { buildLayout } from './mesh-layout.js?v=20261030_v26';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v26';
-import { Voice } from '../voice.js?v=20261030_v26';
-import { playRoomSfx } from './chat.js?v=20261030_v26';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v27';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v27';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v27';
+import { MeshConnection } from '../realtime.js?v=20261030_v27';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v27';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v27';
+import { buildLayout } from './mesh-layout.js?v=20261030_v27';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v27';
+import { Voice } from '../voice.js?v=20261030_v27';
+import { playRoomSfx } from './chat.js?v=20261030_v27';
 
 let ctx = null;
 
@@ -17,14 +17,14 @@ const chatKey = (id) => `vortex_chat_${id}`;
 function loadSavedChat(id) {
   try {
     const arr = JSON.parse(sessionStorage.getItem(chatKey(id)) || '[]');
-    return Array.isArray(arr) ? arr.filter((m) => m && m.id && m.ts && (Date.now() / 1000 - Number(m.ts)) < 3600) : [];
+    return Array.isArray(arr) ? arr.filter((m) => m && m.id && !m.system && m.ts && (Date.now() / 1000 - Number(m.ts)) < 3600) : [];
   } catch (e) { return []; }
 }
 function saveChat(room) {
   try {
     if (!room?.id || room.curated) return;
-    const chat = (room.chat || []).filter((m) => m && m.id).slice(-80);
-    if (chat.length) sessionStorage.setItem(chatKey(room.id), JSON.stringify(chat));
+    const chat = (room.chat || []).filter((m) => m && m.id && !m.system).slice(-80);
+    sessionStorage.setItem(chatKey(room.id), JSON.stringify(chat));
   } catch (e) { /* ignore */ }
 }
 function clearSavedChat(id) {
@@ -133,20 +133,40 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     }
   }
   if (!room.curated && !(ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000)) {
+    const nowSec = Date.now() / 1000;
     const saved = loadSavedChat(room.id);
-    const localCur = Array.isArray(curRoom?.chat) ? curRoom.chat : [];
-    const srvChat = Array.isArray(room.chat) ? room.chat : [];
-    if (saved.length || localCur.length) {
-      const mergedMap = new Map();
-      for (const m of [...saved, ...localCur, ...srvChat]) {
-        if (m && m.id) {
-          const prev = mergedMap.get(m.id);
-          mergedMap.set(m.id, prev ? { ...prev, ...m, reactions: m.reactions || prev.reactions } : m);
+    const localCur = (Array.isArray(curRoom?.chat) ? curRoom.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 45)));
+    const srvChat = (Array.isArray(room.chat) ? room.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 45)));
+    const mergedMap = new Map();
+    for (const m of [...saved, ...localCur, ...srvChat]) {
+      if (m && m.id) {
+        const prev = mergedMap.get(m.id);
+        mergedMap.set(m.id, prev ? { ...prev, ...m, reactions: m.reactions || prev.reactions } : m);
+      }
+    }
+    const sorted = Array.from(mergedMap.values()).sort((a, b) => (Number(a.ts || 0) - Number(b.ts || 0)));
+    const seenPres = new Set();
+    let presCnt = 0;
+    let seenMed = false;
+    const dedupRev = [];
+    for (let i = sorted.length - 1; i >= 0; i -= 1) {
+      const m = sorted[i];
+      if (m.system) {
+        const txt = String(m.text || '');
+        const u = String(m.user || '');
+        if (/katıldı|ayrıldı/i.test(txt)) {
+          if ((u && seenPres.has(u)) || presCnt >= 2) continue;
+          if (u) seenPres.add(u);
+          presCnt += 1;
+        } else if (/oynatılıyor|başlatıldı/i.test(txt)) {
+          if (seenMed) continue;
+          seenMed = true;
         }
       }
-      const mergedChat = Array.from(mergedMap.values()).sort((a, b) => (Number(a.ts || 0) - Number(b.ts || 0))).slice(-200);
-      room = { ...room, chat: mergedChat };
+      dedupRev.push(m);
     }
+    dedupRev.reverse();
+    room = { ...room, chat: dedupRev.slice(-200) };
   }
   if (ctx) {
     if (!ctx.seenChatIds) {

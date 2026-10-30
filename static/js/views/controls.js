@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v26';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v26';
-import { getProvider } from '../providers.js?v=20261030_v26';
-import { expectedPosition } from '../sync.js?v=20261030_v26';
-import { thumbFor } from './lobby.js?v=20261030_v26';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v26';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v26';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v26';
-import { avatar } from '../profile.js?v=20261030_v26';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v27';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v27';
+import { getProvider } from '../providers.js?v=20261030_v27';
+import { expectedPosition } from '../sync.js?v=20261030_v27';
+import { thumbFor } from './lobby.js?v=20261030_v27';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v27';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v27';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v27';
+import { avatar } from '../profile.js?v=20261030_v27';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -614,7 +614,7 @@ export function buildControls(frame, ctx) {
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
-      h('div', { class: 'ctl-top-right' }, epBtn, nextEpTopBtn, subPillBtn, origBtn, qualityBadge, syncPill, provLogo)),
+      h('div', { class: 'ctl-top-right' }, epBtn, nextEpTopBtn, origBtn, provLogo)),
     mid,
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);

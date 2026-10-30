@@ -2962,22 +2962,36 @@ body.theater-mode .resize-handle {
   display: none !important;
 }
 
+#ctl-sync-pill,
+#ctl-quality-badge,
+#ctl-sub-pill {
+  display: none !important;
+}
+
 .chatbar .chat-input {
   background: var(--wl-bg-elevated) !important;
   border: 1px solid var(--wl-border) !important;
   border-radius: 10px !important;
-  padding: 3px 4px 3px 4px !important;
+  padding: 4px 6px !important;
   width: 100% !important;
   display: flex !important;
   align-items: center !important;
-  gap: 6px !important;
+  gap: 7px !important;
+  box-sizing: border-box !important;
 }
 
 .chatbar .chat-input .chat-tools-toggle {
-  background: rgba(255, 255, 255, 0.05) !important;
-  border: 1px solid var(--wl-border) !important;
-  color: var(--wl-text-secondary) !important;
-  flex-shrink: 0 !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  flex: 0 0 32px !important;
+  border-radius: 8px !important;
+  background: rgba(39, 220, 200, 0.1) !important;
+  border: 1px solid rgba(39, 220, 200, 0.25) !important;
+  color: var(--wl-accent) !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
   transition: transform 150ms ease, background 150ms ease, color 150ms ease !important;
 }
 
