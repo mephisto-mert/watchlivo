@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v28';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v28';
-import { avatar } from '../profile.js?v=20261030_v28';
-import { api, qs } from '../api.js?v=20261030_v28';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v28';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v29';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v29';
+import { avatar } from '../profile.js?v=20261030_v29';
+import { api, qs } from '../api.js?v=20261030_v29';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v29';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -344,14 +344,22 @@ export function buildChat(ctx) {
   let lastTyping = 0;
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
   input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
-  input.addEventListener('blur', () => {
+  input.addEventListener('focus', () => {
+    document.body.classList.add('kb-open');
     setTimeout(() => {
+      if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
+      list.scrollTop = list.scrollHeight;
+    }, 60);
+  });
+  input.addEventListener('blur', () => {
+    document.body.classList.remove('kb-open');
+    setTimeout(() => {
+      if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
       try {
-        window.scrollTo(0, 0);
         document.documentElement.scrollLeft = 0;
         document.body.scrollLeft = 0;
       } catch (e) { /* ignore */ }
-    }, 60);
+    }, 80);
   });
 
   function syncVoiceUi() {
@@ -399,24 +407,34 @@ export function buildChat(ctx) {
       }
       return p;
     });
-    const peerByName = new Map();
+    const peerById = new Map();
     for (const p of mappedPeers) {
-      const key = (p.name && p.name !== 'Misafir') ? p.name.trim().toLowerCase() : p.id;
-      const prev = peerByName.get(key);
-      if (!prev || p.id === selfId || (!prev.inCall && p.inCall) || (!prev.isHost && p.isHost)) {
-        peerByName.set(key, p);
-      }
+      if (!p || !p.id) continue;
+      peerById.set(p.id, p);
     }
-    const callPeers = Array.from(peerByName.values());
+    const callPeers = Array.from(peerById.values());
+    const nameTotals = new Map();
+    for (const p of callPeers) {
+      const nk = (p.name || 'Misafir').trim().toLowerCase();
+      nameTotals.set(nk, (nameTotals.get(nk) || 0) + 1);
+    }
     const activeVoiceCount = callPeers.filter((p) => p.inCall || !p.muted || p.cam || p.screen || p.speaking).length;
     dCallStatusBadge.textContent = activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`;
     dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0);
 
     const shownPeers = callPeers.slice(0, 12);
-    const sig = shownPeers.map((p) => `${p.id}:${p.name}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}`).join('|');
+    const sig = shownPeers.map((p) => `${p.id}:${p.name}:${p.device}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}`).join('|');
     if (discordCallPeers.dataset.sig !== sig) {
       discordCallPeers.dataset.sig = sig;
+      const seenNameIdx = new Map();
       discordCallPeers.replaceChildren(...shownPeers.map((p) => {
+        const nk = (p.name || 'Misafir').trim().toLowerCase();
+        const idx = (seenNameIdx.get(nk) || 0) + 1;
+        seenNameIdx.set(nk, idx);
+        const dupCount = nameTotals.get(nk) || 1;
+        const labelText = dupCount > 1
+          ? `${p.name || 'Misafir'} (${p.id === selfId ? 'Sen' : (p.device || `#${idx}`)})`
+          : (p.name || 'Misafir');
         const isAct = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
         const badges = [];
         if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, 'YAYINDA'));
@@ -428,7 +446,7 @@ export function buildChat(ctx) {
         if (p.speaking) av.classList.add('speaking');
         return h('div', {
           class: `discord-peer-chip ${isAct ? 'in-call' : ''} ${p.speaking ? 'is-speaking' : ''} ${p.screen ? 'has-screen' : ''}`.trim(),
-          title: p.screen ? `${p.name} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${p.name}`,
+          title: p.screen ? `${labelText} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${labelText}`,
           onclick: () => {
             const targetCamId = p.id === selfId ? (screenOn ? 'self-screen' : 'self') : p.id;
             const bubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${targetCamId}"]`);
@@ -439,7 +457,7 @@ export function buildChat(ctx) {
               toggleCallJoin();
             }
           },
-        }, av, h('span', { class: 'd-peer-name' }, p.name || 'Misafir'), ...badges);
+        }, av, h('span', { class: 'd-peer-name' }, labelText), ...badges);
       }));
     }
   }
@@ -845,7 +863,7 @@ export function buildChat(ctx) {
     const nowSec = Date.now() / 1000;
     const curTs = Number(m.ts || nowSec);
     if (m.system) {
-      if (nowSec - curTs > 45) {
+      if (nowSec - curTs > 1800) {
         rendered.add(m.id);
         return;
       }
@@ -856,16 +874,13 @@ export function buildChat(ctx) {
         const normAct = /katıldı/i.test(txt) ? 'join' : 'leave';
         const sysKey = `${m.user}:${normAct}`;
         const prevTs = recentSysMap.get(sysKey) || 0;
-        if (prevTs && Math.abs(curTs - prevTs) < 25) {
+        if (prevTs && Math.abs(curTs - prevTs) < 3) {
           rendered.add(m.id);
           return;
         }
         recentSysMap.set(sysKey, curTs);
-        list.querySelectorAll('.sysmsg[data-sys-kind="presence"]').forEach((node) => {
-          if (node.dataset.sysUser === m.user) node.remove();
-        });
         const remPresence = Array.from(list.querySelectorAll('.sysmsg[data-sys-kind="presence"]'));
-        while (remPresence.length >= 2) {
+        while (remPresence.length >= 6) {
           remPresence.shift()?.remove();
         }
       } else if (isMedia) {
@@ -1003,8 +1018,14 @@ export function buildChat(ctx) {
 
   const onVisualViewportResize = () => {
     if (!window.visualViewport) return;
-    document.documentElement.style.setProperty('--vvh', `${window.visualViewport.height}px`);
-    list.scrollTop = list.scrollHeight;
+    const vv = window.visualViewport;
+    document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    document.documentElement.style.setProperty('--vv-top', `${Math.round(vv.offsetTop || 0)}px`);
+    const kbOpen = (window.innerHeight - vv.height > 110) || document.activeElement === input;
+    document.body.classList.toggle('kb-open', kbOpen);
+    if (kbOpen) {
+      list.scrollTop = list.scrollHeight;
+    }
   };
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', onVisualViewportResize);
@@ -1030,7 +1051,7 @@ export function buildChat(ctx) {
       const nowSec = Date.now() / 1000;
       list.querySelectorAll('.sysmsg').forEach((node) => {
         const ts = Number(node.dataset.ts || 0);
-        if (ts > 0 && nowSec - ts > 45) node.remove();
+        if (ts > 0 && nowSec - ts > 1800) node.remove();
       });
       const chatArr = state.mesh?.chat || [];
       for (const m of chatArr) append(m);

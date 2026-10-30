@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v28';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v28';
-import { getProvider } from '../providers.js?v=20261030_v28';
-import { expectedPosition } from '../sync.js?v=20261030_v28';
-import { thumbFor } from './lobby.js?v=20261030_v28';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v28';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v28';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v28';
-import { avatar } from '../profile.js?v=20261030_v28';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v29';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v29';
+import { getProvider } from '../providers.js?v=20261030_v29';
+import { expectedPosition } from '../sync.js?v=20261030_v29';
+import { thumbFor } from './lobby.js?v=20261030_v29';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v29';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v29';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v29';
+import { avatar } from '../profile.js?v=20261030_v29';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -88,13 +88,19 @@ export function buildControls(frame, ctx) {
   applySubPrefsStyle();
 
   let uiTimer = null;
-  const revealControls = (ms = 3200) => {
+  let lastUiRevealAt = 0;
+  const revealControls = (ms) => {
+    const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    const durationMs = ms || (isTouch ? 5200 : 3500);
+    if (!controls.classList.contains('ui-active')) {
+      lastUiRevealAt = Date.now();
+    }
     controls.classList.add('ui-active');
     clearTimeout(uiTimer);
     uiTimer = setTimeout(() => {
       if (!menu.classList.contains('hidden')) return;
       controls.classList.remove('ui-active');
-    }, ms);
+    }, durationMs);
   };
   const doUnlockAudio = (e) => {
     if (e) { e.stopPropagation(); }
@@ -157,28 +163,32 @@ export function buildControls(frame, ctx) {
     showOverlay(`${delta > 0 ? '⏩ +' : '⏪ '}${delta} sn (${fmtTime(target)})`, 1200);
     revealControls();
   };
-  const playBtn = h('button', { class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', onclick: () => {
+  const playBtn = h('button', { class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', onclick: (e) => {
+    if (e) e.stopPropagation();
     if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
     const roomPlaying = (state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
-    if (roomPlaying && host.adapter?.isPaused?.()) {
-      host.adapter.play();
-      revealControls();
-      update();
-      return;
-    }
+    const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
     if (!isLeader()) {
-      if (roomPlaying && host.adapter?.isPaused?.()) {
-        host.adapter.play();
+      if (roomPlaying && adapterPaused) {
+        host.adapter?.play?.();
         ctx.sync?.kick();
-        revealControls();
+        revealControls(5200);
         update();
         return;
       }
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
       return;
     }
-    actions.toggle();
-    revealControls();
+    if (!adapterPaused) {
+      actions.pause();
+    } else if (!roomPlaying || ctx.userPaused) {
+      actions.play();
+    } else {
+      host.adapter?.play?.();
+      actions.play();
+    }
+    revealControls(5200);
+    update();
   } });
   const back10Btn = h('button', {
     class: 'ctl-action',
@@ -475,6 +485,7 @@ export function buildControls(frame, ctx) {
 
   mid.addEventListener('touchstart', (e) => {
     if (!e.touches || e.touches.length !== 1) return;
+    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
     const t = e.touches[0];
     touchStartX = t.clientX;
     touchStartY = t.clientY;
@@ -487,6 +498,7 @@ export function buildControls(frame, ctx) {
 
   mid.addEventListener('touchmove', (e) => {
     if (!e.touches || e.touches.length !== 1) return;
+    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
     const t = e.touches[0];
     const dx = t.clientX - touchStartX;
     const dy = t.clientY - touchStartY;
@@ -515,6 +527,10 @@ export function buildControls(frame, ctx) {
   }, { passive: false });
 
   mid.addEventListener('touchend', (e) => {
+    if (e.target?.closest?.('button, input, .ctl-center-hud')) {
+      revealControls(5200);
+      return;
+    }
     if (isSwiping) {
       isSwiping = false;
       swipeMode = null;
@@ -538,13 +554,13 @@ export function buildControls(frame, ctx) {
         accumulatedSeek = (accumulatedSeek <= 0 ? accumulatedSeek : 0) - 10;
         seekStep(-10);
         triggerSeekRipple('left', accumulatedSeek);
-        revealControls(2200);
+        revealControls(4500);
       } else if (ratio > 0.62) {
         if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
         accumulatedSeek = (accumulatedSeek >= 0 ? accumulatedSeek : 0) + 10;
         seekStep(10);
         triggerSeekRipple('right', accumulatedSeek);
-        revealControls(2200);
+        revealControls(4500);
       } else {
         toggleFullscreen();
       }
@@ -556,25 +572,26 @@ export function buildControls(frame, ctx) {
       tapTimer = setTimeout(() => {
         if (!menu.classList.contains('hidden')) { closeMenu(); return; }
         if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
-        if (controls.classList.contains('ui-active')) {
+        if (controls.classList.contains('ui-active') && Date.now() - lastUiRevealAt > 450) {
           clearTimeout(uiTimer);
           controls.classList.remove('ui-active');
         } else {
-          revealControls(3500);
+          revealControls(5200);
         }
-      }, 260);
+      }, 240);
     }
   }, { passive: true });
 
   mid.addEventListener('click', (e) => {
-    if (e.pointerType === 'touch' || ('ontouchstart' in window && Date.now() - touchStartTime < 450)) return;
+    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
+    if (e.pointerType === 'touch' || ('ontouchstart' in window && Date.now() - touchStartTime < 650)) return;
     if (!menu.classList.contains('hidden')) { closeMenu(); return; }
     if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
-    if (controls.classList.contains('ui-active')) {
+    if (controls.classList.contains('ui-active') && Date.now() - lastUiRevealAt > 350) {
       clearTimeout(uiTimer);
       controls.classList.remove('ui-active');
     } else {
-      revealControls(3500);
+      revealControls(4000);
     }
   });
   mid.addEventListener('dblclick', (e) => {
@@ -622,9 +639,9 @@ export function buildControls(frame, ctx) {
     if (e.pointerType === 'touch') return;
     revealControls(3200);
   }, { passive: true });
-  frame.addEventListener('pointerdown', (e) => {
-    if (e.pointerType === 'touch' && !controls.classList.contains('ui-active')) {
-      revealControls(4000);
+  controls.addEventListener('pointerdown', (e) => {
+    if (e.target?.closest?.('.ctl-top, .ctl-bottom, .ctl-center-hud, .ctl-menu')) {
+      revealControls(5200);
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
@@ -1457,8 +1474,12 @@ export function buildControls(frame, ctx) {
   let lastMobileLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight * 1.15;
 
   function onViewportChange() {
-    try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
-    if (typeof window !== 'undefined') {
+    const ae = typeof document !== 'undefined' ? document.activeElement : null;
+    const isInputFocused = Boolean(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
+    if (!isInputFocused) {
+      try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+    }
+    if (typeof window !== 'undefined' && !isInputFocused) {
       const isTouchPhone = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && Math.min(window.innerWidth, window.innerHeight) <= 540;
       const isLandscape = window.innerWidth > window.innerHeight * 1.15;
       const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
@@ -1803,10 +1824,10 @@ export function buildControls(frame, ctx) {
       }
       const item = h('div', {
         class: 'danmaku-item',
-        style: { top: `${8 + Math.floor(Math.random() * 62)}%`, color: msg.color || '#ffffff' },
+        style: { top: `${8 + Math.floor(Math.random() * 58)}%`, color: '#ffffff' },
       }, `${msg.user ? msg.user + ': ' : ''}${msg.text}`);
       danmakuLayer.append(item);
-      setTimeout(() => item.remove(), 7500);
+      setTimeout(() => item.remove(), 12000);
     },
     syncStatus: (s) => {
       const ms = Math.round((s.delta || 0) * 1000);

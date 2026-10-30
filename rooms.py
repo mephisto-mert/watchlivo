@@ -366,22 +366,18 @@ def prune_chat(room: Dict[str, Any]) -> None:
     cleaned = []
     for m in raw_items:
         m_ts = float(m.get("ts") or 0.0)
-        ttl = 45.0 if m.get("system") else 7200.0
+        ttl = 1800.0 if m.get("system") else 7200.0
         if t - m_ts <= ttl:
             cleaned.append(m)
-    seen_presence_users = set()
     presence_count = 0
     seen_media_sys = False
     deduped_rev = []
     for m in reversed(cleaned):
         if m.get("system"):
             txt = str(m.get("text") or "")
-            u = str(m.get("user") or "")
             if "katıldı" in txt or "ayrıldı" in txt:
-                if u in seen_presence_users or presence_count >= 2:
+                if presence_count >= 6:
                     continue
-                if u:
-                    seen_presence_users.add(u)
                 presence_count += 1
             elif "oynatılıyor" in txt or "başlatıldı" in txt:
                 if seen_media_sys:
@@ -473,7 +469,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         fresh["participants"] = {
             cid: sp for cid, sp in (snap.get("participants") or {}).items() if isinstance(sp, dict)
         }
-        fresh["chat"] = [m for m in (snap.get("chat") or []) if isinstance(m, dict) and (not m.get("system") or (t - float(m.get("ts") or 0.0) <= 45.0))][-MAX_CHAT:]
+        fresh["chat"] = [m for m in (snap.get("chat") or []) if isinstance(m, dict) and (not m.get("system") or (t - float(m.get("ts") or 0.0) <= 1800.0))][-MAX_CHAT:]
         fresh["polls"] = [p for p in (snap.get("polls") or []) if isinstance(p, dict)][-10:]
         fresh["events"] = [e for e in (snap.get("events") or []) if isinstance(e, dict)]
         fresh["signals"] = [s for s in (snap.get("signals") or []) if isinstance(s, dict)]
@@ -515,7 +511,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         if not isinstance(m, dict):
             continue
         m_ts = float(m.get("ts") or 0.0)
-        ttl_c = 45.0 if m.get("system") else 7200.0
+        ttl_c = 1800.0 if m.get("system") else 7200.0
         if m_ts <= 0.0 or (t - m_ts > ttl_c):
             continue
         mid = m.get("id")
@@ -607,11 +603,11 @@ def sys_msg(room: Dict[str, Any], text: str, user: str = "") -> Dict[str, Any]:
     is_media = any(k in text for k in ("oynatılıyor", "başlatıldı"))
     if user and is_presence:
         for prev in reversed(chat[-6:]):
-            if prev.get("system") and prev.get("user") == user and prev.get("text") == text and (t_now - float(prev.get("ts") or 0.0) < 25.0):
+            if prev.get("system") and prev.get("user") == user and prev.get("text") == text and (t_now - float(prev.get("ts") or 0.0) < 4.0):
                 return prev
         chat = [
             m for m in chat
-            if not (m.get("system") and m.get("user") == user and any(k in str(m.get("text") or "") for k in ("katıldı", "ayrıldı")))
+            if not (m.get("system") and m.get("user") == user and any(k in str(m.get("text") or "") for k in ("katıldı", "ayrıldı")) and (t_now - float(m.get("ts") or 0.0) < 10.0))
         ]
     elif is_media:
         chat = [
@@ -666,17 +662,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
             -float(x.get("lastSeen") or 0.0),
         )
     )
-    dedup_parts = []
-    seen_identities = set()
-    for p in raw_parts:
-        ident = (p.get("uid") or "").strip() or (p.get("name") or "").strip().lower()
-        if p.get("transport") != "bot" and ident and ident != "misafir" and p.get("id") != for_cid:
-            if ident in seen_identities:
-                continue
-            seen_identities.add(ident)
-        elif p.get("id") == for_cid and ident and ident != "misafir":
-            seen_identities.add(ident)
-        dedup_parts.append(p)
+    dedup_parts = list(raw_parts)
     total_p = len(dedup_parts)
     ser_parts = []
     for p in dedup_parts[:60]:
@@ -1059,21 +1045,18 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     }
     p.update({k: v for k, v in fields.items() if v})
     p.update({"transport": transport, "lastSeen": now()})
-    already_present_by_name = any(
-        hp.get("transport") != "bot" and hp.get("name") == p.get("name")
-        for hcid, hp in (room.get("participants") or {}).items()
-        if hcid != cid
-    )
     if existing is None and p.get("name") and p.get("name") != "Misafir":
         live_ws = SOCKETS.get(room.get("id", ""), {})
         for old_cid, old_p in list((room.get("participants") or {}).items()):
             if old_cid == cid or old_p.get("transport") == "bot" or old_cid in live_ws:
                 continue
-            same_user_device = (
-                (p.get("uid") and old_p.get("uid") == p.get("uid") and old_p.get("device") == p.get("device"))
-                or (old_p.get("name") == p.get("name") and old_p.get("device") == p.get("device") and (now() - float(old_p.get("lastSeen") or 0.0) > 6.0))
+            stale_age = now() - float(old_p.get("lastSeen") or 0.0)
+            same_stale_user_device = (
+                stale_age > 35.0
+                and old_p.get("device") == p.get("device")
+                and ((p.get("uid") and old_p.get("uid") == p.get("uid")) or old_p.get("name") == p.get("name"))
             )
-            if same_user_device:
+            if same_stale_user_device:
                 room["participants"].pop(old_cid, None)
                 if room.get("host_id") == old_cid:
                     room["host_id"] = cid
@@ -1120,7 +1103,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         if not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
             room["host_id"] = cid
     room["lastActiveAt"] = now()
-    return p, (existing is None and not already_present_by_name)
+    return p, (existing is None)
 
 
 # ---------------------------------------------------------------------------
@@ -1223,7 +1206,12 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             return out
         _apply_time(room, data)
         if "playing" in data:
-            room["media"]["playing"] = bool(data["playing"])
+            want_play = bool(data["playing"])
+            last_pause_at = float(room["media"].get("lastExplicitPauseAt") or 0.0)
+            if want_play and not room["media"].get("playing") and (now() - last_pause_at < 30.0):
+                pass
+            else:
+                room["media"]["playing"] = want_play
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
         room["rev"] = int(room.get("rev") or 1) + 1
@@ -1252,8 +1240,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         _apply_time(room, data)
         if mtype == "play":
             room["media"]["playing"] = True
+            room["media"]["lastExplicitPauseAt"] = 0.0
         elif mtype == "pause":
             room["media"]["playing"] = False
+            room["media"]["lastExplicitPauseAt"] = now()
         elif mtype == "rate":
             try:
                 room["media"]["rate"] = min(2.0, max(0.25, float(data.get("rate", 1.0))))
@@ -2008,15 +1998,29 @@ async def http_sync(request: Request):
         m = room["media"]
         server_media_url = str(m.get("url") or m.get("videoId") or "")
         client_media_url = str(data.get("mediaUrl") or "") if "mediaUrl" in data else server_media_url
-        server_chat_cnt = len(room.get("chat") or [])
+        chat_list = room.get("chat") or []
+        server_chat_cnt = len(chat_list)
         client_chat_cnt = int(data.get("chatCount")) if isinstance(data.get("chatCount"), int) else server_chat_cnt
-        if not is_action and not mutated and not is_new and since_rev > 0 and since_rev == cur_rev and client_media_url == server_media_url and client_chat_cnt == server_chat_cnt:
+        server_last_chat_id = str(chat_list[-1].get("id") or "") if chat_list else ""
+        client_last_chat_id = str(data.get("lastChatId") or "") if "lastChatId" in data else server_last_chat_id
+        server_part_cnt = len(room["participants"])
+        client_part_cnt = int(data.get("participantCount")) if isinstance(data.get("participantCount"), int) else server_part_cnt
+        if (
+            not is_action and not mutated and not is_new and since_rev > 0 and since_rev == cur_rev
+            and client_media_url == server_media_url
+            and client_chat_cnt == server_chat_cnt
+            and client_last_chat_id == server_last_chat_id
+            and client_part_cnt == server_part_cnt
+        ):
             elapsed_w = max(0.0, t_cur - float(m.get("updatedAt") or t_cur))
             recent_ev = [e for e in (room.get("events") or []) if t_cur - float(e.get("ts") or 0) < 6.0][-15:]
             recent_sig = [s for s in (room.get("signals") or []) if s.get("targetId") == cid and t_cur - float(s.get("ts") or 0) < 12.0][-25:]
+            ser_Quick = serialize(room, for_cid=cid)
             return JSONResponse({
                 "ok": True, "unchanged": True, "clientId": cid, "clientToken": sign_client_token(room_id, cid), "rev": cur_rev, "serverTime": t_cur,
-                "participantCount": len(room["participants"]),
+                "participantCount": ser_Quick["participantCount"],
+                "participants": ser_Quick["participants"],
+                "chat": chat_list[-20:],
                 "privacy": room.get("privacy", "public"),
                 "playMode": room.get("playMode", "leader"),
                 "voipMode": room.get("voipMode", "all"),
@@ -2121,11 +2125,15 @@ async def create_room(request: Request):
         "http",
     )
     room["host_id"] = creator_cid
+    room["chat"] = []
+    creator_label = room["creator"] or payload.get("creator") or "Lider"
+    sys_msg(room, "odaya katıldı", creator_label)
     media = payload.get("media")
     if isinstance(media, dict) and (media.get("url") or media.get("videoId")):
-        set_media(room, media, room["creator"] or "Lider", start=0.0)
+        set_media(room, media, creator_label, start=0.0)
         room["media"]["playing"] = True
-    room["chat"] = []
+        if room["media"].get("title"):
+            sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", creator_label)
     async with STORE.lock(room_id):
         await STORE.put(room, force_disk=True)
     _LOBBY_CACHE["ts"] = 0.0

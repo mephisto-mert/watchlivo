@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261030_v28';
-import { api, qs } from '../api.js?v=20261030_v28';
-import { parseVideoUrl } from '../providers.js?v=20261030_v28';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261030_v28';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261030_v28';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, state } from '../store.js?v=20261030_v28';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261030_v29';
+import { api, qs } from '../api.js?v=20261030_v29';
+import { parseVideoUrl } from '../providers.js?v=20261030_v29';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261030_v29';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261030_v29';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261030_v29';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -48,38 +48,335 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
 
 const spinner = () => h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.2em' } }, h('div', { class: 'spinner' }));
 
+const YT_ACCT_KEY = 'vortex_yt_account_v1';
+function getYtProfile() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(YT_ACCT_KEY) || 'null');
+    if (raw && raw.connected) return raw;
+  } catch (e) { /* ignore */ }
+  const g = getAccount('youtube');
+  if (g?.loginSatisfied) {
+    return {
+      connected: true,
+      email: g.accountEmail || state.self?.email || '',
+      channelName: g.profileName || state.self?.name || 'YouTube Premium',
+      interests: 'Türkçe Pop, Gaming, Film Fragmanları, Canlı Yayın',
+    };
+  }
+  return null;
+}
+
+function saveYtProfile(prof) {
+  try {
+    if (!prof) localStorage.removeItem(YT_ACCT_KEY);
+    else localStorage.setItem(YT_ACCT_KEY, JSON.stringify({ ...prof, connected: true, updatedAt: Date.now() }));
+  } catch (e) { /* ignore */ }
+}
+
 export function renderSearchKind(p, body, presetQuery, pick) {
-  const authHolder = h('div', {});
-  const refreshAuth = () => authHolder.replaceChildren(renderAccountBar(p, refreshAuth));
-  refreshAuth();
-  const input = h('input', { placeholder: p.placeholder || 'Ara...', value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
+  let activeTab = presetQuery ? 'search' : 'recommended';
+  const authHolder = h('div', { style: { marginBottom: '12px' } });
+  const tabBar = h('div', { class: 'provider-cat-bar', style: { marginBottom: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' } });
+  const input = h('input', { placeholder: p.placeholder || 'YouTube\'da video, şarkı, kanal veya bağlantı ara...', value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
+  const sectionHeader = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', padding: '0 4px' } });
   const grid = h('div', { class: 'card-grid' });
   let seq = 0;
-  const run = async (q) => {
+
+  const pickAndRecord = (media) => {
+    try {
+      saveWatchProgress({ ...media, provider: media.provider || 'youtube' }, 0, media.duration || 0);
+    } catch (e) { /* ignore */ }
+    pick(media);
+  };
+
+  const openYtConnectModal = () => {
+    const cur = getYtProfile();
+    const emailInp = h('input', {
+      class: 'input',
+      type: 'text',
+      placeholder: 'Google / YouTube E-posta veya @KanalAdı (örn. mert@gmail.com)',
+      value: cur?.email || state.self?.email || state.self?.name || '',
+    });
+    const nameInp = h('input', {
+      class: 'input',
+      type: 'text',
+      placeholder: 'Görünen Profil / Kanal Adı',
+      value: cur?.channelName || state.self?.name || 'Mert Can Yıldız',
+    });
+    const interestInp = h('input', {
+      class: 'input',
+      type: 'text',
+      placeholder: 'Öneri İlgi Alanların (örn. Semicenk, Blok3, Film, Özet, Podcast)',
+      value: cur?.interests || 'Türkçe Hit Müzik, Sinema & Fragman, Eğlence, Teknoloji',
+    });
+    popup({
+      title: '🔴 YouTube Hesabını & Öneri Akışını Bağla',
+      content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+        h('div', {
+          style: {
+            fontSize: '.82rem', padding: '10px 12px', borderRadius: '10px',
+            background: 'rgba(255, 0, 51, 0.1)', border: '1px solid rgba(255, 0, 51, 0.3)',
+            color: '#f1f5f9', lineHeight: '1.45',
+          },
+        }, 'YouTube hesabını bağladığında Sana Özel Önerilenler ve İzleme Geçmişin doğrudan bu ekranda senkronize edilir.'),
+        emailInp,
+        nameInp,
+        interestInp,
+        h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button',
+            class: 'btn sm',
+            onclick: () => {
+              window.open('https://accounts.google.com/ServiceLogin?service=youtube', 'wl_yt_oauth', 'width=520,height=660,noopener,noreferrer');
+            },
+          }, '🌐 Google / YouTube Oturum Penceresini Aç'),
+        )
+      ),
+      options: [
+        {
+          label: '✓ Hesabı Bağla & Önerileri Getir',
+          primary: true,
+          onClick: () => {
+            const em = emailInp.value.trim() || state.self?.name || 'youtube@gmail.com';
+            const cn = nameInp.value.trim() || state.self?.name || 'YouTube Hesabım';
+            const intr = interestInp.value.trim() || 'Türkçe Müzik, Trend Videolar, Sinema';
+            saveYtProfile({ email: em, channelName: cn, interests: intr });
+            toast(`🔴 YouTube hesabı (${cn}) bağlandı! Önerilenler ve geçmişin güncellendi.`);
+            refreshAuthBar();
+            loadTab('recommended');
+          },
+        },
+        ...(cur ? [{
+          label: 'Bağlantıyı Kaldır',
+          onClick: () => {
+            saveYtProfile(null);
+            toast('YouTube hesap bağlantısı kaldırıldı');
+            refreshAuthBar();
+            loadTab('recommended');
+          },
+        }] : []),
+        { label: 'Vazgeç' },
+      ],
+    });
+  };
+
+  const refreshAuthBar = () => {
+    const prof = getYtProfile();
+    authHolder.replaceChildren(
+      h('div', {
+        style: {
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px',
+          padding: '10px 14px', borderRadius: '14px',
+          background: prof ? 'linear-gradient(135deg, rgba(255,0,51,0.14), rgba(15,23,42,0.85))' : 'rgba(15, 23, 42, 0.78)',
+          border: prof ? '1px solid rgba(255, 0, 51, 0.38)' : '1px solid rgba(255, 255, 255, 0.1)',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+          h('div', {
+            style: {
+              width: '36px', height: '36px', borderRadius: '10px', background: '#ff0033', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '1rem',
+            },
+          }, '▶'),
+          h('div', {},
+            h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' } },
+              prof ? `🔴 ${prof.channelName} (${prof.email})` : 'YouTube Hesabını Bağla',
+              prof ? h('span', { style: { fontSize: '.7rem', background: 'rgba(39,220,200,0.16)', color: '#27DCC8', padding: '2px 7px', borderRadius: '99px' } }, '✓ Bağlı') : null),
+            h('div', { style: { fontSize: '.76rem', color: '#94a3b8' } },
+              prof
+                ? `İlgi Alanları: ${prof.interests} · Önerilenler ve İzleme Geçmişin aktif`
+                : 'Hesabını bağlayarak sana özel YouTube önerilerini ve izleme geçmişini tek tıkla odaya getir.'))),
+        h('div', { style: { display: 'flex', gap: '8px' } },
+          h('button', {
+            type: 'button',
+            class: `btn sm ${prof ? '' : 'primary'}`,
+            onclick: openYtConnectModal,
+          }, prof ? '⚙️ Hesap Ayarları' : '🔗 YouTube Hesabını Bağla'),
+          prof ? h('button', {
+            type: 'button',
+            class: 'btn sm',
+            onclick: () => loadTab('history'),
+          }, '🕘 Geçmişim') : null))
+    );
+  };
+
+  const TABS = [
+    { id: 'recommended', label: '✨ Sana Özel Önerilenler' },
+    { id: 'history', label: '🕘 İzleme Geçmişim' },
+    { id: 'trending', label: '🔥 Trendler (TR)' },
+    { id: 'music', label: '🎵 Müzik & Klip' },
+    { id: 'gaming', label: '🎮 Oyun & Eğlence' },
+    { id: 'live', label: '🔴 Canlı Yayınlar' },
+  ];
+
+  const renderTabs = () => {
+    const histCount = getWatchHistory().filter((x) => x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu')).length + getMusicHistory().length;
+    tabBar.replaceChildren(...TABS.map((t) => h('button', {
+      type: 'button',
+      class: `provider-cat-pill ${activeTab === t.id ? 'active' : ''}`,
+      onclick: () => loadTab(t.id),
+    }, t.label, t.id === 'history' && histCount > 0 ? h('span', { class: 'cat-count' }, String(histCount)) : null)));
+  };
+
+  const runSearchQuery = async (q, customHeader = '') => {
     const mine = ++seq;
     const pasted = parseVideoUrl(q);
-    if (pasted && pasted.provider === p.id) {
+    if (pasted && pasted.provider === 'youtube') {
       grid.replaceChildren(spinner());
       const res = await api(`/api/search/youtube?${qs({ q: pasted.id })}`).catch(() => ({ items: [] }));
       const hit = (res.items || []).find((x) => x.videoId === pasted.id);
-      grid.replaceChildren(videoCard(hit ? ytToMedia(hit) : ytToMedia({ videoId: pasted.id, title: 'YouTube videosu' }), pick));
+      grid.replaceChildren(videoCard(hit ? ytToMedia(hit) : ytToMedia({ videoId: pasted.id, title: 'YouTube videosu' }), pickAndRecord));
       return;
     }
     grid.replaceChildren(spinner());
     let res;
-    try { res = await api(`/api/search/youtube?${qs({ q: q || p.defaultQuery })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
+    try { res = await api(`/api/search/youtube?${qs({ q: q || p.defaultQuery || 'türkiye trend müzik klip 2026' })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
     if (mine !== seq) return;
     const items = (res.items || []).map(ytToMedia);
-    grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pick)) : [h('div', { class: 'lobby-empty' }, 'Sonuç bulunamadı.')]));
+    if (customHeader) {
+      sectionHeader.replaceChildren(h('div', { style: { fontSize: '.84rem', fontWeight: '700', color: '#cbd5e1' } }, customHeader));
+    } else {
+      sectionHeader.replaceChildren();
+    }
+    grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord)) : [h('div', { class: 'lobby-empty' }, 'Sonuç bulunamadı.')]));
   };
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(input.value.trim()); });
+
+  const loadTab = async (tabId) => {
+    activeTab = tabId;
+    renderTabs();
+    const prof = getYtProfile();
+    const watchHist = getWatchHistory();
+    const musicHist = getMusicHistory();
+
+    if (tabId === 'history') {
+      const ytHist = [
+        ...watchHist.filter((x) => x && (x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu'))),
+        ...musicHist.filter((x) => x && (x.videoId || x.title)),
+      ];
+      const seenKeys = new Set();
+      const uniqueHist = [];
+      for (const item of ytHist) {
+        const k = item.videoId || item.url || item.title;
+        if (!k || seenKeys.has(k)) continue;
+        seenKeys.add(k);
+        uniqueHist.push({
+          provider: 'youtube',
+          videoId: item.videoId || '',
+          url: item.url || (item.videoId ? `https://www.youtube.com/watch?v=${item.videoId}` : ''),
+          title: item.title || item.songTitle || 'YouTube Videosu',
+          channel: item.channel || item.artist || 'İzleme Geçmişim',
+          thumbnail: item.thumbnail || (item.videoId ? `https://i.ytimg.com/vi/${item.videoId}/hqdefault.jpg` : '/static/watchlivo-poster.svg'),
+          duration: item.duration || 0,
+        });
+      }
+      sectionHeader.replaceChildren(
+        h('div', { style: { fontSize: '.85rem', fontWeight: '700', color: '#e2e8f0' } },
+          `🕘 İzleme Geçmişim (${uniqueHist.length} video)`),
+        uniqueHist.length ? h('button', {
+          type: 'button',
+          class: 'btn sm',
+          onclick: () => {
+            clearWatchHistory();
+            toast('İzleme geçmişi temizlendi');
+            loadTab('history');
+          },
+        }, '🗑️ Geçmişi Temizle') : null
+      );
+      if (uniqueHist.length) {
+        grid.replaceChildren(...uniqueHist.map((m) => videoCard(m, pickAndRecord)));
+        return;
+      }
+      await runSearchQuery(prof?.interests || 'Semicenk Lvbel C5 Blok3 Dedublüman klip', '🕘 Henüz yerel geçmişin boş — Hesabına göre son popüler izlenenler:');
+      return;
+    }
+
+    if (tabId === 'recommended') {
+      const seedTerms = [];
+      if (prof?.interests) {
+        seedTerms.push(prof.interests.split(',')[0].trim());
+      }
+      const recentWatched = watchHist.find((x) => x?.title && (x.provider === 'youtube' || x.videoId))
+        || musicHist[0];
+      if (recentWatched) {
+        const cleanSeed = String(recentWatched.artist || recentWatched.channel || recentWatched.title || '')
+          .replace(/[^\w\sğüşıöçĞÜŞİÖÇ]/g, ' ')
+          .trim()
+          .split(/\s+/)
+          .slice(0, 3)
+          .join(' ');
+        if (cleanSeed) seedTerms.push(cleanSeed);
+      }
+      const recQuery = seedTerms.length
+        ? `${seedTerms.join(' ')} resmi klip HD`
+        : 'Semicenk Blok3 Ati242 Dedublüman Türkçe Hit 2026';
+      await runSearchQuery(
+        recQuery,
+        prof
+          ? `✨ ${prof.channelName} için Kişiselleştirilmiş Öneriler (${prof.interests})`
+          : '✨ İzleme Geçmişine & Türkiye Trendlerine Göre Sana Özel Önerilenler'
+      );
+      return;
+    }
+
+    if (tabId === 'trending') {
+      await runSearchQuery('Türkiye trend videolar popüler 2026', '🔥 Türkiye Trend Videolar');
+      return;
+    }
+    if (tabId === 'music') {
+      await runSearchQuery('Türkçe pop rap hit klipler 2026 resmi video', '🎵 YouTube Müzik & Video Klipler');
+      return;
+    }
+    if (tabId === 'gaming') {
+      await runSearchQuery('Türkçe oyun eğlence vlog özet 2026', '🎮 Oyun, Eğlence & İçerik Üreticileri');
+      return;
+    }
+    if (tabId === 'live') {
+      await runSearchQuery('Türkiye canlı yayın haber müzik live stream', '🔴 Canlı Yayınlar');
+    }
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (q) {
+        activeTab = 'search';
+        renderTabs();
+        runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`);
+      } else {
+        loadTab('recommended');
+      }
+    }
+  });
+
+  refreshAuthBar();
+  renderTabs();
   body.append(
     authHolder,
-    h('div', { class: 'sel-search' }, h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }), input,
-      h('button', { class: 'btn primary', onclick: () => run(input.value.trim()) }, 'Ara')),
-    grid);
-  run(presetQuery || '');
-  setTimeout(() => input.focus(), 30);
+    h('div', { class: 'sel-search' },
+      h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
+      input,
+      h('button', {
+        class: 'btn primary',
+        onclick: () => {
+          const q = input.value.trim();
+          if (q) {
+            activeTab = 'search';
+            renderTabs();
+            runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`);
+          } else {
+            loadTab('recommended');
+          }
+        },
+      }, 'Ara')),
+    tabBar,
+    sectionHeader,
+    grid
+  );
+  if (presetQuery) {
+    runSearchQuery(presetQuery, `🔍 "${presetQuery}" için YouTube Sonuçları`);
+  } else {
+    loadTab('recommended');
+  }
 }
 
 const LINK_HELP = {

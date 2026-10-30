@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v28';
-import { expectedPosition } from '../sync.js?v=20261030_v28';
-import { state } from '../store.js?v=20261030_v28';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v29';
+import { expectedPosition } from '../sync.js?v=20261030_v29';
+import { state } from '../store.js?v=20261030_v29';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -252,7 +252,8 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      if (this.wantPlaying && !this.hasEnded && !v.ended) {
+      const inFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
+      if (this.wantPlaying && !this.hasEnded && !v.ended && !inFullscreen) {
         clearTimeout(this.resumeTimer);
         const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
         const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 450 : 250;
@@ -261,6 +262,11 @@ export class Html5Adapter {
             this.tryPlay();
           }
         }, delayMs);
+        return;
+      }
+      if (inFullscreen && this.wantPlaying && !v.seeking) {
+        this.wantPlaying = false;
+        this.events.onPause?.({ native: true });
         return;
       }
       this.events.onPause?.();

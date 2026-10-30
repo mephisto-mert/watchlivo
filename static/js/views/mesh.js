@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v28';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v28';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v28';
-import { MeshConnection } from '../realtime.js?v=20261030_v28';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v28';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v28';
-import { buildLayout } from './mesh-layout.js?v=20261030_v28';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v28';
-import { Voice } from '../voice.js?v=20261030_v28';
-import { playRoomSfx } from './chat.js?v=20261030_v28';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v29';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v29';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v29';
+import { MeshConnection } from '../realtime.js?v=20261030_v29';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v29';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v29';
+import { buildLayout } from './mesh-layout.js?v=20261030_v29';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v29';
+import { Voice } from '../voice.js?v=20261030_v29';
+import { playRoomSfx } from './chat.js?v=20261030_v29';
 
 let ctx = null;
 
@@ -81,26 +81,27 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
     room = { ...room, media: { ...room.media, similar: curRoom.media.similar } };
   }
-  if (curRoom && isHostOnly() && nextKey && nextKey === prevKey) {
+  if (curRoom && isLeader() && nextKey && nextKey === prevKey) {
     const curMedia = curRoom.media || {};
     const nextMedia = room.media || {};
-    if (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 8500) {
+    if (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 12000) {
       const inSeekGrace = Boolean(ctx?.lastSeekAt && Date.now() - ctx.lastSeekAt < 8500 && Number.isFinite(ctx.lastSeekTarget));
       const pos = inSeekGrace ? expectedPosition(curMedia) : (ctx?.host.adapter?.getTime?.() ?? curMedia.meshStatePosition);
+      const isPausedNow = Boolean(ctx?.userPaused || curMedia.meshStateStatus === 'PAUSED' || curMedia.playing === false);
       room = {
         ...room,
         media: {
           ...nextMedia,
           intro: nextMedia.intro || curMedia.intro,
-          playing: curMedia.playing,
+          playing: !isPausedNow,
           currentTime: pos,
-          meshStateStatus: curMedia.meshStateStatus,
+          meshStateStatus: isPausedNow ? 'PAUSED' : 'PLAYING',
           meshStatePosition: pos,
           meshStateTime: clock.now(),
           meshStatePlaybackSpeed: curMedia.meshStatePlaybackSpeed || 1,
         },
       };
-    } else if (!ctx?.userPaused && curMedia.meshStateStatus === 'PLAYING') {
+    } else if (!ctx?.userPaused && curMedia.meshStateStatus === 'PLAYING' && isHostOnly()) {
       const livePos = ctx?.host.adapter?.getTime?.() ?? expectedPosition(curMedia);
       room = {
         ...room,
@@ -135,8 +136,8 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (!room.curated && !(ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000)) {
     const nowSec = Date.now() / 1000;
     const saved = loadSavedChat(room.id);
-    const localCur = (Array.isArray(curRoom?.chat) ? curRoom.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 45)));
-    const srvChat = (Array.isArray(room.chat) ? room.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 45)));
+    const localCur = (Array.isArray(curRoom?.chat) ? curRoom.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 1800)));
+    const srvChat = (Array.isArray(room.chat) ? room.chat : []).filter((m) => m && (!m.system || (nowSec - Number(m.ts || 0) <= 1800)));
     const mergedMap = new Map();
     for (const m of [...saved, ...localCur, ...srvChat]) {
       if (m && m.id) {
@@ -145,7 +146,6 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       }
     }
     const sorted = Array.from(mergedMap.values()).sort((a, b) => (Number(a.ts || 0) - Number(b.ts || 0)));
-    const seenPres = new Set();
     let presCnt = 0;
     let seenMed = false;
     const dedupRev = [];
@@ -153,10 +153,8 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       const m = sorted[i];
       if (m.system) {
         const txt = String(m.text || '');
-        const u = String(m.user || '');
         if (/katıldı|ayrıldı/i.test(txt)) {
-          if ((u && seenPres.has(u)) || presCnt >= 2) continue;
-          if (u) seenPres.add(u);
+          if (presCnt >= 6) continue;
           presCnt += 1;
         } else if (/oynatılıyor|başlatıldı/i.test(txt)) {
           if (seenMed) continue;
@@ -169,6 +167,18 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     room = { ...room, chat: dedupRev.slice(-200) };
   }
   if (ctx) {
+    if (!ctx.seenParticipantIds) {
+      ctx.seenParticipantIds = new Set((room.participants || []).map((p) => p.id));
+    } else {
+      for (const p of (room.participants || [])) {
+        if (p && p.id && !ctx.seenParticipantIds.has(p.id)) {
+          ctx.seenParticipantIds.add(p.id);
+          if (p.id !== state.clientId && p.transport !== 'bot') {
+            toast(`🟢 ${p.name || 'Bir izleyici'} odaya katıldı`);
+          }
+        }
+      }
+    }
     if (!ctx.seenChatIds) {
       ctx.seenChatIds = new Set((room.chat || []).map((m) => m.id));
     } else {
@@ -284,6 +294,7 @@ function onMessage(data) {
       break;
     case 'sync':
       if (data.cid && data.cid === state.clientId) break;
+      if (isLeader() && ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 10000 && (data.action === 'poll_sync' || data.action === 'heartbeat')) break;
       if (room && data.media) {
         const prevKey = mediaKey(room.media);
         const mergedMedia = { ...(room.media || {}), ...data.media };
@@ -305,12 +316,14 @@ function onMessage(data) {
           ctx.sync.kick(isExplicitAction);
         }
         if (mergedMedia.meshStateStatus === 'PAUSED' || mergedMedia.playing === false) {
+          if (ctx) ctx.userPaused = true;
           ctx?.host?.adapter?.pause?.();
           const target = Number(mergedMedia.meshStatePosition || 0);
           if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.4) {
             ctx?.host?.adapter?.seek?.(target);
           }
         } else if (data.action === 'play') {
+          if (ctx) ctx.userPaused = false;
           ctx?.host?.adapter?.play?.();
         } else if (data.action === 'seek') {
           const target = Number(mergedMedia.meshStatePosition || 0);
@@ -321,11 +334,15 @@ function onMessage(data) {
       break;
     case 'chat':
       if (room && data.message) {
-        if (data.message.id) ctx.seenChatIds?.add(data.message.id);
-        set({ mesh: { ...room, chat: [...(room.chat || []), data.message].slice(-200) } });
-        saveChat(state.mesh);
+        if (data.message.id && ctx?.seenChatIds?.has(data.message.id)) break;
+        if (data.message.id) ctx?.seenChatIds?.add(data.message.id);
+        const updatedChat = [...(room.chat || []).filter((c) => c && c.id !== data.message.id), data.message].slice(-200);
+        const updatedRoom = { ...room, chat: updatedChat };
+        set({ mesh: updatedRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
+        saveChat(updatedRoom);
         ctx.layout.chatAppended(data.message);
-        ctx.layout.danmaku?.(data.message);
+        if (!data.message.system) ctx.layout.danmaku?.(data.message);
       }
       break;
     case 'chat_cleared':
@@ -383,7 +400,9 @@ function localState(patch) {
   const media = { ...m, ...patch, meshStateStatus: status, meshStatePosition: pos, meshStateTime: clock.now() };
   media.playing = media.meshStateStatus === 'PLAYING';
   media.currentTime = media.meshStatePosition;
-  set({ mesh: { ...state.mesh, media } });
+  const updatedRoom = { ...state.mesh, media };
+  set({ mesh: updatedRoom });
+  if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
   ctx.sync.kick();
   ctx.layout.update();
 }
@@ -436,7 +455,10 @@ const actions = {
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
       return;
     }
-    ((state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing !== false ? 'PLAYING' : 'PAUSED')) === 'PLAYING') ? actions.pause() : actions.play();
+    const roomStatusPlaying = (state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing !== false ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+    const adapterPlaying = ctx?.host?.adapter ? !ctx.host.adapter.isPaused() : roomStatusPlaying;
+    const isCurrentlyPlaying = !ctx?.userPaused && (roomStatusPlaying || adapterPlaying);
+    isCurrentlyPlaying ? actions.pause() : actions.play();
   },
   seek(t) {
     if (!ctx) return;
@@ -529,9 +551,10 @@ const actions = {
       if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
       saveChat(updatedRoom);
       ctx?.layout?.chatAppended?.(optimisticMsg);
+      ctx?.layout?.danmaku?.(optimisticMsg);
     }
     const recentChat = (state.mesh?.chat || []).slice(-25);
-    ctx.conn.send('chat', { id: msgId, text: cleanText, ...extra, recentChat });
+    ctx.conn.send('chat', { id: msgId, clientMsgId: msgId, text: cleanText, ...extra, recentChat });
   },
   clearChat() {
     if (!ctx) return;
@@ -763,6 +786,9 @@ function onPlayerEvent(ev, arg) {
         actions.play();
       }
     }
+  }
+  if (ev === 'pause' && arg?.native && isLeader() && !ctx.host.loading && !ctx.userPaused) {
+    actions.pause();
   }
   if (ev === 'ended') {
     const curKey = mediaKey(state.mesh?.media);

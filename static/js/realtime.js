@@ -1,6 +1,6 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v28';
-import { api } from './api.js?v=20261030_v28';
+import { clock } from './sync.js?v=20261030_v29';
+import { api } from './api.js?v=20261030_v29';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -167,7 +167,7 @@ export class MeshConnection {
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this.seenEventIds.add(ev.id);
-      if (!isInit && (ev.cid !== this.clientId || (ev.type === 'chat' && ev.message?.system))) {
+      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat')) {
         this.onMessage?.(ev);
       }
     }
@@ -205,6 +205,9 @@ export class MeshConnection {
     try {
       const curMedia = this.lastRoom?.media;
       const curMediaUrl = String(curMedia?.url || curMedia?.videoId || '');
+      const chatArr = Array.isArray(this.lastRoom?.chat) ? this.lastRoom.chat : [];
+      const lastChatId = chatArr.length ? String(chatArr[chatArr.length - 1]?.id || '') : '';
+      const partArr = Array.isArray(this.lastRoom?.participants) ? this.lastRoom.participants : [];
       const reqBody = {
         ...payload,
         clientId: this.clientId,
@@ -216,7 +219,9 @@ export class MeshConnection {
         country: COUNTRY,
         isCreator: Boolean(this.isCreator),
         mediaUrl: curMediaUrl,
-        chatCount: Array.isArray(this.lastRoom?.chat) ? this.lastRoom.chat.length : 0,
+        chatCount: chatArr.length,
+        lastChatId,
+        participantCount: partArr.length || this.participantCount || 0,
       };
       if ((isInit || this.needsMediaPush || this.isCreator || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 15000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
@@ -255,8 +260,28 @@ export class MeshConnection {
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
         }
         this._dispatchHttpEvents(res, false);
-        const newCnt = Number(res.participantCount || this.participantCount || 1);
+        const newCnt = Number(res.participantCount || (Array.isArray(res.participants) ? res.participants.length : 0) || this.participantCount || 1);
         this.participantCount = newCnt;
+        let stateMutated = false;
+        if (Array.isArray(res.participants)) {
+          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const nextPIds = res.participants.map((p) => `${p.id}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          if (prevPIds !== nextPIds) {
+            this.lastRoom.participants = res.participants;
+            stateMutated = true;
+          }
+        }
+        if (Array.isArray(res.chat) && res.chat.length) {
+          const existingIds = new Set((this.lastRoom.chat || []).map((m) => m.id));
+          for (const m of res.chat) {
+            if (m && m.id && !existingIds.has(m.id)) {
+              existingIds.add(m.id);
+              this.lastRoom.chat = [...(this.lastRoom.chat || []), m].slice(-80);
+              this.onMessage?.({ type: 'chat', message: m });
+              stateMutated = true;
+            }
+          }
+        }
         if (res.media) {
           const prevMedia = this.lastRoom.media || {};
           const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
@@ -285,13 +310,14 @@ export class MeshConnection {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           }
         }
-        if (this.lastRoom.participantCount !== newCnt || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
+        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
           if (res.privacy) this.lastRoom.privacy = res.privacy;
           if (res.playMode) this.lastRoom.playMode = res.playMode;
           if (res.voipMode) this.lastRoom.voipMode = res.voipMode;
           if (res.name) this.lastRoom.name = res.name;
+          if (res.host_id) this.lastRoom.host_id = res.host_id;
           this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
         }
         return;
@@ -339,6 +365,24 @@ export class MeshConnection {
       const isPaused = obj.type === 'pause' || (obj.type === 'heartbeat' && obj.playing === false);
       const baseMedia = this.lastRoom?.media || {};
       this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
+    } else if (obj.type === 'chat' && obj.text) {
+      let hhmm = '';
+      try {
+        hhmm = new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+      } catch (e) {
+        const d = new Date();
+        hhmm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      }
+      const p2pMsg = {
+        id: obj.clientMsgId || `p2p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+        user: this.profile.name,
+        color: this.profile.color,
+        text: String(obj.text).slice(0, 600),
+        replyTo: obj.replyTo || null,
+        time: hhmm,
+        ts: Date.now() / 1000,
+      };
+      this._emitP2p({ event: { type: 'chat', cid: this.clientId, message: p2pMsg } });
     }
     if (this.mode === 'ws') {
       if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));

@@ -97,6 +97,9 @@ export const isHostOnly = () => {
   const myCid = state.clientId;
   const hostId = state.mesh.host_id;
   if (hostId && myCid && hostId === myCid) return true;
+  if (!state.mesh.curated && state.self?.name && state.mesh.creator && state.self.name.trim().toLowerCase() === String(state.mesh.creator).trim().toLowerCase()) return true;
+  const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
+  if (meP?.isHost) return true;
   try {
     const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`);
     if (savedCreator && myCid && savedCreator === myCid) return true;
@@ -108,6 +111,8 @@ export const isLeader = () => {
   if (isHostOnly()) return true;
   if (state.mesh.playMode === 'cohost') return true;
   if (Array.isArray(state.mesh.co_hosts) && state.clientId && state.mesh.co_hosts.includes(state.clientId)) return true;
+  const meCoP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === state.clientId) : null;
+  if (meCoP?.isCoHost) return true;
   return false;
 };
 export const canSelectVideo = () => {
@@ -145,6 +150,7 @@ export function saveWatchProgress(media, currentTime, duration) {
     list.unshift({
       historyId: id,
       title: media.title || 'Video',
+      channel: media.channel || media.artist || '',
       thumbnail: media.thumbnail || '',
       provider: media.catalogProvider || media.provider || 'netflix',
       catalogProvider: media.catalogProvider || media.provider || 'netflix',
@@ -159,7 +165,7 @@ export function saveWatchProgress(media, currentTime, duration) {
       duration: dur,
       updatedAt: Date.now(),
     });
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 18)));
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 40)));
   } catch (e) { /* ignore */ }
 }
 
