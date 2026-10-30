@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261030_v32';
-import { Html5Adapter } from './html5.js?v=20261030_v32';
-import { VimeoAdapter } from './vimeo.js?v=20261030_v32';
-import { EmbedAdapter } from './embed.js?v=20261030_v32';
-import { WebviewAdapter } from './webview.js?v=20261030_v32';
+import { YouTubeAdapter } from './youtube.js?v=20261030_v33';
+import { Html5Adapter } from './html5.js?v=20261030_v33';
+import { VimeoAdapter } from './vimeo.js?v=20261030_v33';
+import { EmbedAdapter } from './embed.js?v=20261030_v33';
+import { WebviewAdapter } from './webview.js?v=20261030_v33';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -85,9 +85,11 @@ export class PlayerHost {
 
   async setMedia(media, startAt = 0, shouldPlay = true) {
     const key = mediaKey(media);
-    if (key === this.key && this.adapter) return false;
+    const nextUrl = String(media?.url || media?.videoId || '');
+    if (key === this.key && this.adapter && this.loadedUrl === nextUrl) return false;
     this.destroyAdapterOnly();
     this.key = key;
+    this.loadedUrl = nextUrl;
     this.error = null;
     this.autoplayBlocked = false;
     if (!this.userMuted) this.muted = false;

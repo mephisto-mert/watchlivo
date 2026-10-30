@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v32';
-import { expectedPosition } from '../sync.js?v=20261030_v32';
-import { state } from '../store.js?v=20261030_v32';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v33';
+import { expectedPosition } from '../sync.js?v=20261030_v33';
+import { state } from '../store.js?v=20261030_v33';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -807,11 +807,11 @@ export class Html5Adapter {
     if (!dur || target < dur - 2) {
       this.hasEnded = false;
     }
-    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 1500 && Math.abs(target - this.lastSeekTarget) < 1.8) {
+    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 600 && Math.abs(target - this.lastSeekTarget) < 0.35) {
       return;
     }
     const v = this.video;
-    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.8) {
+    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.25) {
       return;
     }
     this.lastSeekTarget = target;
@@ -840,13 +840,15 @@ export class Html5Adapter {
     }
   }
   getTime() {
-    if (!this.video || this.video.readyState < 1) {
-      return Number(this.video?.currentTime || 0);
-    }
     if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500) {
       const cur = Number(this.video?.currentTime || 0);
-      if (cur < Math.max(0.5, this.initialSeekPending - 2.5)) return this.initialSeekPending;
+      if (!this.video || this.video.readyState < 1 || cur < Math.max(0.5, this.initialSeekPending - 2.5)) {
+        return this.initialSeekPending;
+      }
       this.initialSeekPending = 0;
+    }
+    if (!this.video || this.video.readyState < 1) {
+      return Number(this.video?.currentTime || 0);
     }
     if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 8500) {
       return this.lastSeekTarget;

@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261030_v32';
-import { state, set, getFriends } from '../store.js?v=20261030_v32';
-import { avatar, profileSetup } from '../profile.js?v=20261030_v32';
-import { api } from '../api.js?v=20261030_v32';
-import { createSelection } from './selection.js?v=20261030_v32';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261030_v32';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261030_v33';
+import { state, set, getFriends } from '../store.js?v=20261030_v33';
+import { avatar, profileSetup } from '../profile.js?v=20261030_v33';
+import { api } from '../api.js?v=20261030_v33';
+import { createSelection } from './selection.js?v=20261030_v33';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261030_v33';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261030_v32', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261030_v33', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -57,6 +57,7 @@ export async function createRoomWithMedia(media) {
     if (res.clientId) {
       sessionStorage.setItem('vortex_cid', res.clientId);
       sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
+      localStorage.setItem(`vortex_creator_flag_${res.room.id}`, '1');
       localStorage.removeItem(`vortex_creator_${res.room.id}`);
     }
     if (res.clientToken) {

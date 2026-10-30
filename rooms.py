@@ -682,14 +682,18 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     ser_parts = []
     for p in dedup_parts[:60]:
         cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
+        p_is_creator = _is_creator_of_room(room, p["id"], p)
+        cp["isCreator"] = p_is_creator
         cp["isHost"] = p["id"] == host_id
-        cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode
+        cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode or p_is_creator
         ser_parts.append(cp)
     if for_cid and for_cid in p_map and not any(x["id"] == for_cid for x in ser_parts):
         me_p = p_map[for_cid]
         cp_me = {k: v for k, v in me_p.items() if k not in ("lastSeen", "uid")}
+        me_is_creator = _is_creator_of_room(room, for_cid, me_p)
+        cp_me["isCreator"] = me_is_creator
         cp_me["isHost"] = for_cid == host_id
-        cp_me["isCoHost"] = (for_cid in co_set) or is_cohost_mode
+        cp_me["isCoHost"] = (for_cid in co_set) or is_cohost_mode or me_is_creator
         ser_parts = ser_parts[:59] + [cp_me]
     recent_events = [e for e in (room.get("events") or []) if t - float(e.get("ts") or 0) < 25.0][-30:]
     if for_cid:
@@ -1027,14 +1031,41 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
     return gone
 
 
+def _slugify_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9\-]", "", (name or "").lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c")).strip("-")
+
+
+def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, Any]] = None, data: Optional[Dict[str, Any]] = None) -> bool:
+    if not room or room.get("curated"):
+        return False
+    p = p or {}
+    data = data or {}
+    if p.get("isCreator") or data.get("isCreator"):
+        return True
+    creator_id = str(room.get("creatorId") or "").strip()
+    uid = str(p.get("uid") or data.get("uid") or "").strip()
+    if uid and creator_id and uid == creator_id:
+        return True
+    if cid and creator_id and cid == creator_id:
+        return True
+    raw_name = str(p.get("name") or data.get("username") or "").strip()
+    p_slug = _slugify_name(raw_name)
+    creator_slug = _slugify_name(room.get("creator") or "")
+    rid_str = str(room.get("id") or "")
+    if p_slug and len(p_slug) >= 3 and p_slug != "misafir":
+        if (creator_slug and p_slug == creator_slug) or rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-"):
+            return True
+    return False
+
+
 def ensure_host(room: Dict[str, Any]) -> None:
     humans = [cid for cid, p in room["participants"].items() if p.get("transport") != "bot"]
     cur_host_id = room.get("host_id")
     cur_host = room["participants"].get(cur_host_id) if cur_host_id else None
     if cur_host and (cur_host.get("transport") != "bot" or not humans):
         return
-    creator_cid = next((cid for cid, p in room["participants"].items() if (p.get("uid") and room.get("creatorId") and p["uid"] == room["creatorId"]) or (room.get("creatorId") and cid == room["creatorId"])), None)
-    if creator_cid and not room.get("host_transferred") and room["participants"].get(creator_cid, {}).get("transport") != "bot":
+    creator_cid = next((cid for cid, p in room["participants"].items() if p.get("transport") != "bot" and _is_creator_of_room(room, cid, p)), None)
+    if creator_cid and not room.get("host_transferred"):
         room["host_id"] = creator_cid
         return
     if humans:
@@ -1043,10 +1074,6 @@ def ensure_host(room: Dict[str, Any]) -> None:
         room["host_id"] = next(iter(room["participants"]))
     else:
         room["host_id"] = None
-
-
-def _slugify_name(name: str) -> str:
-    return re.sub(r"[^a-z0-9\-]", "", (name or "").lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c")).strip("-")
 
 
 def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transport: str) -> Tuple[Dict[str, Any], bool]:
@@ -1062,15 +1089,16 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         "uid": clean_str(data.get("uid"), 64),
     }
     p.update({k: v for k, v in fields.items() if v})
-    p.update({"transport": transport, "lastSeen": now()})
+    t_now = now()
+    p.update({"transport": transport, "lastSeen": t_now})
     if existing is None and p.get("name") and p.get("name") != "Misafir":
         live_ws = SOCKETS.get(room.get("id", ""), {})
         for old_cid, old_p in list((room.get("participants") or {}).items()):
             if old_cid == cid or old_p.get("transport") == "bot" or old_cid in live_ws:
                 continue
-            stale_age = now() - float(old_p.get("lastSeen") or 0.0)
+            stale_age = t_now - float(old_p.get("lastSeen") or 0.0)
             same_stale_user_device = (
-                stale_age > 35.0
+                stale_age > 12.0
                 and old_p.get("device") == p.get("device")
                 and ((p.get("uid") and old_p.get("uid") == p.get("uid")) or old_p.get("name") == p.get("name"))
             )
@@ -1084,43 +1112,32 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
                     if cid not in co_l:
                         co_l.append(cid)
                     room["co_hosts"] = co_l
+    is_creator = _is_creator_of_room(room, cid, p, data)
+    if is_creator:
+        p["isCreator"] = True
     room["participants"][cid] = p
     cur_host_id = room.get("host_id")
     cur_host = room["participants"].get(cur_host_id) if cur_host_id else None
 
-    # Creator or designated host preservation:
-    # If the joining user is the verified creator (by uid, signed creator cid, or room owner slug when current host is not the verified creator), restore host_id.
-    p_slug = _slugify_name(p.get("name", ""))
-    rid_str = str(room.get("id") or "")
-    cur_host_is_verified_creator = bool(
-        cur_host and room.get("creatorId") and (cur_host.get("uid") == room.get("creatorId") or cur_host_id == room.get("creatorId"))
-    )
-    slug_creator_match = bool(
-        not room.get("curated")
-        and p_slug
-        and len(p_slug) >= 3
-        and (rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-"))
-        and not cur_host_is_verified_creator
-    )
-    is_creator = bool(
-        (p.get("uid") and room.get("creatorId") and p["uid"] == room["creatorId"])
-        or (room.get("creatorId") and cid == room["creatorId"])
-        or (data.get("isCreator") and not cur_host_is_verified_creator)
-        or slug_creator_match
-    )
     if is_creator and not room.get("host_transferred"):
-        if not cur_host or cur_host.get("transport") == "bot" or not cur_host_is_verified_creator:
-            room["host_id"] = cid
-        if not room.get("creatorId") or slug_creator_match:
+        if not room.get("creatorId"):
             room["creatorId"] = p.get("uid") or cid
         co = list(room.get("co_hosts") or [])
         if cid not in co:
             co.append(cid)
             room["co_hosts"] = co
+        cur_host_alive = bool(
+            cur_host
+            and cur_host.get("transport") != "bot"
+            and (t_now - float(cur_host.get("lastSeen") or 0.0) <= 5.5)
+        )
+        cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
+        if not cur_host_alive or not cur_host_is_creator:
+            room["host_id"] = cid
     elif not (cur_host and cur_host.get("transport") != "bot"):
         if not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
             room["host_id"] = cid
-    room["lastActiveAt"] = now()
+    room["lastActiveAt"] = t_now
     return p, (existing is None)
 
 
@@ -1182,22 +1199,25 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     name = me["name"]
     p_slug = _slugify_name(name)
     rid_str = str(room.get("id") or "")
-    cur_host = room["participants"].get(room.get("host_id") or "")
-    cur_host_is_verified = bool(
-        cur_host and room.get("creatorId") and (cur_host.get("uid") == room.get("creatorId") or room.get("host_id") == room.get("creatorId"))
+    t_now = now()
+    cur_host_id = room.get("host_id")
+    cur_host = room["participants"].get(cur_host_id or "")
+    cur_host_alive = bool(
+        cur_host
+        and cur_host.get("transport") != "bot"
+        and (t_now - float(cur_host.get("lastSeen") or 0.0) <= 5.5)
     )
-    is_creator = bool(
-        (me.get("uid") and room.get("creatorId") and me["uid"] == room["creatorId"])
-        or (room.get("creatorId") and cid == room["creatorId"])
-        or (not room.get("curated") and p_slug and len(p_slug) >= 3 and (rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-")))
-    )
-    if is_creator and not room.get("host_transferred"):
-        co = list(room.get("co_hosts") or [])
-        if cid not in co:
-            co.append(cid)
-            room["co_hosts"] = co
-        if room.get("host_id") != cid and not cur_host_is_verified and not cur_host:
-            room["host_id"] = cid
+    cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
+    is_creator = _is_creator_of_room(room, cid, me, data)
+    if is_creator:
+        me["isCreator"] = True
+        if not room.get("host_transferred"):
+            co = list(room.get("co_hosts") or [])
+            if cid not in co:
+                co.append(cid)
+                room["co_hosts"] = co
+            if room.get("host_id") != cid and (not cur_host_alive or not cur_host_is_creator):
+                room["host_id"] = cid
     is_host = cid == room["host_id"]
     mode = room["playMode"]
     co_hosts = set(room.get("co_hosts") or [])
@@ -1206,8 +1226,17 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
 
     if mtype == "heartbeat":
         cur_host = room["participants"].get(room.get("host_id") or "")
-        if not is_host and not (can_control and (not cur_host or cur_host.get("transport") == "bot")):
-            return out
+        cur_host_alive = bool(
+            cur_host
+            and cur_host.get("transport") != "bot"
+            and (t_now - float(cur_host.get("lastSeen") or 0.0) <= 5.5)
+        )
+        if not is_host:
+            if can_control and not cur_host_alive:
+                room["host_id"] = cid
+                is_host = True
+            else:
+                return out
         if not room["media"].get("url") and not room["media"].get("videoId"):
             if isinstance(data.get("activeMedia"), dict) and (data["activeMedia"].get("url") or data["activeMedia"].get("videoId")):
                 try:
@@ -1223,21 +1252,27 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         except (TypeError, ValueError):
             inc_t = 0.0
         cur_m = room["media"]
-        cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, now() - float(cur_m.get("updatedAt") or now())) * float(cur_m.get("rate") or 1.0) if cur_m.get("playing") else 0.0)
-        if cur_live > 25.0 and inc_t < 10.0:
+        cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if cur_m.get("playing") else 0.0)
+        if cur_live > 30.0 and inc_t <= 0.15:
             return out
         _apply_time(room, data)
         if "playing" in data:
             want_play = bool(data["playing"])
             last_pause_at = float(room["media"].get("lastExplicitPauseAt") or 0.0)
-            if want_play and not room["media"].get("playing") and (now() - last_pause_at < 30.0):
+            if want_play and not room["media"].get("playing") and (t_now - last_pause_at < 15.0):
                 pass
             else:
                 room["media"]["playing"] = want_play
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
         room["rev"] = int(room.get("rev") or 1) + 1
-        out["broadcast"].append((_sync_event(room, "heartbeat", name), cid))
+        hb_ev = _sync_event(room, "heartbeat", name)
+        hb_ev["id"] = "ev_" + uuid.uuid4().hex[:10]
+        hb_ev["ts"] = t_now
+        hb_ev["cid"] = cid
+        prev_evs = [e for e in (room.get("events") or []) if not (e.get("type") == "sync" and e.get("action") == "heartbeat")]
+        room["events"] = prev_evs[-34:] + [hb_ev]
+        out["broadcast"].append((hb_ev, cid))
         return out
 
     if mtype == "resolve_media":
@@ -1248,14 +1283,14 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             cur_unresolved = not cur_url or cur_url.startswith("/api/rave/resolve-catalog")
             if cur_unresolved or (can_control and media_key(cur_m) == media_key(incoming) and incoming.get("url") != cur_url):
                 if cur_unresolved and float(cur_m.get("currentTime") or 0.0) <= 0.5:
-                    cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0), float(incoming.get("currentTime") or 0.0))
+                    cur_m["currentTime"] = max(0.0, float(incoming.get("currentTime") or 0.0))
                 elif cur_m.get("playing"):
-                    elapsed = max(0.0, now() - float(cur_m.get("updatedAt") or now())) * float(cur_m.get("rate") or 1.0)
+                    elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
                     cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, float(incoming.get("currentTime") or 0.0))
                 for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]
-                cur_m["updatedAt"] = now()
+                cur_m["updatedAt"] = t_now
                 room["media"] = cur_m
                 room["rev"] = int(room.get("rev") or 1) + 1
                 room["_tok_sig"] = ""
@@ -1269,13 +1304,16 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             return out
         if not room["media"].get("url") and not room["media"].get("videoId"):
             return out
+        if (is_creator and not room.get("host_transferred")) or not cur_host_alive:
+            room["host_id"] = cid
+            is_host = True
         _apply_time(room, data)
         if mtype == "play":
             room["media"]["playing"] = True
             room["media"]["lastExplicitPauseAt"] = 0.0
         elif mtype == "pause":
             room["media"]["playing"] = False
-            room["media"]["lastExplicitPauseAt"] = now()
+            room["media"]["lastExplicitPauseAt"] = t_now
         elif mtype == "rate":
             try:
                 room["media"]["rate"] = min(2.0, max(0.25, float(data.get("rate", 1.0))))
@@ -1285,7 +1323,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         room["rev"] = int(room.get("rev") or 1) + 1
         ev = _sync_event(room, mtype, name)
         ev["id"] = "ev_" + uuid.uuid4().hex[:10]
-        ev["ts"] = now()
+        ev["ts"] = t_now
         ev["cid"] = cid
         room["events"] = (room.get("events") or [])[-34:] + [ev]
         out["broadcast"].append((ev, cid))
@@ -1300,6 +1338,9 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if mode in ("leader", "autoplay", "vote") and not can_control and not same_creator_name and room_has_media:
             deny("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.")
             return out
+        if (is_creator and not room.get("host_transferred")) or not cur_host_alive:
+            room["host_id"] = cid
+            is_host = True
         try:
             start_pos = max(0.0, float(data.get("currentTime") or 0.0))
         except (TypeError, ValueError):

@@ -248,6 +248,52 @@ class RegressionTests(unittest.TestCase):
         srv_py = (root / "server.py").read_text(encoding="utf-8")
         self.assertIn("non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]", srv_py)
 
+    def test_multi_device_creator_role_and_exact_frame_sync(self):
+        room = rooms.new_room(
+            "mert-can-yildiz-odasi-f1e42",
+            "Mert Can Yıldız odası",
+            "public",
+            "leader",
+            "Mert Can Yıldız",
+            "h_web1",
+            "",
+        )
+        rooms.add_participant(room, "h_web1", {"username": "Mert Can Yıldız", "device": "Web", "isCreator": True}, "http")
+        room["host_id"] = "h_web1"
+        rooms.set_media(room, {"title": "Zmora", "url": "https://cdn.example.com/zmora/master.m3u8", "provider": "hls"}, "Mert Can Yıldız", 120.0)
+        # Second device (Desktop App) of the same creator joins
+        rooms.add_participant(room, "h_desk2", {"username": "Mert Can Yıldız", "device": "Masaüstü"}, "http")
+        # Guest viewer joins
+        rooms.add_participant(room, "h_guest3", {"username": "Misafir", "device": "Mobil"}, "http")
+        # Host stays on h_web1 (no ping-pong host stealing while h_web1 is alive), and BOTH creator sessions have isCreator=True & co_hosts
+        self.assertEqual(room["host_id"], "h_web1")
+        self.assertIn("h_web1", room["co_hosts"])
+        self.assertIn("h_desk2", room["co_hosts"])
+        ser = rooms.serialize(room)
+        by_id = {p["id"]: p for p in ser["participants"]}
+        self.assertTrue(by_id["h_web1"]["isCreator"])
+        self.assertTrue(by_id["h_web1"]["isHost"])
+        self.assertTrue(by_id["h_desk2"]["isCreator"])
+        self.assertTrue(by_id["h_desk2"]["isCoHost"])
+        self.assertFalse(by_id["h_guest3"]["isCreator"])
+        # Heartbeat from non-host (h_desk2) while h_web1 is alive is ignored so two windows don't fight over timestamps
+        rooms.handle_action(room, "h_desk2", {"type": "heartbeat", "currentTime": 15.0, "playing": True})
+        self.assertGreaterEqual(room["media"]["currentTime"], 120.0)
+        # Heartbeat from active host (h_web1) updates server timestamp and emits heartbeat sync event
+        hb_out = rooms.handle_action(room, "h_web1", {"type": "heartbeat", "currentTime": 145.5, "playing": True})
+        self.assertAlmostEqual(room["media"]["currentTime"], 145.5, places=1)
+        self.assertTrue(any(e.get("action") == "heartbeat" for e, _ in hb_out["broadcast"]))
+        # Explicit seek/pause from creator's second device (h_desk2) promotes h_desk2 to host_id and syncs all clients
+        seek_out = rooms.handle_action(room, "h_desk2", {"type": "seek", "currentTime": 310.25})
+        self.assertEqual(room["host_id"], "h_desk2")
+        self.assertAlmostEqual(room["media"]["currentTime"], 310.25, places=2)
+        self.assertEqual(seek_out["broadcast"][0][0]["action"], "seek")
+        # If h_desk2 goes stale (>6s) and creator refreshes on Web with new cid h_web_new, h_web_new immediately reclaims host_id
+        room["participants"]["h_desk2"]["lastSeen"] = rooms.now() - 8.0
+        room["participants"]["h_web1"]["lastSeen"] = rooms.now() - 8.0
+        rooms.add_participant(room, "h_web_new", {"username": "Mert Can Yıldız", "device": "Web"}, "http")
+        self.assertEqual(room["host_id"], "h_web_new")
+
 
 if __name__ == '__main__':
     unittest.main()

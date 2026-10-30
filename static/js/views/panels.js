@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v32';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261030_v32';
-import { avatar } from '../profile.js?v=20261030_v32';
-import { clock } from '../sync.js?v=20261030_v32';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v32';
-import { copyInvite, inviteUrl } from './chat.js?v=20261030_v32';
-import { parseVideoUrl } from '../providers.js?v=20261030_v32';
-import { resolveMedia } from './selection.js?v=20261030_v32';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v33';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261030_v33';
+import { avatar } from '../profile.js?v=20261030_v33';
+import { clock } from '../sync.js?v=20261030_v33';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v33';
+import { copyInvite, inviteUrl } from './chat.js?v=20261030_v33';
+import { parseVideoUrl } from '../providers.js?v=20261030_v33';
+import { resolveMedia } from './selection.js?v=20261030_v33';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -253,7 +253,7 @@ function Participants(ctx) {
           avatar(p, 36, { speaking: p.speaking, online: true }),
           h('div', { class: 'raver-name' },
             h('b', {}, p.name, isMe ? ' (sen)' : '', p.speaking ? h('span', { class: 'speaking-pill' }, '🎙️ Konuşuyor') : null),
-            h('span', {}, `${p.device || 'Web'}${p.muted ? ' · mikrofon kapalı' : ' · mikrofon açık'}${p.isCoHost && !p.isHost ? ' · 🤝 Ortak Lider' : ''}`),
+            h('span', {}, `${p.device || 'Web'}${p.muted ? ' · mikrofon kapalı' : ' · mikrofon açık'}${p.isCreator ? ' · 👑 Oda Kurucusu' : (p.isCoHost && !p.isHost ? ' · 🤝 Ortak Lider' : '')}`),
             !isMe && !isBot ? h('div', { class: 'peer-vol-row' },
               h('span', { class: 'peer-vol-lbl' }, `🔊 %${peerVol}`),
               h('input', {
@@ -268,7 +268,7 @@ function Participants(ctx) {
                   e.target.previousElementSibling.textContent = `🔊 %${v}`;
                 },
               })) : null),
-          p.isHost ? h('span', { class: 'crown', title: 'Oda lideri', html: icons.crown }) : null,
+          (p.isHost || p.isCreator) ? h('span', { class: 'crown', title: p.isHost ? 'Oda Lideri' : 'Oda Kurucusu', html: icons.crown }) : null,
           !isMe && !isBot ? h('button', {
             type: 'button',
             class: `btn sm friend-toggle-btn ${friendAdded ? 'on' : ''}`,

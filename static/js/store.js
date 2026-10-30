@@ -92,18 +92,31 @@ export function setView(side, value) {
   set({ view: { ...state.view, [side]: next, ...(collapseOther ? { [other]: 'Collapsed' } : {}) } });
 }
 
-export const isHostOnly = () => {
+export const isCreatorSelf = () => {
+  if (!state.mesh || state.mesh.curated) return false;
+  const myCid = state.clientId;
+  const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
+  if (meP?.isCreator) return true;
+  if (state.self?.name && state.mesh.creator && state.self.name.trim().toLowerCase() === String(state.mesh.creator).trim().toLowerCase()) return true;
+  try {
+    const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`) || localStorage.getItem(`vortex_creator_${state.mesh.id}`);
+    if (savedCreator && myCid && savedCreator === myCid) return true;
+  } catch (e) { /* ignore */ }
+  return false;
+};
+export const isActiveTimeKeeper = () => {
   if (!state.mesh) return false;
   const myCid = state.clientId;
   const hostId = state.mesh.host_id;
   if (hostId && myCid && hostId === myCid) return true;
-  if (!state.mesh.curated && state.self?.name && state.mesh.creator && state.self.name.trim().toLowerCase() === String(state.mesh.creator).trim().toLowerCase()) return true;
   const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
   if (meP?.isHost) return true;
-  try {
-    const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`);
-    if (savedCreator && myCid && savedCreator === myCid) return true;
-  } catch (e) { /* ignore */ }
+  if ((!hostId || String(hostId).startsWith('bot_')) && isCreatorSelf()) return true;
+  return false;
+};
+export const isHostOnly = () => {
+  if (!state.mesh) return false;
+  if (isActiveTimeKeeper() || isCreatorSelf()) return true;
   return false;
 };
 export const isLeader = () => {

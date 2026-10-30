@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v32';
-import { api } from './api.js?v=20261030_v32';
-import { state } from './store.js?v=20261030_v32';
+import { clock } from './sync.js?v=20261030_v33';
+import { api } from './api.js?v=20261030_v33';
+import { state } from './store.js?v=20261030_v33';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -23,7 +23,7 @@ export class MeshConnection {
       this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
       const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || '';
       this.clientId = creatorCid || sessionStorage.getItem('vortex_cid') || null;
-      this.isCreator = Boolean(creatorCid && this.clientId === creatorCid);
+      this.isCreator = Boolean((creatorCid && this.clientId === creatorCid) || localStorage.getItem(`vortex_creator_flag_${roomId}`) === '1');
     } catch (e) { /* ignore */ }
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
@@ -224,7 +224,7 @@ export class MeshConnection {
         lastChatId,
         participantCount: partArr.length || this.participantCount || 0,
       };
-      if ((isInit || this.needsMediaPush || this.isCreator || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 15000)) && curMedia && (curMedia.url || curMedia.videoId)) {
+      if ((isInit || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
         this.needsMediaPush = false;
       }
@@ -265,8 +265,8 @@ export class MeshConnection {
         this.participantCount = newCnt;
         let stateMutated = false;
         if (Array.isArray(res.participants)) {
-          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
-          const nextPIds = res.participants.map((p) => `${p.id}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const nextPIds = res.participants.map((p) => `${p.id}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
           if (prevPIds !== nextPIds) {
             this.lastRoom.participants = res.participants;
             stateMutated = true;
@@ -311,15 +311,18 @@ export class MeshConnection {
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - Number(res.media.meshStateTime ?? res.media.updatedAt ?? nowSec)) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
-          const significantJump = isPaused ? (posDiff > 0.6) : (posDiff > 2.8);
+          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
           this.lastRoom.media = { ...this.lastRoom.media, ...res.media };
           if (statusChanged || significantJump) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           } else if (state.mesh?.media) {
-            Object.assign(state.mesh.media, this.lastRoom.media);
+            const isSelfHost = Boolean((res.host_id || this.lastRoom.host_id) && this.clientId && (res.host_id || this.lastRoom.host_id) === this.clientId);
+            if (!isSelfHost || Number(res.media.meshStateTime || 0) >= Number(state.mesh.media.meshStateTime || 0) - 0.2) {
+              Object.assign(state.mesh.media, this.lastRoom.media);
+            }
           }
         }
-        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
+        if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
           if (res.privacy) this.lastRoom.privacy = res.privacy;

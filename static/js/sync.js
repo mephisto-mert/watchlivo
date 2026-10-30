@@ -1,16 +1,16 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-const CYCLE_MS = 500;
-const JUMP_DELTA = 2.4;
-const IN_SYNC = 0.15;
-const COARSE = 4.20;          // Coarse speedSync threshold
-const FLIP = 4.80;            // Hysteresis threshold
-const COARSE_MOD = 0.030;     // Gentle ±3.0% max rate nudge for HTML5 video
-const FINE_MOD = 0.015;       // Gentle ±1.5% fine rate nudge
-const RUNWAY_SEC = 10.0;      // Rave bZ = 0xa (10s buffered runway required to speed up when behind)
-const STARVE_CEILING = 45.0;  // Rave c0 = 0x2d (45s max behind before forcing jump)
-const DEFER_MAX_MS = 30000;   // Rave c1 = 0x7530 (30s max defer window while buffer builds)
-const SEEK_SETTLE_MS = 3500;
+const CYCLE_MS = 450;
+const JUMP_DELTA = 1.35;
+const IN_SYNC = 0.12;
+const COARSE = 0.55;          // Coarse speedSync threshold
+const FLIP = 1.10;            // Hysteresis threshold
+const COARSE_MOD = 0.060;     // Responsive ±6.0% rate nudge for HTML5 video
+const FINE_MOD = 0.030;       // Responsive ±3.0% fine rate nudge
+const RUNWAY_SEC = 3.0;       // Buffered runway required to speed up when behind
+const STARVE_CEILING = 45.0;  // Max behind before forcing jump
+const DEFER_MAX_MS = 30000;   // Max defer window while buffer builds
+const SEEK_SETTLE_MS = 2200;
 
 export const clock = {
   offset: 0, bestRtt: Infinity, samples: 0,
@@ -149,13 +149,13 @@ export class SyncEngine {
     }
     const statusChanged = status !== this.lastStatus;
     this.lastStatus = status;
-    const expectedJump = Number.isFinite(this.lastExpected) && Math.abs(expected - this.lastExpected) > 3.2;
+    const expectedJump = Number.isFinite(this.lastExpected) && Math.abs(expected - this.lastExpected) > 1.8;
     this.lastExpected = expected;
     const stateChanged = statusChanged || expectedJump;
     if (stateChanged) {
       this.lastJumpAt = now;
       this.reJumps = 0;
-      if (!leader && (statusChanged || Math.abs(expected - (this.lastSeekTarget ?? -999)) > 4.5)) {
+      if (!leader && (statusChanged || Math.abs(expected - (this.lastSeekTarget ?? -999)) > 1.8)) {
         this.seekUntil = 0;
         this.deferStartedAt = 0;
       }
@@ -164,10 +164,10 @@ export class SyncEngine {
 
     if (status !== 'PLAYING') {
       if (!ad.isPaused()) ad.pause();
-      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.5) {
+      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.35) {
         this.lastSeekTarget = expected;
         ad.seek(expected);
-        this.seekUntil = now + 1500;
+        this.seekUntil = now + 1200;
       }
       ad.setRate(base);
       this.mode = 'paused';
@@ -176,42 +176,42 @@ export class SyncEngine {
     }
 
     if (ad.isPaused()) {
-      if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 2000) {
+      if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
         ad.play();
       }
       this.mode = 'inSync';
       this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
-      return 900;
+      return 600;
     }
 
     if (this.wasBuffering && !ad.isBuffering()) {
       this.wasBuffering = false;
       this.deferStartedAt = 0;
-      if (!leader && abs > 4.0 && now > this.seekUntil) {
+      if (!leader && abs > 1.35 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         ad.seek(expected);
         this.seekUntil = now + SEEK_SETTLE_MS;
       } else {
-        this.seekUntil = Math.max(this.seekUntil, now + 1800);
+        this.seekUntil = Math.max(this.seekUntil, now + 1000);
       }
     }
     if (ad.isBuffering()) {
       this.wasBuffering = true;
       this.mode = 'buffering';
       this.onStatus({ mode: 'buffering', delta: 0, curr, expected: curr, rate: ad.getRate() });
-      return 600;
+      return 500;
     }
 
     if (leader) {
       if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
       const startTarget = Number(media.meshStatePosition ?? media.currentTime ?? 0);
-      if (!this.didInitialSeek && startTarget >= 8 && curr < 2 && now - (this.loadedAt || 0) < 8000) {
+      if (!this.didInitialSeek && startTarget >= 5 && curr < 2 && now - (this.loadedAt || 0) < 8000) {
         this.didInitialSeek = true;
         this.lastSeekTarget = startTarget;
         ad.seek(startTarget);
         this.seekUntil = now + SEEK_SETTLE_MS;
-      } else if (curr > 1.0 && !ad.video?.seeking && ((abs > 2.2 && now - this.lastLeaderBroadcast > 5000) || (now - this.lastLeaderBroadcast > 9000))) {
+      } else if (curr > 0.2 && !ad.video?.seeking && ((abs > 1.0 && now - this.lastLeaderBroadcast > 1800) || (now - this.lastLeaderBroadcast > 3000))) {
         this.lastLeaderBroadcast = now;
         this.onLeaderSync(curr);
       }
@@ -220,41 +220,27 @@ export class SyncEngine {
       return CYCLE_MS;
     }
 
-    const activelySeekingToTarget = Boolean(ad.video?.seeking && Math.abs(expected - (this.lastSeekTarget ?? -999)) < 5.0);
-    if (activelySeekingToTarget || now < this.seekUntil || (curr < 0.1 && now - (this.loadedAt || 0) < 4500 && expected < 8)) {
+    const activelySeekingToTarget = Boolean(ad.video?.seeking && Math.abs(expected - (this.lastSeekTarget ?? -999)) < 3.5);
+    if (activelySeekingToTarget || now < this.seekUntil || (curr < 0.1 && now - (this.loadedAt || 0) < 2500 && expected < 3)) {
       this.mode = 'inSync';
       this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
-      return 900;
+      return 500;
     }
 
     const quantized = !!ad.caps.rateSteps;
     if (this.pendingSeekAt && !ad.isPaused()) {
       const lat = (now - this.pendingSeekAt) / 1000;
-      this.bufferLatency = Math.min(10, Math.max(0.8, (this.bufferLatency || 1.5) * 0.5 + lat * 0.5));
+      this.bufferLatency = Math.min(5, Math.max(0.2, (this.bufferLatency || 0.4) * 0.5 + lat * 0.5));
       this.pendingSeekAt = 0;
     }
-    const lead = quantized ? 0.35 : 0.05;
+    const lead = quantized ? 0.30 : 0.05;
     const buffered = (t) => (ad.isBuffered ? ad.isBuffered(t) : true);
     const bufEnd = Number(ad.getBuffered?.() || 0);
     const runway = bufEnd > curr ? (bufEnd - curr) : 0;
     if ((stateChanged && abs > 0.25 && now > this.seekUntil) || abs > JUMP_DELTA) {
       const inBuf = buffered(expected + lead);
-      const action = (!statusChanged && delta > 0 && delta < 18 && !inBuf) ? this.decideBehindAction(ad, curr, expected, delta) : 'jump';
-      if (action === 'defer') {
-        if (!this.deferStartedAt) this.deferStartedAt = now;
-        if (now - this.deferStartedAt < 8000) {
-          if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
-          this.mode = 'inSync';
-          this.onStatus({ mode: 'inSync', delta, curr, expected, rate: ad.getRate() });
-          return 1200;
-        }
-      } else if (action === 'speed') {
-        this.deferStartedAt = 0;
-        this.speedSync(curr, expected, base);
-        return CYCLE_MS;
-      }
       this.deferStartedAt = 0;
-      const targetPos = inBuf ? expected + lead : expected + Math.min(3, this.bufferLatency || 0.15) * base;
+      const targetPos = inBuf ? expected + lead : expected + Math.min(0.6, this.bufferLatency || 0.15) * base;
       this.lastSeekTarget = targetPos;
       ad.seek(targetPos);
       if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
@@ -270,14 +256,14 @@ export class SyncEngine {
       this.mode = 'inSync';
     } else if (abs > IN_SYNC && ad.caps.rate) {
       this.deferStartedAt = 0;
-      if (delta > 0 && bufEnd > 0 && runway < 5.0) {
+      if (delta > 0 && bufEnd > 0 && runway < 1.5) {
         if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
         this.mode = 'inSync';
-        timeout = 1500;
+        timeout = 800;
       } else {
         const sp = this.speedSync(curr, expected, base);
         if (Math.abs(ad.getRate() - sp.rate) >= 0.001) ad.setRate(sp.rate);
-        timeout = Math.max(1200, sp.timeout);
+        timeout = Math.max(450, sp.timeout);
         this.mode = 'speedSync';
       }
     } else {
