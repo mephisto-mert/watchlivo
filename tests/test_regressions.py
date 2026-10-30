@@ -159,6 +159,83 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_res.status_code, 200)
         self.assertTrue(bool(r_res.json().get("url")))
 
+    def test_media_key_stability_across_catalog_resolution(self):
+        self.assertEqual(rooms.media_key({}), "")
+        self.assertEqual(rooms.media_key(None), "")
+        unresolved_title_only = {
+            "title": "YAGA — 1. Sezon 2. Bölüm",
+            "season": 1,
+            "episode": 2,
+            "url": "/api/rave/resolve-catalog?title=YAGA&season=1&episode=2",
+        }
+        resolved_title_only = {
+            "title": "YAGA — 1. Sezon 2. Bölüm",
+            "season": 1,
+            "episode": 2,
+            "url": "/api/rave/stream?sid=abc123xyz",
+        }
+        self.assertEqual(rooms.media_key(unresolved_title_only), rooms.media_key(resolved_title_only))
+        unresolved_cat = {"id": "acx_9988", "season": 1, "episode": 3, "url": "/api/rave/resolve-catalog?id=acx_9988"}
+        resolved_cat = {"id": "acx_9988", "season": 1, "episode": 3, "url": "https://cdn.example.com/hls/master.m3u8"}
+        self.assertEqual(rooms.media_key(unresolved_cat), "cat|acx_9988|1|3")
+        self.assertEqual(rooms.media_key(unresolved_cat), rooms.media_key(resolved_cat))
+
+    def test_resolve_media_guards_and_broadcast(self):
+        room = rooms.new_room("res_guard_room")
+        rooms.add_participant(room, "host1", {"username": "HostUser"}, "ws")
+        rooms.add_participant(room, "guest1", {"username": "GuestUser"}, "ws")
+        room["host_id"] = "host1"
+        rooms.set_media(room, {
+            "tmdbId": "550",
+            "title": "Fight Club",
+            "url": "/api/rave/resolve-catalog?tmdbId=550",
+        }, "HostUser", 42.0)
+        out1 = rooms.handle_action(room, "guest1", {
+            "type": "resolve_media",
+            "tmdbId": "550",
+            "title": "Fight Club",
+            "url": "https://cdn.example.com/fightclub/master.m3u8",
+            "streamType": "hls",
+        })
+        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
+        self.assertGreaterEqual(room["media"]["currentTime"], 42.0)
+        self.assertEqual(len(out1["broadcast"]), 1)
+        self.assertEqual(out1["broadcast"][0][0]["action"], "resolve_media")
+        # Non-leader cannot overwrite already-resolved URL with a different URL
+        rooms.handle_action(room, "guest1", {
+            "type": "resolve_media",
+            "tmdbId": "550",
+            "title": "Fight Club",
+            "url": "https://evil.example.com/other.m3u8",
+        })
+        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
+        # Unresolved catalog URL is never accepted into resolve_media
+        rooms.handle_action(room, "host1", {
+            "type": "resolve_media",
+            "tmdbId": "550",
+            "title": "Fight Club",
+            "url": "/api/rave/resolve-catalog?tmdbId=550",
+        })
+        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
+
+    def test_proxy_segment_cache_bounds(self):
+        server._SEGMENT_CACHE.clear()
+        for idx in range(35):
+            server._SEGMENT_CACHE[f"https://cdn.example.com/seg_{idx}.ts|"] = (b"G" * 188, 200, "", "video/mp2t", 9999999999.0)
+            if len(server._SEGMENT_CACHE) > 28:
+                oldest_k = min(server._SEGMENT_CACHE, key=lambda k: server._SEGMENT_CACHE[k][4])
+                server._SEGMENT_CACHE.pop(oldest_k, None)
+        self.assertLessEqual(len(server._SEGMENT_CACHE), 28)
+
+    def test_platform_download_endpoints_and_manifest(self):
+        m_resp = self.client.get("/manifest.json")
+        self.assertEqual(m_resp.status_code, 200)
+        icons = m_resp.json().get("icons") or []
+        self.assertGreaterEqual(len(icons), 3)
+        for path in ("/download/apk", "/download/ipa", "/download/ios", "/download/windows", "/download/exe"):
+            r = self.client.get(path, follow_redirects=False)
+            self.assertIn(r.status_code, (200, 302), path)
+
 
 if __name__ == '__main__':
     unittest.main()

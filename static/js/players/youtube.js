@@ -136,7 +136,11 @@ export class YouTubeAdapter {
           onError: (e) => {
             if (this.altQueue.length > 0 && this.player?.loadVideoById) {
               const nextVid = this.altQueue.shift();
-              try { this.player.loadVideoById(nextVid, Math.floor(this.getTime() || startAt)); return; } catch (err) { /* fallback */ }
+              try {
+                this.player.loadVideoById(nextVid, Math.floor(this.getTime() || startAt));
+                done();
+                return;
+              } catch (err) { /* fallback */ }
             }
             if (this.media?.audioPreviewUrl || this.media?.isMusic) {
               done();
@@ -345,7 +349,7 @@ export class YouTubeAdapter {
     clearInterval(this.subTimer);
     this.subs?.stopDubAudio?.();
     this.subs?.destroy?.();
-    if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttr?.('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
+    if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute?.('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }
     if (this.audioEl) { try { this.audioEl.pause(); this.audioEl.remove(); } catch (e) { /* ignore */ } this.audioEl = null; }
     try { this.player?.destroy?.(); } catch (e) { /* ignore */ }

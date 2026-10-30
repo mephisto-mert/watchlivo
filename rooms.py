@@ -303,6 +303,8 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
 def media_key(m: Dict[str, Any]) -> str:
     if not m:
         return ""
+    if not (m.get("url") or m.get("videoId") or m.get("tmdbId") or m.get("imdbId") or m.get("id")):
+        return ""
     try:
         s = max(1, int(m.get("season") or 1))
     except (TypeError, ValueError):
@@ -313,6 +315,19 @@ def media_key(m: Dict[str, Any]) -> str:
         e = 1
     if m.get("tmdbId"):
         return f"tmdb|{m.get('tmdbId')}|{m.get('mediaType') or 'movie'}|{s}|{e}"
+    if m.get("imdbId"):
+        return f"imdb|{m.get('imdbId')}|{m.get('mediaType') or 'movie'}|{s}|{e}"
+    mid = str(m.get("id") or "").strip()
+    if mid and re.match(r"^(cat[-_]|acx[-_]|anx[-_]|t24[-_]|yt[-_]|tv[-_]|radyo[-_]|fhd[-_]|hfnl[-_]|dbx[-_]|dl[-_]|dp[-_]|trd[-_]|krm[-_])", mid, re.I):
+        return f"cat|{mid}|{s}|{e}"
+    if m.get("videoId"):
+        return f"vid|{m.get('provider') or 'ext'}|{m.get('videoId')}|{s}|{e}"
+    is_catalog_stream = bool(m.get("seriesTitle") or m.get("originalTitle") or m.get("catalogProvider") or "/api/rave/" in str(m.get("url") or "") or m.get("season") or m.get("episode"))
+    raw_title = str(m.get("seriesTitle") or m.get("originalTitle") or m.get("title") or "").strip().lower()
+    if is_catalog_stream and raw_title and raw_title not in ("video", "medya", "stream", "canlı yayın", "medya yükleniyor…", "medya seçilmedi"):
+        base_title = re.sub(r"\s+[—–-]\s*\d+\.\s*sezon.*$", "", raw_title, flags=re.I).strip()
+        if base_title and base_title not in ("video", "medya", "stream"):
+            return f"title|{base_title}|{m.get('mediaType') or 'movie'}|{s}|{e}"
     return f"{m.get('provider')}|{m.get('videoId') or ''}|{m.get('url') or ''}|{s}|{e}"
 
 
@@ -628,7 +643,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     m = dict(_media_defaults(room))
-    if not has_humans:
+    if not has_humans and room.get("curated"):
         room["media"]["currentTime"] = 0.0
         room["media"]["updatedAt"] = t
         m["currentTime"] = 0.0
@@ -977,7 +992,10 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
             continue
         if p.get("transport") == "http" and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL:
             gone.append(room["participants"].pop(cid))
-        elif p.get("transport") == "ws" and not STORE.shared and cid not in live_ws:
+        elif p.get("transport") == "ws" and (
+            (STORE.shared and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL)
+            or (not STORE.shared and cid not in live_ws and t - p.get("lastSeen", 0) > 12.0)
+        ):
             gone.append(room["participants"].pop(cid))
             left_map[cid] = t
     room["left"] = {k: v for k, v in left_map.items() if t - float(v or 0) < 45.0}
@@ -1192,7 +1210,11 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             return out
         if not room["media"].get("url") and not room["media"].get("videoId"):
             if isinstance(data.get("activeMedia"), dict) and (data["activeMedia"].get("url") or data["activeMedia"].get("videoId")):
-                set_media(room, data["activeMedia"], name, float(data.get("currentTime") or data["activeMedia"].get("currentTime") or 0.0))
+                try:
+                    restore_t = float(data.get("currentTime") or data["activeMedia"].get("currentTime") or 0.0)
+                except (TypeError, ValueError):
+                    restore_t = 0.0
+                set_media(room, data["activeMedia"], name, restore_t)
                 room["rev"] = int(room.get("rev") or 1) + 5
                 out["broadcast"].append((_room_event(room, "media_changed", by=name), None))
             return out
@@ -1222,12 +1244,20 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         cur_m = room.get("media") or {}
         incoming = clean_media(data)
         if incoming.get("url") and not str(incoming.get("url")).startswith("/api/rave/resolve-catalog"):
-            if not cur_m.get("url") or str(cur_m.get("url")).startswith("/api/rave/resolve-catalog") or media_key(cur_m) == media_key(incoming):
+            cur_url = str(cur_m.get("url") or "")
+            cur_unresolved = not cur_url or cur_url.startswith("/api/rave/resolve-catalog")
+            if cur_unresolved or (can_control and media_key(cur_m) == media_key(incoming) and incoming.get("url") != cur_url):
+                if cur_m.get("playing"):
+                    elapsed = max(0.0, now() - float(cur_m.get("updatedAt") or now())) * float(cur_m.get("rate") or 1.0)
+                    cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, float(incoming.get("currentTime") or 0.0))
                 for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]
+                cur_m["updatedAt"] = now()
                 room["media"] = cur_m
                 room["rev"] = int(room.get("rev") or 1) + 1
+                room["_tok_sig"] = ""
+                out["broadcast"].append((_sync_event(room, "resolve_media", name), cid))
         return out
 
     if mtype in ("play", "pause", "seek", "rate"):
@@ -1639,7 +1669,7 @@ async def deliver(room_id: str, out: Dict[str, Any], sender_ws=None) -> None:
         ws = SOCKETS.get(room_id, {}).get(target)
         if ws:
             try:
-                await ws.send_json(msg)
+                await asyncio.wait_for(ws.send_json(msg), timeout=1.5)
             except Exception:
                 pass
     if sender_ws:
@@ -1912,7 +1942,8 @@ async def http_sync(request: Request):
                     left_name = left_p.get("name", "Misafir")
                     still_here_http = any(hp.get("transport") != "bot" and hp.get("name") == left_name for hp in (room.get("participants") or {}).values())
                     if not still_here_http:
-                        sys_msg(room, "odadan ayrıldı", left_name)
+                        leave_msg = sys_msg(room, "odadan ayrıldı", left_name)
+                        await broadcast(room_id, {"type": "chat", "message": leave_msg}, cid)
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                 if not has_humans:
                     room["emptySince"] = now()
@@ -1922,6 +1953,7 @@ async def http_sync(request: Request):
                 ensure_host(room)
                 room["rev"] = int(room.get("rev") or 1) + 1
                 await STORE.put(room, force_disk=True)
+                await broadcast(room_id, _room_event(room, "user_left", by=left_p.get("name", "")), cid)
             return JSONResponse({"ok": True})
         room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=verified_uid)
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):

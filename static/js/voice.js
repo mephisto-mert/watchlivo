@@ -612,14 +612,20 @@ export class Voice {
       }
     };
     pc.onnegotiationneeded = () => this._negotiate(id, st);
-    pc.onconnectionstatechange = () => {
+    pc.onconnectionstatechange = async () => {
       if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        try {
+          if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) { /* ignore */ }
         try { pc.restartIce?.(); } catch (e) { /* ignore */ }
         this._negotiate(id, st);
       }
     };
-    pc.oniceconnectionstatechange = () => {
+    pc.oniceconnectionstatechange = async () => {
       if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        try {
+          if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
+        } catch (e) { /* ignore */ }
         try { pc.restartIce?.(); } catch (e) { /* ignore */ }
         this._negotiate(id, st);
       }

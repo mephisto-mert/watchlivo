@@ -102,28 +102,39 @@ MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 ALLOWED_UPLOAD_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".mp3", ".m4a", ".ogg", ".wav"}
 
 
+_ACC_DB_SCHEMA_READY = False
+
+
 def _get_acc_db():
-    conn = sqlite3.connect(str(ACC_DB_PATH))
+    global _ACC_DB_SCHEMA_READY
+    conn = sqlite3.connect(str(ACC_DB_PATH), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS provider_accounts (
-            provider TEXT PRIMARY KEY,
-            domain TEXT,
-            login_satisfied INTEGER DEFAULT 0,
-            account_email TEXT DEFAULT '',
-            profile_name TEXT DEFAULT '',
-            cookies_json TEXT DEFAULT '[]',
-            updated_at REAL DEFAULT 0
-        )
-    """)
-    conn.commit()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS resolved_streams (
-            ckey TEXT PRIMARY KEY,
-            val_json TEXT DEFAULT '[]',
-            exp REAL DEFAULT 0
-        )
-    """)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
+    if not _ACC_DB_SCHEMA_READY:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS provider_accounts (
+                provider TEXT PRIMARY KEY,
+                domain TEXT,
+                login_satisfied INTEGER DEFAULT 0,
+                account_email TEXT DEFAULT '',
+                profile_name TEXT DEFAULT '',
+                cookies_json TEXT DEFAULT '[]',
+                updated_at REAL DEFAULT 0
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS resolved_streams (
+                ckey TEXT PRIMARY KEY,
+                val_json TEXT DEFAULT '[]',
+                exp REAL DEFAULT 0
+            )
+        """)
+        conn.commit()
+        _ACC_DB_SCHEMA_READY = True
     return conn
 
 
@@ -151,12 +162,13 @@ class SecurityHeaders:
                     hdrs.append((
                         b"content-security-policy",
                         b"default-src 'self'; "
-                        b"script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com; "
+                        b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com; "
+                        b"worker-src 'self' blob:; "
                         b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                         b"font-src 'self' data: https://fonts.gstatic.com; "
                         b"img-src 'self' data: blob: https:; "
                         b"media-src 'self' blob: https:; "
-                        b"connect-src 'self' https: wss:; "
+                        b"connect-src 'self' https: wss: ws:; "
                         b"frame-src 'self' https:; "
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
@@ -1404,12 +1416,17 @@ async def title_seasons(request: Request):
     hdrs = {"Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400"}
     if cached and now_t - cached[0] < 3600:
         return JSONResponse(cached[1], headers=hdrs)
+    if len(_SEASONS_LOCKS) >= 300:
+        _SEASONS_LOCKS.pop(next(iter(_SEASONS_LOCKS)), None)
     lock = _SEASONS_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         cached = _SEASONS_CACHE.get(ckey)
         if cached and time.time() - cached[0] < 3600:
             return JSONResponse(cached[1], headers=hdrs)
-        res = await asyncio.wait_for(asyncio.to_thread(_seasons_sync, tmdb_id, title, media_type, season), timeout=9)
+        try:
+            res = await asyncio.wait_for(asyncio.to_thread(_seasons_sync, tmdb_id, title, media_type, season), timeout=9)
+        except Exception:
+            res = {"seasons": [1], "episodes": [{"episode": i, "season": season, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{title or 'Dizi'} — {season}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 11)]}
         if len(_SEASONS_CACHE) >= 300:
             _SEASONS_CACHE.pop(next(iter(_SEASONS_CACHE)), None)
         _SEASONS_CACHE[ckey] = (time.time(), res)
@@ -2859,10 +2876,10 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                 _EMBED_SUB_CACHE[ekey] = list(cached["subs"])
             return c_val
     if not refresh:
+        conn = None
         try:
             conn = _get_acc_db()
             row = conn.execute("SELECT val_json, exp FROM resolved_streams WHERE ckey = ?", (ckey,)).fetchone()
-            conn.close()
             if row and row["exp"] > now_t:
                 parsed = json.loads(row["val_json"] or "{}")
                 if isinstance(parsed, dict):
@@ -2885,6 +2902,12 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     return val
         except Exception:
             pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     meta = _get_tmdb_meta_sync(tid, mtype, title or disp_title, year, imdb_id)
     orig_title = meta.get("originalTitle") or title or disp_title
@@ -3177,13 +3200,19 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         esubs_now = list(_EMBED_SUB_CACHE.get(ekey) or [])
         _STREAM_CACHE[ckey] = {"val": out_urls, "subs": esubs_now, "exp": exp_t}
         if had_primary:
+            conn = None
             try:
                 conn = _get_acc_db()
                 conn.execute("INSERT OR REPLACE INTO resolved_streams (ckey, val_json, exp) VALUES (?, ?, ?)", (ckey, json.dumps({"urls": out_urls, "subs": esubs_now}), exp_t))
                 conn.commit()
-                conn.close()
             except Exception:
                 pass
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
     return out_urls
 
 
@@ -4862,36 +4891,51 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
         now = time.time()
         with _SEG_TABLE_LOCK:
             cached = _SEGMENT_CACHE.get(url)
-        if cached and now - cached[0] < 90:
+        if cached and now - cached[0] < 45:
             data, ct = cached[1], cached[2]
         else:
             ulock = _get_seg_lock(url)
             with ulock:
                 with _SEG_TABLE_LOCK:
                     cached = _SEGMENT_CACHE.get(url)
-                if cached and time.time() - cached[0] < 90:
+                if cached and time.time() - cached[0] < 45:
                     data, ct = cached[1], cached[2]
                 else:
-                    req = urllib.request.Request(url, headers=hdrs)
-                    with _public_open(req, timeout=10) as r:
-                        data = r.read(15 * 1024 * 1024)
-                        is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
-                        raw_ct = (r.headers.get("Content-Type") or "").lower()
-                        if len(data) == 16 or "key.php" in url:
-                            ct = "application/octet-stream"
-                        elif is_mpegts or ".ts" in url or ".png" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
-                            ct = "video/mp2t"
-                        elif "init-" in url or ".m4s" in url or ".mp4" in url:
-                            ct = "video/mp4"
-                        elif "video/" in raw_ct or "audio/" in raw_ct or "mpegurl" in raw_ct:
-                            ct = r.headers.get("Content-Type")
-                        else:
-                            ct = "video/mp2t"
-                    with _SEG_TABLE_LOCK:
-                        if len(_SEGMENT_CACHE) >= 160:
-                            oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
-                            _SEGMENT_CACHE.pop(oldest, None)
-                        _SEGMENT_CACHE[url] = (time.time(), data, ct)
+                    data = b""
+                    ct = "video/mp2t"
+                    for _attempt in range(2):
+                        try:
+                            req = urllib.request.Request(url, headers=hdrs)
+                            with _public_open(req, timeout=8) as r:
+                                data = r.read(15 * 1024 * 1024)
+                                is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
+                                raw_ct = (r.headers.get("Content-Type") or "").lower()
+                                if len(data) == 16 or "key.php" in url:
+                                    ct = "application/octet-stream"
+                                elif is_mpegts or ".ts" in url or ".png" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
+                                    ct = "video/mp2t"
+                                elif "init-" in url or ".m4s" in url or ".mp4" in url:
+                                    ct = "video/mp4"
+                                elif "video/" in raw_ct or "audio/" in raw_ct or "mpegurl" in raw_ct:
+                                    ct = r.headers.get("Content-Type")
+                                else:
+                                    ct = "video/mp2t"
+                            if data:
+                                break
+                        except Exception:
+                            if _attempt == 1:
+                                raise
+                            time.sleep(0.15)
+                    if data and len(data) <= int(2.5 * 1024 * 1024):
+                        with _SEG_TABLE_LOCK:
+                            now_ts = time.time()
+                            expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 45]
+                            for k in expired:
+                                _SEGMENT_CACHE.pop(k, None)
+                            while len(_SEGMENT_CACHE) >= 28:
+                                oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
+                                _SEGMENT_CACHE.pop(oldest, None)
+                            _SEGMENT_CACHE[url] = (now_ts, data, ct)
         total = len(data)
         if rng and rng.startswith("bytes=") and total > 0:
             m = re.match(r"bytes=(\d+)-(\d*)", rng)
@@ -6055,8 +6099,12 @@ async def upload_file(request: Request):
 async def manifest_json(request: Request):
     return JSONResponse({
         "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik", "short_name": "Watchlivo", "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
-        "start_url": "/", "display": "standalone", "background_color": "#07080d", "theme_color": "#07080d", "orientation": "any",
-        "icons": [{"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}],
+        "start_url": "/", "display": "standalone", "background_color": "#080A0F", "theme_color": "#080A0F", "orientation": "any",
+        "icons": [
+            {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ],
     })
 
 
@@ -6125,6 +6173,36 @@ async def download_windows_endpoint(request: Request):
         )
     return RedirectResponse(
         "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.exe",
+        status_code=302,
+    )
+
+
+async def download_ipa_endpoint(request: Request):
+    ipa_file = STATIC_DIR / "Watchlivo.ipa"
+    if ipa_file.exists() and not IS_VERCEL:
+        return FileResponse(
+            ipa_file,
+            media_type="application/octet-stream",
+            filename="Watchlivo.ipa",
+            headers={"Content-Disposition": 'attachment; filename="Watchlivo.ipa"'},
+        )
+    return RedirectResponse(
+        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.ipa",
+        status_code=302,
+    )
+
+
+async def download_ios_endpoint(request: Request):
+    cfg_file = STATIC_DIR / "Watchlivo.mobileconfig"
+    if cfg_file.exists():
+        return FileResponse(
+            cfg_file,
+            media_type="application/x-apple-aspen-config",
+            filename="Watchlivo.mobileconfig",
+            headers={"Content-Disposition": 'attachment; filename="Watchlivo.mobileconfig"'},
+        )
+    return RedirectResponse(
+        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.mobileconfig",
         status_code=302,
     )
 
@@ -6432,6 +6510,8 @@ app = Starlette(
         Route("/sw.js", service_worker),
         Route("/api/health", health),
         Route("/download/apk", download_apk_endpoint),
+        Route("/download/ipa", download_ipa_endpoint),
+        Route("/download/ios", download_ios_endpoint),
         Route("/download/windows", download_windows_endpoint),
         Route("/download/exe", download_windows_endpoint),
         Route("/api/auth/register", auth_engine.auth_register, methods=["POST"]),

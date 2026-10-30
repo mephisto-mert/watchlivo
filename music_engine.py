@@ -70,7 +70,7 @@ def _norm_raw(s: str) -> str:
 
 
 def _classify_track_variant(title: str, album: str = "", artist: str = "") -> tuple[bool, str]:
-    raw = _norm_raw(f"{title or ''} {album or ''} {artist or ''}")
+    raw = _norm_raw(f"{title or ''} {album or ''}")
     if _REMIX_KW_RE.search(raw):
         return True, "🎛️ Remix"
     if _ACOUSTIC_KW_RE.search(raw):
@@ -788,7 +788,7 @@ def _yt_ios_extract_sync(video_id: str) -> dict | None:
                     break
             if audio_url:
                 break
-        for pref_vitag in (136, 135, 134, 18):
+        for pref_vitag in (18, 22, 136, 135, 134):
             for f in fmts:
                 if f.get("itag") == pref_vitag and f.get("url"):
                     video_url = f["url"]
@@ -848,10 +848,16 @@ def _yt_fallback_audio_url_sync(vid: str) -> str:
 async def yt_music_stream(request: Request):
     vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
     kind = (request.query_params.get("kind") or "audio").strip().lower()
-    info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
+    except Exception:
+        info = None
     target = (info or {}).get("videoUrl" if kind == "video" else "audioUrl") or (info or {}).get("audioUrl") or ""
     if not target:
-        target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+        try:
+            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+        except Exception:
+            target = ""
     if not target:
         return JSONResponse({"error": "Akış bulunamadı"}, status_code=404)
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
@@ -954,6 +960,8 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
             artist = trk.get("artist") or artist
         if not song_title:
             song_title = trk.get("songTitle") or song_title
+            if not target_norm_s and song_title:
+                target_norm_s = _norm_key(song_title)
         if not poster or "scdn.co" in poster or "kinox-poster" in poster:
             poster = trk.get("poster") or poster
         if target_norm_s and target_norm_s in _norm_key(trk.get("songTitle", "")):
@@ -1036,22 +1044,27 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": "🎬 Resmi HD Video Klip (Apple Music 1080p)", "mode": "stream", "url": exact_mv})
 
     is_preview_mv = bool(exact_mv and re.search(r"Video211|mzvf_|AudioPreview", str(exact_mv), re.I))
-    if sc_url:
-        primary_prov = "direct"
-        primary_stype = sc_stype
-        primary_url = sc_url
-        alt_urls = [u for u in (sc_alts + ([exact_mv] if not is_preview_mv else []) + [audio_stream]) if u and u != primary_url]
-    elif mode_norm == "video" and exact_mv and not is_preview_mv:
+    if mode_norm == "video" and exact_mv and not is_preview_mv:
         primary_prov = "direct"
         primary_stype = "mp4"
         primary_url = exact_mv
         alt_urls = [u for u in ([sc_url] + sc_alts + [audio_stream, artist_mv]) if u and u != primary_url]
+    elif mode_norm == "video" and (clip_vid or primary_vid):
+        primary_prov = "youtube"
+        primary_stype = "youtube"
+        primary_url = f"https://www.youtube.com/watch?v={clip_vid or primary_vid}"
+        alt_urls = [u for u in ([sc_url] + sc_alts) if u]
+    elif sc_url:
+        primary_prov = "direct"
+        primary_stype = sc_stype
+        primary_url = sc_url
+        alt_urls = [u for u in (sc_alts + ([exact_mv] if not is_preview_mv else []) + [audio_stream]) if u and u != primary_url]
     elif primary_vid:
         primary_prov = "youtube"
         primary_stype = "youtube"
         primary_url = f"https://www.youtube.com/watch?v={clip_vid if mode_norm == 'video' and clip_vid else primary_vid}"
         alt_urls = []
-    elif exact_mv:
+    elif exact_mv and not is_preview_mv:
         primary_prov = "direct"
         primary_stype = "mp4"
         primary_url = exact_mv
@@ -1059,8 +1072,8 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     else:
         primary_prov = "direct"
         primary_stype = "mp4"
-        primary_url = audio_stream or artist_mv
-        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
+        primary_url = audio_stream or exact_mv or artist_mv
+        alt_urls = [u for u in [audio_stream, exact_mv, artist_mv] if u and u != primary_url]
 
     disp_song = _ensure_variant_title(song_title, want_remix, var_badge)
     disp_title = f"{artist} — {disp_song}" if artist and disp_song and artist.lower() not in disp_song.lower() else (disp_song or clean_q)
@@ -1104,7 +1117,10 @@ async def music_catalog(request: Request):
     q = (request.query_params.get("q") or "").strip()[:120]
     rec_artist = (request.query_params.get("recentArtist") or "Semicenk").strip()[:80]
     rec_title = (request.query_params.get("recentTitle") or "").strip()[:80]
-    data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
+    except Exception:
+        data = {"provider": prov, "category": cat, "sections": [], "items": []}
     return JSONResponse(data, headers={"Cache-Control": "public, max-age=120, s-maxage=600, stale-while-revalidate=1800"})
 
 
@@ -1115,7 +1131,10 @@ async def music_similar(request: Request):
     if not artist and "—" in title:
         sp = title.replace("🎵", "").split("—", 1)
         artist, title = sp[0].strip(), sp[1].strip()
-    items = await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist or "Semicenk", title, cat, 16), timeout=9.0)
+    try:
+        items = await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist or "Semicenk", title, cat, 16), timeout=9.0)
+    except Exception:
+        items = []
     return JSONResponse({"artist": artist, "title": title, "items": items}, headers={"Cache-Control": "public, max-age=120, s-maxage=600"})
 
 
@@ -1129,12 +1148,18 @@ async def music_resolve(request: Request):
     prev_u = (request.query_params.get("audioPreviewUrl") or "").strip()[:500]
     mv_u = (request.query_params.get("mvUrl") or "").strip()[:500]
     mode = (request.query_params.get("mode") or "").strip()[:20]
-    res = await asyncio.wait_for(asyncio.to_thread(_resolve_music_sync, artist, title, vid, url, prov, poster, prev_u, mv_u, mode), timeout=11.0)
+    try:
+        res = await asyncio.wait_for(asyncio.to_thread(_resolve_music_sync, artist, title, vid, url, prov, poster, prev_u, mv_u, mode), timeout=11.0)
+    except Exception:
+        res = {"provider": "direct", "streamType": "mp4", "catalogProvider": "music", "isMusic": True, "mediaType": "music", "url": prev_u or mv_u or url, "title": f"🎵 {artist} — {title}".strip(" —"), "artist": artist, "songTitle": title, "poster": poster or "/static/watchlivo-poster.svg", "duration": 180}
     return JSONResponse(res, headers={"Cache-Control": "public, max-age=60, s-maxage=90"})
 
 
 async def music_lyrics_vtt(request: Request):
     artist = (request.query_params.get("artist") or "").strip()[:80]
     title = (request.query_params.get("title") or "").strip()[:100]
-    vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_lrc_vtt_sync, artist, title), timeout=6.0)
+    try:
+        vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_lrc_vtt_sync, artist, title), timeout=6.0)
+    except Exception:
+        vtt = "WEBVTT\n\n"
     return Response(vtt.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400"})

@@ -111,12 +111,45 @@ export function buildControls(frame, ctx) {
     revealControls();
     update();
   };
+  const tapProps = (fn) => {
+    let lastFire = 0;
+    let startX = 0;
+    let startY = 0;
+    const run = (e) => {
+      if (e) e.stopPropagation();
+      const now = Date.now();
+      if (now - lastFire < 320) return;
+      lastFire = now;
+      revealControls(6500);
+      fn(e);
+    };
+    return {
+      onpointerdown: (e) => {
+        e.stopPropagation();
+        startX = e.clientX || 0;
+        startY = e.clientY || 0;
+        revealControls(6500);
+      },
+      ontouchstart: (e) => {
+        e.stopPropagation();
+        const t = e.touches?.[0];
+        if (t) { startX = t.clientX; startY = t.clientY; }
+        revealControls(6500);
+      },
+      ontouchend: (e) => {
+        e.stopPropagation();
+        const t = e.changedTouches?.[0];
+        if (t && (Math.abs(t.clientX - startX) > 24 || Math.abs(t.clientY - startY) > 24)) return;
+        if (e.cancelable) e.preventDefault();
+        run(e);
+      },
+      onclick: (e) => run(e),
+    };
+  };
   const unmute = h('button', {
     class: 'btn primary unmute-pill hidden',
     id: 'ctl-unmute',
-    onclick: doUnlockAudio,
-    onpointerdown: doUnlockAudio,
-    ontouchend: (e) => { e.preventDefault(); doUnlockAudio(e); },
+    ...tapProps(doUnlockAudio),
   }, ico('volume'), 'Sesi Aç');
   const overlayMsg = h('div', { class: 'stage-overlay-msg hidden' });
 
@@ -140,12 +173,12 @@ export function buildControls(frame, ctx) {
     id: 'ctl-quality-badge',
     title: 'Görüntü Kalitesini Seç (1080p / 4K)',
     style: { cursor: 'pointer' },
-    onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('quality'); },
+    ...tapProps(() => toggleMenu('quality')),
   }, '1080p HD');
-  const epBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', onclick: () => openEpisodeModal() }, '📺 S1:B1');
-  const nextEpTopBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); } }, '⏭️ Sonraki Bölüm');
-  const subPillBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('subtitle'); } }, '💬 Altyazı & Dublaj');
-  const origBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-orig-btn', onclick: () => openOfficialPlatform() }, '🔐 Orijinal Platformda Aç');
+  const epBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', ...tapProps(() => openEpisodeModal()) }, '📺 S1:B1');
+  const nextEpTopBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', ...tapProps(() => triggerNextEpisode()) }, '⏭️ Sonraki Bölüm');
+  const subPillBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', ...tapProps(() => toggleMenu('subtitle')) }, '💬 Altyazı & Dublaj');
+  const origBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-orig-btn', ...tapProps(() => openOfficialPlatform()) }, '🔐 Orijinal Platformda Aç');
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
   const syncDot = h('span', { class: 'sync-dot', title: 'Senkron' });
   const syncText = h('span', { class: 'ctl-time', style: { opacity: .7 } });
@@ -163,8 +196,7 @@ export function buildControls(frame, ctx) {
     showOverlay(`${delta > 0 ? '⏩ +' : '⏪ '}${delta} sn (${fmtTime(target)})`, 1200);
     revealControls();
   };
-  const playBtn = h('button', { class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', onclick: (e) => {
-    if (e) e.stopPropagation();
+  const playBtn = h('button', { class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', ...tapProps(() => {
     if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
     const roomPlaying = (state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
     const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
@@ -189,34 +221,32 @@ export function buildControls(frame, ctx) {
     }
     revealControls(5200);
     update();
-  } });
+  }) });
   const back10Btn = h('button', {
     class: 'ctl-action',
     'data-tip': '10 sn geri',
     'aria-label': '10 saniye geri',
     id: 'ctl-back10',
-    onclick: (e) => {
-      e.stopPropagation();
+    ...tapProps(() => {
       if (!isLeader()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
       seekStep(-10);
-    }
+    }),
   }, ico('rewind10'));
   const fwd10Btn = h('button', {
     class: 'ctl-action',
     'data-tip': '10 sn ileri',
     'aria-label': '10 saniye ileri',
     id: 'ctl-fwd10',
-    onclick: (e) => {
-      e.stopPropagation();
+    ...tapProps(() => {
       if (!isLeader()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
       seekStep(10);
-    }
+    }),
   }, ico('forward10'));
   const cur = h('div', { class: 'cur' }), buf = h('div', { class: 'buf' }), knob = h('div', { class: 'knob' });
   const seekPreviewCanvas = h('canvas', { class: 'seek-preview-canvas', width: '128', height: '72' });
@@ -231,15 +261,49 @@ export function buildControls(frame, ctx) {
   const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, trackTicks, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const volRange = h('input', { type: 'range', min: '0', max: '100', value: String(host.volume), 'aria-label': 'Ses', oninput: (e) => { host.setVolume(e.target.value); unmute.classList.add('hidden'); update(); } });
-  const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', onclick: () => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } } });
-  const skipBtn = h('button', { class: 'ctl-action', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', onclick: () => actions.skip() }, ico('skip'));
-  const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('speed'); } }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
-  const subBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('subtitle'); } }, ico('subtitles'), h('span', { class: 'ctl-btn-lbl' }, 'Altyazı & Ses'));
-  const snapBtn = h('button', { class: 'ctl-action', id: 'ctl-snap', 'data-tip': 'Anlık Kare Yakala (PNG)', 'aria-label': 'Ekran Görüntüsü', onclick: (e) => { e.stopPropagation(); takeVideoSnapshot(); } }, ico('snapshot'));
-  const gearBtn = h('button', { class: 'ctl-action', id: 'ctl-gear', 'data-tip': 'Oynatıcı Ayarları', 'aria-label': 'Ayarlar', onclick: (e) => { e.stopPropagation(); revealControls(6500); toggleMenu('list'); } }, ico('settings'));
-  const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', onclick: (e) => { e.stopPropagation(); ctx.toggleTheaterMode?.(); } }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
-  const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', onclick: (e) => { e.stopPropagation(); if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); } }, ico('fullscreen'));
+  const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
+  const skipBtn = h('button', { class: 'ctl-action', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
+  const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', ...tapProps(() => toggleMenu('speed')) }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
+  const subBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', ...tapProps(() => toggleMenu('subtitle')) }, ico('subtitles'), h('span', { class: 'ctl-btn-lbl' }, 'Altyazı & Ses'));
+  const snapBtn = h('button', { class: 'ctl-action', id: 'ctl-snap', 'data-tip': 'Anlık Kare Yakala (PNG)', 'aria-label': 'Ekran Görüntüsü', ...tapProps(() => takeVideoSnapshot()) }, ico('snapshot'));
+  const gearBtn = h('button', { class: 'ctl-action', id: 'ctl-gear', 'data-tip': 'Oynatıcı Ayarları', 'aria-label': 'Ayarlar', ...tapProps(() => toggleMenu('list')) }, ico('settings'));
+  const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
+  const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...tapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
   const menu = h('div', { class: 'ctl-menu acrylic hidden' });
+  let menuTouchStartX = 0;
+  let menuTouchStartY = 0;
+  let menuTouchStartAt = 0;
+  let lastMenuTouchClickAt = 0;
+  menu.addEventListener('pointerdown', (e) => { e.stopPropagation(); revealControls(8000); });
+  menu.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+    const t = e.touches?.[0];
+    if (t) {
+      menuTouchStartX = t.clientX;
+      menuTouchStartY = t.clientY;
+      menuTouchStartAt = Date.now();
+    }
+    revealControls(8000);
+  }, { passive: true });
+  menu.addEventListener('touchend', (e) => {
+    e.stopPropagation();
+    const t = e.changedTouches?.[0];
+    if (!t) return;
+    if (Math.abs(t.clientX - menuTouchStartX) > 16 || Math.abs(t.clientY - menuTouchStartY) > 16) return;
+    if (Date.now() - menuTouchStartAt > 750) return;
+    const actEl = e.target?.closest?.('.opt, .sub-pill-btn, .ctl-pref-pill, .ctl-menu-back, .ctl-menu-close, .ctl-menu-subbtn, button, [role="button"]');
+    if (actEl && menu.contains(actEl) && actEl.tagName !== 'INPUT') {
+      if (e.cancelable) e.preventDefault();
+      lastMenuTouchClickAt = Date.now();
+      actEl.click();
+    }
+  }, { passive: false });
+  menu.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (Date.now() - lastMenuTouchClickAt < 320 && e.isTrusted) {
+      e.preventDefault();
+    }
+  });
   const getActiveIntro = () => {
     const m = state.mesh?.media;
     if (!m || m.mediaType !== 'tv') return null;
@@ -251,15 +315,14 @@ export function buildControls(frame, ctx) {
   const skipIntroBtn = h('button', {
     class: 'btn primary skip-intro-pill hidden',
     id: 'ctl-skip-intro',
-    onclick: (e) => {
-      e.stopPropagation();
+    ...tapProps(() => {
       if (!isLeader()) { toast('İntroyu yalnızca oda lideri atlayabilir'); return; }
       const intro = getActiveIntro();
       const target = intro && Number(intro.end) > 0 ? Number(intro.end) : (position() + 85);
       actions.seek(target);
       skipIntroBtn.classList.add('hidden');
       showOverlay(`⏩ İntro atlandı (${fmtTime(target)})`, 2200);
-    },
+    }),
   }, '⏩ İntroyu Atla');
   const nextEpBanner = h('div', { class: 'next-ep-banner acrylic hidden', id: 'ctl-next-ep' });
   const cinemaSeatsBar = h('div', { class: 'cinema-seats-bar', id: 'cinema-seats-bar' });
@@ -460,17 +523,14 @@ export function buildControls(frame, ctx) {
     id: 'ctl-center-back10',
     'aria-label': '10 saniye geri',
     title: '10 saniye geri',
-    onclick: (e) => { e.stopPropagation(); back10Btn.click(); },
+    ...tapProps(() => back10Btn.click()),
   }, ico('rewind10'));
   const centerPlayBtn = h('button', {
     type: 'button',
     class: 'ctl-center-play',
     id: 'ctl-center-play',
     'aria-label': 'Oynat / Duraklat',
-    onclick: (e) => {
-      e.stopPropagation();
-      playBtn.click();
-    },
+    ...tapProps(() => playBtn.click()),
   }, ico('play'));
   const centerFwd10Btn = h('button', {
     type: 'button',
@@ -478,7 +538,7 @@ export function buildControls(frame, ctx) {
     id: 'ctl-center-fwd10',
     'aria-label': '10 saniye ileri',
     title: '10 saniye ileri',
-    onclick: (e) => { e.stopPropagation(); fwd10Btn.click(); },
+    ...tapProps(() => fwd10Btn.click()),
   }, ico('forward10'));
   const centerHud = h('div', { class: 'ctl-center-hud', id: 'ctl-center-hud' }, centerBack10Btn, centerPlayBtn, centerFwd10Btn);
   const mid = h('div', { class: 'ctl-mid' }, centerHud);
@@ -856,6 +916,10 @@ export function buildControls(frame, ctx) {
 
   function tick() {
     const d = duration(), p = Math.min(position(), d || Infinity);
+    const vAct = host.adapter?.video;
+    if (vAct && !vAct.paused && !vAct.seeking && vAct.readyState >= 2 && !host.loading) {
+      loading.classList.add('hidden');
+    }
     stageBackdrop.classList.toggle('is-hero-cover', p < 2.2);
     if (!scrubbing) {
       const pct = d ? (p / d) * 100 : 0;
@@ -896,16 +960,15 @@ export function buildControls(frame, ctx) {
               isLeader()
                 ? h('button', {
                     class: 'btn primary next-ep-go',
-                    onclick: (e) => { e.stopPropagation(); triggerNextEpisode(); },
+                    ...tapProps(() => triggerNextEpisode()),
                   }, '▶ Hemen Geç')
                 : h('span', { class: 'dim', style: { fontSize: '.74em' } }, 'Oda başkanı bekleniyor…'),
               h('button', {
                 class: 'btn next-ep-cancel',
-                onclick: (e) => {
-                  e.stopPropagation();
+                ...tapProps(() => {
                   cancelledNextEpKey = curEpKey;
                   nextEpBanner.classList.add('hidden');
-                },
+                }),
               }, '✕ İptal'),
             ),
           ),
@@ -1732,14 +1795,25 @@ export function buildControls(frame, ctx) {
     const curRate = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
     speedBtn.querySelector('span').textContent = `${curRate}x`;
     const availSubs = host.adapter?.getSubtitleTracks?.() || m.subtitleTracks || [];
-    const hasSubsOrDub = !!(host.adapter?.caps.subtitles || m.tmdbId || m.videoId || m.provider === 'youtube' || availSubs.length);
+    const hasSubsOrDub = !!(
+      !m.isMusic && (
+        host.adapter?.caps?.subtitles ||
+        m.tmdbId ||
+        m.imdbId ||
+        m.id ||
+        m.title ||
+        m.videoId ||
+        m.provider === 'youtube' ||
+        availSubs.length
+      )
+    );
     subPillBtn.classList.toggle('hidden', !hasSubsOrDub);
     subBtn.style.display = hasSubsOrDub ? '' : 'none';
     if (hasSubsOrDub) {
       const rawSId = host.adapter?.getSelectedSubtitleId?.() || 'off';
       const sId = availSubs.length ? rawSId : 'off';
       const aId = host.adapter?.getSelectedAudioId?.() || 'orig';
-      const subTag = !availSubs.length ? 'Altyazı Yok' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
+      const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
       const dubTag = (aId === 'tr-dub' || aId === 'tr-ai-dub') ? 'TR Dublaj' : (aId === 'en-dub' || aId === 'en-ai-dub') ? 'EN Dublaj' : 'Orijinal';
       subPillBtn.replaceChildren(ico('subtitles'), `${subTag} · ${dubTag}`);
       subBtn.classList.toggle('active-sub', sId !== 'off' || aId !== 'orig');
@@ -1792,7 +1866,7 @@ export function buildControls(frame, ctx) {
       else hideOverlay();
     }
     skipBtn.style.display = (state.mesh?.queue || []).length ? '' : 'none';
-    gearBtn.style.display = (host.adapter?.caps.rate || m.tmdbId || hasSubsOrDub) ? '' : 'none';
+    gearBtn.style.display = has ? '' : 'none';
     renderCinemaSeats();
     syncMediaSession(m, prov, t, playing, curRate);
   }

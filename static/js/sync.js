@@ -128,9 +128,18 @@ export class SyncEngine {
     const abs = Math.abs(delta);
     const now = performance.now();
     const leader = Boolean(this.isLeader());
+    const rawTitleSig = String(media.seriesTitle || media.originalTitle || media.title || '').split(' — ')[0].trim().toLowerCase();
     const mediaIdSig = media.tmdbId
       ? `tmdb|${media.tmdbId}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
-      : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${media.season || ''}|${media.episode || ''}`;
+      : media.imdbId
+        ? `imdb|${media.imdbId}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
+        : (media.id && /^(fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)-/i.test(String(media.id)))
+          ? `cat|${media.id}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
+          : media.videoId
+            ? `vid|${media.videoId}|${media.season || 1}|${media.episode || 1}`
+            : (rawTitleSig && !media.isMusic && media.mediaType !== 'music' && !media.live)
+              ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
+              : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${media.season || ''}|${media.episode || ''}`;
     if (mediaIdSig !== this.mediaIdSig) {
       this.mediaIdSig = mediaIdSig;
       this.loadedAt = now;
@@ -190,7 +199,7 @@ export class SyncEngine {
     if (ad.isBuffering()) {
       this.wasBuffering = true;
       this.mode = 'buffering';
-      this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
+      this.onStatus({ mode: 'buffering', delta: 0, curr, expected: curr, rate: ad.getRate() });
       return 600;
     }
 
@@ -239,6 +248,10 @@ export class SyncEngine {
           this.onStatus({ mode: 'inSync', delta, curr, expected, rate: ad.getRate() });
           return 1200;
         }
+      } else if (action === 'speed') {
+        this.deferStartedAt = 0;
+        this.speedSync(curr, expected, base);
+        return CYCLE_MS;
       }
       this.deferStartedAt = 0;
       const targetPos = inBuf ? expected + lead : expected + Math.min(3, this.bufferLatency || 0.15) * base;

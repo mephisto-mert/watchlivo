@@ -252,7 +252,7 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      const inFullscreen = Boolean(document.fullscreenElement || document.webkitFullscreenElement || v.webkitDisplayingFullscreen);
+      const inFullscreen = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
       if (this.wantPlaying && !this.hasEnded && !v.ended && !inFullscreen) {
         clearTimeout(this.resumeTimer);
         const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
@@ -406,10 +406,11 @@ export class Html5Adapter {
         this._setMusicVisualMode?.(isAudioOnlyUrl(nextUrl) ? 'vinyl' : 'clip');
       }
       const restorePosOnLoad = () => {
-        if (this.video !== v || resumePos < 0.5) return;
-        if (Math.abs((v.currentTime || 0) - resumePos) > 1.5) {
+        if (this.video !== v) return;
+        if (resumePos >= 0.5 && Math.abs((v.currentTime || 0) - resumePos) > 1.5) {
           try { v.currentTime = resumePos; } catch (e) { /* ignore */ }
         }
+        doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
         if (canHlsJs && !useNativeHls) {
@@ -435,6 +436,12 @@ export class Html5Adapter {
 
     const attachHlsJs = (srcUrl, doneCb, customStart = null) => {
       try { this.hls?.destroy(); } catch (e) { /* ignore */ }
+      let doneFired = false;
+      const fireDoneOnce = () => {
+        if (doneFired) return;
+        doneFired = true;
+        doneCb?.();
+      };
       const effStart = Number(customStart ?? startAt) || 0;
       this.hls = new window.Hls({
         enableWorker: true,
@@ -443,27 +450,27 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 50000000,
-        minAutoBitrate: 4500000,
+        abrEwmaDefaultEstimate: 8000000,
+        minAutoBitrate: 1200000,
         autoLevelCapping: -1,
-        maxBufferLength: 45,
-        maxMaxBufferLength: 90,
-        backBufferLength: 90,
-        maxBufferSize: 60 * 1000 * 1000,
-        maxBufferHole: 0.8,
-        maxAudioFramesDrift: 1,
+        maxBufferLength: 35,
+        maxMaxBufferLength: 75,
+        backBufferLength: 45,
+        maxBufferSize: 45 * 1000 * 1000,
+        maxBufferHole: 1.2,
+        maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
         forceKeyFrameOnDiscontinuity: true,
         progressive: false,
-        highBufferWatchdogPeriod: 2,
-        maxFragLookUpTolerance: 0.25,
-        nudgeOffset: 0.15,
-        nudgeMaxRetry: 8,
-        fragLoadingTimeOut: 14000,
-        fragLoadingMaxRetry: 3,
-        fragLoadingRetryDelay: 600,
-        manifestLoadingTimeOut: 10000,
-        manifestLoadingMaxRetry: 2,
+        highBufferWatchdogPeriod: 3,
+        maxFragLookUpTolerance: 0.35,
+        nudgeOffset: 0.25,
+        nudgeMaxRetry: 10,
+        fragLoadingTimeOut: 7500,
+        fragLoadingMaxRetry: 4,
+        fragLoadingRetryDelay: 350,
+        manifestLoadingTimeOut: 9000,
+        manifestLoadingMaxRetry: 3,
       });
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
         if (data?.levels?.length > 1) {
@@ -496,7 +503,7 @@ export class Html5Adapter {
         if (v.readyState >= 2) {
           clearBuf();
           this.events.onReady?.();
-          doneCb?.();
+          fireDoneOnce();
         }
       });
       this.hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
@@ -509,7 +516,7 @@ export class Html5Adapter {
         netRetries = 0;
         clearBuf();
         this.events.onReady?.();
-        doneCb?.();
+        fireDoneOnce();
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (!data?.fatal) {
@@ -518,9 +525,30 @@ export class Html5Adapter {
             return;
           }
           if (data?.details === 'bufferStalledError' && this.wantPlaying) {
-            if (v.paused) this.tryPlay();
-            else if (v.readyState < 3 && v.currentTime > 1) {
-              try { this.hls.startLoad(Math.max(0, v.currentTime)); } catch (err) { /* ignore */ }
+            if (v.paused) {
+              this.tryPlay();
+              return;
+            }
+            try {
+              const cur = v.currentTime || 0;
+              for (let i = 0; i < v.buffered.length; i += 1) {
+                const bStart = v.buffered.start(i);
+                const bEnd = v.buffered.end(i);
+                if (bStart > cur + 0.04 && bStart - cur <= 2.5 && bEnd > bStart + 0.2) {
+                  v.currentTime = bStart + 0.05;
+                  return;
+                }
+              }
+            } catch (err) { /* ignore */ }
+            const nowMs = Date.now();
+            if (v.readyState < 3 && v.currentTime > 1 && (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 7000)) {
+              this._lastHlsKickAt = nowMs;
+              try {
+                if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
+                  this.hls.nextLoadLevel = Math.max(0, this.hls.currentLevel - 1);
+                }
+                this.hls.startLoad(Math.max(0, v.currentTime));
+              } catch (err) { /* ignore */ }
             }
           }
           return;
@@ -549,7 +577,7 @@ export class Html5Adapter {
               if (curResume >= 5) {
                 v.addEventListener('loadedmetadata', () => { try { v.currentTime = curResume; } catch (e) {} }, { once: true });
               }
-              if (autoplay) this.tryPlay();
+              if (this.wantPlaying) this.tryPlay();
             } else {
               handleExhaustedCandidates(srcUrl, doneCb);
             }
@@ -683,6 +711,63 @@ export class Html5Adapter {
       }
     };
     this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+    clearInterval(this.playbackWatchdog);
+    let lastWatchdogPos = -1;
+    let consecutiveMidStalls = 0;
+    this.playbackWatchdog = setInterval(() => {
+      if (this._destroyed || this.video !== v || this.hasEnded || v.ended) return;
+      const curT = Number(v.currentTime || 0);
+      if (!v.paused && !v.seeking && v.readyState >= 3 && Math.abs(curT - lastWatchdogPos) > 0.15) {
+        consecutiveMidStalls = 0;
+        lastWatchdogPos = curT;
+        clearBuf();
+        return;
+      }
+      if (!this.wantPlaying || v.seeking) {
+        consecutiveMidStalls = 0;
+        lastWatchdogPos = curT;
+        return;
+      }
+      if (Math.abs(curT - lastWatchdogPos) < 0.08 && curT > 0.5) {
+        consecutiveMidStalls += 1;
+        if (v.paused && v.readyState >= 2) {
+          this.tryPlay();
+        }
+        try {
+          for (let i = 0; i < v.buffered.length; i += 1) {
+            const bStart = v.buffered.start(i);
+            const bEnd = v.buffered.end(i);
+            if (bStart > curT + 0.04 && bStart - curT <= 2.8 && bEnd > bStart + 0.2) {
+              v.currentTime = bStart + 0.06;
+              consecutiveMidStalls = 0;
+              return;
+            }
+          }
+        } catch (err) { /* ignore */ }
+        if (consecutiveMidStalls === 2 && this.hls) {
+          const nowMs = Date.now();
+          if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 6500) {
+            this._lastHlsKickAt = nowMs;
+            try {
+              if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
+                this.hls.nextLoadLevel = Math.max(0, this.hls.currentLevel - 1);
+              }
+              this.hls.startLoad(Math.max(0, curT));
+            } catch (err) { /* ignore */ }
+          }
+        } else if (consecutiveMidStalls >= 5) {
+          consecutiveMidStalls = 0;
+          if (nativeAltIdx < alts.length) {
+            loadCandidateUrl(alts[nativeAltIdx++]);
+          } else if (this.hls) {
+            try { this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
+          }
+        }
+      } else {
+        consecutiveMidStalls = 0;
+        lastWatchdogPos = curT;
+      }
+    }, 2500);
   }
 
   async tryPlay() {
@@ -936,6 +1021,7 @@ export class Html5Adapter {
     clearTimeout(this.waitTimer);
     clearTimeout(this.resumeTimer);
     clearTimeout(this.watchdogTimer);
+    clearInterval(this.playbackWatchdog);
     setReferrerMeta('strict-origin-when-cross-origin');
     this.subs.stopDubAudio();
     this.subs.destroy();

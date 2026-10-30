@@ -111,25 +111,37 @@ def _supabase_auth_req(path: str, payload: Dict[str, Any]) -> Optional[Dict[str,
         return None
 
 
+_AUTH_DB_SCHEMA_READY = False
+
+
 def _get_db() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(AUTH_DB_PATH))
+    global _AUTH_DB_SCHEMA_READY
+    conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS watchlivo_users (
-            uid TEXT PRIMARY KEY,
-            email TEXT UNIQUE,
-            handle TEXT UNIQUE,
-            name TEXT NOT NULL,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
-            color TEXT DEFAULT '#00f5d4',
-            avatar TEXT DEFAULT '🎬',
-            auth_provider TEXT DEFAULT 'email',
-            verified INTEGER DEFAULT 1,
-            created_at REAL DEFAULT 0,
-            updated_at REAL DEFAULT 0
-        )
-    """)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+    except Exception:
+        pass
+    if not _AUTH_DB_SCHEMA_READY:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS watchlivo_users (
+                uid TEXT PRIMARY KEY,
+                email TEXT UNIQUE,
+                handle TEXT UNIQUE,
+                name TEXT NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL,
+                color TEXT DEFAULT '#00f5d4',
+                avatar TEXT DEFAULT '🎬',
+                auth_provider TEXT DEFAULT 'email',
+                verified INTEGER DEFAULT 1,
+                created_at REAL DEFAULT 0,
+                updated_at REAL DEFAULT 0
+            )
+        """)
+        conn.commit()
+        _AUTH_DB_SCHEMA_READY = True
     return conn
 
 

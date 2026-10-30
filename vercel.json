@@ -87,6 +87,22 @@
       }
     },
     {
+      "src": "/download/ipa",
+      "dest": "/static/Watchlivo.ipa",
+      "headers": {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.ipa\""
+      }
+    },
+    {
+      "src": "/download/ios",
+      "dest": "/static/Watchlivo.mobileconfig",
+      "headers": {
+        "Content-Type": "application/x-apple-aspen-config",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.mobileconfig\""
+      }
+    },
+    {
       "src": "/download/(windows|exe)",
       "dest": "/static/Watchlivo.exe",
       "headers": {

@@ -286,12 +286,18 @@ export class MeshConnection {
           const prevMedia = this.lastRoom.media || {};
           const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
           const srvUrl = String(res.media.url || res.media.videoId || '');
-          if (prevUrl && !srvUrl) {
+          const srvUnresolved = srvUrl.startsWith('/api/rave/resolve-catalog');
+          const prevResolved = prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog');
+          if (prevUrl && (!srvUrl || (prevResolved && srvUnresolved))) {
             this.needsMediaPush = true;
             this.lastRev = 0;
             return;
           }
-          if (srvUrl && srvUrl !== prevUrl) {
+          const sameIdentity = Boolean(
+            (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
+            (res.media.title && prevMedia.title && String(res.media.title) === String(prevMedia.title))
+          );
+          if (srvUrl && srvUrl !== prevUrl && !sameIdentity) {
             this.lastRev = 0;
             setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
             return;
@@ -308,6 +314,8 @@ export class MeshConnection {
           this.lastRoom.media = { ...this.lastRoom.media, ...res.media };
           if (statusChanged || significantJump) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
+          } else if (state.mesh?.media) {
+            Object.assign(state.mesh.media, this.lastRoom.media);
           }
         }
         if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
@@ -395,15 +403,18 @@ export class MeshConnection {
 
   send(type, payload = {}) { this.sendRaw({ type, ...payload }); }
 
-  close() {
+  close(explicitLeave = false) {
     this.closed = true;
     clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer);
-    try {
-      localStorage.removeItem(`vortex_st_${this.roomId}`);
-      localStorage.removeItem(`vortex_room_${this.roomId}`);
-    } catch (e) { /* ignore */ }
     try { this.bc?.close(); } catch (e) { /* ignore */ }
     try { this.ws?.close(); } catch (e) { /* ignore */ }
-    if (this.mode === 'http') api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, { method: 'POST', body: { type: 'leave', clientId: this.clientId, syncToken: this.syncToken || undefined } }).catch(() => {});
+    if (explicitLeave) {
+      try {
+        localStorage.removeItem(`vortex_st_${this.roomId}`);
+        localStorage.removeItem(`vortex_room_${this.roomId}`);
+        sessionStorage.removeItem(`vortex_st_${this.roomId}`);
+      } catch (e) { /* ignore */ }
+      if (this.mode === 'http') api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, { method: 'POST', body: { type: 'leave', clientId: this.clientId, syncToken: this.syncToken || undefined } }).catch(() => {});
+    }
   }
 }

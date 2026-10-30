@@ -534,7 +534,8 @@ export class SubtitleDubController {
       trEl.kind = 'subtitles';
       trEl.label = track.label || 'Altyazı';
       trEl.srclang = track.lang || 'tr';
-      trEl.src = isAppleMobile ? (track.url || vttBlobUrl) : (vttBlobUrl || track.url);
+      const isLocalSub = String(track.url || '').startsWith('local://');
+      trEl.src = (isAppleMobile && !isLocalSub) ? (track.url || vttBlobUrl) : (vttBlobUrl || track.url);
       v.appendChild(trEl);
       try {
         if (trEl.track) {
@@ -774,7 +775,7 @@ export class SubtitleDubController {
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if (track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (!isInit && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();

@@ -298,6 +298,14 @@ function onMessage(data) {
       if (room && data.media) {
         const prevKey = mediaKey(room.media);
         const mergedMedia = { ...(room.media || {}), ...data.media };
+        const prevUrl = String(room.media?.url || '');
+        const nextUrl = String(data.media?.url || '');
+        if ((!nextUrl || nextUrl.startsWith('/api/rave/resolve-catalog')) && prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog') && prevKey === mediaKey(data.media)) {
+          mergedMedia.url = prevUrl;
+          if (!mergedMedia.altUrls?.length && room.media?.altUrls?.length) mergedMedia.altUrls = room.media.altUrls;
+          if (!mergedMedia.subtitleTracks?.length && room.media?.subtitleTracks?.length) mergedMedia.subtitleTracks = room.media.subtitleTracks;
+          if (!mergedMedia.audioTracks?.length && room.media?.audioTracks?.length) mergedMedia.audioTracks = room.media.audioTracks;
+        }
         if (!mergedMedia.url && room.media?.url) mergedMedia.url = room.media.url;
         if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
         if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
@@ -680,6 +688,7 @@ const actions = {
   async leave() {
     document.body.classList.remove('mesh-minimized');
     clearSavedChat(state.mesh?.id);
+    try { ctx?.conn?.close(true); } catch (e) { /* ignore */ }
     window.vortexNavigate('/');
   },
 };

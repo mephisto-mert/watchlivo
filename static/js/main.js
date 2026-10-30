@@ -104,8 +104,9 @@ async function route() {
 }
 
 export function navigate(path) {
-  if (location.hash === `#${path}`) route();
-  else location.hash = path;
+  const clean = String(path || '/').replace(/^#+/, '');
+  if (location.hash === `#${clean}`) route();
+  else location.hash = clean;
 }
 window.vortexNavigate = navigate;
 

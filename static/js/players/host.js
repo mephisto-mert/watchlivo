@@ -28,18 +28,27 @@ export function adapterFor(media) {
   ) {
     return Html5Adapter;
   }
+  if (media.provider === 'vimeo') return VimeoAdapter;
   if (media.provider === 'youtube' || /^[A-Za-z0-9_-]{11}$/.test(vid) || /youtube\.com|youtu\.be/i.test(url)) {
     return YouTubeAdapter;
   }
-  if (media.provider === 'vimeo') return VimeoAdapter;
   return EmbedAdapter;
 }
 
 export const mediaKey = (m) => {
-  if (!m) return '';
+  if (!m || (!m.url && !m.videoId && !m.tmdbId && !m.imdbId && !m.id)) return '';
   const s = Math.max(1, Number(m.season) || 1);
   const e = Math.max(1, Number(m.episode) || 1);
   if (m.tmdbId) return `tmdb|${m.tmdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
+  if (m.imdbId) return `imdb|${m.imdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
+  if (m.id && /^(fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)-/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
+  if (m.videoId) return `vid|${m.provider || 'ext'}|${m.videoId}|${s}|${e}`;
+  const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/'));
+  const rawTitle = String(m.seriesTitle || m.originalTitle || m.title || '').trim().toLowerCase();
+  if (isCatalogStream && rawTitle && !['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitle)) {
+    const baseTitle = rawTitle.replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').trim();
+    if (baseTitle && !['video', 'medya', 'stream'].includes(baseTitle)) return `title|${baseTitle}|${m.mediaType || 'movie'}|${s}|${e}`;
+  }
   return `${m.provider}|${m.videoId || ''}|${m.url || ''}|${s}|${e}`;
 };
 
