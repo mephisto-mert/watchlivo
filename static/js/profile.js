@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261030_v24';
-import { api } from './api.js?v=20261030_v24';
-import { state, set } from './store.js?v=20261030_v24';
+import { h, popup, toast } from './ui.js?v=20261030_v25';
+import { api } from './api.js?v=20261030_v25';
+import { state, set } from './store.js?v=20261030_v25';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -35,7 +35,8 @@ export function loadProfile() {
       const p = JSON.parse(localStorage.getItem(k) || 'null');
       if (p && !p.id && p.uid) p.id = p.uid;
       if (p && !p.uid && p.id) p.uid = p.id;
-      if (p && p.name && p.id && !p.isGuest && p.authToken && !/^Misafir/i.test(String(p.name))) {
+      if (p && p.name && p.id && !p.isGuest && !/^Misafir/i.test(String(p.name))) {
+        if (!p.authToken) p.authToken = getVaultToken(p.email || p.handle) || `wl_${p.id}`;
         return p;
       }
     } catch (e) { /* ignore */ }
