@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v38';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v38';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v38';
-import { MeshConnection } from '../realtime.js?v=20261030_v38';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v38';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v38';
-import { buildLayout } from './mesh-layout.js?v=20261030_v38';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v38';
-import { Voice } from '../voice.js?v=20261030_v38';
-import { playRoomSfx } from './chat.js?v=20261030_v38';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v39';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v39';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v39';
+import { MeshConnection } from '../realtime.js?v=20261030_v39';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v39';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v39';
+import { buildLayout } from './mesh-layout.js?v=20261030_v39';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v39';
+import { Voice } from '../voice.js?v=20261030_v39';
+import { playRoomSfx } from './chat.js?v=20261030_v39';
 
 let ctx = null;
 
@@ -314,9 +314,14 @@ async function loadMedia(media) {
         actions.heartbeat(ad.getTime?.() ?? 0, true);
       }
     };
-    if (vEl && (vEl.readyState < 2 || vEl.paused)) {
+    if (vEl) {
       vEl.addEventListener('playing', fireLeaderAnchor, { once: true });
-      vEl.addEventListener('canplay', fireLeaderAnchor, { once: true });
+      vEl.addEventListener('seeked', () => {
+        if (ctx && ctx.loadSeq === mySeq && isTimeKeeper() && !ctx.host?.loading) {
+          actions.heartbeat(ad.getTime?.() ?? 0, true);
+        }
+      });
+      if (vEl.readyState >= 3 && !vEl.paused) fireLeaderAnchor();
     } else {
       fireLeaderAnchor();
     }

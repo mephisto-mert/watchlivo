@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v38';
-import { api } from './api.js?v=20261030_v38';
-import { state } from './store.js?v=20261030_v38';
+import { clock } from './sync.js?v=20261030_v39';
+import { api } from './api.js?v=20261030_v39';
+import { state } from './store.js?v=20261030_v39';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -184,8 +184,8 @@ export class MeshConnection {
     const scheduleNextPoll = () => {
       if (this.closed || this.mode !== 'http') return;
       const pCnt = this.participantCount || 1;
-      const baseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt > 25 ? 1550 : 1100;
-      const jitterMs = pCnt > 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 180);
+      const baseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt > 25 ? 1400 : 750;
+      const jitterMs = pCnt > 25 ? Math.floor(Math.random() * 450) : Math.floor(Math.random() * 120);
       this.pollTimer = setTimeout(async () => {
         if (!this.inFlight && !this.outQueue.length) {
           await this.httpSend({ type: 'poll' });
@@ -383,7 +383,33 @@ export class MeshConnection {
         if (res.room.syncToken && res.room.syncToken !== this.syncToken) {
           this.syncToken = res.room.syncToken;
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
-          if (!isPoll) this._emitP2p({ event: { type: 'room_state', room: res.room } });
+          if (!isPoll) {
+            this._emitP2p({ event: { type: 'room_state', room: res.room } });
+            const echoTok = this.syncToken;
+            if (!isInit && echoTok && (this.participantCount || 1) > 1) {
+              for (const delayMs of [90, 240]) {
+                setTimeout(() => {
+                  if (this.closed || !this.syncToken) return;
+                  api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+                    method: 'POST', timeout: 5000,
+                    body: {
+                      type: 'poll',
+                      clientId: this.clientId,
+                      clientToken: this.clientToken,
+                      username: this.profile.name,
+                      color: this.profile.color,
+                      device: this.device,
+                      pwd: this.password,
+                      country: COUNTRY,
+                      isCreator: Boolean(this.isCreator),
+                      sinceRev: this.lastRev,
+                      syncToken: this.syncToken,
+                    },
+                  }).catch(() => {});
+                }, delayMs);
+              }
+            }
+          }
         }
         const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${res.room.host_id}`;
         if (isInit) this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });

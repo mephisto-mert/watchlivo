@@ -80,11 +80,11 @@ export class SyncEngine {
     }
     const runway = bufEnd - curr;
     if (expected <= bufEnd) {
-      if (delta <= 4.5 && ad.caps?.rate && runway >= 1.2) return 'speed';
-      return 'jump';
+      if (delta <= 5.5 && ad.caps?.rate && runway >= 0.8) return 'speed';
+      return (ad.isBuffered ? ad.isBuffered(expected) : true) ? 'jump' : 'defer';
     }
     if (delta > STARVE_CEILING) return 'jump';
-    if (runway >= RUNWAY_SEC && ad.caps?.rate) return 'speed';
+    if (runway >= 1.2 && ad.caps?.rate) return 'speed';
     return 'defer';
   }
 
@@ -250,7 +250,7 @@ export class SyncEngine {
     const runway = bufEnd > curr ? (bufEnd - curr) : 0;
     if ((stateChanged && abs > 1.5 && now > this.seekUntil) || abs > JUMP_DELTA) {
       const inBuf = buffered(expected + lead);
-      const behindAct = (!stateChanged && delta > 0 && delta < 6.0) ? this.decideBehindAction(ad, curr, expected, delta) : 'jump';
+      const behindAct = (delta > 0 && delta < 6.0) ? this.decideBehindAction(ad, curr, expected, delta) : 'jump';
       if (behindAct === 'speed') {
         this.deferStartedAt = 0;
         const sp = this.speedSync(curr, expected, base);
@@ -259,7 +259,7 @@ export class SyncEngine {
         this.mode = 'speedSync';
       } else if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < DEFER_MAX_MS)) {
         if (!this.deferStartedAt) this.deferStartedAt = now;
-        const catchupRate = (runway >= 1.2 && ad.caps?.rate) ? Math.min(base + 0.035, 1.05) : base;
+        const catchupRate = (runway >= 0.8 && ad.caps?.rate) ? Math.min(base + 0.035, 1.05) : base;
         if (Math.abs(ad.getRate() - catchupRate) >= 0.01) ad.setRate(catchupRate);
         this.mode = 'inSync';
         this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
@@ -284,10 +284,10 @@ export class SyncEngine {
       this.mode = 'inSync';
     } else if (abs > IN_SYNC && ad.caps.rate) {
       this.deferStartedAt = 0;
-      if (delta > 0 && bufEnd > 0 && runway < 1.5) {
+      if (delta > 0 && bufEnd > 0 && runway < 0.8) {
         if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
         this.mode = 'inSync';
-        timeout = 800;
+        timeout = 700;
       } else {
         const sp = this.speedSync(curr, expected, base);
         if (Math.abs(ad.getRate() - sp.rate) >= 0.001) ad.setRate(sp.rate);
