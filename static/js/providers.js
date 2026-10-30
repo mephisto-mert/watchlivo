@@ -254,6 +254,9 @@ export const PROVIDERS = [
       (u.match(/pluto\.tv\/.*?(?:movies|series|live-tv)\/([\w-]+)/i) || [])[1] ||
       (u.match(/tubitv\.com\/(?:video|movies|tv-shows|series)\/(\d+)/i) || [])[1] || null
     ) },
+  { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
+    homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Semicenk Blok3 Dedublüman Türkçe Hit 2026',
+    idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
   { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Dizi & Film Vitrini', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
