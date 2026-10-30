@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v18';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v18';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v18';
-import { MeshConnection } from '../realtime.js?v=20261030_v18';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v18';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v18';
-import { buildLayout } from './mesh-layout.js?v=20261030_v18';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v18';
-import { Voice } from '../voice.js?v=20261030_v18';
-import { playRoomSfx } from './chat.js?v=20261030_v18';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v20';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v20';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v20';
+import { MeshConnection } from '../realtime.js?v=20261030_v20';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v20';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v20';
+import { buildLayout } from './mesh-layout.js?v=20261030_v20';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v20';
+import { Voice } from '../voice.js?v=20261030_v20';
+import { playRoomSfx } from './chat.js?v=20261030_v20';
 
 let ctx = null;
 
@@ -115,6 +115,19 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     }
     if (ctx?.lastPrivacy && ctx.lastPrivacyAt && Date.now() - ctx.lastPrivacyAt < 10000) {
       room = { ...room, privacy: ctx.lastPrivacy };
+    }
+  }
+  if (ctx && (isHostOnly() || isLeader())) {
+    let savedPriv = ctx.lastPrivacy || '';
+    if (!savedPriv && room.id) {
+      try { savedPriv = sessionStorage.getItem(`vortex_priv_${room.id}`) || ''; } catch (e) { /* ignore */ }
+    }
+    if (savedPriv && room.privacy !== savedPriv) {
+      room = { ...room, privacy: savedPriv };
+      if (!ctx.lastPrivacySyncAt || Date.now() - ctx.lastPrivacySyncAt > 3500) {
+        ctx.lastPrivacySyncAt = Date.now();
+        setTimeout(() => ctx?.conn?.send('host_action', { action: 'set_privacy', privacy: savedPriv }), 80);
+      }
     }
   }
   if (!room.curated && !(room.chat || []).length) {
@@ -332,7 +345,7 @@ const actions = {
     const playing = !ctx.userPaused && !ad.isPaused?.();
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
-    ctx.conn.send('heartbeat', { currentTime: t, playing, atTime: clock.now() });
+    ctx.conn.send('heartbeat', { currentTime: t, playing, atTime: clock.now(), privacy: state.mesh?.privacy || undefined });
   },
   play() {
     if (!ctx) return;
@@ -476,13 +489,23 @@ const actions = {
       if (extra.privacy) {
         patch.privacy = extra.privacy;
         if (ctx) { ctx.lastPrivacy = extra.privacy; ctx.lastPrivacyAt = Date.now(); }
+        try { sessionStorage.setItem(`vortex_priv_${state.mesh.id}`, extra.privacy); } catch (e) { /* ignore */ }
+        const privNotice = {
+          public: '🌐 Oda gizliliği "Herkese Açık" olarak ayarlandı',
+          friends: '👥 Oda gizliliği "Sadece Arkadaşlar" olarak ayarlandı',
+          nearby: '📍 Oda gizliliği "Çevremdekiler" olarak ayarlandı',
+          private: '🔒 Oda gizliliği "Gizli Oda (Sadece Davet)" olarak ayarlandı',
+        }[extra.privacy];
+        if (privNotice) toast(privNotice);
       }
       if (extra.playMode) patch.playMode = extra.playMode;
       if (extra.voipMode) patch.voipMode = extra.voipMode;
       if (typeof extra.name === 'string' && extra.name.trim()) patch.name = extra.name.trim();
       if (typeof extra.password === 'string') patch.hasPassword = Boolean(extra.password.trim());
       if (Object.keys(patch).length) {
-        set({ mesh: { ...state.mesh, ...patch } });
+        const updatedRoom = { ...state.mesh, ...patch };
+        set({ mesh: updatedRoom });
+        rememberRoom(updatedRoom);
         ctx?.layout.update();
       }
     }

@@ -1,10 +1,10 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v18';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261030_v18';
-import { avatar } from '../profile.js?v=20261030_v18';
-import { clock } from '../sync.js?v=20261030_v18';
-import { fetchRooms, meshThumb, thumbFor } from './lobby.js?v=20261030_v18';
-import { copyInvite, inviteUrl } from './chat.js?v=20261030_v18';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v20';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261030_v20';
+import { avatar } from '../profile.js?v=20261030_v20';
+import { clock } from '../sync.js?v=20261030_v20';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v20';
+import { copyInvite, inviteUrl } from './chat.js?v=20261030_v20';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -124,6 +124,12 @@ function Friends() {
       h('div', { class: 'invite-preview-badge' }, '🎬 WATCHLIVO DAVET KARTI'),
       h('div', { class: 'invite-preview-title' }, roomTitle),
       h('div', { class: 'invite-preview-sub' }, `${sender} seni birlikte film/dizi izlemeye davet ediyor.`)),
+    h('button', {
+      type: 'button',
+      class: 'btn primary',
+      style: { width: '100%', justifyContent: 'center', gap: '6px' },
+      onclick: () => openFriendsManagerModal(),
+    }, '👥 + Arkadaş Ekle & Arkadaş Listem'),
     h('div', { class: 'share-box' },
       h('input', { class: 'input', value: url, readonly: true, onclick: (e) => e.target.select() }),
       h('button', { class: 'btn primary', onclick: copyInvite, 'aria-label': 'Kopyala' }, h('span', { html: icons.copy, style: { display: 'flex' } }))),
@@ -175,6 +181,12 @@ function Participants(ctx) {
     const visibleParts = allParts.slice(0, 60);
     const overflowCount = Math.max(0, totalCount - visibleParts.length);
     fill(el,
+      h('button', {
+        type: 'button',
+        class: 'btn sm primary',
+        style: { width: '100%', marginBottom: '8px', justifyContent: 'center' },
+        onclick: () => openFriendsManagerModal(() => update()),
+      }, '👥 + Kullanıcı Adıyla Arkadaş Ekle'),
       duckBar,
       ...visibleParts.map((p) => {
         const isMe = p.id === state.clientId;

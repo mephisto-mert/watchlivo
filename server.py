@@ -4234,15 +4234,145 @@ async def resolve_catalog(request: Request):
     return JSONResponse(res, headers=cc_hdrs)
 
 
+def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 40) -> dict:
+    import random
+    cat_c = (cat or "all").strip().lower()
+    mt_c = (mt_filter or "").strip().lower()
+    if mt_c in ("series", "show"):
+        mt_c = "tv"
+    elif mt_c in ("movies", "film"):
+        mt_c = "movie"
+
+    v_cat = (_MAIN_SITES_VAULT.get("catalog") or {})
+    pool_items = []
+    seen_keys = set()
+
+    def _norm_poster(u_img: str) -> str:
+        u_img = str(u_img or "").strip()
+        if not u_img or u_img.startswith("/"):
+            return u_img
+        if "image.tmdb.org" in u_img:
+            return u_img
+        if any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
+            return f"/api/rave/poster?u={urllib.parse.quote(u_img, safe='')}"
+        return u_img
+
+    def _add_cand(it_raw: dict, default_badge: str = ""):
+        if not isinstance(it_raw, dict):
+            return
+        it = dict(it_raw)
+        title = str(it.get("title") or "").strip()
+        if not title:
+            return
+        yr = str(it.get("year") or "")
+        rt = float(it.get("rating") or 0)
+        if rt == 0.0 and yr >= "2026":
+            return
+        mtype = "tv" if it.get("mediaType") == "tv" else "movie"
+        tid = str(it.get("tmdbId") or "")
+        cid = str(it.get("id") or tid or "")
+        if _HIDDEN_TMDB_IDS and not _has_vault_stream(it):
+            if tid in _HIDDEN_TMDB_IDS or f"{mtype}:{tid or cid}" in _HIDDEN_TMDB_IDS:
+                return
+        if mt_c in ("tv", "movie") and mtype != mt_c:
+            return
+        cats = list(it.get("categories") or [])
+        if cat_c == "series" and mtype != "tv":
+            return
+        if cat_c == "movies" and mtype == "tv":
+            return
+        if cat_c == "anime" and "anime" not in cats and "animation" not in cats and not cid.startswith("ac-"):
+            return
+        if cat_c == "tr" and it.get("origLang") != "tr" and "Yerli" not in str(it.get("genreLabel") or ""):
+            return
+        if cat_c not in ("all", "trend", "series", "movies", "anime", "tr") and cat_c not in cats:
+            return
+        poster = _norm_poster(it.get("poster") or "")
+        backdrop = _norm_poster(it.get("backdrop") or poster)
+        if not poster:
+            return
+        dedup = f"{mtype}:{tid or _norm_title(title)}"
+        if dedup in seen_keys:
+            return
+        seen_keys.add(dedup)
+        it["poster"] = poster
+        it["backdrop"] = backdrop or poster
+        if default_badge and not it.get("sourceBadge"):
+            it["sourceBadge"] = default_badge
+        pool_items.append(it)
+
+    for dom_k, dom_list in _DOMESTIC_TR_ORIGINALS.items():
+        for d_it in dom_list:
+            _add_cand(d_it, "🇹🇷 Yerli Orijinal 4K")
+
+    for src_key, badge in (("fhd", "🎬 FullHDFilm 4K"), ("hfnl", "🎬 HDFilmCehennemi+"), ("dbx", "📺 Dizibox HD"), ("ac", "⛩️ Animetrix Fansub")):
+        src_list = list(v_cat.get(src_key) or [])
+        if len(src_list) > 250:
+            src_list = random.sample(src_list, 250)
+        for v_it in src_list:
+            _add_cand(v_it, badge)
+
+    for _, c_entry in list(_CATALOG_MEM_CACHE.items())[:8]:
+        if isinstance(c_entry, tuple) and len(c_entry) == 2 and isinstance(c_entry[1], dict):
+            for c_it in (c_entry[1].get("items") or [])[:40]:
+                _add_cand(c_it, "🔥 4K Sinema Arşivi")
+
+    try:
+        rnd_pg = random.randint(1, 15)
+        if mt_c != "movie" and cat_c != "movies":
+            tv_u = f"https://api.themoviedb.org/3/discover/tv?api_key={TMDB_API_KEY}&language=tr-TR&without_genres=10763,10764,10766,10767&vote_count.gte=40&sort_by=popularity.desc&page={rnd_pg}"
+            for r in (_http_json(tv_u, timeout=2.0).get("results") or [])[:16]:
+                if r.get("poster_path"):
+                    _add_cand(_tmdb_item(r, "tv"), "📺 Dizi+ Arşiv")
+        if mt_c != "tv" and cat_c not in ("series", "anime"):
+            mv_u = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR&primary_release_date.lte=2026-04-30&vote_count.gte=80&sort_by=popularity.desc&page={rnd_pg}"
+            for r in (_http_json(mv_u, timeout=2.0).get("results") or [])[:16]:
+                if r.get("poster_path"):
+                    _add_cand(_tmdb_item(r, "movie"), "🎬 Sinema+ 4K")
+    except Exception:
+        pass
+
+    random.shuffle(pool_items)
+    with_backdrop = [x for x in pool_items if "image.tmdb.org" in str(x.get("backdrop") or x.get("poster") or "")]
+    others = [x for x in pool_items if "image.tmdb.org" not in str(x.get("backdrop") or x.get("poster") or "")]
+    random.shuffle(with_backdrop)
+    random.shuffle(others)
+    final_items = (with_backdrop + others)[:max(12, min(96, int(limit or 40)))]
+    return {
+        "items": final_items,
+        "totalAvailable": 42600,
+        "totalTv": 18400,
+        "totalMovies": 24200,
+        "page": 1,
+        "category": cat_c,
+        "shuffled": True,
+        "hasMore": True,
+    }
+
+
 async def provider_catalog(request: Request):
     prov = (request.query_params.get("provider") or request.query_params.get("source") or "cinema").strip().lower()
     q = (request.query_params.get("q") or "").strip()[:200]
+    shuffle_flag = (request.query_params.get("shuffle") or request.query_params.get("random") or "").strip().lower() in ("1", "true", "yes")
     try:
         page = max(1, int(request.query_params.get("page") or 1))
     except (TypeError, ValueError):
         page = 1
+    try:
+        limit = max(12, min(96, int(request.query_params.get("limit") or 40)))
+    except (TypeError, ValueError):
+        limit = 40
     category = (request.query_params.get("category") or "all").strip()[:40]
     mt_filter = (request.query_params.get("mediaType") or request.query_params.get("type") or "").strip()[:20]
+    if shuffle_flag and not q:
+        try:
+            res = await asyncio.wait_for(asyncio.to_thread(_showcase_shuffle_sync, category, mt_filter, limit), timeout=5.0)
+        except Exception:
+            res = {"items": [], "totalAvailable": 42600, "totalTv": 18400, "totalMovies": 24200, "page": 1, "category": category, "shuffled": True, "hasMore": True}
+        return JSONResponse(
+            {"provider": prov, "query": "", **res},
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
     ckey = f"v3:{prov}:{category}:{page}:{mt_filter}:{q.lower()}"
     lock = _CATALOG_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:

@@ -1,6 +1,6 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v18';
-import { api } from './api.js?v=20261030_v18';
+import { clock } from './sync.js?v=20261030_v20';
+import { api } from './api.js?v=20261030_v20';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -248,9 +248,13 @@ export class MeshConnection {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           }
         }
-        if (this.lastRoom.participantCount !== newCnt) {
+        if (this.lastRoom.participantCount !== newCnt || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
+          if (res.privacy) this.lastRoom.privacy = res.privacy;
+          if (res.playMode) this.lastRoom.playMode = res.playMode;
+          if (res.voipMode) this.lastRoom.voipMode = res.voipMode;
+          if (res.name) this.lastRoom.name = res.name;
           this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
         }
         return;
@@ -266,7 +270,7 @@ export class MeshConnection {
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
           if (!isPoll) this._emitP2p({ event: { type: 'room_state', room: res.room } });
         }
-        const stamp = `${res.room.rev}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${res.room.host_id}`;
+        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${res.room.host_id}`;
         if (isInit) this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
         else if (stamp !== this.lastRoomStamp) this.onMessage?.({ type: 'room_state', room: res.room, viaHttp: isPoll });
         this.lastRoomStamp = stamp;

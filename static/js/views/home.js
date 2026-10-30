@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261030_v18';
-import { state, set } from '../store.js?v=20261030_v18';
-import { avatar, profileSetup } from '../profile.js?v=20261030_v18';
-import { api } from '../api.js?v=20261030_v18';
-import { createSelection } from './selection.js?v=20261030_v18';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom } from './lobby.js?v=20261030_v18';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261030_v20';
+import { state, set, getFriends } from '../store.js?v=20261030_v20';
+import { avatar, profileSetup } from '../profile.js?v=20261030_v20';
+import { api } from '../api.js?v=20261030_v20';
+import { createSelection } from './selection.js?v=20261030_v20';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261030_v20';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261024m', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261030_v20', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -81,6 +81,7 @@ export function renderHome(app) {
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
         toast('🎬 Aktif izleme odaları listesi');
       }),
+      navIcon('friends', 'Arkadaşlarım & Arkadaş Ekle', () => openFriendsManagerModal(() => draw(true)), { id: 'nav-friends-btn', badge: getFriends().length }),
       navIcon('settings', 'Ayarlar & Tema', () => openAppSettings(), { id: 'nav-theme-btn' })),
     h('div', { class: 'nav-center navbar-center' }, logo()),
     h('div', { class: 'nav-right navbar-right' },
@@ -102,7 +103,7 @@ export function renderHome(app) {
           document.getElementById('home-selection')?.scrollIntoView({ behavior: 'smooth' });
           setTimeout(() => document.querySelector('#home-selection .home-search input')?.focus(), 80);
         }
-      } }, h('span', { html: icons.plus, style: { display: 'flex' } }), '+ Oda Oluştur'),
+      } }, h('span', { html: icons.plus, style: { display: 'flex' } }), h('span', { class: 'create-room-lbl' }, 'Oda Oluştur')),
       navIcon('download', 'Tüm Uygulamaları İndir (APK & Windows)', () => openDownloadModal(), { id: 'nav-download-btn' }),
       navIcon('link', 'Kodla katıl', () => joinByCode())));
 
@@ -249,7 +250,13 @@ export function renderHome(app) {
       h('div', { class: 'lobby-toolbar-left' },
         h('h2', { class: 'lobby-heading' }, 'Odalar & 7/24 Canlı Yayınlar'),
         tabs),
-      h('div', { class: 'lobby-toolbar-right' },
+      h('div', { class: 'lobby-toolbar-right', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+        h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          id: 'btn-toolbar-friends',
+          onclick: () => openFriendsManagerModal(() => draw(true)),
+        }, '👥 + Arkadaş Ekle'),
         lobbySearch)),
     lobbyBox);
 

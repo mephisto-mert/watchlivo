@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v18';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v18';
-import { avatar } from '../profile.js?v=20261030_v18';
-import { api, qs } from '../api.js?v=20261030_v18';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v18';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v20';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v20';
+import { avatar } from '../profile.js?v=20261030_v20';
+import { api, qs } from '../api.js?v=20261030_v20';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v20';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -830,9 +830,10 @@ export function buildChat(ctx) {
     barEl = h('div', { class: 'chat-quick-bar', id: 'privacy-card' },
       h('div', { class: 'chat-quick-pills' },
         h('button', { type: 'button', class: 'chat-q-pill primary', onclick: copyInvite, title: 'Davet bağlantısını kopyala' }, h('span', { html: icons.link, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Davet Linki'),
+        h('button', { type: 'button', class: 'chat-q-pill friend-add-pill', id: 'btn-room-add-friend', onclick: () => { if (typeof window.vortexOpenFriendsModal === 'function') window.vortexOpenFriendsModal(); else { setView('right', 'Friends'); ctx.layout.update(); } }, title: 'Arkadaş Ekle & Arkadaş Listem' }, h('span', { html: icons.addUser, style: { display: 'inline-flex', width: '12px', height: '12px' } }), '+ Arkadaş Ekle'),
         h('a', { class: 'chat-q-pill', href: waUrl, target: '_blank', rel: 'noopener', title: 'WhatsApp ile davet et' }, h('span', { html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'WhatsApp'),
         h('button', { type: 'button', class: 'chat-q-pill', onclick: () => { setView('right', 'Friends'); ctx.layout.update(); }, title: 'Davet Kartı & QR' }, h('span', { html: icons.qr, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'QR')),
-      h('div', { class: 'chat-access-seg' },
+      h('div', { class: 'chat-access-seg', 'data-active-privacy': cur },
         ...PRIVACY.map(([k, label, ic, desc]) => h('button', {
           type: 'button',
           class: `chat-q-pill privacy-opt ${cur === k ? 'on' : ''}`,
@@ -842,7 +843,7 @@ export function buildChat(ctx) {
             if (!isLeader()) { toast('Bu ayarı yalnızca oda lideri değiştirebilir'); return; }
             actions.hostAction('set_privacy', { privacy: k });
           },
-        }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), label))),
+        }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), h('span', { class: 'priv-opt-lbl' }, cur === k && k === 'friends' ? 'Sadece Arkadaşlar' : label)))),
       h('button', { type: 'button', class: 'chat-q-close', 'aria-label': 'Kapat', onclick: () => barEl.remove() }, '✕'));
     return barEl;
   }
@@ -969,8 +970,15 @@ export function buildChat(ctx) {
       const card = el.querySelector('#privacy-card');
       if (card) {
         const cur = state.mesh?.privacy || 'public';
+        const segEl = card.querySelector('.chat-access-seg');
+        if (segEl) segEl.dataset.activePrivacy = cur;
         card.querySelectorAll('.privacy-opt').forEach((btn) => {
-          btn.classList.toggle('on', btn.dataset.privacy === cur);
+          const isOn = btn.dataset.privacy === cur;
+          btn.classList.toggle('on', isOn);
+          const lbl = btn.querySelector('.priv-opt-lbl');
+          if (lbl && btn.dataset.privacy === 'friends') {
+            lbl.textContent = isOn ? 'Sadece Arkadaşlar' : 'Arkadaşlar';
+          }
         });
       }
     },

@@ -371,7 +371,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     prune_chat(room)
     p_map = room.get("participants") or {}
     m_upd = float((room.get("media") or {}).get("updatedAt") or 0.0)
-    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{len(room.get('chat') or [])}:{int(t // 4)}"
+    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{int(t // 4)}"
     if room.get("_tok_sig") == tok_sig and room.get("_tok_val"):
         return room["_tok_val"]
     host_id = room.get("host_id")
@@ -1072,6 +1072,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         _apply_time(room, data)
         if "playing" in data:
             room["media"]["playing"] = bool(data["playing"])
+        if is_host and data.get("privacy") in VALID_PRIVACY:
+            room["privacy"] = data["privacy"]
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append((_sync_event(room, "heartbeat", name), cid))
         return out
@@ -1324,9 +1326,15 @@ def _handle_social(room, cid, data, out, name, is_host):
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
     elif mtype == "host_action":
         act = data.get("action")
-        if not is_host:
+        is_creator_match = bool(
+            (room.get("creatorId") and (me.get("uid") == room.get("creatorId") or cid == room.get("creatorId")))
+            or (room.get("creator") and me.get("name") and me.get("name") == room.get("creator"))
+        )
+        if not (is_host or cid in (room.get("co_hosts") or []) or is_creator_match):
             out["reply"].append({"type": "error", "message": "Bu ayarları yalnızca oda lideri değiştirebilir."})
             return out
+        if is_creator_match and room.get("host_id") not in room.get("participants", {}):
+            room["host_id"] = cid
         if act == "set_privacy":
             if data.get("privacy") in VALID_PRIVACY:
                 room["privacy"] = data["privacy"]
@@ -1339,6 +1347,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 room.pop("password", None)
             if clean_str(data.get("name"), 45):
                 room["name"] = clean_str(data.get("name"), 45)
+            _LOBBY_CACHE["ts"] = 0.0
         elif act == "transfer_host" and data.get("targetId") in room["participants"]:
             room["host_id"] = data["targetId"]
             room["host_transferred"] = True
@@ -1791,6 +1800,10 @@ async def http_sync(request: Request):
             return JSONResponse({
                 "ok": True, "unchanged": True, "clientId": cid, "clientToken": sign_client_token(room_id, cid), "rev": cur_rev, "serverTime": t_cur,
                 "participantCount": len(room["participants"]),
+                "privacy": room.get("privacy", "public"),
+                "playMode": room.get("playMode", "leader"),
+                "voipMode": room.get("voipMode", "all"),
+                "name": room.get("name", ""),
                 "media": {
                     "playing": bool(m.get("playing")), "currentTime": float(m.get("currentTime") or 0.0),
                     "rate": float(m.get("rate") or 1.0), "updatedAt": float(m.get("updatedAt") or t_cur),

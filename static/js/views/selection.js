@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v18';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v18';
-import { api, qs } from '../api.js?v=20261030_v18';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v18';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v18';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v18';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v20';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v20';
+import { api, qs } from '../api.js?v=20261030_v20';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v20';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v20';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v20';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -108,6 +108,15 @@ const HERO_DEFAULT_POOL = [
   { id: '66732', tmdbId: '66732', mediaType: 'tv', title: 'Stranger Things', originalTitle: 'Stranger Things', year: '2016', rating: '8.6', overview: 'Küçük bir kasabada küçük bir çocuğun gizemli şekilde kaybolması, doğaüstü güçleri ve gizli deneyleri gün yüzüne çıkarır.', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', poster: 'https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg' },
 ];
 
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 export function createSelection({ onPick, compact = false, initialProvider = null } = {}) {
   const root = h('div', { class: 'selection fade-in' });
   let provider = initialProvider ? getProvider(initialProvider) : null;
@@ -115,7 +124,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let catFilter = 'all';
   let showAllProviders = false;
   let showTrending = false;
-  let trendingItems = [...HERO_DEFAULT_POOL];
+  let trendingItems = shuffleArray(HERO_DEFAULT_POOL);
+  let trendingFetched = false;
   let trendingLoading = false;
   let heroIndex = 0;
   fetchAccounts().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
@@ -126,41 +136,69 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     await onPick(media);
   };
 
-  async function ensureTrending() {
+  async function ensureTrending(forceShuffle = false) {
     if (trendingLoading) return trendingItems;
     trendingLoading = true;
     try {
-      const res = await api('/api/rave/catalog?provider=netflix', { timeout: 10000 });
-      const fetched = (res.items || []).slice(0, 16);
+      const res = await api(`/api/rave/catalog?provider=cinema&shuffle=1&limit=36&_t=${Date.now()}`, { timeout: 10000 });
+      const fetched = (res.items || []).filter((x) => x && x.title && (x.poster || x.backdrop));
       if (fetched.length) {
-        const seenIds = new Set(fetched.map((x) => String(x.tmdbId || x.id)));
-        trendingItems = [...fetched, ...HERO_DEFAULT_POOL.filter((d) => !seenIds.has(String(d.tmdbId || d.id)))].slice(0, 16);
+        const seenIds = new Set(fetched.map((x) => String(x.tmdbId || x.id || x.title)));
+        const merged = [
+          ...shuffleArray(fetched),
+          ...shuffleArray(HERO_DEFAULT_POOL).filter((d) => !seenIds.has(String(d.tmdbId || d.id || d.title))),
+        ];
+        trendingItems = merged.slice(0, 36);
+        trendingFetched = true;
+        if (forceShuffle) heroIndex = 0;
+      } else if (forceShuffle) {
+        trendingItems = shuffleArray(trendingItems.length ? trendingItems : HERO_DEFAULT_POOL);
+        heroIndex = 0;
       }
     } catch (e) {
-      if (!trendingItems.length) trendingItems = [...HERO_DEFAULT_POOL];
+      trendingItems = shuffleArray(trendingItems.length ? trendingItems : HERO_DEFAULT_POOL);
+      trendingFetched = true;
+      if (forceShuffle) heroIndex = 0;
     } finally {
       trendingLoading = false;
     }
     return trendingItems;
   }
 
+  async function shuffleShowcaseUI(btnEl) {
+    const prevTxt = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+      btnEl.disabled = true;
+      btnEl.textContent = '🎲 Karıştırılıyor...';
+    }
+    try {
+      await ensureTrending(true);
+      if (!provider && root.isConnected) renderGrid();
+      toast('🎲 40.000+ Arşivden yeni vitrin önerileri getirildi!');
+    } finally {
+      if (btnEl && btnEl.isConnected) {
+        btnEl.disabled = false;
+        btnEl.textContent = prevTxt || '🎲 Vitrini Karıştır';
+      }
+    }
+  }
+
   async function pickRandomMovie(btnEl) {
     if (btnEl) { btnEl.disabled = true; btnEl.textContent = '🎲 Seçiliyor...'; }
     try {
       let items = [];
-      if (provider && provider.kind === 'catalog') {
-        try {
-          const res = await api(`/api/rave/catalog?${qs({ provider: provider.id, page: 1 })}`, { timeout: 10000 });
-          items = res.items || [];
-        } catch (e) { /* fallback to trending */ }
-      }
-      if (!items.length) items = await ensureTrending();
+      try {
+        const provId = (provider && provider.kind === 'catalog') ? provider.id : 'cinema';
+        const res = await api(`/api/rave/catalog?${qs({ provider: provId, shuffle: 1, limit: 36, _t: Date.now() })}`, { timeout: 10000 });
+        items = res.items || [];
+      } catch (e) { /* fallback to trending */ }
+      if (!items.length) items = await ensureTrending(true);
       const movies = items.filter((it) => it.mediaType !== 'tv');
       const pool = movies.length ? movies : items;
       if (!pool.length) { toast('Katalog yüklenemedi, lütfen tekrar dene'); return; }
       const chosen = pool[Math.floor(Math.random() * pool.length)];
       toast(`🎲 Rastgele Seçim: ${chosen.title} hazırlanıyor...`);
-      const defProv = provider || getProvider(chosen.provider || 'netflix') || { id: 'netflix', name: 'Netflix' };
+      const defProv = provider || getProvider(chosen.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
       const media = await resolveCatalogItem(chosen, defProv, 1, 1);
       if (media) await pickSafe(media);
     } finally {
@@ -244,8 +282,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const trendingRail = !compact && showTrending && trendingItems.length ? h('div', { class: 'trending-strip' },
       h('div', { class: 'trending-strip-head' },
-        h('span', { class: 'trending-strip-title' }, '🔥 Günün Popüler Film & Dizileri (Tek Tıkla Odaya Aç)'),
-        h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×')),
+        h('span', { class: 'trending-strip-title' }, '🔥 40.000+ Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
+        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('button', { type: 'button', class: 'btn sm', onclick: (e) => shuffleShowcaseUI(e.currentTarget) }, '🎲 Yenile & Karıştır'),
+          h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×'))),
       h('div', { class: 'trending-strip-row' },
         ...trendingItems.map((item) => {
           const prov = getProvider(item.provider || 'netflix') || { id: 'netflix', name: 'Netflix' };
@@ -334,7 +374,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
     const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
     const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
-    if (trendingItems.length <= HERO_DEFAULT_POOL.length && !trendingLoading && !compact) {
+    if (!trendingFetched && !trendingLoading && !compact) {
       ensureTrending().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
     }
 
@@ -440,6 +480,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             }, '🎬 40.000+ Kataloğu Aç'),
             h('button', {
               type: 'button',
+              id: 'btn-shuffle-hero',
+              class: 'btn-download-glass hero-shuffle-btn',
+              title: '40.000+ içerikten vitrini rastgele karıştır',
+              onclick: (e) => shuffleShowcaseUI(e.currentTarget),
+            }, '🎲 Vitrini Karıştır'),
+            h('button', {
+              type: 'button',
               class: 'btn-download-glass hero-nav-btn',
               title: 'Önceki',
               onclick: () => {
@@ -467,8 +514,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           }))),
       h('div', { class: 'hero-showcase-strip' },
         h('div', { class: 'hero-showcase-head' },
-          h('span', { class: 'hero-showcase-title' }, '🎬 Vitrindeki Diğer Filmler & Diziler (Seç veya Hemen Odada Başlat)'),
+          h('span', { class: 'hero-showcase-title' }, `🎬 40.000+ Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
           h('div', { class: 'hero-showcase-arrows' },
+            h('button', {
+              type: 'button',
+              id: 'btn-shuffle-showcase',
+              class: 'btn sm primary',
+              title: '40.000+ arşivden yeni rastgele vitrin önerileri getir',
+              onclick: (e) => shuffleShowcaseUI(e.currentTarget),
+            }, '🎲 Karıştır'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: 420, behavior: 'smooth' }); } }, '▶'),
             h('button', { type: 'button', class: 'btn sm', onclick: () => { provider = getProvider('cinema'); render(); } }, 'Tümünü Gör →'))),
