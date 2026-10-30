@@ -621,6 +621,9 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
             if s_media.get(k):
                 room["media"][k] = s_media[k]
+        if s_m_time > r_m_time:
+            room["media"]["updatedAt"] = s_m_time
+            room["media"]["currentTime"] = s_pos
     if snap.get("polls") and not room.get("polls"):
         room["polls"] = snap["polls"]
     elif snap.get("polls") and room.get("polls"):
@@ -935,9 +938,21 @@ class RedisStore:
             try:
                 room = json.loads(raw)
                 r_has_media = bool(isinstance(room.get("media"), dict) and (room["media"].get("url") or room["media"].get("videoId")))
-                if cached_has_media and not r_has_media and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
-                    room["media"] = cached["media"]
-                    room["rev"] = max(int(room.get("rev") or 1), int(cached.get("rev") or 1))
+                if cached_has_media and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
+                    c_m = cached.get("media") or {}
+                    r_m = room.get("media") or {}
+                    c_upd = float(c_m.get("updatedAt") or 0.0)
+                    r_upd = float(r_m.get("updatedAt") or 0.0)
+                    if not r_has_media or c_upd > r_upd + 0.01:
+                        room["media"] = c_m
+                        room["rev"] = max(int(room.get("rev") or 1), int(cached.get("rev") or 1))
+                    if cached.get("events"):
+                        ev_by_id = {}
+                        for ev_item in (room.get("events") or []) + (cached.get("events") or []):
+                            if isinstance(ev_item, dict) and ev_item.get("id") and (t - float(ev_item.get("ts") or 0.0) < 25.0):
+                                ev_by_id[ev_item["id"]] = ev_item
+                        if ev_by_id:
+                            room["events"] = sorted(ev_by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-35:]
                 if cached and cached.get("chat") and not room.get("_explicit_chat_clear") and (t - self.l1_write_ts.get(room_id, 0.0) < 60.0):
                     by_id = {}
                     for cm in (cached.get("chat") or []) + (room.get("chat") or []):
@@ -2122,7 +2137,7 @@ async def http_sync(request: Request):
             sys_msg(room, "odaya katıldı", p["name"])
         active_m = data.get("activeMedia")
         restored_active_media = False
-        if not room.get("curated") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
+        if data.get("type") not in ("resolve_media", "change_media") and not room.get("curated") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
             room_empty_media = not room["media"].get("url") and not room["media"].get("videoId")
             caller_is_leader = bool(
                 cid == room.get("host_id")
@@ -2138,6 +2153,9 @@ async def http_sync(request: Request):
                     for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
                         if incoming_clean.get(k):
                             room["media"][k] = incoming_clean[k]
+                    if float(room["media"].get("currentTime") or 0.0) <= 12.0:
+                        room["media"]["currentTime"] = 0.0
+                        room["media"]["updatedAt"] = now()
                     room["rev"] = int(room.get("rev") or 1) + 1
                     room["_tok_sig"] = ""
                     restored_active_media = True
@@ -2162,7 +2180,7 @@ async def http_sync(request: Request):
         if mutated and not is_action:
             room["rev"] = int(room.get("rev") or 1) + 1
         t_cur = now()
-        if mutated or is_new or (t_cur - prev_seen > 4.5):
+        if mutated or is_new or (t_cur - prev_seen > 15.0):
             await STORE.put(room, force_disk=bool(mutated or is_new))
         cur_rev = int(room.get("rev") or 1)
         m = room["media"]

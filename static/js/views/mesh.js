@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v40';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v40';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v40';
-import { MeshConnection } from '../realtime.js?v=20261030_v40';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v40';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v40';
-import { buildLayout } from './mesh-layout.js?v=20261030_v40';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v40';
-import { Voice } from '../voice.js?v=20261030_v40';
-import { playRoomSfx } from './chat.js?v=20261030_v40';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v41';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v41';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v41';
+import { MeshConnection } from '../realtime.js?v=20261030_v41';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v41';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v41';
+import { buildLayout } from './mesh-layout.js?v=20261030_v41';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v41';
+import { Voice } from '../voice.js?v=20261030_v41';
+import { playRoomSfx } from './chat.js?v=20261030_v41';
 
 let ctx = null;
 
@@ -236,7 +236,7 @@ async function loadMedia(media) {
     ctx.host.loading = true;
     ctx.layout?.playerEvent?.('loading');
     if (!isTimeKeeper()) {
-      for (let w = 0; w < 24; w += 1) {
+      for (let w = 0; w < 12; w += 1) {
         await new Promise((r) => setTimeout(r, 250));
         if (!ctx || ctx.loadSeq !== mySeq) return;
         const latest = state.mesh?.media;
@@ -280,7 +280,9 @@ async function loadMedia(media) {
                 if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
                 rememberRoom(updatedMesh);
               }
-              ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
+              if (isTimeKeeper() || String(state.mesh?.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
+                ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
+              }
               break;
             }
           }
@@ -557,7 +559,7 @@ const actions = {
     }
     localState({ meshStatePosition: target });
     ctx.conn.send('seek', { currentTime: target, atTime: clock.now() });
-    setTimeout(() => { ctx?.host?.adapter?.seek?.(target); }, 35);
+    ctx.host.adapter?.seek?.(target);
   },
   setRate(r) {
     if (!ctx) return;
