@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v30';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v30';
-import { api, qs } from '../api.js?v=20261030_v30';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v30';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v30';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v30';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v31';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v31';
+import { api, qs } from '../api.js?v=20261030_v31';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v31';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v31';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v31';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -729,6 +729,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       }, '🎲 Rastgele Film') : null);
     const body = h('div', { class: 'sel-body' });
     root.replaceChildren(head, body);
+    try { for (const sc of [root.closest('.panel-body'), root.closest('.home'), root.closest('.home-scroll'), document.scrollingElement, document.documentElement, document.body]) { if (sc) sc.scrollTop = 0; } window.scrollTo(0, 0); } catch (e) { /* ignore */ }
     if (!providerUsable(p)) { body.append(desktopOnlyCard(p)); return; }
     if (p.kind === 'search') renderSearchKind(p, body, presetQuery, pickSafe);
     else if (p.kind === 'music') renderMusicKind(p, body, presetQuery, pickSafe);
