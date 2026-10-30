@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v22';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261030_v22';
-import { avatar } from '../profile.js?v=20261030_v22';
-import { clock } from '../sync.js?v=20261030_v22';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v22';
-import { copyInvite, inviteUrl } from './chat.js?v=20261030_v22';
-import { parseVideoUrl } from '../providers.js?v=20261030_v22';
-import { resolveMedia } from './selection.js?v=20261030_v22';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v23';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261030_v23';
+import { avatar } from '../profile.js?v=20261030_v23';
+import { clock } from '../sync.js?v=20261030_v23';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v23';
+import { copyInvite, inviteUrl } from './chat.js?v=20261030_v23';
+import { parseVideoUrl } from '../providers.js?v=20261030_v23';
+import { resolveMedia } from './selection.js?v=20261030_v23';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -141,7 +141,7 @@ function Vote(ctx) {
           h('div', { class: 'vt' }, item.songTitle || item.title || 'Video'),
           h('div', { style: { display: 'flex', gap: '4px', marginTop: '4px' } },
             h('button', { type: 'button', class: 'btn sm', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.queueMusic(item) }, '+ Sıraya'),
-            lead ? h('button', { type: 'button', class: 'btn sm primary', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.pickMedia(item) }, '▶ Oynat') : null))))) : null;
+            lead ? h('button', { type: 'button', class: 'btn sm primary', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.pickMedia(item) }, '▶ Oynat') : null)))))) : null;
 
     fill(el,
       quickAddBox,
