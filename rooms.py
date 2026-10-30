@@ -1911,13 +1911,15 @@ async def create_room(request: Request):
     add_participant(
         room,
         creator_cid,
-        payload.get("creator") or "Lider",
-        payload.get("color") or "#27DCC8",
-        payload.get("device") or "Web",
+        {
+            "username": payload.get("creator") or "Lider",
+            "color": payload.get("color") or "#27DCC8",
+            "device": payload.get("device") or "Web",
+            "country": "TR",
+            "uid": verified_uid,
+            "isCreator": True,
+        },
         "http",
-        "TR",
-        verified_uid,
-        is_creator=True,
     )
     room["host_id"] = creator_cid
     media = payload.get("media")
