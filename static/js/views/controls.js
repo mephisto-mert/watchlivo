@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v25';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v25';
-import { getProvider } from '../providers.js?v=20261030_v25';
-import { expectedPosition } from '../sync.js?v=20261030_v25';
-import { thumbFor } from './lobby.js?v=20261030_v25';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v25';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v25';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v25';
-import { avatar } from '../profile.js?v=20261030_v25';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v26';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v26';
+import { getProvider } from '../providers.js?v=20261030_v26';
+import { expectedPosition } from '../sync.js?v=20261030_v26';
+import { thumbFor } from './lobby.js?v=20261030_v26';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v26';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v26';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v26';
+import { avatar } from '../profile.js?v=20261030_v26';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -797,13 +797,20 @@ export function buildControls(frame, ctx) {
   function renderCinemaSeats() {
     const parts = Array.isArray(state.mesh?.participants) ? state.mesh.participants : [];
     const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
-    if (!hasMedia || !parts.length) {
+    const now = Date.now();
+    const activeParts = parts.filter((p) => {
+      const uName = String(p.name || 'Misafir');
+      const reactObj = seatReactions.get(uName);
+      const hasEmoji = Boolean(reactObj && now - reactObj.at < 2600);
+      const isSpk = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+      return hasEmoji || isSpk;
+    });
+    if (!hasMedia || !activeParts.length) {
       cinemaSeatsBar.classList.add('hidden');
       return;
     }
     cinemaSeatsBar.classList.remove('hidden');
-    const now = Date.now();
-    const visibleParts = parts.slice(0, 8);
+    const visibleParts = activeParts.slice(0, 6);
     fill(
       cinemaSeatsBar,
       ...visibleParts.map((p) => {
@@ -827,7 +834,6 @@ export function buildControls(frame, ctx) {
           h('span', { class: 'seat-name' }, uName.slice(0, 10)),
         );
       }),
-      parts.length > 8 ? h('div', { class: 'cinema-seat seat-more' }, `+${parts.length - 8}`) : null,
     );
   }
 

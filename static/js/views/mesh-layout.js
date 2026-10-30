@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v25';
-import { state, setView, canSelectVideo } from '../store.js?v=20261030_v25';
-import { navIcon, logo } from './home.js?v=20261030_v25';
-import { createSelection } from './selection.js?v=20261030_v25';
-import { buildControls } from './controls.js?v=20261030_v25';
-import { buildChat } from './chat.js?v=20261030_v25';
-import { PANELS } from './panels.js?v=20261030_v25';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v26';
+import { state, setView, canSelectVideo } from '../store.js?v=20261030_v26';
+import { navIcon, logo } from './home.js?v=20261030_v26';
+import { createSelection } from './selection.js?v=20261030_v26';
+import { buildControls } from './controls.js?v=20261030_v26';
+import { buildChat } from './chat.js?v=20261030_v26';
+import { PANELS } from './panels.js?v=20261030_v26';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -119,8 +119,7 @@ export function buildLayout(app, ctx) {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');
         }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, variant: 'primary-pill', id: 'nav-search-video' }),
-        roomActionBtn('minimize', 'Küçült', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' }),
-        roomActionBtn('settings', 'Oda Ayarı', 'Oda Ayarları', () => openSide('left', 'Settings'), { selected: L === 'Settings' })),
+        roomActionBtn('minimize', 'Küçült', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' })),
       h('div', { class: 'navbar-center' },
         h('div', { class: 'room-brand-capsule' },
           logo(),
@@ -130,19 +129,21 @@ export function buildLayout(app, ctx) {
             !m.curated && m.id ? h('span', { style: { opacity: '0.55', fontSize: '11px', marginLeft: '5px', fontWeight: '600' } }, `#${String(m.id).split('-').pop()}`) : null
           ) : null,
           m ? h('span', {
-            class: `privacy-chip is-${m.privacy || 'public'}`,
+            class: `privacy-chip is-${m.privacy || 'public'} ${L === 'Settings' ? 'selected' : ''}`.trim(),
             'data-privacy': m.privacy || 'public',
-            title: 'Oda gizlilik ayarını değiştir',
+            title: 'Oda gizliliği ve oda ayarlarını aç',
             onclick: () => openSide('left', 'Settings'),
-          }, PRIVACY_LABEL[m.privacy] || '🌐 Herkese Açık') : null,
-          state.connection === 'online'
-            ? h('span', { class: 'privacy-chip sync-live-chip', title: 'Sıfır gecikmeli senkronizasyon aktif' }, h('span', { class: 'room-live-dot' }), 'CANLI SENKRON')
-            : h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…'))),
+          }, `${PRIVACY_LABEL[m.privacy] || '🌐 Herkese Açık'} ▾`) : null,
+          state.connection !== 'online'
+            ? h('span', { class: 'privacy-chip conn-chip', style: { borderColor: '#f59e0b' } }, state.connection === 'denied' ? 'Erişim yok' : 'Bağlanıyor…')
+            : null)),
       h('div', { class: 'navbar-right' },
         roomActionBtn('vote', 'Sıra', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
         roomActionBtn('addUser', 'Davet Et', 'Arkadaş Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends', variant: 'invite-pill' }),
         roomActionBtn('users', 'Kişiler', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
-        roomActionBtn(theaterMode ? 'panelRightOpen' : 'panelRightClose', theaterMode ? 'Sohbeti Aç' : 'Sinema Modu', theaterMode ? 'Sohbet Panelini Aç (T)' : 'Sinema Modu / Paneli Gizle (T)', () => toggleTheaterMode(), { selected: theaterMode, id: 'nav-toggle-chat' })));
+        theaterMode
+          ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(), { selected: true, id: 'nav-toggle-chat' })
+          : null));
   }
 
   function update() {

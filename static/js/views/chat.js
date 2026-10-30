@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v25';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v25';
-import { avatar } from '../profile.js?v=20261030_v25';
-import { api, qs } from '../api.js?v=20261030_v25';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v25';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v26';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v26';
+import { avatar } from '../profile.js?v=20261030_v26';
+import { api, qs } from '../api.js?v=20261030_v26';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v26';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -104,12 +104,18 @@ export function buildChat(ctx) {
   const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
   const gifBtn = h('button', { class: 'ctl-action', 'aria-label': 'GIF', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
   const sendBtn = h('button', { class: 'ctl-action', 'aria-label': 'Gönder', onclick: () => send() }, h('span', { html: icons.send, style: { display: 'contents' } }));
+  let toolsPopover = null;
+  let toolsBtn = null;
+  const closeToolsPopover = () => {
+    toolsPopover?.classList.add('hidden');
+    toolsBtn?.classList.remove('active');
+  };
   const pollBtn = h('button', {
     type: 'button',
     class: 'sfx-pill poll-pill',
     id: 'btn-chat-poll',
     title: 'Odada Canlı Anket Başlat',
-    onclick: () => openPollModal(),
+    onclick: () => { closeToolsPopover(); openPollModal(); },
   }, h('span', { html: icons.poll, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Anket');
   const clearChatBtn = h('button', {
     type: 'button',
@@ -117,6 +123,7 @@ export function buildChat(ctx) {
     id: 'btn-chat-clear',
     title: 'Oda Sohbetini Temizle (Lider)',
     onclick: () => {
+      closeToolsPopover();
       if (!isLeader()) {
         toast('⚠️ Sohbeti yalnızca oda lideri temizleyebilir');
         return;
@@ -132,6 +139,7 @@ export function buildChat(ctx) {
     id: 'btn-chat-snap',
     title: 'Oynatılan Sahneden Kare Yakala ve Sohbette Paylaş',
     onclick: () => {
+      closeToolsPopover();
       const cap = input.value.trim();
       const res = window.vortexCaptureSceneToChat?.(cap);
       if (res && cap) input.value = '';
@@ -143,6 +151,7 @@ export function buildChat(ctx) {
     id: 'btn-chat-ts',
     title: 'Videodaki Anlık Dakika:Saniye Damgasını Mesaja Ekle',
     onclick: () => {
+      closeToolsPopover();
       const sec = Number(window.vortexGetVideoPosition?.() || 0);
       const stamp = fmtTime(sec);
       input.value = `${input.value ? input.value.trimEnd() + ' ' : ''}${stamp} `;
@@ -151,13 +160,33 @@ export function buildChat(ctx) {
   }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
   const reactions = h('div', { class: 'reaction-bar' },
     h('div', { class: 'reaction-emoji-grid' },
-      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e))),
+      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e))));
+
+  toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
+    h('div', { class: 'chat-tools-sec-title' }, '⚡ Oda Araçları & Hızlı Paylaşım'),
+    h('div', { class: 'reaction-tools-row' }, snapSceneBtn, stampTimeBtn, pollBtn, clearChatBtn),
+    h('div', { class: 'chat-tools-sec-title' }, '🔊 Ses Efektleri (Soundboard)'),
     h('div', { class: 'reaction-tools-row' },
-      snapSceneBtn,
-      stampTimeBtn,
-      pollBtn,
-      ...SOUNDBOARD.map(([k, lbl]) => h('button', { type: 'button', class: 'sfx-pill', onclick: () => actions.soundfx?.(k), title: `Sesli Efekt: ${lbl}` }, lbl)),
-      clearChatBtn));
+      ...SOUNDBOARD.map(([k, lbl]) => h('button', {
+        type: 'button',
+        class: 'sfx-pill',
+        onclick: () => { actions.soundfx?.(k); closeToolsPopover(); },
+        title: `Sesli Efekt: ${lbl}`,
+      }, lbl))));
+
+  toolsBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action chat-tools-toggle',
+    id: 'btn-chat-tools',
+    'aria-label': 'Oda Araçları ve Ses Efektleri',
+    title: 'Oda Araçları: Anket, Sahne Paylaş, Saniye Ekle & Ses Efektleri (+)',
+    onclick: (e) => {
+      e.stopPropagation();
+      gifPanel.classList.add('hidden');
+      const isHidden = toolsPopover.classList.toggle('hidden');
+      toolsBtn.classList.toggle('active', !isHidden);
+    },
+  }, h('span', { html: icons.plus, style: { display: 'contents' } }));
 
   const discordCallPeers = h('div', { class: 'discord-call-peers', id: 'discord-call-peers' });
   const dCallStatusBadge = h('span', { class: 'discord-call-badge', id: 'discord-call-badge' }, 'Canlı');
@@ -167,6 +196,16 @@ export function buildChat(ctx) {
     id: 'btn-discord-call',
     onclick: () => toggleCallJoin(),
   }, h('span', { html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), 'Sesliye Katıl');
+  const dShareQuickBtn = h('button', {
+    type: 'button',
+    class: 'discord-stage-btn share-toggle-btn',
+    id: 'btn-discord-share-toggle',
+    title: 'Hızlı Davet Linki, WhatsApp, QR & Oda Gizliliği',
+    onclick: () => {
+      const hiddenNow = quickAccessZone.classList.toggle('hidden');
+      dShareQuickBtn.classList.toggle('on', !hiddenNow);
+    },
+  }, h('span', { html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Paylaş');
   const dSwapBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
@@ -200,7 +239,7 @@ export function buildChat(ctx) {
         h('span', { html: icons.audioWave, style: { display: 'inline-flex', width: '14px', height: '14px', color: '#27DCC8' } }),
         h('span', {}, 'Ses Kanalı'),
         dCallStatusBadge),
-      h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dJoinBtn)),
+      h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dShareQuickBtn, dJoinBtn)),
     discordCallPeers,
     h('div', { class: 'discord-call-controls', id: 'discord-call-controls' },
       dMicPill, dDeafPill, dCamPill, dScreenPill));
@@ -263,50 +302,11 @@ export function buildChat(ctx) {
       h('div', { class: 'music-similar-tabs' }, btnTabSimilar, btnTabRecent, btnVinylToggle, btnNextSim)),
     musicStrip);
 
-  const toggleRightDrawer = (tabName) => {
-    const curR = state.view.right;
-    setView('right', curR === tabName ? 'Collapsed' : tabName);
-    ctx.layout?.update?.();
-  };
-  const chatLoungeHead = h('div', { class: 'chat-lounge-head' },
-    h('div', { class: 'chat-lounge-brand' },
-      h('span', { class: 'chat-lounge-dot' }),
-      h('span', { class: 'chat-lounge-title' }, 'ODA SALONU')),
-    h('div', { class: 'chat-lounge-tabs' },
-      h('button', { type: 'button', class: 'chat-lounge-tab', title: 'Oynatma Sırası & Oylama', onclick: () => toggleRightDrawer('Vote') }, h('span', { html: icons.vote, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Sıra'),
-      h('button', { type: 'button', class: 'chat-lounge-tab', title: 'Odadaki Katılımcılar', onclick: () => toggleRightDrawer('Participants') }, h('span', { html: icons.users, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Kişiler'),
-      h('button', { type: 'button', class: 'chat-lounge-tab accent', title: 'Arkadaş Davet Et', onclick: () => toggleRightDrawer('Friends') }, h('span', { html: icons.addUser, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Davet')));
-
-  const welcomeHub = h('div', { class: 'chat-welcome-hub', id: 'chat-welcome-hub' },
-    h('div', { class: 'chat-hub-top' },
-      h('div', { class: 'chat-hub-badge' }, h('span', { class: 'chat-hub-pulse' }), 'CANLI SENKRON STÜDYO'),
-      h('button', { type: 'button', class: 'chat-hub-close', title: 'Gizle', onclick: () => welcomeHub.remove() }, '✕')),
-    h('div', { class: 'chat-hub-desc' }, 'Odadaki herkes videoyu milisaniye senkronla aynı anda izler. Hızlı oda araçları:'),
-    h('div', { class: 'chat-hub-grid' },
-      h('button', { type: 'button', class: 'chat-hub-action primary', onclick: () => { setView('left', 'Search'); ctx.layout?.update?.(); } },
-        h('span', { class: 'hub-act-ico', html: icons.searchVideo }),
-        h('span', { class: 'hub-act-txt' }, h('b', {}, 'İçerik Seç'), h('small', {}, 'Film, Dizi, Platform'))),
-      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => openPollModal() },
-        h('span', { class: 'hub-act-ico', html: icons.poll }),
-        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Anket Başlat'), h('small', {}, 'Canlı Oda Oylaması'))),
-      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => window.vortexCaptureSceneToChat?.('') },
-        h('span', { class: 'hub-act-ico', html: icons.cameraSnap }),
-        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Sahne Paylaş'), h('small', {}, 'Anlık Kare Gönder'))),
-      h('button', { type: 'button', class: 'chat-hub-action', onclick: () => copyInvite() },
-        h('span', { class: 'hub-act-ico', html: icons.link }),
-        h('span', { class: 'hub-act-txt' }, h('b', {}, 'Link Kopyala'), h('small', {}, 'Arkadaşlarını Çağır')))),
-    h('div', { class: 'chat-hub-keys' },
-      h('span', {}, h('kbd', {}, 'Space'), ' Oynat'),
-      h('span', {}, h('kbd', {}, 'T'), ' Sinema'),
-      h('span', {}, h('kbd', {}, 'F'), ' Tam Ekran'),
-      h('span', {}, h('kbd', {}, 'M'), ' Sessiz')));
-  list.append(welcomeHub);
-
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
-  const quickAccessZone = h('div', { class: 'chat-access-zone', id: 'chat-access-zone' });
-  const bar = h('div', { class: 'chatbar' }, micBtn, camBtn, screenBtn, h('div', { class: 'chat-input' }, input, gifBtn, sendBtn), gifPanel);
-  const el = h('div', { class: 'chat' }, chatLoungeHead, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
+  const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
+  const bar = h('div', { class: 'chatbar' }, micBtn, camBtn, screenBtn, h('div', { class: 'chat-input' }, toolsBtn, input, gifBtn, sendBtn), toolsPopover, gifPanel);
+  const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
   let onboarding = false;
@@ -600,6 +600,9 @@ export function buildChat(ctx) {
     if (!e.target?.closest?.('.gif-panel, [aria-label="GIF"]')) {
       gifPanel.classList.add('hidden');
     }
+    if (!e.target?.closest?.('.chat-tools-popover, #btn-chat-tools')) {
+      closeToolsPopover();
+    }
   };
   document.addEventListener('pointerdown', onDocOutsideTap, { passive: true });
 
@@ -856,7 +859,7 @@ export function buildChat(ctx) {
             actions.hostAction('set_privacy', { privacy: k });
           },
         }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), h('span', { class: 'priv-opt-lbl' }, cur === k && k === 'friends' ? 'Sadece Arkadaşlar' : label)))),
-      h('button', { type: 'button', class: 'chat-q-close', 'aria-label': 'Kapat', onclick: () => barEl.remove() }, '✕'));
+      h('button', { type: 'button', class: 'chat-q-close', 'aria-label': 'Kapat', onclick: () => { quickAccessZone.classList.add('hidden'); dShareQuickBtn.classList.remove('on'); } }, '✕'));
     return barEl;
   }
 

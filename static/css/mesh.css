@@ -2504,8 +2504,12 @@ body.theater-mode .resize-handle {
   display: none !important;
 }
 
-/* Always show the 4-pill media controls (Mic, Headphones, Camera, Screen) for 1-click access */
-.discord-call-bar .discord-call-controls {
+/* Show the 4-pill media controls (Mic, Headphones, Camera, Screen) only when in-call */
+.discord-call-bar:not(.in-call) .discord-call-controls {
+  display: none !important;
+}
+
+.discord-call-bar.in-call .discord-call-controls {
   display: grid !important;
   grid-template-columns: repeat(4, 1fr) !important;
   gap: 5px !important;
@@ -2586,6 +2590,10 @@ body.theater-mode .resize-handle {
 /* 4C. Zone 2: Persistent Invite & Privacy Card (.chat-quick-bar) */
 .chat-access-zone {
   flex-shrink: 0 !important;
+}
+
+.chat-access-zone.hidden {
+  display: none !important;
 }
 
 .chat-quick-bar {
@@ -2958,11 +2966,63 @@ body.theater-mode .resize-handle {
   background: var(--wl-bg-elevated) !important;
   border: 1px solid var(--wl-border) !important;
   border-radius: 10px !important;
-  padding: 3px 4px 3px 12px !important;
+  padding: 3px 4px 3px 4px !important;
   width: 100% !important;
   display: flex !important;
   align-items: center !important;
-  gap: 4px !important;
+  gap: 6px !important;
+}
+
+.chatbar .chat-input .chat-tools-toggle {
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid var(--wl-border) !important;
+  color: var(--wl-text-secondary) !important;
+  flex-shrink: 0 !important;
+  transition: transform 150ms ease, background 150ms ease, color 150ms ease !important;
+}
+
+.chatbar .chat-input .chat-tools-toggle:hover,
+.chatbar .chat-input .chat-tools-toggle.active {
+  background: var(--wl-accent-soft) !important;
+  border-color: var(--wl-accent-border) !important;
+  color: var(--wl-accent) !important;
+}
+
+.chatbar .chat-input .chat-tools-toggle.active {
+  transform: rotate(45deg) !important;
+}
+
+.chat-tools-popover {
+  position: absolute !important;
+  bottom: calc(100% + 6px) !important;
+  left: 10px !important;
+  right: 10px !important;
+  padding: 10px 11px !important;
+  border-radius: 12px !important;
+  background: rgba(16, 21, 31, 0.98) !important;
+  border: 1px solid var(--wl-accent-border) !important;
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.72) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 7px !important;
+  z-index: 65 !important;
+}
+
+.chat-tools-popover.hidden {
+  display: none !important;
+}
+
+.chat-tools-sec-title {
+  font-size: 0.66rem !important;
+  font-weight: 800 !important;
+  color: var(--wl-text-secondary) !important;
+  letter-spacing: 0.03em !important;
+  text-transform: uppercase !important;
+}
+
+.chat-tools-popover .reaction-tools-row {
+  flex-wrap: wrap !important;
+  gap: 5px !important;
 }
 
 .chatbar .chat-input:focus-within {
