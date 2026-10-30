@@ -522,7 +522,7 @@ function itemMatchesCat(it, catId) {
 }
 
 export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
-  if (window.vortexDesktop) { renderDesktopKind(p, body, pick); return; }
+  if (window.vortexDesktop?.isElectron && !p.freeNoAuth && p.id !== 'cinema') { renderDesktopKind(p, body, pick); return; }
   const authHolder = h('div', {});
   const input = h('input', { id: 'hub-search-q', placeholder: p.placeholder || `${p.name} içinde binlerce dizi veya film ara...`, value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
   const mainWrap = h('div', { class: 'catalog-main' });

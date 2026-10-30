@@ -537,8 +537,9 @@ export class Html5Adapter {
               }
             } catch (err) { /* ignore */ }
             try {
-              if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
-                this.hls.nextAutoLevel = Math.max(0, this.hls.currentLevel - 1);
+              const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
+              if (this.hls.levels?.length > 1 && curLvl > 0) {
+                this.hls.nextAutoLevel = Math.max(0, curLvl - 1);
               }
             } catch (err) { /* ignore */ }
           }
@@ -694,7 +695,7 @@ export class Html5Adapter {
         } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback) {
           triedHlsFallback = true;
           v.removeAttribute('src');
-          attachHlsJs(url);
+          attachHlsJs(this.currentUrl || url);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         } else if (this.hls) {
           try { this.hls.startLoad(); } catch (e) { /* ignore */ }
@@ -740,7 +741,8 @@ export class Html5Adapter {
           if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 15000) {
             this._lastHlsKickAt = nowMs;
             try {
-              if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
+              const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
+              if (this.hls.levels?.length > 1 && curLvl > 0) {
                 this.hls.nextAutoLevel = 0;
               }
               this.hls.startLoad(Math.max(0, curT));

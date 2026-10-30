@@ -221,9 +221,9 @@ class RegressionTests(unittest.TestCase):
     def test_proxy_segment_cache_bounds(self):
         server._SEGMENT_CACHE.clear()
         for idx in range(35):
-            server._SEGMENT_CACHE[f"https://cdn.example.com/seg_{idx}.ts|"] = (b"G" * 188, 200, "", "video/mp2t", 9999999999.0)
+            server._SEGMENT_CACHE[f"https://cdn.example.com/seg_{idx}.ts|"] = (9999999999.0, b"G" * 188, "video/mp2t")
             if len(server._SEGMENT_CACHE) > 28:
-                oldest_k = min(server._SEGMENT_CACHE, key=lambda k: server._SEGMENT_CACHE[k][4])
+                oldest_k = min(server._SEGMENT_CACHE, key=lambda k: server._SEGMENT_CACHE[k][0])
                 server._SEGMENT_CACHE.pop(oldest_k, None)
         self.assertLessEqual(len(server._SEGMENT_CACHE), 28)
 
@@ -258,7 +258,7 @@ class RegressionTests(unittest.TestCase):
             "h_web1",
             "",
         )
-        rooms.add_participant(room, "h_web1", {"username": "Mert Can Yıldız", "device": "Web", "isCreator": True}, "http")
+        rooms.add_participant(room, "h_web1", {"username": "Mert Can Yıldız", "device": "Web", "_internalCreator": True}, "http")
         room["host_id"] = "h_web1"
         rooms.set_media(room, {"title": "Zmora", "url": "https://cdn.example.com/zmora/master.m3u8", "provider": "hls"}, "Mert Can Yıldız", 120.0)
         # Second device (Desktop App) of the same creator joins
@@ -288,11 +288,53 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(room["host_id"], "h_desk2")
         self.assertAlmostEqual(room["media"]["currentTime"], 310.25, places=2)
         self.assertEqual(seek_out["broadcast"][0][0]["action"], "seek")
-        # If h_desk2 goes stale (>6s) and creator refreshes on Web with new cid h_web_new, h_web_new immediately reclaims host_id
-        room["participants"]["h_desk2"]["lastSeen"] = rooms.now() - 8.0
-        room["participants"]["h_web1"]["lastSeen"] = rooms.now() - 8.0
+        # If h_desk2 goes stale (>10s) and creator refreshes on Web with new cid h_web_new, h_web_new immediately reclaims host_id
+        room["participants"]["h_desk2"]["lastSeen"] = rooms.now() - 12.0
+        room["participants"]["h_web1"]["lastSeen"] = rooms.now() - 12.0
         rooms.add_participant(room, "h_web_new", {"username": "Mert Can Yıldız", "device": "Web"}, "http")
         self.assertEqual(room["host_id"], "h_web_new")
+
+    def test_v34_merge_sync_token_preserves_creator_and_rejects_spoofing(self):
+        room = rooms.new_room(
+            "mert-can-yildiz-odasi-9a1b2",
+            "Mert Can Yıldız odası",
+            "public",
+            "leader",
+            "Mert Can Yıldız",
+            "u_creator_1",
+            "",
+        )
+        rooms.add_participant(room, "h_creator", {"username": "Mert Can Yıldız", "userId": "u_creator_1", "_internalCreator": True}, "http")
+        room["host_id"] = "h_creator"
+        # Untrusted guest sends isCreator=True on non-empty room -> must be rejected
+        rooms.add_participant(room, "h_attacker", {"username": "Saldırgan", "userId": "u_attacker_9", "isCreator": True}, "http")
+        self.assertFalse(room["participants"]["h_attacker"].get("isCreator", False))
+        self.assertNotIn("h_attacker", room["co_hosts"])
+        # Different registered account with same display name must not spoof creator when creatorId is u_creator_1
+        rooms.add_participant(room, "h_impostor", {"username": "Mert Can Yıldız", "userId": "u_impostor_2", "isCreator": True}, "http")
+        self.assertFalse(room["participants"]["h_impostor"].get("isCreator", False))
+        # Incoming syncToken with higher rev from another serverless worker must not overwrite live host_id or creatorId
+        import copy
+        remote_room = copy.deepcopy(room)
+        remote_room["rev"] = room["rev"] + 5
+        remote_room["host_id"] = "h_attacker"
+        remote_room["creatorId"] = ""
+        remote_room["co_hosts"] = ["h_extra_cohost"]
+        remote_room.pop("_tok_sig", None)
+        remote_room.pop("_tok_val", None)
+        token = rooms.pack_sync_token(remote_room)
+        rooms.merge_sync_token(room, token, room["id"])
+        self.assertEqual(room["host_id"], "h_creator")
+        self.assertEqual(room["creatorId"], "u_creator_1")
+        self.assertIn("h_creator", room["co_hosts"])
+        self.assertIn("h_extra_cohost", room["co_hosts"])
+        # Co-host pauses room; creator's playing heartbeat within 15s must not unpause room
+        room["co_hosts"].append("h_attacker")
+        rooms.set_media(room, {"title": "Film", "url": "https://cdn.example.com/f.m3u8", "provider": "hls"}, "Mert Can Yıldız", 50.0)
+        rooms.handle_action(room, "h_attacker", {"type": "pause", "currentTime": 55.0})
+        self.assertFalse(room["media"]["playing"])
+        rooms.handle_action(room, "h_creator", {"type": "heartbeat", "currentTime": 56.0, "playing": True})
+        self.assertFalse(room["media"]["playing"])
 
 
 if __name__ == '__main__':

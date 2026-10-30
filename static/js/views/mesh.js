@@ -803,7 +803,7 @@ function onPlayerEvent(ev, arg) {
       }
     }
   }
-  if (ev === 'pause' && arg?.native && isLeader() && !ctx.host.loading && !ctx.userPaused) {
+  if (ev === 'pause' && arg?.native && isTimeKeeper() && !document.hidden && !ctx.host.loading && !ctx.userPaused) {
     actions.pause();
   }
   if (ev === 'ended') {

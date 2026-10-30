@@ -14,7 +14,7 @@ export function adapterFor(media) {
   if (!media) return EmbedAdapter;
   const url = String(media.url || '');
   const vid = String(media.videoId || '');
-  if (window.vortexDesktop && DRM_PROVS.has(media.provider) && url && !/youtube\.com|youtu\.be/i.test(url)) {
+  if (window.vortexDesktop?.isElectron && DRM_PROVS.has(media.provider) && url && !/youtube\.com|youtu\.be/i.test(url)) {
     return WebviewAdapter;
   }
   if (
@@ -29,7 +29,7 @@ export function adapterFor(media) {
     return Html5Adapter;
   }
   if (media.provider === 'vimeo') return VimeoAdapter;
-  if (media.provider === 'youtube' || /^[A-Za-z0-9_-]{11}$/.test(vid) || /youtube\.com|youtu\.be/i.test(url)) {
+  if (media.provider === 'youtube' || ((!media.provider || media.provider === 'web') && /^[A-Za-z0-9_-]{11}$/.test(vid)) || /youtube\.com|youtu\.be/i.test(url)) {
     return YouTubeAdapter;
   }
   return EmbedAdapter;

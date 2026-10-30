@@ -140,13 +140,14 @@ class RateLimiter:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
         if url:
+            win_sec = int(self.window) or 1
             count = self._kv("INCR", key)
             try:
                 count_int = int(count)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 count_int = None
             if count_int == 1:
-                self._kv("EXPIRE", key, int(self.window) or 1)
+                self._kv("EXPIRE", key, win_sec)
             if count_int is not None:
                 if count_int > self.limit:
                     ttl = self._kv("TTL", key)
@@ -155,9 +156,16 @@ class RateLimiter:
                     except (TypeError, ValueError):
                         retry = self.window
                     if retry < 0:
-                        self._kv("EXPIRE", key, int(self.window) or 1)
+                        self._kv("EXPIRE", key, win_sec)
                         retry = self.window
                     return False, max(1.0, retry)
+                elif count_int == 2:
+                    ttl = self._kv("TTL", key)
+                    try:
+                        if float(ttl) < 0:  # type: ignore[arg-type]
+                            self._kv("EXPIRE", key, win_sec)
+                    except (TypeError, ValueError):
+                        pass
                 return True, 0.0
         t = time.time()
         with self._lock:
@@ -185,12 +193,19 @@ class RateLimiter:
 
 def client_ip(scope_or_request) -> str:
     """Best-effort client IP honouring common proxy headers."""
-    headers = {}
-    try:
-        headers = scope_or_request.headers  # type: ignore[assignment]
-    except Exception:
-        pass
-    for hdr_name in ("x-vercel-forwarded-for", "cf-connecting-ip", "x-forwarded-for", "x-real-ip"):
+    headers: Dict[str, str] = {}
+    if isinstance(scope_or_request, dict):
+        for k, v in (scope_or_request.get("headers") or []):
+            try:
+                headers[k.decode("latin-1").lower()] = v.decode("latin-1")
+            except Exception:
+                continue
+    else:
+        try:
+            headers = scope_or_request.headers  # type: ignore[assignment]
+        except Exception:
+            pass
+    for hdr_name in ("x-vercel-forwarded-for", "cf-connecting-ip", "x-real-ip", "x-forwarded-for"):
         try:
             val = (headers.get(hdr_name) or "").split(",")[0].strip()
             if val:
@@ -203,7 +218,7 @@ def client_ip(scope_or_request) -> str:
             return str(client.host)[:64]
     except Exception:
         pass
-    scope = getattr(scope_or_request, "scope", None) or {}
+    scope = scope_or_request if isinstance(scope_or_request, dict) else (getattr(scope_or_request, "scope", None) or {})
     try:
         client = scope.get("client")
         if client:

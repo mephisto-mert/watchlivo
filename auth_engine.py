@@ -536,7 +536,8 @@ async def auth_oauth(request: Request) -> JSONResponse:
             req = urllib.request.Request(g_url, headers={"User-Agent": "WatchlivoAuth/1.0"})
             with urllib.request.urlopen(req, timeout=5) as gr:
                 g_info = json.loads(gr.read().decode("utf-8"))
-                if g_info.get("email") and (str(g_info.get("email_verified")).lower() in ("true", "1")):
+                aud_ok = (not GOOGLE_OAUTH_CLIENT_ID) or (str(g_info.get("aud") or "") == GOOGLE_OAUTH_CLIENT_ID)
+                if aud_ok and g_info.get("email") and (str(g_info.get("email_verified")).lower() in ("true", "1")):
                     fb_email = str(g_info.get("email")).strip().lower()
                     fb_name = str(g_info.get("name") or g_info.get("given_name") or "").strip()[:24]
         except Exception:
@@ -660,8 +661,11 @@ async def auth_phone_send_code(request: Request) -> JSONResponse:
             return JSONResponse({"ok": False, "error": "SMS gönderilemedi. Lütfen tekrar deneyin."}, status_code=502)
         return JSONResponse({"ok": True, "phone": phone, "expiresIn": 300,
                              "message": "Doğrulama kodu telefonunuza gönderildi."})
-    return JSONResponse({"ok": True, "phone": phone, "code": code, "expiresIn": 300,
-                         "message": "Doğrulama kodu oluşturuldu."})
+    if os.environ.get("WATCHLIVO_DEV_OTP") == "1":
+        return JSONResponse({"ok": True, "phone": phone, "code": code, "expiresIn": 300,
+                             "message": "Doğrulama kodu oluşturuldu."})
+    _PHONE_CODES.pop(phone, None)
+    return _SMS_DISABLED
 
 
 async def auth_phone_verify_code(request: Request) -> JSONResponse:

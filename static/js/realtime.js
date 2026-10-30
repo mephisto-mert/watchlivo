@@ -28,6 +28,7 @@ export class MeshConnection {
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
     this.seenP2pIds = new Set();
+    this.instanceId = 'inst_' + Math.random().toString(36).slice(2, 10);
     this.outQueue = [];
     this.flushing = false;
     this.lastRev = 0;
@@ -37,8 +38,20 @@ export class MeshConnection {
       if (typeof BroadcastChannel !== 'undefined') {
         this.bc = new BroadcastChannel(`vortex_mesh_${roomId}`);
         this.bc.onmessage = (ev) => this.onP2pPacket(ev.data);
+        if (this.clientId) {
+          this.bc.postMessage({ _cidProbe: true, cid: this.clientId, instanceId: this.instanceId });
+        }
       }
     } catch (e) { /* ignore */ }
+  }
+
+  _addBounded(set, val, max = 600) {
+    if (!val) return;
+    if (set.size >= max && !set.has(val)) {
+      const oldest = set.values().next().value;
+      if (oldest !== undefined) set.delete(oldest);
+    }
+    set.add(val);
   }
 
   emitStatus(s) {
@@ -50,15 +63,32 @@ export class MeshConnection {
   _emitP2p(pkt) {
     if (!pkt || this.closed) return;
     const msg = { ...pkt, _id: pkt._id || ('p_' + Math.random().toString(36).slice(2, 10)), fromCid: this.clientId, syncToken: this.syncToken, rev: this.lastRev };
-    this.seenP2pIds.add(msg._id);
+    this._addBounded(this.seenP2pIds, msg._id);
     try { this.bc?.postMessage(msg); } catch (e) { /* ignore */ }
     try { this.p2pBroadcast?.(msg); } catch (e) { /* ignore */ }
   }
 
   onP2pPacket(pkt) {
-    if (!pkt || this.closed || pkt.fromCid === this.clientId) return;
+    if (!pkt || this.closed) return;
+    if (pkt._cidProbe && pkt.cid && pkt.cid === this.clientId && pkt.instanceId && pkt.instanceId !== this.instanceId) {
+      try { this.bc?.postMessage({ _cidConflict: true, cid: this.clientId, targetInstanceId: pkt.instanceId }); } catch (e) { /* ignore */ }
+      return;
+    }
+    if (pkt._cidConflict && pkt.cid === this.clientId && pkt.targetInstanceId === this.instanceId) {
+      this.clientId = 'h_' + Math.random().toString(36).slice(2, 10);
+      this.clientToken = '';
+      try {
+        sessionStorage.setItem('vortex_cid', this.clientId);
+        sessionStorage.removeItem(`vortex_ct_${this.roomId}`);
+      } catch (e) { /* ignore */ }
+      if (this.mode === 'http' && !this.closed) {
+        this.httpSend({ type: 'init' }, true);
+      }
+      return;
+    }
+    if (pkt.fromCid === this.clientId) return;
     if (pkt._id && this.seenP2pIds.has(pkt._id)) return;
-    if (pkt._id) this.seenP2pIds.add(pkt._id);
+    if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
     if (pkt.syncToken && Number(pkt.rev || 0) >= this.lastRev) {
       this.syncToken = pkt.syncToken;
       this.lastRev = Number(pkt.rev || this.lastRev);
@@ -66,6 +96,15 @@ export class MeshConnection {
     if (pkt.event) {
       const ev = pkt.event;
       if (ev.targetId && ev.targetId !== this.clientId) return;
+      if (ev.id) {
+        if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(ev.type)) {
+          if (this.seenSignalIds.has(ev.id)) return;
+          this._addBounded(this.seenSignalIds, ev.id);
+        } else {
+          if (this.seenEventIds.has(ev.id)) return;
+          this._addBounded(this.seenEventIds, ev.id);
+        }
+      }
       this.onMessage?.(ev);
     }
   }
@@ -159,22 +198,22 @@ export class MeshConnection {
 
   _markRoomEventsSeen(room) {
     if (!room) return;
-    for (const ev of room.events || []) if (ev.id) this.seenEventIds.add(ev.id);
-    for (const sg of room.signals || []) if (sg.id) this.seenSignalIds.add(sg.id);
+    for (const ev of room.events || []) if (ev.id) this._addBounded(this.seenEventIds, ev.id);
+    for (const sg of room.signals || []) if (sg.id) this._addBounded(this.seenSignalIds, sg.id);
   }
 
   _dispatchHttpEvents(room, isInit) {
     if (!room) return;
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
-      this.seenEventIds.add(ev.id);
+      this._addBounded(this.seenEventIds, ev.id);
       if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat')) {
         this.onMessage?.(ev);
       }
     }
     for (const sg of room.signals || []) {
       if (!sg.id || this.seenSignalIds.has(sg.id)) continue;
-      this.seenSignalIds.add(sg.id);
+      this._addBounded(this.seenSignalIds, sg.id);
       if (sg.targetId === this.clientId && sg.fromId !== this.clientId) {
         this.onMessage?.(sg);
       }
@@ -364,19 +403,31 @@ export class MeshConnection {
       return;
     }
     if (['reaction', 'soundfx', 'typing'].includes(obj.type)) {
-      this._emitP2p({ event: { ...obj, user: this.profile.name, cid: this.clientId } });
+      const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+      obj.actionId = actId;
+      this._addBounded(this.seenEventIds, actId);
+      this._emitP2p({ event: { ...obj, id: actId, user: this.profile.name, cid: this.clientId } });
     } else if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(obj.type)) {
-      this._emitP2p({ event: { ...obj, fromId: this.clientId } });
+      const sigId = obj.signalId || ('sg_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+      obj.signalId = sigId;
+      this._addBounded(this.seenSignalIds, sigId);
+      this._emitP2p({ event: { ...obj, id: sigId, fromId: this.clientId } });
     } else if (['change_media', 'resolve_media'].includes(obj.type)) {
       this.needsMediaPush = true;
       this.lastMediaPushAt = Date.now();
+      const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+      obj.actionId = actId;
+      this._addBounded(this.seenEventIds, actId);
       const m = { ...(this.lastRoom?.media || {}), ...obj, meshStateStatus: 'PLAYING', playing: true, meshStatePosition: Number(obj.currentTime || 0), meshStateTime: clock.now() };
       delete m.type;
-      this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
+      this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
     } else if (['play', 'pause', 'seek', 'rate', 'heartbeat'].includes(obj.type)) {
+      const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
+      obj.actionId = actId;
+      this._addBounded(this.seenEventIds, actId);
       const isPaused = obj.type === 'pause' || (obj.type === 'heartbeat' && obj.playing === false);
       const baseMedia = this.lastRoom?.media || {};
-      this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
+      this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
     } else if (obj.type === 'chat' && obj.text) {
       let hhmm = '';
       try {

@@ -36,7 +36,7 @@ export function loadProfile() {
       if (p && !p.id && p.uid) p.id = p.uid;
       if (p && !p.uid && p.id) p.uid = p.id;
       if (p && p.name && p.id && !p.isGuest && !/^Misafir/i.test(String(p.name))) {
-        if (!p.authToken) p.authToken = getVaultToken(p.email || p.handle) || `wl_${p.id}`;
+        if (!p.authToken) p.authToken = getVaultToken(p.email || p.handle) || '';
         return p;
       }
     } catch (e) { /* ignore */ }

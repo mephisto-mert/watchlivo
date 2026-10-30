@@ -335,5 +335,5 @@ export function parseVideoUrl(raw) {
   return null;
 }
 
-export const isDesktop = () => !!window.vortexDesktop;
+export const isDesktop = () => Boolean(window.vortexDesktop?.isElectron);
 export const providerUsable = (p) => !!p && (p.web || isDesktop());

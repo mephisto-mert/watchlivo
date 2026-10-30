@@ -1426,7 +1426,10 @@ async def title_seasons(request: Request):
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_seasons_sync, tmdb_id, title, media_type, season), timeout=9)
         except Exception:
-            res = {"seasons": [1], "episodes": [{"episode": i, "season": season, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{title or 'Dizi'} — {season}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 11)]}
+            res = {
+                "seasons": [{"season": max(1, season), "name": f"{max(1, season)}. Sezon", "count": 10}],
+                "episodes": [{"episode": i, "season": season, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{title or 'Dizi'} — {season}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 11)],
+            }
         if len(_SEASONS_CACHE) >= 300:
             _SEASONS_CACHE.pop(next(iter(_SEASONS_CACHE)), None)
         _SEASONS_CACHE[ckey] = (time.time(), res)
@@ -4252,6 +4255,8 @@ async def resolve_catalog(request: Request):
         cached = _RESOLVE_RESP_CACHE.get(ckey)
         if cached and now_t - cached[0] < 120:
             return JSONResponse(cached[1], headers=cc_hdrs)
+    if len(_RESOLVE_LOCKS) >= 400:
+        _RESOLVE_LOCKS.pop(next(iter(_RESOLVE_LOCKS)), None)
     lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         if not force_refresh:
@@ -4411,6 +4416,8 @@ async def provider_catalog(request: Request):
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
     ckey = f"v3:{prov}:{category}:{page}:{mt_filter}:{q.lower()}"
+    if len(_CATALOG_LOCKS) >= 400:
+        _CATALOG_LOCKS.pop(next(iter(_CATALOG_LOCKS)), None)
     lock = _CATALOG_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         try:
@@ -4880,7 +4887,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
     is_explicit_mp4 = any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower()
     is_seg_url = (not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer"))
     has_high_range = False
-    if rng and rng.startswith("bytes="):
+    if rng and rng.startswith("bytes=") and not is_seg_url:
         m_hi = re.match(r"bytes=(\d+)-", rng)
         if m_hi and int(m_hi.group(1)) >= 8 * 1024 * 1024:
             has_high_range = True
@@ -5348,8 +5355,9 @@ async def rave_stream_manifest(request: Request):
                             rm = re.search(r"RESOLUTION=(\d+)x(\d+)", inf_l, re.I)
                             w, h = (int(rm.group(1)), int(rm.group(2))) if rm else (0, 0)
                             if not w and not h:
-                                comb = (inf_l + " " + raw_uri).lower()
-                                if "2160" in comb or "4k" in comb:
+                                u_path_low = raw_uri.split("?", 1)[0].lower()
+                                comb = (inf_l.lower() + " " + u_path_low)
+                                if re.search(r"(?:^|[^a-z0-9])(2160p?|3840x2160|4k)(?:[^a-z0-9]|$)", comb):
                                     w, h = 3840, 2160
                                 elif "1080" in comb or "/q/1" in comb:
                                     w, h = 1920, 1080
@@ -5675,6 +5683,8 @@ def _translate_vtt_to_tr_sync(vtt: str) -> str:
         else:
             out_blocks.append("\n".join(hdr_lines + [tr_map.get(idx, orig_txt)]))
     res_vtt = "\n\n".join(out_blocks) + "\n"
+    if len(_SUB_VTT_CACHE) >= 200:
+        _SUB_VTT_CACHE.pop(next(iter(_SUB_VTT_CACHE)), None)
     _SUB_VTT_CACHE[ck] = res_vtt
     return res_vtt
 
@@ -5688,6 +5698,8 @@ def _detect_intro_sync(imdb_id: str, tid: str, mtype: str, s: int, e: int, subs:
     ck = f"v2:{imdb_id or tid}:{mtype}:{s}:{e}"
     if ck in _INTRO_CACHE:
         return _INTRO_CACHE[ck]
+    if len(_INTRO_CACHE) >= 500:
+        _INTRO_CACHE.pop(next(iter(_INTRO_CACHE)), None)
     if imdb_id and imdb_id.startswith("tt"):
         try:
             u = f"https://api.introdb.app/intro?imdb_id={urllib.parse.quote(imdb_id)}&season={s}&episode={e}"

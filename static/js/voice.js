@@ -613,7 +613,7 @@ export class Voice {
     };
     pc.onnegotiationneeded = () => this._negotiate(id, st);
     pc.onconnectionstatechange = async () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+      if (pc.connectionState === 'failed') {
         try {
           if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
         } catch (e) { /* ignore */ }
@@ -622,7 +622,7 @@ export class Voice {
       }
     };
     pc.oniceconnectionstatechange = async () => {
-      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+      if (pc.iceConnectionState === 'failed') {
         try {
           if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
         } catch (e) { /* ignore */ }
@@ -642,7 +642,7 @@ export class Voice {
       const old = this.peers.get(from);
       const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (newU && oldU && newU !== oldU) {
+      if (newU && oldU && newU !== oldU && (old.pc.connectionState === 'closed' || old.pc.connectionState === 'failed')) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
@@ -994,7 +994,7 @@ export class Voice {
     this.inCall = false;
     this.deafened = false;
     for (const st of this.peers.values()) {
-      if (st?.audio) st.audio.muted = false;
+      if (st?.audio) st.audio.muted = true;
     }
     this._playCallChime(false);
     this.send('voice_state', { inCall: false, muted: true, speaking: false, cam: false, screen: false, deafened: false });

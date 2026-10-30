@@ -1107,6 +1107,8 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         "subtitleTracks": [{"id": "lyrics-tr", "lang": "tr", "label": "🎤 Senkron Şarkı Sözleri (Karaoke)", "url": lyrics_vtt_url, "default": True}],
         "similar": sim,
     }
+    if len(_RESOLVE_MUSIC_CACHE) >= 400:
+        _RESOLVE_MUSIC_CACHE.pop(next(iter(_RESOLVE_MUSIC_CACHE)), None)
     _RESOLVE_MUSIC_CACHE[ckey] = (time.time(), res)
     return res
 
@@ -1120,7 +1122,7 @@ async def music_catalog(request: Request):
     try:
         data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
     except Exception:
-        data = {"provider": prov, "category": cat, "sections": [], "items": []}
+        data = {"provider": prov, "category": cat, "shelves": [], "sections": [], "items": [], "similarItems": []}
     return JSONResponse(data, headers={"Cache-Control": "public, max-age=120, s-maxage=600, stale-while-revalidate=1800"})
 
 
