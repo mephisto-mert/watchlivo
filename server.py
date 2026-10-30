@@ -4961,8 +4961,9 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                 return part, 206, f"bytes {start}-{start + len(part) - 1}/{total}", ct
         return data, 200, "", ct
 
-    chunk_sz = 2560 * 1024
+    chunk_sz = 3840 * 1024
     start, end = 0, chunk_sz - 1
+    m_suf = None
     if rng and rng.startswith("bytes="):
         m_suf = re.match(r"bytes=-(\d+)", rng)
         m = re.match(r"bytes=(\d+)-(\d*)", rng)
@@ -4976,12 +4977,74 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
             hdrs["Range"] = f"bytes={start}-{end}"
     if "Range" not in hdrs:
         hdrs["Range"] = f"bytes={start}-{end}"
-    req = urllib.request.Request(url, headers=hdrs)
-    with _public_open(req, timeout=10) as r:
-        data = r.read(chunk_sz + 1024)
-        cr = r.headers.get("Content-Range") or ""
-        status = 206 if cr else 200
-        return data, status, cr, "video/mp4"
+    mp4_ckey = f"mp4|{url}|{hdrs['Range']}"
+    now_mp4 = time.time()
+    with _SEG_TABLE_LOCK:
+        cached_mp4 = _SEGMENT_CACHE.get(mp4_ckey)
+    if cached_mp4 and now_mp4 - cached_mp4[0] < 90:
+        data = cached_mp4[1]
+        meta_parts = str(cached_mp4[2] or "video/mp4||206").split("\n")
+        ct = meta_parts[0] if len(meta_parts) > 0 and meta_parts[0] else "video/mp4"
+        cr = meta_parts[1] if len(meta_parts) > 1 else ""
+        status = int(meta_parts[2]) if len(meta_parts) > 2 and meta_parts[2].isdigit() else (206 if cr else 200)
+    else:
+        ulock = _get_seg_lock(mp4_ckey)
+        with ulock:
+            with _SEG_TABLE_LOCK:
+                cached_mp4 = _SEGMENT_CACHE.get(mp4_ckey)
+            if cached_mp4 and time.time() - cached_mp4[0] < 90:
+                data = cached_mp4[1]
+                meta_parts = str(cached_mp4[2] or "video/mp4||206").split("\n")
+                ct = meta_parts[0] if len(meta_parts) > 0 and meta_parts[0] else "video/mp4"
+                cr = meta_parts[1] if len(meta_parts) > 1 else ""
+                status = int(meta_parts[2]) if len(meta_parts) > 2 and meta_parts[2].isdigit() else (206 if cr else 200)
+            else:
+                req = urllib.request.Request(url, headers=hdrs)
+                with _public_open(req, timeout=10) as r:
+                    data = r.read(chunk_sz + 1024)
+                    cr = r.headers.get("Content-Range") or ""
+                    status = 206 if cr else 200
+                    ct = "video/mp4"
+                if data and len(data) <= int(6 * 1024 * 1024):
+                    with _SEG_TABLE_LOCK:
+                        now_ts = time.time()
+                        while len(_SEGMENT_CACHE) >= 96:
+                            oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
+                            _SEGMENT_CACHE.pop(oldest, None)
+                        _SEGMENT_CACHE[mp4_ckey] = (now_ts, data, f"{ct}\n{cr}\n{status}")
+    if not m_suf and data and len(data) >= chunk_sz - 65536:
+        next_start = end + 1
+        next_end = next_start + chunk_sz - 1
+        next_rng = f"bytes={next_start}-{next_end}"
+        next_ckey = f"mp4|{url}|{next_rng}"
+        with _SEG_TABLE_LOCK:
+            has_next = next_ckey in _SEGMENT_CACHE
+        if not has_next:
+            def _bg_prefetch_mp4(u_bg=url, h_bg=dict(hdrs), r_bg=next_rng, ck_bg=next_ckey, csz=chunk_sz):
+                try:
+                    lck = _get_seg_lock(ck_bg)
+                    if lck.locked():
+                        return
+                    with lck:
+                        with _SEG_TABLE_LOCK:
+                            if ck_bg in _SEGMENT_CACHE:
+                                return
+                        h_bg["Range"] = r_bg
+                        req_bg = urllib.request.Request(u_bg, headers=h_bg)
+                        with _public_open(req_bg, timeout=8) as r_resp:
+                            d_bg = r_resp.read(csz + 1024)
+                            cr_bg = r_resp.headers.get("Content-Range") or ""
+                            st_bg = 206 if cr_bg else 200
+                        if d_bg and len(d_bg) <= int(6 * 1024 * 1024):
+                            with _SEG_TABLE_LOCK:
+                                while len(_SEGMENT_CACHE) >= 96:
+                                    oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
+                                    _SEGMENT_CACHE.pop(oldest, None)
+                                _SEGMENT_CACHE[ck_bg] = (time.time(), d_bg, f"video/mp4\n{cr_bg}\n{st_bg}")
+                except Exception:
+                    pass
+            threading.Thread(target=_bg_prefetch_mp4, daemon=True).start()
+    return data, status, cr, ct
 
 
 async def rave_stream_manifest(request: Request):

@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v39';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v39';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v39';
-import { MeshConnection } from '../realtime.js?v=20261030_v39';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v39';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v39';
-import { buildLayout } from './mesh-layout.js?v=20261030_v39';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v39';
-import { Voice } from '../voice.js?v=20261030_v39';
-import { playRoomSfx } from './chat.js?v=20261030_v39';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v40';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v40';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v40';
+import { MeshConnection } from '../realtime.js?v=20261030_v40';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v40';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v40';
+import { buildLayout } from './mesh-layout.js?v=20261030_v40';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v40';
+import { Voice } from '../voice.js?v=20261030_v40';
+import { playRoomSfx } from './chat.js?v=20261030_v40';
 
 let ctx = null;
 
@@ -555,9 +555,9 @@ const actions = {
       ctx.sync.seekUntil = performance.now() + 7500;
       ctx.sync.lastLeaderBroadcast = performance.now();
     }
-    ctx.host.adapter?.seek?.(target);
     localState({ meshStatePosition: target });
     ctx.conn.send('seek', { currentTime: target, atTime: clock.now() });
+    setTimeout(() => { ctx?.host?.adapter?.seek?.(target); }, 35);
   },
   setRate(r) {
     if (!ctx) return;
