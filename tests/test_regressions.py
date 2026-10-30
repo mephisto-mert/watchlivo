@@ -362,6 +362,38 @@ class RegressionTests(unittest.TestCase):
         # Verify CSS pointer-events isolation when controls are hidden and idle-cursor auto-hide in controls.js
         mesh_css = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         self.assertIn("frame.classList.add('idle-cursor')", mesh_css)
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("document.querySelectorAll('.modal-backdrop, .popup-backdrop')", main_js)
+
+    def test_v37_sync_token_resolved_url_and_events(self):
+        import copy
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        self.assertIn("onPlay: (arg) => this.onEvent('play', arg)", host_js)
+        self.assertIn("onPause: (arg) => this.onEvent('pause', arg)", host_js)
+        room = rooms.new_room("test-v37-room", "Test V37", "public", "leader", "Mert Can Yıldız", "u_mert", "")
+        rooms.add_participant(room, "h_mert", {"username": "Mert Can Yıldız", "userId": "u_mert", "_internalCreator": True}, "http")
+        # Subsequent guest fallback must not overwrite real name
+        rooms.add_participant(room, "h_mert", {"username": "Misafir İzleyici"}, "http")
+        self.assertEqual(room["participants"]["h_mert"]["name"], "Mert Can Yıldız")
+        rooms.set_media(room, {"title": "Zmora", "tmdbId": "253372", "url": "/api/rave/resolve-catalog?tmdbId=253372", "provider": "hls"}, "Mert Can Yıldız", 0.0)
+        rooms.handle_action(room, "h_mert", {
+            "type": "resolve_media",
+            "tmdbId": "253372",
+            "title": "Zmora",
+            "url": "/api/rave/stream_manifest?sid=resolved123&ext=.m3u8",
+            "currentTime": 0.0,
+        })
+        self.assertTrue(any(e.get("action") == "resolve_media" for e in room.get("events", [])))
+        # Ensure unresolved syncToken never overwrites resolved URL in room
+        stale_snap = copy.deepcopy(room)
+        stale_snap["media"]["url"] = "/api/rave/resolve-catalog?tmdbId=253372"
+        stale_snap["media"]["updatedAt"] = rooms.now() + 5.0
+        stale_snap.pop("_tok_sig", None)
+        stale_tok = rooms.pack_sync_token(stale_snap)
+        rooms.merge_sync_token(room, stale_tok, room["id"])
+        self.assertEqual(room["media"]["url"], "/api/rave/stream_manifest?sid=resolved123&ext=.m3u8")
 
 
 if __name__ == '__main__':

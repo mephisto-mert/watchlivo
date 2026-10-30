@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v36';
-import { expectedPosition } from '../sync.js?v=20261030_v36';
-import { state } from '../store.js?v=20261030_v36';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v37';
+import { expectedPosition } from '../sync.js?v=20261030_v37';
+import { state } from '../store.js?v=20261030_v37';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -175,8 +175,9 @@ export class Html5Adapter {
       reportPlay(wasPausedWant);
     });
     v.addEventListener('volumechange', () => { if (!v.paused && !v.muted && v.volume > 0) { this.audioUnlocked = true; this.events.onUnmuted?.(); } });
-    v.addEventListener('canplay', () => clearBuf());
-    v.addEventListener('canplaythrough', () => clearBuf());
+    v.addEventListener('loadeddata', () => { if (v.readyState >= 2) { clearBuf(); this.events.onReady?.(); } });
+    v.addEventListener('canplay', () => { clearBuf(); this.events.onReady?.(); });
+    v.addEventListener('canplaythrough', () => { clearBuf(); this.events.onReady?.(); });
     v.addEventListener('seeking', () => {
       this.subs?.clearActiveCue?.();
     });
@@ -525,9 +526,11 @@ export class Html5Adapter {
       let mediaRetries = 0;
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
         netRetries = 0;
-        clearBuf();
-        this.events.onReady?.();
-        fireDoneOnce();
+        if (v.readyState >= 2) {
+          clearBuf();
+          this.events.onReady?.();
+          fireDoneOnce();
+        }
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (!data?.fatal) {
@@ -628,7 +631,7 @@ export class Html5Adapter {
       const done = () => {
         if (resolved) return;
         resolved = true;
-        if (v.readyState >= 2) {
+        if (v.readyState >= 2 && !v.seeking) {
           clearBuf();
           this.events.onReady?.();
         } else {
@@ -638,17 +641,15 @@ export class Html5Adapter {
         resolve();
       };
       const onFrameReady = () => {
-        if (v.readyState >= 2 || v.currentTime > 0.2) {
-          clearBuf();
-          this.events.onReady?.();
-        }
+        if (v.readyState < 2) return;
+        clearBuf();
+        this.events.onReady?.();
         done();
       };
-      v.addEventListener('loadedmetadata', onFrameReady);
       v.addEventListener('loadeddata', onFrameReady);
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
-      setTimeout(done, 1500);
+      setTimeout(done, 2200);
       if (isHls && canHlsJs && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {

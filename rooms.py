@@ -407,8 +407,10 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     t = now()
     prune_chat(room)
     p_map = room.get("participants") or {}
-    m_upd = float((room.get("media") or {}).get("updatedAt") or 0.0)
-    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{int(t // 4)}"
+    m_obj = room.get("media") or {}
+    m_upd = float(m_obj.get("updatedAt") or 0.0)
+    m_url_sig = str(m_obj.get("url") or m_obj.get("videoId") or "")[:48]
+    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{m_url_sig}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{int(t // 4)}"
     if room.get("_tok_sig") == tok_sig and room.get("_tok_val"):
         return room["_tok_val"]
     host_id = room.get("host_id")
@@ -587,8 +589,22 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if snap_h_id and snap_h_id in merged_p and snap_h_id not in kicked and snap_h_id not in left_map:
         if not cur_h_alive or (snap.get("host_transferred") and s_rev > r_rev):
             room["host_id"] = snap_h_id
-    if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and media_key(s_media) == media_key(r_media))):
-        room["media"] = s_media
+    same_m_key = bool(s_has_media and r_has_media and media_key(s_media) == media_key(r_media))
+    s_unresolved = str(s_media.get("url") or "").startswith("/api/rave/resolve-catalog")
+    r_unresolved = str(r_media.get("url") or "").startswith("/api/rave/resolve-catalog")
+    if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
+        if same_m_key and s_unresolved and not r_unresolved:
+            merged_m = dict(s_media)
+            for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
+                if r_media.get(k):
+                    merged_m[k] = r_media[k]
+            room["media"] = merged_m
+        else:
+            room["media"] = s_media
+    elif same_m_key and r_unresolved and not s_unresolved:
+        for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
+            if s_media.get(k):
+                room["media"][k] = s_media[k]
     if snap.get("polls") and not room.get("polls"):
         room["polls"] = snap["polls"]
     elif snap.get("polls") and room.get("polls"):
@@ -1106,8 +1122,12 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         room["left"].pop(cid, None)
     existing = room["participants"].get(cid)
     p = existing or {"id": cid, "muted": True, "speaking": False, "name": "Misafir", "color": "#00f5d4", "device": "Web", "country": "", "uid": ""}
+    raw_uname = clean_str(data.get("username"), 24)
+    existing_name = str((existing or {}).get("name") or "")
+    if existing and existing_name and not existing_name.lower().startswith(("misafir", "izleyici")) and raw_uname.lower().startswith(("misafir", "izleyici")):
+        raw_uname = existing_name
     fields = {
-        "name": clean_str(data.get("username"), 24),
+        "name": raw_uname,
         "color": clean_str(data.get("color"), 16) if re.match(r"^#[0-9a-fA-F]{3,8}$", str(data.get("color") or "")) else "",
         "device": clean_str(data.get("device"), 16),
         "country": re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper()),
@@ -1324,7 +1344,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 room["media"] = cur_m
                 room["rev"] = int(room.get("rev") or 1) + 1
                 room["_tok_sig"] = ""
-                out["broadcast"].append((_sync_event(room, "resolve_media", name), cid))
+                res_ev = _sync_event(room, "resolve_media", name)
+                res_ev["id"] = req_act_id or ("ev_" + uuid.uuid4().hex[:10])
+                res_ev["ts"] = t_now
+                res_ev["cid"] = cid
+                room.setdefault("events", []).append(res_ev)
+                room["events"] = room["events"][-35:]
+                out["broadcast"].append((res_ev, cid))
         return out
 
     if mtype in ("play", "pause", "seek", "rate"):
@@ -2092,13 +2118,21 @@ async def http_sync(request: Request):
             inc_resolved = bool(incoming_clean.get("url") and not str(incoming_clean.get("url")).startswith("/api/rave/resolve-catalog"))
             should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (caller_is_leader and cur_unresolved and inc_resolved)
             if should_sync_active:
-                try:
-                    am_pos = max(0.0, float(active_m.get("currentTime") or active_m.get("meshStatePosition") or 0.0))
-                except (TypeError, ValueError):
-                    am_pos = 0.0
-                set_media(room, active_m, p["name"], am_pos)
-                room["rev"] = int(room.get("rev") or 1) + 5
-                restored_active_media = True
+                if cur_unresolved and inc_resolved and not room_empty_media and media_key(room["media"]) == media_key(incoming_clean):
+                    for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
+                        if incoming_clean.get(k):
+                            room["media"][k] = incoming_clean[k]
+                    room["rev"] = int(room.get("rev") or 1) + 1
+                    room["_tok_sig"] = ""
+                    restored_active_media = True
+                else:
+                    try:
+                        am_pos = max(0.0, float(active_m.get("currentTime") or active_m.get("meshStatePosition") or 0.0))
+                    except (TypeError, ValueError):
+                        am_pos = 0.0
+                    set_media(room, active_m, p["name"], am_pos)
+                    room["rev"] = int(room.get("rev") or 1) + 5
+                    restored_active_media = True
         voted = check_vote_end(room)
         mutated = restored_active_media or voted or bool(pruned) or (room.get("host_id") != prev_host) or is_new
         if is_action:
