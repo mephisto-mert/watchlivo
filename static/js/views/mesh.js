@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v20';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v20';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v20';
-import { MeshConnection } from '../realtime.js?v=20261030_v20';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v20';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v20';
-import { buildLayout } from './mesh-layout.js?v=20261030_v20';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v20';
-import { Voice } from '../voice.js?v=20261030_v20';
-import { playRoomSfx } from './chat.js?v=20261030_v20';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v21';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v21';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v21';
+import { MeshConnection } from '../realtime.js?v=20261030_v21';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v21';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v21';
+import { buildLayout } from './mesh-layout.js?v=20261030_v21';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v21';
+import { Voice } from '../voice.js?v=20261030_v21';
+import { playRoomSfx } from './chat.js?v=20261030_v21';
 
 let ctx = null;
 
@@ -56,7 +56,9 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       chat: (room.chat && room.chat.length) ? room.chat : (curRoom.chat || []),
     };
     nextKey = mediaKey(room.media);
-    if (isLeader()) {
+    if (ctx?.conn) ctx.conn.lastRoom = room;
+    if (!ctx?.lastMediaRestoreAt || Date.now() - ctx.lastMediaRestoreAt > 2500) {
+      if (ctx) ctx.lastMediaRestoreAt = Date.now();
       const curPos = ctx?.host.adapter?.getTime?.() ?? expectedPosition(curRoom.media);
       setTimeout(() => ctx?.conn?.send('change_media', { ...curRoom.media, currentTime: curPos }), 120);
     }
@@ -148,6 +150,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     }
   }
   set({ mesh: room });
+  if (ctx?.conn) ctx.conn.lastRoom = room;
   saveChat(room);
   rememberRoom(room);
   const key = mediaKey(room.media);
@@ -199,7 +202,12 @@ async function loadMedia(media) {
                 intro: res.intro || media.intro,
                 duration: res.duration || media.duration,
               };
-              if (state.mesh) set({ mesh: { ...state.mesh, media } });
+              if (state.mesh) {
+                const updatedMesh = { ...state.mesh, media };
+                set({ mesh: updatedMesh });
+                if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
+                rememberRoom(updatedMesh);
+              }
               ctx.conn?.send('resolve_media', { ...media, currentTime: start });
               break;
             }
@@ -246,22 +254,35 @@ function onMessage(data) {
     case 'sync':
       if (data.cid && data.cid === state.clientId) break;
       if (room && data.media) {
-        set({ mesh: { ...room, media: data.media } });
+        const prevKey = mediaKey(room.media);
+        const mergedMedia = { ...(room.media || {}), ...data.media };
+        if (!mergedMedia.url && room.media?.url) mergedMedia.url = room.media.url;
+        if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
+        if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
+        if (!mergedMedia.provider && room.media?.provider) mergedMedia.provider = room.media.provider;
+        const nextKey = mediaKey(mergedMedia);
+        const updatedRoom = { ...room, media: mergedMedia };
+        set({ mesh: updatedRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
+        if (nextKey && (nextKey !== prevKey || !ctx?.host?.adapter)) {
+          loadMedia(mergedMedia);
+          break;
+        }
         if (ctx?.sync) {
-          ctx.sync.lastExpected = expectedPosition(data.media);
+          ctx.sync.lastExpected = expectedPosition(mergedMedia);
           ctx.sync.seekUntil = 0;
           ctx.sync.kick();
         }
-        if (data.media.meshStateStatus === 'PAUSED' || data.media.playing === false) {
+        if (mergedMedia.meshStateStatus === 'PAUSED' || mergedMedia.playing === false) {
           ctx?.host?.adapter?.pause?.();
-          const target = Number(data.media.meshStatePosition || 0);
+          const target = Number(mergedMedia.meshStatePosition || 0);
           if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.4) {
             ctx?.host?.adapter?.seek?.(target);
           }
         } else if (data.action === 'play') {
           ctx?.host?.adapter?.play?.();
         } else if (data.action === 'seek') {
-          const target = Number(data.media.meshStatePosition || 0);
+          const target = Number(mergedMedia.meshStatePosition || 0);
           ctx?.host?.adapter?.seek?.(target);
         }
         ctx.layout.update();
@@ -424,6 +445,7 @@ const actions = {
       if (state.mesh) {
         const updatedRoom = { ...state.mesh, media: nextMedia };
         set({ mesh: updatedRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
         rememberRoom(updatedRoom);
       }
       loadMedia(nextMedia);
@@ -577,7 +599,13 @@ export async function enterMesh(app, params) {
     if (params.r_tok && params.id) {
       sessionStorage.setItem(`vortex_st_${params.id}`, String(params.r_tok));
     }
-    initialCid = sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || null;
+    if (params.id && location.hash.includes('?')) {
+      window.history.replaceState(null, '', `#/mesh/${encodeURIComponent(params.id)}`);
+    }
+    initialCid = sessionStorage.getItem(`vortex_creator_${params.id}`)
+      || localStorage.getItem(`vortex_creator_${params.id}`)
+      || sessionStorage.getItem('vortex_cid')
+      || null;
     if (initialCid) sessionStorage.setItem('vortex_cid', initialCid);
   } catch (e) { /* ignore */ }
   set({ mesh: null, clientId: initialCid, view: { left: 'Collapsed', right: 'Collapsed' }, connection: 'connecting' });
@@ -602,6 +630,9 @@ export async function enterMesh(app, params) {
     roomId: params.id, profile: state.self, password: params.pwd || '', device: deviceLabel(),
     onMessage, onStatus: (s) => { set({ connection: s }); ctx?.layout.update(); },
   });
+  if (cachedRoom && cachedRoom.id === params.id) {
+    ctx.conn.lastRoom = cachedRoom;
+  }
   ctx.voice = new Voice({
     send: (type, payload) => ctx.conn.send(type, payload),
     getSelfId: () => state.clientId,

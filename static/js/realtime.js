@@ -1,6 +1,6 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v20';
-import { api } from './api.js?v=20261030_v20';
+import { clock } from './sync.js?v=20261030_v21';
+import { api } from './api.js?v=20261030_v21';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -12,11 +12,15 @@ export class MeshConnection {
     this.status = '';
     this.syncToken = '';
     this.clientToken = '';
+    this.isCreator = false;
+    this.needsMediaPush = false;
     try {
       localStorage.removeItem(`vortex_st_${roomId}`);
       this.syncToken = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
-      this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
-      this.clientId = sessionStorage.getItem('vortex_cid') || null;
+      this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || localStorage.getItem(`vortex_ct_${roomId}`) || '';
+      const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || localStorage.getItem(`vortex_creator_${roomId}`) || '';
+      this.clientId = creatorCid || sessionStorage.getItem('vortex_cid') || null;
+      this.isCreator = Boolean(creatorCid && this.clientId === creatorCid);
     } catch (e) { /* ignore */ }
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
@@ -197,6 +201,8 @@ export class MeshConnection {
     this.inFlight = true;
     const t0 = Date.now() / 1000;
     try {
+      const curMedia = this.lastRoom?.media;
+      const curMediaUrl = String(curMedia?.url || curMedia?.videoId || '');
       const reqBody = {
         ...payload,
         clientId: this.clientId,
@@ -206,7 +212,13 @@ export class MeshConnection {
         device: this.device,
         pwd: this.password,
         country: COUNTRY,
+        isCreator: Boolean(this.isCreator),
+        mediaUrl: curMediaUrl,
       };
+      if ((isInit || this.needsMediaPush) && curMedia && (curMedia.url || curMedia.videoId)) {
+        reqBody.activeMedia = curMedia;
+        this.needsMediaPush = false;
+      }
       if (isPoll && this.lastRev > 0) {
         reqBody.sinceRev = this.lastRev;
       }
@@ -225,6 +237,11 @@ export class MeshConnection {
       }
       if (res.serverTime) clock.sample(t0, Number(res.serverTime));
       this.emitStatus('online');
+      if (Array.isArray(res.errors) && res.errors.length) {
+        for (const err of res.errors) {
+          if (err) this.onMessage?.({ type: 'error', message: String(err) });
+        }
+      }
       if (isPoll && (reqSeq !== this.actionSeq || this.outQueue.length > 0)) {
         this._dispatchHttpEvents(res.unchanged ? res : res.room, false);
         return;
@@ -239,6 +256,18 @@ export class MeshConnection {
         this.participantCount = newCnt;
         if (res.media) {
           const prevMedia = this.lastRoom.media || {};
+          const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
+          const srvUrl = String(res.media.url || res.media.videoId || '');
+          if (prevUrl && !srvUrl) {
+            this.needsMediaPush = true;
+            this.lastRev = 0;
+            return;
+          }
+          if (srvUrl && srvUrl !== prevUrl) {
+            this.lastRev = 0;
+            setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
+            return;
+          }
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
           const posDiff = Math.abs(Number(res.media.meshStatePosition || 0) - Number(prevMedia.meshStatePosition || 0));
           const isPaused = res.media.meshStateStatus === 'PAUSED' || res.media.playing === false;
@@ -292,9 +321,14 @@ export class MeshConnection {
       this._emitP2p({ event: { ...obj, user: this.profile.name, cid: this.clientId } });
     } else if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(obj.type)) {
       this._emitP2p({ event: { ...obj, fromId: this.clientId } });
+    } else if (['change_media', 'resolve_media'].includes(obj.type)) {
+      const m = { ...(this.lastRoom?.media || {}), ...obj, meshStateStatus: 'PLAYING', playing: true, meshStatePosition: Number(obj.currentTime || 0), meshStateTime: clock.now() };
+      delete m.type;
+      this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
     } else if (['play', 'pause', 'seek', 'rate', 'heartbeat'].includes(obj.type)) {
       const isPaused = obj.type === 'pause' || (obj.type === 'heartbeat' && obj.playing === false);
-      this._emitP2p({ event: { type: 'sync', action: obj.type, by: this.profile.name, media: { meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
+      const baseMedia = this.lastRoom?.media || {};
+      this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
     }
     if (this.mode === 'ws') {
       if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));
