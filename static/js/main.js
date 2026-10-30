@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261030_v35';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261030_v35';
-import { renderHome, destroyHome } from './views/home.js?v=20261030_v35';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261030_v35';
-import { api } from './api.js?v=20261030_v35';
-import { toast } from './ui.js?v=20261030_v35';
+import { state, set } from './store.js?v=20261030_v36';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261030_v36';
+import { renderHome, destroyHome } from './views/home.js?v=20261030_v36';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261030_v36';
+import { api } from './api.js?v=20261030_v36';
+import { toast } from './ui.js?v=20261030_v36';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -73,7 +73,7 @@ async function route() {
   set({ route: r });
   if (r.name === 'mesh') {
     document.body.classList.remove('mesh-minimized');
-    document.querySelectorAll('.modal-backdrop').forEach((el) => el.remove());
+    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => el.remove());
     if (current === 'home') destroyHome();
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');

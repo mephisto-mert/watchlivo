@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261030_v35';
-import { avatar } from '../profile.js?v=20261030_v35';
-import { getProvider } from '../providers.js?v=20261030_v35';
-import { api, qs } from '../api.js?v=20261030_v35';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261030_v35';
-import { expectedPosition } from '../sync.js?v=20261030_v35';
+import { h, icons, popup, toast } from '../ui.js?v=20261030_v36';
+import { avatar } from '../profile.js?v=20261030_v36';
+import { getProvider } from '../providers.js?v=20261030_v36';
+import { api, qs } from '../api.js?v=20261030_v36';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261030_v36';
+import { expectedPosition } from '../sync.js?v=20261030_v36';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },

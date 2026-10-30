@@ -2177,6 +2177,7 @@ async def create_room(request: Request):
     req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
     creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
     verified_uid = str(request.scope.get("wl_uid") or "")
+    creator_uid = verified_uid or clean_str(payload.get("creatorId"), 40) or creator_cid
     media = payload.get("media")
     has_incoming_media = isinstance(media, dict) and bool(media.get("url") or media.get("videoId"))
     creator_slug = _slugify_name(payload.get("creator") or "")
@@ -2231,7 +2232,7 @@ async def create_room(request: Request):
         except Exception:
             pass
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
-                    payload.get("creator", ""), verified_uid or creator_cid, payload.get("password", ""))
+                    payload.get("creator", ""), creator_uid, payload.get("password", ""))
     add_participant(
         room,
         creator_cid,
@@ -2240,7 +2241,7 @@ async def create_room(request: Request):
             "color": payload.get("color") or "#27DCC8",
             "device": payload.get("device") or "Web",
             "country": "TR",
-            "uid": verified_uid,
+            "uid": verified_uid or clean_str(payload.get("creatorId"), 40),
             "_internalCreator": True,
         },
         "http",

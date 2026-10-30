@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v35';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v35';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v35';
-import { MeshConnection } from '../realtime.js?v=20261030_v35';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v35';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v35';
-import { buildLayout } from './mesh-layout.js?v=20261030_v35';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v35';
-import { Voice } from '../voice.js?v=20261030_v35';
-import { playRoomSfx } from './chat.js?v=20261030_v35';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v36';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v36';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v36';
+import { MeshConnection } from '../realtime.js?v=20261030_v36';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v36';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v36';
+import { buildLayout } from './mesh-layout.js?v=20261030_v36';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v36';
+import { Voice } from '../voice.js?v=20261030_v36';
+import { playRoomSfx } from './chat.js?v=20261030_v36';
 
 let ctx = null;
 
@@ -713,6 +713,12 @@ export async function enterMesh(app, params) {
   try {
     if (params.r_tok && params.id) {
       sessionStorage.setItem(`vortex_st_${params.id}`, String(params.r_tok));
+    }
+    if (params.new === '1' && params.id) {
+      const existingCreatorCid = sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+      sessionStorage.setItem('vortex_cid', existingCreatorCid);
+      sessionStorage.setItem(`vortex_creator_${params.id}`, existingCreatorCid);
+      localStorage.setItem(`vortex_creator_flag_${params.id}`, '1');
     }
     if (params.id && location.hash.includes('?')) {
       window.history.replaceState(null, '', `#/mesh/${encodeURIComponent(params.id)}`);
