@@ -5009,7 +5009,7 @@ async def rave_stream_manifest(request: Request):
     is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
-    m3u8_ckey = f"v2|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
+    m3u8_ckey = f"v3|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
@@ -5359,6 +5359,8 @@ async def rave_stream_manifest(request: Request):
                                     w, h = 854, 480
                                 elif "360" in comb or "240" in comb:
                                     w, h = 640, 360
+                                if w and h and "RESOLUTION=" not in inf_l.upper():
+                                    inf_l = f"{inf_l},RESOLUTION={w}x{h}"
                             eff_w = max(w, int(h * 16 / 9)) if (w or h) else 0
                             bm = re.search(r"BANDWIDTH=(\d+)", inf_l, re.I)
                             bw = int(bm.group(1)) if bm else 2500000
@@ -5375,14 +5377,30 @@ async def rave_stream_manifest(request: Request):
                             continue
                 out_lines.append(s_ln)
             if variant_pairs:
-                has_fhd_var = any(v[0] >= 1880 for v in variant_pairs)
-                if has_fhd_var:
-                    variant_pairs = [v for v in variant_pairs if v[0] >= 1880]
+                non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]
+                if non_4k:
+                    variant_pairs = non_4k
+                if cur_is_ve and not any(1000 <= v[0] < 1800 for v in variant_pairs):
+                    for v_w, _v_bw, v_inf, v_uri in list(variant_pairs):
+                        if v_w >= 1800 and "sid=" in v_uri:
+                            try:
+                                m_sid = re.search(r"sid=([A-Za-z0-9_-]+)", v_uri)
+                                if m_sid:
+                                    raw_s = m_sid.group(1)
+                                    u_dec = base64.urlsafe_b64decode(raw_s + "=" * ((4 - len(raw_s) % 4) % 4)).decode("utf-8")
+                                    if "s1080p" in u_dec:
+                                        u_720 = u_dec.replace("s1080p", "s720p")
+                                        uri_720 = _rewrite_u(u_720, is_sub_playlist=True)
+                                        inf_720 = re.sub(r"BANDWIDTH=\d+", "BANDWIDTH=2400000", re.sub(r"RESOLUTION=\d+x\d+", "RESOLUTION=1280x720", v_inf))
+                                        variant_pairs.append((1280, 2400000, inf_720, uri_720))
+                                        break
+                            except Exception:
+                                pass
+                segs_proxied = bool(cur_is_ve or cur_is_hfnl or cur_is_dbx or cur_is_dl or cur_is_dp or cur_is_fp or proxy_segs)
+                if segs_proxied:
+                    variant_pairs.sort(key=lambda v: (1 if 1000 <= v[0] < 1800 else (0 if v[0] >= 1800 else -1), v[0], v[1]), reverse=True)
                 else:
-                    has_hd_var = any(v[0] >= 1150 for v in variant_pairs)
-                    if has_hd_var:
-                        variant_pairs = [v for v in variant_pairs if v[0] >= 1150 or v[0] == 0]
-                variant_pairs.sort(key=lambda v: (v[0], v[1]), reverse=True)
+                    variant_pairs.sort(key=lambda v: (v[0], v[1]), reverse=True)
                 for _, _, inf_l, uri_l in variant_pairs:
                     out_lines.append(inf_l)
                     out_lines.append(uri_l)

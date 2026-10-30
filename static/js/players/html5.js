@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v31';
-import { expectedPosition } from '../sync.js?v=20261030_v31';
-import { state } from '../store.js?v=20261030_v31';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v32';
+import { expectedPosition } from '../sync.js?v=20261030_v32';
+import { state } from '../store.js?v=20261030_v32';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -450,48 +450,44 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 8000000,
-        minAutoBitrate: 1200000,
+        abrEwmaDefaultEstimate: 2500000,
         autoLevelCapping: -1,
         maxBufferLength: 35,
         maxMaxBufferLength: 75,
         backBufferLength: 45,
         maxBufferSize: 45 * 1000 * 1000,
-        maxBufferHole: 1.2,
+        maxBufferHole: 0.8,
         maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
         forceKeyFrameOnDiscontinuity: true,
         progressive: false,
-        highBufferWatchdogPeriod: 3,
+        highBufferWatchdogPeriod: 2,
         maxFragLookUpTolerance: 0.35,
         nudgeOffset: 0.25,
         nudgeMaxRetry: 10,
-        fragLoadingTimeOut: 7500,
-        fragLoadingMaxRetry: 4,
-        fragLoadingRetryDelay: 350,
-        manifestLoadingTimeOut: 9000,
-        manifestLoadingMaxRetry: 3,
+        fragLoadingTimeOut: 25000,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 500,
+        manifestLoadingTimeOut: 15000,
+        manifestLoadingMaxRetry: 4,
+        levelLoadingTimeOut: 15000,
+        levelLoadingMaxRetry: 4,
       });
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
         if (data?.levels?.length > 1) {
-          let bestIdx = 0;
-          let bestScore = -1;
+          let maxAllowedIdx = -1;
           data.levels.forEach((l, idx) => {
             const w = l.width || 0;
             const h = l.height || 0;
-            const effW = Math.max(w, Math.round(h * 16 / 9));
-            // Prefer <= 1080p (effW <= 2200, h <= 1150) on initial start so 8MB+ 4K segments don't stall serverless proxies
-            const isOver1080p = effW > 2200 || h > 1150 || (l.bitrate || 0) > 9500000;
-            const score = (isOver1080p ? 100 : effW) * 1000 + Math.min(999, Math.round((l.bitrate || 0) / 100000));
-            if (score >= bestScore) { bestScore = score; bestIdx = idx; }
+            const bw = l.bitrate || 0;
+            const isOver1080p = w > 2650 || h > 1200 || bw > 10500000;
+            if (!isOver1080p) {
+              maxAllowedIdx = idx;
+            }
           });
-          this.hls.startLevel = bestIdx;
-          const curLvl = data.levels[this.hls.currentLevel] || null;
-          if (!curLvl || (curLvl.width || 0) > 2200 || (curLvl.height || 0) > 1150) {
-            this.hls.currentLevel = bestIdx;
+          if (maxAllowedIdx >= 0 && maxAllowedIdx < data.levels.length - 1) {
+            this.hls.autoLevelCapping = maxAllowedIdx;
           }
-          this.hls.loadLevel = bestIdx;
-          this.hls.nextLevel = bestIdx;
         }
         this.events.onTracksChanged?.();
         if (effStart >= 0.5 && v.readyState >= 1 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
@@ -540,16 +536,11 @@ export class Html5Adapter {
                 }
               }
             } catch (err) { /* ignore */ }
-            const nowMs = Date.now();
-            if (v.readyState < 3 && v.currentTime > 1 && (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 7000)) {
-              this._lastHlsKickAt = nowMs;
-              try {
-                if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
-                  this.hls.nextLoadLevel = Math.max(0, this.hls.currentLevel - 1);
-                }
-                this.hls.startLoad(Math.max(0, v.currentTime));
-              } catch (err) { /* ignore */ }
-            }
+            try {
+              if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
+                this.hls.nextAutoLevel = Math.max(0, this.hls.currentLevel - 1);
+              }
+            } catch (err) { /* ignore */ }
           }
           return;
         }
@@ -744,18 +735,18 @@ export class Html5Adapter {
             }
           }
         } catch (err) { /* ignore */ }
-        if (consecutiveMidStalls === 2 && this.hls) {
+        if (consecutiveMidStalls === 6 && this.hls) {
           const nowMs = Date.now();
-          if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 6500) {
+          if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 15000) {
             this._lastHlsKickAt = nowMs;
             try {
               if (this.hls.levels?.length > 1 && this.hls.currentLevel > 0) {
-                this.hls.nextLoadLevel = Math.max(0, this.hls.currentLevel - 1);
+                this.hls.nextAutoLevel = 0;
               }
               this.hls.startLoad(Math.max(0, curT));
             } catch (err) { /* ignore */ }
           }
-        } else if (consecutiveMidStalls >= 5) {
+        } else if (consecutiveMidStalls >= 12) {
           consecutiveMidStalls = 0;
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);

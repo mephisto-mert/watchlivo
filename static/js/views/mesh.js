@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v31';
-import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v31';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v31';
-import { MeshConnection } from '../realtime.js?v=20261030_v31';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v31';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v31';
-import { buildLayout } from './mesh-layout.js?v=20261030_v31';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v31';
-import { Voice } from '../voice.js?v=20261030_v31';
-import { playRoomSfx } from './chat.js?v=20261030_v31';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v32';
+import { state, set, isLeader, isHostOnly, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v32';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v32';
+import { MeshConnection } from '../realtime.js?v=20261030_v32';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v32';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v32';
+import { buildLayout } from './mesh-layout.js?v=20261030_v32';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v32';
+import { Voice } from '../voice.js?v=20261030_v32';
+import { playRoomSfx } from './chat.js?v=20261030_v32';
 
 let ctx = null;
 
@@ -243,7 +243,10 @@ async function loadMedia(media) {
                 subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
                 intro: res.intro || media.intro,
                 duration: res.duration || media.duration,
+                meshStatePosition: start,
+                meshStateTime: clock.now(),
               };
+              if (isLeader()) ctx.lastLeaderActionAt = Date.now();
               if (state.mesh) {
                 const updatedMesh = { ...state.mesh, media };
                 set({ mesh: updatedMesh });
@@ -262,7 +265,11 @@ async function loadMedia(media) {
   if (media?.isMusic || media?.mediaType === 'music') saveMusicHistory(media);
   else saveWatchProgress(media, 0, media?.duration || 0);
   await ctx.host.setMedia(media, start, playing);
-  if (!isLeader()) {
+  if (isLeader()) {
+    ctx.lastLeaderActionAt = Date.now();
+    const readyPos = ctx.host?.adapter?.getTime?.() ?? start;
+    localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: readyPos });
+  } else {
     const liveExp = expectedPosition(state.mesh?.media || media);
     if (liveExp > 1.0 && Math.abs(liveExp - start) > 2.5 && ctx.host?.adapter) {
       ctx.host.adapter.seek?.(liveExp);

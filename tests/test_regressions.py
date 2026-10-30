@@ -236,6 +236,18 @@ class RegressionTests(unittest.TestCase):
             r = self.client.get(path, follow_redirects=False)
             self.assertIn(r.status_code, (200, 302), path)
 
+    def test_realtime_imports_state_and_hls_abr_anti_freeze(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
+        self.assertIn("import { state } from './store.js", rt_js)
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("fragLoadingTimeOut: 25000", html5_js)
+        self.assertIn("this.hls.autoLevelCapping = maxAllowedIdx", html5_js)
+        self.assertNotIn("this.hls.loadLevel = bestIdx", html5_js)
+        srv_py = (root / "server.py").read_text(encoding="utf-8")
+        self.assertIn("non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]", srv_py)
+
 
 if __name__ == '__main__':
     unittest.main()
