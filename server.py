@@ -5471,7 +5471,7 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
     return data, ct
 
 
-_POSTER_LIMIT = RateLimiter(120, 60.0, name="poster")
+_POSTER_LIMIT = RateLimiter(360, 60.0, name="poster")
 
 
 async def poster_proxy(request: Request):
@@ -5481,7 +5481,15 @@ async def poster_proxy(request: Request):
     is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter."))
     if not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig):
         return RedirectResponse("/static/watchlivo-poster.svg")
-    allowed, retry_after = _POSTER_LIMIT.hit(client_ip(request))
+    if url in _POSTER_MEM_CACHE:
+        _POSTER_MEM_CACHE.move_to_end(url)
+        data, ct = _POSTER_MEM_CACHE[url]
+        if data and ct.startswith("image/"):
+            return Response(data, media_type=ct, headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
+            })
+    allowed, retry_after = await asyncio.to_thread(_POSTER_LIMIT.hit, client_ip(request))
     if not allowed:
         return too_many_response(retry_after)
     if not url.startswith(("https://", "http://")) or not public_http_url(url):

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v41';
-import { expectedPosition } from '../sync.js?v=20261030_v41';
-import { state } from '../store.js?v=20261030_v41';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v42';
+import { expectedPosition } from '../sync.js?v=20261030_v42';
+import { state } from '../store.js?v=20261030_v42';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -299,7 +299,7 @@ export class Html5Adapter {
       const raw = String(u || '').trim();
       if (!raw) return '';
       const mSid = raw.match(/[?&]sid=([^&#]+)/);
-      if (mSid && (raw.includes('/api/rave/stream_manifest') || raw.includes('/api/rave/stream_chunk'))) {
+      if (mSid && (raw.includes('/api/rave/stream') || raw.includes('/api/rave/stream_manifest') || raw.includes('/api/rave/stream_chunk'))) {
         return `sid:${mSid[1]}`;
       }
       return raw.replace(/&ext=\.m3u8\b/i, '');
@@ -545,12 +545,14 @@ export class Html5Adapter {
             }
             try {
               const cur = v.currentTime || 0;
-              for (let i = 0; i < v.buffered.length; i += 1) {
-                const bStart = v.buffered.start(i);
-                const bEnd = v.buffered.end(i);
-                if (bStart > cur + 0.04 && bStart - cur <= 2.5 && bEnd > bStart + 0.2) {
-                  v.currentTime = bStart + 0.05;
-                  return;
+              if (!this.isBuffered(cur + 0.25)) {
+                for (let i = 0; i < v.buffered.length; i += 1) {
+                  const bStart = v.buffered.start(i);
+                  const bEnd = v.buffered.end(i);
+                  if (bStart > cur + 0.04 && bStart - cur <= 2.5 && bEnd > bStart + 0.2) {
+                    v.currentTime = bStart + 0.05;
+                    return;
+                  }
                 }
               }
             } catch (err) { /* ignore */ }

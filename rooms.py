@@ -1334,6 +1334,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if cur_m.get("playing") else 0.0)
         if cur_live > 30.0 and inc_t <= 0.15:
             return out
+        prev_playing = bool(cur_m.get("playing"))
+        prev_privacy = room.get("privacy")
         _apply_time(room, data)
         if "playing" in data:
             want_play = bool(data["playing"])
@@ -1344,7 +1346,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 room["media"]["playing"] = want_play
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
-        room["rev"] = int(room.get("rev") or 1) + 1
+        if bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 1.5:
+            room["rev"] = int(room.get("rev") or 1) + 1
         hb_ev = _sync_event(room, "heartbeat", name)
         hb_ev["id"] = req_act_id or ("ev_" + uuid.uuid4().hex[:10])
         hb_ev["ts"] = t_now
