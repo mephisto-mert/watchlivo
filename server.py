@@ -4884,8 +4884,9 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
         if orig:
             hdrs["Origin"] = orig
     clean_u_path = url.lower().split("?", 1)[0]
-    is_explicit_mp4 = any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower()
-    is_seg_url = (not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer"))
+    is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
+    is_explicit_mp4 = (not is_fmp4_init) and (any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower())
+    is_seg_url = is_fmp4_init or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
         m_hi = re.match(r"bytes=(\d+)-", rng)
@@ -4916,13 +4917,14 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                             with _public_open(req, timeout=8) as r:
                                 data = r.read(15 * 1024 * 1024)
                                 is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
+                                is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
                                 raw_ct = (r.headers.get("Content-Type") or "").lower()
                                 if len(data) == 16 or "key.php" in url:
                                     ct = "application/octet-stream"
+                                elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url)):
+                                    ct = "video/mp4"
                                 elif is_mpegts or ".ts" in url or ".png" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
                                     ct = "video/mp2t"
-                                elif "init-" in url or ".m4s" in url or ".mp4" in url:
-                                    ct = "video/mp4"
                                 elif "video/" in raw_ct or "audio/" in raw_ct or "mpegurl" in raw_ct:
                                     ct = r.headers.get("Content-Type")
                                 else:
@@ -4933,13 +4935,13 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                             if _attempt == 1:
                                 raise
                             time.sleep(0.15)
-                    if data and len(data) <= int(2.5 * 1024 * 1024):
+                    if data and len(data) <= int(4.5 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
                             now_ts = time.time()
                             expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 45]
                             for k in expired:
                                 _SEGMENT_CACHE.pop(k, None)
-                            while len(_SEGMENT_CACHE) >= 28:
+                            while len(_SEGMENT_CACHE) >= 24:
                                 oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
                                 _SEGMENT_CACHE.pop(oldest, None)
                             _SEGMENT_CACHE[url] = (now_ts, data, ct)
@@ -5404,11 +5406,7 @@ async def rave_stream_manifest(request: Request):
                                         break
                             except Exception:
                                 pass
-                segs_proxied = bool(cur_is_ve or cur_is_hfnl or cur_is_dbx or cur_is_dl or cur_is_dp or cur_is_fp or proxy_segs)
-                if segs_proxied:
-                    variant_pairs.sort(key=lambda v: (1 if 1000 <= v[0] < 1800 else (0 if v[0] >= 1800 else -1), v[0], v[1]), reverse=True)
-                else:
-                    variant_pairs.sort(key=lambda v: (v[0], v[1]), reverse=True)
+                variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 9999, v[1] if v[1] > 0 else 99999999))
                 for _, _, inf_l, uri_l in variant_pairs:
                     out_lines.append(inf_l)
                     out_lines.append(uri_l)

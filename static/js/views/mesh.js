@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v34';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v34';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v34';
-import { MeshConnection } from '../realtime.js?v=20261030_v34';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v34';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v34';
-import { buildLayout } from './mesh-layout.js?v=20261030_v34';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v34';
-import { Voice } from '../voice.js?v=20261030_v34';
-import { playRoomSfx } from './chat.js?v=20261030_v34';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v35';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v35';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v35';
+import { MeshConnection } from '../realtime.js?v=20261030_v35';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v35';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v35';
+import { buildLayout } from './mesh-layout.js?v=20261030_v35';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v35';
+import { Voice } from '../voice.js?v=20261030_v35';
+import { playRoomSfx } from './chat.js?v=20261030_v35';
 
 let ctx = null;
 
@@ -83,7 +83,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (curRoom && isTimeKeeper() && nextKey && nextKey === prevKey) {
     const curMedia = curRoom.media || {};
     const nextMedia = room.media || {};
-    if (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 4500) {
+    if ((ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 6500) || ctx?.userPaused) {
       const inSeekGrace = Boolean(ctx?.lastSeekAt && Date.now() - ctx.lastSeekAt < 4500 && Number.isFinite(ctx.lastSeekTarget));
       const pos = inSeekGrace ? expectedPosition(curMedia) : (ctx?.host.adapter?.getTime?.() ?? curMedia.meshStatePosition);
       const isPausedNow = Boolean(ctx?.userPaused || curMedia.meshStateStatus === 'PAUSED' || curMedia.playing === false);
@@ -214,10 +214,12 @@ async function loadMedia(media) {
   if (ctx.loadingSig === sig) return;
   ctx.loadingSig = sig;
   ctx.userPaused = false;
+  const initialPos = Number(media?.meshStatePosition ?? media?.currentTime ?? 0);
   const exp = expectedPosition(media);
   const start = (ctx.isNew && exp < 3.0) ? 0 : (exp > 0.5 ? Math.max(0, exp) : 0);
   ctx.isNew = false;
   const playing = (media?.meshStateStatus || (media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+  let resolvedFromCatalogFresh = false;
   if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
     ctx.host.loading = true;
     ctx.layout?.playerEvent?.('loading');
@@ -237,7 +239,8 @@ async function loadMedia(media) {
             const res = await r.json();
             if (res && res.url) {
               const freshExp = expectedPosition(state.mesh?.media || media);
-              const resolvedStart = freshExp > 0.5 ? freshExp : start;
+              const resolvedStart = initialPos < 2.0 ? 0 : (freshExp > 0.5 ? freshExp : start);
+              resolvedFromCatalogFresh = initialPos < 2.0;
               media = {
                 ...media,
                 provider: res.provider || 'hls',
@@ -269,7 +272,7 @@ async function loadMedia(media) {
   if (media?.isMusic || media?.mediaType === 'music') saveMusicHistory(media);
   else saveWatchProgress(media, 0, media?.duration || 0);
   const finalExp = expectedPosition(state.mesh?.media || media);
-  const finalStart = finalExp > 0.5 ? finalExp : start;
+  const finalStart = resolvedFromCatalogFresh ? 0 : (finalExp > 0.5 ? finalExp : start);
   await ctx.host.setMedia(media, finalStart, playing);
   if (!isTimeKeeper()) {
     const liveExp = expectedPosition(state.mesh?.media || media);
@@ -803,7 +806,10 @@ function onPlayerEvent(ev, arg) {
       }
     }
   }
-  if (ev === 'pause' && arg?.native && isTimeKeeper() && !document.hidden && !ctx.host.loading && !ctx.userPaused) {
+  if (ev === 'play' && arg?.native && isLeader() && !ctx.host.loading && ctx.userPaused) {
+    actions.play();
+  }
+  if (ev === 'pause' && arg?.native && isLeader() && !document.hidden && !ctx.host.loading && !ctx.userPaused) {
     actions.pause();
   }
   if (ev === 'ended') {

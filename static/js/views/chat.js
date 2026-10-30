@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v34';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v34';
-import { avatar } from '../profile.js?v=20261030_v34';
-import { api, qs } from '../api.js?v=20261030_v34';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v34';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v35';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v35';
+import { avatar } from '../profile.js?v=20261030_v35';
+import { api, qs } from '../api.js?v=20261030_v35';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v35';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -346,7 +346,9 @@ export function buildChat(ctx) {
   input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
   input.addEventListener('focus', () => {
     document.body.classList.add('kb-open');
+    try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     setTimeout(() => {
+      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
       if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
       list.scrollTop = list.scrollHeight;
     }, 60);
@@ -1019,9 +1021,12 @@ export function buildChat(ctx) {
   const onVisualViewportResize = () => {
     if (!window.visualViewport) return;
     const vv = window.visualViewport;
+    const kbOpen = (window.innerHeight - vv.height > 110) || document.activeElement === input;
+    if (kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0)) {
+      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
+    }
     document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
     document.documentElement.style.setProperty('--vv-top', `${Math.round(vv.offsetTop || 0)}px`);
-    const kbOpen = (window.innerHeight - vv.height > 110) || document.activeElement === input;
     document.body.classList.toggle('kb-open', kbOpen);
     if (kbOpen) {
       list.scrollTop = list.scrollHeight;

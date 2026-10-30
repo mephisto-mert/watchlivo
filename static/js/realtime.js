@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v34';
-import { api } from './api.js?v=20261030_v34';
-import { state } from './store.js?v=20261030_v34';
+import { clock } from './sync.js?v=20261030_v35';
+import { api } from './api.js?v=20261030_v35';
+import { state } from './store.js?v=20261030_v35';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -274,9 +274,10 @@ export class MeshConnection {
         reqBody.syncToken = this.syncToken;
       }
       const res = await api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
-        method: 'POST', timeout: 8000,
+        method: 'POST', timeout: 12000,
         body: reqBody,
       });
+      this.httpFailCount = 0;
       if (res.clientToken || (res.clientId && res.clientId !== this.clientId)) {
         this._rememberToken(res.clientToken, res.clientId);
         if (!isPoll) {
@@ -390,8 +391,16 @@ export class MeshConnection {
         this.lastRoomStamp = stamp;
       }
     } catch (e) {
-      this.emitStatus(e.status === 403 ? 'denied' : 'connecting');
-      if (e.status === 403) { this.close(); this.onMessage?.({ type: 'password_required', roomId: this.roomId }); }
+      if (e.status === 403) {
+        this.emitStatus('denied');
+        this.close();
+        this.onMessage?.({ type: 'password_required', roomId: this.roomId });
+      } else {
+        this.httpFailCount = (this.httpFailCount || 0) + 1;
+        if (!this.lastRoom || this.httpFailCount >= 5) {
+          this.emitStatus('connecting');
+        }
+      }
     } finally {
       this.inFlight = false;
     }

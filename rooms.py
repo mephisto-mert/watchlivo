@@ -1311,11 +1311,12 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             cur_unresolved = not cur_url or cur_url.startswith("/api/rave/resolve-catalog")
             same_key = (not media_key(cur_m)) or (media_key(cur_m) == media_key(incoming))
             if (cur_unresolved and (can_control or same_key)) or (can_control and same_key and incoming.get("url") != cur_url):
-                if cur_unresolved and float(cur_m.get("currentTime") or 0.0) <= 0.5:
-                    cur_m["currentTime"] = max(0.0, float(incoming.get("currentTime") or 0.0))
+                inc_ct = max(0.0, float(incoming.get("currentTime") or 0.0))
+                if float(cur_m.get("currentTime") or 0.0) <= 5.0 and inc_ct <= 2.0:
+                    cur_m["currentTime"] = inc_ct
                 elif cur_m.get("playing"):
                     elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
-                    cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, float(incoming.get("currentTime") or 0.0))
+                    cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, inc_ct)
                 for k in ("provider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]

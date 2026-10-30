@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v34';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v34';
-import { getProvider } from '../providers.js?v=20261030_v34';
-import { expectedPosition } from '../sync.js?v=20261030_v34';
-import { thumbFor } from './lobby.js?v=20261030_v34';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v34';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v34';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v34';
-import { avatar } from '../profile.js?v=20261030_v34';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v35';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v35';
+import { getProvider } from '../providers.js?v=20261030_v35';
+import { expectedPosition } from '../sync.js?v=20261030_v35';
+import { thumbFor } from './lobby.js?v=20261030_v35';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v35';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v35';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v35';
+import { avatar } from '../profile.js?v=20261030_v35';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -89,17 +89,27 @@ export function buildControls(frame, ctx) {
 
   let uiTimer = null;
   let lastUiRevealAt = 0;
+  let lastMouseX = -1;
+  let lastMouseY = -1;
+  const hideControlsNow = () => {
+    clearTimeout(uiTimer);
+    controls.classList.remove('ui-active');
+    frame.classList.add('idle-cursor');
+  };
   const revealControls = (ms) => {
     const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
-    const durationMs = ms || (isTouch ? 5200 : 3500);
-    if (!controls.classList.contains('ui-active')) {
+    const durationMs = ms || (isTouch ? 4500 : 3000);
+    const wasVisible = controls.classList.contains('ui-active') && !frame.classList.contains('idle-cursor');
+    if (!wasVisible) {
       lastUiRevealAt = Date.now();
     }
+    frame.classList.remove('idle-cursor');
     controls.classList.add('ui-active');
     clearTimeout(uiTimer);
     uiTimer = setTimeout(() => {
       if (!menu.classList.contains('hidden')) return;
       controls.classList.remove('ui-active');
+      frame.classList.add('idle-cursor');
     }, durationMs);
   };
   const doUnlockAudio = (e) => {
@@ -544,12 +554,12 @@ export function buildControls(frame, ctx) {
   const mid = h('div', { class: 'ctl-mid' }, centerHud);
 
   mid.addEventListener('touchstart', (e) => {
+    touchStartTime = Date.now();
     if (!e.touches || e.touches.length !== 1) return;
-    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
+    if (e.target?.closest?.('button, input')) return;
     const t = e.touches[0];
     touchStartX = t.clientX;
     touchStartY = t.clientY;
-    touchStartTime = Date.now();
     isSwiping = false;
     swipeMode = null;
     startVolume = Number(host.volume || 80);
@@ -558,7 +568,7 @@ export function buildControls(frame, ctx) {
 
   mid.addEventListener('touchmove', (e) => {
     if (!e.touches || e.touches.length !== 1) return;
-    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
+    if (e.target?.closest?.('button, input')) return;
     const t = e.touches[0];
     const dx = t.clientX - touchStartX;
     const dy = t.clientY - touchStartY;
@@ -587,8 +597,9 @@ export function buildControls(frame, ctx) {
   }, { passive: false });
 
   mid.addEventListener('touchend', (e) => {
-    if (e.target?.closest?.('button, input, .ctl-center-hud')) {
-      revealControls(5200);
+    touchStartTime = Date.now();
+    if (e.target?.closest?.('button, input')) {
+      revealControls(4500);
       return;
     }
     if (isSwiping) {
@@ -606,7 +617,7 @@ export function buildControls(frame, ctx) {
     const tapX = t.clientX - rect.left;
     const ratio = tapX / rect.width;
 
-    if (now - lastTapTime < 320 && Math.abs(t.clientX - lastTapX) < 70 && Math.abs(t.clientY - lastTapY) < 70) {
+    if (now - lastTapTime < 300 && Math.abs(t.clientX - lastTapX) < 70 && Math.abs(t.clientY - lastTapY) < 70) {
       clearTimeout(tapTimer);
       lastTapTime = 0;
       if (ratio < 0.38) {
@@ -632,30 +643,30 @@ export function buildControls(frame, ctx) {
       tapTimer = setTimeout(() => {
         if (!menu.classList.contains('hidden')) { closeMenu(); return; }
         if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
-        if (controls.classList.contains('ui-active') && Date.now() - lastUiRevealAt > 450) {
-          clearTimeout(uiTimer);
-          controls.classList.remove('ui-active');
+        if (controls.classList.contains('ui-active') && Date.now() - lastUiRevealAt > 320) {
+          hideControlsNow();
         } else {
-          revealControls(5200);
+          revealControls(4500);
         }
-      }, 240);
+      }, 220);
     }
   }, { passive: true });
 
+  let desktopClickTimer = null;
   mid.addEventListener('click', (e) => {
-    if (e.target?.closest?.('button, input, .ctl-center-hud')) return;
-    if (e.pointerType === 'touch' || ('ontouchstart' in window && Date.now() - touchStartTime < 650)) return;
+    if (e.target?.closest?.('button, input')) return;
+    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 900) return;
     if (!menu.classList.contains('hidden')) { closeMenu(); return; }
     if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
-    if (controls.classList.contains('ui-active') && Date.now() - lastUiRevealAt > 350) {
-      clearTimeout(uiTimer);
-      controls.classList.remove('ui-active');
-    } else {
-      revealControls(4000);
-    }
+    clearTimeout(desktopClickTimer);
+    desktopClickTimer = setTimeout(() => {
+      playBtn.click();
+      revealControls(3000);
+    }, 200);
   });
   mid.addEventListener('dblclick', (e) => {
-    if (e.pointerType === 'touch') return;
+    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 900) return;
+    clearTimeout(desktopClickTimer);
     toggleFullscreen();
   });
   const miniTitle = h('span', { class: 'mini-player-title' }, 'Canlı Oda');
@@ -696,12 +707,15 @@ export function buildControls(frame, ctx) {
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
   frame.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'touch') return;
-    revealControls(3200);
+    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 1000) return;
+    if (lastMouseX >= 0 && Math.abs(e.clientX - lastMouseX) < 4 && Math.abs(e.clientY - lastMouseY) < 4) return;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    revealControls(3000);
   }, { passive: true });
   controls.addEventListener('pointerdown', (e) => {
-    if (e.target?.closest?.('.ctl-top, .ctl-bottom, .ctl-center-hud, .ctl-menu')) {
-      revealControls(5200);
+    if (e.target?.closest?.('.ctl-top, .ctl-bottom, .ctl-menu, .ctl-center-play, .ctl-center-side')) {
+      revealControls(4500);
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
@@ -1835,7 +1849,7 @@ export function buildControls(frame, ctx) {
     controls.classList.toggle('show', !playing && !embedOnly);
     playBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
     centerPlayBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
-    const showCenterHud = !playing || position() < 1.5;
+    const showCenterHud = !playing;
     centerPlayBtn.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('is-paused', showCenterHud);
     theaterBtn.classList.toggle('on', Boolean(ctx.isTheaterMode?.()));

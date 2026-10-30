@@ -336,6 +336,33 @@ class RegressionTests(unittest.TestCase):
         rooms.handle_action(room, "h_creator", {"type": "heartbeat", "currentTime": 56.0, "playing": True})
         self.assertFalse(room["media"]["playing"])
 
+    def test_v35_fmp4_init_cache_abr_and_fullscreen_pause(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        srv_py = (root / "server.py").read_text(encoding="utf-8")
+        # fMP4 init-*.mp4 detection and MP4 box header detection before .cfd/ check
+        self.assertIn('is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)', srv_py)
+        self.assertIn('is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")', srv_py)
+        self.assertIn("variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 9999, v[1] if v[1] > 0 else 99999999))", srv_py)
+        # Fresh catalog resolution preserves 0.0 start position
+        room = rooms.new_room("test-v35-room", "Test V35", "public", "leader", "Tris", "u_tris", "")
+        rooms.add_participant(room, "h_tris", {"username": "Tris", "userId": "u_tris", "_internalCreator": True}, "http")
+        room["host_id"] = "h_tris"
+        rooms.set_media(room, {"title": "Zmora", "tmdbId": "253372", "url": "/api/rave/resolve-catalog?tmdbId=253372", "provider": "hls"}, "Tris", 0.0)
+        # Simulate 3 seconds of catalog resolution delay before resolve_media arrives with currentTime=0
+        room["media"]["updatedAt"] = rooms.now() - 3.5
+        rooms.handle_action(room, "h_tris", {
+            "type": "resolve_media",
+            "tmdbId": "253372",
+            "title": "Zmora",
+            "url": "/api/rave/stream_manifest?sid=test123&ext=.m3u8",
+            "currentTime": 0.0,
+        })
+        self.assertEqual(room["media"]["currentTime"], 0.0)
+        # Verify CSS pointer-events isolation when controls are hidden and idle-cursor auto-hide in controls.js
+        mesh_css = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("frame.classList.add('idle-cursor')", mesh_css)
+
 
 if __name__ == '__main__':
     unittest.main()

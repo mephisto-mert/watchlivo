@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v34';
-import { expectedPosition } from '../sync.js?v=20261030_v34';
-import { state } from '../store.js?v=20261030_v34';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v35';
+import { expectedPosition } from '../sync.js?v=20261030_v35';
+import { state } from '../store.js?v=20261030_v35';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -158,19 +158,21 @@ export class Html5Adapter {
         this.events.onBuffering?.(false);
       }
     };
-    const reportPlay = () => {
+    const reportPlay = (native = false) => {
       if (!this.playingReported) {
         this.playingReported = true;
-        this.events.onPlay?.();
+        this.events.onPlay?.(native ? { native: true } : undefined);
       }
     };
     v.addEventListener('playing', () => {
       clearBuf();
+      const wasPausedWant = !this.wantPlaying;
+      this.wantPlaying = true;
       if (this.bgMvEl && !this.vinylMode) {
         this.bgMvEl.play().catch(() => {});
       }
       if (!v.muted && v.volume > 0) this.events.onUnmuted?.();
-      reportPlay();
+      reportPlay(wasPausedWant);
     });
     v.addEventListener('volumechange', () => { if (!v.paused && !v.muted && v.volume > 0) { this.audioUnlocked = true; this.events.onUnmuted?.(); } });
     v.addEventListener('canplay', () => clearBuf());
@@ -252,10 +254,11 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      const inFullscreen = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
-      if (this.wantPlaying && !this.hasEnded && !v.ended && !inFullscreen) {
+      const inNativeVideoFs = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
+      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
+      const isTransientPause = Boolean(!inNativeVideoFs && (v.seeking || recentSeek || v.readyState < 2 || document.hidden));
+      if (this.wantPlaying && !this.hasEnded && !v.ended && isTransientPause) {
         clearTimeout(this.resumeTimer);
-        const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
         const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 450 : 250;
         this.resumeTimer = setTimeout(() => {
           if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {
@@ -264,7 +267,7 @@ export class Html5Adapter {
         }, delayMs);
         return;
       }
-      if (inFullscreen && this.wantPlaying && !v.seeking) {
+      if (this.wantPlaying && !v.seeking) {
         this.wantPlaying = false;
         this.events.onPause?.({ native: true });
         return;
@@ -291,16 +294,26 @@ export class Html5Adapter {
     const seenUrls = new Set();
     const alts = [];
     const primaryIsPlayableFull = Boolean(media.url && !is30sPreviewUrl(media.url) && !isDrmUrl(media.url));
+    const normDedupeKey = (u) => {
+      const raw = String(u || '').trim();
+      if (!raw) return '';
+      const mSid = raw.match(/[?&]sid=([^&#]+)/);
+      if (mSid && (raw.includes('/api/rave/stream_manifest') || raw.includes('/api/rave/stream_chunk'))) {
+        return `sid:${mSid[1]}`;
+      }
+      return raw.replace(/&ext=\.m3u8\b/i, '');
+    };
     const pushAlt = (u) => {
       const s = String(u || '').trim();
-      if (!s || isDrmUrl(s) || isDemoTestUrl(s) || seenUrls.has(s)) return;
+      const k = normDedupeKey(s);
+      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || seenUrls.has(k)) return;
       if (this.isMusic && is30sPreviewUrl(s) && primaryIsPlayableFull) return;
-      seenUrls.add(s);
+      seenUrls.add(k);
       alts.push(s);
     };
     const rawInitialUrl = (!isDemoTestUrl(prefAudio?.url) && prefAudio?.url) || (!isDemoTestUrl(media.url) && media.url) || '';
     if (rawInitialUrl && !isDrmUrl(rawInitialUrl)) {
-      seenUrls.add(String(rawInitialUrl).trim());
+      seenUrls.add(normDedupeKey(rawInitialUrl));
     }
     if (media.url && media.url !== rawInitialUrl) pushAlt(media.url);
     for (const u of (media.altUrls || [])) pushAlt(u);
@@ -450,7 +463,9 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 2500000,
+        abrEwmaDefaultEstimate: 1600000,
+        abrBandWidthFactor: 0.85,
+        abrBandWidthUpFactor: 0.65,
         autoLevelCapping: -1,
         maxBufferLength: 35,
         maxMaxBufferLength: 75,
@@ -656,7 +671,7 @@ export class Html5Adapter {
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
     let stallChecks = 0;
-    const stallWindowMs = this.isMusic ? 4500 : 4800;
+    const stallWindowMs = this.isMusic ? 4500 : 10500;
     let lastZeroDimSwitchAt = 0;
     const checkZeroDimAudioOnly = () => {
       if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) return;
@@ -671,7 +686,7 @@ export class Html5Adapter {
     v.addEventListener('timeupdate', checkZeroDimAudioOnly);
     const checkUniversalStall = () => {
       if (this.video !== v) return;
-      if (!v.paused && v.readyState >= 2 && v.currentTime > (startAt || 0) + 0.4) {
+      if (!v.paused && v.readyState >= 2 && v.currentTime > (startAt || 0) + 0.25) {
         if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0) {
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
@@ -686,10 +701,16 @@ export class Html5Adapter {
       if (this.wantPlaying && v.paused && v.readyState >= 2) {
         this.tryPlay();
       }
-      const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= (startAt || 0) + 0.35);
+      const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= (startAt || 0) + 0.25);
       if (isStuck && stallChecks < 6) {
         stallChecks += 1;
-        if (nativeAltIdx < alts.length) {
+        if (this.hls && this.hls.levels?.length > 0 && stallChecks === 1) {
+          try {
+            if (this.hls.levels.length > 1) this.hls.nextAutoLevel = 0;
+            if (v.readyState >= 2 && this.wantPlaying && v.paused) this.tryPlay();
+          } catch (e) { /* ignore */ }
+          this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+        } else if (nativeAltIdx < alts.length) {
           loadCandidateUrl(alts[nativeAltIdx++]);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback) {
@@ -698,7 +719,9 @@ export class Html5Adapter {
           attachHlsJs(this.currentUrl || url);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         } else if (this.hls) {
-          try { this.hls.startLoad(); } catch (e) { /* ignore */ }
+          try {
+            if (this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
+          } catch (e) { /* ignore */ }
         }
       }
     };
@@ -736,19 +759,34 @@ export class Html5Adapter {
             }
           }
         } catch (err) { /* ignore */ }
-        if (consecutiveMidStalls === 6 && this.hls) {
+        if (consecutiveMidStalls === 3 && this.hls) {
+          try {
+            const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
+            if (this.hls.levels?.length > 1 && curLvl > 0) {
+              this.hls.nextAutoLevel = 0;
+            }
+          } catch (err) { /* ignore */ }
+        } else if (consecutiveMidStalls === 10 && this.hls) {
           const nowMs = Date.now();
-          if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 15000) {
+          if (!this._lastHlsKickAt || nowMs - this._lastHlsKickAt > 25000) {
             this._lastHlsKickAt = nowMs;
             try {
-              const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
-              if (this.hls.levels?.length > 1 && curLvl > 0) {
+              if (this.hls.levels?.length > 1) {
                 this.hls.nextAutoLevel = 0;
               }
-              this.hls.startLoad(Math.max(0, curT));
+              let bufAhead = 0;
+              for (let i = 0; i < v.buffered.length; i += 1) {
+                if (v.buffered.start(i) <= curT + 0.5 && v.buffered.end(i) > curT) {
+                  bufAhead = v.buffered.end(i) - curT;
+                  break;
+                }
+              }
+              if (bufAhead < 0.1) {
+                this.hls.startLoad(Math.max(0, curT));
+              }
             } catch (err) { /* ignore */ }
           }
-        } else if (consecutiveMidStalls >= 12) {
+        } else if (consecutiveMidStalls >= 18) {
           consecutiveMidStalls = 0;
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
