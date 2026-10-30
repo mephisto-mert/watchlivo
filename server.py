@@ -4837,8 +4837,11 @@ _M3U8_CACHE: dict[str, tuple[float, str]] = {}
 
 def _get_seg_lock(url: str) -> threading.Lock:
     with _SEG_TABLE_LOCK:
-        if len(_SEG_URL_LOCKS) > 256:
-            _SEG_URL_LOCKS.clear()
+        if len(_SEG_URL_LOCKS) > 512:
+            for k in list(_SEG_URL_LOCKS.keys())[:256]:
+                lck = _SEG_URL_LOCKS.get(k)
+                if lck is not None and not lck.locked():
+                    _SEG_URL_LOCKS.pop(k, None)
         return _SEG_URL_LOCKS.setdefault(url, threading.Lock())
 
 
@@ -4899,14 +4902,14 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
         now = time.time()
         with _SEG_TABLE_LOCK:
             cached = _SEGMENT_CACHE.get(url)
-        if cached and now - cached[0] < 45:
+        if cached and now - cached[0] < 90:
             data, ct = cached[1], cached[2]
         else:
             ulock = _get_seg_lock(url)
             with ulock:
                 with _SEG_TABLE_LOCK:
                     cached = _SEGMENT_CACHE.get(url)
-                if cached and time.time() - cached[0] < 45:
+                if cached and time.time() - cached[0] < 90:
                     data, ct = cached[1], cached[2]
                 else:
                     data = b""
@@ -4935,13 +4938,13 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                             if _attempt == 1:
                                 raise
                             time.sleep(0.15)
-                    if data and len(data) <= int(4.5 * 1024 * 1024):
+                    if data and len(data) <= int(10 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
                             now_ts = time.time()
-                            expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 45]
+                            expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 90]
                             for k in expired:
                                 _SEGMENT_CACHE.pop(k, None)
-                            while len(_SEGMENT_CACHE) >= 24:
+                            while len(_SEGMENT_CACHE) >= 96:
                                 oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
                                 _SEGMENT_CACHE.pop(oldest, None)
                             _SEGMENT_CACHE[url] = (now_ts, data, ct)

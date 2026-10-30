@@ -395,6 +395,31 @@ class RegressionTests(unittest.TestCase):
         rooms.merge_sync_token(room, stale_tok, room["id"])
         self.assertEqual(room["media"]["url"], "/api/rave/stream_manifest?sid=resolved123&ext=.m3u8")
 
+    def test_v38_multi_user_anti_freeze_and_heartbeat_order(self):
+        import copy
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        self.assertIn("else if (behindAct === 'defer'", sync_js)
+        self.assertIn("const JUMP_DELTA = 2.4;", sync_js)
+        room = rooms.new_room("test-v38-room", "Test V38", "public", "leader", "Lider", "u_lider", "")
+        rooms.add_participant(room, "h_lider", {"username": "Lider", "userId": "u_lider", "_internalCreator": True}, "http")
+        room["host_id"] = "h_lider"
+        rooms.set_media(room, {"title": "Zmora", "tmdbId": "253372", "url": "https://cdn.example.com/zmora.m3u8", "provider": "hls"}, "Lider", 0.0)
+        # First heartbeat at t=1.2s, stored in follower's older syncToken
+        rooms.handle_action(room, "h_lider", {"type": "heartbeat", "currentTime": 1.2, "playing": True})
+        old_snap = copy.deepcopy(room)
+        old_snap.pop("_tok_sig", None)
+        old_tok = rooms.pack_sync_token(old_snap)
+        # Newer heartbeat at t=6.5s arrives on room
+        room["events"][-1]["ts"] = rooms.now() - 3.0
+        rooms.handle_action(room, "h_lider", {"type": "heartbeat", "currentTime": 6.5, "playing": True})
+        # Follower polls with old_tok -> merge_sync_token must NOT resurrect the older heartbeat!
+        rooms.merge_sync_token(room, old_tok, room["id"])
+        hbs = [e for e in room.get("events", []) if e.get("type") == "sync" and e.get("action") == "heartbeat"]
+        self.assertEqual(len(hbs), 1)
+        self.assertAlmostEqual(float(hbs[0]["media"]["currentTime"]), 6.5, places=1)
+
 
 if __name__ == '__main__':
     unittest.main()

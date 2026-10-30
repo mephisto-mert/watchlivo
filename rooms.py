@@ -546,12 +546,28 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             seen_c[mid]["reactions"] = existing_r
     merged_c.sort(key=lambda x: float(x.get("ts") or 0.0))
     seen_ev = set()
-    merged_ev = []
+    raw_evs = []
+    best_hb_id = None
+    best_hb_key = (-1.0, -1.0)
     for ev in (room.get("events") or []) + (snap.get("events") or []):
+        if not isinstance(ev, dict):
+            continue
         eid = ev.get("id")
-        if eid and eid not in seen_ev and t - float(ev.get("ts") or 0) < 25.0:
+        ev_ts = float(ev.get("ts") or 0.0)
+        if eid and eid not in seen_ev and t - ev_ts < 25.0:
             seen_ev.add(eid)
-            merged_ev.append(ev)
+            raw_evs.append(ev)
+            if ev.get("type") == "sync" and ev.get("action") == "heartbeat":
+                hb_ct = float((ev.get("media") or {}).get("currentTime") or 0.0)
+                hb_key = (ev_ts, hb_ct)
+                if hb_key >= best_hb_key:
+                    best_hb_key = hb_key
+                    best_hb_id = eid
+    raw_evs.sort(key=lambda x: float(x.get("ts") or 0.0))
+    merged_ev = [
+        ev for ev in raw_evs
+        if not (ev.get("type") == "sync" and ev.get("action") == "heartbeat" and ev.get("id") != best_hb_id)
+    ]
     seen_sig = set()
     merged_sig = []
     for sg in (room.get("signals") or []) + (snap.get("signals") or []):
@@ -1332,7 +1348,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             same_key = (not media_key(cur_m)) or (media_key(cur_m) == media_key(incoming))
             if (cur_unresolved and (can_control or same_key)) or (can_control and same_key and incoming.get("url") != cur_url):
                 inc_ct = max(0.0, float(incoming.get("currentTime") or 0.0))
-                if float(cur_m.get("currentTime") or 0.0) <= 5.0 and inc_ct <= 2.0:
+                if (cur_unresolved and float(cur_m.get("currentTime") or 0.0) <= 12.0 and inc_ct <= 2.0) or (float(cur_m.get("currentTime") or 0.0) <= 5.0 and inc_ct <= 2.0):
                     cur_m["currentTime"] = inc_ct
                 elif cur_m.get("playing"):
                     elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
@@ -2181,6 +2197,10 @@ async def http_sync(request: Request):
                 "name": room.get("name", ""),
                 "host_id": room.get("host_id"),
                 "media": {
+                    "id": str(m.get("id") or ""), "tmdbId": str(m.get("tmdbId") or ""),
+                    "imdbId": str(m.get("imdbId") or ""), "mediaType": str(m.get("mediaType") or ""),
+                    "season": m.get("season"), "episode": m.get("episode"),
+                    "seriesTitle": str(m.get("seriesTitle") or ""), "originalTitle": str(m.get("originalTitle") or ""),
                     "url": str(m.get("url") or ""), "videoId": str(m.get("videoId") or ""),
                     "title": str(m.get("title") or ""), "provider": str(m.get("provider") or ""),
                     "playing": bool(m.get("playing")), "currentTime": float(m.get("currentTime") or 0.0),

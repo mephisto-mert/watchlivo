@@ -273,7 +273,8 @@ export class SubtitleDubController {
         ];
     const hasTrSub = this.subtitleTracks.some((t) => t.lang === 'tr');
     const hasInitialAudio = rawAudio.length > 1;
-    if (media.tmdbId || media.imdbId || media.videoId || media.provider === 'youtube' || !this.subtitleTracks.length || !hasTrSub) {
+    const needsSubFetch = !(this.subtitleTracks.length > 0 && hasTrSub && hasInitialAudio) && Boolean(media.tmdbId || media.imdbId || media.videoId || media.provider === 'youtube' || !this.subtitleTracks.length || !hasTrSub);
+    if (needsSubFetch) {
       try {
         const queryParams = {
           tmdbId: media.tmdbId || '',
@@ -308,6 +309,9 @@ export class SubtitleDubController {
           if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
             this.audioTracks = data.audioTracks.filter(Boolean);
             if (this.media) this.media.audioTracks = this.audioTracks;
+            if (this.adapter?.hls?.audioTracks?.length > 1) {
+              this.mergeHlsAudioTracks(this.adapter.hls.audioTracks);
+            }
           }
           if (data.intro && !this.intro) {
             this.intro = data.intro;

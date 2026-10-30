@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v37';
-import { expectedPosition } from '../sync.js?v=20261030_v37';
-import { state } from '../store.js?v=20261030_v37';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v38';
+import { expectedPosition } from '../sync.js?v=20261030_v38';
+import { state } from '../store.js?v=20261030_v38';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -256,8 +256,8 @@ export class Html5Adapter {
         return;
       }
       const inNativeVideoFs = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
-      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
-      const isTransientPause = Boolean(!inNativeVideoFs && (v.seeking || recentSeek || v.readyState < 2 || document.hidden));
+      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
+      const isTransientPause = Boolean(!inNativeVideoFs);
       if (this.wantPlaying && !this.hasEnded && !v.ended && isTransientPause) {
         clearTimeout(this.resumeTimer);
         const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 450 : 250;
@@ -278,11 +278,11 @@ export class Html5Adapter {
     v.addEventListener('waiting', () => {
       clearTimeout(this.waitTimer);
       this.waitTimer = setTimeout(() => {
-        if (this.video && !this.video.paused && this.video.readyState < 3 && !this.bufferingReported) {
+        if (this.video && !this.video.paused && this.video.readyState < 2 && !this.bufferingReported) {
           this.bufferingReported = true;
           this.events.onBuffering?.(true);
         }
-      }, 900);
+      }, 1300);
     });
     v.addEventListener('ended', fireEndedOnce);
     const is30sPreviewUrl = (u) => /AudioPreview|Video211|mzaf_|mzvf_|p\.scdn\.co\/mp3-preview/i.test(String(u || ''));
@@ -534,7 +534,7 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (!data?.fatal) {
-          if ((data?.details === 'fragParsingError' || data?.details === 'decryptError' || data?.details === 'keyLoadError') && nativeAltIdx < alts.length) {
+          if ((data?.details === 'decryptError' || data?.details === 'keyLoadError') && nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             return;
           }
@@ -687,7 +687,11 @@ export class Html5Adapter {
     v.addEventListener('timeupdate', checkZeroDimAudioOnly);
     const checkUniversalStall = () => {
       if (this.video !== v) return;
-      if (!v.paused && v.readyState >= 2 && v.currentTime > (startAt || 0) + 0.25) {
+      if (!this.wantPlaying || v.seeking || document.hidden) {
+        this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+        return;
+      }
+      if (!v.paused && v.readyState >= 2 && (v.currentTime > 0.25 || v.readyState >= 3)) {
         if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0) {
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
@@ -702,7 +706,7 @@ export class Html5Adapter {
       if (this.wantPlaying && v.paused && v.readyState >= 2) {
         this.tryPlay();
       }
-      const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= (startAt || 0) + 0.25);
+      const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= 0.15 && v.readyState < 3);
       if (isStuck && stallChecks < 6) {
         stallChecks += 1;
         if (this.hls && this.hls.levels?.length > 0 && stallChecks === 1) {
@@ -739,7 +743,7 @@ export class Html5Adapter {
         clearBuf();
         return;
       }
-      if (!this.wantPlaying || v.seeking) {
+      if (!this.wantPlaying || v.seeking || document.hidden) {
         consecutiveMidStalls = 0;
         lastWatchdogPos = curT;
         return;
@@ -749,17 +753,19 @@ export class Html5Adapter {
         if (v.paused && v.readyState >= 2) {
           this.tryPlay();
         }
-        try {
-          for (let i = 0; i < v.buffered.length; i += 1) {
-            const bStart = v.buffered.start(i);
-            const bEnd = v.buffered.end(i);
-            if (bStart > curT + 0.04 && bStart - curT <= 2.8 && bEnd > bStart + 0.2) {
-              v.currentTime = bStart + 0.06;
-              consecutiveMidStalls = 0;
-              return;
+        if (consecutiveMidStalls >= 2 && !this.isBuffered(curT + 0.25)) {
+          try {
+            for (let i = 0; i < v.buffered.length; i += 1) {
+              const bStart = v.buffered.start(i);
+              const bEnd = v.buffered.end(i);
+              if (bStart > curT + 0.04 && bStart - curT <= 2.8 && bEnd > bStart + 0.2) {
+                v.currentTime = bStart + 0.06;
+                consecutiveMidStalls = 0;
+                return;
+              }
             }
-          }
-        } catch (err) { /* ignore */ }
+          } catch (err) { /* ignore */ }
+        }
         if (consecutiveMidStalls === 3 && this.hls) {
           try {
             const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
@@ -848,11 +854,11 @@ export class Html5Adapter {
     if (!dur || target < dur - 2) {
       this.hasEnded = false;
     }
-    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 600 && Math.abs(target - this.lastSeekTarget) < 0.35) {
+    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 1000 && Math.abs(target - this.lastSeekTarget) < 1.2) {
       return;
     }
     const v = this.video;
-    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.25) {
+    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.6) {
       return;
     }
     this.lastSeekTarget = target;
@@ -862,6 +868,7 @@ export class Html5Adapter {
     if (v) {
       if (v.readyState < 1) {
         this.initialSeekPending = target;
+        this.loadedAtMs = Date.now();
         if (!this._pendingMetaSeekBound) {
           this._pendingMetaSeekBound = true;
           v.addEventListener('loadedmetadata', () => {
@@ -917,8 +924,8 @@ export class Html5Adapter {
   }
   isBuffering() {
     if (!this.video) return true;
-    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500 && this.video.readyState < 3) return true;
-    return Boolean(this.video.seeking || (this.video.readyState < 3 && (!this.video.paused || this.wantPlaying)));
+    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500 && this.video.readyState < 2) return true;
+    return Boolean(this.video.seeking || this.bufferingReported || (this.video.readyState < 2 && (!this.video.paused || this.wantPlaying)));
   }
   setRate(r) { if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r; }
   getRate() { return Number(this.video?.playbackRate || 1); }
