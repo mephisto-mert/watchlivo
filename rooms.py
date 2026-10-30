@@ -1110,14 +1110,15 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     is_creator = bool(
         (me.get("uid") and room.get("creatorId") and me["uid"] == room["creatorId"])
         or (room.get("creatorId") and cid == room["creatorId"])
-        or (not room.get("curated") and p_slug and len(p_slug) >= 3 and (rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-")) and not cur_host_is_verified)
+        or (not room.get("curated") and p_slug and len(p_slug) >= 3 and (rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-")))
     )
-    if is_creator and not room.get("host_transferred") and room.get("host_id") != cid:
-        room["host_id"] = cid
+    if is_creator and not room.get("host_transferred"):
         co = list(room.get("co_hosts") or [])
         if cid not in co:
             co.append(cid)
             room["co_hosts"] = co
+        if room.get("host_id") != cid and not cur_host_is_verified and not cur_host:
+            room["host_id"] = cid
     is_host = cid == room["host_id"]
     mode = room["playMode"]
     co_hosts = set(room.get("co_hosts") or [])
