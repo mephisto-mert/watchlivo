@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v23';
-import { expectedPosition } from '../sync.js?v=20261030_v23';
-import { state } from '../store.js?v=20261030_v23';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v24';
+import { expectedPosition } from '../sync.js?v=20261030_v24';
+import { state } from '../store.js?v=20261030_v24';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -213,13 +213,21 @@ export class Html5Adapter {
           this.highestPlayedPos = Math.max(this.highestPlayedPos || 0, v.currentTime);
         }
       }
-      if (v.currentTime > 0 && !v.paused) reportPlay();
+      if (v.currentTime > 0 && !v.paused && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) reportPlay();
       if (v.seeking) return;
-      this.subs.onTimeUpdate(v.currentTime);
+      if (v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) {
+        this.subs.onTimeUpdate(v.currentTime);
+      } else {
+        this.subs?.clearActiveCue?.();
+      }
     });
     clearInterval(this.subTickTimer);
     this.subTickTimer = setInterval(() => {
       if (this._destroyed || !this.video || this.video.paused || this.video.seeking) return;
+      if (this.video.readyState < 2 || (!this.isMusic && this.video.videoWidth === 0)) {
+        this.subs?.clearActiveCue?.();
+        return;
+      }
       if (this.subs && this.subs.selectedSubId !== 'off' && this.subs.subCues?.length) {
         this.subs.onTimeUpdate(this.video.currentTime);
       }
@@ -269,6 +277,7 @@ export class Html5Adapter {
     v.addEventListener('ended', fireEndedOnce);
     const is30sPreviewUrl = (u) => /AudioPreview|Video211|mzaf_|mzvf_|p\.scdn\.co\/mp3-preview/i.test(String(u || ''));
     const isDrmUrl = (u) => /\/(?:cbcs|cenc)\//i.test(String(u || ''));
+    const isHevcUrl = (u) => /\/resource\/h265\/|[._-]h265[._-]|[._-]hevc[._-]/i.test(String(u || ''));
     const isDemoTestUrl = (u) => /unified-streaming\.com|tears-of-steel|test-streams\.mux\.dev|shaka-demo-assets|angel-one|aHR0cHM6Ly9kZW1vLnVuaWZpZWQtc3RyZWFtaW5n|aHR0cHM6Ly90ZXN0LXN0cmVhbXMubXV4|aHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL3NoYWth/i.test(String(u || ''));
     const prefAudio = (!this.isMusic && Array.isArray(media.audioTracks))
       ? media.audioTracks.find((t) => t.mode === 'stream' && (t.audioLang || t.targetLang || t.lang) && (t.id === this.subs.selectedAudioId || t.targetLang === this.subs.selectedAudioId || t.lang === this.subs.selectedAudioId || t.audioLang === this.subs.selectedAudioId) && t.url && !isDemoTestUrl(t.url))
@@ -292,12 +301,17 @@ export class Html5Adapter {
     if (Array.isArray(media.audioTracks)) {
       for (const t of media.audioTracks) if (t?.url) pushAlt(t.url);
     }
+    alts.sort((a, b) => (isHevcUrl(a) ? 1 : 0) - (isHevcUrl(b) ? 1 : 0));
 
     let nativeAltIdx = 0;
     let triedProxySegs = false;
-    const url = (rawInitialUrl && !isDrmUrl(rawInitialUrl))
-      ? rawInitialUrl
-      : (alts[nativeAltIdx++] || '');
+    let initialCandidate = (rawInitialUrl && !isDrmUrl(rawInitialUrl)) ? rawInitialUrl : '';
+    if (initialCandidate && isHevcUrl(initialCandidate) && alts.length > 0 && !isHevcUrl(alts[0])) {
+      const promoted = alts.shift();
+      alts.push(initialCandidate);
+      initialCandidate = promoted;
+    }
+    const url = initialCandidate || (alts[nativeAltIdx++] || '');
     this.currentUrl = url;
     if (this.isMusic) {
       const wantClip = media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
@@ -450,17 +464,24 @@ export class Html5Adapter {
           let bestIdx = 0;
           let bestScore = -1;
           data.levels.forEach((l, idx) => {
-            const effW = Math.max(l.width || 0, Math.round((l.height || 0) * 16 / 9));
-            const score = effW * 1000 + Math.min(999, Math.round((l.bitrate || 0) / 100000));
+            const w = l.width || 0;
+            const h = l.height || 0;
+            const effW = Math.max(w, Math.round(h * 16 / 9));
+            // Prefer <= 1080p (effW <= 2200, h <= 1150) on initial start so 8MB+ 4K segments don't stall serverless proxies
+            const isOver1080p = effW > 2200 || h > 1150 || (l.bitrate || 0) > 9500000;
+            const score = (isOver1080p ? 100 : effW) * 1000 + Math.min(999, Math.round((l.bitrate || 0) / 100000));
             if (score >= bestScore) { bestScore = score; bestIdx = idx; }
           });
           this.hls.startLevel = bestIdx;
-          this.hls.currentLevel = bestIdx;
+          const curLvl = data.levels[this.hls.currentLevel] || null;
+          if (!curLvl || (curLvl.width || 0) > 2200 || (curLvl.height || 0) > 1150) {
+            this.hls.currentLevel = bestIdx;
+          }
           this.hls.loadLevel = bestIdx;
           this.hls.nextLevel = bestIdx;
         }
         this.events.onTracksChanged?.();
-        if (effStart >= 0.5 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
+        if (effStart >= 0.5 && v.readyState >= 1 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
           try { v.currentTime = effStart; } catch (err) { /* ignore */ }
         }
         this.subs.mergeHlsAudioTracks(this.hls.audioTracks || data?.audioTracks || []);
@@ -609,28 +630,35 @@ export class Html5Adapter {
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
     let stallChecks = 0;
-    const stallWindowMs = this.isMusic ? 5000 : 9500;
+    const stallWindowMs = this.isMusic ? 4500 : 4800;
+    let lastZeroDimSwitchAt = 0;
+    const checkZeroDimAudioOnly = () => {
+      if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) return;
+      if (v.readyState >= 2 && !v.paused && v.currentTime > (startAt || 0) + 0.45 && v.videoWidth === 0) {
+        const nowMs = Date.now();
+        if (nowMs - lastZeroDimSwitchAt > 1200 && nativeAltIdx < alts.length) {
+          lastZeroDimSwitchAt = nowMs;
+          loadCandidateUrl(alts[nativeAltIdx++]);
+        }
+      }
+    };
+    v.addEventListener('timeupdate', checkZeroDimAudioOnly);
     const checkUniversalStall = () => {
       if (this.video !== v) return;
       if (!v.paused && v.readyState >= 2 && v.currentTime > (startAt || 0) + 0.4) {
-        clearBuf();
-        this.events.onReady?.();
-        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.currentTime > 1.5 && !(this.lastSeekAt && Date.now() - this.lastSeekAt < 8000)) {
-          const noVideoFrames = v.videoWidth === 0 || (typeof v.webkitDecodedFrameCount === 'number' && v.webkitDecodedFrameCount === 0);
-          if (noVideoFrames && nativeAltIdx < alts.length) {
+        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0) {
+          if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
             this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
           }
+          return;
         }
+        clearBuf();
+        this.events.onReady?.();
         return;
       }
       if (this.wantPlaying && v.paused && v.readyState >= 2) {
         this.tryPlay();
-      }
-      if (!this.isMusic && v.readyState >= 1 && stallChecks === 0) {
-        stallChecks += 1;
-        this.watchdogTimer = setTimeout(checkUniversalStall, 5500);
-        return;
       }
       const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= (startAt || 0) + 0.35);
       if (isStuck && stallChecks < 6) {
@@ -709,20 +737,30 @@ export class Html5Adapter {
     this.lastSeekAt = Date.now();
     this.subs?.stopDubAudio?.();
     if (v) {
-      if (!this.hls && v.readyState < 1) {
-        v.addEventListener('loadedmetadata', () => {
-          if (this.video === v) {
-            try { v.currentTime = target; } catch (e) { /* ignore */ }
-          }
-        }, { once: true });
+      if (v.readyState < 1) {
+        this.initialSeekPending = target;
+        if (!this._pendingMetaSeekBound) {
+          this._pendingMetaSeekBound = true;
+          v.addEventListener('loadedmetadata', () => {
+            this._pendingMetaSeekBound = false;
+            if (this.video === v && this.initialSeekPending > 0.5 && Math.abs((v.currentTime || 0) - this.initialSeekPending) > 1.2) {
+              try { v.currentTime = this.initialSeekPending; } catch (e) { /* ignore */ }
+            }
+          }, { once: true });
+        }
       } else {
         try { v.currentTime = target; } catch (e) { /* ignore */ }
       }
     }
     this.subs?.clearActiveCue?.();
-    this.subs?.onTimeUpdate?.(target, true);
+    if (v && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) {
+      this.subs?.onTimeUpdate?.(target, true);
+    }
   }
   getTime() {
+    if (!this.video || this.video.readyState < 1) {
+      return Number(this.video?.currentTime || 0);
+    }
     if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500) {
       const cur = Number(this.video?.currentTime || 0);
       if (cur < Math.max(0.5, this.initialSeekPending - 2.5)) return this.initialSeekPending;

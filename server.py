@@ -2997,13 +2997,21 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     res.append((st["playlist"], "hls"))
                 else:
                     quals = st.get("qualities") or {}
-                    for qk in ("2160", "4k", "1440", "1080", "720", "480", "360"):
-                        qu = (quals.get(qk) or {}).get("url") or ""
-                        if qu.startswith("https://"):
-                            ref = "" if "hakunaymatata.com" in qu else (((quals.get(qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/")
-                            st_tag = "mp4_vl_1080" if qk in ("2160", "4k", "1440", "1080") else ("mp4_vl_720" if qk == "720" else "mp4_vl_sd")
-                            res.append((_proxy_u(qu, ref, ".mp4"), st_tag))
+                    chosen_qk, chosen_qu = "", ""
+                    for prefer_h264 in (True, False):
+                        for qk in ("1080", "720", "1440", "2160", "4k", "480", "360"):
+                            qu = (quals.get(qk) or {}).get("url") or ""
+                            if qu.startswith("https://"):
+                                if prefer_h264 and "/resource/h265/" in qu.lower():
+                                    continue
+                                chosen_qk, chosen_qu = qk, qu
+                                break
+                        if chosen_qu:
                             break
+                    if chosen_qu:
+                        ref = "" if "hakunaymatata.com" in chosen_qu else (((quals.get(chosen_qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/")
+                        st_tag = "mp4_vl_1080" if chosen_qk in ("2160", "4k", "1440", "1080") else ("mp4_vl_720" if chosen_qk == "720" else "mp4_vl_sd")
+                        res.append((_proxy_u(chosen_qu, ref, ".mp4"), st_tag))
         except Exception:
             pass
         return res

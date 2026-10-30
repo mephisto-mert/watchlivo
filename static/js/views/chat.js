@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v23';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v23';
-import { avatar } from '../profile.js?v=20261030_v23';
-import { api, qs } from '../api.js?v=20261030_v23';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v23';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v24';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v24';
+import { avatar } from '../profile.js?v=20261030_v24';
+import { api, qs } from '../api.js?v=20261030_v24';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v24';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [

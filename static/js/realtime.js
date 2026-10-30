@@ -1,6 +1,6 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v23';
-import { api } from './api.js?v=20261030_v23';
+import { clock } from './sync.js?v=20261030_v24';
+import { api } from './api.js?v=20261030_v24';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -218,7 +218,7 @@ export class MeshConnection {
         mediaUrl: curMediaUrl,
         chatCount: Array.isArray(this.lastRoom?.chat) ? this.lastRoom.chat.length : 0,
       };
-      if ((isInit || this.needsMediaPush) && curMedia && (curMedia.url || curMedia.videoId)) {
+      if ((isInit || this.needsMediaPush || this.isCreator || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 15000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
         this.needsMediaPush = false;
       }
@@ -330,6 +330,8 @@ export class MeshConnection {
     } else if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(obj.type)) {
       this._emitP2p({ event: { ...obj, fromId: this.clientId } });
     } else if (['change_media', 'resolve_media'].includes(obj.type)) {
+      this.needsMediaPush = true;
+      this.lastMediaPushAt = Date.now();
       const m = { ...(this.lastRoom?.media || {}), ...obj, meshStateStatus: 'PLAYING', playing: true, meshStatePosition: Number(obj.currentTime || 0), meshStateTime: clock.now() };
       delete m.type;
       this._emitP2p({ event: { type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });

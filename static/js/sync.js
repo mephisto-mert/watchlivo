@@ -113,6 +113,11 @@ export class SyncEngine {
       this.mode = 'ended';
       return CYCLE_MS;
     }
+    if (ad.video && ad.video.readyState < 1) {
+      this.mode = 'buffering';
+      this.onStatus({ mode: 'buffering', delta: 0, curr: 0, expected: 0, rate: 1 });
+      return CYCLE_MS;
+    }
     const curr = ad.getTime();
     const dur = Number(ad.getDuration?.() || media.duration || 0);
     if (dur > 25 && (curr >= dur - 0.5 || expected >= dur + 0.5)) {

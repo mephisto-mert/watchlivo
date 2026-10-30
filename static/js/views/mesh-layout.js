@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v23';
-import { state, setView, canSelectVideo } from '../store.js?v=20261030_v23';
-import { navIcon, logo } from './home.js?v=20261030_v23';
-import { createSelection } from './selection.js?v=20261030_v23';
-import { buildControls } from './controls.js?v=20261030_v23';
-import { buildChat } from './chat.js?v=20261030_v23';
-import { PANELS } from './panels.js?v=20261030_v23';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261030_v24';
+import { state, setView, canSelectVideo } from '../store.js?v=20261030_v24';
+import { navIcon, logo } from './home.js?v=20261030_v24';
+import { createSelection } from './selection.js?v=20261030_v24';
+import { buildControls } from './controls.js?v=20261030_v24';
+import { buildChat } from './chat.js?v=20261030_v24';
+import { PANELS } from './panels.js?v=20261030_v24';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -125,7 +125,10 @@ export function buildLayout(app, ctx) {
         h('div', { class: 'room-brand-capsule' },
           logo(),
           h('span', { class: 'room-header-sep' }),
-          m ? h('span', { class: 'mesh-title', title: m.name }, m.name) : null,
+          m ? h('span', { class: 'mesh-title', title: `${m.name} (#${String(m.id || '').split('-').pop()})` },
+            m.name,
+            !m.curated && m.id ? h('span', { style: { opacity: '0.55', fontSize: '11px', marginLeft: '5px', fontWeight: '600' } }, `#${String(m.id).split('-').pop()}`) : null
+          ) : null,
           m ? h('span', {
             class: `privacy-chip is-${m.privacy || 'public'}`,
             'data-privacy': m.privacy || 'public',

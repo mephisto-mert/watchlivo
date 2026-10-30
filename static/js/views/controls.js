@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v23';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v23';
-import { getProvider } from '../providers.js?v=20261030_v23';
-import { expectedPosition } from '../sync.js?v=20261030_v23';
-import { thumbFor } from './lobby.js?v=20261030_v23';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v23';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v23';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v23';
-import { avatar } from '../profile.js?v=20261030_v23';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v24';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v24';
+import { getProvider } from '../providers.js?v=20261030_v24';
+import { expectedPosition } from '../sync.js?v=20261030_v24';
+import { thumbFor } from './lobby.js?v=20261030_v24';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v24';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v24';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v24';
+import { avatar } from '../profile.js?v=20261030_v24';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -906,7 +906,11 @@ export function buildControls(frame, ctx) {
       ambilightCanvas.style.opacity = '0';
       ambilightCanvas.classList.remove('on');
     }
-    host.adapter?.subs?.onTimeUpdate?.(p);
+    if (!host.adapter?.video || (host.adapter.video.readyState >= 2 && (host.adapter.video.videoWidth > 0 || host.adapter.isMusic))) {
+      host.adapter?.subs?.onTimeUpdate?.(p);
+    } else {
+      host.adapter?.subs?.clearActiveCue?.();
+    }
     if (m && d > 0 && Date.now() - lastMediaPosSyncAt > 2500 && typeof navigator !== 'undefined' && navigator.mediaSession?.setPositionState) {
       try {
         lastMediaPosSyncAt = Date.now();

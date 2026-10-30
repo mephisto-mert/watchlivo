@@ -1030,8 +1030,9 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         or slug_creator_match
     )
     if is_creator and not room.get("host_transferred"):
-        room["host_id"] = cid
-        if not room.get("creatorId") or slug_creator_match or data.get("isCreator"):
+        if not cur_host or cur_host.get("transport") == "bot" or not cur_host_is_verified_creator:
+            room["host_id"] = cid
+        if not room.get("creatorId") or slug_creator_match:
             room["creatorId"] = p.get("uid") or cid
         co = list(room.get("co_hosts") or [])
         if cid not in co:
@@ -1193,7 +1194,9 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             deny("7/24 canlı TV ve radyo odalarında yayın değiştirilemez.")
             return out
         room_has_media = bool(room["media"].get("url") or room["media"].get("videoId"))
-        if mode in ("leader", "autoplay", "vote") and not can_control and room_has_media:
+        creator_slug = _slugify_name(room.get("creator", ""))
+        same_creator_name = bool(p_slug and creator_slug and p_slug == creator_slug)
+        if mode in ("leader", "autoplay", "vote") and not can_control and not same_creator_name and room_has_media:
             deny("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.")
             return out
         try:
@@ -1880,14 +1883,26 @@ async def http_sync(request: Request):
             sys_msg(room, "odaya katıldı", p["name"])
         active_m = data.get("activeMedia")
         restored_active_media = False
-        if not room.get("curated") and not room["media"].get("url") and not room["media"].get("videoId") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
-            try:
-                am_pos = max(0.0, float(active_m.get("currentTime") or active_m.get("meshStatePosition") or 0.0))
-            except (TypeError, ValueError):
-                am_pos = 0.0
-            set_media(room, active_m, p["name"], am_pos)
-            room["rev"] = int(room.get("rev") or 1) + 5
-            restored_active_media = True
+        if not room.get("curated") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
+            room_empty_media = not room["media"].get("url") and not room["media"].get("videoId")
+            caller_is_leader = bool(
+                cid == room.get("host_id")
+                or cid in (room.get("co_hosts") or [])
+                or data.get("isCreator")
+                or (_slugify_name(p.get("name", "")) and _slugify_name(p.get("name", "")) == _slugify_name(room.get("creator", "")))
+            )
+            incoming_clean = clean_media(active_m)
+            cur_unresolved = str(room["media"].get("url") or "").startswith("/api/rave/resolve-catalog")
+            inc_resolved = bool(incoming_clean.get("url") and not str(incoming_clean.get("url")).startswith("/api/rave/resolve-catalog"))
+            should_sync_active = room_empty_media or (caller_is_leader and cur_unresolved and inc_resolved)
+            if should_sync_active:
+                try:
+                    am_pos = max(0.0, float(active_m.get("currentTime") or active_m.get("meshStatePosition") or 0.0))
+                except (TypeError, ValueError):
+                    am_pos = 0.0
+                set_media(room, active_m, p["name"], am_pos)
+                room["rev"] = int(room.get("rev") or 1) + 5
+                restored_active_media = True
         voted = check_vote_end(room)
         mutated = restored_active_media or voted or bool(pruned) or (room.get("host_id") != prev_host) or is_new
         if is_action:
@@ -1952,6 +1967,58 @@ async def create_room(request: Request):
     req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
     creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
     verified_uid = str(request.scope.get("wl_uid") or "")
+    media = payload.get("media")
+    has_incoming_media = isinstance(media, dict) and bool(media.get("url") or media.get("videoId"))
+    creator_slug = _slugify_name(payload.get("creator") or "")
+    if has_incoming_media and (verified_uid or len(creator_slug) >= 3):
+        try:
+            all_existing = await STORE.all()
+            t_now = now()
+            best_existing = None
+            for cand in all_existing:
+                if not isinstance(cand, dict) or cand.get("curated"):
+                    continue
+                if t_now - float(cand.get("lastActiveAt") or 0.0) > 600.0:
+                    continue
+                cand_creator_match = bool(
+                    (verified_uid and cand.get("creatorId") == verified_uid)
+                    or (creator_slug and _slugify_name(cand.get("creator") or "") == creator_slug)
+                )
+                if not cand_creator_match:
+                    continue
+                humans = [pt for pt in (cand.get("participants") or {}).values() if pt.get("transport") != "bot" and t_now - float(pt.get("lastSeen") or 0.0) < 120.0]
+                cand_empty_media = not (cand.get("media") or {}).get("url") and not (cand.get("media") or {}).get("videoId")
+                if humans and (cand_empty_media or len(humans) >= 2):
+                    if not best_existing or len(humans) > len([pt for pt in (best_existing.get("participants") or {}).values() if pt.get("transport") != "bot"]):
+                        best_existing = cand
+            if best_existing and best_existing.get("id"):
+                existing_id = best_existing["id"]
+                async with STORE.lock(existing_id):
+                    live_room = await STORE.get(existing_id) or best_existing
+                    add_participant(
+                        live_room,
+                        creator_cid,
+                        {
+                            "username": payload.get("creator") or "Lider",
+                            "color": payload.get("color") or "#27DCC8",
+                            "device": payload.get("device") or "Web",
+                            "country": "TR",
+                            "uid": verified_uid,
+                            "isCreator": True,
+                        },
+                        "http",
+                    )
+                    live_room["host_id"] = creator_cid
+                    set_media(live_room, media, live_room.get("creator") or "Lider", start=float(media.get("currentTime") or 0.0))
+                    live_room["media"]["playing"] = True
+                    live_room["rev"] = int(live_room.get("rev") or 1) + 5
+                    sys_msg(live_room, f"Şu an oynatılıyor: {live_room['media']['title']}", live_room.get("creator") or "Lider")
+                    await STORE.put(live_room, force_disk=True)
+                _LOBBY_CACHE["ts"] = 0.0
+                client_token = sign_client_token(existing_id, creator_cid)
+                return JSONResponse({"ok": True, "clientId": creator_cid, "clientToken": client_token, "room": serialize(live_room, for_cid=creator_cid)})
+        except Exception:
+            pass
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
                     payload.get("creator", ""), verified_uid or creator_cid, payload.get("password", ""))
     add_participant(

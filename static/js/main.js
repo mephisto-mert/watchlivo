@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261030_v23';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261030_v23';
-import { renderHome, destroyHome } from './views/home.js?v=20261030_v23';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261030_v23';
-import { api } from './api.js?v=20261030_v23';
-import { toast } from './ui.js?v=20261030_v23';
+import { state, set } from './store.js?v=20261030_v24';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261030_v24';
+import { renderHome, destroyHome } from './views/home.js?v=20261030_v24';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261030_v24';
+import { api } from './api.js?v=20261030_v24';
+import { toast } from './ui.js?v=20261030_v24';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -154,13 +154,11 @@ async function boot() {
   if (profile) {
     start(profile);
   } else {
-    set({ self: { id: 'pending_auth', name: 'Hesap Girişi', handle: '', color: '#6366f1', isGuest: true } });
-    // Always render home backdrop so app never stays on an empty black screen
-    const appEl = document.getElementById('app');
-    if (appEl && !appEl.children.length) {
-      renderHome(appEl);
+    const guestFallback = { id: 'guest_' + Math.random().toString(36).slice(2, 9), name: 'Misafir İzleyici', handle: 'misafir', color: '#27DCC8', isGuest: true };
+    start(guestFallback);
+    if (!location.hash || location.hash === '#/' || location.hash === '#') {
+      profileSetup({ dismissable: true, onDone: start });
     }
-    profileSetup({ dismissable: false, onDone: start });
   }
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
