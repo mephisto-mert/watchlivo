@@ -1908,6 +1908,17 @@ async def create_room(request: Request):
     verified_uid = str(request.scope.get("wl_uid") or "")
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
                     payload.get("creator", ""), verified_uid or creator_cid, payload.get("password", ""))
+    add_participant(
+        room,
+        creator_cid,
+        payload.get("creator") or "Lider",
+        payload.get("color") or "#27DCC8",
+        payload.get("device") or "Web",
+        "http",
+        "TR",
+        verified_uid,
+        is_creator=True,
+    )
     room["host_id"] = creator_cid
     media = payload.get("media")
     if isinstance(media, dict) and (media.get("url") or media.get("videoId")):
