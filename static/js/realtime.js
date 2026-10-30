@@ -1,6 +1,6 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v21';
-import { api } from './api.js?v=20261030_v21';
+import { clock } from './sync.js?v=20261030_v22';
+import { api } from './api.js?v=20261030_v22';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -16,9 +16,11 @@ export class MeshConnection {
     this.needsMediaPush = false;
     try {
       localStorage.removeItem(`vortex_st_${roomId}`);
+      localStorage.removeItem(`vortex_ct_${roomId}`);
+      localStorage.removeItem(`vortex_creator_${roomId}`);
       this.syncToken = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
-      this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || localStorage.getItem(`vortex_ct_${roomId}`) || '';
-      const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || localStorage.getItem(`vortex_creator_${roomId}`) || '';
+      this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
+      const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || '';
       this.clientId = creatorCid || sessionStorage.getItem('vortex_cid') || null;
       this.isCreator = Boolean(creatorCid && this.clientId === creatorCid);
     } catch (e) { /* ignore */ }
@@ -214,6 +216,7 @@ export class MeshConnection {
         country: COUNTRY,
         isCreator: Boolean(this.isCreator),
         mediaUrl: curMediaUrl,
+        chatCount: Array.isArray(this.lastRoom?.chat) ? this.lastRoom.chat.length : 0,
       };
       if ((isInit || this.needsMediaPush) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
@@ -269,9 +272,14 @@ export class MeshConnection {
             return;
           }
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
-          const posDiff = Math.abs(Number(res.media.meshStatePosition || 0) - Number(prevMedia.meshStatePosition || 0));
-          const isPaused = res.media.meshStateStatus === 'PAUSED' || res.media.playing === false;
-          const significantJump = isPaused ? (posDiff > 0.5) : (posDiff > 2.5);
+          const nowSec = clock.now();
+          const prevPlaying = (prevMedia.meshStateStatus || (prevMedia.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+          const nextPlaying = (res.media.meshStateStatus || (res.media.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+          const prevExp = Number(prevMedia.meshStatePosition ?? prevMedia.currentTime ?? 0) + (prevPlaying ? Math.max(0, nowSec - Number(prevMedia.meshStateTime ?? prevMedia.updatedAt ?? nowSec)) * Number(prevMedia.meshStatePlaybackSpeed ?? prevMedia.rate ?? 1) : 0);
+          const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - Number(res.media.meshStateTime ?? res.media.updatedAt ?? nowSec)) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
+          const posDiff = Math.abs(nextExp - prevExp);
+          const isPaused = !nextPlaying;
+          const significantJump = isPaused ? (posDiff > 0.6) : (posDiff > 2.8);
           this.lastRoom.media = { ...this.lastRoom.media, ...res.media };
           if (statusChanged || significantJump) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });

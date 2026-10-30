@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v21';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v21';
-import { api, qs } from '../api.js?v=20261030_v21';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v21';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v21';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v21';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261030_v22';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261030_v22';
+import { api, qs } from '../api.js?v=20261030_v22';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261030_v22';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261030_v22';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261030_v22';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -64,11 +64,21 @@ export function providerTile(p, onClick) {
 
 export function videoCard(media, onPick) {
   const prov = getProvider(media.provider);
+  const inRoom = Boolean(window.vortexActions?.queueMusic && location.hash.startsWith('#/mesh/'));
   const card = h('div', { class: 'vcard', role: 'button', tabindex: '0' },
     h('div', { class: 'vcard-thumb' },
       media.thumbnail ? h('img', { src: media.thumbnail, alt: '' }) : null,
       prov?.logo ? h('img', { class: 'vcard-prov', src: prov.logo, alt: '' }) : null,
-      media.duration ? h('span', { class: 'vcard-dur' }, fmtDur(media.duration)) : null),
+      media.duration ? h('span', { class: 'vcard-dur' }, fmtDur(media.duration)) : null,
+      inRoom ? h('button', {
+        type: 'button',
+        class: 'vcard-queue-btn',
+        title: 'Oda sırasına ekle (Watch2Gether Playlist)',
+        onclick: (e) => {
+          e.stopPropagation();
+          window.vortexActions?.queueMusic?.(media);
+        },
+      }, '+ Sıraya Ekle') : null),
     h('div', { class: 'vcard-info' }, h('div', { class: 'vcard-title' }, media.title), h('div', { class: 'vcard-sub' }, media.channel || prov?.name || '')));
   const go = async () => {
     if (card.querySelector('.loading')) return;
@@ -128,7 +138,79 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let trendingFetched = false;
   let trendingLoading = false;
   let heroIndex = 0;
+  let autoRotateEnabled = true;
+  let heroHovered = false;
+  let autoRotateTicks = 0;
+  let autoRotateTimer = null;
   fetchAccounts().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
+
+  function updateHeroBannerInPlace() {
+    const heroEl = root.querySelector('.gazestream-hero');
+    if (!heroEl) return;
+    const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
+    if (!heroPool.length) return;
+    const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
+    const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
+    const trendTag = heroEl.querySelector('.hero-trending-tag span:last-child');
+    if (trendTag) trendTag.textContent = `Şimdi Trend (${safeHeroIdx + 1}/${heroPool.length}) — 4K Senkron Sinema Vitrini`;
+    const catTags = heroEl.querySelectorAll('.hero-category-tags .tag-badge');
+    if (catTags[0]) catTags[0].textContent = heroItem.mediaType === 'tv' ? '📺 Popüler Dizi' : '🎬 Sinema Filmi';
+    if (catTags[1]) catTags[1].textContent = `⭐ IMDb ${heroItem.rating || '8.3'}`;
+    const mainTitle = heroEl.querySelector('.hero-main-title');
+    if (mainTitle) {
+      mainTitle.textContent = `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`;
+    }
+    const synopsis = heroEl.querySelector('.hero-synopsis');
+    if (synopsis) {
+      synopsis.textContent = heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.';
+    }
+    const watchBtnSpans = heroEl.querySelectorAll('.btn-watch-cyan span');
+    if (watchBtnSpans[0]) watchBtnSpans[0].textContent = heroItem.mediaType === 'tv' ? '📺' : '▶';
+    if (watchBtnSpans[1]) watchBtnSpans[1].textContent = heroItem.mediaType === 'tv' ? 'Sezon & Bölüm Seç' : 'Odaya Katıl & Şimdi İzle';
+    const artImg = heroEl.querySelector('.hero-main-img');
+    if (artImg) {
+      const nextSrc = heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop';
+      if (artImg.src !== nextSrc) {
+        artImg.style.opacity = '0.35';
+        artImg.src = nextSrc;
+        artImg.alt = heroItem.title;
+        setTimeout(() => { artImg.style.opacity = '1'; }, 120);
+      }
+    }
+    const rowEl = heroEl.querySelector('.hero-showcase-row');
+    const cards = heroEl.querySelectorAll('.hero-mini-card');
+    cards.forEach((c, idx) => {
+      const isAct = idx === safeHeroIdx;
+      c.classList.toggle('active', isAct);
+      if (isAct && rowEl) {
+        const targetLeft = Math.max(0, c.offsetLeft - (rowEl.clientWidth / 2) + (c.clientWidth / 2));
+        rowEl.scrollTo({ left: targetLeft, behavior: 'smooth' });
+      }
+    });
+  }
+
+  function startShowcaseAutoRotation() {
+    if (autoRotateTimer || compact) return;
+    autoRotateTimer = setInterval(async () => {
+      if (!root.isConnected) {
+        clearInterval(autoRotateTimer);
+        autoRotateTimer = null;
+        return;
+      }
+      if (compact || provider || superQuery || heroHovered || !autoRotateEnabled) return;
+      const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
+      if (!heroPool.length) return;
+      heroIndex = (heroIndex + 1) % heroPool.length;
+      autoRotateTicks += 1;
+      if (autoRotateTicks % 10 === 0 && !trendingLoading) {
+        await ensureTrending(false);
+        if (!provider && !superQuery && root.isConnected) renderGrid();
+        return;
+      }
+      updateHeroBannerInPlace();
+    }, 5500);
+  }
+  if (!compact) startShowcaseAutoRotation();
 
   const pickSafe = async (media) => {
     const p = getProvider(media.provider);
@@ -434,7 +516,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             }, ctaLabel)));
       }));
 
-    const heroBanner = (!compact && !superQuery) ? h('div', { class: 'gazestream-hero hero-with-rail' },
+    const heroBanner = (!compact && !superQuery) ? h('div', {
+      class: 'gazestream-hero hero-with-rail',
+      onmouseenter: () => { heroHovered = true; },
+      onmouseleave: () => { heroHovered = false; },
+    },
       h('div', { class: 'hero-stage-top' },
         h('div', { class: 'hero-left-info' },
           h('div', { class: 'hero-trending-tag' },
@@ -453,15 +539,18 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               class: 'btn-watch-cyan',
               onclick: async (e) => {
                 const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-                if (heroItem.mediaType === 'tv') {
-                  openTvSeriesModal(heroItem, defProv);
+                const curPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
+                const curIdx = ((heroIndex % curPool.length) + curPool.length) % curPool.length;
+                const activeHero = curPool[curIdx] || heroItem;
+                if (activeHero.mediaType === 'tv') {
+                  openTvSeriesModal(activeHero, defProv);
                   return;
                 }
                 const btn = e.currentTarget;
                 btn.disabled = true;
-                toast(`🎬 ${heroItem.title} odası hazırlanıyor...`);
+                toast(`🎬 ${activeHero.title} odası hazırlanıyor...`);
                 try {
-                  const media = await resolveCatalogItem(heroItem, defProv, 1, 1);
+                  const media = await resolveCatalogItem(activeHero, defProv, 1, 1);
                   if (media) await pickSafe(media);
                 } finally {
                   btn.disabled = false;
@@ -516,6 +605,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('div', { class: 'hero-showcase-head' },
           h('span', { class: 'hero-showcase-title' }, `🎬 40.000+ Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
           h('div', { class: 'hero-showcase-arrows' },
+            h('button', {
+              type: 'button',
+              id: 'btn-auto-showcase',
+              class: `btn sm ${autoRotateEnabled ? 'primary' : 'ghost'}`,
+              title: 'Vitrini otomatik döndür / duraklat',
+              onclick: (e) => {
+                autoRotateEnabled = !autoRotateEnabled;
+                e.currentTarget.className = `btn sm ${autoRotateEnabled ? 'primary' : 'ghost'}`;
+                e.currentTarget.textContent = autoRotateEnabled ? '⏱ Otomatik: Açık' : '⏸ Otomatik: Durdu';
+              },
+            }, autoRotateEnabled ? '⏱ Otomatik: Açık' : '⏸ Otomatik: Durdu'),
             h('button', {
               type: 'button',
               id: 'btn-shuffle-showcase',

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v21';
-import { expectedPosition } from '../sync.js?v=20261030_v21';
-import { state } from '../store.js?v=20261030_v21';
+import { SubtitleDubController } from './subtitles.js?v=20261030_v22';
+import { expectedPosition } from '../sync.js?v=20261030_v22';
+import { state } from '../store.js?v=20261030_v22';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -244,13 +244,15 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      if (this.wantPlaying && !this.hasEnded && !v.ended && !v.seeking) {
+      if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
+        const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2000);
+        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 450 : 250;
         this.resumeTimer = setTimeout(() => {
-          if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended) {
+          if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {
             this.tryPlay();
           }
-        }, 180);
+        }, delayMs);
         return;
       }
       this.events.onPause?.();
@@ -695,14 +697,17 @@ export class Html5Adapter {
     if (!dur || target < dur - 2) {
       this.hasEnded = false;
     }
-    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 400 && Math.abs(target - this.lastSeekTarget) < 0.4) {
+    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 1500 && Math.abs(target - this.lastSeekTarget) < 1.8) {
+      return;
+    }
+    const v = this.video;
+    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.8) {
       return;
     }
     this.lastSeekTarget = target;
     this.highestPlayedPos = target;
     this.lastSeekAt = Date.now();
     this.subs?.stopDubAudio?.();
-    const v = this.video;
     if (v) {
       if (!this.hls && v.readyState < 1) {
         v.addEventListener('loadedmetadata', () => {
@@ -712,9 +717,6 @@ export class Html5Adapter {
         }, { once: true });
       } else {
         try { v.currentTime = target; } catch (e) { /* ignore */ }
-        if (this.hls && !this.isBuffered(target)) {
-          try { this.hls.startLoad(target); } catch (e) { /* ignore */ }
-        }
       }
     }
     this.subs?.clearActiveCue?.();

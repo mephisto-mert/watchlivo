@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v21';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v21';
-import { avatar } from '../profile.js?v=20261030_v21';
-import { api, qs } from '../api.js?v=20261030_v21';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v21';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v22';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v22';
+import { avatar } from '../profile.js?v=20261030_v22';
+import { api, qs } from '../api.js?v=20261030_v22';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v22';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -731,9 +731,20 @@ export function buildChat(ctx) {
 
   function msgNode(m) {
     if (m.system) {
-      const t = h('div', { class: 'sysmsg' });
-      if (m.user) t.append(h('b', {}, m.user), ' ');
-      t.append(m.text || '');
+      const txt = String(m.text || '');
+      const isJoin = /katıldı/i.test(txt);
+      const isLeave = /ayrıldı/i.test(txt);
+      const isMedia = /oynatılıyor|başlatıldı|eklendi/i.test(txt);
+      const badgeIcon = isJoin ? '🟢' : isLeave ? '🔴' : isMedia ? '🎬' : '✨';
+      const displayTxt = txt === 'katıldı' ? 'odaya katıldı' : txt === 'ayrıldı' ? 'odadan ayrıldı' : txt;
+      const t = h('div', {
+        class: `sysmsg ${isJoin ? 'sysmsg-join' : isLeave ? 'sysmsg-leave' : isMedia ? 'sysmsg-media' : ''}`,
+      },
+        h('span', { class: 'sysmsg-ico' }, badgeIcon),
+        m.user ? h('b', { class: 'sysmsg-user' }, m.user) : null,
+        m.user ? ' ' : null,
+        h('span', { class: 'sysmsg-txt' }, displayTxt),
+        m.time ? h('time', { class: 'sysmsg-time' }, m.time) : null);
       return t;
     }
     const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot;
@@ -797,22 +808,25 @@ export function buildChat(ctx) {
     return row;
   }
 
+  const recentSysMap = new Map();
   function append(m) {
-    if (!m || rendered.has(m.id)) return;
+    if (!m || !m.id || rendered.has(m.id)) return;
     if (m.system && m.user) {
-      const joinKey = `join:${m.user}`;
-      if (m.text === 'katıldı') {
-        if (rendered.has(joinKey)) return;
-        rendered.add(joinKey);
-      } else if (m.text === 'ayrıldı') {
-        rendered.delete(joinKey);
+      const normAct = /katıldı/i.test(m.text || '') ? 'join' : (/ayrıldı/i.test(m.text || '') ? 'leave' : (m.text || ''));
+      const sysKey = `${m.user}:${normAct}`;
+      const prevTs = recentSysMap.get(sysKey) || 0;
+      const curTs = Number(m.ts || (Date.now() / 1000));
+      if (prevTs && Math.abs(curTs - prevTs) < 12) {
+        rendered.add(m.id);
+        return;
       }
+      recentSysMap.set(sysKey, curTs);
     }
     rendered.add(m.id);
     if (m.system) lastUser = null;
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     list.append(msgNode(m));
-    while (list.children.length > 120) {
+    while (list.children.length > 150) {
       list.firstElementChild?.remove();
     }
     if (atBottom) list.scrollTop = list.scrollHeight;
@@ -955,9 +969,6 @@ export function buildChat(ctx) {
       syncVoiceUi();
       syncMusicSimilarUi();
       const chatArr = state.mesh?.chat || [];
-      if (chatArr.length === 0 && rendered.size > 0) {
-        clear();
-      }
       for (const m of chatArr) append(m);
       renderPolls();
       renderReactions();

@@ -1,10 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v21';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend } from '../store.js?v=20261030_v21';
-import { avatar } from '../profile.js?v=20261030_v21';
-import { clock } from '../sync.js?v=20261030_v21';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v21';
-import { copyInvite, inviteUrl } from './chat.js?v=20261030_v21';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261030_v22';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261030_v22';
+import { avatar } from '../profile.js?v=20261030_v22';
+import { clock } from '../sync.js?v=20261030_v22';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261030_v22';
+import { copyInvite, inviteUrl } from './chat.js?v=20261030_v22';
+import { parseVideoUrl } from '../providers.js?v=20261030_v22';
+import { resolveMedia } from './selection.js?v=20261030_v22';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -70,7 +72,48 @@ function Settings(ctx) {
 function Vote(ctx) {
   const el = h('div');
   let pieTimer = null;
+  const urlInput = h('input', {
+    class: 'input',
+    placeholder: 'YouTube, MP4, M3U8, Kick bağlantısı yapıştır...',
+    style: { flex: '1', fontSize: '.78rem', padding: '7px 10px' },
+  });
+  const addFromInput = async (playNow = false) => {
+    const raw = String(urlInput.value || '').trim();
+    if (!raw) {
+      ctx?.layout?.openSearch?.();
+      return;
+    }
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const parsed = parseVideoUrl(url);
+    if (!parsed) {
+      toast('Geçerli bir video bağlantısı girin veya Katalogdan Ara\'ya tıklayın');
+      return;
+    }
+    toast('⏳ Video bilgisi alınıyor...');
+    const media = await resolveMedia(parsed);
+    if (!media) return;
+    urlInput.value = '';
+    if (playNow && isLeader()) {
+      ctx.actions.pickMedia(media);
+    } else {
+      ctx.actions.queueMusic(media);
+    }
+  };
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addFromInput(false);
+    }
+  });
+  const quickAddBox = h('div', { class: 'w2g-queue-add-box', style: { padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px', borderBottom: '1px solid rgba(255,255,255,0.06)' } },
+    h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+      urlInput,
+      h('button', { type: 'button', class: 'btn sm primary', onclick: () => addFromInput(false) }, '+ Ekle')),
+    h('div', { style: { display: 'flex', gap: '6px' } },
+      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 40.000+ Katalog & YouTube Ara')));
+
   const update = () => {
+    if (el.contains(document.activeElement) && document.activeElement === urlInput) return;
     const m = state.mesh;
     const q = m?.queue || [];
     const mode = m?.playMode;
@@ -89,8 +132,20 @@ function Vote(ctx) {
         pie.textContent = Math.ceil(left / 1000);
       }, 200);
     }
+    const recentHistory = [...getWatchHistory().slice(0, 4), ...getMusicHistory().slice(0, 3)].slice(0, 5);
+    const historyBox = recentHistory.length ? h('div', { style: { padding: '8px 10px', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '6px' } },
+      h('div', { style: { fontSize: '.74rem', fontWeight: '700', color: '#A0A9B8', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '.04em' } }, '🕘 Oda & İzleme Geçmişi'),
+      h('div', { class: 'vote-list' }, recentHistory.map((item) => h('div', { class: 'vote-card', style: { cursor: 'default' } },
+        h('img', { src: item.thumbnail || item.poster || '/static/watchlivo-poster.svg', alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('div', { class: 'vi' },
+          h('div', { class: 'vt' }, item.songTitle || item.title || 'Video'),
+          h('div', { style: { display: 'flex', gap: '4px', marginTop: '4px' } },
+            h('button', { type: 'button', class: 'btn sm', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.queueMusic(item) }, '+ Sıraya'),
+            lead ? h('button', { type: 'button', class: 'btn sm primary', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.pickMedia(item) }, '▶ Oynat') : null))))) : null;
+
     fill(el,
-      h('div', { class: 'sel-note' }, mode === 'vote' ? 'Oylayalım: en çok oy alan video sıradaki olur.' : mode === 'autoplay' ? 'Otomatik Oynat: sıradaki video bitince otomatik başlar.' : mode === 'leader' ? "Liderin Seçimi: sırayı lider yönetir." : 'Hemen Oynat: seçilen video hemen oynar.'),
+      quickAddBox,
+      h('div', { class: 'sel-note' }, mode === 'vote' ? 'Oylayalım: en çok oy alan video sıradaki olur.' : mode === 'autoplay' ? 'Otomatik Oynat: sıradaki video bitince otomatik başlar.' : mode === 'leader' ? "Liderin Seçimi: herkes sıraya video önerebilir, lider başlatır." : 'Hemen Oynat: seçilen video hemen oynar.'),
       m?.voteEndsAt && m.voteEndsAt * 1000 > nowMs() ? h('div', { style: { display: 'flex', justifyContent: 'center' } }, pie) : null,
       q.length ? h('div', { class: 'vote-list' }, q.map((item, i) => {
         const votes = (item.votes || []).length;
@@ -101,8 +156,9 @@ function Vote(ctx) {
               h('button', { class: 'btn', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); ctx.actions.playQueueIndex(i); } }, 'Şimdi Oynat'),
               h('button', { class: 'btn danger', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); ctx.actions.removeQueueItem(i); } }, 'Kaldır')) : null),
           votes ? h('span', { class: 'vote-counter' }, votes) : null);
-      })) : h('div', { class: 'lobby-empty' }, 'Sıra boş. Video Ara ile video ekleyebilirsin.'),
-      (m?.skip_votes || []).length ? h('div', { class: 'sel-note' }, `Atlama oyu: ${(m.skip_votes || []).length}/${m.skipNeeded || '?'}`) : null);
+      })) : h('div', { class: 'lobby-empty', style: { padding: '14px 10px' } }, 'Sıra boş. Yukarıdan bağlantı yapıştırabilir veya Katalogdan video ekleyebilirsin.'),
+      (m?.skip_votes || []).length ? h('div', { class: 'sel-note' }, `Atlama oyu: ${(m.skip_votes || []).length}/${m.skipNeeded || '?'}`) : null,
+      historyBox);
   };
   update();
   return { el, update, destroy: () => clearInterval(pieTimer) };

@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v21';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v21';
-import { getProvider } from '../providers.js?v=20261030_v21';
-import { expectedPosition } from '../sync.js?v=20261030_v21';
-import { thumbFor } from './lobby.js?v=20261030_v21';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v21';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v21';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v21';
-import { avatar } from '../profile.js?v=20261030_v21';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v22';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v22';
+import { getProvider } from '../providers.js?v=20261030_v22';
+import { expectedPosition } from '../sync.js?v=20261030_v22';
+import { thumbFor } from './lobby.js?v=20261030_v22';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v22';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v22';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v22';
+import { avatar } from '../profile.js?v=20261030_v22';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1717,7 +1717,14 @@ export function buildControls(frame, ctx) {
     origBtn.classList.toggle('hidden', !hasOrig);
     if (hasOrig) origBtn.replaceChildren(ico('externalLink'), formatOpenInProvider(prov?.name || 'Orijinal'));
     const roomPlaying = (m.meshStateStatus || (m.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
-    const localPaused = Boolean(host.adapter && !host.loading && host.adapter.isPaused?.());
+    const localPaused = Boolean(
+      host.adapter
+      && !host.loading
+      && host.adapter.isPaused?.()
+      && !host.adapter.isBuffering?.()
+      && !host.adapter.video?.seeking
+      && !host.adapter.wantPlaying
+    );
     const playing = roomPlaying && !localPaused;
     const embedOnly = host.adapter && !host.adapter.caps.overlayClicks;
     controls.classList.toggle('show', !playing && !embedOnly);

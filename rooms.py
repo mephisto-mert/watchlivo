@@ -345,13 +345,15 @@ def new_room(room_id: str, name: str = "", privacy: str = "public", play_mode: s
 
 
 def prune_chat(room: Dict[str, Any]) -> None:
-    """Remove stale system messages, expired chat history, and wipe chat when no human is in the room."""
+    """Remove expired chat history while preserving active room conversation."""
     t = now()
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     if not has_humans:
-        room["chat"] = []
-        room["polls"] = []
+        empty_since = float(room.get("emptySince") or 0.0)
+        if room.get("curated") or (empty_since > 0.0 and t - empty_since > 3600.0):
+            room["chat"] = []
+            room["polls"] = []
         return
     cleaned = []
     for m in (room.get("chat") or []):
@@ -360,7 +362,7 @@ def prune_chat(room: Dict[str, Any]) -> None:
         m_ts = float(m.get("ts") or 0.0)
         if m_ts <= 0.0:
             continue
-        ttl = 90.0 if m.get("system") else 1200.0
+        ttl = 7200.0
         if t - m_ts <= ttl:
             cleaned.append(m)
     room["chat"] = cleaned[-MAX_CHAT:]
@@ -483,21 +485,15 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         elif cid not in merged_p or sp_seen > float(merged_p[cid].get("lastSeen") or 0):
             merged_p[cid] = sp
     seen_c: Dict[str, Dict[str, Any]] = {}
-    seen_sys_join = set()
     merged_c = []
     for m in (room.get("chat") or []) + (snap.get("chat") or []):
         if not isinstance(m, dict):
             continue
         m_ts = float(m.get("ts") or 0.0)
-        if m_ts <= 0.0 or (t - m_ts > (90.0 if m.get("system") else 1200.0)):
+        if m_ts <= 0.0 or (t - m_ts > 7200.0):
             continue
         mid = m.get("id")
         if mid and mid not in seen_c:
-            if m.get("system") and m.get("text") == "katıldı" and m.get("user"):
-                jkey = f"{m.get('user')}:{m.get('time')}"
-                if jkey in seen_sys_join:
-                    continue
-                seen_sys_join.add(jkey)
             mc = dict(m)
             seen_c[mid] = mc
             merged_c.append(mc)
@@ -573,18 +569,20 @@ def set_media(room: Dict[str, Any], media: Dict[str, Any], by: str, start: float
     room["skip_votes"] = []
     room["voteEndsAt"] = 0.0
     room["endedKey"] = ""
-    room["chat"] = [c for c in (room.get("chat") or []) if not c.get("system")]
 
 
 def sys_msg(room: Dict[str, Any], text: str, user: str = "") -> Dict[str, Any]:
     prune_chat(room)
+    t_now = now()
     chat = room.get("chat") or []
-    if user and text in ("katıldı", "ayrıldı"):
+    if user and any(k in text for k in ("katıldı", "ayrıldı")):
         for prev in reversed(chat[-4:]):
-            if prev.get("system") and prev.get("user") == user and prev.get("text") == text:
+            if prev.get("system") and prev.get("user") == user and prev.get("text") == text and (t_now - float(prev.get("ts") or 0.0) < 12.0):
                 return prev
-    msg = {"id": uuid.uuid4().hex[:10], "system": True, "user": user, "text": text, "time": time.strftime("%H:%M"), "ts": now()}
+    msg = {"id": uuid.uuid4().hex[:10], "system": True, "user": user, "text": text, "time": time.strftime("%H:%M"), "ts": t_now}
     room["chat"] = (chat + [msg])[-MAX_CHAT:]
+    ev = {"id": uuid.uuid4().hex[:10], "ts": t_now, "type": "chat", "message": msg, "cid": ""}
+    room["events"] = (room.get("events") or [])[-34:] + [ev]
     return msg
 
 
@@ -844,6 +842,13 @@ class RedisStore:
                 if cached_has_media and not r_has_media and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
                     room["media"] = cached["media"]
                     room["rev"] = max(int(room.get("rev") or 1), int(cached.get("rev") or 1))
+                if cached and cached.get("chat") and not room.get("_explicit_chat_clear") and (t - self.l1_write_ts.get(room_id, 0.0) < 60.0):
+                    by_id = {}
+                    for cm in (cached.get("chat") or []) + (room.get("chat") or []):
+                        if isinstance(cm, dict) and cm.get("id"):
+                            by_id[cm["id"]] = cm
+                    if len(by_id) > len(room.get("chat") or []):
+                        room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
                 self.l1_rooms[room_id] = room
                 self.l1_read_ts[room_id] = t
                 return room
@@ -859,6 +864,13 @@ class RedisStore:
             cur_m = room.get("media") or {}
             if not cur_m.get("url") and not cur_m.get("videoId") and not room.get("_explicit_media_clear"):
                 room["media"] = prev_cached["media"]
+        if prev_cached and prev_cached.get("chat") and not room.get("_explicit_chat_clear"):
+            by_id = {}
+            for cm in (prev_cached.get("chat") or []) + (room.get("chat") or []):
+                if isinstance(cm, dict) and cm.get("id"):
+                    by_id[cm["id"]] = cm
+            room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
+        room.pop("_explicit_chat_clear", None)
         self.l1_rooms[rid] = room
         self.l1_read_ts[rid] = t
         await self.fallback.put(room, force_disk=force_disk)
@@ -937,14 +949,21 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
     room["left"] = {k: v for k, v in left_map.items() if t - float(v or 0) < 45.0}
     room["events"] = [e for e in (room.get("events") or []) if t - float(e.get("ts") or 0) < 25.0][-35:]
     room["signals"] = [s for s in (room.get("signals") or []) if t - float(s.get("ts") or 0) < 35.0][-240:]
+    for gp in gone:
+        if isinstance(gp, dict) and gp.get("transport") != "bot":
+            sys_msg(room, "odadan ayrıldı", gp.get("name", "Misafir"))
     prune_chat(room)
     has_humans = any(p.get("transport") != "bot" for p in room["participants"].values())
     if not has_humans:
-        room["chat"] = []
-        room["polls"] = []
-        if isinstance(room.get("media"), dict):
-            room["media"]["currentTime"] = 0.0
-            room["media"]["updatedAt"] = t
+        room.setdefault("emptySince", t)
+        if room.get("curated") or (t - float(room.get("emptySince") or t) > 3600.0):
+            room["chat"] = []
+            room["polls"] = []
+            if isinstance(room.get("media"), dict):
+                room["media"]["currentTime"] = 0.0
+                room["media"]["updatedAt"] = t
+    else:
+        room.pop("emptySince", None)
     if gone:
         ensure_host(room)
     return gone
@@ -1183,24 +1202,21 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             start_pos = 0.0
         set_media(room, data, name, start_pos)
         room["rev"] = int(room.get("rev") or 1) + 5
-        sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", "")
+        sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", name)
         out["broadcast"].append((_room_event(room, "media_changed", by=name), None))
 
     elif mtype == "queue_add":
-        if mode == "leader" and not can_control:
-            deny("Oynatma ayarı 'Liderin Seçimi'. Seçimin sıraya eklenmeyecek.")
-            return out
         item = clean_media(data.get("item") or {})
         item.update({"id": f"q_{uuid.uuid4().hex[:8]}", "votes": [name], "addedBy": name})
-        if mode == "quickplay" or not room["media"].get("url") and not room["media"].get("videoId"):
+        if (mode == "quickplay" and can_control) or (can_control and not room["media"].get("url") and not room["media"].get("videoId")):
             set_media(room, item, name)
             room["rev"] = int(room.get("rev") or 1) + 1
-            sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}")
+            sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", name)
             out["broadcast"].append((_room_event(room, "media_changed", by=name), None))
         else:
             room["queue"] = (room["queue"] + [item])[:50]
             room["rev"] = int(room.get("rev") or 1) + 1
-            sys_msg(room, f"{item['title']} eklendi", name)
+            sys_msg(room, f"sıraya ekledi: {item['title']}", name)
             out["broadcast"].append((_room_event(room), None))
 
     elif mtype == "vote_video":
@@ -1292,6 +1308,27 @@ def _handle_social(room, cid, data, out, name, is_host):
         except (TypeError, ValueError):
             vid_t = None
         if text or gif or snap:
+            raw_recent = data.get("recentChat")
+            if isinstance(raw_recent, list) and not room.get("_explicit_chat_clear"):
+                by_id = {m.get("id"): m for m in (room.get("chat") or []) if isinstance(m, dict) and m.get("id")}
+                for rm in raw_recent[-25:]:
+                    if isinstance(rm, dict) and rm.get("id") and rm["id"] not in by_id:
+                        rm_ts = float(rm.get("ts") or t_now)
+                        if 0 < t_now - rm_ts <= 7200.0:
+                            by_id[rm["id"]] = {
+                                "id": clean_str(rm.get("id"), 24),
+                                "system": bool(rm.get("system")),
+                                "user": clean_str(rm.get("user"), 32),
+                                "uid": clean_str(rm.get("uid"), 64),
+                                "color": clean_str(rm.get("color"), 16) or "#27DCC8",
+                                "text": clean_str(rm.get("text"), 1000),
+                                "gif": clean_str(rm.get("gif"), 600),
+                                "time": clean_str(rm.get("time"), 12) or time.strftime("%H:%M"),
+                                "ts": rm_ts,
+                                "replyTo": rm.get("replyTo") if isinstance(rm.get("replyTo"), dict) else None,
+                                "reactions": rm.get("reactions") if isinstance(rm.get("reactions"), dict) else {},
+                            }
+                room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
             raw_rep = data.get("replyTo")
             reply_obj = None
             if isinstance(raw_rep, dict) and (raw_rep.get("user") or raw_rep.get("text")):
@@ -1311,19 +1348,26 @@ def _handle_social(room, cid, data, out, name, is_host):
                         "text": clean_str(target_m.get("text") or ("📸 Sahne" if target_m.get("snapshot") else "GIF" if target_m.get("gif") else ""), 140),
                         "color": target_m.get("color") or "#00f5d4",
                     }
-            msg = {"id": uuid.uuid4().hex[:10], "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
+            req_mid = clean_str(data.get("id"), 24)
+            msg_id = req_mid if (req_mid and re.match(r"^[a-zA-Z0-9_-]{4,24}$", req_mid)) else uuid.uuid4().hex[:10]
+            msg = {"id": msg_id, "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
                    "time": time.strftime("%H:%M"), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
             if snap:
                 msg["snapshot"] = snap
             if vid_t is not None:
                 msg["videoTime"] = round(vid_t, 1)
-            room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]
+            room.pop("_explicit_chat_clear", None)
+            existing_chat = [m for m in (room.get("chat") or []) if isinstance(m, dict) and m.get("id") != msg_id]
+            room["chat"] = (existing_chat + [msg])[-MAX_CHAT:]
+            ev = {"id": uuid.uuid4().hex[:10], "ts": t_now, "type": "chat", "message": msg, "cid": cid}
+            room["events"] = (room.get("events") or [])[-34:] + [ev]
             room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "clear_chat":
         if not (is_host or cid in (room.get("co_hosts") or [])):
             out["reply"].append({"type": "error", "message": "Sohbeti yalnızca oda lideri temizleyebilir."})
             return out
+        room["_explicit_chat_clear"] = True
         room["chat"] = []
         room["polls"] = []
         room["rev"] = int(room.get("rev") or 1) + 1
@@ -1690,8 +1734,8 @@ async def ws_endpoint(websocket: WebSocket):
                 return
         prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-        empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 9999.0
-        if was_empty_humans and (room.get("curated") or empty_elapsed > 45.0):
+        empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
+        if was_empty_humans and (room.get("curated") or empty_elapsed > 3600.0):
             room["chat"] = []
             room["polls"] = []
             if room.get("media"):
@@ -1700,7 +1744,7 @@ async def ws_endpoint(websocket: WebSocket):
                 room["media"]["playing"] = True
         room.pop("emptySince", None)
         p, _ = add_participant(room, cid, join_data, "ws")
-        join_msg = sys_msg(room, "katıldı", p["name"])
+        join_msg = sys_msg(room, "odaya katıldı", p["name"])
         SOCKETS.setdefault(room_id, {})[cid] = websocket
         await STORE.put(room)
     await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room)})
@@ -1738,13 +1782,11 @@ async def ws_endpoint(websocket: WebSocket):
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                 if not has_humans:
                     room["emptySince"] = now()
-                    room["chat"] = []
-                    room["polls"] = []
-                    if isinstance(room.get("media"), dict):
-                        room["media"]["currentTime"] = 0.0
-                        room["media"]["updatedAt"] = now()
+                    if room.get("curated"):
+                        room["chat"] = []
+                        room["polls"] = []
                 ensure_host(room)
-                msg = sys_msg(room, "ayrıldı", left["name"]) if (left and has_humans) else None
+                msg = sys_msg(room, "odadan ayrıldı", left["name"]) if left else None
                 room["lastActiveAt"] = now()
                 await STORE.put(room)
         if room and left and msg:
@@ -1787,15 +1829,17 @@ async def http_sync(request: Request):
         if not cid:
             cid = requested_cid if data.get("type") == "leave" and requested_cid else "h_" + uuid.uuid4().hex[:8]
         if data.get("type") == "leave":
-            if room and room["participants"].pop(cid, None):
+            left_p = room["participants"].pop(cid, None) if room else None
+            if room and left_p:
                 room.setdefault("left", {})[cid] = now()
+                if left_p.get("transport") != "bot":
+                    sys_msg(room, "odadan ayrıldı", left_p.get("name", "Misafir"))
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                 if not has_humans:
-                    room["chat"] = []
-                    room["polls"] = []
-                    if room.get("media"):
-                        room["media"]["currentTime"] = 0.0
-                        room["media"]["updatedAt"] = now()
+                    room["emptySince"] = now()
+                    if room.get("curated"):
+                        room["chat"] = []
+                        room["polls"] = []
                 ensure_host(room)
                 room["rev"] = int(room.get("rev") or 1) + 1
                 await STORE.put(room, force_disk=True)
@@ -1832,8 +1876,8 @@ async def http_sync(request: Request):
                         room["participants"]["kinox_bot"]["name"] = room["creator"]
         room.pop("emptySince", None)
         p, is_new = add_participant(room, cid, {**data, "uid": verified_uid}, "http")
-        if is_new and len(room.get("chat") or []) < 12:
-            sys_msg(room, "katıldı", p["name"])
+        if is_new:
+            sys_msg(room, "odaya katıldı", p["name"])
         active_m = data.get("activeMedia")
         restored_active_media = False
         if not room.get("curated") and not room["media"].get("url") and not room["media"].get("videoId") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
@@ -1845,7 +1889,7 @@ async def http_sync(request: Request):
             room["rev"] = int(room.get("rev") or 1) + 5
             restored_active_media = True
         voted = check_vote_end(room)
-        mutated = restored_active_media or voted or bool(pruned) or (room.get("host_id") != prev_host) or (is_new and bool(room["media"].get("url") or room["media"].get("videoId")))
+        mutated = restored_active_media or voted or bool(pruned) or (room.get("host_id") != prev_host) or is_new
         if is_action:
             out = handle_action(room, cid, data)
             mutated = True
@@ -1863,7 +1907,9 @@ async def http_sync(request: Request):
         m = room["media"]
         server_media_url = str(m.get("url") or m.get("videoId") or "")
         client_media_url = str(data.get("mediaUrl") or "") if "mediaUrl" in data else server_media_url
-        if not is_action and not mutated and not is_new and since_rev > 0 and since_rev == cur_rev and client_media_url == server_media_url:
+        server_chat_cnt = len(room.get("chat") or [])
+        client_chat_cnt = int(data.get("chatCount")) if isinstance(data.get("chatCount"), int) else server_chat_cnt
+        if not is_action and not mutated and not is_new and since_rev > 0 and since_rev == cur_rev and client_media_url == server_media_url and client_chat_cnt == server_chat_cnt:
             elapsed_w = max(0.0, t_cur - float(m.get("updatedAt") or t_cur))
             recent_ev = [e for e in (room.get("events") or []) if t_cur - float(e.get("ts") or 0) < 6.0][-15:]
             recent_sig = [s for s in (room.get("signals") or []) if s.get("targetId") == cid and t_cur - float(s.get("ts") or 0) < 12.0][-25:]

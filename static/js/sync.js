@@ -1,8 +1,8 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
 const CYCLE_MS = 500;
-const JUMP_DELTA = 1.0;
-const IN_SYNC = 0.12;
+const JUMP_DELTA = 2.4;
+const IN_SYNC = 0.15;
 const COARSE = 4.20;          // Coarse speedSync threshold
 const FLIP = 4.80;            // Hysteresis threshold
 const COARSE_MOD = 0.030;     // Gentle ±3.0% max rate nudge for HTML5 video
@@ -10,7 +10,7 @@ const FINE_MOD = 0.015;       // Gentle ±1.5% fine rate nudge
 const RUNWAY_SEC = 10.0;      // Rave bZ = 0xa (10s buffered runway required to speed up when behind)
 const STARVE_CEILING = 45.0;  // Rave c0 = 0x2d (45s max behind before forcing jump)
 const DEFER_MAX_MS = 30000;   // Rave c1 = 0x7530 (30s max defer window while buffer builds)
-const SEEK_SETTLE_MS = 1500;
+const SEEK_SETTLE_MS = 3500;
 
 export const clock = {
   offset: 0, bestRtt: Infinity, samples: 0,
@@ -57,11 +57,13 @@ export class SyncEngine {
 
   start() { this.stop(); this.loop(); }
   stop() { clearTimeout(this.timer); this.timer = null; }
-  kick() {
+  kick(resetCooldown = false) {
     this.inSyncCount = 0;
     this.flipCount = 0;
-    this.seekUntil = 0;
-    this.deferStartedAt = 0;
+    if (resetCooldown) {
+      this.seekUntil = 0;
+      this.deferStartedAt = 0;
+    }
     this.start();
   }
 
@@ -160,7 +162,7 @@ export class SyncEngine {
     }
 
     if (ad.isPaused()) {
-      if (now - (this.lastPlayAttempt || 0) > 1200) {
+      if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 2000) {
         this.lastPlayAttempt = now;
         ad.play();
       }
@@ -171,11 +173,13 @@ export class SyncEngine {
 
     if (this.wasBuffering && !ad.isBuffering()) {
       this.wasBuffering = false;
-      this.seekUntil = 0;
       this.deferStartedAt = 0;
-      if (!leader && abs > 0.6) {
-        ad.seek(expected);
+      if (!leader && abs > 4.0 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
+        ad.seek(expected);
+        this.seekUntil = now + SEEK_SETTLE_MS;
+      } else {
+        this.seekUntil = Math.max(this.seekUntil, now + 1800);
       }
     }
     if (ad.isBuffering()) {
