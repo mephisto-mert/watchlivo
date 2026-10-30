@@ -48,6 +48,12 @@ def now() -> float:
     return time.time()
 
 
+def now_hhmm(ts: Optional[float] = None) -> str:
+    from datetime import datetime, timezone, timedelta
+    t_val = float(ts) if ts is not None else now()
+    return datetime.fromtimestamp(t_val, tz=timezone(timedelta(hours=3))).strftime("%H:%M")
+
+
 def clean_str(v: Any, limit: int) -> str:
     return str(v or "").strip()[:limit]
 
@@ -612,7 +618,7 @@ def sys_msg(room: Dict[str, Any], text: str, user: str = "") -> Dict[str, Any]:
             m for m in chat
             if not (m.get("system") and any(k in str(m.get("text") or "") for k in ("oynatılıyor", "başlatıldı")))
         ]
-    msg = {"id": uuid.uuid4().hex[:10], "system": True, "user": user, "text": text, "time": time.strftime("%H:%M"), "ts": t_now}
+    msg = {"id": uuid.uuid4().hex[:10], "system": True, "user": user, "text": text, "time": now_hhmm(t_now), "ts": t_now}
     room["chat"] = (chat + [msg])[-MAX_CHAT:]
     prune_chat(room)
     ev = {"id": uuid.uuid4().hex[:10], "ts": t_now, "type": "chat", "message": msg, "cid": ""}
@@ -1399,7 +1405,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                                 "color": clean_str(rm.get("color"), 16) or "#27DCC8",
                                 "text": clean_str(rm.get("text"), 1000),
                                 "gif": clean_str(rm.get("gif"), 600),
-                                "time": clean_str(rm.get("time"), 12) or time.strftime("%H:%M"),
+                                "time": now_hhmm(rm_ts),
                                 "ts": rm_ts,
                                 "replyTo": rm.get("replyTo") if isinstance(rm.get("replyTo"), dict) else None,
                                 "reactions": rm.get("reactions") if isinstance(rm.get("reactions"), dict) else {},
@@ -1427,7 +1433,7 @@ def _handle_social(room, cid, data, out, name, is_host):
             req_mid = clean_str(data.get("id"), 24)
             msg_id = req_mid if (req_mid and re.match(r"^[a-zA-Z0-9_-]{4,24}$", req_mid)) else uuid.uuid4().hex[:10]
             msg = {"id": msg_id, "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
-                   "time": time.strftime("%H:%M"), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
+                   "time": now_hhmm(t_now), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
             if snap:
                 msg["snapshot"] = snap
             if vid_t is not None:
@@ -1568,6 +1574,7 @@ def _handle_social(room, cid, data, out, name, is_host):
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
     elif mtype == "poll_create":
+        t_now = now()
         question = clean_str(data.get("question"), 140)
         raw_opts = [clean_str(o, 80) for o in (data.get("options") or [])[:5] if clean_str(o, 80)]
         if question and len(raw_opts) >= 2:
@@ -1575,7 +1582,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 "id": "p_" + uuid.uuid4().hex[:8],
                 "question": question,
                 "creator": name,
-                "createdAt": now(),
+                "createdAt": t_now,
                 "options": [{"text": opt, "votes": []} for opt in raw_opts],
             }
             room["polls"] = ((room.get("polls") or []) + [poll])[-10:]
@@ -1586,7 +1593,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 "color": me["color"],
                 "text": f"📊 Anket: {question}",
                 "pollId": poll["id"],
-                "time": time.strftime("%H:%M"),
+                "time": now_hhmm(t_now),
                 "ts": t_now,
             }
             room["chat"] = (room["chat"] + [msg])[-MAX_CHAT:]

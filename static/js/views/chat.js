@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v27';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v27';
-import { avatar } from '../profile.js?v=20261030_v27';
-import { api, qs } from '../api.js?v=20261030_v27';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v27';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v28';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v28';
+import { avatar } from '../profile.js?v=20261030_v28';
+import { api, qs } from '../api.js?v=20261030_v28';
+import { resolveMusicItem } from './selection-kinds.js?v=20261030_v28';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -741,7 +741,21 @@ export function buildChat(ctx) {
         : null);
   }
 
+  function formatLocalTime(m) {
+    const ts = Number(m?.ts || 0);
+    if (ts > 1000000000) {
+      try {
+        const d = new Date(ts * 1000);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+      } catch (e) { /* ignore */ }
+    }
+    return m?.time || '';
+  }
+
   function msgNode(m) {
+    const dispTime = formatLocalTime(m);
     if (m.system) {
       const txt = String(m.text || '');
       const isJoin = /katıldı/i.test(txt);
@@ -760,7 +774,7 @@ export function buildChat(ctx) {
         m.user ? h('b', { class: 'sysmsg-user' }, m.user) : null,
         m.user ? ' ' : null,
         h('span', { class: 'sysmsg-txt' }, displayTxt),
-        m.time ? h('time', { class: 'sysmsg-time' }, m.time) : null);
+        dispTime ? h('time', { class: 'sysmsg-time' }, dispTime) : null);
       return t;
     }
     const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot;
@@ -799,6 +813,7 @@ export function buildChat(ctx) {
     row = h('div', {
       class: `msg ${cont ? 'cont' : ''}`,
       'data-id': m.id,
+      'data-ts': String(m.ts || (Date.now() / 1000)),
       onmouseleave: () => row.classList.remove('msg-closing'),
       onclick: (e) => {
         if (e.target.closest('button, a, .chat-poll-card, .chat-snapshot-card, .msg-actions, .msg-reactions')) return;
@@ -811,7 +826,7 @@ export function buildChat(ctx) {
       avatar({ name: m.user, color: m.color }, 30),
       h('div', { class: 'msg-body' },
         h('div', { class: 'msg-head-row' },
-          h('div', { class: 'msg-name' }, h('span', { style: { color: m.color } }, m.user), h('time', {}, m.time || '')),
+          h('div', { class: 'msg-name' }, h('span', { style: { color: m.color } }, m.user), h('time', {}, dispTime)),
           actionBar),
         buildQuoteBlock(m.replyTo),
         m.pollId
@@ -860,7 +875,16 @@ export function buildChat(ctx) {
     rendered.add(m.id);
     if (m.system) lastUser = null;
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-    list.append(msgNode(m));
+    const node = msgNode(m);
+    const lastChild = list.lastElementChild;
+    const lastTs = lastChild ? Number(lastChild.dataset?.ts || 0) : 0;
+    if (lastTs > 0 && curTs > 0 && curTs < lastTs - 1) {
+      const nextSibling = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs);
+      if (nextSibling) list.insertBefore(node, nextSibling);
+      else list.append(node);
+    } else {
+      list.append(node);
+    }
     while (list.children.length > 150) {
       list.firstElementChild?.remove();
     }
