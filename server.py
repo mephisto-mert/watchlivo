@@ -2090,6 +2090,7 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                         hint_langs.append(code)
             elif len(audios) == 1:
                 a0_lbl = str(audios[0].get("label") or "").lower()
+                a0_lang = str(audios[0].get("lang") or "").lower().strip()
                 has_def_tr_sub = any(
                     isinstance(sub_it, dict) and str(sub_it.get("lang") or "").lower().startswith("tr") and sub_it.get("default")
                     for sub_it in (pl.get("subs") or [])
@@ -2098,11 +2099,13 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                     hint_langs = ["tr"]
                 elif orig_lang and ("orijinal" in a0_lbl or has_def_tr_sub):
                     hint_langs = [orig_lang]
+                elif ("dublaj" in a0_lbl or a0_lang in ("tr", "tur") or "türk" in a0_lbl) and not has_def_tr_sub:
+                    hint_langs = ["tr"]
             if hint_langs:
                 _AUDIO_LANG_HINT[st_u] = hint_langs
-            has_tr_a = any(str(a.get("lang") or "").lower() in ("tr", "tur") or "türk" in str(a.get("label") or "").lower() for a in audios)
+            has_tr_a = ("tr" in hint_langs) or any(str(a.get("lang") or "").lower() in ("tr", "tur") or "türk" in str(a.get("label") or "").lower() for a in audios)
             has_other_a = any(str(a.get("lang") or "").lower() not in ("tr", "tur") and "türk" not in str(a.get("label") or "").lower() for a in audios)
-            stype = "hls_pv_multi" if (len(audios) >= 2 and has_tr_a and has_other_a) else "hls_pv"
+            stype = "hls_pv_multi" if (len(audios) >= 2 and has_tr_a and has_other_a) else ("hls_pv_tr" if hint_langs == ["tr"] else "hls_pv")
             return [(st_u, stype)]
         except Exception:
             return []
@@ -2453,29 +2456,39 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
+                        if IS_VERCEL and (
+                            "dbx.molystream.org" in raw_su.lower()
+                            or "dplayer" in raw_su.lower()
+                            or "hdfilmcehennemi.mobi" in raw_su.lower()
+                            or ("cdnimages" in raw_su.lower() and "/hls/" in raw_su.lower())
+                            or "playmix.uno" in raw_su.lower()
+                            or "master.txt?s=" in raw_su.lower()
+                            or st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
+                        ):
+                            continue
                         if "dplayer" in raw_su.lower() and "multiplayer.php" not in raw_su.lower() and "iframe.php" not in raw_su.lower():
                             continue
                         if not _stream_matches_title(raw_su, valid_titles):
                             continue
                         is_true_1080_vault = (
-                            not refresh and (
-                                st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl")
-                                or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
-                                or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
-                                or (st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
-                                or (st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
-                            )
+                            st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr")
+                            or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
+                            or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
+                            or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
+                            or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
                         )
                         dest_l = target_list if is_true_1080_vault else fallback_res
                         if (raw_su, st_t) not in dest_l:
                             dest_l.append((raw_su, st_t))
-                        if v_aud and ("multi" in st_t or st_t in ("hls_dl", "hls_dp") or len(v_aud) == 1):
+                        if st_t == "hls_pv_tr":
+                            _AUDIO_LANG_HINT[raw_su] = ["tr"]
+                        elif v_aud and ("multi" in st_t or st_t in ("hls_dl", "hls_dp") or len(v_aud) == 1):
                             prev_aud = _AUDIO_LANG_HINT.get(str(u_st[0])) or []
                             if not prev_aud or ("orig" in prev_aud and "orig" not in v_aud):
                                 _AUDIO_LANG_HINT[str(u_st[0])] = list(v_aud)
 
     _collect_vault_keys(exact_ep_keys, res)
-    if res and not refresh:
+    if res and (not refresh or IS_VERCEL):
         return res + [x for x in fallback_res if x not in res]
     _collect_vault_keys(fb_ep_keys, fallback_res)
 
@@ -2542,6 +2555,8 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 pass
         if res:
             return res + [x for x in fallback_res if x not in res]
+    if IS_VERCEL:
+        return res + [x for x in fallback_res if x not in res]
 
     # 3. Live extraction from https://www.hdfilmcehennemi.nl/ (movies & series)
     hfnl_targets = []
@@ -2848,7 +2863,7 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = "", refresh: bool = False):
-    ckey = f"v33:{mtype}:{tid}:{s}:{e}"
+    ckey = f"v34:{mtype}:{tid}:{s}:{e}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -2884,7 +2899,9 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
                     for u_c, st_c in val:
                         st_cs = str(st_c or "")
-                        if "multi" in st_cs or st_cs in ("hls_dl", "hls_dp"):
+                        if st_cs == "hls_pv_tr":
+                            _AUDIO_LANG_HINT[u_c] = ["tr"]
+                        elif "multi" in st_cs or st_cs in ("hls_dl", "hls_dp"):
                             for vk_c, ve_c in v_streams.items():
                                 if isinstance(ve_c, dict) and ve_c.get("audioLangs") and any(s_p[0] == u_c for s_p in (ve_c.get("streams") or []) if isinstance(s_p, (list, tuple))):
                                     _AUDIO_LANG_HINT[u_c] = list(ve_c["audioLangs"])
@@ -3035,7 +3052,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     f_ac = pool.submit(_extract_animecix_sync, mtype, s, e, orig_title, tr_title, tid, extra_titles, source_url, orig_lang)
     f_pv = pool.submit(_extract_ddizimag_sync, mtype, s, e, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
     f_dl = pool.submit(_extract_dizilife_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
-    f_dp = pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
+    f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
     f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid, refresh)
     f_ve = pool.submit(_job_videasy)
     f_hexa = pool.submit(_job_hexa)
@@ -3111,16 +3128,16 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         if x not in hexa_res:
             hexa_res.insert(0, x)
     vault_yt = [x for x in tr_res if x[1] == "yt"]
-    main_multi = [x for x in tr_res if x[1] in ("hls_fhd_multi", "hls_hfnl_multi")]
-    main_single = [x for x in tr_res if x[1] in ("hls_fhd", "hls_fhd_tr", "hls_hfnl", "hls_dbx")]
+    main_multi = [x for x in tr_res if x[1] in (("hls_fhd_multi",) if IS_VERCEL else ("hls_fhd_multi", "hls_hfnl_multi"))]
+    main_single = [x for x in tr_res if x[1] in (("hls_fhd", "hls_fhd_tr") if IS_VERCEL else ("hls_fhd", "hls_fhd_tr", "hls_hfnl", "hls_dbx"))]
     ac_1080 = [x for x in ac_res if "_720p" not in str(x[0]).lower()]
     ac_720 = [x for x in ac_res if "_720p" in str(x[0]).lower()]
-    pv_multi = [x for x in tr_res if x[1] == "hls_pv_multi"]
+    pv_multi = [x for x in tr_res if x[1] in ("hls_pv_multi", "hls_pv_tr")]
     fp_multi = [x for x in tr_res if x[1].startswith("hls_fp:multi:")]
     pv_single = [x for x in tr_res if x[1] == "hls_pv"]
     fp_other = [x for x in tr_res if x[1].startswith("hls_fp:") and x not in fp_multi]
     dl_only = [x for x in tr_res if x[1] == "hls_dl"]
-    dp_only = [x for x in tr_res if x[1] == "hls_dp"]
+    dp_only = [] if IS_VERCEL else [x for x in tr_res if x[1] == "hls_dp"]
     if ac_res or main_multi or main_single or pv_multi or fp_multi or pv_single or fp_other or dl_only or dp_only or ve_res or hexa_res or vid_res or vault_yt:
         if is_ja_or_anime:
             out_urls.extend(ac_1080)
@@ -3221,7 +3238,7 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     if stype == "hls_dbx":
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=dbx&ext=.m3u8"
-    if stype in ("hls_pv", "hls_pv_multi"):
+    if stype in ("hls_pv", "hls_pv_tr", "hls_pv_multi"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=pv&ext=.m3u8"
     if stype == "hls_dp":
@@ -3649,6 +3666,9 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int)
     import base64
     if raw_u in _AUDIO_LANG_HINT and _AUDIO_LANG_HINT[raw_u] and raw_u in _STREAM_RES_HINT:
         return list(_AUDIO_LANG_HINT[raw_u])
+    if str(st) == "hls_pv_tr":
+        _STREAM_RES_HINT.setdefault(raw_u, 1280)
+        return ["tr"]
     if str(st).startswith("hls_fp:tr:"):
         _STREAM_RES_HINT.setdefault(raw_u, 1920)
         return ["tr"]
@@ -3734,7 +3754,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
     def _src_res_tier(pair):
         u, st = pair
         probed_l = lang_map.get(u) or _AUDIO_LANG_HINT.get(u) or []
-        has_tr = ("tr" in probed_l) or st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_fhd_tr", "mp4_ac_dub") or str(st).startswith("hls_fp:multi:") or str(st).startswith("hls_fp:tr:")
+        has_tr = ("tr" in probed_l) or st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "hls_fhd_tr", "mp4_ac_dub") or str(st).startswith("hls_fp:multi:") or str(st).startswith("hls_fp:tr:")
         live_bonus = 1.0 if (u in lang_map and lang_map.get(u)) else 0.0
         tr_boost = (3.0 if has_tr else 0.0) + live_bonus
         if st in ("mp4_ac_sub", "mp4_ac_dub"):
@@ -3775,7 +3795,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = ["tr"]
         if not langs and str(st).startswith("hls_fp:orig:") and orig_lang:
             langs = [orig_lang]
-        if not langs and st == "hls_fhd_tr":
+        if not langs and st in ("hls_fhd_tr", "hls_pv_tr"):
             langs = ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
@@ -3793,7 +3813,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
                 by_lang.setdefault(L, []).append((u_l, "verified"))
         else:
             unknown.append(wu)
-    order = ([orig_lang] if orig_lang in by_lang else []) + [L for L in by_lang if L not in (orig_lang, "tr", "en")] + [L for L in ("tr", "en") if L in by_lang and L != orig_lang]
+    order = (["tr"] if "tr" in by_lang else []) + ([orig_lang] if orig_lang in by_lang and orig_lang != "tr" else []) + [L for L in by_lang if L not in (orig_lang, "tr", "en")] + (["en"] if "en" in by_lang and orig_lang != "en" else [])
     eff_orig_lang = orig_lang if orig_lang in by_lang else next((L for L in order if L != "tr"), orig_lang)
     is_tr_native = orig_lang == "tr" or prov in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv")
     tracks = []
@@ -3989,6 +4009,8 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
         return f"📡 Sunucu {idx} · DiziBox (1080p HD)"
     if st_s == "hls_pv_multi":
         return f"📡 Sunucu {idx} · Pilavyer Dual (TR Dublaj & Altyazı · HD)"
+    if st_s == "hls_pv_tr":
+        return f"📡 Sunucu {idx} · Pilavyer (TR Dublaj · HD)"
     if st_s == "hls_pv" or "pilavyer" in u_l:
         return f"📡 Sunucu {idx} · Pilavyer (HD)"
     if st_s.startswith("hls_fp:") or "fastplay" in u_l:
@@ -4068,6 +4090,16 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
                         st_u, st_t = str(st_item[0]), str(st_item[1])
                         if _is_vault_url_expired(st_u):
+                            continue
+                        if IS_VERCEL and (
+                            st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
+                            or "dbx.molystream.org" in st_u.lower()
+                            or "dplayer" in st_u.lower()
+                            or "hdfilmcehennemi.mobi" in st_u.lower()
+                            or ("cdnimages" in st_u.lower() and "/hls/" in st_u.lower())
+                            or "playmix.uno" in st_u.lower()
+                            or "master.txt?s=" in st_u.lower()
+                        ):
                             continue
                         if _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
@@ -4233,7 +4265,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v22|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v23|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     if not force_refresh:
@@ -5042,7 +5074,7 @@ async def rave_stream_manifest(request: Request):
     is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
-    m3u8_ckey = f"v3|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}"
+    m3u8_ckey = f"v4|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
@@ -5363,6 +5395,16 @@ async def rave_stream_manifest(request: Request):
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
                                     if "DEFAULT=YES" not in s_ln:
                                         s_ln = s_ln.replace("TYPE=AUDIO,", "TYPE=AUDIO,DEFAULT=YES,AUTOSELECT=YES,", 1)
+                                elif not is_probe:
+                                    continue
+                                else:
+                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
+                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)
+                            elif not is_probe and has_tr_aud:
+                                if is_tr_line and not selected_aud_set:
+                                    selected_aud_set = True
+                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=YES', s_ln)
+                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
                                 else:
                                     s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)

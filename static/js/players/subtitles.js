@@ -128,8 +128,8 @@ export class SubtitleDubController {
     this.subtitleTracks = [];
     this.audioTracks = [];
     this.selectedSubId = localStorage.getItem('vortex_sub_lang') || 'tr';
-    const savedAud = localStorage.getItem('vortex_audio_lang') || 'orig';
-    this.selectedAudioId = /^src-\d+$/.test(savedAud) ? 'orig' : savedAud;
+    const savedAud = localStorage.getItem('vortex_audio_proxy_pref') || 'tr-dub';
+    this.selectedAudioId = /^src-\d+$/.test(savedAud) ? 'tr-dub' : savedAud;
     this.offsetSec = 0;
     this.fpsScale = 1.0;
     this.dualSubEnabled = false;
@@ -744,7 +744,10 @@ export class SubtitleDubController {
     const cleanId = id || 'orig';
     this.selectedAudioId = cleanId;
     if (!isInit && !/^src-\d+$/.test(cleanId)) {
-      try { localStorage.setItem('vortex_audio_lang', cleanId); } catch (e) { /* ignore */ }
+      try {
+        localStorage.setItem('vortex_audio_proxy_pref', cleanId);
+        localStorage.setItem('vortex_audio_lang', cleanId);
+      } catch (e) { /* ignore */ }
     }
     const track = this.audioTracks.find((t) => t.id === cleanId)
       || this.audioTracks.find((t) => (t.targetLang || t.lang) === cleanId)
@@ -783,12 +786,10 @@ export class SubtitleDubController {
     }
 
     const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
-    const stripAud = (u) => cleanUrl(u).replace(/&aud=[^&#]+/g, '');
-    const sameStreamBase = Boolean(track.url && this.adapter.currentUrl && stripAud(track.url) === stripAud(this.adapter.currentUrl));
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
-    if ((typeof track.hlsIndex === 'number' || sameStreamBase) && hlsHasMulti) {
+    if (typeof track.hlsIndex === 'number' && hlsHasMulti && (!track.url || cleanUrl(track.url) === cleanUrl(this.adapter.currentUrl))) {
       this._applyHlsAudioSelection();
-    } else if (track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl) && (!isInit || track.id !== 'orig')) {
+    } else if (track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();

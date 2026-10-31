@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v47';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v47';
-import { getProvider } from '../providers.js?v=20261101_v47';
-import { expectedPosition } from '../sync.js?v=20261101_v47';
-import { thumbFor } from './lobby.js?v=20261101_v47';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v47';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v47';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v47';
-import { avatar } from '../profile.js?v=20261101_v47';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v48';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v48';
+import { getProvider } from '../providers.js?v=20261101_v48';
+import { expectedPosition } from '../sync.js?v=20261101_v48';
+import { thumbFor } from './lobby.js?v=20261101_v48';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v48';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v48';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v48';
+import { avatar } from '../profile.js?v=20261101_v48';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1006,7 +1006,7 @@ export function buildControls(frame, ctx) {
   function tick() {
     const d = duration(), p = Math.min(position(), d || Infinity);
     const vAct = host.adapter?.video;
-    if (vAct && !vAct.paused && !vAct.seeking && vAct.readyState >= 2 && !host.loading) {
+    if (vAct && !vAct.seeking && vAct.readyState >= 2 && !host.loading) {
       loading.classList.add('hidden');
     }
     stageBackdrop.classList.toggle('is-hero-cover', p < 2.2);
@@ -2068,10 +2068,9 @@ export function buildControls(frame, ctx) {
         update();
         return;
       }
-      const vReady = (host.adapter?.video?.readyState ?? 4) >= 2;
       if (ev === 'loading' || (ev === 'buffering' && arg)) {
         loading.classList.remove('hidden');
-      } else if (ev === 'ready' || ev === 'play' || (ev === 'buffering' && !arg) || (ev === 'loaded' && vReady)) {
+      } else if (ev === 'ready' || ev === 'play' || (ev === 'buffering' && !arg) || ev === 'loaded') {
         loading.classList.add('hidden');
         errorBox.classList.add('hidden');
         applyVideoFilter();

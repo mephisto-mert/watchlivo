@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261101_v47';
-import { Html5Adapter } from './html5.js?v=20261101_v47';
-import { VimeoAdapter } from './vimeo.js?v=20261101_v47';
-import { EmbedAdapter } from './embed.js?v=20261101_v47';
-import { WebviewAdapter } from './webview.js?v=20261101_v47';
+import { YouTubeAdapter } from './youtube.js?v=20261101_v48';
+import { Html5Adapter } from './html5.js?v=20261101_v48';
+import { VimeoAdapter } from './vimeo.js?v=20261101_v48';
+import { EmbedAdapter } from './embed.js?v=20261101_v48';
+import { WebviewAdapter } from './webview.js?v=20261101_v48';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -95,7 +95,13 @@ export class PlayerHost {
     const nextUrl = String(media?.url || media?.videoId || '');
     const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
     const nextResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog'));
-    if (key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) return false;
+    if (key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) {
+      if (this.loading) {
+        this.loading = false;
+        this.onEvent('loaded');
+      }
+      return false;
+    }
     this.destroyAdapterOnly();
     this.key = key;
     this.loadedUrl = nextUrl;

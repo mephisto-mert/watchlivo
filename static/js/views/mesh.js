@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v47';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v47';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v47';
-import { MeshConnection } from '../realtime.js?v=20261101_v47';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v47';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v47';
-import { buildLayout } from './mesh-layout.js?v=20261101_v47';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v47';
-import { Voice } from '../voice.js?v=20261101_v47';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v47';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v48';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v48';
+import { resolveMusicItem } from './selection-kinds.js?v=20261101_v48';
+import { MeshConnection } from '../realtime.js?v=20261101_v48';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v48';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v48';
+import { buildLayout } from './mesh-layout.js?v=20261101_v48';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v48';
+import { Voice } from '../voice.js?v=20261101_v48';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v48';
 
 let ctx = null;
 
@@ -209,6 +209,24 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       }
     }
   }
+  if (curRoom?.media && room?.media && mediaKey(curRoom.media) === mediaKey(room.media)) {
+    const prevMUrl = String(curRoom.media.url || '');
+    const nextMUrl = String(room.media.url || '');
+    if ((!nextMUrl || nextMUrl.startsWith('/api/rave/resolve-catalog')) && prevMUrl && !prevMUrl.startsWith('/api/rave/resolve-catalog')) {
+      room = {
+        ...room,
+        media: {
+          ...room.media,
+          url: prevMUrl,
+          altUrls: room.media.altUrls?.length ? room.media.altUrls : (curRoom.media.altUrls || []),
+          subtitleTracks: room.media.subtitleTracks?.length ? room.media.subtitleTracks : (curRoom.media.subtitleTracks || []),
+          audioTracks: room.media.audioTracks?.length ? room.media.audioTracks : (curRoom.media.audioTracks || []),
+          servers: room.media.servers?.length ? room.media.servers : (curRoom.media.servers || []),
+          intro: room.media.intro || curRoom.media.intro || null,
+        },
+      };
+    }
+  }
   set({ mesh: room });
   if (ctx?.conn) ctx.conn.lastRoom = room;
   saveChat(room);
@@ -246,14 +264,21 @@ async function loadMedia(media) {
   const mKey = mediaKey(media);
   const sig = `${mKey}|${media.url || ''}`;
   if (ctx.loadingSig === sig) return;
+  const stripAudParam = (u) => String(u || '').replace(/&aud=[^&#]+/g, '').replace(/&proxy_segs=1/g, '');
   const alreadyLoadedResolved = Boolean(
     mKey && ctx.host?.key === mKey && ctx.host?.adapter
     && ctx.host?.loadedUrl && !String(ctx.host.loadedUrl).startsWith('/api/rave/resolve-catalog')
-    && String(media.url || '') && !String(media.url).startsWith('/api/rave/resolve-catalog')
-    && ctx.host.loadedUrl === media.url
+    && (
+      String(media.url || '').startsWith('/api/rave/resolve-catalog')
+      || stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)
+    )
   );
   if (alreadyLoadedResolved) {
     ctx.loadingSig = sig;
+    if (ctx.host.loading) {
+      ctx.host.loading = false;
+      ctx.layout?.playerEvent?.('loaded');
+    }
     return;
   }
   ctx.loadingSig = sig;
@@ -267,7 +292,6 @@ async function loadMedia(media) {
   const playing = (media?.meshStateStatus || (media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
   let resolvedFromCatalogFresh = initialPos < 3.0 && exp < 12.0;
   if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
-    ctx.host.loading = true;
     ctx.layout?.playerEvent?.('loading');
     if (!isTimeKeeper()) {
       for (let w = 0; w < 12; w += 1) {

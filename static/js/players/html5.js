@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v47';
-import { expectedPosition } from '../sync.js?v=20261101_v47';
-import { state } from '../store.js?v=20261101_v47';
+import { SubtitleDubController } from './subtitles.js?v=20261101_v48';
+import { expectedPosition } from '../sync.js?v=20261101_v48';
+import { state } from '../store.js?v=20261101_v48';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -522,7 +522,7 @@ export class Html5Adapter {
         this.subs.mergeHlsAudioTracks(this.hls.audioTracks || data?.audioTracks || []);
         this.subs._applyHlsAudioSelection();
         if (this.wantPlaying) this.tryPlay();
-        if (v.readyState >= 2) {
+        if (v.readyState >= 1) {
           clearBuf();
           this.events.onReady?.();
           fireDoneOnce();
@@ -536,11 +536,9 @@ export class Html5Adapter {
       let mediaRetries = 0;
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
         netRetries = 0;
-        if (v.readyState >= 2) {
-          clearBuf();
-          this.events.onReady?.();
-          fireDoneOnce();
-        }
+        clearBuf();
+        this.events.onReady?.();
+        fireDoneOnce();
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (!data?.fatal) {
@@ -662,7 +660,7 @@ export class Html5Adapter {
           resolve();
           return;
         }
-        if (v.readyState >= 2 && !v.seeking) {
+        if ((v.readyState >= 1 && !v.seeking) || v.paused) {
           clearBuf();
           this.events.onReady?.();
         } else {
@@ -672,11 +670,12 @@ export class Html5Adapter {
         resolve();
       };
       const onFrameReady = () => {
-        if (this._destroyed || this.video !== v || v.readyState < 2) return;
+        if (this._destroyed || this.video !== v || v.readyState < 1) return;
         clearBuf();
         this.events.onReady?.();
         done();
       };
+      v.addEventListener('loadedmetadata', onFrameReady);
       v.addEventListener('loadeddata', onFrameReady);
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);

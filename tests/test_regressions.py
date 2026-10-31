@@ -559,6 +559,25 @@ class RegressionTests(unittest.TestCase):
         mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
         self.assertIn("repeat(7, minmax(0, 1fr)) auto !important", mesh_css)
 
+    def test_v48_dublaj_and_spinner_sync_fixes(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        # 1. Vault has all 18 episodes of Arcane (Season 1 & Season 2) with DiziLife dual audio + Pilavyer TR dublaj
+        v_streams = (server._MAIN_SITES_VAULT.get("streams") or {})
+        for s in (1, 2):
+            for e in range(1, 10):
+                ent = v_streams.get(f"tmdb:tv:94605:{s}:{e}")
+                self.assertIsNotNone(ent, f"Missing Arcane S{s}E{e} in vault")
+                sts = [x[1] for x in (ent.get("streams") or [])]
+                self.assertIn("hls_dl", sts)
+                self.assertIn("hls_pv_tr", sts)
+        # 2. host.js resets loading=false and fires 'loaded' on early return in setMedia
+        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        self.assertIn("this.onEvent('loaded');\n      }\n      return false;", host_js)
+        # 3. mesh.js preserves resolved URL in applyRoom and handles alreadyLoadedResolved across aud/resolve-catalog
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        self.assertIn("stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)", mesh_js)
+
 
 if __name__ == '__main__':
     unittest.main()
