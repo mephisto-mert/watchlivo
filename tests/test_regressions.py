@@ -490,6 +490,33 @@ class RegressionTests(unittest.TestCase):
         chat_texts = [c.get("text", "") for c in (room_data.get("chat") or [])]
         self.assertTrue(any("Mola Zamanı" in t and "duraklatma isteği gönderdi" in t for t in chat_texts))
 
+    def test_v45_full_site_audit_fixes(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
+        self.assertIn("skipWaiting", sw_js)
+        chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        self.assertIn("onpointerdown: (e) => { e.preventDefault(); actions.requestBreak?.(); }", chat_js)
+        # Guest name isolation: two different guests named 'Misafir İzleyici' must not share creator privilege
+        test_room = rooms.new_room("misafir-izleyici-odasi-1234", creator="Misafir İzleyici", creator_id="h_guest_1")
+        self.assertFalse(rooms._is_creator_of_room(test_room, "h_guest_2", {"id": "h_guest_2", "name": "Misafir İzleyici"}))
+        # Chat clear timestamp prevents old recentChat from re-populating cleared room
+        old_ts = rooms.now() - 30.0
+        self.client.post("/api/rooms/v45-clear-room/sync", json={
+            "type": "init", "clientId": "h_c1", "username": "Lider",
+            "recentChat": [{"id": "m_old_1", "user": "Lider", "text": "Silinecek mesaj", "ts": old_ts}],
+        })
+        self.client.post("/api/rooms/v45-clear-room/sync", json={
+            "type": "clear_chat", "clientId": "h_c1", "username": "Lider",
+        })
+        r_after = self.client.post("/api/rooms/v45-clear-room/sync", json={
+            "type": "init", "clientId": "h_c2", "username": "Izleyici",
+            "recentChat": [{"id": "m_old_1", "user": "Lider", "text": "Silinecek mesaj", "ts": old_ts}],
+        })
+        self.assertEqual(r_after.status_code, 200)
+        after_texts = [c.get("text") for c in (r_after.json().get("room", {}).get("chat") or []) if not c.get("system")]
+        self.assertNotIn("Silinecek mesaj", after_texts)
+
 
 if __name__ == '__main__':
     unittest.main()

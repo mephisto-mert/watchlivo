@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261031_v44';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261031_v44';
-import { api, qs } from '../api.js?v=20261031_v44';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261031_v44';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261031_v44';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261031_v44';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261031_v45';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261031_v45';
+import { api, qs } from '../api.js?v=20261031_v45';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261031_v45';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261031_v45';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -472,13 +472,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           tabindex: '0',
           onclick: () => {
             heroIndex = idx;
-            renderGrid();
+            updateHeroBannerInPlace();
           },
           onkeydown: (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               heroIndex = idx;
-              renderGrid();
+              updateHeroBannerInPlace();
             }
           },
         },
@@ -579,8 +579,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               class: 'btn-download-glass hero-nav-btn',
               title: 'Önceki',
               onclick: () => {
-                heroIndex = (safeHeroIdx - 1 + heroPool.length) % heroPool.length;
-                renderGrid();
+                heroIndex = (heroIndex - 1 + heroPool.length) % heroPool.length;
+                updateHeroBannerInPlace();
                 setTimeout(() => root.querySelector('.hero-mini-card.active')?.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' }), 20);
               },
             }, '‹ Önceki'),
@@ -589,8 +589,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               class: 'btn-download-glass hero-nav-btn',
               title: 'Sonraki',
               onclick: () => {
-                heroIndex = (safeHeroIdx + 1) % heroPool.length;
-                renderGrid();
+                heroIndex = (heroIndex + 1) % heroPool.length;
+                updateHeroBannerInPlace();
                 setTimeout(() => root.querySelector('.hero-mini-card.active')?.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' }), 20);
               },
             }, 'Sonraki ›'))),

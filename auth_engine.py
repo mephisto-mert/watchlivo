@@ -256,7 +256,11 @@ def _user_update(uid: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     conn = _get_db()
     try:
         sets = [k for k in cur.keys() if k != "uid"]
-        conn.execute(f"UPDATE watchlivo_users SET {', '.join(f'{k} = ?' for k in sets)} WHERE uid = ?", [cur[k] for k in sets] + [uid])
+        try:
+            conn.execute(f"UPDATE watchlivo_users SET {', '.join(f'{k} = ?' for k in sets)} WHERE uid = ?", [cur[k] for k in sets] + [uid])
+        except sqlite3.IntegrityError:
+            cur["handle"] = f"{str(cur.get('handle') or 'uye')[:18]}_{secrets.token_hex(2)}"
+            conn.execute(f"UPDATE watchlivo_users SET {', '.join(f'{k} = ?' for k in sets)} WHERE uid = ?", [cur[k] for k in sets] + [uid])
         conn.commit()
         return cur
     finally:
@@ -878,6 +882,12 @@ async def auth_me(request: Request) -> JSONResponse:
     claims = verify_auth_token(token)
     if not claims:
         return JSONResponse({"ok": False, "authenticated": False}, status_code=200)
+    try:
+        row = _user_get(claims["uid"])
+    except Exception:
+        row = None
+    if row:
+        return JSONResponse({"ok": True, "authenticated": True, "user": _row_to_user(row)})
     user = {
         "uid": claims["uid"],
         "email": claims.get("email", ""),

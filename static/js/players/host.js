@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261031_v44';
-import { Html5Adapter } from './html5.js?v=20261031_v44';
-import { VimeoAdapter } from './vimeo.js?v=20261031_v44';
-import { EmbedAdapter } from './embed.js?v=20261031_v44';
-import { WebviewAdapter } from './webview.js?v=20261031_v44';
+import { YouTubeAdapter } from './youtube.js?v=20261031_v45';
+import { Html5Adapter } from './html5.js?v=20261031_v45';
+import { VimeoAdapter } from './vimeo.js?v=20261031_v45';
+import { EmbedAdapter } from './embed.js?v=20261031_v45';
+import { WebviewAdapter } from './webview.js?v=20261031_v45';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -37,8 +37,9 @@ export function adapterFor(media) {
 
 export const mediaKey = (m) => {
   if (!m || (!m.url && !m.videoId && !m.tmdbId && !m.imdbId && !m.id)) return '';
-  const s = Math.max(1, Number(m.season) || 1);
-  const e = Math.max(1, Number(m.episode) || 1);
+  const epMatch = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
+  const s = Math.max(1, Number(m.season || epMatch?.[1] || epMatch?.[3]) || 1);
+  const e = Math.max(1, Number(m.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
   if (m.tmdbId) return `tmdb|${m.tmdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
   if (m.imdbId) return `imdb|${m.imdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
   if (m.id && /^(fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)-/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
@@ -83,35 +84,48 @@ export class PlayerHost {
     return Boolean(this.muted || this.autoplayBlocked || this.adapter?.isMuted?.() || this.volume === 0);
   }
 
+  _effectiveVolume() {
+    return this.ducked && localStorage.getItem('vortex_voice_duck') !== 'off'
+      ? Math.max(12, Math.round(this.volume * 0.35))
+      : this.volume;
+  }
+
   async setMedia(media, startAt = 0, shouldPlay = true) {
     const key = mediaKey(media);
     const nextUrl = String(media?.url || media?.videoId || '');
     const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
     const nextResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog'));
-    if (key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved))) return false;
+    if (key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) return false;
     this.destroyAdapterOnly();
     this.key = key;
     this.loadedUrl = nextUrl;
+    this.requestedUrl = nextUrl;
     this.error = null;
     this.autoplayBlocked = false;
     if (!this.userMuted) this.muted = false;
     if (!media || (!media.url && !media.videoId)) { this.onEvent('empty'); return true; }
     const Cls = adapterFor(media);
+    let ad = null;
+    const guard = (fn) => (...args) => { if (this.adapter === ad) fn(...args); };
     const events = {
-      onReady: () => this.onEvent('ready'),
+      onReady: guard(() => this.onEvent('ready')),
       onPlay: (arg) => this.onEvent('play', arg),
       onPause: (arg) => this.onEvent('pause', arg),
-      onEnded: () => this.onEvent('ended'),
-      onBuffering: (b) => this.onEvent('buffering', b),
-      onSubtitleCue: (txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' }),
-      onTracksChanged: () => this.onEvent('tracks-changed'),
-      onError: (msg) => { this.error = msg; this.onEvent('error', msg); },
-      onUnmuted: () => {
+      onEnded: guard(() => this.onEvent('ended')),
+      onBuffering: guard((b) => this.onEvent('buffering', b)),
+      onSubtitleCue: guard((txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' })),
+      onTracksChanged: guard(() => this.onEvent('tracks-changed')),
+      onError: guard((msg) => { this.error = msg; this.onEvent('error', msg); }),
+      onUnmuted: guard(() => {
+        if (this.userMuted) {
+          this.adapter?.setMuted?.(true);
+          return;
+        }
         this.autoplayBlocked = false;
         this.muted = false;
         this.onEvent('unmuted');
-      },
-      onAutoplayBlocked: () => {
+      }),
+      onAutoplayBlocked: guard(() => {
         const hasActiveGesture = Boolean(navigator.userActivation?.isActive);
         if (this.userUnlocked && hasActiveGesture && !this.userMuted) {
           this.autoplayBlocked = false;
@@ -123,16 +137,16 @@ export class PlayerHost {
         this.autoplayBlocked = true;
         this.muted = true;
         this.onEvent('autoplay-blocked');
-      },
+      }),
     };
-    const ad = new Cls(this.container, events);
+    ad = new Cls(this.container, events);
     this.adapter = ad;
     this.loading = true;
     this.onEvent('loading');
     try {
       await ad.load(media, startAt, shouldPlay);
       if (this.adapter !== ad) return true;
-      ad.setVolume(this.volume);
+      ad.setVolume(this._effectiveVolume());
       if (this.userMuted) {
         ad.setMuted(true);
       } else if (ad.isMuted?.()) {
@@ -157,10 +171,7 @@ export class PlayerHost {
   setVolume(v) {
     this.volume = Math.max(0, Math.min(100, Number(v)));
     localStorage.setItem('vortex_volume', String(this.volume));
-    const effVol = this.ducked && localStorage.getItem('vortex_voice_duck') !== 'off'
-      ? Math.max(12, Math.round(this.volume * 0.35))
-      : this.volume;
-    this.adapter?.setVolume(effVol);
+    this.adapter?.setVolume(this._effectiveVolume());
     if (this.volume > 0 && (this.muted || this.autoplayBlocked || this.adapter?.isMuted?.())) {
       this.userMuted = false;
       this.setMuted(false);
@@ -171,8 +182,7 @@ export class PlayerHost {
     const next = Boolean(ducked) && localStorage.getItem('vortex_voice_duck') !== 'off';
     if (this.ducked === next) return;
     this.ducked = next;
-    const effVol = this.ducked ? Math.max(12, Math.round(this.volume * 0.35)) : this.volume;
-    this.adapter?.setVolume(effVol);
+    this.adapter?.setVolume(this._effectiveVolume());
   }
 
   setMuted(m, explicitUser = false) {
@@ -183,7 +193,7 @@ export class PlayerHost {
       this.userUnlocked = true;
       this.autoplayBlocked = false;
       if (this.volume <= 0) this.volume = 80;
-      this.adapter?.setVolume(this.volume);
+      this.adapter?.setVolume(this._effectiveVolume());
       this.onEvent('unmuted');
     }
     this.adapter?.setMuted(this.muted);
@@ -196,7 +206,7 @@ export class PlayerHost {
     this.muted = false;
     if (this.volume <= 0) this.volume = 80;
     this.adapter?.setMuted(false);
-    this.adapter?.setVolume(this.volume);
+    this.adapter?.setVolume(this._effectiveVolume());
     if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying !== false) this.adapter?.play?.();
     this.onEvent('unmuted');
   }

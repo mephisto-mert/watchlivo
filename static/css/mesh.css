@@ -3782,7 +3782,24 @@ body.theater-mode .resize-handle {
   justify-content: center;
   cursor: pointer;
 }
+@keyframes fsChatSlideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
 @media (max-width: 680px) {
+  .ctl-top-right {
+    gap: 4px !important;
+  }
+  .ctl-top-right .ctl-pill {
+    padding: 4px 7px !important;
+    font-size: 0.65rem !important;
+  }
   .break-request-banner {
     top: 52px;
     padding: 7px 10px;

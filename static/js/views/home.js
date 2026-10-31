@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261031_v44';
-import { state, set, getFriends } from '../store.js?v=20261031_v44';
-import { avatar, profileSetup } from '../profile.js?v=20261031_v44';
-import { api } from '../api.js?v=20261031_v44';
-import { createSelection } from './selection.js?v=20261031_v44';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261031_v44';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261031_v45';
+import { state, set, getFriends } from '../store.js?v=20261031_v45';
+import { avatar, profileSetup } from '../profile.js?v=20261031_v45';
+import { api } from '../api.js?v=20261031_v45';
+import { createSelection } from './selection.js?v=20261031_v45';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261031_v45';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261031_v44', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261031_v45', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -119,9 +119,10 @@ export function renderHome(app) {
       navIcon('link', 'Kodla katıl', () => joinByCode())));
 
   const selection = createSelection({ onPick: async (media) => {
-    if (document.body.classList.contains('mesh-minimized') && state.mesh && typeof window.vortexActions?.pickMedia === 'function') {
+    if (document.body.classList.contains('mesh-minimized') && state.mesh && !state.mesh.curated && typeof window.vortexActions?.pickMedia === 'function') {
       try {
-        await window.vortexActions.pickMedia(media);
+        const cleanMedia = { ...media, currentTime: Number(media.currentTime) > 0 ? Number(media.currentTime) : 0 };
+        await window.vortexActions.pickMedia(cleanMedia);
         window.vortexRestoreRoom?.();
         return;
       } catch (e) { /* fallback to createRoomWithMedia */ }

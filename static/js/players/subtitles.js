@@ -779,7 +779,7 @@ export class SubtitleDubController {
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if (!isInit && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if ((!isInit || track.id !== 'orig') && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();
@@ -962,6 +962,8 @@ export class SubtitleDubController {
   unlockDubAudio() {}
 
   destroy() {
+    this._destroyed = true;
+    this.stopDubAudio();
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);

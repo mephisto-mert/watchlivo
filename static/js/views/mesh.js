@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v44';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v44';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v44';
-import { MeshConnection } from '../realtime.js?v=20261031_v44';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v44';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v44';
-import { buildLayout } from './mesh-layout.js?v=20261031_v44';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v44';
-import { Voice } from '../voice.js?v=20261031_v44';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v44';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v45';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v45';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
+import { MeshConnection } from '../realtime.js?v=20261031_v45';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v45';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v45';
+import { buildLayout } from './mesh-layout.js?v=20261031_v45';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v45';
+import { Voice } from '../voice.js?v=20261031_v45';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v45';
 
 let ctx = null;
 
@@ -44,7 +44,8 @@ function saveChat(room) {
       if (m && m.id && !m.system) {
         const ts = Number(m.ts || nowSec);
         if (nowSec - ts < 86400) {
-          byId.set(m.id, { ...m, ts });
+          const { snapshot, ...lite } = m;
+          byId.set(m.id, { ...lite, ts });
         }
       }
     }
@@ -249,6 +250,7 @@ async function loadMedia(media) {
     mKey && ctx.host?.key === mKey && ctx.host?.adapter
     && ctx.host?.loadedUrl && !String(ctx.host.loadedUrl).startsWith('/api/rave/resolve-catalog')
     && String(media.url || '') && !String(media.url).startsWith('/api/rave/resolve-catalog')
+    && ctx.host.loadedUrl === media.url
   );
   if (alreadyLoadedResolved) {
     ctx.loadingSig = sig;
@@ -323,6 +325,12 @@ async function loadMedia(media) {
     }
   }
   if (!ctx || ctx.loadSeq !== mySeq) return;
+  if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
+    ctx.host.loading = false;
+    ctx.loadingSig = '';
+    ctx.layout?.playerEvent?.('error', 'Yayın kaynağı şu an çözümlenemedi, lütfen yenileyin.');
+    return;
+  }
   ctx.loadingSig = `${mediaKey(media)}|${media.url || ''}`;
   if (media?.isMusic || media?.mediaType === 'music') saveMusicHistory(media);
   else saveWatchProgress(media, 0, media?.duration || 0);
@@ -736,11 +744,15 @@ const actions = {
   requestBreak() {
     if (!ctx) return;
     const nowMs = Date.now();
+    if (ctx.lastBreakReqAt && nowMs - ctx.lastBreakReqAt < 350) return;
     if (ctx.lastBreakReqAt && nowMs - ctx.lastBreakReqAt < 2000) {
       toast('☕ Duraklatma isteği zaten gönderildi');
       return;
     }
     ctx.lastBreakReqAt = nowMs;
+    const actId = 'brk_' + nowMs.toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    if (!ctx.seenBreakIds) ctx.seenBreakIds = new Set();
+    ctx.seenBreakIds.add(actId);
     const myName = state.self?.name || 'İzleyici';
     playEmojiSfx('☕');
     ctx.layout?.floatEmoji?.('☕', myName);
@@ -750,7 +762,7 @@ const actions = {
       ctx.layout?.showBreakRequestBanner?.(myName);
     }
     const curPos = Number(ctx.host?.adapter?.getTime?.() || state.mesh?.media?.currentTime || 0);
-    ctx.conn.send('break_request', { videoTime: curPos });
+    ctx.conn.send('break_request', { actionId: actId, videoTime: curPos });
   },
   hostAction(action, extra = {}) {
     if (action === 'set_privacy' && state.mesh) {

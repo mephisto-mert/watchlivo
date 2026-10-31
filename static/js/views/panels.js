@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261031_v44';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261031_v44';
-import { avatar } from '../profile.js?v=20261031_v44';
-import { clock } from '../sync.js?v=20261031_v44';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261031_v44';
-import { copyInvite, inviteUrl } from './chat.js?v=20261031_v44';
-import { parseVideoUrl } from '../providers.js?v=20261031_v44';
-import { resolveMedia } from './selection.js?v=20261031_v44';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261031_v45';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261031_v45';
+import { avatar } from '../profile.js?v=20261031_v45';
+import { clock } from '../sync.js?v=20261031_v45';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261031_v45';
+import { copyInvite, inviteUrl } from './chat.js?v=20261031_v45';
+import { parseVideoUrl } from '../providers.js?v=20261031_v45';
+import { resolveMedia } from './selection.js?v=20261031_v45';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -29,14 +29,15 @@ function Settings(ctx) {
   let lastSig = '';
   const update = () => {
     const m = state.mesh;
-    if (!m || el.contains(document.activeElement)) return;
+    const activeTag = document.activeElement?.tagName;
+    if (!m || (el.contains(document.activeElement) && (activeTag === 'INPUT' || activeTag === 'TEXTAREA'))) return;
     const lead = isHostOnly();
     const sig = `${m.name}|${m.privacy}|${m.playMode}|${m.voipMode}|${m.hasPassword}|${lead}`;
     if (sig === lastSig) return;
     lastSig = sig;
     const act = (action, extra) => (lead ? ctx.actions.hostAction(action, extra) : toast('Bu ayarları yalnızca oda lideri değiştirebilir.'));
     const nameInput = h('input', { class: 'input', value: m.name, maxlength: '45', disabled: lead ? null : true, onchange: (e) => act('set_privacy', { name: e.target.value }) });
-    const pwInput = h('input', { class: 'input', type: 'password', placeholder: m.hasPassword ? 'Şifre ayarlı (değiştirmek için yaz)' : 'Şifre yok', disabled: lead ? null : true, onchange: (e) => act('set_privacy', { password: e.target.value }) });
+    const pwInput = h('input', { class: 'input', type: 'password', placeholder: m.hasPassword ? 'Şifre ayarlı (değiştirmek için yaz)' : 'Şifre yok', disabled: lead ? null : true, onchange: (e) => { act('set_privacy', { password: e.target.value }); e.target.value = ''; e.target.blur(); } });
     fill(el,
       lead ? null : h('div', { class: 'sel-note' }, 'Oda ayarlarını yalnızca oda lideri değiştirebilir.'),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Oda adı'), nameInput),

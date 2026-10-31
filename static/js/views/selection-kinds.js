@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261031_v44';
-import { api, qs } from '../api.js?v=20261031_v44';
-import { parseVideoUrl } from '../providers.js?v=20261031_v44';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261031_v44';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261031_v44';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261031_v44';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261031_v45';
+import { api, qs } from '../api.js?v=20261031_v45';
+import { parseVideoUrl } from '../providers.js?v=20261031_v45';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261031_v45';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261031_v45';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261031_v45';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -86,7 +86,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     try {
       saveWatchProgress({ ...media, provider: media.provider || 'youtube' }, 0, media.duration || 0);
     } catch (e) { /* ignore */ }
-    pick(media);
+    return pick(media);
   };
 
   const openYtConnectModal = () => {
@@ -663,9 +663,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         const prevLen = currentItems.length;
         currentItems = mergeUniqueItems(currentItems, more);
         const added = currentItems.slice(prevLen);
-        if (!added.length) {
+        if (!added.length && !hasMorePages) {
           hasMorePages = false;
-        } else {
+        } else if (added.length) {
           const gridEl = contentArea.querySelector('#cat-archive-grid');
           const toAppend = activeCat === 'all' ? added : added.filter((it) => itemMatchesCat(it, activeCat));
           if (gridEl && toAppend.length) {

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261031_v44';
-import { expectedPosition } from '../sync.js?v=20261031_v44';
-import { state } from '../store.js?v=20261031_v44';
+import { SubtitleDubController } from './subtitles.js?v=20261031_v45';
+import { expectedPosition } from '../sync.js?v=20261031_v45';
+import { state } from '../store.js?v=20261031_v45';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -246,7 +246,11 @@ export class Html5Adapter {
       this.subs.stopDubAudio();
       this.events.onEnded?.();
     };
+    const onFsChangeMark = () => { this._lastFsChangeAt = Date.now(); };
+    v.addEventListener('webkitbeginfullscreen', onFsChangeMark);
+    v.addEventListener('webkitendfullscreen', onFsChangeMark);
     v.addEventListener('pause', () => {
+      if (this._destroyed || this.video !== v) return;
       this.playingReported = false;
       this.subs.stopDubAudio();
       try { this.bgMvEl?.pause(); } catch (e) { /* ignore */ }
@@ -255,9 +259,9 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      const inNativeVideoFs = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
+      const fsTransition = Boolean(this._lastFsChangeAt && Date.now() - this._lastFsChangeAt < 650);
       const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2200);
-      const isTransientPause = Boolean(!inNativeVideoFs && (v.seeking || recentSeek || v.readyState < 2));
+      const isTransientPause = Boolean(fsTransition || v.seeking || recentSeek || v.readyState < 2);
       if (this.wantPlaying && !this.hasEnded && !v.ended && isTransientPause) {
         clearTimeout(this.resumeTimer);
         const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 400 : 250;
@@ -347,9 +351,13 @@ export class Html5Adapter {
     const isApple = /Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
     const useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
     this.useNativeHls = useNativeHls;
-    const withProxySegs = (u) => (String(u || '').includes('/api/rave/stream?') && !String(u || '').includes('proxy_segs=1')
-      ? String(u).replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
-      : u);
+    const withProxySegs = (u) => {
+      const s = String(u || '');
+      if (!s.includes('/api/rave/stream?') || s.includes('proxy_segs=1')) return u;
+      return s.includes('&ext=.m3u8')
+        ? s.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
+        : `${s}&proxy_segs=1`;
+    };
 
     let triedLiveRefresh = false;
     const handleExhaustedCandidates = async (srcUrl, doneCb) => {
@@ -405,15 +413,17 @@ export class Html5Adapter {
     };
 
     const loadCandidateUrl = (nextUrl, doneCb) => {
-      if (!nextUrl || this.video !== v) return;
+      if (!nextUrl || this._destroyed || this.video !== v) return;
+      if (!String(nextUrl).includes('proxy_segs=1')) this._switchedToProxySegs = false;
       const expT = expectedPosition(state.mesh?.media);
-      const curNow = Number(this.getTime() || 0);
+      const curNow = Math.max(Number(this.getTime() || 0), Number(this.highestPlayedPos || 0));
       const resumePos = curNow > 0.5 ? curNow : ((Number.isFinite(expT) && expT > 0.5) ? expT : (startAt || 0));
       this.highestPlayedPos = resumePos;
       if (resumePos >= 0.5) {
         this.lastSeekTarget = resumePos;
         this.lastSeekAt = Date.now();
         this.initialSeekPending = resumePos;
+        this.loadedAtMs = Date.now();
       }
       this.currentUrl = nextUrl;
       if (this.isMusic) {
@@ -622,7 +632,7 @@ export class Html5Adapter {
     };
 
     v.addEventListener('error', () => {
-      if (this.hls) return;
+      if (this._destroyed || this.video !== v || this.hls) return;
       if (nativeAltIdx < alts.length) {
         loadCandidateUrl(alts[nativeAltIdx++]);
         return;
@@ -638,9 +648,20 @@ export class Html5Adapter {
 
     await new Promise((resolve) => {
       let resolved = false;
+      this._loadDoneResolve = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve();
+        }
+      };
       const done = () => {
         if (resolved) return;
         resolved = true;
+        clearTimeout(this.loadReadyTimer);
+        if (this._destroyed || this.video !== v) {
+          resolve();
+          return;
+        }
         if (v.readyState >= 2 && !v.seeking) {
           clearBuf();
           this.events.onReady?.();
@@ -651,7 +672,7 @@ export class Html5Adapter {
         resolve();
       };
       const onFrameReady = () => {
-        if (v.readyState < 2) return;
+        if (this._destroyed || this.video !== v || v.readyState < 2) return;
         clearBuf();
         this.events.onReady?.();
         done();
@@ -659,7 +680,7 @@ export class Html5Adapter {
       v.addEventListener('loadeddata', onFrameReady);
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
-      setTimeout(done, 2200);
+      this.loadReadyTimer = setTimeout(done, 2200);
       if (isHls && canHlsJs && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
@@ -667,6 +688,7 @@ export class Html5Adapter {
         if (autoplay) this.tryPlay();
       }
     });
+    if (this._destroyed || this.video !== v) return;
     if (!this.hls && startAt >= 8) {
       const applyInitialNativeSeek = () => {
         if (this.video !== v || this.hls) return;
@@ -864,10 +886,10 @@ export class Html5Adapter {
     if (!dur || target < dur - 2) {
       this.hasEnded = false;
     }
-    if (this.lastSeekAt && Date.now() - this.lastSeekAt < 1000 && Math.abs(target - this.lastSeekTarget) < 1.2) {
+    const v = this.video;
+    if (v && (v.seeking || Math.abs((Number(v.currentTime) || 0) - this.lastSeekTarget) < 1.5) && this.lastSeekAt && Date.now() - this.lastSeekAt < 1000 && Math.abs(target - this.lastSeekTarget) < 1.2) {
       return;
     }
-    const v = this.video;
     if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.6) {
       return;
     }
@@ -900,7 +922,7 @@ export class Html5Adapter {
   getTime() {
     if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 6000) {
       const cur = Number(this.video?.currentTime || 0);
-      if (!this.video || this.video.readyState < 1 || (cur < 0.5 && this.initialSeekPending > 2.0)) {
+      if (!this.video || this.video.readyState < 1 || cur < Math.max(0.5, this.initialSeekPending - 2.5)) {
         return this.initialSeekPending;
       }
       this.initialSeekPending = 0;
@@ -944,6 +966,7 @@ export class Html5Adapter {
     this.subs.syncVideoVolume();
   }
   setMuted(m) {
+    this.userExplicitMuted = Boolean(m);
     if (!m) {
       this.audioUnlocked = true;
       this.subs.unlockDubAudio();
@@ -1048,26 +1071,29 @@ export class Html5Adapter {
       const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : '1080p Full HD';
       return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
     }
+    const isAuto = Boolean(this.hls.autoLevelEnabled);
     const cur = this.hls.currentLevel;
     const items = levels.map((l, idx) => {
       const w = l.width || 0, h = l.height || 0;
       const effW = Math.max(w, Math.round(h * 16 / 9));
       const tag = effW >= 3200 ? '4K UHD (2160p)' : effW >= 1800 ? '1080p Full HD' : effW >= 1200 ? '720p HD' : `${h || 720}p`;
-      return { id: idx, label: `🎬 ${tag}${w && h ? ` (${w}×${h})` : ''}`, active: cur === idx };
+      return { id: idx, label: `🎬 ${tag}${w && h ? ` (${w}×${h})` : ''}`, active: !isAuto && cur === idx };
     });
-    items.push({ id: -1, label: '⚡ Otomatik (En Yüksek HD)', active: cur === -1 });
+    items.push({ id: -1, label: '⚡ Otomatik (En Yüksek HD)', active: isAuto });
     return items;
   }
   setQualityLevel(idx) {
     if (!this.hls) return;
     const n = Number(idx);
+    if (n >= 0) this.hls.autoLevelCapping = -1;
     this.hls.currentLevel = n;
-    this.hls.loadLevel = n;
     this.events.onTracksChanged?.();
   }
   destroy() {
     this._destroyed = true;
     this.wantPlaying = false;
+    clearTimeout(this.loadReadyTimer);
+    this._loadDoneResolve?.();
     clearInterval(this.subTickTimer);
     clearTimeout(this.waitTimer);
     clearTimeout(this.resumeTimer);

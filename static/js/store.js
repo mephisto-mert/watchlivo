@@ -97,7 +97,8 @@ export const isCreatorSelf = () => {
   const myCid = state.clientId;
   const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
   if (meP?.isCreator) return true;
-  if (state.self?.name && state.mesh.creator && state.self.name.trim().toLowerCase() === String(state.mesh.creator).trim().toLowerCase()) return true;
+  const selfNameLow = String(state.self?.name || '').trim().toLowerCase();
+  if (selfNameLow && !['misafir', 'misafir izleyici', 'izleyici'].includes(selfNameLow) && state.mesh.creator && selfNameLow === String(state.mesh.creator).trim().toLowerCase()) return true;
   try {
     const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`) || localStorage.getItem(`vortex_creator_${state.mesh.id}`);
     if (savedCreator && myCid && savedCreator === myCid) return true;

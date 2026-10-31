@@ -1,5 +1,5 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261031_v44';
+import { SubtitleDubController } from './subtitles.js?v=20261031_v45';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -38,6 +38,7 @@ export class YouTubeAdapter {
 
   async load(media, startAt = 0, autoplay = true) {
     this.media = media || {};
+    this.wantPlaying = Boolean(autoplay);
     this.altQueue = Array.isArray(media?.altVideoIds) ? [...media.altVideoIds] : [];
     if (media?.live) { this.caps.live = true; this.caps.seek = false; }
     const rawId = String(media?.videoId || '');
@@ -117,6 +118,7 @@ export class YouTubeAdapter {
             }
           },
           onStateChange: (e) => {
+            if (this._destroyed) return;
             const S = window.YT.PlayerState;
             if (e.data === S.PLAYING) {
               clearTimeout(this.autoplayTimer);
@@ -306,8 +308,8 @@ export class YouTubeAdapter {
   setSubtitleFpsScale(scale = 1.0) { return this.subs?.setSubtitleFpsScale(scale) || 1.0; }
   isDualSubtitleEnabled() { return false; }
   setDualSubtitle() { return Promise.resolve(false); }
-  play() { if (this.audioEl) this.audioEl.play().catch(() => {}); else this.player?.playVideo?.(); }
-  pause() { if (this.audioEl) this.audioEl.pause(); else this.player?.pauseVideo?.(); }
+  play() { this.wantPlaying = true; if (this.audioEl) this.audioEl.play().catch(() => {}); else this.player?.playVideo?.(); }
+  pause() { this.wantPlaying = false; if (this.audioEl) this.audioEl.pause(); else this.player?.pauseVideo?.(); }
   seek(t) {
     const target = Math.max(0, t);
     if (this.audioEl) { try { this.audioEl.currentTime = target; } catch (e) { /* ignore */ } }

@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v44';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v44';
-import { avatar } from '../profile.js?v=20261031_v44';
-import { api, qs } from '../api.js?v=20261031_v44';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v44';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v45';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v45';
+import { avatar } from '../profile.js?v=20261031_v45';
+import { api, qs } from '../api.js?v=20261031_v45';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1213,6 +1213,7 @@ export function buildChat(ctx) {
     },
     destroy() {
       clearTimeout(typingTimer);
+      document.body.classList.remove('kb-open');
       document.removeEventListener('pointerdown', onDocOutsideTap);
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', onVisualViewportResize);

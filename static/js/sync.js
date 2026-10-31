@@ -16,6 +16,7 @@ export const clock = {
   offset: 0, bestRtt: Infinity, samples: 0,
   now() { return Date.now() / 1000 + this.offset; },
   sample(t0, serverTime, t1 = Date.now() / 1000) {
+    if (!Number.isFinite(t0) || !Number.isFinite(serverTime) || t0 <= 0 || serverTime <= 0) return;
     const rtt = Math.max(0, t1 - t0);
     const est = serverTime + rtt / 2 - t1;
     if (this.samples > 6 && Number.isFinite(this.bestRtt)) {
@@ -160,7 +161,12 @@ export class SyncEngine {
     }
     const statusChanged = status !== this.lastStatus;
     this.lastStatus = status;
-    const expectedJump = Number.isFinite(this.lastExpected) && Math.abs(expected - this.lastExpected) > JUMP_DELTA;
+    const stepDtSec = this.lastStepAt ? Math.max(0, (now - this.lastStepAt) / 1000) : 0;
+    this.lastStepAt = now;
+    const naturalExpected = Number.isFinite(this.lastExpected)
+      ? this.lastExpected + (status === 'PLAYING' && !statusChanged ? stepDtSec * base : 0)
+      : expected;
+    const expectedJump = Number.isFinite(this.lastExpected) && Math.abs(expected - naturalExpected) > JUMP_DELTA;
     this.lastExpected = expected;
     const stateChanged = statusChanged || expectedJump;
     if (stateChanged) {
@@ -175,7 +181,7 @@ export class SyncEngine {
 
     if (status !== 'PLAYING') {
       if (!ad.isPaused()) ad.pause();
-      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.35) {
+      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.35 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         ad.seek(expected);
         this.seekUntil = now + 1200;

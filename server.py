@@ -2595,7 +2595,8 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 if "/sezon-" in h_u:
                     h_u = re.sub(r"/sezon-\d+/bolum-\d+/?.*$", f"/sezon-{s}/bolum-{e}/", h_u)
                 else:
-                    slug = h_u.rstrip("/").rsplit("/", 1)[-1]
+                    m_sl = re.search(r"/dizi/([^/?#]+)", h_u)
+                    slug = m_sl.group(1) if m_sl else h_u.rstrip("/").rsplit("/", 1)[-1]
                     h_u = f"https://www.hdfilmcehennemi.nl/dizi/{slug}/sezon-{s}/bolum-{e}/"
             phtml = urllib.request.urlopen(urllib.request.Request(h_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             if mtype == "movie" and year and str(year)[:4].isdigit():
@@ -4102,11 +4103,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
                 full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
                 return {
+                    "id": eff_tid or tid,
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
+                    "sourceUrl": source_url or "",
                     "streamType": "youtube",
                     "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
@@ -4131,11 +4134,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 dur = yt_res["duration"]
                 full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
                 return {
+                    "id": eff_tid or tid,
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
+                    "sourceUrl": source_url or "",
                     "streamType": "youtube",
                     "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
@@ -4208,11 +4213,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd", "hls_fhd_multi", "hls_fhd_tr") for _, st in (direct_list or []))
             res_str = "720p HD" if is_720_likely else "1080p HD"
             return {
+                "id": eff_tid or tid,
                 "provider": eff_prov,
                 "catalogProvider": eff_prov,
                 "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
                 "seriesTitle": disp or tr_title or orig_title,
                 "originalTitle": orig_title, "year": year, "origLang": orig_lang,
+                "sourceUrl": source_url or "",
                 "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:6], "servers": servers[:8],
                 "subtitleTracks": sub_tracks, "audioTracks": audio_tracks, "intro": intro_seg,
                 "platformAudioLangs": pmeta.get("audioLangs") or [],
@@ -4845,7 +4852,10 @@ def _get_seg_lock(url: str) -> threading.Lock:
         return _SEG_URL_LOCKS.setdefault(url, threading.Lock())
 
 
-def _proxy_chunk_sync(url: str, ref: str, rng: str):
+_KNOWN_LARGE_MP4_URLS: set[str] = set()
+
+
+def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
     is_hakuna = "hakunaymatata.com" in url
@@ -4888,7 +4898,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
             hdrs["Origin"] = orig
     clean_u_path = url.lower().split("?", 1)[0]
     is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
-    is_explicit_mp4 = (not is_fmp4_init) and (any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower())
+    is_explicit_mp4 = (not is_fmp4_init) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower())
     is_seg_url = is_fmp4_init or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
@@ -4900,6 +4910,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
     is_full_mp4 = (is_explicit_mp4 and not is_seg_url) or has_high_range
     if not is_full_mp4:
         now = time.time()
+        up_total = 0
         with _SEG_TABLE_LOCK:
             cached = _SEGMENT_CACHE.get(url)
         if cached and now - cached[0] < 90:
@@ -4919,6 +4930,9 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                             req = urllib.request.Request(url, headers=hdrs)
                             with _public_open(req, timeout=8) as r:
                                 data = r.read(15 * 1024 * 1024)
+                                raw_cl = (r.headers.get("Content-Length") or "").strip()
+                                if raw_cl.isdigit():
+                                    up_total = int(raw_cl)
                                 is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
                                 is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
                                 raw_ct = (r.headers.get("Content-Type") or "").lower()
@@ -4938,7 +4952,11 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                             if _attempt == 1:
                                 raise
                             time.sleep(0.15)
-                    if data and len(data) <= int(10 * 1024 * 1024):
+                    if up_total > len(data) and not is_seg_url:
+                        if len(_KNOWN_LARGE_MP4_URLS) > 500:
+                            _KNOWN_LARGE_MP4_URLS.clear()
+                        _KNOWN_LARGE_MP4_URLS.add(url)
+                    elif data and len(data) <= int(10 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
                             now_ts = time.time()
                             expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 90]
@@ -4948,15 +4966,15 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str):
                                 oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
                                 _SEGMENT_CACHE.pop(oldest, None)
                             _SEGMENT_CACHE[url] = (now_ts, data, ct)
-        total = len(data)
-        if rng and rng.startswith("bytes=") and total > 0:
+        total = max(len(data), up_total)
+        if rng and rng.startswith("bytes=") and len(data) > 0:
             m = re.match(r"bytes=(\d+)-(\d*)", rng)
             if m:
                 start = int(m.group(1))
-                if start >= total:
+                if start >= len(data):
                     return b"", 416, f"bytes */{total}", ct
-                end = int(m.group(2)) if m.group(2) else (total - 1)
-                end = min(max(start, end), total - 1)
+                end = int(m.group(2)) if m.group(2) else (len(data) - 1)
+                end = min(max(start, end), len(data) - 1)
                 part = data[start:end + 1]
                 return part, 206, f"bytes {start}-{start + len(part) - 1}/{total}", ct
         return data, 200, "", ct
@@ -5258,7 +5276,9 @@ async def rave_stream_manifest(request: Request):
                     u_str = urllib.parse.urljoin(base_u, u_str)
                 if cur_is_fp and "/subtitle/" in u_str:
                     return f"/api/rave/subtitle.vtt?url={urllib.parse.quote(u_str, safe='')}&lang=tr"
-                want_m3u8 = is_sub_playlist or is_master or (".m3u8" in u_str) or ("/manifests/" in u_str) or ("/index-" in u_str) or ("sublist_" in u_str) or ("nm.php" in u_str) or ("nl.php" in u_str) or ("/l.php" in u_str) or ("/m.php" in u_str) or ("/q/" in u_str) or ("/embed/sheila/" in u_str)
+                u_path_low = u_str.lower().split("?", 1)[0].split("#", 1)[0]
+                is_known_seg_ext = u_path_low.endswith((".ts", ".m4s", ".mp4", ".aac", ".vtt", ".srt", ".key", ".png", ".jpg", ".webp"))
+                want_m3u8 = is_sub_playlist or is_master or (".m3u8" in u_path_low) or (not is_known_seg_ext and (("/manifests/" in u_str) or ("/index-" in u_str) or ("sublist_" in u_str) or ("nm.php" in u_str) or ("nl.php" in u_str) or ("/l.php" in u_str) or ("/m.php" in u_str) or ("/q/" in u_str) or ("/embed/sheila/" in u_str)))
                 if want_m3u8:
                     sub_sid = base64.urlsafe_b64encode(u_str.encode("utf-8")).decode("ascii").rstrip("=")
                     if cur_is_hfnl:
@@ -5442,7 +5462,7 @@ async def rave_stream_manifest(request: Request):
             _M3U8_CACHE[m3u8_ckey] = (time.time(), body)
         return Response(body, media_type="application/vnd.apple.mpegurl", headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
+            "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
         })
     except Exception:
         return JSONResponse({"error": "Seçilen içerik akışına ulaşılamadı"}, status_code=502, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
@@ -5518,8 +5538,9 @@ async def stream_proxy(request: Request):
     if not url or not _proxy_sig_ok(url, ref, sig):
         return JSONResponse({"error": "İmzasız proxy isteği reddedildi"}, status_code=403, headers={"Cache-Control": "no-store", **cors_hdrs})
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
+    ext_hint = (request.query_params.get("ext") or "").strip().lower()
     try:
-        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng), timeout=12)
+        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=12)
         cache_ctl = (
             "private, max-age=300"
             if (rng or status == 206)
@@ -6597,6 +6618,7 @@ app = Starlette(
         Route("/api/rave/platform-catalog", provider_catalog),
         Route("/api/rave/seasons", title_seasons),
         Route("/api/rave/series-info", title_seasons),
+        Route("/api/rave/series-episodes", title_seasons),
         Route("/api/rave/resolve-catalog", resolve_catalog),
         Route("/api/rave/resolve-stream", resolve_catalog),
         Route("/api/rave/music-catalog", music_engine.music_catalog),
@@ -6607,7 +6629,10 @@ app = Starlette(
         Route("/api/rave/lyrics", music_engine.music_lyrics_vtt),
         Route("/api/rave/yt-music-stream", music_engine.yt_music_stream, methods=["GET", "HEAD"]),
         Route("/api/rave/stream", rave_stream_manifest),
+        Route("/api/rave/stream-manifest", rave_stream_manifest),
+        Route("/api/rave/stream_manifest", rave_stream_manifest),
         Route("/api/rave/stream-proxy", stream_proxy, methods=["GET", "HEAD"]),
+        Route("/api/rave/stream_chunk", stream_proxy, methods=["GET", "HEAD"]),
         Route("/api/rave/poster-proxy", poster_proxy, methods=["GET", "HEAD"]),
         Route("/api/rave/poster", poster_proxy, methods=["GET", "HEAD"]),
         Route("/api/rave/subtitles", rave_subtitles),

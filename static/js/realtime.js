@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261031_v44';
-import { api } from './api.js?v=20261031_v44';
-import { state } from './store.js?v=20261031_v44';
+import { clock } from './sync.js?v=20261031_v45';
+import { api } from './api.js?v=20261031_v45';
+import { state } from './store.js?v=20261031_v45';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -431,7 +431,10 @@ export class MeshConnection {
       }
       return true;
     } catch (e) {
-      if (e.status === 403) {
+      if (e.status === 410) {
+        this.close();
+        this.onMessage?.({ type: 'kicked', roomId: this.roomId });
+      } else if (e.status === 403) {
         this.emitStatus('denied');
         this.close();
         this.onMessage?.({ type: 'password_required', roomId: this.roomId });
@@ -452,7 +455,7 @@ export class MeshConnection {
       if (this.mode === 'ws' && this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));
       return;
     }
-    if (['reaction', 'soundfx', 'typing'].includes(obj.type)) {
+    if (['reaction', 'soundfx', 'typing', 'break_request'].includes(obj.type)) {
       const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
       obj.actionId = actId;
       this._addBounded(this.seenEventIds, actId);

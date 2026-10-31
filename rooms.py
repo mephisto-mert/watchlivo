@@ -422,7 +422,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "creator",
                                      "creatorId", "host_id", "co_hosts", "host_transferred",
                                      "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
-                                     "endedKey", "kicked", "left", "rev", "curated")}
+                                     "endedKey", "kicked", "left", "rev", "curated", "chatClearedAt")}
     # Secrets never leave the server: no password hash, no creator identity.
     snap["sigExp"] = t + SYNC_TOKEN_TTL
     snap["participants"] = dict(p_items)
@@ -522,6 +522,9 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             continue
         elif cid not in merged_p or sp_seen > float(merged_p[cid].get("lastSeen") or 0):
             merged_p[cid] = sp
+    cleared_at = max(float(room.get("chatClearedAt") or 0.0), float(snap.get("chatClearedAt") or 0.0))
+    if cleared_at > 0.0:
+        room["chatClearedAt"] = cleared_at
     seen_c: Dict[str, Dict[str, Any]] = {}
     merged_c = []
     for m in (room.get("chat") or []) + (snap.get("chat") or []):
@@ -529,7 +532,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             continue
         m_ts = float(m.get("ts") or 0.0)
         ttl_c = 1800.0 if m.get("system") else 86400.0
-        if m_ts <= 0.0 or (t - m_ts > ttl_c):
+        if m_ts <= 0.0 or (t - m_ts > ttl_c) or (cleared_at > 0.0 and m_ts <= cleared_at):
             continue
         mid = m.get("id")
         if mid and mid not in seen_c:
@@ -1112,7 +1115,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
     p_slug = _slugify_name(raw_name)
     creator_slug = _slugify_name(room.get("creator") or "")
     rid_str = str(room.get("id") or "")
-    if p_slug and len(p_slug) >= 3 and p_slug != "misafir":
+    if p_slug and len(p_slug) >= 3 and p_slug not in ("misafir", "misafir-izleyici", "izleyici"):
         if (creator_slug and p_slug == creator_slug) or rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-"):
             return True
     if data.get("isCreator") and not any(hp.get("transport") != "bot" and hp.get("id") != cid for hp in (room.get("participants") or {}).values()):
@@ -1521,6 +1524,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
 def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> bool:
     if not isinstance(raw_recent, list) or room.get("curated") or room.get("_explicit_chat_clear"):
         return False
+    cleared_at = float(room.get("chatClearedAt") or 0.0)
     by_id = {m.get("id"): m for m in (room.get("chat") or []) if isinstance(m, dict) and m.get("id")}
     added = False
     for rm in raw_recent[-40:]:
@@ -1529,12 +1533,14 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                 rm_ts = float(rm.get("ts") or t_now)
             except (TypeError, ValueError):
                 rm_ts = t_now
+            if cleared_at > 0.0 and rm_ts <= cleared_at:
+                continue
             if 0 <= t_now - rm_ts <= 86400.0:
                 txt_val = clean_str(rm.get("text"), 1000)
                 gif_val = clean_str(rm.get("gif"), 600)
                 if not txt_val and not gif_val:
                     continue
-                by_id[rm["id"]] = {
+                restored_m = {
                     "id": clean_str(rm.get("id"), 24),
                     "system": False,
                     "user": clean_str(rm.get("user"), 32) or "İzleyici",
@@ -1547,6 +1553,13 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                     "replyTo": rm.get("replyTo") if isinstance(rm.get("replyTo"), dict) else None,
                     "reactions": rm.get("reactions") if isinstance(rm.get("reactions"), dict) else {},
                 }
+                if rm.get("breakRequest"):
+                    restored_m["breakRequest"] = True
+                if rm.get("pollId"):
+                    restored_m["pollId"] = clean_str(rm.get("pollId"), 32)
+                if isinstance(rm.get("videoTime"), (int, float)) and 0 <= float(rm["videoTime"]) <= 86400:
+                    restored_m["videoTime"] = round(float(rm["videoTime"]), 1)
+                by_id[rm["id"]] = restored_m
                 added = True
     if added:
         room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
@@ -1619,6 +1632,7 @@ def _handle_social(room, cid, data, out, name, is_host):
             out["reply"].append({"type": "error", "message": "Sohbeti yalnızca oda lideri temizleyebilir."})
             return out
         room["_explicit_chat_clear"] = True
+        room["chatClearedAt"] = t_now
         room["chat"] = []
         room["polls"] = []
         room["rev"] = int(room.get("rev") or 1) + 1
@@ -2016,6 +2030,10 @@ async def ws_endpoint(websocket: WebSocket):
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
             room["creatorId"] = verified_uid or cid
         room.setdefault("kicked", [])
+        if cid in room["kicked"]:
+            await websocket.send_json({"type": "kicked"})
+            await websocket.close()
+            return
         if has_password(room) and cid not in (room.get("participants") or {}):
             allowed, _retry = _JOIN_LIMITER.hit(f"ws:{room_id}:{client_ip(websocket)}")
             if not allowed or not verify_room_password(room, q.get("pwd", "")):
@@ -2108,6 +2126,8 @@ async def http_sync(request: Request):
     async with STORE.lock(room_id):
         is_action = data.get("type") not in (None, "", "poll", "init", "ping")
         room = await STORE.get(room_id, force_fresh=bool(is_action or data.get("type") == "init"))
+        pre_merge_host = room.get("host_id") if room else None
+        pre_merge_seen = float((room.get("participants") or {}).get(signed_cid or requested_cid, {}).get("lastSeen") or 0.0) if room else 0.0
         if data.get("syncToken"):
             room = merge_sync_token(room, data.get("syncToken"), room_id)
         # A cid is only trusted when the server signed it, or when nobody is
@@ -2150,8 +2170,8 @@ async def http_sync(request: Request):
                 return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_after)}, status_code=429)
             if not verify_room_password(room, data.get("pwd", "")):
                 return JSONResponse({"error": "password_required"}, status_code=403)
-        prev_host = room.get("host_id")
-        prev_seen = float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
+        prev_host = pre_merge_host if pre_merge_host is not None else room.get("host_id")
+        prev_seen = pre_merge_seen or float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
         pruned = prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
