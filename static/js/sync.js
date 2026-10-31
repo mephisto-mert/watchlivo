@@ -229,7 +229,7 @@ export class SyncEngine {
         this.lastSeekTarget = startTarget;
         ad.seek(startTarget);
         this.seekUntil = now + SEEK_SETTLE_MS;
-      } else if (curr > 0.2 && !ad.video?.seeking && ((abs > 1.0 && now - this.lastLeaderBroadcast > 1800) || (now - this.lastLeaderBroadcast > 3000))) {
+      } else if (now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && ((abs > 1.0 && now - this.lastLeaderBroadcast > 1800) || (now - this.lastLeaderBroadcast > 3000))) {
         this.lastLeaderBroadcast = now;
         this.onLeaderSync(curr);
       }

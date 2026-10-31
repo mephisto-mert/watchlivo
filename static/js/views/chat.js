@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v45';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v45';
-import { avatar } from '../profile.js?v=20261031_v45';
-import { api, qs } from '../api.js?v=20261031_v45';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v46';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v46';
+import { avatar } from '../profile.js?v=20261031_v46';
+import { api, qs } from '../api.js?v=20261031_v46';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v46';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1016,6 +1016,7 @@ export function buildChat(ctx) {
     }
     while (list.children.length > 150) {
       list.firstElementChild?.remove();
+      list.firstElementChild?.classList?.remove('cont');
     }
     if (atBottom) list.scrollTop = list.scrollHeight;
   }
@@ -1126,7 +1127,10 @@ export function buildChat(ctx) {
 
   function clear() {
     rendered.clear();
+    recentSysMap.clear();
     lastUser = null;
+    lastTs = 0;
+    clearReply();
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
 

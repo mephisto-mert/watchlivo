@@ -1,5 +1,5 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261031_v45';
+import { SubtitleDubController } from './subtitles.js?v=20261031_v46';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -10,9 +10,9 @@ function loadYouTubeApi() {
     window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(); };
     const s = document.createElement('script');
     s.src = 'https://www.youtube.com/iframe_api';
-    s.onerror = () => reject(new Error('YouTube API yüklenemedi'));
+    s.onerror = () => { apiPromise = null; reject(new Error('YouTube API yüklenemedi')); };
     document.head.append(s);
-    setTimeout(() => reject(new Error('YouTube API zaman aşımı')), 12000);
+    setTimeout(() => { if (!(window.YT && window.YT.Player)) { apiPromise = null; reject(new Error('YouTube API zaman aşımı')); } }, 12000);
   });
   return apiPromise;
 }
@@ -199,9 +199,10 @@ export class YouTubeAdapter {
   }
 
   _mountVinylOverlay(media) {
-    const cover = media.poster || media.thumbnail || '/static/watchlivo-poster.svg';
-    const title = (media.songTitle || media.title || 'Müzik & Klip').replace(/^🎵\s*/, '');
-    const artist = media.artist || media.channel || 'Sanatçı';
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    const cover = esc(media.poster || media.thumbnail || '/static/watchlivo-poster.svg');
+    const title = esc((media.songTitle || media.title || 'Müzik & Klip').replace(/^🎵\s*/, ''));
+    const artist = esc(media.artist || media.channel || 'Sanatçı');
     const wrap = document.createElement('div');
     wrap.className = 'music-vinyl-stage';
     wrap.style.display = 'none';

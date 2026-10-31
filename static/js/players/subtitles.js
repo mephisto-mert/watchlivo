@@ -528,6 +528,10 @@ export class SubtitleDubController {
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);
+      v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
+      v.removeEventListener('webkitendfullscreen', this._fsHandler);
+      v.removeEventListener('enterpictureinpicture', this._fsHandler);
+      v.removeEventListener('leavepictureinpicture', this._fsHandler);
       this._fsHandler = null;
     }
     if (!track?.url || !this.subCues.length) return;
@@ -589,7 +593,8 @@ export class SubtitleDubController {
         const nativeVideoFs = Boolean(
           v.webkitDisplayingFullscreen ||
           document.fullscreenElement === v ||
-          document.webkitFullscreenElement === v
+          document.webkitFullscreenElement === v ||
+          document.pictureInPictureElement === v
         );
         if (v.textTracks) {
           for (let i = 0; i < v.textTracks.length; i += 1) {
@@ -609,6 +614,8 @@ export class SubtitleDubController {
       setTimeout(() => { srcSettled = true; setMode(); }, 650);
       v.addEventListener('webkitbeginfullscreen', setMode);
       v.addEventListener('webkitendfullscreen', setMode);
+      v.addEventListener('enterpictureinpicture', setMode);
+      v.addEventListener('leavepictureinpicture', setMode);
       this._fsHandler = setMode;
       document.addEventListener('fullscreenchange', setMode);
       document.addEventListener('webkitfullscreenchange', setMode);
@@ -967,6 +974,10 @@ export class SubtitleDubController {
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);
+      v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
+      v.removeEventListener('webkitendfullscreen', this._fsHandler);
+      v.removeEventListener('enterpictureinpicture', this._fsHandler);
+      v.removeEventListener('leavepictureinpicture', this._fsHandler);
       this._fsHandler = null;
     }
     if (this.blobUrl) {

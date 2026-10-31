@@ -541,9 +541,9 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -> l
         except Exception:
             pass
         try:
-            hfnl_su = f"https://www.hdfilmcehennemi.land/?s={urllib.parse.quote(q.strip())}"
-            raw_s = urllib.request.urlopen(urllib.request.Request(hfnl_su, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.land/"}), timeout=3.5).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-            for card in re.findall(r'<a[^>]+href="(https://www\.hdfilmcehennemi\.land/(?:film|dizi)/[^"]+)"[^>]*>(.*?)</a>', raw_s, re.S):
+            hfnl_su = f"https://www.hdfilmcehennemi.nl/?s={urllib.parse.quote(q.strip())}"
+            raw_s = urllib.request.urlopen(urllib.request.Request(hfnl_su, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.5).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+            for card in re.findall(r'<a[^>]+href="(https://www\.hdfilmcehennemi\.(?:nl|land)/(?:film|dizi)/[^"]+)"[^>]*>(.*?)</a>', raw_s, re.S):
                 href, c_body = card
                 slug = href.rstrip("/").split("/")[-1].replace("-izle", "")
                 cid = f"hfnl-{slug}"
@@ -1542,11 +1542,11 @@ PROV_BROWSE = {
     "peacock": "https://www.peacocktv.com",
     "plex": "https://watch.plex.tv",
     "pluto": "https://pluto.tv",
-    "cinema": "https://www.hdfilmcehennemi.land",
-    "hdfilmcehennemi": "https://www.hdfilmcehennemi.land",
-    "dizibox": "https://www.dizibox.com",
+    "cinema": "https://www.hdfilmcehennemi.nl",
+    "hdfilmcehennemi": "https://www.hdfilmcehennemi.nl",
+    "dizibox": "https://www.dizibox.live",
     "dizilife": "https://dizi82.life",
-    "fullhdfilm": "https://www.fullhdfilmizlesene.de",
+    "fullhdfilm": "https://www.fullhdfilmizlesene.now",
     "yabancidizi": "https://yabancidizi.tv",
     "music": "https://music.youtube.com",
 }
@@ -1572,11 +1572,11 @@ OFFICIAL_SEARCH_URLS = {
     "max": "https://play.max.com/search?q={q}",
     "crunchyroll": "https://www.crunchyroll.com/search?q={q}",
     "tubi": "https://tubitv.com/search/{q}",
-    "cinema": "https://www.hdfilmcehennemi.land/?s={q}",
-    "hdfilmcehennemi": "https://www.hdfilmcehennemi.land/?s={q}",
-    "dizibox": "https://www.dizibox.com/?s={q}",
+    "cinema": "https://www.hdfilmcehennemi.nl/?s={q}",
+    "hdfilmcehennemi": "https://www.hdfilmcehennemi.nl/?s={q}",
+    "dizibox": "https://www.dizibox.live/?s={q}",
     "dizilife": "https://dizi82.life/ara?q={q}",
-    "fullhdfilm": "https://www.hdfilmcehennemi.land/?s={q}",
+    "fullhdfilm": "https://www.fullhdfilmizlesene.now/arama/{q}",
     "yabancidizi": "https://dizi82.life/ara?q={q}",
 }
 
@@ -2419,9 +2419,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
             if nt:
                 fb_ep_keys.append(f"{mtype}:{nt}:1:1")
 
-    if mtype != "tv":
-        fb_ep_keys = []
-    elif s > 1 or e > 1:
+    if mtype == "tv" and (s > 1 or e > 1):
         fb_ep_keys = []
 
     def _collect_vault_keys(key_list, target_list):
@@ -3018,7 +3016,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     for cp in caps:
                         cu = str(cp.get("url") or "").strip()
                         cl = str(cp.get("language") or cp.get("lang") or "").lower().strip()
-                        if cu.startswith("https://"):
+                        if cu.startswith("https://") and not any(x.get("url") == cu for x in es_list):
                             es_list.append({"lang": cl, "url": cu, "source": "vidlink_embed"})
                 if st.get("playlist"):
                     res.append((st["playlist"], "hls"))
@@ -3036,9 +3034,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                         if chosen_qu:
                             break
                     if chosen_qu:
-                        ref = "" if "hakunaymatata.com" in chosen_qu else (((quals.get(chosen_qk) or {}).get("headers") or {}).get("referer") or "https://filmboom.top/")
                         st_tag = "mp4_vl_1080" if chosen_qk in ("2160", "4k", "1440", "1080") else ("mp4_vl_720" if chosen_qk == "720" else "mp4_vl_sd")
-                        res.append((_proxy_u(chosen_qu, ref, ".mp4"), st_tag))
+                        res.append((chosen_qu, st_tag))
         except Exception:
             pass
         return res
@@ -3247,7 +3244,7 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=dp&proxy_segs=1&ext=.m3u8"
     if stype in ("mp4_ac_sub", "mp4_ac_dub"):
         return _proxy_u(u, "https://tau-video.xyz/", ".mp4")
-    if stype == "mp4_vl":
+    if str(stype).startswith("mp4_vl"):
         return _proxy_u(u, "" if "hakunaymatata.com" in u else "https://filmboom.top/", ".mp4")
     if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
@@ -4825,9 +4822,14 @@ async def rave_browser_login(request: Request):
 
 
 async def rave_logout_account(request: Request):
-    payload = await request.json()
-    provider = (payload.get("provider") or "").strip().lower()
-    domain = (payload.get("domain") or "").strip()
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    provider = str(payload.get("provider") or "").strip().lower()
+    domain = str(payload.get("domain") or "").strip()
     return JSONResponse({"ok": True, "provider": provider, "domain": domain, "loginSatisfied": False})
 
 
@@ -5469,12 +5471,14 @@ async def rave_stream_manifest(request: Request):
 
 
 _POSTER_MEM_CACHE = collections.OrderedDict()
+_POSTER_CACHE_LOCK = threading.Lock()
 
 
 def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
-    if url in _POSTER_MEM_CACHE:
-        _POSTER_MEM_CACHE.move_to_end(url)
-        return _POSTER_MEM_CACHE[url]
+    with _POSTER_CACHE_LOCK:
+        if url in _POSTER_MEM_CACHE:
+            _POSTER_MEM_CACHE.move_to_end(url)
+            return _POSTER_MEM_CACHE[url]
     ref = "https://www.fullhdfilmizlesene.now/"
     if "hdfilmcehennemi." in url:
         ref = "https://www.hdfilmcehennemi.nl/"
@@ -5485,9 +5489,11 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
         data = r.read(1024 * 1024)
         ct = (r.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
     if data:
-        _POSTER_MEM_CACHE[url] = (data, ct)
-        while len(_POSTER_MEM_CACHE) > 250:
-            _POSTER_MEM_CACHE.popitem(last=False)
+        with _POSTER_CACHE_LOCK:
+            _POSTER_MEM_CACHE[url] = (data, ct)
+            _POSTER_MEM_CACHE.move_to_end(url)
+            while len(_POSTER_MEM_CACHE) > 250:
+                _POSTER_MEM_CACHE.popitem(last=False)
     return data, ct
 
 
@@ -5501,9 +5507,12 @@ async def poster_proxy(request: Request):
     is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter."))
     if not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig):
         return RedirectResponse("/static/watchlivo-poster.svg")
-    if url in _POSTER_MEM_CACHE:
-        _POSTER_MEM_CACHE.move_to_end(url)
-        data, ct = _POSTER_MEM_CACHE[url]
+    with _POSTER_CACHE_LOCK:
+        cached_poster = _POSTER_MEM_CACHE.get(url)
+        if cached_poster is not None:
+            _POSTER_MEM_CACHE.move_to_end(url)
+    if cached_poster is not None:
+        data, ct = cached_poster
         if data and ct.startswith("image/"):
             return Response(data, media_type=ct, headers={
                 "Access-Control-Allow-Origin": "*",
@@ -5636,11 +5645,16 @@ def _srt_to_vtt(raw_bytes) -> str:
     return txt + "\n"
 
 
+_VTT_CACHE_LOCK = threading.Lock()
+_TTS_CACHE_LOCK = threading.Lock()
+
+
 def _fetch_vtt_sync(url: str) -> str:
     import gzip
-    if url in _SUB_VTT_CACHE:
-        _SUB_VTT_CACHE.move_to_end(url)
-        return _SUB_VTT_CACHE[url]
+    with _VTT_CACHE_LOCK:
+        if url in _SUB_VTT_CACHE:
+            _SUB_VTT_CACHE.move_to_end(url)
+            return _SUB_VTT_CACHE[url]
     ua_use = (
         "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
         if "youtube.com/api/timedtext" in url
@@ -5674,16 +5688,20 @@ def _fetch_vtt_sync(url: str) -> str:
         except Exception:
             pass
     vtt = _srt_to_vtt(raw)
-    _SUB_VTT_CACHE[url] = vtt
-    while len(_SUB_VTT_CACHE) > 40:
-        _SUB_VTT_CACHE.popitem(last=False)
+    with _VTT_CACHE_LOCK:
+        _SUB_VTT_CACHE[url] = vtt
+        _SUB_VTT_CACHE.move_to_end(url)
+        while len(_SUB_VTT_CACHE) > 200:
+            _SUB_VTT_CACHE.popitem(last=False)
     return vtt
 
 
 def _translate_vtt_to_tr_sync(vtt: str) -> str:
     ck = f"tr_vtt:{hashlib.md5(vtt[:4096].encode('utf-8', errors='ignore')).hexdigest()}:{len(vtt)}"
-    if ck in _SUB_VTT_CACHE:
-        return _SUB_VTT_CACHE[ck]
+    with _VTT_CACHE_LOCK:
+        if ck in _SUB_VTT_CACHE:
+            _SUB_VTT_CACHE.move_to_end(ck)
+            return _SUB_VTT_CACHE[ck]
     blocks = vtt.split("\n\n")
     cue_indices = []
     cue_texts = []
@@ -5739,9 +5757,11 @@ def _translate_vtt_to_tr_sync(vtt: str) -> str:
         else:
             out_blocks.append("\n".join(hdr_lines + [tr_map.get(idx, orig_txt)]))
     res_vtt = "\n\n".join(out_blocks) + "\n"
-    if len(_SUB_VTT_CACHE) >= 200:
-        _SUB_VTT_CACHE.pop(next(iter(_SUB_VTT_CACHE)), None)
-    _SUB_VTT_CACHE[ck] = res_vtt
+    with _VTT_CACHE_LOCK:
+        _SUB_VTT_CACHE[ck] = res_vtt
+        _SUB_VTT_CACHE.move_to_end(ck)
+        while len(_SUB_VTT_CACHE) > 200:
+            _SUB_VTT_CACHE.popitem(last=False)
     return res_vtt
 
 
@@ -6071,18 +6091,21 @@ async def rave_subtitle_vtt(request: Request):
 
 def _fetch_tts_mp3_sync(text: str, lang: str = "tr") -> bytes:
     ck = f"{lang}:{text[:180]}"
-    if ck in _TTS_CACHE:
-        _TTS_CACHE.move_to_end(ck)
-        return _TTS_CACHE[ck]
+    with _TTS_CACHE_LOCK:
+        if ck in _TTS_CACHE:
+            _TTS_CACHE.move_to_end(ck)
+            return _TTS_CACHE[ck]
     q = urllib.parse.quote(text[:180])
     u = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={urllib.parse.quote(lang[:5])}&q={q}"
     req = urllib.request.Request(u, headers={"User-Agent": UA137, "Referer": "https://translate.google.com/"})
     with urllib.request.urlopen(req, timeout=4.5) as r:
         data = r.read(256 * 1024)
     if data:
-        _TTS_CACHE[ck] = data
-        while len(_TTS_CACHE) > 120:
-            _TTS_CACHE.popitem(last=False)
+        with _TTS_CACHE_LOCK:
+            _TTS_CACHE[ck] = data
+            _TTS_CACHE.move_to_end(ck)
+            while len(_TTS_CACHE) > 120:
+                _TTS_CACHE.popitem(last=False)
     return data
 
 
@@ -6157,28 +6180,39 @@ async def upload_file(request: Request):
     allowed, retry_after = _UPLOAD_LIMIT.hit(uid)
     if not allowed:
         return too_many_response(retry_after)
-    length = int(request.headers.get("content-length") or 0)
+    try:
+        length = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        length = 0
     if length > MAX_UPLOAD_BYTES:
         return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
     if _uploads_dir_size() + max(0, length) > MAX_UPLOADS_TOTAL_BYTES:
         return JSONResponse({"error": "Sunucu depolama alanı dolu. Lütfen daha sonra tekrar dene."}, status_code=507)
-    form = await request.form(max_part_size=MAX_UPLOAD_BYTES)
+    try:
+        form = await request.form(max_part_size=MAX_UPLOAD_BYTES)
+    except Exception:
+        return JSONResponse({"error": "Geçersiz form verisi"}, status_code=400)
     file = form.get("file")
-    if not file or not getattr(file, "filename", None):
+    if not file or not getattr(file, "filename", None) or not hasattr(file, "read"):
         return JSONResponse({"error": "Dosya bulunamadı"}, status_code=400)
     ext = pathlib.Path(file.filename).suffix.lower()
     if ext not in ALLOWED_UPLOAD_EXTS:
         return JSONResponse({"error": f"Desteklenmeyen dosya türü: {ext}"}, status_code=400)
     name = f"{uuid.uuid4().hex[:12]}{ext}"
+    dest = UPLOADS_DIR / name
     size = 0
-    with open(UPLOADS_DIR / name, "wb") as out:
-        while chunk := await file.read(1024 * 1024):
-            size += len(chunk)
-            if size > MAX_UPLOAD_BYTES:
-                out.close()
-                (UPLOADS_DIR / name).unlink(missing_ok=True)
-                return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
-            out.write(chunk)
+    try:
+        with open(dest, "wb") as out:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    out.close()
+                    dest.unlink(missing_ok=True)
+                    return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
+                out.write(chunk)
+    except Exception:
+        dest.unlink(missing_ok=True)
+        return JSONResponse({"error": "Dosya yükleme kesildi"}, status_code=400)
     return JSONResponse({"url": f"/uploads/{name}", "filename": pathlib.Path(file.filename).name[:120], "size": size})
 
 
@@ -6516,14 +6550,17 @@ async def rave_browser_proxy(request: Request):
     <div class="portal-login-row">
       <input id="q-inp" class="portal-inp" placeholder="{prov_upper} içinde film, dizi ara veya bağlantı yapıştır..." />
       <button class="portal-btn" onclick="handlePortalInput(document.getElementById('q-inp').value)">🔍 Ara / Aç</button>
-      <button class="portal-btn sec" onclick="launchDirectUrl({json.dumps(target_url)})">▶ Bu Sayfayı Odada Başlat</button>
-      <button class="portal-btn sec" onclick="window.open({json.dumps(target_url)}, '_blank', 'noopener')">↗ {prov_upper} Resmi Site</button>
+      <button class="portal-btn sec" onclick="launchDirectUrl(INIT_URL)">▶ Bu Sayfayı Odada Başlat</button>
+      <button class="portal-btn sec" onclick="window.open(INIT_URL, '_blank', 'noopener')">↗ {prov_upper} Resmi Site</button>
     </div>
   </div>
   <div id="grid" class="portal-grid">Yükleniyor...</div>
   <script>
-    const PROV = {json.dumps(prov)};
-    const INIT_URL = {json.dumps(target_url)};
+    const PROV = {json.dumps(prov).replace("</", "<\\/")};
+    const INIT_URL = {json.dumps(target_url).replace("</", "<\\/")};
+    function escHtml(s) {{
+      return String(s ?? '').replace(/[&<>"']/g, c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
+    }}
     function launchDirectUrl(u) {{
       window.parent.postMessage({{
         type: 'watchlivo_portal_pick',
@@ -6558,10 +6595,10 @@ async def rave_browser_proxy(request: Request):
         items.slice(0, 24).forEach(it => {{
           const card = document.createElement('div');
           card.className = 'p-item';
-          card.innerHTML = '<img src="' + (it.poster || it.backdrop || '/static/watchlivo-poster.svg') + '" alt="" />' +
+          card.innerHTML = '<img src="' + escHtml(it.poster || it.backdrop || '/static/watchlivo-poster.svg') + '" alt="" />' +
             '<div class="p-item-body">' +
-              '<div class="p-item-title">' + (it.title || '') + '</div>' +
-              '<div class="p-item-sub">' + (it.year || '2025') + ' · ⭐ ' + (it.rating || '8.2') + '</div>' +
+              '<div class="p-item-title">' + escHtml(it.title || '') + '</div>' +
+              '<div class="p-item-sub">' + escHtml(it.year || '2025') + ' · ⭐ ' + escHtml(it.rating || '8.2') + '</div>' +
               '<div class="p-item-play">▶ Odada Başlat</div>' +
             '</div>';
           card.onclick = () => {{

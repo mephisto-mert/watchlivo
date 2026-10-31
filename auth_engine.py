@@ -33,7 +33,7 @@ from security import RateLimiter, client_ip, constant_time_eq, server_secret, to
 
 # Fail-closed: no public fallback secret. Without AUTH_SECRET the process uses an
 # unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
-AUTH_SECRET = server_secret("AUTH_SECRET") if not (os.environ.get("VORTEX_SECRET") or "").strip() else server_secret("VORTEX_SECRET")
+AUTH_SECRET = server_secret("AUTH_SECRET") if len((os.environ.get("AUTH_SECRET") or "").strip()) >= 16 else server_secret("VORTEX_SECRET")
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL") or 60 * 60 * 24 * 7)
 _LOGIN_LIMIT = RateLimiter(10, 300.0, name="login")
 _REGISTER_LIMIT = RateLimiter(5, 3600.0, name="register")
@@ -432,7 +432,15 @@ async def auth_login(request: Request) -> JSONResponse:
         row = None
     target_email = identifier if EMAIL_RE.match(identifier) else (row.get("email", "") if row else "")
     fb_verified = False
-    if target_email and EMAIL_RE.match(target_email):
+    local_verified = bool(
+        row
+        and row.get("password_hash")
+        and row.get("salt")
+        and constant_time_eq(row["password_hash"], _hash_pw(password, row["salt"]))
+    )
+    if local_verified:
+        fb_verified = True
+    elif target_email and EMAIL_RE.match(target_email):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
@@ -457,7 +465,7 @@ async def auth_login(request: Request) -> JSONResponse:
                         _user_create(row)
                     except Exception:
                         pass
-                else:
+                elif row.get("auth_provider", "email") == "email":
                     new_hash = _hash_pw(password, row["salt"])
                     if row.get("password_hash") != new_hash:
                         row = _user_update(row["uid"], {"password_hash": new_hash}) or row
@@ -686,8 +694,8 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
     allowed, retry_after = _OTP_VERIFY_LIMIT.hit(f"{client_ip(request)}:{phone}")
     if not allowed:
         return too_many_response(retry_after)
-    stored = _PHONE_CODES.get(phone)
-    if not stored and store_backend() == "redis":
+    stored = None
+    if store_backend() == "redis":
         try:
             raw_otp = _kv("GET", f"{_kp()}otp:{phone}")
             if raw_otp:
@@ -695,6 +703,8 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
                 _PHONE_CODES[phone] = stored
         except Exception:
             stored = None
+    if not stored:
+        stored = _PHONE_CODES.get(phone)
     if not stored or time.time() > stored.get("exp", 0):
         return JSONResponse({"ok": False, "error": "Doğrulama kodunun süresi dolmuş veya kod gönderilmemiş. Lütfen yeni kod isteyin."}, status_code=400)
     if int(stored.get("tries") or 0) >= 5:

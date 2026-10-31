@@ -23,6 +23,7 @@ from typing import Dict, Optional, Tuple
 # ---------------------------------------------------------------------------
 _EPHEMERAL: Dict[str, bytes] = {}
 _WARNED: set[str] = set()
+_SECRET_LOCK = threading.Lock()
 
 
 def server_secret(name: str, *, min_len: int = 16) -> bytes:
@@ -42,15 +43,24 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
             f"{name} ortam değişkeni tanımlı değil veya çok kısa (>= {min_len} karakter). "
             "WATCHLIVO_STRICT_SECRETS=1 iken uygulama başlamaz."
         )
-    if name not in _EPHEMERAL:
-        seed = f"watchlivo-deterministic-secret-v1:{name}:{os.environ.get('VERCEL_GIT_COMMIT_SHA', 'default')}"
-        _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
-        if name not in _WARNED:
-            _WARNED.add(name)
-            print(
-                f"[security] {name} tanımlı değil — deterministik çalışma sırrı üretildi."
+    with _SECRET_LOCK:
+        if name not in _EPHEMERAL:
+            shared_entropy = (
+                os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+                or os.environ.get("KV_REST_API_TOKEN")
+                or os.environ.get("OPENAI_API_KEY")
+                or os.environ.get("OPENAI_CLOUD_FALLBACK_KEY")
+                or os.environ.get("TMDB_API_KEY")
+                or ""
             )
-    return _EPHEMERAL[name]
+            seed = f"watchlivo-deterministic-secret-v2:{name}:{shared_entropy}:{os.environ.get('VERCEL_GIT_COMMIT_SHA', 'default')}"
+            _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
+            if name not in _WARNED:
+                _WARNED.add(name)
+                print(
+                    f"[security] {name} tanımlı değil — deterministik çalışma sırrı üretildi."
+                )
+        return _EPHEMERAL[name]
 
 
 def constant_time_eq(left: str, right: str) -> bool:
@@ -187,6 +197,9 @@ class RateLimiter:
 
     def reset(self, key: str) -> None:
         key = f"{self.name}:{key}"[:200]
+        url, _ = self._kv_cfg()
+        if url:
+            self._kv("DEL", key)
         with self._lock:
             self._hits.pop(key, None)
 

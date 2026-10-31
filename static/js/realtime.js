@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261031_v45';
-import { api } from './api.js?v=20261031_v45';
-import { state } from './store.js?v=20261031_v45';
+import { clock } from './sync.js?v=20261031_v46';
+import { api } from './api.js?v=20261031_v46';
+import { state } from './store.js?v=20261031_v46';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -179,11 +179,12 @@ export class MeshConnection {
     };
     ws.onclose = () => {
       clearInterval(this.pingTimer);
+      clearTimeout(this.wsRetryTimer);
       if (this.closed) return;
       if (!opened && this.retry >= 1) { this.startHttp(); return; }
       this.emitStatus('connecting');
       this.retry += 1;
-      setTimeout(() => !this.closed && this.startWs(), Math.min(8000, 600 * this.retry));
+      this.wsRetryTimer = setTimeout(() => !this.closed && this.startWs(), Math.min(8000, 600 * this.retry));
     };
     ws.onerror = () => { /* onclose handles retry/fallback */ };
   }
@@ -361,7 +362,7 @@ export class MeshConnection {
             }
           }
         }
-        if (res.media) {
+        if (res.media && !(isPoll && (reqSeq !== this.actionSeq || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 5000)))) {
           const prevMedia = this.lastRoom.media || {};
           const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
           const srvUrl = String(res.media.url || res.media.videoId || '');
@@ -378,6 +379,7 @@ export class MeshConnection {
           );
           if (srvUrl && srvUrl !== prevUrl && !sameIdentity) {
             this.lastRev = 0;
+            this.syncToken = '';
             setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
             return;
           }
@@ -523,7 +525,7 @@ export class MeshConnection {
       window.removeEventListener('focus', this._visHandler);
       this._visHandler = null;
     }
-    clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer);
+    clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer); clearTimeout(this.wsRetryTimer);
     try { this.bc?.close(); } catch (e) { /* ignore */ }
     try { this.ws?.close(); } catch (e) { /* ignore */ }
     if (explicitLeave) {
@@ -532,7 +534,7 @@ export class MeshConnection {
         localStorage.removeItem(`vortex_room_${this.roomId}`);
         sessionStorage.removeItem(`vortex_st_${this.roomId}`);
       } catch (e) { /* ignore */ }
-      if (this.mode === 'http') api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, { method: 'POST', body: { type: 'leave', clientId: this.clientId, syncToken: this.syncToken || undefined } }).catch(() => {});
+      if (this.mode === 'http') api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, { method: 'POST', body: { type: 'leave', clientId: this.clientId, clientToken: this.clientToken || undefined, syncToken: this.syncToken || undefined } }).catch(() => {});
     }
   }
 }

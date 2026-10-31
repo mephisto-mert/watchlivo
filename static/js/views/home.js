@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261031_v45';
-import { state, set, getFriends } from '../store.js?v=20261031_v45';
-import { avatar, profileSetup } from '../profile.js?v=20261031_v45';
-import { api } from '../api.js?v=20261031_v45';
-import { createSelection } from './selection.js?v=20261031_v45';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261031_v45';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261031_v46';
+import { state, set, getFriends } from '../store.js?v=20261031_v46';
+import { avatar, profileSetup } from '../profile.js?v=20261031_v46';
+import { api } from '../api.js?v=20261031_v46';
+import { createSelection } from './selection.js?v=20261031_v46';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, openFriendsManagerModal } from './lobby.js?v=20261031_v46';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261031_v45', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261031_v46', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -40,7 +40,7 @@ export async function createRoomWithMedia(media) {
   const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
   const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
   const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
-  if (state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
+  if (cleanMedia && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
     document.body.classList.remove('mesh-minimized');
     window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
     window.vortexActions.pickMedia(cleanMedia);

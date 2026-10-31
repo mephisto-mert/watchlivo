@@ -157,7 +157,7 @@ def _cid_is_active(room: Dict[str, Any], cid: str, verified_uid: str = "") -> bo
     p = (room.get("participants") or {}).get(cid)
     if not isinstance(p, dict):
         return False
-    if verified_uid and (p.get("uid") == verified_uid or room.get("creatorId") == verified_uid):
+    if verified_uid and p.get("uid") == verified_uid:
         return False
     try:
         return now() - float(p.get("lastSeen") or 0.0) < 30.0
@@ -269,6 +269,10 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "duration": duration,
         "live": bool(data.get("live")),
         "isMusic": bool(data.get("isMusic") or data.get("mediaType") == "music"),
+        "musicMode": clean_str(data.get("musicMode"), 20),
+        "clipVideoId": clean_str(data.get("clipVideoId"), 60),
+        "isRemix": bool(data.get("isRemix")),
+        "versionBadge": clean_str(data.get("versionBadge"), 40),
         "musicPlatformLabel": clean_str(data.get("musicPlatformLabel"), 120),
         "mvUrl": clean_str(data.get("mvUrl"), 1500),
         "artist": clean_str(data.get("artist"), 100),
@@ -277,11 +281,18 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "audioPreviewUrl": clean_str(data.get("audioPreviewUrl"), 1500),
         "similar": [
             {
+                "id": clean_str(s.get("id") or s.get("trackId"), 80),
+                "trackId": clean_str(s.get("trackId") or s.get("id"), 80),
+                "videoId": clean_str(s.get("videoId"), 40),
+                "mvUrl": clean_str(s.get("mvUrl"), 1500),
+                "audioPreviewUrl": clean_str(s.get("audioPreviewUrl"), 1500),
                 "artist": clean_str(s.get("artist"), 80),
                 "songTitle": clean_str(s.get("songTitle") or s.get("title"), 100),
                 "title": clean_str(s.get("title") or s.get("songTitle"), 140),
                 "poster": clean_str(s.get("poster") or s.get("thumbnail"), 600),
                 "duration": max(90, int(float(s.get("duration") or 200))),
+                "sourcePlatform": clean_str(s.get("sourcePlatform"), 30),
+                "sourceBadge": clean_str(s.get("sourceBadge"), 60),
             }
             for s in (data.get("similar") or [])[:12]
             if isinstance(s, dict) and (s.get("songTitle") or s.get("title"))
@@ -511,7 +522,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     for src in (room.get("left") or {}, snap.get("left") or {}):
         if isinstance(src, dict):
             for lcid, lts in src.items():
-                if t - float(lts or 0) < 45.0:
+                if t - float(lts or 0) < HTTP_PARTICIPANT_TTL + 60.0:
                     left_map[lcid] = max(left_map.get(lcid, 0.0), float(lts or 0))
     merged_p = dict(room.get("participants") or {})
     for cid, sp in (snap.get("participants") or {}).items():
@@ -614,14 +625,14 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
         if same_m_key and s_unresolved and not r_unresolved:
             merged_m = dict(s_media)
-            for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle"):
+            for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                 if r_media.get(k):
                     merged_m[k] = r_media[k]
             room["media"] = merged_m
         else:
             room["media"] = s_media
     elif same_m_key and r_unresolved and not s_unresolved:
-        for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle"):
+        for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
             if s_media.get(k):
                 room["media"][k] = s_media[k]
         if s_m_time > r_m_time:
@@ -957,12 +968,14 @@ class RedisStore:
                         if ev_by_id:
                             room["events"] = sorted(ev_by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-35:]
                 if cached and cached.get("chat") and not room.get("_explicit_chat_clear") and (t - self.l1_write_ts.get(room_id, 0.0) < 60.0):
+                    cleared_c_at = max(float(room.get("chatClearedAt") or 0.0), float(cached.get("chatClearedAt") or 0.0))
                     by_id = {}
                     for cm in (cached.get("chat") or []) + (room.get("chat") or []):
-                        if isinstance(cm, dict) and cm.get("id"):
+                        if isinstance(cm, dict) and cm.get("id") and (cleared_c_at <= 0.0 or float(cm.get("ts") or 0.0) > cleared_c_at):
                             by_id[cm["id"]] = cm
                     if len(by_id) > len(room.get("chat") or []):
                         room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
+                        prune_chat(room)
                 self.l1_rooms[room_id] = room
                 self.l1_read_ts[room_id] = t
                 return room
@@ -979,11 +992,13 @@ class RedisStore:
             if not cur_m.get("url") and not cur_m.get("videoId") and not room.get("_explicit_media_clear"):
                 room["media"] = prev_cached["media"]
         if prev_cached and prev_cached.get("chat") and not room.get("_explicit_chat_clear"):
+            cleared_c_at = max(float(room.get("chatClearedAt") or 0.0), float(prev_cached.get("chatClearedAt") or 0.0))
             by_id = {}
             for cm in (prev_cached.get("chat") or []) + (room.get("chat") or []):
-                if isinstance(cm, dict) and cm.get("id"):
+                if isinstance(cm, dict) and cm.get("id") and (cleared_c_at <= 0.0 or float(cm.get("ts") or 0.0) > cleared_c_at):
                     by_id[cm["id"]] = cm
             room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
+            prune_chat(room)
         room.pop("_explicit_chat_clear", None)
         self.l1_rooms[rid] = room
         self.l1_read_ts[rid] = t
@@ -1063,7 +1078,9 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
         ):
             gone.append(room["participants"].pop(cid))
             left_map[cid] = t
-    room["left"] = {k: v for k, v in left_map.items() if t - float(v or 0) < 45.0}
+    room["left"] = {k: v for k, v in left_map.items() if t - float(v or 0) < HTTP_PARTICIPANT_TTL + 60.0}
+    if len(room["left"]) > 100:
+        room["left"] = dict(sorted(room["left"].items(), key=lambda kv: float(kv[1] or 0.0))[-100:])
     room["events"] = [e for e in (room.get("events") or []) if t - float(e.get("ts") or 0) < 25.0][-35:]
     room["signals"] = [s for s in (room.get("signals") or []) if t - float(s.get("ts") or 0) < 35.0][-240:]
     for gp in gone:
@@ -1080,6 +1097,7 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
     if not has_humans:
         room.setdefault("emptySince", t)
         if room.get("curated") or (t - float(room.get("emptySince") or t) > 3600.0):
+            room["_explicit_chat_clear"] = True
             room["chat"] = []
             room["polls"] = []
             if isinstance(room.get("media"), dict):
@@ -1176,10 +1194,12 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
             if old_cid == cid or old_p.get("transport") == "bot" or old_cid in live_ws:
                 continue
             stale_age = t_now - float(old_p.get("lastSeen") or 0.0)
+            same_uid = bool(p.get("uid") and old_p.get("uid") and p.get("uid") == old_p.get("uid"))
+            same_guest_name = bool(not p.get("uid") and not old_p.get("uid") and old_p.get("name") == p.get("name"))
             same_stale_user_device = (
                 stale_age > 12.0
                 and old_p.get("device") == p.get("device")
-                and ((p.get("uid") and old_p.get("uid") == p.get("uid")) or old_p.get("name") == p.get("name"))
+                and (same_uid or same_guest_name)
             )
             if same_stale_user_device:
                 room["participants"].pop(old_cid, None)
@@ -1374,7 +1394,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 elif cur_m.get("playing"):
                     elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
                     cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, inc_ct)
-                for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle"):
+                for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]
                 cur_m["updatedAt"] = t_now
@@ -1404,9 +1424,12 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if mtype == "play":
             room["media"]["playing"] = True
             room["media"]["lastExplicitPauseAt"] = 0.0
+            room["endedKey"] = ""
         elif mtype == "pause":
             room["media"]["playing"] = False
             room["media"]["lastExplicitPauseAt"] = t_now
+        elif mtype == "seek":
+            room["endedKey"] = ""
         elif mtype == "rate":
             try:
                 room["media"]["rate"] = min(2.0, max(0.25, float(data.get("rate", 1.0))))
@@ -1790,7 +1813,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             out.setdefault("direct", []).append((target, relay))
     elif mtype == "profile_update":
         me["name"] = clean_str(data.get("name"), 24) or me["name"]
-        me["color"] = clean_str(data.get("color"), 16) or me["color"]
+        raw_col = clean_str(data.get("color"), 16)
+        if re.match(r"^#[0-9a-fA-F]{3,8}$", raw_col):
+            me["color"] = raw_col
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
@@ -2044,6 +2069,7 @@ async def ws_endpoint(websocket: WebSocket):
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
         if was_empty_humans and (room.get("curated") or empty_elapsed > 3600.0):
+            room["_explicit_chat_clear"] = True
             room["chat"] = []
             room["polls"] = []
             if room.get("media"):
@@ -2092,13 +2118,20 @@ async def ws_endpoint(websocket: WebSocket):
             room = await STORE.get(room_id)
             if room:
                 t_disc = now()
+                prev_h = room.get("host_id")
                 cur_p = room.get("participants", {}).get(cid)
                 if cur_p:
                     cur_p["transport"] = "http"
-                    cur_p["lastSeen"] = t_disc
+                    cur_p["lastSeen"] = min(float(cur_p.get("lastSeen") or 0.0), t_disc - 16.0)
                 ensure_host(room)
+                if cur_p:
+                    cur_p["lastSeen"] = t_disc
                 room["lastActiveAt"] = t_disc
+                if room.get("host_id") != prev_h:
+                    room["rev"] = int(room.get("rev") or 1) + 1
                 await STORE.put(room)
+                if room.get("host_id") != prev_h:
+                    await broadcast(room_id, _room_event(room))
 
 
 _LOBBY_CACHE: Dict[str, Any] = {"ts": 0.0, "data": None}
@@ -2176,6 +2209,7 @@ async def http_sync(request: Request):
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
         if was_empty_humans and (room.get("curated") or empty_elapsed > 3600.0):
+            room["_explicit_chat_clear"] = True
             room["chat"] = []
             room["polls"] = []
             if room.get("media") and not data.get("syncToken"):
@@ -2208,7 +2242,7 @@ async def http_sync(request: Request):
             should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (caller_is_leader and cur_unresolved and inc_resolved)
             if should_sync_active:
                 if cur_unresolved and inc_resolved and not room_empty_media and media_key(room["media"]) == media_key(incoming_clean):
-                    for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle"):
+                    for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                         if incoming_clean.get(k):
                             room["media"][k] = incoming_clean[k]
                     if float(room["media"].get("currentTime") or 0.0) <= 12.0:
@@ -2272,21 +2306,7 @@ async def http_sync(request: Request):
                 "voipMode": room.get("voipMode", "all"),
                 "name": room.get("name", ""),
                 "host_id": room.get("host_id"),
-                "media": {
-                    "id": str(m.get("id") or ""), "tmdbId": str(m.get("tmdbId") or ""),
-                    "imdbId": str(m.get("imdbId") or ""), "mediaType": str(m.get("mediaType") or ""),
-                    "season": m.get("season"), "episode": m.get("episode"),
-                    "seriesTitle": str(m.get("seriesTitle") or ""), "originalTitle": str(m.get("originalTitle") or ""),
-                    "url": str(m.get("url") or ""), "videoId": str(m.get("videoId") or ""),
-                    "title": str(m.get("title") or ""), "provider": str(m.get("provider") or ""),
-                    "playing": bool(m.get("playing")), "currentTime": float(m.get("currentTime") or 0.0),
-                    "rate": float(m.get("rate") or 1.0), "updatedAt": float(m.get("updatedAt") or t_cur),
-                    "elapsedSinceUpdate": round(elapsed_w, 3), "serverNow": t_cur,
-                    "meshStateStatus": "PLAYING" if m.get("playing") else "PAUSED",
-                    "meshStatePosition": float(m.get("currentTime") or 0.0),
-                    "meshStateTime": float(m.get("updatedAt") or t_cur),
-                    "meshStatePlaybackSpeed": float(m.get("rate") or 1.0),
-                },
+                "media": ser_Quick["media"],
                 "syncToken": pack_sync_token(room),
                 "events": recent_ev, "signals": recent_sig, "errors": [],
             })

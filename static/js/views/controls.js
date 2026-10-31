@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261031_v45';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261031_v45';
-import { getProvider } from '../providers.js?v=20261031_v45';
-import { expectedPosition } from '../sync.js?v=20261031_v45';
-import { thumbFor } from './lobby.js?v=20261031_v45';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261031_v45';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261031_v45';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261031_v45';
-import { avatar } from '../profile.js?v=20261031_v45';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261031_v46';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261031_v46';
+import { getProvider } from '../providers.js?v=20261031_v46';
+import { expectedPosition } from '../sync.js?v=20261031_v46';
+import { thumbFor } from './lobby.js?v=20261031_v46';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261031_v46';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261031_v46';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261031_v46';
+import { avatar } from '../profile.js?v=20261031_v46';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -305,7 +305,7 @@ export function buildControls(frame, ctx) {
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const volRange = h('input', { type: 'range', min: '0', max: '100', value: String(host.volume), 'aria-label': 'Ses', oninput: (e) => { host.setVolume(e.target.value); unmute.classList.add('hidden'); update(); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
-  const skipBtn = h('button', { class: 'ctl-action', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
+  const skipBtn = h('button', { class: 'ctl-action', id: 'ctl-skip', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
   const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', ...tapProps(() => toggleMenu('speed')) }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
   const subBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', ...tapProps(() => toggleMenu('subtitle')) }, ico('subtitles'), h('span', { class: 'ctl-btn-lbl' }, 'Altyazı & Ses'));
   const snapBtn = h('button', { class: 'ctl-action', id: 'ctl-snap', 'data-tip': 'Anlık Kare Yakala (PNG)', 'aria-label': 'Ekran Görüntüsü', ...tapProps(() => takeVideoSnapshot()) }, ico('snapshot'));
@@ -373,7 +373,7 @@ export function buildControls(frame, ctx) {
   const ambilightCanvas = h('canvas', { class: 'ambilight-canvas', width: '32', height: '18' });
   let curFilter = localStorage.getItem('vortex_video_filter') || 'normal';
   let danmakuEnabled = localStorage.getItem('vortex_danmaku') !== 'off';
-  let ambilightEnabled = false;
+  let ambilightEnabled = localStorage.getItem('vortex_ambilight') === 'on';
   let autoAdvancingKey = '';
   let cancelledNextEpKey = '';
   const seatReactions = new Map();
@@ -381,7 +381,11 @@ export function buildControls(frame, ctx) {
   function applyVideoFilter() {
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
     const spec = VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal;
-    if (v) v.style.filter = spec.css;
+    if (v) {
+      v.style.filter = spec.css === 'none'
+        ? 'brightness(var(--video-brightness, 100%))'
+        : `${spec.css} brightness(var(--video-brightness, 100%))`;
+    }
   }
 
   function takeVideoSnapshot(opts = {}) {
@@ -477,10 +481,15 @@ export function buildControls(frame, ctx) {
     let targetEp = (curE || 1) + 1;
     let epName = '';
     try {
+      m.season = targetSeason;
+      m.episode = targetEp;
+      m.title = `${cleanTitle} — S${targetSeason}:B${targetEp} - ${targetEp}. Bölüm`;
+      update();
       showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
-        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(1800) : undefined;
+        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
         if (r.ok) {
           const sData = await r.json();
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
@@ -1444,7 +1453,7 @@ export function buildControls(frame, ctx) {
       menu.replaceChildren(
         backHeader('Oynatma Hızı', 'list'),
         h('div', { class: 'dim', style: { fontSize: '.75em', padding: '.3em .7em' } }, isLeader() ? 'Oynatma hızı' : 'Oynatma hızını yalnızca lider değiştirebilir'),
-        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
+        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { if (!isLeader()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; } closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
       );
       return;
     }

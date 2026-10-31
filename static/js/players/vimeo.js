@@ -7,9 +7,9 @@ function loadSdk() {
     const s = document.createElement('script');
     s.src = 'https://player.vimeo.com/api/player.js';
     s.onload = () => resolve();
-    s.onerror = () => reject(new Error('Vimeo SDK yüklenemedi'));
+    s.onerror = () => { sdkPromise = null; reject(new Error('Vimeo SDK yüklenemedi')); };
     document.head.append(s);
-    setTimeout(() => reject(new Error('Vimeo SDK zaman aşımı')), 12000);
+    setTimeout(() => { if (!(window.Vimeo && window.Vimeo.Player)) { sdkPromise = null; reject(new Error('Vimeo SDK zaman aşımı')); } }, 12000);
   });
   return sdkPromise;
 }

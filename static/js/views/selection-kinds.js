@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261031_v45';
-import { api, qs } from '../api.js?v=20261031_v45';
-import { parseVideoUrl } from '../providers.js?v=20261031_v45';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261031_v45';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261031_v45';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261031_v45';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261031_v46';
+import { api, qs } from '../api.js?v=20261031_v46';
+import { parseVideoUrl } from '../providers.js?v=20261031_v46';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261031_v46';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261031_v46';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261031_v46';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -531,7 +531,8 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   const contentArea = h('div', { class: 'catalog-sections-wrap' });
   let seq = 0;
   let catalogLoaded = false;
-  let activeCat = 'all';
+  let activeCat = p._initialCat || 'all';
+  delete p._initialCat;
   let currentItems = [];
   let currentQuery = '';
   let currentPage = 1;
@@ -761,7 +762,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       const filtered = currentItems.filter((it) => itemMatchesCat(it, activeCat));
       const catMeta = CATALOG_CATEGORIES.find((c) => c.id === activeCat) || CATALOG_CATEGORIES[0];
       if (!filtered.length) {
-        contentArea.replaceChildren(h('div', { class: 'lobby-empty' }, 'Bu kategoride içerik yükleniyor...'));
+        contentArea.replaceChildren(h('div', { class: 'lobby-empty' }, catalogLoaded ? 'Bu kategoride eşleşen içerik bulunamadı.' : 'Bu kategoride içerik yükleniyor...'));
         return;
       }
       contentArea.replaceChildren(

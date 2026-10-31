@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v45';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v45';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
-import { MeshConnection } from '../realtime.js?v=20261031_v45';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v45';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v45';
-import { buildLayout } from './mesh-layout.js?v=20261031_v45';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v45';
-import { Voice } from '../voice.js?v=20261031_v45';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v45';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v46';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v46';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v46';
+import { MeshConnection } from '../realtime.js?v=20261031_v46';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v46';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v46';
+import { buildLayout } from './mesh-layout.js?v=20261031_v46';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v46';
+import { Voice } from '../voice.js?v=20261031_v46';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v46';
 
 let ctx = null;
 
@@ -634,14 +634,14 @@ const actions = {
   skip() { ctx.conn.send('vote_skip'); },
   // Rave play-mode rules for a selection made inside the mesh.
   pickMedia(media) {
+    if (!ctx || !media) return;
     const mode = state.mesh?.playMode || 'leader';
     if (mode === 'leader' && !isLeader()) { toast("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir."); return; }
     if (mode === 'leader' || mode === 'cohost' || mode === 'quickplay' || !state.mesh?.media?.url) {
-      if (ctx) {
-        ctx.userPaused = false;
-        ctx.lastLeaderActionAt = Date.now();
-      }
-      const nextMedia = { ...media, playing: true, currentTime: 0, meshStateStatus: 'PLAYING', meshStatePosition: 0, meshStateTime: clock.now() };
+      ctx.userPaused = false;
+      ctx.lastLeaderActionAt = Date.now();
+      const startPos = Number.isFinite(Number(media.currentTime)) && Number(media.currentTime) > 0 ? Number(media.currentTime) : 0;
+      const nextMedia = { ...media, playing: true, currentTime: startPos, meshStateStatus: 'PLAYING', meshStatePosition: startPos, meshStateTime: clock.now() };
       if (state.mesh) {
         const updatedRoom = { ...state.mesh, media: nextMedia };
         set({ mesh: updatedRoom });
@@ -649,7 +649,7 @@ const actions = {
         rememberRoom(updatedRoom);
       }
       loadMedia(nextMedia);
-      ctx.conn.send('change_media', { ...media, currentTime: 0 });
+      ctx.conn.send('change_media', { ...media, currentTime: startPos });
       set({ view: { ...state.view, left: 'Collapsed' } });
       ctx.layout.update();
       return;
@@ -918,6 +918,15 @@ export async function enterMesh(app, params) {
     onP2pData: (pkt) => ctx?.conn?.onP2pPacket?.(pkt),
   });
   ctx.conn.p2pBroadcast = (pkt) => ctx?.voice?.broadcastP2p?.(pkt);
+  ctx.progressTimer = setInterval(() => {
+    const m = state.mesh?.media;
+    const ad = ctx?.host?.adapter;
+    if (m && ad && !ctx.host.loading && !(m.isMusic || m.mediaType === 'music')) {
+      const pos = ad.getTime?.() || 0;
+      const dur = ad.getDuration?.() || m.duration || 0;
+      if (pos > 5) saveWatchProgress(m, pos, dur);
+    }
+  }, 15000);
   ctx.conn.start();
   window.vortexActions = actions;
   window.__kinoxVoice = ctx.voice;
@@ -988,6 +997,15 @@ function onPlayerEvent(ev, arg) {
 
 export function leaveMeshView() {
   if (!ctx) return;
+  try {
+    const m = state.mesh?.media;
+    const ad = ctx?.host?.adapter;
+    if (m && ad && !ctx.host.loading && !(m.isMusic || m.mediaType === 'music')) {
+      const pos = ad.getTime?.() || 0;
+      const dur = ad.getDuration?.() || m.duration || 0;
+      if (pos > 5) saveWatchProgress(m, pos, dur);
+    }
+  } catch (e) { /* ignore */ }
   clearInterval(ctx.progressTimer);
   try { ctx.conn?.close(); } catch (e) { /* ignore */ }
   ctx.sync.stop();

@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261031_v45';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261031_v45';
-import { api, qs } from '../api.js?v=20261031_v45';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261031_v45';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261031_v45';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261031_v45';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261031_v46';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261031_v46';
+import { api, qs } from '../api.js?v=20261031_v46';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261031_v46';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261031_v46';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261031_v46';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -581,7 +581,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               onclick: () => {
                 heroIndex = (heroIndex - 1 + heroPool.length) % heroPool.length;
                 updateHeroBannerInPlace();
-                setTimeout(() => root.querySelector('.hero-mini-card.active')?.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' }), 20);
+                setTimeout(() => {
+                  const row = root.querySelector('.hero-showcase-row');
+                  const card = root.querySelector('.hero-mini-card.active');
+                  if (row && card) row.scrollTo({ left: card.offsetLeft - row.clientWidth / 2 + card.clientWidth / 2, behavior: 'smooth' });
+                }, 20);
               },
             }, '‹ Önceki'),
             h('button', {
@@ -591,7 +595,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               onclick: () => {
                 heroIndex = (heroIndex + 1) % heroPool.length;
                 updateHeroBannerInPlace();
-                setTimeout(() => root.querySelector('.hero-mini-card.active')?.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' }), 20);
+                setTimeout(() => {
+                  const row = root.querySelector('.hero-showcase-row');
+                  const card = root.querySelector('.hero-mini-card.active');
+                  if (row && card) row.scrollTo({ left: card.offsetLeft - row.clientWidth / 2 + card.clientWidth / 2, behavior: 'smooth' });
+                }, 20);
               },
             }, 'Sonraki ›'))),
         h('div', { class: 'hero-art-stage' },
@@ -743,6 +751,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   root.setProvider = (id) => { provider = id ? getProvider(id) : null; render(); };
   root.openFavorites = () => {
     provider = getProvider('cinema');
+    if (provider) provider._initialCat = 'favs';
     render();
     setTimeout(() => {
       const favTab = root.querySelector('.cat-tab-pill[data-cat="favs"]');

@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261031_v45';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261031_v45';
-import { avatar } from '../profile.js?v=20261031_v45';
-import { clock } from '../sync.js?v=20261031_v45';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261031_v45';
-import { copyInvite, inviteUrl } from './chat.js?v=20261031_v45';
-import { parseVideoUrl } from '../providers.js?v=20261031_v45';
-import { resolveMedia } from './selection.js?v=20261031_v45';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261031_v46';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261031_v46';
+import { avatar } from '../profile.js?v=20261031_v46';
+import { clock } from '../sync.js?v=20261031_v46';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261031_v46';
+import { copyInvite, inviteUrl } from './chat.js?v=20261031_v46';
+import { parseVideoUrl } from '../providers.js?v=20261031_v46';
+import { resolveMedia } from './selection.js?v=20261031_v46';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -53,7 +53,8 @@ function Settings(ctx) {
       h('div', { class: 'settings-group' }, h('h4', {}, 'Ses'), seg([
         ['off', 'Kapalı', 'Sesli sohbet yok'], ['leader', 'Yalnızca Lider', 'Yalnızca lider konuşabilir'], ['all', 'Herkes', 'Herkes sesli sohbet yapabilir']],
         m.voipMode === 'on' ? 'all' : m.voipMode, (k) => act('set_privacy', { voipMode: k }), !lead)),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Oda şifresi'), pwInput),
+      h('div', { class: 'settings-group' }, h('h4', {}, 'Oda şifresi'), pwInput,
+        (m.hasPassword && lead) ? h('button', { type: 'button', class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: () => act('set_privacy', { password: '' }) }, '🔓 Şifreyi Kaldır') : null),
       h('div', { class: 'settings-group' },
         h('h4', {}, 'Görünüm & Tema'),
         h('button', { type: 'button', class: 'btn primary', style: { width: '100%' }, onclick: () => openThemeModal() }, '🎨 Görünüm & Tema Ayarları')),
@@ -217,6 +218,7 @@ function Globe() {
 function Participants(ctx) {
   const el = h('div', { style: { paddingBottom: '1em' } });
   const update = () => {
+    if (el.contains(document.activeElement) && document.activeElement?.classList?.contains('peer-vol-slider')) return;
     const m = state.mesh;
     const hostOnly = isHostOnly();
     const duckOn = localStorage.getItem('vortex_voice_duck') !== 'off';

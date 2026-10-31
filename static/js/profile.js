@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261031_v45';
-import { api } from './api.js?v=20261031_v45';
-import { state, set } from './store.js?v=20261031_v45';
+import { h, popup, toast } from './ui.js?v=20261031_v46';
+import { api } from './api.js?v=20261031_v46';
+import { state, set } from './store.js?v=20261031_v46';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -81,7 +81,16 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
   } catch (e) { /* ignore */ }
-  const guest = loadProfile();
+  const guest = loadProfile() || {
+    id: 'g_' + Math.random().toString(36).slice(2, 10),
+    uid: '',
+    name: 'Misafir İzleyici',
+    handle: 'misafir',
+    color: AVATAR_COLORS[0],
+    isGuest: true,
+    verified: false,
+    authToken: '',
+  };
   try { set({ self: guest }); } catch (_) {}
   return guest;
 }
@@ -128,7 +137,10 @@ async function getFirebaseAuth() {
     ]);
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     return { auth: getAuth(app), GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, RecaptchaVerifier, signInWithPhoneNumber };
-  })().catch(() => null);
+  })().catch(() => {
+    _fbAuthPromise = null;
+    return null;
+  });
   return _fbAuthPromise;
 }
 

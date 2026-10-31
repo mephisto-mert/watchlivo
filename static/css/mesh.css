@@ -2953,7 +2953,7 @@ body.theater-mode .resize-handle {
 
 .reaction-emoji-grid {
   display: grid !important;
-  grid-template-columns: repeat(7, 1fr) !important;
+  grid-template-columns: repeat(7, minmax(0, 1fr)) auto !important;
   gap: 5px !important;
   width: 100% !important;
 }

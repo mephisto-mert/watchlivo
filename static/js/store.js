@@ -47,6 +47,7 @@ export function applyUiPrefs(prefs = state?.uiPrefs) {
   root.style.setProperty('--sub-bg', bgMap[prefs.subColor] || 'rgba(7, 8, 13, 0.75)');
   if (typeof window !== 'undefined') {
     window.__kinoxVoiceDuckEnabled = prefs.voiceDucking !== false;
+    try { localStorage.setItem('vortex_voice_duck', prefs.voiceDucking === false ? '0' : '1'); } catch (e) { /* ignore */ }
   }
 }
 

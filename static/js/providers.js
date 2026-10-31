@@ -313,6 +313,18 @@ export const PROVIDERS = [
 const INTERNAL_FALLBACK_PROVIDERS = [
   { id: 'youtube', name: 'YouTube', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
     idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
+  { id: 'vimeo', name: 'Vimeo', logo: LOGOS.vimeo, bg: '#10121a', accent: '#1ab7ea', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/vimeo\.com\/(?:video\/)?(\d+)/i) || [])[1] || null },
+  { id: 'twitch', name: 'Twitch', logo: LOGOS.twitch, bg: '#10121a', accent: '#9146ff', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i) || [])[1] || (u.match(/twitch\.tv\/([a-zA-Z0-9_]+)/i) || [])[1] || null },
+  { id: 'kick', name: 'Kick', logo: LOGOS.kick, bg: '#10121a', accent: '#53fc18', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/kick\.com\/([a-zA-Z0-9_-]+)/i) || [])[1] || null },
+  { id: 'dailymotion', name: 'Dailymotion', logo: LOGOS.dailymotion, bg: '#10121a', accent: '#0066dc', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/(?:dailymotion\.com\/video\/|dai\.ly\/)([a-zA-Z0-9]+)/i) || [])[1] || null },
+  { id: 'tiktok', name: 'TikTok', logo: LOGOS.tiktok, bg: '#10121a', accent: '#ff0050', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/tiktok\.com\/.*\/video\/(\d+)/i) || [])[1] || null },
+  { id: 'drive', name: 'Google Drive', logo: LOGOS.drive, bg: '#10121a', accent: '#34a853', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
   { id: 'web', name: 'Web', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link', freeNoAuth: true,
     idParser: (u) => (/^https?:\/\//i.test(u) ? u : null) },
 ];

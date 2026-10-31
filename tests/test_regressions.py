@@ -517,6 +517,48 @@ class RegressionTests(unittest.TestCase):
         after_texts = [c.get("text") for c in (r_after.json().get("room", {}).get("chat") or []) if not c.get("system")]
         self.assertNotIn("Silinecek mesaj", after_texts)
 
+    def test_v46_full_architecture_audit_fixes(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        # 1. clean_media & merge_sync_token preserve musicMode, clipVideoId, and playable similar fields
+        cm = rooms.clean_media({
+            "provider": "youtube",
+            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            "title": "Test Song",
+            "isMusic": True,
+            "musicMode": "video",
+            "clipVideoId": "dQw4w9WgXcQ",
+            "isRemix": True,
+            "versionBadge": "🎛️ Remix",
+            "similar": [{
+                "id": "sim_1",
+                "title": "Sim Track",
+                "songTitle": "Sim Track",
+                "artist": "Artist",
+                "videoId": "abc12345678",
+                "audioPreviewUrl": "https://example.com/p.m4a",
+            }],
+        })
+        self.assertEqual(cm.get("musicMode"), "video")
+        self.assertEqual(cm.get("clipVideoId"), "dQw4w9WgXcQ")
+        self.assertTrue(cm.get("isRemix"))
+        self.assertEqual(cm["similar"][0].get("videoId"), "abc12345678")
+        self.assertEqual(cm["similar"][0].get("audioPreviewUrl"), "https://example.com/p.m4a")
+
+        # 2. providers.js includes vimeo, twitch, kick, dailymotion, tiktok, drive in INTERNAL_FALLBACK_PROVIDERS
+        prov_js = (root / "static" / "js" / "providers.js").read_text(encoding="utf-8")
+        for pid in ("vimeo", "twitch", "kick", "dailymotion", "tiktok", "drive"):
+            self.assertIn(f"id: '{pid}'", prov_js)
+
+        # 3. controls.js combines video filter with brightness(--video-brightness) and skipBtn has id: 'ctl-skip'
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("brightness(var(--video-brightness, 100%))", ctl_js)
+        self.assertIn("id: 'ctl-skip'", ctl_js)
+
+        # 4. mesh.css fits 7 emojis + Mola Zamanı button on a single grid row
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("repeat(7, minmax(0, 1fr)) auto !important", mesh_css)
+
 
 if __name__ == '__main__':
     unittest.main()

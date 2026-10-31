@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261031_v45';
+import { toast } from './ui.js?v=20261031_v46';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -230,7 +230,8 @@ export class Voice {
       frame.appendChild(dock);
       if (!this._resizeObserverBound) {
         this._resizeObserverBound = true;
-        window.addEventListener('resize', () => this._layoutCameraBubbles(), { passive: true });
+        this._onResizeBound = () => this._layoutCameraBubbles();
+        window.addEventListener('resize', this._onResizeBound, { passive: true });
       }
     } else if (dock.parentElement !== frame) {
       if (callBar) {
@@ -590,11 +591,13 @@ export class Voice {
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
         const vStream = new MediaStream([e.track]);
+        st.remoteVideoStream = vStream;
         const p = (this.participants || []).find((x) => x.id === id);
         this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı', Boolean(p?.screen));
         e.track.onended = () => this._removeVideoBubble(id);
         e.track.onunmute = () => {
           const curP = (this.participants || []).find((x) => x.id === id);
+          if (curP?.cam === false && curP?.screen === false) return;
           this._attachVideoBubble(id, vStream, curP?.name || 'Katılımcı', Boolean(curP?.screen));
         };
       } else if (e.track.kind === 'audio') {
@@ -712,6 +715,11 @@ export class Voice {
         if (p.id && p.id !== selfId) {
           if (p.cam === false && p.screen === false) {
             this._removeVideoBubble(p.id);
+          } else if (p.cam || p.screen) {
+            const existingSt = this.peers.get(p.id);
+            if (existingSt?.remoteVideoStream && !document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`)) {
+              this._attachVideoBubble(p.id, existingSt.remoteVideoStream, p.name || 'Katılımcı', Boolean(p.screen));
+            }
           }
           const peerActive = Boolean(!p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
@@ -975,6 +983,13 @@ export class Voice {
     this.inCall = true;
     this._playCallChime(true);
     for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+    for (const [id, st] of this.peers.entries()) {
+      if (st?.audio) {
+        const volPct = this.getPeerVolume(id);
+        st.audio.muted = Boolean(this.deafened) || volPct === 0;
+        st.audio.play?.().catch(() => {});
+      }
+    }
     if (withMic && !this.micOn) {
       await this.toggleMic();
     }
@@ -1041,6 +1056,11 @@ export class Voice {
     clearInterval(this.screenSynthTimer);
     window.removeEventListener('pointerdown', this._unlockBound);
     window.removeEventListener('keydown', this._unlockBound);
+    if (this._onResizeBound) {
+      window.removeEventListener('resize', this._onResizeBound);
+      this._onResizeBound = null;
+      this._resizeObserverBound = false;
+    }
     for (const st of this.peers.values()) {
       try { st.pc.close(); } catch (e) { /* ignore */ }
       st.audio.srcObject = null;
@@ -1055,5 +1075,7 @@ export class Voice {
     this.screenStream = null;
     document.getElementById('vortex-cam-dock')?.remove();
     this.audioCtx?.close?.().catch(() => {});
+    this.synthAudioCtx?.close?.().catch(() => {});
+    if (typeof window !== 'undefined') window.__kinoxVoiceDuckFactor = 1.0;
   }
 }

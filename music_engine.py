@@ -431,12 +431,14 @@ def _dedup_and_enrich(lists: list[list[dict]], global_seen: set | None = None, a
 
 
 def _detect_artist_category(artist: str, genre: str = "") -> str:
-    a_low = (artist or "").lower()
-    g_low = (genre or "").lower()
-    for cat_id, seeds in CATEGORY_SEEDS.items():
-        for s in seeds:
-            if s.lower() in a_low or a_low in s.lower():
-                return cat_id
+    a_low = (artist or "").lower().strip()
+    g_low = (genre or "").lower().strip()
+    if len(a_low) >= 3:
+        for cat_id, seeds in CATEGORY_SEEDS.items():
+            for s in seeds:
+                s_low = s.lower()
+                if s_low in a_low or (len(a_low) >= 4 and a_low in s_low):
+                    return cat_id
     if "rap" in g_low or "hip-hop" in g_low:
         return "tr_rap"
     if "rock" in g_low or "alternative" in g_low:
@@ -863,7 +865,14 @@ async def yt_music_stream(request: Request):
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
     def_ct = "video/mp4" if kind == "video" else "audio/mp4"
     try:
-        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
+        try:
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
+        except Exception:
+            _YT_IOS_STREAM_CACHE.pop(vid, None)
+            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+            if not target:
+                raise
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
             "Content-Length": str(len(data)),
@@ -879,6 +888,8 @@ async def yt_music_stream(request: Request):
 
 
 def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, provider: str, poster: str, preview_url: str, mv_url_param: str = "", mode: str = "") -> dict:
+    if not url and video_id and re.match(r"^[A-Za-z0-9_-]{11}$", video_id):
+        url = f"https://www.youtube.com/watch?v={video_id}"
     is_generic_title = not song_title or song_title.strip() in ("Müzik & Klip Parçası", "Müzik", "Track")
     if url and is_generic_title:
         try:
@@ -929,7 +940,7 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     want_remix, var_badge = _classify_track_variant(song_title, "", artist)
     clean_q = f"{artist} {song_title}".strip() or "Semicenk Çıkmaz Bir Sokakta"
     mode_norm = "video" if mode.lower() in ("video", "clip", "mv") else ("audio" if mode.lower() in ("audio", "song") else "")
-    ckey = f"v14|{clean_q.lower()}|{'rmx' if want_remix else 'orig'}|{mode_norm}"
+    ckey = f"v15|{clean_q.lower()}|{'rmx' if want_remix else 'orig'}|{mode_norm}|{video_id}|{url}|{preview_url}|{mv_url_param}"
     cached = _RESOLVE_MUSIC_CACHE.get(ckey)
     if cached and time.time() - cached[0] < 120:
         return cached[1]
@@ -1072,8 +1083,8 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     else:
         primary_prov = "direct"
         primary_stype = "mp4"
-        primary_url = audio_stream or exact_mv or artist_mv
-        alt_urls = [u for u in [audio_stream, exact_mv, artist_mv] if u and u != primary_url]
+        primary_url = audio_stream or exact_mv or artist_mv or preview_url or mv_url_param or url
+        alt_urls = [u for u in [audio_stream, exact_mv, artist_mv, preview_url, mv_url_param] if u and u != primary_url]
 
     disp_song = _ensure_variant_title(song_title, want_remix, var_badge)
     disp_title = f"{artist} — {disp_song}" if artist and disp_song and artist.lower() not in disp_song.lower() else (disp_song or clean_q)
