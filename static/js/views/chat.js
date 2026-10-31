@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v43';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v43';
-import { avatar } from '../profile.js?v=20261031_v43';
-import { api, qs } from '../api.js?v=20261031_v43';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v43';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v44';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v44';
+import { avatar } from '../profile.js?v=20261031_v44';
+import { api, qs } from '../api.js?v=20261031_v44';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v44';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -137,6 +137,18 @@ export function playEmojiSfx(emoji) {
         osc.start(now + i * 0.05);
         osc.stop(now + i * 0.05 + 0.18);
       });
+    } else if (emoji === '☕') {
+      [587.33, 880, 1046.5].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.085);
+        g.gain.setValueAtTime(0.16, now + i * 0.085);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.085 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.085);
+        osc.stop(now + i * 0.085 + 0.24);
+      });
     } else {
       [640, 920].forEach((freq, i) => {
         const osc = ac.createOscillator();
@@ -239,9 +251,19 @@ export function buildChat(ctx) {
       input.focus();
     },
   }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
+  const breakBarBtn = h('button', {
+    type: 'button',
+    class: 'react-break-btn',
+    id: 'btn-chat-break',
+    'aria-label': 'Mola Zamanı',
+    title: 'Oda kurucusuna mola (duraklatma) isteği gönder',
+    onpointerdown: (e) => { e.preventDefault(); actions.requestBreak?.(); },
+    onclick: () => actions.requestBreak?.(),
+  }, '☕ Mola Zamanı');
   const reactions = h('div', { class: 'reaction-bar' },
     h('div', { class: 'reaction-emoji-grid' },
-      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e))));
+      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e)),
+      breakBarBtn));
 
   toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
     h('div', { class: 'chat-tools-sec-title' }, '⚡ Oda Araçları & Hızlı Paylaşım'),

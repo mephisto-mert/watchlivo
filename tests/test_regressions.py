@@ -466,6 +466,30 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("playBtn.dataset.sig", ctl_js)
         self.assertIn("@media (max-width: 960px) and (orientation: landscape)", mesh_css)
 
+    def test_v44_break_time_pause_request(self):
+        # Creator initializes room
+        r1 = self.client.post("/api/rooms/v44-break-room/sync", json={
+            "type": "init",
+            "clientId": "h_leader_1",
+            "username": "MertKurucu",
+        })
+        self.assertEqual(r1.status_code, 200)
+        # Viewer joins and sends break_request ("Mola Zamanı")
+        r2 = self.client.post("/api/rooms/v44-break-room/sync", json={
+            "type": "break_request",
+            "clientId": "h_viewer_2",
+            "username": "ElifIzleyici",
+            "videoTime": 124.5,
+        })
+        self.assertEqual(r2.status_code, 200)
+        room_data = r2.json().get("room", {})
+        ev_types = [e.get("type") for e in (room_data.get("events") or [])]
+        self.assertIn("break_request", ev_types)
+        brk_ev = next(e for e in room_data["events"] if e.get("type") == "break_request")
+        self.assertEqual(brk_ev.get("user"), "ElifIzleyici")
+        chat_texts = [c.get("text", "") for c in (room_data.get("chat") or [])]
+        self.assertTrue(any("Mola Zamanı" in t and "duraklatma isteği gönderdi" in t for t in chat_texts))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261031_v43';
-import { api } from './api.js?v=20261031_v43';
-import { state } from './store.js?v=20261031_v43';
+import { clock } from './sync.js?v=20261031_v44';
+import { api } from './api.js?v=20261031_v44';
+import { state } from './store.js?v=20261031_v44';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -231,7 +231,7 @@ export class MeshConnection {
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this._addBounded(this.seenEventIds, ev.id);
-      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat')) {
+      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat' || ev.type === 'break_request')) {
         this.onMessage?.(ev);
       }
     }

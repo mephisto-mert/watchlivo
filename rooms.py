@@ -1557,9 +1557,10 @@ def _handle_social(room, cid, data, out, name, is_host):
     mtype = data.get("type")
     me = room["participants"][cid]
     t_now = now()
+    req_act_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(data.get("actionId") or ""))[:32]
     rl = me.setdefault("_rl", {})
-    if mtype in ("chat", "reaction", "soundfx", "poll_create"):
-        cd = 3.5 if mtype == "poll_create" else (0.04 if mtype == "chat" else 0.15)
+    if mtype in ("chat", "reaction", "soundfx", "poll_create", "break_request"):
+        cd = 3.5 if mtype == "poll_create" else (1.5 if mtype == "break_request" else (0.04 if mtype == "chat" else 0.15))
         if t_now - float(rl.get(mtype) or 0.0) < cd:
             return out
         rl[mtype] = t_now
@@ -1657,6 +1658,34 @@ def _handle_social(room, cid, data, out, name, is_host):
             ev = {"id": req_act_id or uuid.uuid4().hex[:10], "ts": now(), "type": "soundfx", "sfx": sfx, "user": name, "cid": cid}
             room["events"] = (room.get("events") or [])[-34:] + [ev]
             out["broadcast"].append(({"type": "soundfx", "sfx": sfx, "user": name}, cid))
+    elif mtype == "break_request":
+        ev_id = req_act_id or ("brk_" + uuid.uuid4().hex[:10])
+        ev = {
+            "id": ev_id,
+            "ts": t_now,
+            "type": "break_request",
+            "user": name,
+            "uid": me.get("uid", ""),
+            "color": me.get("color", "#27DCC8"),
+            "cid": cid,
+        }
+        room["events"] = (room.get("events") or [])[-34:] + [ev]
+        msg = {
+            "id": "m_" + uuid.uuid4().hex[:10],
+            "user": name,
+            "uid": me.get("uid", ""),
+            "color": me.get("color", "#27DCC8"),
+            "text": f"☕ Mola Zamanı — {name} duraklatma isteği gönderdi.",
+            "breakRequest": True,
+            "time": now_hhmm(t_now),
+            "ts": t_now,
+            "reactions": {},
+        }
+        room.pop("_explicit_chat_clear", None)
+        room["chat"] = ((room.get("chat") or []) + [msg])[-MAX_CHAT:]
+        room["rev"] = int(room.get("rev") or 1) + 1
+        out["broadcast"].append((ev, None))
+        out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "voice_state":
         if room["voipMode"] == "off" or (room["voipMode"] == "leader" and not is_host):
             me["muted"], me["speaking"] = True, False

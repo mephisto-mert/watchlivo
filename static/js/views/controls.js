@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261031_v43';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261031_v43';
-import { getProvider } from '../providers.js?v=20261031_v43';
-import { expectedPosition } from '../sync.js?v=20261031_v43';
-import { thumbFor } from './lobby.js?v=20261031_v43';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261031_v43';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261031_v43';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261031_v43';
-import { avatar } from '../profile.js?v=20261031_v43';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261031_v44';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261031_v44';
+import { getProvider } from '../providers.js?v=20261031_v44';
+import { expectedPosition } from '../sync.js?v=20261031_v44';
+import { thumbFor } from './lobby.js?v=20261031_v44';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261031_v44';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261031_v44';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261031_v44';
+import { avatar } from '../profile.js?v=20261031_v44';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -187,6 +187,41 @@ export function buildControls(frame, ctx) {
   }, '1080p HD');
   const epBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', ...tapProps(() => openEpisodeModal()) }, '📺 S1:B1');
   const nextEpTopBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', ...tapProps(() => triggerNextEpisode(true)) }, '⏭️ Sonraki Bölüm');
+  const breakTopBtn = h('button', {
+    type: 'button',
+    class: 'btn ctl-pill ctl-break-pill',
+    id: 'ctl-break-btn',
+    title: 'Oda kurucusuna mola (duraklatma) isteği gönder',
+    ...tapProps(() => actions.requestBreak?.()),
+  }, '☕ Mola Zamanı');
+  let breakBannerTimer = null;
+  const breakBannerText = h('div', { class: 'break-banner-text', id: 'ctl-break-banner-text' }, '☕ Mola Zamanı — Duraklatma isteği geldi!');
+  const breakAcceptBtn = h('button', {
+    type: 'button',
+    class: 'btn primary break-banner-accept',
+    id: 'ctl-break-accept',
+    ...tapProps(() => {
+      breakBanner.classList.add('hidden');
+      clearTimeout(breakBannerTimer);
+      actions.pause?.();
+      toast('⏸ Mola verildi — video duraklatıldı');
+      showOverlay('☕ Mola Zamanı — Video duraklatıldı', 3000);
+    }),
+  }, '⏸ Şimdi Duraklat');
+  const breakDismissBtn = h('button', {
+    type: 'button',
+    class: 'btn break-banner-dismiss',
+    id: 'ctl-break-dismiss',
+    'aria-label': 'Kapat',
+    ...tapProps(() => {
+      breakBanner.classList.add('hidden');
+      clearTimeout(breakBannerTimer);
+    }),
+  }, '✕');
+  const breakBanner = h('div', { class: 'break-request-banner hidden', id: 'ctl-break-banner' },
+    h('span', { class: 'break-banner-ico' }, '☕'),
+    breakBannerText,
+    h('div', { class: 'break-banner-actions' }, breakAcceptBtn, breakDismissBtn));
   const subPillBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', ...tapProps(() => toggleMenu('subtitle')) }, '💬 Altyazı & Dublaj');
   const origBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-orig-btn', ...tapProps(() => openOfficialPlatform()) }, '🔐 Orijinal Platformda Aç');
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
@@ -721,7 +756,7 @@ export function buildControls(frame, ctx) {
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
-      h('div', { class: 'ctl-top-right' }, epBtn, nextEpTopBtn, origBtn, provLogo)),
+      h('div', { class: 'ctl-top-right' }, breakTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)),
     mid,
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
@@ -738,7 +773,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1780,6 +1815,7 @@ export function buildControls(frame, ctx) {
     const curSeasonNum = Number(m.season || parsedTitleEp?.[1] || parsedTitleEp?.[3] || 0);
     const curEpNum = Number(m.episode || parsedTitleEp?.[2] || parsedTitleEp?.[4] || 0);
     const isSeries = Boolean(m.mediaType === 'tv' || curSeasonNum > 0 || curEpNum > 0);
+    breakTopBtn.classList.toggle('hidden', !has);
     epBtn.classList.toggle('hidden', !isSeries);
     nextEpTopBtn.classList.toggle('hidden', !isSeries || (!isLeader() && !canSelectVideo()));
     if (isSeries) {
@@ -1916,9 +1952,22 @@ export function buildControls(frame, ctx) {
 
   return {
     update,
+    showBreakSentOverlay: () => {
+      showOverlay('☕ Mola Zamanı — Duraklatma isteği oda kurucusuna gönderildi', 3200);
+    },
+    showBreakRequestBanner: (userName) => {
+      const sender = String(userName || 'Bir izleyici').trim();
+      breakBannerText.textContent = `☕ ${sender} Mola Zamanı (duraklatma isteği) gönderdi!`;
+      breakBanner.classList.remove('hidden');
+      clearTimeout(breakBannerTimer);
+      breakBannerTimer = setTimeout(() => {
+        breakBanner.classList.add('hidden');
+      }, 12000);
+    },
     destroy: () => {
       clearInterval(tickTimer);
       clearTimeout(uiTimer);
+      clearTimeout(breakBannerTimer);
       window.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('fullscreenchange', onNativeFsChange);
       document.removeEventListener('webkitfullscreenchange', onNativeFsChange);

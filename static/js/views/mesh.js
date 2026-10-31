@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v43';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v43';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v43';
-import { MeshConnection } from '../realtime.js?v=20261031_v43';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v43';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v43';
-import { buildLayout } from './mesh-layout.js?v=20261031_v43';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v43';
-import { Voice } from '../voice.js?v=20261031_v43';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v43';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v44';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v44';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v44';
+import { MeshConnection } from '../realtime.js?v=20261031_v44';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v44';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v44';
+import { buildLayout } from './mesh-layout.js?v=20261031_v44';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v44';
+import { Voice } from '../voice.js?v=20261031_v44';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v44';
 
 let ctx = null;
 
@@ -485,6 +485,27 @@ function onMessage(data) {
     case 'typing': ctx?.layout.showTyping(data.user); break;
     case 'reaction': playEmojiSfx(data.emoji); ctx?.layout.floatEmoji(data.emoji, data.user); break;
     case 'soundfx': playRoomSfx(data.sfx); ctx?.layout.floatEmoji(data.sfx === 'clap' ? '👏' : data.sfx === 'laugh' ? '😂' : data.sfx === 'suspense' ? '🥁' : '🎉', data.user); break;
+    case 'break_request': {
+      if (ctx) {
+        if (!ctx.seenBreakIds) ctx.seenBreakIds = new Set();
+        if (data.id && ctx.seenBreakIds.has(data.id)) break;
+        if (data.id) ctx.seenBreakIds.add(data.id);
+      }
+      const senderName = data.user || 'Bir izleyici';
+      if (data.cid !== state.clientId) {
+        playEmojiSfx('☕');
+        ctx?.layout?.floatEmoji?.('☕', senderName);
+      }
+      if (isLeader() || isHostOnly()) {
+        ctx?.layout?.showBreakRequestBanner?.(senderName);
+        if (data.cid !== state.clientId) {
+          toast(`☕ ${senderName} mola zamanı (duraklatma isteği) gönderdi!`);
+        }
+      } else if (data.cid !== state.clientId) {
+        toast(`☕ ${senderName} oda kurucusuna duraklatma isteği gönderdi`);
+      }
+      break;
+    }
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
     case 'participants_updated': if (room) { set({ mesh: { ...room, participants: data.participants } }); ctx.layout.update(); ctx.voice?.syncPeers(data.participants); } break;
@@ -712,6 +733,25 @@ const actions = {
   typing() { ctx.conn.send('typing', { user: state.self.name }); },
   reaction(emoji) { playEmojiSfx(emoji); ctx.layout.floatEmoji(emoji, state.self?.name); ctx.conn.send('reaction', { emoji }); },
   soundfx(sfx) { playRoomSfx(sfx); ctx.layout.floatEmoji(sfx === 'clap' ? '👏' : sfx === 'laugh' ? '😂' : sfx === 'suspense' ? '🥁' : '🎉', state.self?.name); ctx.conn.send('soundfx', { sfx }); },
+  requestBreak() {
+    if (!ctx) return;
+    const nowMs = Date.now();
+    if (ctx.lastBreakReqAt && nowMs - ctx.lastBreakReqAt < 2000) {
+      toast('☕ Duraklatma isteği zaten gönderildi');
+      return;
+    }
+    ctx.lastBreakReqAt = nowMs;
+    const myName = state.self?.name || 'İzleyici';
+    playEmojiSfx('☕');
+    ctx.layout?.floatEmoji?.('☕', myName);
+    ctx.layout?.showBreakSentOverlay?.();
+    toast('☕ Mola Zamanı: Duraklatma isteği oda kurucusuna gönderildi!');
+    if (isLeader() || isHostOnly()) {
+      ctx.layout?.showBreakRequestBanner?.(myName);
+    }
+    const curPos = Number(ctx.host?.adapter?.getTime?.() || state.mesh?.media?.currentTime || 0);
+    ctx.conn.send('break_request', { videoTime: curPos });
+  },
   hostAction(action, extra = {}) {
     if (action === 'set_privacy' && state.mesh) {
       const patch = {};
