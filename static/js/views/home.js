@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261101_v48';
-import { state, set, getFriends } from '../store.js?v=20261101_v48';
-import { avatar, profileSetup } from '../profile.js?v=20261101_v48';
-import { api } from '../api.js?v=20261101_v48';
-import { createSelection } from './selection.js?v=20261101_v48';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261101_v48';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261101_v49';
+import { state, set, getFriends } from '../store.js?v=20261101_v49';
+import { avatar, profileSetup } from '../profile.js?v=20261101_v49';
+import { api } from '../api.js?v=20261101_v49';
+import { createSelection } from './selection.js?v=20261101_v49';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261101_v49';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261101_v48', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261101_v49', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -63,7 +63,7 @@ export async function createRoomWithMedia(media) {
     if (res.clientId) {
       sessionStorage.setItem('vortex_cid', res.clientId);
       sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
-      localStorage.setItem(`vortex_creator_flag_${res.room.id}`, '1');
+      localStorage.removeItem(`vortex_creator_flag_${res.room.id}`);
       localStorage.removeItem(`vortex_creator_${res.room.id}`);
     }
     if (res.clientToken) {
@@ -73,7 +73,7 @@ export async function createRoomWithMedia(media) {
     if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
   } catch (e) { /* ignore */ }
   rememberRoom(res.room);
-  window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1`);
+  window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
 }
 
 export function renderHome(app) {
@@ -296,6 +296,7 @@ export function renderHome(app) {
       emptyStreak = 0;
       rooms = next;
       draw();
+      updateMiniPip();
     } catch (e) { if (!rooms.length) lobbyBox.replaceChildren(h('div', { class: 'lobby-empty' }, 'Odalar yüklenemedi.')); }
   };
   lobbyBox.append(h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.5em' } }, h('div', { class: 'spinner' })));
@@ -359,7 +360,12 @@ function updateMiniPip() {
   if (closeBtn) {
     closeBtn.onclick = (e) => {
       e.stopPropagation();
-      try { sessionStorage.setItem('vortex_pip_dismissed', activeId); } catch {}
+      try {
+        sessionStorage.setItem('vortex_pip_dismissed', activeId);
+        if (!String(activeId).startsWith('tv-') && !String(activeId).startsWith('radyo-')) {
+          forgetRoom(activeId);
+        }
+      } catch {}
       pipEl.classList.remove('active');
     };
   }

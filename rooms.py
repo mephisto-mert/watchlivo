@@ -26,7 +26,7 @@ SYNC_SECRET = server_secret("VORTEX_SECRET")
 VALID_PRIVACY = ("public", "nearby", "friends", "private")
 VALID_PLAY_MODES = ("leader", "cohost", "autoplay", "quickplay", "vote")
 VALID_VOIP = ("off", "leader", "all")
-HTTP_PARTICIPANT_TTL = 600.0
+HTTP_PARTICIPANT_TTL = 60.0
 EMPTY_ROOM_TTL = 14400.0
 VOTE_WINDOW = 8.0
 MAX_CHAT = 80
@@ -36,8 +36,9 @@ MEDIA_FIELDS = ("provider", "videoId", "url", "title", "thumbnail", "channel", "
 SAFE_MERGE_KEYS = (
     "name", "privacy", "playMode", "voipMode", "queue", "skip_votes",
     "voteEndsAt", "endedKey", "rev", "polls", "curated", "isMature",
-    "creatorId", "host_id", "co_hosts", "host_transferred",
+    "creatorId", "creatorCid", "host_id", "co_hosts", "host_transferred",
 )
+_CLOSED_ROOMS: Dict[str, float] = {}
 SYNC_TOKEN_TTL = 86400.0
 CLIENT_TOKEN_TTL = 86400.0
 _JOIN_LIMITER = RateLimiter(12, 300.0, name="room_pwd")
@@ -161,7 +162,8 @@ def _cid_is_active(room: Dict[str, Any], cid: str, verified_uid: str = "", data:
         return False
     if data and isinstance(data, dict):
         req_name = clean_str(data.get("username"), 24)
-        if req_name and p.get("name") == req_name and p.get("device") == clean_str(data.get("device"), 16):
+        req_dev = clean_str(data.get("device"), 16)
+        if req_name and p.get("name") == req_name and (not req_dev or p.get("device") == req_dev):
             return False
     try:
         return now() - float(p.get("lastSeen") or 0.0) < 30.0
@@ -184,11 +186,13 @@ def _participant_identity_key(p: Dict[str, Any]) -> str:
 
 
 def _dedupe_room_participants(room: Dict[str, Any], prefer_cid: str = "") -> None:
-    """Ensure a single person never appears as 2 participants in the same room."""
+    """Remove stale ghost duplicate sessions while preserving active multi-device/multi-tab sessions and the room creator."""
     p_map = room.get("participants")
     if not isinstance(p_map, dict) or len(p_map) <= 1:
         return
     t_now = now()
+    creator_cid = str(room.get("creatorCid") or "").strip()
+    host_cid = str(room.get("host_id") or "").strip()
     by_ident: Dict[str, Tuple[str, Dict[str, Any]]] = {}
     to_remove: List[Tuple[str, str]] = []
     for cid, p in list(p_map.items()):
@@ -199,12 +203,23 @@ def _dedupe_room_participants(room: Dict[str, Any], prefer_cid: str = "") -> Non
             by_ident[ident] = (cid, p)
             continue
         prev_cid, prev_p = by_ident[ident]
-        if cid == prefer_cid:
+        prev_seen = float(prev_p.get("lastSeen") or 0.0)
+        cur_seen = float(p.get("lastSeen") or 0.0)
+        prev_alive = (t_now - prev_seen) <= 10.0
+        cur_alive = (t_now - cur_seen) <= 10.0
+        # If both sessions are actively polling within the last 10s, they are 2 separate open devices/tabs — keep both!
+        if prev_alive and cur_alive:
+            if prev_cid in (creator_cid, host_cid):
+                continue
+            if cid in (creator_cid, host_cid):
+                by_ident[ident] = (cid, p)
+            continue
+        if prev_cid in (creator_cid, host_cid) and prev_alive:
+            to_remove.append((cid, prev_cid))
+        elif cid in (creator_cid, host_cid) and cur_alive:
             to_remove.append((prev_cid, cid))
             by_ident[ident] = (cid, p)
-        elif prev_cid == prefer_cid:
-            to_remove.append((cid, prev_cid))
-        elif float(p.get("lastSeen") or 0.0) >= float(prev_p.get("lastSeen") or 0.0):
+        elif cur_seen >= prev_seen:
             to_remove.append((prev_cid, cid))
             by_ident[ident] = (cid, p)
         else:
@@ -216,6 +231,8 @@ def _dedupe_room_participants(room: Dict[str, Any], prefer_cid: str = "") -> Non
     for old_cid, keep_cid in to_remove:
         p_map.pop(old_cid, None)
         left_map[old_cid] = t_now
+        if room.get("creatorCid") == old_cid:
+            room["creatorCid"] = keep_cid
         if room.get("host_id") == old_cid:
             room["host_id"] = keep_cid
         if old_cid in co_list:
@@ -432,6 +449,7 @@ def new_room(room_id: str, name: str = "", privacy: str = "public", play_mode: s
         "passwordHash": hash_room_password(password),
         "creator": clean_str(creator, 24),
         "creatorId": clean_str(creator_id, 64),
+        "creatorCid": "",
         "host_id": None,
         "co_hosts": [],
         "createdAt": now(),
@@ -505,7 +523,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
         key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
     )[:24]
     snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "isMature", "creator",
-                                     "creatorId", "host_id", "co_hosts", "host_transferred",
+                                     "creatorId", "creatorCid", "host_id", "co_hosts", "host_transferred",
                                      "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
                                      "endedKey", "kicked", "left", "rev", "curated", "chatClearedAt")}
     # Secrets never leave the server: no password hash, no creator identity.
@@ -563,6 +581,8 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if not snap_active_humans:
         return room
     if room is None:
+        if room_id in _CLOSED_ROOMS and not snap.get("curated"):
+            return None
         fresh = new_room(
             room_id,
             clean_str(snap.get("name"), 45),
@@ -689,12 +709,18 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
                 room[k] = snap[k]
     if not room.get("creatorId") and snap.get("creatorId"):
         room["creatorId"] = snap["creatorId"]
+    if not room.get("creatorCid") and snap.get("creatorCid"):
+        room["creatorCid"] = snap["creatorCid"]
     if not room.get("creator") and snap.get("creator"):
         room["creator"] = snap["creator"]
     merged_co = list(dict.fromkeys(list(room.get("co_hosts") or []) + list(snap.get("co_hosts") or [])))
-    for pcid, pp in merged_p.items():
-        if isinstance(pp, dict) and pp.get("isCreator") and pcid not in merged_co:
-            merged_co.append(pcid)
+    c_cid_val = str(room.get("creatorCid") or "").strip()
+    if c_cid_val and c_cid_val in merged_p and not room.get("host_transferred") and c_cid_val not in merged_co:
+        merged_co.append(c_cid_val)
+    if c_cid_val and c_cid_val in merged_p:
+        for pcid, pp in merged_p.items():
+            if isinstance(pp, dict) and pcid != c_cid_val:
+                pp["isCreator"] = False
     room["co_hosts"] = [c for c in merged_co if c not in kicked and c not in left_map]
     cur_h_id = room.get("host_id")
     cur_h = merged_p.get(cur_h_id or "")
@@ -785,7 +811,7 @@ def sys_msg(room: Dict[str, Any], text: str, user: str = "") -> Dict[str, Any]:
 def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, Any]:
     t = now()
     prune_chat(room)
-    _dedupe_room_participants(room, prefer_cid=for_cid or "")
+    _dedupe_room_participants(room)
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     m = dict(_media_defaults(room))
@@ -815,6 +841,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     p_map = room.get("participants") or {}
     co_set = set(room.get("co_hosts") or [])
     host_id = room.get("host_id")
+    creator_cid = str(room.get("creatorCid") or "").strip() or (str(host_id or "") if not room.get("host_transferred") and not room.get("curated") else "")
     is_cohost_mode = room.get("playMode") == "cohost"
     raw_parts = list(p_map.values())
     raw_parts.sort(
@@ -831,7 +858,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         p_is_creator = _is_creator_of_room(room, p["id"], p)
         cp["isCreator"] = p_is_creator
         cp["isHost"] = p["id"] == host_id
-        cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode or p_is_creator
+        cp["isCoHost"] = ((p["id"] in co_set) and (p["id"] != creator_cid or p["id"] == host_id or p_is_creator)) or is_cohost_mode
         ser_parts.append(cp)
     if for_cid and for_cid in p_map and not any(x["id"] == for_cid for x in ser_parts):
         me_p = p_map[for_cid]
@@ -839,7 +866,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         me_is_creator = _is_creator_of_room(room, for_cid, me_p)
         cp_me["isCreator"] = me_is_creator
         cp_me["isHost"] = for_cid == host_id
-        cp_me["isCoHost"] = (for_cid in co_set) or is_cohost_mode or me_is_creator
+        cp_me["isCoHost"] = ((for_cid in co_set) and (for_cid != creator_cid or for_cid == host_id or me_is_creator)) or is_cohost_mode
         ser_parts = ser_parts[:59] + [cp_me]
     recent_events = [e for e in (room.get("events") or []) if t - float(e.get("ts") or 0) < 25.0][-30:]
     if for_cid:
@@ -849,7 +876,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     return {
         "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
         "voipMode": room["voipMode"], "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room["creator"],
-        "host_id": host_id, "co_hosts": list(co_set),
+        "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set),
         "curated": bool(room.get("curated")), "polls": (room.get("polls") or [])[-10:],
         "voteEndsAt": room["voteEndsAt"], "media": m, "queue": room["queue"],
         "skip_votes": room["skip_votes"], "participants": ser_parts,
@@ -875,6 +902,7 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     m_summary["currentTime"] = cur_time
     m_summary["liveTime"] = round(raw_live, 1)
     host_id = room.get("host_id")
+    creator_cid = str(room.get("creatorCid") or "").strip() or (str(host_id or "") if not room.get("host_transferred") and not room.get("curated") else "")
     co_set = set(room.get("co_hosts") or [])
     is_cohost_mode = room.get("playMode") == "cohost"
     parts_preview = []
@@ -886,9 +914,10 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
         "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room.get("creator", ""),
-        "host_id": host_id, "rev": int(room.get("rev") or 1),
+        "creatorCid": creator_cid, "host_id": host_id, "rev": int(room.get("rev") or 1),
         "curated": bool(room.get("curated")), "media": m_summary,
         "count": len(p_map), "participantCount": len(p_map), "participants": parts_preview,
+        "syncToken": pack_sync_token(room),
     }
 
 
@@ -911,6 +940,8 @@ class MemoryStore:
         return self.locks.setdefault(room_id, asyncio.Lock())
 
     async def get(self, room_id: str, force_fresh: bool = False) -> Optional[Dict[str, Any]]:
+        if room_id in _CLOSED_ROOMS and not any(s["id"] == room_id for s in CURATED_LIVE_SPECS):
+            return None
         r = self.rooms.get(room_id)
         if r is not None:
             return r
@@ -925,6 +956,7 @@ class MemoryStore:
         return r
 
     async def put(self, room: Dict[str, Any], force_disk: bool = False) -> None:
+        _CLOSED_ROOMS.pop(room["id"], None)
         self.rooms[room["id"]] = room
         t = now()
         if self.tmp_dir and (force_disk or t - float(room.get("_lastDiskAt") or 0.0) >= 3.0):
@@ -937,6 +969,7 @@ class MemoryStore:
                 pass
 
     async def delete(self, room_id: str) -> None:
+        _CLOSED_ROOMS[room_id] = now()
         self.rooms.pop(room_id, None)
         if self.tmp_dir:
             try:
@@ -1030,11 +1063,22 @@ class RedisStore:
 
     async def get(self, room_id: str, force_fresh: bool = False) -> Optional[Dict[str, Any]]:
         t = now()
+        is_curated_spec = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
+        if room_id in _CLOSED_ROOMS and not is_curated_spec:
+            self.l1_rooms.pop(room_id, None)
+            return None
         cached = self.l1_rooms.get(room_id)
         cached_has_media = bool(cached and isinstance(cached.get("media"), dict) and (cached["media"].get("url") or cached["media"].get("videoId")))
         if not force_fresh and cached and cached_has_media and (t - self.l1_read_ts.get(room_id, 0.0) < 0.2):
             return cached
-        raw = await self.cmd("GET", f"vortex:room:{room_id}")
+        mget_res = await self.cmd("MGET", f"vortex:room:{room_id}", f"vortex:closed:{room_id}")
+        raw = mget_res[0] if isinstance(mget_res, list) and len(mget_res) >= 1 else None
+        is_closed = bool(mget_res[1]) if isinstance(mget_res, list) and len(mget_res) >= 2 else False
+        if is_closed and not is_curated_spec:
+            _CLOSED_ROOMS[room_id] = t
+            self.l1_rooms.pop(room_id, None)
+            await self.fallback.delete(room_id)
+            return None
         if raw:
             try:
                 room = json.loads(raw)
@@ -1072,6 +1116,7 @@ class RedisStore:
 
     async def put(self, room: Dict[str, Any], force_disk: bool = False) -> None:
         rid = room["id"]
+        _CLOSED_ROOMS.pop(rid, None)
         t = now()
         prev_cached = self.l1_rooms.get(rid)
         if prev_cached and isinstance(prev_cached.get("media"), dict) and (prev_cached["media"].get("url") or prev_cached["media"].get("videoId")):
@@ -1098,9 +1143,11 @@ class RedisStore:
         await self.pipeline([
             ["SET", f"vortex:room:{rid}", payload, "EX", "86400"],
             ["SADD", "vortex:rooms", rid],
+            ["DEL", f"vortex:closed:{rid}"],
         ])
 
     async def delete(self, room_id: str) -> None:
+        _CLOSED_ROOMS[room_id] = now()
         self.l1_rooms.pop(room_id, None)
         self.l1_read_ts.pop(room_id, None)
         self.l1_write_ts.pop(room_id, None)
@@ -1108,6 +1155,7 @@ class RedisStore:
         await self.pipeline([
             ["DEL", f"vortex:room:{room_id}"],
             ["SREM", "vortex:rooms", room_id],
+            ["SET", f"vortex:closed:{room_id}", "1", "EX", "7200"],
         ])
 
     async def all(self) -> List[Dict[str, Any]]:
@@ -1206,24 +1254,51 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
         return False
     p = p or {}
     data = data or {}
-    if p.get("isCreator") or data.get("_internalCreator"):
+    if data.get("_internalCreator"):
         return True
+    t_now = now()
+    rid_str = str(room.get("id") or "")
+    live_ws = SOCKETS.get(rid_str, {})
+    p_map = room.get("participants") or {}
+    creator_cid = str(room.get("creatorCid") or "").strip()
+    if creator_cid:
+        if cid and cid == creator_cid:
+            return True
+        creator_p = p_map.get(creator_cid)
+        creator_cid_alive = bool(
+            creator_p
+            and creator_p.get("transport") != "bot"
+            and (creator_cid in live_ws or (t_now - float(creator_p.get("lastSeen") or 0.0) <= 10.0))
+        )
+        if creator_cid_alive:
+            return False
+    cur_host_id = str(room.get("host_id") or "").strip()
+    if cur_host_id and not room.get("host_transferred"):
+        if cid and cid == cur_host_id:
+            return True
+        cur_host_p = p_map.get(cur_host_id)
+        cur_host_alive = bool(
+            cur_host_p
+            and cur_host_p.get("transport") != "bot"
+            and (cur_host_id in live_ws or (t_now - float(cur_host_p.get("lastSeen") or 0.0) <= 10.0))
+        )
+        if cur_host_alive:
+            return False
     creator_id = str(room.get("creatorId") or "").strip()
     uid = str(p.get("uid") or data.get("uid") or data.get("userId") or "").strip()
-    if uid and creator_id and uid == creator_id:
-        return True
     if cid and creator_id and cid == creator_id:
+        return True
+    if uid and creator_id and uid == creator_id:
         return True
     if uid and creator_id and uid != creator_id and (creator_id.startswith(("u_", "uid_")) or uid.startswith(("u_", "uid_"))):
         return False
     raw_name = str(p.get("name") or data.get("username") or "").strip()
     p_slug = _slugify_name(raw_name)
     creator_slug = _slugify_name(room.get("creator") or "")
-    rid_str = str(room.get("id") or "")
-    if p_slug and len(p_slug) >= 3 and p_slug not in ("misafir", "misafir-izleyici", "izleyici"):
+    if p_slug and len(p_slug) >= 2 and p_slug not in ("misafir", "misafir-izleyici", "izleyici"):
         if (creator_slug and p_slug == creator_slug) or rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-"):
             return True
-    if data.get("isCreator") and not any(hp.get("transport") != "bot" and hp.get("id") != cid for hp in (room.get("participants") or {}).values()):
+    if data.get("isCreator") and not any(hp.get("transport") != "bot" and hp.get("id") != cid for hp in p_map.values()):
         return True
     return False
 
@@ -1246,6 +1321,7 @@ def ensure_host(room: Dict[str, Any]) -> None:
     if creator_candidates and not room.get("host_transferred"):
         creator_candidates.sort(key=lambda kv: float(kv[1].get("lastSeen") or 0.0), reverse=True)
         room["host_id"] = creator_candidates[0][0]
+        room["creatorCid"] = creator_candidates[0][0]
         return
     if humans:
         humans_sorted = sorted(humans, key=lambda c: float(room["participants"][c].get("lastSeen") or 0.0), reverse=True)
@@ -1307,6 +1383,8 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
                 room["participants"].pop(old_cid, None)
                 if room.get("host_id") == old_cid:
                     room["host_id"] = cid
+                if room.get("creatorCid") == old_cid:
+                    room["creatorCid"] = cid
                 co_l = list(room.get("co_hosts") or [])
                 if old_cid in co_l:
                     co_l.remove(old_cid)
@@ -1314,8 +1392,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
                         co_l.append(cid)
                     room["co_hosts"] = co_l
     is_creator = _is_creator_of_room(room, cid, p, data)
-    if is_creator:
-        p["isCreator"] = True
+    p["isCreator"] = bool(is_creator)
     pre_count = len(room.get("participants") or {})
     room["participants"][cid] = p
     _dedupe_room_participants(room, prefer_cid=cid)
@@ -1327,6 +1404,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     if is_creator and not room.get("host_transferred"):
         if not room.get("creatorId"):
             room["creatorId"] = p.get("uid") or cid
+        room["creatorCid"] = cid
         co = list(room.get("co_hosts") or [])
         if cid not in co:
             co.append(cid)
@@ -1397,6 +1475,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                     out.setdefault("direct", []).extend(sub_out["direct"])
                 if sub_out.get("kick"):
                     out["kick"] = sub_out["kick"]
+                if sub_out.get("close_room"):
+                    out["close_room"] = True
         return out
     me = room["participants"].get(cid)
     if not me:
@@ -1415,9 +1495,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     )
     cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
     is_creator = _is_creator_of_room(room, cid, me, data)
+    me["isCreator"] = bool(is_creator)
     if is_creator:
-        me["isCreator"] = True
         if not room.get("host_transferred"):
+            room["creatorCid"] = cid
             co = list(room.get("co_hosts") or [])
             if cid not in co:
                 co.append(cid)
@@ -1555,9 +1636,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             deny("7/24 canlı TV ve radyo odalarında yayın değiştirilemez.")
             return out
         room_has_media = bool(room["media"].get("url") or room["media"].get("videoId"))
-        creator_slug = _slugify_name(room.get("creator", ""))
-        same_creator_name = bool(p_slug and creator_slug and p_slug == creator_slug)
-        if mode in ("leader", "autoplay", "vote") and not can_control and not same_creator_name and room_has_media:
+        if mode in ("leader", "autoplay", "vote") and not can_control and room_has_media:
             deny("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.")
             return out
         if (is_creator and not room.get("host_transferred")) or not cur_host_alive:
@@ -1998,6 +2077,10 @@ def _handle_social(room, cid, data, out, name, is_host):
                 ensure_host(room)
             sys_msg(room, f"{name} tarafından odadan çıkarıldı", kicked["name"])
             out["kick"] = tid
+        elif act == "close_room" and (is_host or is_creator_match) and not room.get("curated"):
+            room["_close_room_now"] = True
+            out["close_room"] = True
+            return out
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append((_room_event(room), None))
@@ -2264,6 +2347,11 @@ async def ws_endpoint(websocket: WebSocket):
     join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid", "clientId", "clientToken")}
     join_data["uid"] = verified_uid
     async with STORE.lock(room_id):
+        is_curated_ws = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
+        if not is_curated_ws and room_id in _CLOSED_ROOMS and (now() - float(_CLOSED_ROOMS.get(room_id) or 0.0) < 7200.0):
+            await websocket.send_json({"type": "room_closed", "roomId": room_id})
+            await websocket.close()
+            return
         room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
         cid = signed_cid or requested_cid
         if not signed_cid and cid and _cid_is_active(room, cid, verified_uid, join_data):
@@ -2272,6 +2360,7 @@ async def ws_endpoint(websocket: WebSocket):
             cid = uuid.uuid4().hex[:10]
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
             room["creatorId"] = verified_uid or cid
+            room["creatorCid"] = cid
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             await websocket.send_json({"type": "kicked"})
@@ -2299,7 +2388,7 @@ async def ws_endpoint(websocket: WebSocket):
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
         SOCKETS.setdefault(room_id, {})[cid] = websocket
         await STORE.put(room)
-    await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room)})
+    await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
     await broadcast(room_id, {"type": "user_joined", "user": {"id": cid, "name": p["name"]}, "room": serialize(room)}, exclude=cid)
     if join_msg:
         await broadcast(room_id, {"type": "chat", "message": join_msg}, exclude=cid)
@@ -2316,7 +2405,7 @@ async def ws_endpoint(websocket: WebSocket):
                     r_mem["participants"][cid]["lastSeen"] = t_ping
                 await websocket.send_json({"type": "pong", "t0": data.get("t0", 0), "t0Epoch": data.get("t0Epoch", 0), "serverTime": t_ping})
                 continue
-            if data.get("type") == "leave":
+            if data.get("type") in ("leave", "close_room"):
                 explicit_ws_leave = True
                 break
             async with STORE.lock(room_id):
@@ -2325,6 +2414,11 @@ async def ws_endpoint(websocket: WebSocket):
                     break
                 room["participants"][cid]["lastSeen"] = now()
                 out = handle_action(room, cid, data)
+                if out.get("close_room") or room.get("_close_room_now"):
+                    await STORE.delete(room_id)
+                    _LOBBY_CACHE["ts"] = 0.0
+                    await broadcast(room_id, {"type": "room_closed", "roomId": room_id})
+                    break
                 await STORE.put(room)
             await deliver(room_id, out, websocket)
             _after(room_id, out)
@@ -2345,7 +2439,14 @@ async def ws_endpoint(websocket: WebSocket):
                 if explicit_ws_leave:
                     room.get("participants", {}).pop(cid, None)
                     room.setdefault("left", {})[cid] = t_disc
-                    is_creator_leave = bool(not room.get("curated") and (_is_creator_of_room(room, cid, cur_p, join_data) or (cid == prev_h and not room.get("host_transferred"))))
+                    is_creator_leave = bool(
+                        not room.get("curated")
+                        and (
+                            cid == room.get("creatorCid")
+                            or _is_creator_of_room(room, cid, cur_p, join_data)
+                            or (cid == prev_h and not room.get("host_transferred"))
+                        )
+                    )
                     has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
                     if not room.get("curated") and (is_creator_leave or not has_humans):
                         await STORE.delete(room_id)
@@ -2395,8 +2496,13 @@ async def http_sync(request: Request):
         since_rev = 0
     out: Dict[str, Any] = {}
     async with STORE.lock(room_id):
+        is_curated_id = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
         is_action = data.get("type") not in (None, "", "poll", "init", "ping")
-        room = await STORE.get(room_id, force_fresh=bool(is_action or data.get("type") == "init"))
+        room = await STORE.get(room_id, force_fresh=bool(is_action or data.get("type") in ("init", "leave", "close_room")))
+        if room is None and not is_curated_id and room_id in _CLOSED_ROOMS and (now() - float(_CLOSED_ROOMS.get(room_id) or 0.0) < 7200.0):
+            if data.get("type") in ("leave", "close_room"):
+                return JSONResponse({"ok": True, "roomClosed": True})
+            return JSONResponse({"ok": True, "roomClosed": True, "error": "room_closed"}, status_code=410)
         pre_merge_host = room.get("host_id") if room else None
         pre_merge_seen = float((room.get("participants") or {}).get(signed_cid or requested_cid, {}).get("lastSeen") or 0.0) if room else 0.0
         if data.get("syncToken"):
@@ -2404,11 +2510,11 @@ async def http_sync(request: Request):
         # A cid is only trusted when the server signed it, or when nobody is
         # currently using it (prevents session takeover by claiming a live cid).
         cid = signed_cid or requested_cid
-        if not signed_cid and cid and room is not None and _cid_is_active(room, cid, verified_uid):
+        if not signed_cid and cid and room is not None and _cid_is_active(room, cid, verified_uid, {**data, "uid": verified_uid}):
             cid = ""
         if not cid:
-            cid = requested_cid if data.get("type") == "leave" and requested_cid else "h_" + uuid.uuid4().hex[:8]
-        if data.get("type") == "leave":
+            cid = requested_cid if data.get("type") in ("leave", "close_room") and requested_cid else "h_" + uuid.uuid4().hex[:8]
+        if data.get("type") in ("leave", "close_room"):
             prev_h = room.get("host_id") if room else None
             left_p = room["participants"].pop(cid, None) if room else None
             if room and not left_p:
@@ -2416,7 +2522,7 @@ async def http_sync(request: Request):
                 for k_p, v_p in list((room.get("participants") or {}).items()):
                     if v_p.get("transport") == "bot":
                         continue
-                    if (verified_uid and v_p.get("uid") == verified_uid) or (req_nm and _slugify_name(v_p.get("name") or "") == req_nm):
+                    if (verified_uid and v_p.get("uid") == verified_uid) or (req_nm and _slugify_name(v_p.get("name") or "") == req_nm and k_p == room.get("creatorCid")):
                         left_p = room["participants"].pop(k_p, None)
                         room.setdefault("left", {})[k_p] = now()
             if room:
@@ -2424,7 +2530,8 @@ async def http_sync(request: Request):
                 is_creator_leave = bool(
                     not room.get("curated")
                     and (
-                        _is_creator_of_room(room, cid, left_p, {**data, "uid": verified_uid})
+                        cid == room.get("creatorCid")
+                        or _is_creator_of_room(room, cid, left_p, {**data, "uid": verified_uid})
                         or (cid == prev_h and not room.get("host_transferred"))
                     )
                 )
@@ -2454,6 +2561,7 @@ async def http_sync(request: Request):
         room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=verified_uid)
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
             room["creatorId"] = verified_uid or cid
+            room["creatorCid"] = cid
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
@@ -2524,6 +2632,11 @@ async def http_sync(request: Request):
         if is_action:
             out = handle_action(room, cid, data)
             mutated = True
+            if out.get("close_room") or room.get("_close_room_now"):
+                await STORE.delete(room_id)
+                _LOBBY_CACHE["ts"] = 0.0
+                await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
+                return JSONResponse({"ok": True, "roomClosed": True})
             if out.get("kick"):
                 room["kicked"] = (room["kicked"] + [out["kick"]])[-50:]
         elif is_new and SOCKETS.get(room_id) and (now() - float(room.get("_lastWsJoinBcast") or 0.0) > 1.0):
@@ -2532,7 +2645,7 @@ async def http_sync(request: Request):
         if mutated and not is_action:
             room["rev"] = int(room.get("rev") or 1) + 1
         t_cur = now()
-        if mutated or is_new or (t_cur - prev_seen > 15.0):
+        if mutated or is_new or (t_cur - prev_seen > 4.0):
             await STORE.put(room, force_disk=bool(mutated or is_new))
         cur_rev = int(room.get("rev") or 1)
         m = room["media"]
@@ -2584,18 +2697,15 @@ async def create_room(request: Request):
     name = clean_str(payload.get("name"), 45) or "Watchlivo Odası"
     slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
     room_id = f"{slug}-{uuid.uuid4().hex[:5]}"
+    _CLOSED_ROOMS.pop(room_id, None)
     req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
     creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
     verified_uid = str(request.scope.get("wl_uid") or "")
     creator_uid = verified_uid or clean_str(payload.get("creatorId"), 40) or creator_cid
-    media = payload.get("media")
-    has_incoming_media = isinstance(media, dict) and bool(media.get("url") or media.get("videoId"))
     creator_slug = _slugify_name(payload.get("creator") or "")
-    if verified_uid or creator_cid or len(creator_slug) >= 2:
+    if verified_uid or creator_cid or (len(creator_slug) >= 2 and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")):
         try:
             all_existing = await STORE.all()
-            t_now = now()
-            best_existing = None
             stale_creator_rooms = []
             for cand in all_existing:
                 if not isinstance(cand, dict) or cand.get("curated"):
@@ -2603,62 +2713,23 @@ async def create_room(request: Request):
                 cand_creator_match = bool(
                     (verified_uid and cand.get("creatorId") == verified_uid)
                     or (creator_cid and cand.get("creatorId") == creator_cid)
+                    or (creator_cid and cand.get("creatorCid") == creator_cid)
                     or (creator_cid and cand.get("host_id") == creator_cid)
-                    or (creator_slug and _slugify_name(cand.get("creator") or "") == creator_slug)
+                    or (creator_slug and creator_slug not in ("misafir", "izleyici", "misafir-izleyici") and _slugify_name(cand.get("creator") or "") == creator_slug)
                 )
-                if not cand_creator_match:
-                    continue
-                humans = [pt for pt in (cand.get("participants") or {}).values() if pt.get("transport") != "bot" and t_now - float(pt.get("lastSeen") or 0.0) < 120.0]
-                other_humans = [
-                    pt for cid_k, pt in (cand.get("participants") or {}).items()
-                    if pt.get("transport") != "bot"
-                    and cid_k != creator_cid
-                    and not (verified_uid and pt.get("uid") == verified_uid)
-                    and not (creator_slug and _slugify_name(pt.get("name") or "") == creator_slug)
-                    and t_now - float(pt.get("lastSeen") or 0.0) < 120.0
-                ]
-                if has_incoming_media and other_humans and t_now - float(cand.get("lastActiveAt") or 0.0) <= 600.0:
-                    if not best_existing or len(humans) > len([pt for pt in (best_existing.get("participants") or {}).values() if pt.get("transport") != "bot"]):
-                        best_existing = cand
-                else:
+                if cand_creator_match and cand.get("id"):
                     stale_creator_rooms.append(cand.get("id"))
             for old_rid in stale_creator_rooms:
-                if old_rid and (not best_existing or old_rid != best_existing.get("id")):
+                if old_rid and old_rid != room_id:
                     await STORE.delete(old_rid)
                     await broadcast(old_rid, {"type": "room_closed", "roomId": old_rid})
             if stale_creator_rooms:
                 _LOBBY_CACHE["ts"] = 0.0
-            if best_existing and best_existing.get("id"):
-                existing_id = best_existing["id"]
-                async with STORE.lock(existing_id):
-                    live_room = await STORE.get(existing_id) or best_existing
-                    add_participant(
-                        live_room,
-                        creator_cid,
-                        {
-                            "username": payload.get("creator") or "Lider",
-                            "color": payload.get("color") or "#27DCC8",
-                            "device": payload.get("device") or "Web",
-                            "country": "TR",
-                            "uid": verified_uid,
-                            "_internalCreator": True,
-                        },
-                        "http",
-                    )
-                    live_room["host_id"] = creator_cid
-                    set_media(live_room, media, live_room.get("creator") or "Lider", start=float(media.get("currentTime") or 0.0))
-                    live_room["media"]["playing"] = True
-                    live_room["rev"] = int(live_room.get("rev") or 1) + 5
-                    sys_msg(live_room, f"Şu an oynatılıyor: {live_room['media']['title']}", live_room.get("creator") or "Lider")
-                    await STORE.put(live_room, force_disk=True)
-                await broadcast(existing_id, _room_event(live_room, "media_changed", by=live_room.get("creator") or "Lider"))
-                _LOBBY_CACHE["ts"] = 0.0
-                client_token = sign_client_token(existing_id, creator_cid)
-                return JSONResponse({"ok": True, "clientId": creator_cid, "clientToken": client_token, "room": serialize(live_room, for_cid=creator_cid)})
         except Exception:
             pass
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
                     payload.get("creator", ""), creator_uid, payload.get("password", ""), bool(payload.get("isMature")))
+    room["creatorCid"] = creator_cid
     add_participant(
         room,
         creator_cid,
@@ -2677,6 +2748,7 @@ async def create_room(request: Request):
         "http",
     )
     room["host_id"] = creator_cid
+    room["creatorCid"] = creator_cid
     room["chat"] = []
     creator_label = room["creator"] or payload.get("creator") or "Lider"
     sys_msg(room, "odaya katıldı", creator_label)
@@ -2711,15 +2783,18 @@ async def list_rooms(request: Request):
         candidates = []
         valid_curated = {s["id"] for s in CURATED_LIVE_SPECS}
         for room in all_rooms:
-            if room.get("curated") and room.get("id") not in valid_curated:
-                await STORE.delete(room["id"])
+            rid_item = room.get("id")
+            if room.get("curated") and rid_item not in valid_curated:
+                await STORE.delete(rid_item)
+                continue
+            if not room.get("curated") and rid_item in _CLOSED_ROOMS and (t - float(_CLOSED_ROOMS.get(rid_item) or 0.0) < 7200.0):
                 continue
             removed = prune(room)
             p_map = room.get("participants") or {}
             has_humans = any(hp.get("transport") != "bot" for hp in p_map.values())
             needs_save = bool(removed)
             if room.get("curated"):
-                spec = next((s for s in CURATED_LIVE_SPECS if s["id"] == room.get("id")), None)
+                spec = next((s for s in CURATED_LIVE_SPECS if s["id"] == rid_item), None)
                 if spec and str(room.get("creator") or "").startswith("KINOX"):
                     room["creator"] = spec.get("creator", "Watchlivo 7/24")
                     if "kinox_bot" in p_map:
@@ -2735,32 +2810,36 @@ async def list_rooms(request: Request):
                         room["media"]["updatedAt"] = t
                     needs_save = True
             if needs_save:
-                async with STORE.lock(room["id"]):
+                async with STORE.lock(rid_item):
                     await STORE.put(room)
             p_cnt = len(p_map)
-            if (not p_cnt or not has_humans) and not room.get("curated"):
-                await STORE.delete(room["id"])
+            creator_cid_chk = str(room.get("creatorCid") or "").strip()
+            creator_missing = bool(creator_cid_chk and not room.get("host_transferred") and creator_cid_chk not in p_map)
+            if (not p_cnt or not has_humans or creator_missing) and not room.get("curated"):
+                await STORE.delete(rid_item)
                 continue
             if room["privacy"] == "private" or not p_cnt:
                 continue
             candidates.append(room)
-        # Deduplicate non-curated rooms by creator so a user switching episodes/movies never leaves ghost rooms behind
-        by_creator: Dict[str, Dict[str, Any]] = {}
+        # Deduplicate non-curated rooms by BOTH creatorId and creator slug so a user switching episodes/movies never leaves ghost rooms behind
+        by_creator_id: Dict[str, Dict[str, Any]] = {}
+        by_creator_slug: Dict[str, Dict[str, Any]] = {}
         deduped_candidates = []
         for r in sorted(candidates, key=lambda x: float(x.get("lastActiveAt") or x.get("createdAt") or 0.0), reverse=True):
             if r.get("curated"):
                 deduped_candidates.append(r)
                 continue
-            c_key = str(r.get("creatorId") or "").strip() or _slugify_name(r.get("creator") or "")
-            if c_key and c_key in by_creator:
-                # Stale earlier room by the same creator -> delete it if no other humans are actively watching
-                kept = by_creator[c_key]
-                r_humans = [hp for hp in (r.get("participants") or {}).values() if hp.get("transport") != "bot"]
-                if len(r_humans) <= 1 or _slugify_name(r.get("creator") or "") == _slugify_name(kept.get("creator") or ""):
-                    await STORE.delete(r["id"])
-                    continue
-            if c_key:
-                by_creator[c_key] = r
+            c_id_key = str(r.get("creatorId") or "").strip()
+            c_slug_key = _slugify_name(r.get("creator") or "")
+            if c_slug_key in ("misafir", "izleyici", "misafir-izleyici"):
+                c_slug_key = ""
+            if (c_id_key and c_id_key in by_creator_id) or (c_slug_key and len(c_slug_key) >= 2 and c_slug_key in by_creator_slug):
+                await STORE.delete(r["id"])
+                continue
+            if c_id_key:
+                by_creator_id[c_id_key] = r
+            if c_slug_key and len(c_slug_key) >= 2:
+                by_creator_slug[c_slug_key] = r
             deduped_candidates.append(r)
         candidates = deduped_candidates
         candidates.sort(key=lambda r: (0 if not r.get("curated") else 1, -len(r.get("participants") or {}), CURATED_ORDER.get(r.get("id", ""), 999), r.get("id", "")))
@@ -2773,6 +2852,8 @@ async def list_rooms(request: Request):
 
 async def room_info(request: Request):
     room_id = (request.path_params.get("room_id") or "").lower()
+    if room_id in _CLOSED_ROOMS and (now() - float(_CLOSED_ROOMS.get(room_id) or 0.0) < 7200.0):
+        return JSONResponse({"error": "Bu oda artık mevcut değil", "roomClosed": True}, status_code=410)
     room = (await STORE.get(room_id) or await ensure_curated_room(room_id)) if valid_room_id(room_id) else None
     if not room:
         return JSONResponse({"error": "Bu oda artık mevcut değil"}, status_code=404)

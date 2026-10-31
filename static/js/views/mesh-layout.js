@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261101_v48';
-import { state, setView, canSelectVideo } from '../store.js?v=20261101_v48';
-import { navIcon, logo } from './home.js?v=20261101_v48';
-import { createSelection } from './selection.js?v=20261101_v48';
-import { buildControls } from './controls.js?v=20261101_v48';
-import { buildChat } from './chat.js?v=20261101_v48';
-import { PANELS } from './panels.js?v=20261101_v48';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261101_v49';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261101_v49';
+import { navIcon, logo } from './home.js?v=20261101_v49';
+import { createSelection } from './selection.js?v=20261101_v49';
+import { buildControls } from './controls.js?v=20261101_v49';
+import { buildChat } from './chat.js?v=20261101_v49';
+import { PANELS } from './panels.js?v=20261101_v49';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -100,8 +100,9 @@ export function buildLayout(app, ctx) {
     const voteCount = (m?.queue || []).length;
     const people = Number(m?.participantCount || m?.count || (m?.participants || []).length) || 1;
     const selDisabled = !canSelectVideo();
+    const isCreatorOrHost = Boolean(m && !m.curated && isHostOnly());
     const mediaTitle = m?.media?.title || '';
-    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}|${mediaTitle}`;
+    const navSig = `${L}|${R}|${voteCount}|${people}|${selDisabled}|${isCreatorOrHost}|${m?.name || ''}|${m?.privacy || ''}|${state.connection}|${theaterMode}|${mediaTitle}`;
     if (navSig === lastNavSig) return;
     lastNavSig = navSig;
     const openSide = (side, tab) => {
@@ -114,7 +115,19 @@ export function buildLayout(app, ctx) {
     };
     nav.replaceChildren(
       h('div', { class: 'navbar-left' },
-        roomActionBtn('close', 'Ayrıl', 'Odadan Ayrıl', async () => { if (await confirmPopup('Odadan ayrılmak istediğinize emin misiniz?', 'Ayrıl', 'Kal')) actions.leave(); }, { variant: 'leave-pill' }),
+        roomActionBtn(
+          'close',
+          isCreatorOrHost ? 'Odayı Kapat' : 'Ayrıl',
+          isCreatorOrHost ? 'Odayı Kapat ve Herkesi Çıkar' : 'Odadan Ayrıl',
+          async () => {
+            const msg = isCreatorOrHost
+              ? 'Odayı kapatıp çıkmak istediğinize emin misiniz? Oda herkes için kapanacaktır.'
+              : 'Odadan ayrılmak istediğinize emin misiniz?';
+            const okLbl = isCreatorOrHost ? 'Odayı Kapat' : 'Ayrıl';
+            if (await confirmPopup(msg, okLbl, 'Kal')) actions.leave(isCreatorOrHost);
+          },
+          { variant: 'leave-pill', id: 'nav-leave-room' }
+        ),
         roomActionBtn('searchVideo', 'İçerik Seç', 'Video & Katalog Ara', () => {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');

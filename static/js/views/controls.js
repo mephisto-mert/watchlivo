@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v48';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v48';
-import { getProvider } from '../providers.js?v=20261101_v48';
-import { expectedPosition } from '../sync.js?v=20261101_v48';
-import { thumbFor } from './lobby.js?v=20261101_v48';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v48';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v48';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v48';
-import { avatar } from '../profile.js?v=20261101_v48';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v49';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v49';
+import { getProvider } from '../providers.js?v=20261101_v49';
+import { expectedPosition } from '../sync.js?v=20261101_v49';
+import { thumbFor } from './lobby.js?v=20261101_v49';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v49';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v49';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v49';
+import { avatar } from '../profile.js?v=20261101_v49';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1146,6 +1146,10 @@ export function buildControls(frame, ctx) {
   }
 
   function openEpisodeModal() {
+    if (!canSelectVideo()) {
+      toast("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider bölüm değiştirebilir.");
+      return;
+    }
     const m = state.mesh?.media;
     if (!m) return;
     const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
@@ -1959,6 +1963,10 @@ export function buildControls(frame, ctx) {
     back10Btn.classList.toggle('disabled-control', !leader);
     fwd10Btn.classList.toggle('locked', !leader);
     fwd10Btn.classList.toggle('disabled-control', !leader);
+    centerBack10Btn.classList.toggle('locked', !leader);
+    centerBack10Btn.classList.toggle('disabled-control', !leader);
+    centerFwd10Btn.classList.toggle('locked', !leader);
+    centerFwd10Btn.classList.toggle('disabled-control', !leader);
     if (!leader) {
       back10Btn.setAttribute('data-tip', 'Videoyu yalnızca oda başkanı sarabilir');
       fwd10Btn.setAttribute('data-tip', 'Videoyu yalnızca oda başkanı sarabilir');

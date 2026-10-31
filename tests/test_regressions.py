@@ -261,38 +261,43 @@ class RegressionTests(unittest.TestCase):
         rooms.add_participant(room, "h_web1", {"username": "Mert Can Yıldız", "device": "Web", "_internalCreator": True}, "http")
         room["host_id"] = "h_web1"
         rooms.set_media(room, {"title": "Zmora", "url": "https://cdn.example.com/zmora/master.m3u8", "provider": "hls"}, "Mert Can Yıldız", 120.0)
-        # Second device (Desktop App) of the same creator joins
+        # Second device (Desktop App) with the same display name joins while h_web1 is active
         rooms.add_participant(room, "h_desk2", {"username": "Mert Can Yıldız", "device": "Masaüstü"}, "http")
         # Guest viewer joins
         rooms.add_participant(room, "h_guest3", {"username": "Misafir", "device": "Mobil"}, "http")
-        # Host stays on h_web1 (no ping-pong host stealing while h_web1 is alive), and BOTH creator sessions have isCreator=True & co_hosts
+        # Strict single-creator lock: ONLY h_web1 (creatorCid) is creator/host; h_desk2 is a regular viewer while h_web1 is active
         self.assertEqual(room["host_id"], "h_web1")
+        self.assertEqual(room["creatorCid"], "h_web1")
         self.assertIn("h_web1", room["co_hosts"])
-        self.assertIn("h_desk2", room["co_hosts"])
+        self.assertNotIn("h_desk2", room["co_hosts"])
         ser = rooms.serialize(room)
         by_id = {p["id"]: p for p in ser["participants"]}
         self.assertTrue(by_id["h_web1"]["isCreator"])
         self.assertTrue(by_id["h_web1"]["isHost"])
-        self.assertTrue(by_id["h_desk2"]["isCreator"])
-        self.assertTrue(by_id["h_desk2"]["isCoHost"])
+        self.assertFalse(by_id["h_desk2"]["isCreator"])
+        self.assertFalse(by_id["h_desk2"]["isCoHost"])
         self.assertFalse(by_id["h_guest3"]["isCreator"])
-        # Heartbeat from non-host (h_desk2) while h_web1 is alive is ignored so two windows don't fight over timestamps
+        # Heartbeat from non-host (h_desk2) while h_web1 is alive is ignored
         rooms.handle_action(room, "h_desk2", {"type": "heartbeat", "currentTime": 15.0, "playing": True})
         self.assertGreaterEqual(room["media"]["currentTime"], 120.0)
         # Heartbeat from active host (h_web1) updates server timestamp and emits heartbeat sync event
         hb_out = rooms.handle_action(room, "h_web1", {"type": "heartbeat", "currentTime": 145.5, "playing": True})
         self.assertAlmostEqual(room["media"]["currentTime"], 145.5, places=1)
         self.assertTrue(any(e.get("action") == "heartbeat" for e, _ in hb_out["broadcast"]))
-        # Explicit seek/pause from creator's second device (h_desk2) promotes h_desk2 to host_id and syncs all clients
-        seek_out = rooms.handle_action(room, "h_desk2", {"type": "seek", "currentTime": 310.25})
-        self.assertEqual(room["host_id"], "h_desk2")
+        # Unpromoted second device (h_desk2) CANNOT seek while h_web1 is active
+        denied_seek = rooms.handle_action(room, "h_desk2", {"type": "seek", "currentTime": 310.25})
+        self.assertEqual(room["host_id"], "h_web1")
+        self.assertLess(room["media"]["currentTime"], 200.0)
+        self.assertTrue(any(m.get("type") == "error" for m in denied_seek["reply"]))
+        # Creator h_web1 CAN seek and syncs all clients
+        seek_out = rooms.handle_action(room, "h_web1", {"type": "seek", "currentTime": 310.25})
         self.assertAlmostEqual(room["media"]["currentTime"], 310.25, places=2)
         self.assertEqual(seek_out["broadcast"][0][0]["action"], "seek")
-        # If h_desk2 goes stale (>10s) and creator refreshes on Web with new cid h_web_new, h_web_new immediately reclaims host_id
-        room["participants"]["h_desk2"]["lastSeen"] = rooms.now() - 12.0
+        # If h_web1 goes stale (>10s) and creator refreshes on Web with new cid h_web_new, h_web_new immediately reclaims host_id & creatorCid
         room["participants"]["h_web1"]["lastSeen"] = rooms.now() - 12.0
         rooms.add_participant(room, "h_web_new", {"username": "Mert Can Yıldız", "device": "Web"}, "http")
         self.assertEqual(room["host_id"], "h_web_new")
+        self.assertEqual(room["creatorCid"], "h_web_new")
 
     def test_v34_merge_sync_token_preserves_creator_and_rejects_spoofing(self):
         room = rooms.new_room(
@@ -452,8 +457,8 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("setTimeout(() => ac.close()", chat_js)
         self.assertIn("playEmojiSfx(emoji)", mesh_js)
 
-        # 4. App-switch resilience (600s TTL + visibilitychange recovery)
-        self.assertGreaterEqual(rooms.HTTP_PARTICIPANT_TTL, 600.0)
+        # 4. App-switch resilience (60s TTL + visibilitychange recovery)
+        self.assertGreaterEqual(rooms.HTTP_PARTICIPANT_TTL, 45.0)
         rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
         self.assertIn("visibilitychange", rt_js)
 
@@ -577,6 +582,94 @@ class RegressionTests(unittest.TestCase):
         # 3. mesh.js preserves resolved URL in applyRoom and handles alreadyLoadedResolved across aud/resolve-catalog
         mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
         self.assertIn("stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)", mesh_js)
+
+    def test_v49_creator_only_seek_and_complete_room_closure(self):
+        # 1. Creator creates a room via /api/rooms/create
+        r_create = self.client.post("/api/rooms/create", json={
+            "name": "MC odası",
+            "creator": "MC",
+            "clientId": "h_mc_creator_1",
+            "creatorId": "h_mc_creator_1",
+            "privacy": "public",
+            "playMode": "leader",
+            "media": {
+                "title": "Arcane — S1B1",
+                "url": "https://cdn.example.com/arcane/s1e1.m3u8",
+                "provider": "hls",
+                "currentTime": 50.0,
+            },
+        })
+        self.assertEqual(r_create.status_code, 200)
+        room_info = r_create.json()["room"]
+        room_id = room_info["id"]
+        sync_token = room_info["syncToken"]
+        self.assertEqual(room_info["creatorCid"], "h_mc_creator_1")
+
+        # 2. Second participant joins with the EXACT SAME username ("MC") and userId ("h_mc_creator_1")
+        r_join2 = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "type": "init",
+            "clientId": "h_mc_viewer_2",
+            "userId": "h_mc_creator_1",
+            "username": "MC",
+            "syncToken": sync_token,
+        })
+        self.assertEqual(r_join2.status_code, 200)
+        r2_room = r_join2.json()["room"]
+        by_cid = {p["id"]: p for p in r2_room["participants"]}
+        self.assertEqual(len(by_cid), 2)
+        self.assertTrue(by_cid["h_mc_creator_1"]["isCreator"])
+        self.assertTrue(by_cid["h_mc_creator_1"]["isHost"])
+        self.assertFalse(by_cid["h_mc_viewer_2"]["isCreator"])
+        self.assertFalse(by_cid["h_mc_viewer_2"]["isHost"])
+        self.assertFalse(by_cid["h_mc_viewer_2"]["isCoHost"])
+
+        # 3. Second participant attempts to seek -> DENIED! Time stays ~50s
+        r_seek_denied = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "type": "seek",
+            "clientId": "h_mc_viewer_2",
+            "userId": "h_mc_creator_1",
+            "username": "MC",
+            "currentTime": 900.0,
+        })
+        self.assertEqual(r_seek_denied.status_code, 200)
+        denied_payload = r_seek_denied.json()
+        self.assertLess(denied_payload["room"]["media"]["currentTime"], 100.0)
+        self.assertTrue(len(denied_payload.get("errors") or []) > 0)
+
+        # 4. Creator seeks -> ALLOWED! Time updates to 420.0
+        r_seek_ok = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "type": "seek",
+            "clientId": "h_mc_creator_1",
+            "userId": "h_mc_creator_1",
+            "username": "MC",
+            "currentTime": 420.0,
+        })
+        self.assertEqual(r_seek_ok.status_code, 200)
+        self.assertAlmostEqual(r_seek_ok.json()["room"]["media"]["currentTime"], 420.0, places=1)
+
+        # 5. Creator closes the room -> permanently closed for everyone
+        r_close = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "type": "close_room",
+            "clientId": "h_mc_creator_1",
+            "username": "MC",
+        })
+        self.assertEqual(r_close.status_code, 200)
+        self.assertTrue(r_close.json().get("roomClosed"))
+
+        # 6. Viewer 2 polls (even passing old syncToken!) -> receives 410 roomClosed and room is NOT resurrected
+        r_poll_after = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "type": "poll",
+            "clientId": "h_mc_viewer_2",
+            "username": "MC",
+            "syncToken": sync_token,
+        })
+        self.assertEqual(r_poll_after.status_code, 410)
+        self.assertTrue(r_poll_after.json().get("roomClosed"))
+
+        # 7. Room does not appear in /api/rooms
+        r_list = self.client.get("/api/rooms")
+        listed_ids = [rm["id"] for rm in (r_list.json().get("rooms") or [])]
+        self.assertNotIn(room_id, listed_ids)
 
 
 if __name__ == '__main__':

@@ -96,13 +96,16 @@ export function setView(side, value) {
 export const isCreatorSelf = () => {
   if (!state.mesh || state.mesh.curated) return false;
   const myCid = state.clientId;
+  if (!myCid) return false;
   const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
   if (meP?.isCreator) return true;
-  const selfNameLow = String(state.self?.name || '').trim().toLowerCase();
-  if (selfNameLow && !['misafir', 'misafir izleyici', 'izleyici'].includes(selfNameLow) && state.mesh.creator && selfNameLow === String(state.mesh.creator).trim().toLowerCase()) return true;
+  if (state.mesh.creatorCid && state.mesh.creatorCid !== myCid) {
+    const creatorAlive = Array.isArray(state.mesh.participants) && state.mesh.participants.some((p) => p.id === state.mesh.creatorCid);
+    if (creatorAlive) return false;
+  }
   try {
-    const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`) || localStorage.getItem(`vortex_creator_${state.mesh.id}`);
-    if (savedCreator && myCid && savedCreator === myCid) return true;
+    const savedCreator = sessionStorage.getItem(`vortex_creator_${state.mesh.id}`);
+    if (savedCreator && savedCreator === myCid) return true;
   } catch (e) { /* ignore */ }
   return false;
 };
