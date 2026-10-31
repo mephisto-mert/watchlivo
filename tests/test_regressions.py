@@ -400,8 +400,8 @@ class RegressionTests(unittest.TestCase):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
-        self.assertIn("else if (behindAct === 'defer'", sync_js)
-        self.assertIn("const JUMP_DELTA = 2.4;", sync_js)
+        self.assertIn("if (behindAct === 'defer'", sync_js)
+        self.assertIn("const JUMP_DELTA = 3.5;", sync_js)
         room = rooms.new_room("test-v38-room", "Test V38", "public", "leader", "Lider", "u_lider", "")
         rooms.add_participant(room, "h_lider", {"username": "Lider", "userId": "u_lider", "_internalCreator": True}, "http")
         room["host_id"] = "h_lider"
@@ -411,14 +411,14 @@ class RegressionTests(unittest.TestCase):
         old_snap = copy.deepcopy(room)
         old_snap.pop("_tok_sig", None)
         old_tok = rooms.pack_sync_token(old_snap)
-        # Newer heartbeat at t=6.5s arrives on room
+        # Newer heartbeat at t=12.5s (explicit jump > 4.5s) arrives on room
         room["events"][-1]["ts"] = rooms.now() - 3.0
-        rooms.handle_action(room, "h_lider", {"type": "heartbeat", "currentTime": 6.5, "playing": True})
+        rooms.handle_action(room, "h_lider", {"type": "heartbeat", "currentTime": 12.5, "playing": True})
         # Follower polls with old_tok -> merge_sync_token must NOT resurrect the older heartbeat!
         rooms.merge_sync_token(room, old_tok, room["id"])
         hbs = [e for e in room.get("events", []) if e.get("type") == "sync" and e.get("action") == "heartbeat"]
         self.assertEqual(len(hbs), 1)
-        self.assertAlmostEqual(float(hbs[0]["media"]["currentTime"]), 6.5, places=1)
+        self.assertAlmostEqual(float(hbs[0]["media"]["currentTime"]), 12.5, places=1)
 
     def test_v43_room_screen_8_fixes(self):
         import pathlib
@@ -430,7 +430,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_rng.headers.get("vary"), "Range")
         self.assertIn("private", r_rng.headers.get("cache-control", ""))
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
-        self.assertIn("delta < 0 && delta > -10.0 && !stateChanged", sync_js)
+        self.assertIn("const SEEK_SETTLE_MS = 8000;", sync_js)
 
         # 2. Chat persistence on refresh (init merges recentChat) & dual storage
         r_init = self.client.post("/api/rooms/v43-chat-test-room/sync", json={

@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261031_v46';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261031_v46';
-import { renderHome, destroyHome } from './views/home.js?v=20261031_v46';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261031_v46';
-import { api } from './api.js?v=20261031_v46';
-import { toast } from './ui.js?v=20261031_v46';
+import { state, set } from './store.js?v=20261101_v47';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v47';
+import { renderHome, destroyHome } from './views/home.js?v=20261101_v47';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v47';
+import { api } from './api.js?v=20261101_v47';
+import { toast } from './ui.js?v=20261101_v47';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -57,7 +57,7 @@ window.vortexRestoreRoom = () => {
 window.vortexCloseMinimizedRoom = () => {
   document.body.classList.remove('mesh-minimized');
   activeMeshRoomId = null;
-  leaveMeshView();
+  leaveMeshView(true);
   const meshRoot = document.getElementById('mesh-root');
   if (meshRoot) {
     meshRoot.replaceChildren();
@@ -78,7 +78,7 @@ async function route() {
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');
     if (activeMeshRoomId !== r.params.id || !state.mesh) {
-      if (activeMeshRoomId) leaveMeshView();
+      if (activeMeshRoomId) leaveMeshView(true);
       activeMeshRoomId = r.params.id;
       await enterMesh(meshRoot, r.params);
     } else {
@@ -90,7 +90,7 @@ async function route() {
       document.body.classList.remove('mesh-minimized');
       if (activeMeshRoomId) {
         activeMeshRoomId = null;
-        leaveMeshView();
+        leaveMeshView(true);
       }
       meshRoot.replaceChildren();
       meshRoot.classList.add('hidden');

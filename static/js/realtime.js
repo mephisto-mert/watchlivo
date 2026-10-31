@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261031_v46';
-import { api } from './api.js?v=20261031_v46';
-import { state } from './store.js?v=20261031_v46';
+import { clock } from './sync.js?v=20261101_v47';
+import { api } from './api.js?v=20261101_v47';
+import { state } from './store.js?v=20261101_v47';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -38,9 +38,7 @@ export class MeshConnection {
       if (typeof BroadcastChannel !== 'undefined') {
         this.bc = new BroadcastChannel(`vortex_mesh_${roomId}`);
         this.bc.onmessage = (ev) => this.onP2pPacket(ev.data);
-        if (this.clientId) {
-          this.bc.postMessage({ _cidProbe: true, cid: this.clientId, instanceId: this.instanceId });
-        }
+
       }
     } catch (e) { /* ignore */ }
   }
@@ -70,22 +68,7 @@ export class MeshConnection {
 
   onP2pPacket(pkt) {
     if (!pkt || this.closed) return;
-    if (pkt._cidProbe && pkt.cid && pkt.cid === this.clientId && pkt.instanceId && pkt.instanceId !== this.instanceId) {
-      try { this.bc?.postMessage({ _cidConflict: true, cid: this.clientId, targetInstanceId: pkt.instanceId }); } catch (e) { /* ignore */ }
-      return;
-    }
-    if (pkt._cidConflict && pkt.cid === this.clientId && pkt.targetInstanceId === this.instanceId) {
-      this.clientId = 'h_' + Math.random().toString(36).slice(2, 10);
-      this.clientToken = '';
-      try {
-        sessionStorage.setItem('vortex_cid', this.clientId);
-        sessionStorage.removeItem(`vortex_ct_${this.roomId}`);
-      } catch (e) { /* ignore */ }
-      if (this.mode === 'http' && !this.closed) {
-        this.httpSend({ type: 'init' }, true);
-      }
-      return;
-    }
+    if (pkt._cidProbe || pkt._cidConflict) return;
     if (pkt.fromCid === this.clientId) return;
     if (pkt._id && this.seenP2pIds.has(pkt._id)) return;
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
@@ -532,9 +515,28 @@ export class MeshConnection {
       try {
         localStorage.removeItem(`vortex_st_${this.roomId}`);
         localStorage.removeItem(`vortex_room_${this.roomId}`);
+        localStorage.removeItem(`vortex_creator_flag_${this.roomId}`);
         sessionStorage.removeItem(`vortex_st_${this.roomId}`);
+        sessionStorage.removeItem(`vortex_room_${this.roomId}`);
       } catch (e) { /* ignore */ }
-      if (this.mode === 'http') api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, { method: 'POST', body: { type: 'leave', clientId: this.clientId, clientToken: this.clientToken || undefined, syncToken: this.syncToken || undefined } }).catch(() => {});
+      try {
+        if (this.ws && this.ws.readyState === 1) {
+          this.ws.send(JSON.stringify({ type: 'leave', clientId: this.clientId }));
+        }
+      } catch (e) { /* ignore */ }
+      try {
+        fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+          method: 'POST',
+          keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'leave',
+            clientId: this.clientId,
+            username: this.profile?.name || '',
+            clientToken: this.clientToken || undefined,
+          }),
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
     }
   }
 }

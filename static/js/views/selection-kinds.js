@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261031_v46';
-import { api, qs } from '../api.js?v=20261031_v46';
-import { parseVideoUrl } from '../providers.js?v=20261031_v46';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261031_v46';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261031_v46';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261031_v46';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261101_v47';
+import { api, qs } from '../api.js?v=20261101_v47';
+import { parseVideoUrl } from '../providers.js?v=20261101_v47';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261101_v47';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261101_v47';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261101_v47';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -203,6 +203,8 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   const TABS = [
     { id: 'recommended', label: '✨ Sana Özel Önerilenler' },
     { id: 'history', label: '🕘 İzleme Geçmişim' },
+    { id: 'playlists', label: '📋 Playlist İçe Aktar' },
+    { id: 'liked', label: '❤️ Favorilerim' },
     { id: 'trending', label: '🔥 Trendler (TR)' },
     { id: 'music', label: '🎵 Müzik & Klip' },
     { id: 'gaming', label: '🎮 Oyun & Eğlence' },
@@ -211,16 +213,48 @@ export function renderSearchKind(p, body, presetQuery, pick) {
 
   const renderTabs = () => {
     const histCount = getWatchHistory().filter((x) => x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu')).length + getMusicHistory().length;
+    const favCount = getFavorites().length;
     tabBar.replaceChildren(...TABS.map((t) => h('button', {
       type: 'button',
       class: `provider-cat-pill ${activeTab === t.id ? 'active' : ''}`,
       onclick: () => loadTab(t.id),
-    }, t.label, t.id === 'history' && histCount > 0 ? h('span', { class: 'cat-count' }, String(histCount)) : null)));
+    }, t.label,
+      t.id === 'history' && histCount > 0 ? h('span', { class: 'cat-count' }, String(histCount)) : null,
+      t.id === 'liked' && favCount > 0 ? h('span', { class: 'cat-count' }, String(favCount)) : null)));
   };
 
   const runSearchQuery = async (q, customHeader = '') => {
     const mine = ++seq;
-    const pasted = parseVideoUrl(q);
+    const rawQ = String(q || '').trim();
+    if (/[?&]list=([A-Za-z0-9_-]{10,64})/.test(rawQ) || /^(PL|UU|FL|RD|OLAK)[A-Za-z0-9_-]{8,64}$/.test(rawQ)) {
+      grid.replaceChildren(spinner());
+      const plRes = await api(`/api/rave/playlist?${qs({ url: rawQ })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
+      if (mine !== seq) return;
+      const plItems = (plRes.items || []).map(ytToMedia);
+      sectionHeader.replaceChildren(
+        h('div', { style: { fontSize: '.86rem', fontWeight: '800', color: '#f8fafc' } },
+          `📋 ${plRes.title || 'YouTube Oynatma Listesi'} (${plItems.length} video)`),
+        plItems.length ? h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: async () => {
+            if (window.vortexActions?.queueBatch && location.hash.startsWith('#/mesh/')) {
+              window.vortexActions.queueBatch(plItems);
+            } else {
+              await pickAndRecord(plItems[0]);
+              setTimeout(() => {
+                if (window.vortexActions?.queueBatch && plItems.length > 1) {
+                  window.vortexActions.queueBatch(plItems.slice(1));
+                }
+              }, 800);
+            }
+          },
+        }, `📋 Tüm Playlisti Odaya Ekle (${plItems.length})`) : null
+      );
+      grid.replaceChildren(...(plItems.length ? plItems.map((m) => videoCard(m, pickAndRecord)) : [h('div', { class: 'lobby-empty' }, 'Oynatma listesi yüklenemedi.')]));
+      return;
+    }
+    const pasted = parseVideoUrl(rawQ);
     if (pasted && pasted.provider === 'youtube') {
       grid.replaceChildren(spinner());
       const res = await api(`/api/search/youtube?${qs({ q: pasted.id })}`).catch(() => ({ items: [] }));
@@ -230,7 +264,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     }
     grid.replaceChildren(spinner());
     let res;
-    try { res = await api(`/api/search/youtube?${qs({ q: q || p.defaultQuery || 'türkiye trend müzik klip 2026' })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
+    try { res = await api(`/api/search/youtube?${qs({ q: rawQ || p.defaultQuery || 'türkiye trend müzik klip 2026' })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
     if (mine !== seq) return;
     const items = (res.items || []).map(ytToMedia);
     if (customHeader) {
@@ -315,6 +349,47 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           ? `✨ ${prof.channelName} için Kişiselleştirilmiş Öneriler (${prof.interests})`
           : '✨ İzleme Geçmişine & Türkiye Trendlerine Göre Sana Özel Önerilenler'
       );
+      return;
+    }
+
+    if (tabId === 'playlists') {
+      const plInp = h('input', {
+        class: 'input',
+        placeholder: 'YouTube Playlist URL veya ID yapıştır (örn. https://www.youtube.com/playlist?list=PL...)',
+        value: 'https://www.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI',
+        style: { flex: '1', minWidth: '220px' },
+      });
+      sectionHeader.replaceChildren(
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', width: '100%', alignItems: 'center' } },
+          plInp,
+          h('button', {
+            type: 'button',
+            class: 'btn sm primary',
+            onclick: () => runSearchQuery(plInp.value.trim(), '📋 YouTube Playlist İçe Aktarma'),
+          }, '📋 Playlisti Getir'))
+      );
+      await runSearchQuery(plInp.value.trim(), '📋 YouTube Playlist İçe Aktarma');
+      return;
+    }
+
+    if (tabId === 'liked') {
+      const favs = getFavorites().map((f) => ({
+        provider: f.provider || 'youtube',
+        videoId: f.videoId || f.id || '',
+        url: f.url || (f.videoId ? `https://www.youtube.com/watch?v=${f.videoId}` : ''),
+        title: f.title || 'Favori İçerik',
+        channel: f.channel || 'Favorilerim',
+        thumbnail: f.poster || f.thumbnail || '/static/watchlivo-poster.svg',
+        duration: f.duration || 0,
+      }));
+      sectionHeader.replaceChildren(
+        h('div', { style: { fontSize: '.85rem', fontWeight: '700', color: '#e2e8f0' } }, `❤️ Beğenilenler & Favorilerim (${favs.length})`)
+      );
+      if (favs.length) {
+        grid.replaceChildren(...favs.map((m) => videoCard(m, pickAndRecord)));
+        return;
+      }
+      await runSearchQuery('Semicenk Dedublüman Mert Demir popüler akustik 2026', '❤️ Henüz favori eklemedin — Popüler Favori Önerileri:');
       return;
     }
 
@@ -1114,3 +1189,134 @@ export function renderMusicKind(p, body, presetQuery, pick) {
     contentArea);
   loadMusic(currentQuery);
 }
+
+export function renderDriveKind(p, body, pick) {
+  const folderInp = h('input', {
+    placeholder: p.placeholder || 'Google Drive klasör veya video bağlantısı yapıştır (drive.google.com/drive/folders/...)',
+    value: '',
+    'aria-label': 'Google Drive klasör veya dosya bağlantısı',
+  });
+  const qualityHolder = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } });
+  const listHolder = h('div', { class: 'card-grid' });
+  let selectedQuality = '1080p';
+
+  const loadFolder = async (rawUrl = '') => {
+    listHolder.replaceChildren(spinner());
+    try {
+      const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
+      const items = res.items || [];
+      qualityHolder.replaceChildren(
+        h('span', { style: { fontSize: '.78rem', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' } }, '🎞️ Çözünürlük & MKV/MP4 Akış Kalitesi:'),
+        ...['1080p', '720p', '480p'].map((q) => h('button', {
+          type: 'button',
+          class: `provider-cat-pill ${selectedQuality === q ? 'active' : ''}`,
+          onclick: () => {
+            selectedQuality = q;
+            loadFolder(rawUrl);
+          },
+        }, `🎬 ${q} Direct Stream`))
+      );
+      listHolder.replaceChildren(...items.map((it) => {
+        const qObj = (it.qualities || []).find((x) => x.label === selectedQuality) || (it.qualities || [])[0] || { url: it.url };
+        return videoCard({
+          provider: 'direct',
+          streamType: 'mp4',
+          videoId: it.id,
+          url: qObj.url || it.url,
+          title: `${it.title} [${selectedQuality}]`,
+          channel: `Google Drive · ${it.size || 'HD'}`,
+          thumbnail: it.thumbnail || '/static/watchlivo-poster.svg',
+          duration: it.duration || 0,
+        }, pick);
+      }));
+    } catch (e) {
+      listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasörü okunamadı.'));
+    }
+  };
+
+  body.append(
+    renderAccountBar(p, () => loadFolder(folderInp.value.trim())),
+    h('div', { class: 'sel-search' },
+      h('span', { html: icons.link, style: { display: 'flex', opacity: .7 } }),
+      folderInp,
+      h('button', { class: 'btn primary', onclick: () => loadFolder(folderInp.value.trim()) }, '📂 Klasörü / Videoyu Aç')),
+    qualityHolder,
+    listHolder
+  );
+  loadFolder('');
+}
+
+export function renderRaveDjKind(p, body, pick) {
+  const trackAInp = h('input', {
+    class: 'input',
+    placeholder: '1. Şarkı veya YouTube URL (örn. Semicenk - Canın Sağ Olsun)',
+    value: 'Semicenk - Canın Sağ Olsun',
+  });
+  const trackBInp = h('input', {
+    class: 'input',
+    placeholder: '2. Şarkı veya YouTube URL (örn. Blok3 - Aklına Ben Gelicem)',
+    value: 'Blok3 - Aklına Ben Gelicem',
+  });
+  const statusBox = h('div', { style: { marginTop: '10px' } });
+  const presetGrid = h('div', { class: 'card-grid', style: { marginTop: '12px' } });
+
+  const createMashup = async (aVal, bVal) => {
+    statusBox.replaceChildren(spinner());
+    try {
+      const res = await api('/api/rave/ravedj-mashup', {
+        method: 'POST',
+        body: { trackA: aVal, trackB: bVal },
+        timeout: 15000,
+      });
+      if (res?.mashup) {
+        toast(`🎧 RaveDJ AI Mashup hazır: ${res.mashup.title} (${res.mashup.bpm} BPM)`);
+        await pick(res.mashup);
+      }
+    } catch (e) {
+      toast('RaveDJ Mashup oluşturulamadı, lütfen tekrar dene');
+    } finally {
+      statusBox.replaceChildren();
+    }
+  };
+
+  api('/api/rave/ravedj-trending').then((res) => {
+    const items = res.items || [];
+    presetGrid.replaceChildren(...items.map((it) => h('div', {
+      class: 'vcard',
+      role: 'button',
+      tabindex: '0',
+      onclick: () => createMashup(it.trackA, it.trackB),
+    },
+      h('div', { class: 'vcard-thumb', style: { background: 'linear-gradient(135deg,#ec4899,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '110px', fontSize: '2rem' } },
+        '🎧',
+        h('span', { class: 'vcard-dur' }, `${it.bpm} BPM`)),
+      h('div', { class: 'vcard-info' },
+        h('div', { class: 'vcard-title' }, it.title),
+        h('div', { class: 'vcard-sub' }, `${it.trackA} × ${it.trackB}`)))));
+  }).catch(() => {});
+
+  body.append(
+    h('div', {
+      style: {
+        padding: '16px', borderRadius: '16px',
+        background: 'linear-gradient(135deg, rgba(236,72,153,0.16), rgba(99,102,241,0.16))',
+        border: '1px solid rgba(236,72,153,0.35)', marginBottom: '14px',
+      },
+    },
+      h('div', { style: { fontWeight: '800', fontSize: '1rem', color: '#f8fafc', marginBottom: '6px' } }, '🎧 RaveDJ AI Mashup & Çift Şarkı Mix Motoru'),
+      h('div', { style: { fontSize: '.82rem', color: '#cbd5e1', marginBottom: '12px' } },
+        'İki farklı şarkıyı veya YouTube bağlantısını seç; RaveDJ yapay zeka BPM & vokal-ritim sentezleyici ile anında ortak Mashup oluşturup odada başlat!'),
+      h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '12px' } },
+        trackAInp,
+        trackBInp),
+      h('button', {
+        type: 'button',
+        class: 'btn primary',
+        onclick: () => createMashup(trackAInp.value.trim(), trackBInp.value.trim()),
+      }, '⚡ AI Mashup Oluştur & Odaya Yansıt'),
+      statusBox),
+    h('div', { class: 'section-head' }, h('h2', {}, '🔥 Popüler RaveDJ Mashup Şablonları')),
+    presetGrid
+  );
+}
+

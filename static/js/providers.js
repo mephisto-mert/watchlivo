@@ -231,6 +231,22 @@ export const LOGOS = {
     '<text x="42" y="21" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13.2" letter-spacing="0.3">SİNEMA, DİZİ &amp; ANİME+</text>' +
     '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">40.000+ FİLM · DİZİ · ANİMETRİX 4K</text>'
   ),
+  vk: svgRaw(
+    '<rect x="8" y="8" width="28" height="28" rx="8" fill="#0077ff"/>' +
+    '<text x="22" y="28" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="15">VK</text>' +
+    '<text x="82" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20">VK Video</text>'
+  ),
+  rutube: svgRaw(
+    '<rect x="8" y="8" width="28" height="28" rx="8" fill="#e11d48"/>' +
+    '<text x="22" y="28" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="15">RU</text>' +
+    '<text x="82" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20">RUTUBE</text>'
+  ),
+  ravedj: svgRaw(
+    '<defs><linearGradient id="rdj" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00f5d4"/><stop offset="100%" stop-color="#ff2a85"/></linearGradient></defs>' +
+    '<rect x="8" y="8" width="28" height="28" rx="8" fill="url(#rdj)"/>' +
+    '<text x="22" y="27.5" text-anchor="middle" fill="#09090b" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="14">DJ</text>' +
+    '<text x="84" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20">RaveDJ AI</text>'
+  ),
 };
 
 export const PROVIDER_CATEGORIES = [
@@ -308,6 +324,21 @@ export const PROVIDERS = [
   { id: 'peacock', name: 'Peacock', cat: 'global', badge: 'Universal & NBC Vitrini', logo: LOGOS.peacock, bg: '#10121a', accent: '#a855f7', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.peacocktv.com', placeholder: "Peacock vitrininde film veya dizi ara...",
     idParser: (u) => (u.match(/peacocktv\.com\/watch\/(?:asset|playback)\/([\w-]+)/i) || [])[1] || null },
+  { id: 'vk', name: 'VK Video', cat: 'global', badge: 'Dizi · Anime · 1080p Arşiv', logo: LOGOS.vk, bg: '#10121a', accent: '#0077ff', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://vkvideo.ru', placeholder: "VK Video'da Türkçe altyazılı dizi, anime veya film bağlantısı yapıştır...",
+    idParser: (u) => (u.match(/(?:vk\.com|vkvideo\.ru)\/(?:video|clip)(-?\d+_\d+)/i) || [])[1] || null },
+  { id: 'pluto', name: 'Pluto TV', cat: 'global', badge: 'Ücretsiz Canlı TV & VOD', logo: LOGOS.pluto, bg: '#10121a', accent: '#facc15', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://pluto.tv', placeholder: "Pluto TV'de ücretsiz film veya kanal ara...",
+    idParser: (u) => (u.match(/pluto\.tv\/.*?(?:movies|series|live-tv)\/([\w-]+)/i) || [])[1] || null },
+  { id: 'tubi', name: 'Tubi', cat: 'global', badge: 'Ücretsiz Sinema & Dizi', logo: LOGOS.tubi, bg: '#10121a', accent: '#ff3e2e', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://tubitv.com', placeholder: "Tubi vitrininde ücretsiz film veya dizi ara...",
+    idParser: (u) => (u.match(/tubitv\.com\/(?:video|movies|tv-shows|series)\/(\d+)/i) || [])[1] || null },
+  { id: 'drive', name: 'Google Drive', cat: 'global', badge: 'Klasör Gezgini · MKV / MP4 1080p', logo: LOGOS.drive, bg: '#10121a', accent: '#00ac47', web: true, kind: 'drive', freeNoAuth: true,
+    homeUrl: 'https://drive.google.com', placeholder: "Google Drive klasör veya MKV/MP4 dosya bağlantısı yapıştır...",
+    idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
+  { id: 'ravedj', name: 'RaveDJ AI', cat: 'global', badge: '2 Şarkıyı AI ile Birleştir · Mashup & Mix', logo: LOGOS.ravedj, bg: '#10121a', accent: '#00f5d4', web: true, kind: 'ravedj', freeNoAuth: true,
+    homeUrl: 'https://rave.dj', placeholder: "RaveDJ Mashup için şarkı veya YouTube bağlantısı gir...",
+    idParser: (u) => (u.match(/rave\.dj\/([\w-]+)/i) || [])[1] || null },
 ];
 
 const INTERNAL_FALLBACK_PROVIDERS = [
@@ -323,8 +354,12 @@ const INTERNAL_FALLBACK_PROVIDERS = [
     idParser: (u) => (u.match(/(?:dailymotion\.com\/video\/|dai\.ly\/)([a-zA-Z0-9]+)/i) || [])[1] || null },
   { id: 'tiktok', name: 'TikTok', logo: LOGOS.tiktok, bg: '#10121a', accent: '#ff0050', web: true, kind: 'link', freeNoAuth: true,
     idParser: (u) => (u.match(/tiktok\.com\/.*\/video\/(\d+)/i) || [])[1] || null },
-  { id: 'drive', name: 'Google Drive', logo: LOGOS.drive, bg: '#10121a', accent: '#34a853', web: true, kind: 'link', freeNoAuth: true,
-    idParser: (u) => (u.match(/drive\.google\.com\/(?:file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
+  { id: 'vk', name: 'VK Video', logo: LOGOS.vk, bg: '#10121a', accent: '#0077ff', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/(?:vk\.com|vkvideo\.ru)\/(?:video|clip)(-?\d+_\d+)/i) || [])[1] || null },
+  { id: 'rutube', name: 'Rutube', logo: LOGOS.rutube, bg: '#10121a', accent: '#e11d48', web: true, kind: 'link', freeNoAuth: true,
+    idParser: (u) => (u.match(/rutube\.ru\/(?:video|play\/embed)\/([a-f0-9]{16,36})/i) || [])[1] || null },
+  { id: 'drive', name: 'Google Drive', logo: LOGOS.drive, bg: '#10121a', accent: '#34a853', web: true, kind: 'drive', freeNoAuth: true,
+    idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
   { id: 'web', name: 'Web', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link', freeNoAuth: true,
     idParser: (u) => (/^https?:\/\//i.test(u) ? u : null) },
 ];

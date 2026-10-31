@@ -249,3 +249,23 @@ def too_many_response(retry_after: float):
         status_code=429,
         headers={"Retry-After": str(int(max(1, retry_after)))},
     )
+
+
+def is_safe_public_url(url: str) -> bool:
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local ranges (SSRF guard)."""
+    import ipaddress
+    import socket
+    import urllib.parse
+
+    try:
+        p = urllib.parse.urlparse(str(url or "").strip())
+        if p.scheme not in ("http", "https") or not p.hostname:
+            return False
+        for info in socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80)):
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                return False
+        return True
+    except Exception:
+        return False
+

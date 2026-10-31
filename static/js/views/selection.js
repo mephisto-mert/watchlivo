@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261031_v46';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261031_v46';
-import { api, qs } from '../api.js?v=20261031_v46';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem } from './selection-kinds.js?v=20261031_v46';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261031_v46';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261031_v46';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261101_v47';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261101_v47';
+import { api, qs } from '../api.js?v=20261101_v47';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261101_v47';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261101_v47';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261101_v47';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -289,9 +289,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   const RAVE_TOP_IDS = [
-    'cinema', 'youtube',
+    'cinema', 'youtube', 'ravedj', 'drive',
     'netflix', 'disney', 'prime', 'max', 'apple', 'exxen', 'blutv', 'gain',
     'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'hulu', 'paramount', 'peacock', 'ytmusic',
+    'vk', 'rutube', 'pluto', 'tubi',
   ];
 
   function renderGrid() {
@@ -741,6 +742,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (!providerUsable(p)) { body.append(desktopOnlyCard(p)); return; }
     if (p.kind === 'search') renderSearchKind(p, body, presetQuery, pickSafe);
     else if (p.kind === 'music') renderMusicKind(p, body, presetQuery, pickSafe);
+    else if (p.kind === 'drive') renderDriveKind(p, body, pickSafe);
+    else if (p.kind === 'ravedj') renderRaveDjKind(p, body, pickSafe);
     else if (p.kind === 'link') renderLinkKind(p, body, pickFromUrl);
     else if (p.kind === 'upload') renderUploadKind(body, pickSafe);
     else if (p.kind === 'catalog') renderCatalogKind(p, body, presetQuery, pickSafe, pickFromUrl);
@@ -779,6 +782,8 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
   if (provider === 'kick') return { provider, videoId: id, url: `https://kick.com/${id}`, embedUrl: `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true`, title: fallbackTitle || `Kick · ${id}`, channel: 'Kick', live: true };
   if (provider === 'dailymotion') return { provider, videoId: id, url: `https://www.dailymotion.com/video/${id}`, embedUrl: `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(id)}&autoplay=1`, title: fallbackTitle || `Dailymotion · ${id}`, thumbnail: `https://www.dailymotion.com/thumbnail/video/${id}`, channel: 'Dailymotion' };
   if (provider === 'tiktok') return { provider, videoId: id, url, embedUrl: `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?autoplay=1&rel=0`, title: fallbackTitle || `TikTok · #${id}`, channel: 'TikTok' };
+  if (provider === 'vk') return { provider: 'vk', videoId: id, url, embedUrl: `https://vk.com/video_ext.php?oid=${String(id).split('_')[0]}&id=${String(id).split('_')[1] || id}&hd=2`, title: fallbackTitle || `VK Video · ${id}`, channel: 'VK Video' };
+  if (provider === 'rutube') return { provider: 'rutube', videoId: id, url, embedUrl: `https://rutube.ru/play/embed/${encodeURIComponent(id)}`, title: fallbackTitle || `Rutube · ${id}`, channel: 'Rutube' };
   if (provider === 'drive') return { provider, videoId: id, url, title: fallbackTitle || 'Google Drive videosu', channel: 'Google Drive', thumbnail: `https://drive.google.com/thumbnail?id=${id}&sz=w640` };
   if (provider === 'dropbox') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');

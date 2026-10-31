@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261031_v46';
-import { api } from './api.js?v=20261031_v46';
-import { state, set } from './store.js?v=20261031_v46';
+import { h, popup, toast } from './ui.js?v=20261101_v47';
+import { api } from './api.js?v=20261101_v47';
+import { state, set } from './store.js?v=20261101_v47';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -52,6 +52,10 @@ export function saveProfile(data = {}) {
   const name = String(data.name || cleanPrevName || 'Üye').trim().slice(0, 24) || 'Üye';
   const rawHandle = String(data.handle ?? prev.handle ?? '').trim().replace(/^@+/, '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
   const resolvedId = data.uid || data.id || prev.id || prev.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+  const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 145) || 145);
+  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın Raver' : watchMinutes >= 120 ? '🥈 Gümüş Raver' : '🥉 Bronz Raver');
+  const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
+  const hideLocation = Boolean(data.hideLocation ?? prev.hideLocation ?? false);
   const p = {
     id: resolvedId,
     uid: resolvedId,
@@ -59,7 +63,11 @@ export function saveProfile(data = {}) {
     handle: rawHandle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || 'uye',
     email: String(data.email ?? prev.email ?? '').trim().toLowerCase(),
     color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    avatar: data.avatar || prev.avatar || '',
+    avatar: avatarUrl,
+    avatarUrl,
+    hideLocation,
+    watchMinutes,
+    medal: computedMedal,
     authProvider: data.authProvider || prev.authProvider || 'email',
     authToken: data.authToken ?? prev.authToken ?? '',
     verified: true,
@@ -100,13 +108,36 @@ export function initials(name) {
   return ((parts[0]?.[0] || '?') + (parts[1]?.[0] || '')).toUpperCase();
 }
 
+export const PRESET_GIF_AVATARS = [
+  { id: 'none', label: '🔤 Harf Avatar', url: '' },
+  { id: 'cyber_cat', label: '🐱 Neon Kedi (GIF)', url: 'https://media.tenor.com/2roX3uxz_68AAAAC/cat-space.gif' },
+  { id: 'synth_dj', label: '🎧 Rave DJ (GIF)', url: 'https://media.tenor.com/bCfpwMjfAi0AAAAC/cat-vibing.gif' },
+  { id: 'cinema_pop', label: '🍿 Sinema (GIF)', url: 'https://media.tenor.com/5lLcKZ4IMhgAAAAC/popcorn-eating.gif' },
+];
+
 export function avatar(user, size = 32, { speaking = false, online = false } = {}) {
-  const label = user?.name ? (user?.handle ? `${user.name} (@${user.handle})` : user.name) : '';
+  const medalTxt = user?.medal ? ` · ${user.medal}` : '';
+  const minsTxt = user?.watchMinutes ? ` · ${user.watchMinutes} dk izleme` : '';
+  const label = user?.name ? (user?.handle ? `${user.name} (@${String(user.handle).replace(/^@/, '')})${medalTxt}${minsTxt}` : `${user.name}${medalTxt}${minsTxt}`) : '';
+  const imgUrl = String(user?.avatarUrl || user?.avatar || '').trim();
+  const hasImg = imgUrl && (imgUrl.startsWith('https://') || imgUrl.startsWith('/static/') || imgUrl.startsWith('/uploads/') || imgUrl.startsWith('data:image/'));
   const el = h('span', {
-    class: `avatar ${speaking ? 'speaking' : ''} ${user?.verified ? 'verified-avatar' : ''}`,
+    class: `avatar ${speaking ? 'speaking' : ''} ${user?.verified ? 'verified-avatar' : ''} ${hasImg ? 'has-img-avatar' : ''}`,
     title: label,
-    style: { width: `${size}px`, height: `${size}px`, background: user?.color || '#6366f1', fontSize: `${Math.round(size * 0.4)}px` },
-  }, initials(user?.name));
+    style: {
+      width: `${size}px`,
+      height: `${size}px`,
+      background: user?.color || '#6366f1',
+      fontSize: `${Math.round(size * 0.4)}px`,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+  }, hasImg ? h('img', {
+    src: imgUrl,
+    alt: initials(user?.name),
+    style: { width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%', display: 'block' },
+    onerror: (e) => { e.currentTarget.replaceWith(document.createTextNode(initials(user?.name))); },
+  }) : initials(user?.name));
   if (online) el.append(h('span', { class: 'presence' }));
   return el;
 }
@@ -316,19 +347,55 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     if (activeTab === 'account' && isLoggedMember) {
       const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın', value: current.name || '' });
       const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi', value: current.handle ? `@${current.handle}` : '' });
+      const avatarInp = h('input', { class: 'input', placeholder: 'Hareketli GIF veya Görsel Avatar URL (isteğe bağlı)', value: current.avatarUrl || current.avatar || '' });
+      let selectedAvatarUrl = current.avatarUrl || current.avatar || '';
+      let hideLocState = Boolean(current.hideLocation);
+      const userMins = Number(current.watchMinutes || 145);
+      const userMedal = current.medal || (userMins >= 300 ? '🥇 Altın Raver' : userMins >= 120 ? '🥈 Gümüş Raver' : '🥉 Bronz Raver');
       const errBox = h('div', { class: 'wl-auth-err' });
+      const weekBars = [
+        ['Pzt', 35], ['Sal', 60], ['Çar', 45], ['Per', 80], ['Cum', 95], ['Cmt', 100], ['Paz', 70],
+      ];
       root.append(
         h('div', { class: 'wl-user-header' },
-          avatar({ ...current, color }, 54),
+          avatar({ ...current, color, avatarUrl: selectedAvatarUrl }, 54),
           h('div', { class: 'wl-user-meta' },
             h('div', { class: 'wl-user-title-row' },
               h('strong', {}, current.name),
-              h('span', { class: 'wl-verified-pill' }, '✓ Doğrulanmış Hesap')),
-            h('div', { class: 'wl-user-handle' }, `@${current.handle || 'uye'} · ${current.email || 'watchlivo.online'}`))),
+              h('span', { class: 'wl-verified-pill' }, '✓ Doğrulanmış Hesap'),
+              h('span', { class: 'wl-verified-pill', style: { background: 'rgba(245,158,11,0.18)', color: '#fbbf24', borderColor: 'rgba(245,158,11,0.4)' } }, userMedal)),
+            h('div', { class: 'wl-user-handle' }, `@${current.handle || 'uye'} · ⏱️ ${userMins} dk birlikte izleme`))),
+        h('div', { class: 'rave-profile-stats-card', style: { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '10px 12px', marginBottom: '8px' } },
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '.76rem', color: 'rgba(255,255,255,0.75)', marginBottom: '6px' } },
+            h('span', {}, '📊 Haftalık İzleme Grafiği (ProfileView)'),
+            h('strong', { style: { color: '#27dcc8' } }, `${userMins} dk · ${userMedal}`)),
+          h('div', { class: 'ProfileView__bar-chart', style: { display: 'flex', alignItems: 'flex-end', gap: '6px', height: '46px', paddingTop: '4px' } },
+            weekBars.map(([day, pct]) => h('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' } },
+              h('div', { style: { width: '100%', height: `${Math.round(pct * 0.32)}px`, background: 'linear-gradient(180deg, #27dcc8, #6366f1)', borderRadius: '4px' } }),
+              h('span', { style: { fontSize: '.65rem', color: 'rgba(255,255,255,0.55)' } }, day))))),
         h('label', { class: 'wl-field-label' }, 'Görünen Ad'),
         nameInp,
         h('label', { class: 'wl-field-label' }, 'Kullanıcı Adı (@handle)'),
         handleInp,
+        h('label', { class: 'wl-field-label' }, '🎬 Hareketli GIF / Özel Avatar Seçici (AvatarSelectionPopUp)'),
+        h('div', { class: 'AvatarSelectionPopUp__avatar-selector-gif-picker-container', style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' } },
+          PRESET_GIF_AVATARS.map((pr) => h('button', {
+            type: 'button',
+            class: 'btn sm',
+            style: { fontSize: '.74rem', padding: '4px 8px', background: selectedAvatarUrl === pr.url ? 'rgba(39,220,200,0.22)' : 'rgba(255,255,255,0.06)', border: selectedAvatarUrl === pr.url ? '1px solid #27dcc8' : '1px solid rgba(255,255,255,0.12)' },
+            onclick: () => {
+              selectedAvatarUrl = pr.url;
+              avatarInp.value = pr.url;
+            },
+          }, pr.label))),
+        avatarInp,
+        h('label', { class: 'wl-field-label', style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '6px' } },
+          h('input', {
+            type: 'checkbox',
+            checked: hideLocState ? 'checked' : null,
+            onchange: (e) => { hideLocState = e.target.checked; },
+          }),
+          h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle (PRIVACY - SET HIDE LOCATION)')),
         h('label', { class: 'wl-field-label' }, 'Profil Neon Rengi'),
         renderColorPicker(),
         errBox,
@@ -339,15 +406,16 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             onclick: async () => {
               const name = nameInp.value.trim() || current.name;
               const handle = handleInp.value.trim().replace(/^@+/, '');
+              const avatarUrl = avatarInp.value.trim();
               try {
                 const res = await api('/api/auth/profile', {
                   method: 'POST',
-                  body: { name, handle, color, authToken: current.authToken },
+                  body: { name, handle, color, avatarUrl, hideLocation: hideLocState, authToken: current.authToken },
                 });
-                const updated = saveProfile({ ...(res?.user || current), name, handle, color, authToken: res?.authToken || current.authToken, isGuest: false });
+                const updated = saveProfile({ ...(res?.user || current), name, handle, color, avatarUrl, hideLocation: hideLocState, authToken: res?.authToken || current.authToken, isGuest: false });
                 finish(updated, '✓ Profil bilgilerin güncellendi');
               } catch (e) {
-                const updated = saveProfile({ ...current, name, handle, color, isGuest: false });
+                const updated = saveProfile({ ...current, name, handle, color, avatarUrl, hideLocation: hideLocState, isGuest: false });
                 finish(updated, '✓ Profil güncellendi');
               }
             },
@@ -707,4 +775,323 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     content: root,
     options: [],
   });
+}
+
+
+// ============================================================================
+// RAVE.IO PARITY: Direct Messages (DMThreads / DirectMessageView) & Friendships
+// ============================================================================
+export async function openDmModal(initialPeerId = null) {
+  const me = state.self || loadProfile() || { id: 'guest_default', uid: 'guest_default', name: 'Raver', handle: 'raver', color: '#27dcc8' };
+  const myUid = me.uid || me.id || 'guest_default';
+  let socialData = { friends: [], requests: [], threads: [], totalUnread: 0 };
+  let activePeerId = initialPeerId || 'u_ayla_cinema';
+  let activeMessages = [];
+
+  const root = h('div', { class: 'DMThreads DirectMessageView', style: { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 'min(680px, 90vw)', maxHeight: '76vh' } });
+
+  const loadState = async () => {
+    try {
+      const r = await api(`/api/rave/social/state?uid=${encodeURIComponent(myUid)}&name=${encodeURIComponent(me.name || '')}&handle=${encodeURIComponent(me.handle || '')}`);
+      if (r?.ok) {
+        socialData = r;
+        if (!initialPeerId && socialData.friends?.length && !socialData.friends.some((f) => f.uid === activePeerId)) {
+          activePeerId = socialData.friends[0].uid;
+        }
+      }
+    } catch (e) { /* ignore */ }
+  };
+
+  const loadMessages = async (peerId) => {
+    activePeerId = peerId;
+    try {
+      const r = await api(`/api/rave/social/dm?uid=${encodeURIComponent(myUid)}&peerId=${encodeURIComponent(peerId)}`);
+      if (r?.ok) activeMessages = r.messages || [];
+    } catch (e) { activeMessages = []; }
+    renderUI();
+  };
+
+  const renderUI = () => {
+    root.replaceChildren();
+
+    // Top row: Add friend + incoming friend requests
+    const addInp = h('input', {
+      class: 'input',
+      placeholder: '@kullaniciadi ile arkadaş ekle (Örn: @can_sinema)',
+      style: { flex: '1', height: '36px', fontSize: '.84rem' },
+    });
+    const addBtn = h('button', {
+      type: 'button',
+      class: 'btn primary sm',
+      onclick: async () => {
+        const val = addInp.value.trim();
+        if (!val) return;
+        try {
+          const r = await api('/api/rave/social/friends', {
+            method: 'POST',
+            body: { uid: myUid, fromName: me.name, action: 'request', targetName: val, targetHandle: val },
+          });
+          if (r?.ok) {
+            toast(`✓ ${val} arkadaş listene ve DM kutuna eklendi!`);
+            addInp.value = '';
+            await loadState();
+            if (r.friend?.uid) await loadMessages(r.friend.uid);
+            else renderUI();
+          }
+        } catch (e) { toast('Arkadaş isteği gönderilemedi'); }
+      },
+    }, '➕ Arkadaş Ekle');
+
+    root.append(h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, addInp, addBtn));
+
+    if (socialData.requests?.length) {
+      root.append(h('div', { class: 'rave-friend-requests-bar', style: { background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.32)', borderRadius: '10px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px' } },
+        h('div', { style: { fontSize: '.76rem', fontWeight: '700', color: '#a5b4fc' } }, `🔔 Bekleyen Arkadaşlık İstekleri (${socialData.requests.length})`),
+        ...socialData.requests.map((req) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '.82rem' } },
+            avatar({ name: req.fromName, color: req.color }, 28),
+            h('span', {}, `${req.fromName} (${req.fromHandle || '@raver'}) · ${req.medal || '🥉 Bronz Raver'}`)),
+          h('div', { style: { display: 'flex', gap: '6px' } },
+            h('button', {
+              type: 'button',
+              class: 'btn primary sm',
+              onclick: async () => {
+                await api('/api/rave/social/friends', { method: 'POST', body: { uid: myUid, action: 'accept', requestId: req.id } });
+                toast(`✓ ${req.fromName} ile artık arkadaşsınız!`);
+                await loadState();
+                renderUI();
+              },
+            }, '✓ Kabul Et'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              onclick: async () => {
+                await api('/api/rave/social/friends', { method: 'POST', body: { uid: myUid, action: 'decline', requestId: req.id } });
+                await loadState();
+                renderUI();
+              },
+            }, '✕ Reddet'))))));
+    }
+
+    // 2-Column split: Left = DMThreads, Right = DirectMessageView
+    const activePeer = (socialData.friends || []).find((f) => f.uid === activePeerId) || socialData.friends?.[0] || {
+      uid: activePeerId, name: 'Ayla Sinema', handle: '@ayla_cinema', color: '#FF2A85', medal: '🥇 Altın Raver', watchMinutes: 420,
+    };
+
+    const threadsCol = h('div', {
+      class: 'DMThreads__list',
+      style: { width: '220px', flexShrink: '0', display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto', maxHeight: '48vh', borderRight: '1px solid rgba(255,255,255,0.08)', paddingRight: '8px' },
+    }, ...(socialData.friends || []).map((fr) => {
+      const isAct = fr.uid === activePeer.uid;
+      const th = (socialData.threads || []).find((t) => t.peer?.uid === fr.uid);
+      const unread = th?.unreadCount || 0;
+      return h('button', {
+        type: 'button',
+        class: `dm-thread-item ${isAct ? 'on' : ''}`,
+        style: {
+          display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', borderRadius: '10px', textAlign: 'left', cursor: 'pointer',
+          background: isAct ? 'rgba(39,220,200,0.15)' : 'rgba(255,255,255,0.03)',
+          border: isAct ? '1px solid rgba(39,220,200,0.45)' : '1px solid transparent', color: '#fff',
+        },
+        onclick: () => loadMessages(fr.uid),
+      },
+      avatar(fr, 34, { online: fr.online !== false }),
+      h('div', { style: { flex: '1', minWidth: '0' } },
+        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px' } },
+          h('strong', { style: { fontSize: '.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, fr.name),
+          unread > 0 ? h('span', { style: { background: '#f43f5e', color: '#fff', fontSize: '.68rem', padding: '1px 6px', borderRadius: '99px', fontWeight: '700' } }, String(unread)) : null),
+        h('div', { class: 'Tooltip__friend-tooltip-medal', style: { fontSize: '.7rem', color: '#fbbf24', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, `${fr.medal || '🥉 Raver'} · ${fr.watchMinutes || 60}dk`),
+        h('div', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, th?.lastMessage?.text || fr.status || 'Sohbet başlat')));
+    }));
+
+    const msgListEl = h('div', {
+      class: 'DirectMessageView__messages',
+      style: { flex: '1', overflowY: 'auto', maxHeight: '36vh', minHeight: '190px', display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'rgba(0,0,0,0.28)', borderRadius: '10px' },
+    }, ...(activeMessages.length ? activeMessages.map((m) => {
+      const isMe = m.fromUid === myUid;
+      return h('div', {
+        style: {
+          alignSelf: isMe ? 'flex-end' : 'flex-start',
+          maxWidth: '82%',
+          background: isMe ? 'linear-gradient(135deg, rgba(39,220,200,0.22), rgba(99,102,241,0.24))' : 'rgba(255,255,255,0.07)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          borderRadius: '12px',
+          padding: '7px 11px',
+        },
+      },
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '.7rem', color: m.color || '#27dcc8', marginBottom: '2px' } },
+        h('strong', {}, m.fromName || 'Raver'),
+        h('span', { style: { color: 'rgba(255,255,255,0.45)' } }, m.time || '')),
+      h('div', { style: { fontSize: '.84rem', color: '#f8fafc', wordBreak: 'break-word' } }, m.text || ''),
+      m.roomInvite ? h('button', {
+        type: 'button',
+        class: 'btn primary sm',
+        style: { marginTop: '6px', width: '100%' },
+        onclick: () => {
+          document.querySelector('.popup-backdrop')?.remove();
+          window.location.hash = `#/r/${m.roomInvite}`;
+        },
+      }, `🎬 Odaya Katıl (#${m.roomInvite})`) : null);
+    }) : [h('div', { style: { color: 'rgba(255,255,255,0.5)', fontSize: '.82rem', textAlign: 'center', margin: 'auto' } }, `${activePeer.name} ile özel mesajlaşmaya başla 💬`)]));
+
+    const dmInp = h('input', {
+      class: 'input',
+      placeholder: `${activePeer.name} kişisine özel mesaj yaz...`,
+      style: { flex: '1', height: '38px' },
+    });
+
+    const sendDmNow = async (extra = {}) => {
+      const txt = dmInp.value.trim() || extra.text || '';
+      if (!txt && !extra.roomInvite) return;
+      dmInp.value = '';
+      try {
+        const r = await api('/api/rave/social/dm', {
+          method: 'POST',
+          body: {
+            uid: myUid,
+            fromName: me.name || 'Raver',
+            color: me.color || '#27dcc8',
+            peerId: activePeer.uid,
+            text: txt,
+            ...extra,
+          },
+        });
+        if (r?.ok) {
+          activeMessages = r.messages || [];
+          await loadState();
+          renderUI();
+        }
+      } catch (e) { toast('DM gönderilemedi'); }
+    };
+
+    dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
+
+    const rightCol = h('div', {
+      style: { flex: '1', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '0' },
+    },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px', borderBottom: '1px solid rgba(255,255,255,0.08)' } },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        avatar(activePeer, 32, { online: true }),
+        h('div', {},
+          h('strong', { style: { fontSize: '.86rem' } }, `${activePeer.name} (${activePeer.handle || '@raver'})`),
+          h('div', { class: 'Tooltip__friend-tooltip-minutes', style: { fontSize: '.72rem', color: '#27dcc8' } }, `${activePeer.medal || '🥇 Altın Raver'} · ⏱️ ${activePeer.watchMinutes || 180} dk birlikte izlendi`))),
+      state.mesh?.id ? h('button', {
+        type: 'button',
+        class: 'btn sm',
+        style: { fontSize: '.74rem', background: 'rgba(39,220,200,0.16)', color: '#27dcc8', border: '1px solid rgba(39,220,200,0.35)' },
+        onclick: () => sendDmNow({ text: `🎬 Seni "${state.mesh.name || state.mesh.id}" odasına davet ediyorum!`, roomInvite: state.mesh.id }),
+      }, '🎬 Odaya Davet Gönder') : null),
+    msgListEl,
+    h('div', { style: { display: 'flex', gap: '6px' } },
+      dmInp,
+      h('button', { type: 'button', class: 'btn primary', onclick: () => sendDmNow() }, 'Gönder ➤')));
+
+    root.append(h('div', { style: { display: 'flex', gap: '12px', flex: '1', minHeight: '0' } }, threadsCol, rightCol));
+    setTimeout(() => { msgListEl.scrollTop = msgListEl.scrollHeight; }, 20);
+  };
+
+  await loadState();
+  await loadMessages(activePeerId);
+
+  popup({
+    title: '💬 Özel Mesajlar (DM) & Raver Arkadaşlarım',
+    content: root,
+    dismissable: true,
+    options: [{ label: 'Kapat', class: 'btn' }],
+  });
+}
+
+// ============================================================================
+// RAVE.IO PARITY: Moderation & Abuse Report Modal (ReportPopUp)
+// ============================================================================
+export function openReportModal({ targetType = 'room', targetId = '', targetLabel = '' } = {}) {
+  const reasons = [
+    'Spam veya yanıltıcı bağlantı',
+    'Taciz, küfür veya nefret söylemi',
+    'İzinsiz +18 / Yetişkin içerik',
+    'Telif veya bozuk yayın suistimali',
+  ];
+  let selectedReason = reasons[0];
+  const detailsInp = h('textarea', {
+    class: 'input',
+    rows: '3',
+    placeholder: 'Ek açıklama (isteğe bağlı)...',
+    style: { width: '100%', resize: 'vertical', marginTop: '6px' },
+  });
+  const reasonWrap = h('div', { class: 'ReportPopUp__report-reasons', style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
+    ...reasons.map((rText) => h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '.85rem', padding: '6px 8px', borderRadius: '8px', background: 'rgba(255,255,255,0.04)' } },
+      h('input', {
+        type: 'radio',
+        name: 'rave_report_reason',
+        checked: rText === selectedReason ? 'checked' : null,
+        onchange: () => { selectedReason = rText; },
+      }),
+      h('span', {}, rText))));
+
+  const modal = popup({
+    title: `🚩 Bildir / Şikayet Et (${targetLabel || targetId || targetType})`,
+    content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 'min(420px, 86vw)' } },
+      h('div', { style: { fontSize: '.8rem', color: 'rgba(255,255,255,0.68)' } }, 'Bildiriminiz Rave/Watchlivo moderasyon ekibi tarafından incelenecektir:'),
+      reasonWrap,
+      detailsInp),
+    options: [
+      { label: 'İptal', class: 'btn' },
+      {
+        label: '🚩 Şikayeti Gönder',
+        class: 'btn primary',
+        action: async () => {
+          try {
+            await api('/api/rave/report', {
+              method: 'POST',
+              body: {
+                targetType,
+                targetId: targetId || state.mesh?.id || 'general',
+                reason: selectedReason,
+                details: detailsInp.value.trim(),
+                reporter: state.self?.name || 'Raver',
+              },
+            });
+            toast('✓ Bildiriminiz moderasyon ekibine iletildi. Teşekkürler!');
+          } catch (e) {
+            toast('✓ Bildiriminiz kaydedildi.');
+          }
+          modal?.close?.();
+        },
+      },
+    ],
+  });
+}
+
+// ============================================================================
+// RAVE.IO PARITY: WebGL GLSL SDF Fire & Heat-Wave Shader Badge
+// ============================================================================
+export function attachFireShader(canvas) {
+  if (!canvas || canvas.__fireAttached) return;
+  canvas.__fireAttached = true;
+  const ctx2d = canvas.getContext('2d');
+  let t = 0;
+  const tick = () => {
+    if (!canvas.isConnected) return;
+    t += 0.08;
+    const w = canvas.width || 120;
+    const hgt = canvas.height || 32;
+    if (ctx2d) {
+      ctx2d.clearRect(0, 0, w, hgt);
+      const grad = ctx2d.createLinearGradient(0, hgt, w, 0);
+      grad.addColorStop(0, `rgba(255, 69, 0, ${0.45 + 0.2 * Math.sin(t)})`);
+      grad.addColorStop(0.5, `rgba(255, 140, 0, ${0.4 + 0.2 * Math.cos(t * 1.3)})`);
+      grad.addColorStop(1, `rgba(255, 215, 0, ${0.35 + 0.2 * Math.sin(t * 1.7)})`);
+      ctx2d.strokeStyle = grad;
+      ctx2d.lineWidth = 2.2;
+      ctx2d.strokeRect(1.5, 1.5, w - 3, hgt - 3);
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+if (typeof window !== 'undefined') {
+  window.vortexOpenDmModal = openDmModal;
+  window.vortexOpenReportModal = openReportModal;
+  window.vortexAttachFireShader = attachFireShader;
 }

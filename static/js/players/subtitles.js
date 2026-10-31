@@ -783,10 +783,12 @@ export class SubtitleDubController {
     }
 
     const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
+    const stripAud = (u) => cleanUrl(u).replace(/&aud=[^&#]+/g, '');
+    const sameStreamBase = Boolean(track.url && this.adapter.currentUrl && stripAud(track.url) === stripAud(this.adapter.currentUrl));
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
-    if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
+    if ((typeof track.hlsIndex === 'number' || sameStreamBase) && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if ((!isInit || track.id !== 'orig') && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl) && (!isInit || track.id !== 'orig')) {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();
@@ -974,10 +976,13 @@ export class SubtitleDubController {
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);
-      v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
-      v.removeEventListener('webkitendfullscreen', this._fsHandler);
-      v.removeEventListener('enterpictureinpicture', this._fsHandler);
-      v.removeEventListener('leavepictureinpicture', this._fsHandler);
+      const v = this.adapter?.video;
+      if (v) {
+        v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
+        v.removeEventListener('webkitendfullscreen', this._fsHandler);
+        v.removeEventListener('enterpictureinpicture', this._fsHandler);
+        v.removeEventListener('leavepictureinpicture', this._fsHandler);
+      }
       this._fsHandler = null;
     }
     if (this.blobUrl) {

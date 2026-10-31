@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261031_v46';
-import { avatar } from '../profile.js?v=20261031_v46';
-import { getProvider } from '../providers.js?v=20261031_v46';
-import { api, qs } from '../api.js?v=20261031_v46';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261031_v46';
-import { expectedPosition } from '../sync.js?v=20261031_v46';
+import { h, icons, popup, toast } from '../ui.js?v=20261101_v47';
+import { avatar } from '../profile.js?v=20261101_v47';
+import { getProvider } from '../providers.js?v=20261101_v47';
+import { api, qs } from '../api.js?v=20261101_v47';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261101_v47';
+import { expectedPosition } from '../sync.js?v=20261101_v47';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -157,6 +157,25 @@ export function rememberRoom(room) {
     const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((r) => r !== room.id);
     list.unshift(room.id);
     localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 12)));
+  } catch (e) { /* ignore */ }
+}
+export function forgetRoom(roomId) {
+  if (!roomId) return;
+  try {
+    sessionStorage.removeItem(`vortex_room_${roomId}`);
+    sessionStorage.removeItem(`vortex_st_${roomId}`);
+    sessionStorage.removeItem(`vortex_ct_${roomId}`);
+    sessionStorage.removeItem(`vortex_creator_${roomId}`);
+    localStorage.removeItem(`vortex_st_${roomId}`);
+    localStorage.removeItem(`vortex_room_${roomId}`);
+    localStorage.removeItem(`vortex_creator_flag_${roomId}`);
+    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((r) => r !== roomId);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+    const snaps = JSON.parse(localStorage.getItem('vortex_room_snapshots_v1') || '{}');
+    if (snaps && snaps[roomId]) {
+      delete snaps[roomId];
+      localStorage.setItem('vortex_room_snapshots_v1', JSON.stringify(snaps));
+    }
   } catch (e) { /* ignore */ }
 }
 export function getRememberedRoom(roomId) {
@@ -349,6 +368,13 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
   const match = (r) => !q || `${r.name} ${r.media?.title || ''} ${r.creator || ''}`.toLowerCase().includes(q);
   const visible = rooms.filter((r) => r.id !== state.mesh?.id && match(r));
   const recents = recentIds();
+  if (rooms.length > 0 && recents.length > 0) {
+    const liveIds = new Set(rooms.map((r) => r.id));
+    const validRecents = recents.filter((id) => liveIds.has(id) || id === state.mesh?.id);
+    if (validRecents.length !== recents.length) {
+      try { localStorage.setItem(RECENT_KEY, JSON.stringify(validRecents)); } catch (e) { /* ignore */ }
+    }
+  }
   const friends = getFriends();
   const myName = (state.self?.name || '').trim().toLowerCase();
 

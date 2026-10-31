@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v46';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v46';
-import { resolveMusicItem } from './selection-kinds.js?v=20261031_v46';
-import { MeshConnection } from '../realtime.js?v=20261031_v46';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v46';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v46';
-import { buildLayout } from './mesh-layout.js?v=20261031_v46';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v46';
-import { Voice } from '../voice.js?v=20261031_v46';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v46';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v47';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v47';
+import { resolveMusicItem } from './selection-kinds.js?v=20261101_v47';
+import { MeshConnection } from '../realtime.js?v=20261101_v47';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v47';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v47';
+import { buildLayout } from './mesh-layout.js?v=20261101_v47';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v47';
+import { Voice } from '../voice.js?v=20261101_v47';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v47';
 
 let ctx = null;
 
@@ -517,6 +517,15 @@ function onMessage(data) {
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
     case 'participants_updated': if (room) { set({ mesh: { ...room, participants: data.participants } }); ctx.layout.update(); ctx.voice?.syncPeers(data.participants); } break;
+    case 'room_closed': {
+      const closedId = data.roomId || room?.id || state.route?.params?.id;
+      if (closedId) forgetRoom(closedId);
+      ctx?.conn?.close(false);
+      set({ mesh: null });
+      toast('Oda kurucusu odadan ayrıldığı için oda kapatıldı');
+      window.vortexNavigate('/');
+      break;
+    }
     case 'password_required': askPassword(); break;
     case 'kicked': popup({ title: 'Odadan Atıldın', options: [{ label: 'Ana Sayfa', onClick: () => window.vortexNavigate('/') }], dismissable: false }); ctx?.conn.close(); break;
     case 'webrtc_offer': case 'webrtc_answer': case 'webrtc_ice': ctx?.voice?.onSignal(data); break;
@@ -846,7 +855,13 @@ const actions = {
   },
   async leave() {
     document.body.classList.remove('mesh-minimized');
+    const leavingId = state.mesh?.id || state.route?.params?.id;
+    const isCurated = Boolean(state.mesh?.curated);
+    if (leavingId && !isCurated) {
+      forgetRoom(leavingId);
+    }
     try { ctx?.conn?.close(true); } catch (e) { /* ignore */ }
+    set({ mesh: null });
     window.vortexNavigate('/');
   },
 };
@@ -995,7 +1010,7 @@ function onPlayerEvent(ev, arg) {
   ctx.layout.playerEvent(ev, arg);
 }
 
-export function leaveMeshView() {
+export function leaveMeshView(explicitLeave = false) {
   if (!ctx) return;
   try {
     const m = state.mesh?.media;
@@ -1006,8 +1021,11 @@ export function leaveMeshView() {
       if (pos > 5) saveWatchProgress(m, pos, dur);
     }
   } catch (e) { /* ignore */ }
+  if (explicitLeave && state.mesh?.id && !state.mesh?.curated) {
+    forgetRoom(state.mesh.id);
+  }
   clearInterval(ctx.progressTimer);
-  try { ctx.conn?.close(); } catch (e) { /* ignore */ }
+  try { ctx.conn?.close(Boolean(explicitLeave)); } catch (e) { /* ignore */ }
   ctx.sync.stop();
   ctx.host.destroy();
   ctx.voice?.destroy();
