@@ -250,7 +250,9 @@ export class SyncEngine {
     const runway = bufEnd > curr ? (bufEnd - curr) : 0;
     if ((stateChanged && abs > 1.5 && now > this.seekUntil) || abs > JUMP_DELTA) {
       const inBuf = buffered(expected + lead);
-      const behindAct = (delta > 0 && delta < 6.0) ? this.decideBehindAction(ad, curr, expected, delta) : 'jump';
+      const behindAct = (delta > 0 && delta < 6.0)
+        ? this.decideBehindAction(ad, curr, expected, delta)
+        : (delta < 0 && delta > -10.0 && !stateChanged && ad.caps?.rate ? 'speed' : 'jump');
       if (behindAct === 'speed') {
         this.deferStartedAt = 0;
         const sp = this.speedSync(curr, expected, base);

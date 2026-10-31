@@ -71,7 +71,31 @@ body.vortex-fs .panel-video {
 .player-host > div:not(.yt-mount) { position: absolute; z-index: 4; background: transparent !important; pointer-events: auto; }
 .ambilight-canvas { position: absolute; inset: -6%; width: 112%; height: 112%; object-fit: cover; filter: blur(44px) saturate(1.85) brightness(0.85); opacity: 0; display: none; pointer-events: none; z-index: 0; transition: opacity .6s ease; }
 .ambilight-canvas.on { display: block; }
-.danmaku-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 11; }
+.danmaku-layer { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 33; }
+.fs-chat-stack {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left, 14px));
+  bottom: max(68px, calc(58px + env(safe-area-inset-bottom, 0px)));
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(76vw, 420px);
+  pointer-events: none;
+}
+.fs-chat-pill {
+  background: rgba(8, 10, 18, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.35;
+  padding: 6px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(39, 220, 200, 0.28);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
+  word-break: break-word;
+}
 .danmaku-item {
   position: absolute;
   right: -40%;
@@ -3598,4 +3622,62 @@ body.theater-mode .resize-handle {
     padding: 9px 12px !important;
   }
 }
+
+@media (max-width: 960px) and (orientation: landscape) {
+  body:not(.vortex-fs):not(.mesh-minimized) .video-chat {
+    flex-direction: row !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-video {
+    flex: 1 1 0% !important;
+    width: auto !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    border-bottom: 0 !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat {
+    flex: 0 0 clamp(248px, 38vw, 336px) !important;
+    width: clamp(248px, 38vw, 336px) !important;
+    max-width: 42vw !important;
+    height: 100% !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .chat {
+    height: 100% !important;
+    min-height: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .discord-call-bar {
+    padding: 4px 8px !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .discord-call-peers {
+    max-height: 30px !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .chat-list {
+    flex: 1 1 0% !important;
+    min-height: 80px !important;
+    padding: 6px 8px !important;
+    overflow-y: auto !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .reaction-bar {
+    padding: 3px 6px !important;
+    flex-shrink: 0 !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .chatbar {
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) !important;
+    flex-shrink: 0 !important;
+  }
+}
+
 

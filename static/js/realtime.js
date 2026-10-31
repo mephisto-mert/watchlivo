@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261030_v42';
-import { api } from './api.js?v=20261030_v42';
-import { state } from './store.js?v=20261030_v42';
+import { clock } from './sync.js?v=20261031_v43';
+import { api } from './api.js?v=20261031_v43';
+import { state } from './store.js?v=20261031_v43';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -121,6 +121,21 @@ export class MeshConnection {
   }
 
   start() {
+    if (!this._visHandler) {
+      this._visHandler = () => {
+        if (this.closed || document.hidden) return;
+        this.retry = 0;
+        this.httpFailCount = 0;
+        if (this.mode === 'http') {
+          this.httpSend({ type: 'init' }, true);
+        } else if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
+          this.startWs();
+        }
+      };
+      document.addEventListener('visibilitychange', this._visHandler);
+      window.addEventListener('pageshow', this._visHandler);
+      window.addEventListener('focus', this._visHandler);
+    }
     const preferHttp = /(\.vercel\.app|watchlivo\.online)$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
     if (preferHttp) this.startHttp(); else this.startWs();
   }
@@ -142,7 +157,16 @@ export class MeshConnection {
       return;
     }
     this.ws = ws;
-    ws.onopen = () => { opened = true; this.retry = 0; this.emitStatus('online'); this.ping(); this.pingTimer = setInterval(() => this.ping(), 2500); };
+    ws.onopen = () => {
+      opened = true;
+      this.retry = 0;
+      this.emitStatus('online');
+      this.ping();
+      this.pingTimer = setInterval(() => this.ping(), 2500);
+      while (this.outQueue.length && this.ws?.readyState === 1) {
+        try { this.ws.send(JSON.stringify(this.outQueue.shift())); } catch (e) { break; }
+      }
+    };
     ws.onmessage = (ev) => {
       let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.type === 'pong' && data.t0Epoch) clock.sample(Number(data.t0Epoch), Number(data.serverTime));
@@ -227,7 +251,14 @@ export class MeshConnection {
       while (this.outQueue.length && !this.closed) {
         const items = this.outQueue.splice(0, 20);
         const payload = items.length === 1 ? items[0] : { type: 'batch', items };
-        await this.httpSend(payload, false);
+        const ok = await this.httpSend(payload, false);
+        if (!ok && !this.closed) {
+          const retryable = items.filter((it) => it && ['chat', 'msg_react', 'poll_create', 'poll_vote', 'change_media'].includes(it.type) && (it._retries = (it._retries || 0) + 1) <= 3);
+          if (retryable.length) {
+            this.outQueue.unshift(...retryable);
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        }
         if (this.outQueue.length) await new Promise((r) => setTimeout(r, 15));
       }
     } finally {
@@ -237,7 +268,7 @@ export class MeshConnection {
 
   async httpSend(payload, isInit = false) {
     const isPoll = payload.type === 'poll';
-    if (isPoll && (this.inFlight || this.flushing)) return;
+    if (isPoll && (this.inFlight || this.flushing)) return true;
     if (!isPoll) this.actionSeq = (this.actionSeq || 0) + 1;
     const reqSeq = this.actionSeq || 0;
     this.inFlight = true;
@@ -263,6 +294,13 @@ export class MeshConnection {
         lastChatId,
         participantCount: partArr.length || this.participantCount || 0,
       };
+      if ((isInit || payload.type === 'init') && !reqBody.recentChat) {
+        try {
+          const savedC = JSON.parse(localStorage.getItem(`vortex_chat_${this.roomId}`) || sessionStorage.getItem(`vortex_chat_${this.roomId}`) || '[]');
+          const mergedInitChat = [...(Array.isArray(savedC) ? savedC : []), ...chatArr.filter((m) => m && !m.system)].slice(-35);
+          if (mergedInitChat.length) reqBody.recentChat = mergedInitChat;
+        } catch (e) { /* ignore */ }
+      }
       if ((isInit || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
         this.needsMediaPush = false;
@@ -385,11 +423,13 @@ export class MeshConnection {
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
           if (!isPoll) this._emitP2p({ event: { type: 'room_state', room: res.room } });
         }
-        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${res.room.host_id}`;
+        const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
+        const stamp = `${res.room.rev}|${res.room.privacy}|${res.room.playMode}|${res.room.voipMode}|${res.room.name}|${res.room.participantCount || (res.room.participants || []).length}|${res.room.media?.meshStateTime}|${res.room.media?.meshStateStatus}|${res.room.media?.url}|${res.room.chat?.length}|${srvLastChatId}|${res.room.host_id}`;
         if (isInit) this.onMessage?.({ type: 'init', clientId: this.clientId, room: res.room });
         else if (stamp !== this.lastRoomStamp) this.onMessage?.({ type: 'room_state', room: res.room, viaHttp: isPoll });
         this.lastRoomStamp = stamp;
       }
+      return true;
     } catch (e) {
       if (e.status === 403) {
         this.emitStatus('denied');
@@ -401,6 +441,7 @@ export class MeshConnection {
           this.emitStatus('connecting');
         }
       }
+      return false;
     } finally {
       this.inFlight = false;
     }
@@ -457,7 +498,11 @@ export class MeshConnection {
       this._emitP2p({ event: { type: 'chat', cid: this.clientId, message: p2pMsg } });
     }
     if (this.mode === 'ws') {
-      if (this.ws?.readyState === 1) this.ws.send(JSON.stringify(obj));
+      if (this.ws?.readyState === 1) {
+        this.ws.send(JSON.stringify(obj));
+      } else {
+        this.outQueue.push(obj);
+      }
     } else if (this.mode === 'http') {
       this.actionSeq = (this.actionSeq || 0) + 1;
       this.outQueue.push(obj);
@@ -469,6 +514,12 @@ export class MeshConnection {
 
   close(explicitLeave = false) {
     this.closed = true;
+    if (this._visHandler) {
+      document.removeEventListener('visibilitychange', this._visHandler);
+      window.removeEventListener('pageshow', this._visHandler);
+      window.removeEventListener('focus', this._visHandler);
+      this._visHandler = null;
+    }
     clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer);
     try { this.bc?.close(); } catch (e) { /* ignore */ }
     try { this.ws?.close(); } catch (e) { /* ignore */ }

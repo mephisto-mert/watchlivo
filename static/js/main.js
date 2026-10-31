@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261030_v42';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261030_v42';
-import { renderHome, destroyHome } from './views/home.js?v=20261030_v42';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261030_v42';
-import { api } from './api.js?v=20261030_v42';
-import { toast } from './ui.js?v=20261030_v42';
+import { state, set } from './store.js?v=20261031_v43';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261031_v43';
+import { renderHome, destroyHome } from './views/home.js?v=20261031_v43';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261031_v43';
+import { api } from './api.js?v=20261031_v43';
+import { toast } from './ui.js?v=20261031_v43';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');

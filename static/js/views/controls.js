@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261030_v42';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261030_v42';
-import { getProvider } from '../providers.js?v=20261030_v42';
-import { expectedPosition } from '../sync.js?v=20261030_v42';
-import { thumbFor } from './lobby.js?v=20261030_v42';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261030_v42';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261030_v42';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261030_v42';
-import { avatar } from '../profile.js?v=20261030_v42';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261031_v43';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261031_v43';
+import { getProvider } from '../providers.js?v=20261031_v43';
+import { expectedPosition } from '../sync.js?v=20261031_v43';
+import { thumbFor } from './lobby.js?v=20261031_v43';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261031_v43';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261031_v43';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261031_v43';
+import { avatar } from '../profile.js?v=20261031_v43';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -185,10 +185,10 @@ export function buildControls(frame, ctx) {
     style: { cursor: 'pointer' },
     ...tapProps(() => toggleMenu('quality')),
   }, '1080p HD');
-  const epBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', ...tapProps(() => openEpisodeModal()) }, '📺 S1:B1');
-  const nextEpTopBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', ...tapProps(() => triggerNextEpisode()) }, '⏭️ Sonraki Bölüm');
-  const subPillBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', ...tapProps(() => toggleMenu('subtitle')) }, '💬 Altyazı & Dublaj');
-  const origBtn = h('button', { class: 'btn ctl-pill hidden', id: 'ctl-orig-btn', ...tapProps(() => openOfficialPlatform()) }, '🔐 Orijinal Platformda Aç');
+  const epBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', ...tapProps(() => openEpisodeModal()) }, '📺 S1:B1');
+  const nextEpTopBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', ...tapProps(() => triggerNextEpisode(true)) }, '⏭️ Sonraki Bölüm');
+  const subPillBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-sub-pill', ...tapProps(() => toggleMenu('subtitle')) }, '💬 Altyazı & Dublaj');
+  const origBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-orig-btn', ...tapProps(() => openOfficialPlatform()) }, '🔐 Orijinal Platformda Aç');
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
   const syncDot = h('span', { class: 'sync-dot', title: 'Senkron' });
   const syncText = h('span', { class: 'ctl-time', style: { opacity: .7 } });
@@ -206,7 +206,7 @@ export function buildControls(frame, ctx) {
     showOverlay(`${delta > 0 ? '⏩ +' : '⏪ '}${delta} sn (${fmtTime(target)})`, 1200);
     revealControls();
   };
-  const playBtn = h('button', { class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', ...tapProps(() => {
+  const playBtn = h('button', { type: 'button', class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', ...tapProps(() => {
     if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
     const roomPlaying = (state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
     const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
@@ -221,10 +221,8 @@ export function buildControls(frame, ctx) {
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
       return;
     }
-    if (!adapterPaused) {
+    if (!adapterPaused || (roomPlaying && !ctx.userPaused)) {
       actions.pause();
-    } else if (!roomPlaying || ctx.userPaused) {
-      actions.play();
     } else {
       host.adapter?.play?.();
       actions.play();
@@ -417,64 +415,85 @@ export function buildControls(frame, ctx) {
     revealControls(2600);
   };
 
-  async function triggerNextEpisode() {
+  let nextEpBusy = false;
+  async function triggerNextEpisode(manual = false) {
     const m = state.mesh?.media;
-    if (!m || m.mediaType !== 'tv' || !isLeader()) return;
-    if ((state.mesh?.queue || []).length > 0) return;
+    if (!m) return;
+    const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
+    const curS = Number(m.season || parsedEp?.[1] || parsedEp?.[3] || 0);
+    const curE = Number(m.episode || parsedEp?.[2] || parsedEp?.[4] || 0);
+    const isSeries = Boolean(m.mediaType === 'tv' || curS > 0 || curE > 0);
+    if (!isSeries) return;
+    if (!isLeader() && !canSelectVideo()) {
+      if (manual) toast('Bölümü yalnızca oda başkanı değiştirebilir');
+      return;
+    }
+    if (!manual && (state.mesh?.queue || []).length > 0) return;
+    if (nextEpBusy) return;
     const cleanTitle = (m.seriesTitle || (m.title || 'Dizi').split(' — ')[0]).trim();
     const seriesIdKey = m.tmdbId || m.id || cleanTitle;
     if (!seriesIdKey) return;
-    const curKey = `${seriesIdKey}:${m.season || 1}:${m.episode || 1}`;
-    if (autoAdvancingKey === curKey) return;
+    const curKey = `${seriesIdKey}:${curS || 1}:${curE || 1}`;
+    if (!manual && autoAdvancingKey === curKey) return;
     autoAdvancingKey = curKey;
+    nextEpBusy = true;
     nextEpBanner.classList.add('hidden');
-    let targetSeason = Number(m.season || 1) || 1;
-    let targetEp = (Number(m.episode || 1) || 1) + 1;
+    let targetSeason = curS || 1;
+    let targetEp = (curE || 1) + 1;
     let epName = '';
     try {
-      const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
-      if (r.ok) {
-        const sData = await r.json();
-        const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
-        const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
-        const foundEp = eps.find((x) => Number(x.episode) === targetEp);
-        if (foundEp) {
-          const rawName = String(foundEp.name || '').trim();
-          const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
-          epName = isRedundant ? '' : rawName;
-        } else if (eps.length > 0 && targetEp > eps.length) {
-          const hasNextSeason = seasons.some((s) => Number(s.season) === targetSeason + 1);
-          if (hasNextSeason) {
-            targetSeason += 1;
-            targetEp = 1;
-            const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
-            if (r2.ok) {
-              const s2 = await r2.json();
-              const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
-              if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
-                epName = ep1.name.trim();
+      showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
+      if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
+      try {
+        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+        if (r.ok) {
+          const sData = await r.json();
+          const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
+          const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
+          const foundEp = eps.find((x) => Number(x.episode) === targetEp);
+          if (foundEp) {
+            const rawName = String(foundEp.name || '').trim();
+            const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
+            epName = isRedundant ? '' : rawName;
+          } else if (eps.length > 0 && targetEp > eps.length) {
+            const hasNextSeason = seasons.some((s) => Number(s.season) === targetSeason + 1);
+            if (hasNextSeason) {
+              targetSeason += 1;
+              targetEp = 1;
+              const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+              if (r2.ok) {
+                const s2 = await r2.json();
+                const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
+                if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
+                  epName = ep1.name.trim();
+                }
               }
+            } else {
+              toast('🏁 Dizinin son bölümüne ulaşıldı');
+              autoAdvancingKey = '';
+              return;
             }
-          } else {
-            toast('🏁 Dizinin son bölümüne ulaşıldı');
-            return;
           }
         }
+      } catch (e) { /* fallback to +1 */ }
+      const prov = getProvider(m.catalogProvider || m.provider) || { id: 'cinema', name: 'Sinema & Dizi' };
+      showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
+      const nextMedia = await resolveCatalogItem(
+        { id: m.id || '', tmdbId: m.tmdbId || '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: m.originalTitle || cleanTitle, year: m.year || '', mediaType: 'tv', backdrop: m.thumbnail, poster: m.thumbnail },
+        prov,
+        targetSeason,
+        targetEp,
+        epName,
+      );
+      if (nextMedia) {
+        actions.pickMedia({ ...nextMedia, mediaType: 'tv', season: targetSeason, episode: targetEp, seriesTitle: cleanTitle });
+      } else {
+        autoAdvancingKey = '';
+        toast('⚠️ Sonraki bölüm kaynağı bulunamadı');
       }
-    } catch (e) { /* fallback to +1 */ }
-    const prov = getProvider(m.catalogProvider || m.provider) || { id: 'cinema', name: 'Sinema & Dizi' };
-    showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
-    const nextMedia = await resolveCatalogItem(
-      { tmdbId: m.tmdbId || '', imdbId: m.imdbId || '', title: cleanTitle, originalTitle: m.originalTitle || cleanTitle, year: m.year || '', mediaType: 'tv', backdrop: m.thumbnail },
-      prov,
-      targetSeason,
-      targetEp,
-      epName,
-    );
-    if (nextMedia) {
-      actions.pickMedia(nextMedia);
-    } else {
-      autoAdvancingKey = '';
+    } finally {
+      nextEpBusy = false;
+      setTimeout(() => { if (autoAdvancingKey === curKey) autoAdvancingKey = ''; }, 3000);
     }
   }
   const closeMenu = () => {
@@ -1557,23 +1576,13 @@ export function buildControls(frame, ctx) {
       try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
     }
     if (typeof window !== 'undefined' && !isInputFocused) {
-      const isTouchPhone = ('ontouchstart' in window || navigator.maxTouchPoints > 0) && Math.min(window.innerWidth, window.innerHeight) <= 540;
       const isLandscape = window.innerWidth > window.innerHeight * 1.15;
-      const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
-      const isMinimized = document.body.classList.contains('mesh-minimized');
-      if (isTouchPhone && hasMedia && !isMinimized) {
-        if (!lastMobileLandscape && isLandscape && !isFullscreenActive()) {
-          frame.classList.add('fullscreen');
-          document.body.classList.add('vortex-fs');
-          frame.dataset.fsMode = 'auto-rotate';
-          revealControls(2500);
-        } else if (lastMobileLandscape && !isLandscape && isFullscreenActive()) {
-          frame.classList.remove('fullscreen');
-          document.body.classList.remove('vortex-fs');
-          frame.dataset.fsMode = '';
-          if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-          if (document.webkitFullscreenElement) document.webkitExitFullscreen?.();
-        }
+      if (lastMobileLandscape && !isLandscape && isFullscreenActive() && frame.dataset.fsMode === 'auto-rotate') {
+        frame.classList.remove('fullscreen');
+        document.body.classList.remove('vortex-fs');
+        frame.dataset.fsMode = '';
+        if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+        if (document.webkitFullscreenElement) document.webkitExitFullscreen?.();
       }
       lastMobileLandscape = isLandscape;
     }
@@ -1621,19 +1630,6 @@ export function buildControls(frame, ctx) {
     }
     const reqFrameFs = frame.requestFullscreen || frame.webkitRequestFullscreen;
     const reqDocFs = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
-    const iosVideoFs = v && (v.webkitEnterFullscreen || v.webkitEnterFullScreen);
-    if (!reqFrameFs && !reqDocFs && typeof iosVideoFs === 'function') {
-      try {
-        const subs = host.adapter?.subs;
-        if (subs && subs.selectedSubId && subs.selectedSubId !== 'off') {
-          const curTrk = subs.subtitleTracks?.find((t) => t.id === subs.selectedSubId);
-          if (curTrk) subs._attachNativeTrack(curTrk);
-        }
-        frame.dataset.fsMode = 'ios-native';
-        iosVideoFs.call(v);
-        return;
-      } catch (e) { /* fallback to CSS fullscreen below */ }
-    }
     frame.classList.add('fullscreen');
     document.body.classList.add('vortex-fs');
     onViewportChange();
@@ -1646,15 +1642,6 @@ export function buildControls(frame, ctx) {
         try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* ignore */ }
         onViewportChange();
       }).catch(() => {
-        if (typeof iosVideoFs === 'function') {
-          try {
-            frame.classList.remove('fullscreen');
-            document.body.classList.remove('vortex-fs');
-            frame.dataset.fsMode = 'ios-native';
-            iosVideoFs.call(v);
-            return;
-          } catch (err) { /* ignore */ }
-        }
         frame.dataset.fsMode = 'css';
       });
     } else {
@@ -1789,12 +1776,25 @@ export function buildControls(frame, ctx) {
     title.textContent = m.title || 'Video';
     artist.textContent = m.channel || prov?.name || '';
     provLogo.src = prov?.logo || ''; provLogo.style.display = prov?.logo ? '' : 'none';
-    const isSeries = !!(m.mediaType === 'tv');
+    const parsedTitleEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
+    const curSeasonNum = Number(m.season || parsedTitleEp?.[1] || parsedTitleEp?.[3] || 0);
+    const curEpNum = Number(m.episode || parsedTitleEp?.[2] || parsedTitleEp?.[4] || 0);
+    const isSeries = Boolean(m.mediaType === 'tv' || curSeasonNum > 0 || curEpNum > 0);
     epBtn.classList.toggle('hidden', !isSeries);
-    nextEpTopBtn.classList.toggle('hidden', !isSeries || !isLeader());
+    nextEpTopBtn.classList.toggle('hidden', !isSeries || (!isLeader() && !canSelectVideo()));
     if (isSeries) {
-      epBtn.replaceChildren(ico('episodes'), `S${m.season || 1}:B${m.episode || 1}`);
-      nextEpTopBtn.replaceChildren(ico('skip'), `B${Number(m.episode || 1) + 1}`);
+      const sNum = curSeasonNum || 1;
+      const eNum = curEpNum || 1;
+      const epSig = `S${sNum}:B${eNum}`;
+      if (epBtn.dataset.sig !== epSig) {
+        epBtn.dataset.sig = epSig;
+        epBtn.replaceChildren(ico('episodes'), epSig);
+      }
+      const nextSig = `B${eNum + 1}`;
+      if (nextEpTopBtn.dataset.sig !== nextSig) {
+        nextEpTopBtn.dataset.sig = nextSig;
+        nextEpTopBtn.replaceChildren(ico('skip'), nextSig);
+      }
     }
     const vEl = host.adapter?.video || frame.querySelector('video');
     const vw = vEl?.videoWidth || 0;
@@ -1829,12 +1829,22 @@ export function buildControls(frame, ctx) {
       const aId = host.adapter?.getSelectedAudioId?.() || 'orig';
       const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
       const dubTag = (aId === 'tr-dub' || aId === 'tr-ai-dub') ? 'TR Dublaj' : (aId === 'en-dub' || aId === 'en-ai-dub') ? 'EN Dublaj' : 'Orijinal';
-      subPillBtn.replaceChildren(ico('subtitles'), `${subTag} · ${dubTag}`);
+      const subSig = `${subTag} · ${dubTag}`;
+      if (subPillBtn.dataset.sig !== subSig) {
+        subPillBtn.dataset.sig = subSig;
+        subPillBtn.replaceChildren(ico('subtitles'), subSig);
+      }
       subBtn.classList.toggle('active-sub', sId !== 'off' || aId !== 'orig');
     }
     const hasOrig = !!(m.officialUrl || m.catalogProvider);
     origBtn.classList.toggle('hidden', !hasOrig);
-    if (hasOrig) origBtn.replaceChildren(ico('externalLink'), formatOpenInProvider(prov?.name || 'Orijinal'));
+    if (hasOrig) {
+      const origSig = formatOpenInProvider(prov?.name || 'Orijinal');
+      if (origBtn.dataset.sig !== origSig) {
+        origBtn.dataset.sig = origSig;
+        origBtn.replaceChildren(ico('externalLink'), origSig);
+      }
+    }
     const roomPlaying = (m.meshStateStatus || (m.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
     const localPaused = Boolean(
       host.adapter
@@ -1847,13 +1857,24 @@ export function buildControls(frame, ctx) {
     const playing = roomPlaying && !localPaused;
     const embedOnly = host.adapter && !host.adapter.caps.overlayClicks;
     controls.classList.toggle('show', !playing && !embedOnly);
-    playBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
-    centerPlayBtn.replaceChildren(ico(playing ? 'pause' : 'play'));
+    const playIconName = playing ? 'pause' : 'play';
+    if (playBtn.dataset.sig !== playIconName) {
+      playBtn.dataset.sig = playIconName;
+      playBtn.replaceChildren(ico(playIconName));
+    }
+    if (centerPlayBtn.dataset.sig !== playIconName) {
+      centerPlayBtn.dataset.sig = playIconName;
+      centerPlayBtn.replaceChildren(ico(playIconName));
+    }
     const showCenterHud = !playing;
     centerPlayBtn.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('is-paused', showCenterHud);
     theaterBtn.classList.toggle('on', Boolean(ctx.isTheaterMode?.()));
-    volBtn.replaceChildren(ico(isActuallyMuted() ? 'mute' : 'volume'));
+    const volIconName = isActuallyMuted() ? 'mute' : 'volume';
+    if (volBtn.dataset.sig !== volIconName) {
+      volBtn.dataset.sig = volIconName;
+      volBtn.replaceChildren(ico(volIconName));
+    }
     volRange.value = String(host.volume);
     const canSeek = !host.adapter || !!host.adapter.caps.seek;
     const leader = isLeader();
@@ -1906,7 +1927,25 @@ export function buildControls(frame, ctx) {
       document.body.classList.remove('vortex-fs');
     },
     danmaku: (msg) => {
-      if (!danmakuEnabled || !msg || msg.system || !msg.text) return;
+      if (!msg || msg.system || (!msg.text && !msg.gif)) return;
+      const inFs = isFullscreenActive();
+      if (inFs) {
+        let fsStack = frame.querySelector('.fs-chat-stack');
+        if (!fsStack) {
+          fsStack = h('div', { class: 'fs-chat-stack' });
+          frame.append(fsStack);
+        }
+        while (fsStack.childElementCount >= 4) {
+          fsStack.firstElementChild?.remove();
+        }
+        const pill = h('div', { class: 'fs-chat-pill' },
+          h('b', { style: { color: msg.color || '#27DCC8' } }, `${msg.user || 'İzleyici'}: `),
+          h('span', {}, msg.text || 'GIF Gönderdi'));
+        fsStack.append(pill);
+        setTimeout(() => pill.remove(), 5500);
+      }
+      if (!danmakuEnabled && !inFs) return;
+      if (!msg.text) return;
       while (danmakuLayer.childElementCount >= 20) {
         danmakuLayer.firstElementChild?.remove();
       }

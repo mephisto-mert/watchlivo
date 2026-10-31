@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261030_v42';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261030_v42';
-import { avatar } from '../profile.js?v=20261030_v42';
-import { api, qs } from '../api.js?v=20261030_v42';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v42';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261031_v43';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261031_v43';
+import { avatar } from '../profile.js?v=20261031_v43';
+import { api, qs } from '../api.js?v=20261031_v43';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v43';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -75,7 +75,81 @@ export function playRoomSfx(sfx) {
         osc.stop(now + i * 0.09 + 0.26);
       });
     }
-    setTimeout(() => ac.close().catch(() => {}), 1400);
+  } catch (e) { /* ignore */ }
+}
+
+export function playEmojiSfx(emoji) {
+  try {
+    if (emoji === '👏') { playRoomSfx('clap'); return; }
+    if (emoji === '😂') { playRoomSfx('laugh'); return; }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
+      _sfxAudioCtx = new Ctx();
+    }
+    const ac = _sfxAudioCtx;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    const now = ac.currentTime;
+    if (emoji === '❤️') {
+      [523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.065);
+        g.gain.setValueAtTime(0.14, now + i * 0.065);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.065 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.065);
+        osc.stop(now + i * 0.065 + 0.24);
+      });
+    } else if (emoji === '😮') {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(310, now);
+      osc.frequency.exponentialRampToValueAtTime(720, now + 0.26);
+      g.gain.setValueAtTime(0.15, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(g).connect(ac.destination);
+      osc.start(now);
+      osc.stop(now + 0.32);
+    } else if (emoji === '😢') {
+      [440, 392, 329.63].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.12);
+        g.gain.setValueAtTime(0.12, now + i * 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.12);
+        osc.stop(now + i * 0.12 + 0.24);
+      });
+    } else if (emoji === '🔥') {
+      [587.33, 880, 1174.66].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + i * 0.05);
+        g.gain.setValueAtTime(0.09, now + i * 0.05);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.16);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.05);
+        osc.stop(now + i * 0.05 + 0.18);
+      });
+    } else {
+      [640, 920].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.055);
+        g.gain.setValueAtTime(0.15, now + i * 0.055);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.055 + 0.09);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.055);
+        osc.stop(now + i * 0.055 + 0.1);
+      });
+    }
   } catch (e) { /* ignore */ }
 }
 const PRIVACY = [
@@ -98,12 +172,19 @@ export function buildChat(ctx) {
   const { actions } = ctx;
   const list = h('div', { class: 'chat-list', id: 'chat-list' });
   const typing = h('div', { class: 'typing' });
-  const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', 'aria-label': 'Mesaj', id: 'chat-input' });
+  const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', enterkeyhint: 'send', autocomplete: 'off', 'aria-label': 'Mesaj', id: 'chat-input' });
   const micBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Mikrofon', 'data-tip': 'Mikrofon', id: 'btn-mic', onclick: () => toggleMic() }, h('span', { html: icons.micOff, style: { display: 'flex' } }));
   const camBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Kamera', 'data-tip': 'Kamera Aç/Kapat', id: 'btn-cam', onclick: () => toggleCam() }, h('span', { html: icons.cameraOff, style: { display: 'flex' } }));
   const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
-  const gifBtn = h('button', { class: 'ctl-action', 'aria-label': 'GIF', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
-  const sendBtn = h('button', { class: 'ctl-action', 'aria-label': 'Gönder', onclick: () => send() }, h('span', { html: icons.send, style: { display: 'contents' } }));
+  const gifBtn = h('button', { type: 'button', class: 'ctl-action', 'aria-label': 'GIF', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
+  const sendBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action',
+    id: 'btn-chat-send',
+    'aria-label': 'Gönder',
+    onpointerdown: (e) => { e.preventDefault(); send(); },
+    onclick: () => send(),
+  }, h('span', { html: icons.send, style: { display: 'contents' } }));
   let toolsPopover = null;
   let toolsBtn = null;
   const closeToolsPopover = () => {
@@ -332,9 +413,13 @@ export function buildChat(ctx) {
     input.focus();
   }
 
+  let lastSendAt = 0;
   function send() {
+    const nowMs = Date.now();
+    if (nowMs - lastSendAt < 80) return;
     const v = input.value;
     if (!v.trim()) return;
+    lastSendAt = nowMs;
     const extra = activeReply ? { replyTo: activeReply } : {};
     actions.sendChat(v, extra);
     input.value = '';
@@ -342,7 +427,12 @@ export function buildChat(ctx) {
     list.querySelectorAll('.sys-card').forEach((c) => c.remove());
   }
   let lastTyping = 0;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.keyCode === 13) {
+      e.preventDefault();
+      send();
+    }
+  });
   input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
   input.addEventListener('focus', () => {
     document.body.classList.add('kb-open');

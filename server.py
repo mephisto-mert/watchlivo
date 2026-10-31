@@ -5252,7 +5252,7 @@ async def rave_stream_manifest(request: Request):
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             is_master = "#EXT-X-STREAM-INF" in raw
-            ps_q = ("&proxy_segs=1" if (proxy_segs or cur_is_dp or cur_is_hfnl or cur_is_dbx or cur_is_dl) else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
+            ps_q = ("&proxy_segs=1" if (proxy_segs or cur_is_dp or cur_is_hfnl or cur_is_fhd or cur_is_pv or cur_is_dbx or cur_is_dl) else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
@@ -5295,7 +5295,7 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, dp_ref, ".ts")
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
-                if "dragonballzfans" in u_str or proxy_segs:
+                if "dragonballzfans" in u_str or proxy_segs or cur_is_fhd or cur_is_pv:
                     ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
                         "https://rapidvid.org/" if cur_is_fhd else (
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (
@@ -5520,11 +5520,17 @@ async def stream_proxy(request: Request):
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
     try:
         data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng), timeout=12)
+        cache_ctl = (
+            "private, max-age=300"
+            if (rng or status == 206)
+            else "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600"
+        )
         hdrs = {
             "Content-Type": ct,
             "Content-Length": str(len(data)),
             "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600, immutable",
+            "Vary": "Range",
+            "Cache-Control": cache_ctl,
             **cors_hdrs,
         }
         if cr and status in (206, 416):

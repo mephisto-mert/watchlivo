@@ -1,34 +1,66 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261030_v42';
-import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261030_v42';
-import { resolveMusicItem } from './selection-kinds.js?v=20261030_v42';
-import { MeshConnection } from '../realtime.js?v=20261030_v42';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261030_v42';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261030_v42';
-import { buildLayout } from './mesh-layout.js?v=20261030_v42';
-import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261030_v42';
-import { Voice } from '../voice.js?v=20261030_v42';
-import { playRoomSfx } from './chat.js?v=20261030_v42';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261031_v43';
+import { state, set, isLeader, isHostOnly, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261031_v43';
+import { resolveMusicItem } from './selection-kinds.js?v=20261031_v43';
+import { MeshConnection } from '../realtime.js?v=20261031_v43';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261031_v43';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261031_v43';
+import { buildLayout } from './mesh-layout.js?v=20261031_v43';
+import { thumbFor, rememberRoom, getRememberedRoom } from './lobby.js?v=20261031_v43';
+import { Voice } from '../voice.js?v=20261031_v43';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261031_v43';
 
 let ctx = null;
 
-// Sohbet yenilemede korunur (sessionStorage), odadan çıkınca / sekme kapanınca temizlenir.
+// Sohbet yenilemede ve uygulama geçişlerinde korunur (sessionStorage + localStorage).
 const chatKey = (id) => `vortex_chat_${id}`;
-function loadSavedChat(id) {
+export function loadSavedChat(id) {
+  if (!id) return [];
   try {
-    const arr = JSON.parse(sessionStorage.getItem(chatKey(id)) || '[]');
-    return Array.isArray(arr) ? arr.filter((m) => m && m.id && !m.system && m.ts && (Date.now() / 1000 - Number(m.ts)) < 3600) : [];
+    const nowSec = Date.now() / 1000;
+    const rawS = JSON.parse(sessionStorage.getItem(chatKey(id)) || '[]');
+    const rawL = JSON.parse(localStorage.getItem(chatKey(id)) || '[]');
+    const byId = new Map();
+    for (const m of [...(Array.isArray(rawL) ? rawL : []), ...(Array.isArray(rawS) ? rawS : [])]) {
+      if (m && m.id && !m.system) {
+        const ts = Number(m.ts || nowSec);
+        if (nowSec - ts < 86400) {
+          byId.set(m.id, { ...m, ts });
+        }
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-80);
   } catch (e) { return []; }
 }
 function saveChat(room) {
   try {
     if (!room?.id || room.curated) return;
-    const chat = (room.chat || []).filter((m) => m && m.id && !m.system).slice(-80);
-    sessionStorage.setItem(chatKey(room.id), JSON.stringify(chat));
+    if (ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000) return;
+    const nowSec = Date.now() / 1000;
+    const existing = loadSavedChat(room.id);
+    const incoming = (room.chat || []).filter((m) => m && m.id && !m.system);
+    const byId = new Map();
+    for (const m of [...existing, ...incoming]) {
+      if (m && m.id && !m.system) {
+        const ts = Number(m.ts || nowSec);
+        if (nowSec - ts < 86400) {
+          byId.set(m.id, { ...m, ts });
+        }
+      }
+    }
+    const merged = Array.from(byId.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-80);
+    const serialized = JSON.stringify(merged);
+    sessionStorage.setItem(chatKey(room.id), serialized);
+    localStorage.setItem(chatKey(room.id), serialized);
   } catch (e) { /* ignore */ }
 }
 function clearSavedChat(id) {
-  try { if (id) sessionStorage.removeItem(chatKey(id)); } catch (e) { /* ignore */ }
+  try {
+    if (id) {
+      sessionStorage.removeItem(chatKey(id));
+      localStorage.removeItem(chatKey(id));
+    }
+  } catch (e) { /* ignore */ }
 }
 
 const isTimeKeeper = () => isActiveTimeKeeper()
@@ -451,7 +483,7 @@ function onMessage(data) {
       }
       break;
     case 'typing': ctx?.layout.showTyping(data.user); break;
-    case 'reaction': ctx?.layout.floatEmoji(data.emoji, data.user); break;
+    case 'reaction': playEmojiSfx(data.emoji); ctx?.layout.floatEmoji(data.emoji, data.user); break;
     case 'soundfx': playRoomSfx(data.sfx); ctx?.layout.floatEmoji(data.sfx === 'clap' ? '👏' : data.sfx === 'laugh' ? '😂' : data.sfx === 'suspense' ? '🥁' : '🎉', data.user); break;
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
@@ -678,7 +710,7 @@ const actions = {
     ctx.conn.send('msg_react', { msgId, emoji });
   },
   typing() { ctx.conn.send('typing', { user: state.self.name }); },
-  reaction(emoji) { ctx.layout.floatEmoji(emoji, state.self?.name); ctx.conn.send('reaction', { emoji }); },
+  reaction(emoji) { playEmojiSfx(emoji); ctx.layout.floatEmoji(emoji, state.self?.name); ctx.conn.send('reaction', { emoji }); },
   soundfx(sfx) { playRoomSfx(sfx); ctx.layout.floatEmoji(sfx === 'clap' ? '👏' : sfx === 'laugh' ? '😂' : sfx === 'suspense' ? '🥁' : '🎉', state.self?.name); ctx.conn.send('soundfx', { sfx }); },
   hostAction(action, extra = {}) {
     if (action === 'set_privacy' && state.mesh) {
@@ -762,7 +794,6 @@ const actions = {
   },
   async leave() {
     document.body.classList.remove('mesh-minimized');
-    clearSavedChat(state.mesh?.id);
     try { ctx?.conn?.close(true); } catch (e) { /* ignore */ }
     window.vortexNavigate('/');
   },
@@ -803,9 +834,17 @@ export async function enterMesh(app, params) {
   ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };
   ctx.layout = buildLayout(app, ctx);
   const cachedRoom = getRememberedRoom(params.id);
+  const initialSavedChat = loadSavedChat(params.id);
   if (cachedRoom && cachedRoom.id === params.id) {
+    if (initialSavedChat.length && !(cachedRoom.chat && cachedRoom.chat.length)) {
+      cachedRoom.chat = initialSavedChat;
+    }
     applyRoom(cachedRoom, { reload: true });
   } else {
+    if (initialSavedChat.length) {
+      ctx.seenChatIds = new Set(initialSavedChat.map((m) => m.id));
+      for (const m of initialSavedChat) ctx.layout?.chatAppended?.(m);
+    }
     ctx.layout.playerEvent?.('loading');
   }
   sync.start();
@@ -815,6 +854,8 @@ export async function enterMesh(app, params) {
   });
   if (cachedRoom && cachedRoom.id === params.id) {
     ctx.conn.lastRoom = cachedRoom;
+  } else if (initialSavedChat.length) {
+    ctx.conn.lastRoom = { id: params.id, chat: initialSavedChat };
   }
   ctx.voice = new Voice({
     send: (type, payload) => ctx.conn.send(type, payload),

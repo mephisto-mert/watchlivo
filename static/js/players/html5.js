@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261030_v42';
-import { expectedPosition } from '../sync.js?v=20261030_v42';
-import { state } from '../store.js?v=20261030_v42';
+import { SubtitleDubController } from './subtitles.js?v=20261031_v43';
+import { expectedPosition } from '../sync.js?v=20261031_v43';
+import { state } from '../store.js?v=20261031_v43';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -256,11 +256,11 @@ export class Html5Adapter {
         return;
       }
       const inNativeVideoFs = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v);
-      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
-      const isTransientPause = Boolean(!inNativeVideoFs);
+      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2200);
+      const isTransientPause = Boolean(!inNativeVideoFs && (v.seeking || recentSeek || v.readyState < 2));
       if (this.wantPlaying && !this.hasEnded && !v.ended && isTransientPause) {
         clearTimeout(this.resumeTimer);
-        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 450 : 250;
+        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 400 : 250;
         this.resumeTimer = setTimeout(() => {
           if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {
             this.tryPlay();
@@ -534,6 +534,14 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         if (!data?.fatal) {
+          if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+            this._switchedToProxySegs = true;
+            const proxied = withProxySegs(srcUrl);
+            if (proxied && proxied !== srcUrl) {
+              loadCandidateUrl(proxied, doneCb);
+              return;
+            }
+          }
           if ((data?.details === 'decryptError' || data?.details === 'keyLoadError') && nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             return;
@@ -890,9 +898,9 @@ export class Html5Adapter {
     }
   }
   getTime() {
-    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500) {
+    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 6000) {
       const cur = Number(this.video?.currentTime || 0);
-      if (!this.video || this.video.readyState < 1 || cur < Math.max(0.5, this.initialSeekPending - 2.5)) {
+      if (!this.video || this.video.readyState < 1 || (cur < 0.5 && this.initialSeekPending > 2.0)) {
         return this.initialSeekPending;
       }
       this.initialSeekPending = 0;
@@ -900,7 +908,7 @@ export class Html5Adapter {
     if (!this.video || this.video.readyState < 1) {
       return Number(this.video?.currentTime || 0);
     }
-    if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 8500) {
+    if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 3500) {
       return this.lastSeekTarget;
     }
     return Number(this.video?.currentTime || 0);

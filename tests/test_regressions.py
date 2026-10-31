@@ -420,6 +420,52 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(hbs), 1)
         self.assertAlmostEqual(float(hbs[0]["media"]["currentTime"]), 6.5, places=1)
 
+    def test_v43_room_screen_8_fixes(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        # 1. Wi-Fi stream proxy Vary: Range + non-immutable 206 + backward seek loop guard
+        with patch.object(server, "_proxy_chunk_sync", return_value=(b"A" * 64, 206, "bytes 0-63/1000", "video/mp2t")):
+            r_rng = self.client.get(server._proxy_u("https://example.com/seg.ts"), headers={"Range": "bytes=0-63"})
+        self.assertEqual(r_rng.status_code, 206)
+        self.assertEqual(r_rng.headers.get("vary"), "Range")
+        self.assertIn("private", r_rng.headers.get("cache-control", ""))
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        self.assertIn("delta < 0 && delta > -10.0 && !stateChanged", sync_js)
+
+        # 2. Chat persistence on refresh (init merges recentChat) & dual storage
+        r_init = self.client.post("/api/rooms/v43-chat-test-room/sync", json={
+            "type": "init",
+            "clientId": "h_chat_u1",
+            "username": "Mert",
+            "recentChat": [
+                {"id": "m_saved_1", "user": "Mert", "color": "#27DCC8", "text": "Yenileme öncesi mesaj", "ts": rooms.now() - 15.0, "time": "22:10"},
+            ],
+        })
+        self.assertEqual(r_init.status_code, 200)
+        chat_texts = [c.get("text") for c in (r_init.json().get("room", {}).get("chat") or [])]
+        self.assertIn("Yenileme öncesi mesaj", chat_texts)
+
+        # 3. Reaction emojis play synthesized audio & AudioContext stays open
+        chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        self.assertIn("export function playEmojiSfx(emoji)", chat_js)
+        self.assertNotIn("setTimeout(() => ac.close()", chat_js)
+        self.assertIn("playEmojiSfx(emoji)", mesh_js)
+
+        # 4. App-switch resilience (600s TTL + visibilitychange recovery)
+        self.assertGreaterEqual(rooms.HTTP_PARTICIPANT_TTL, 600.0)
+        rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
+        self.assertIn("visibilitychange", rt_js)
+
+        # 5 & 6 & 7. Fullscreen chat stack, pause fix, landscape side-by-side chat, and B1->B2 triggerNextEpisode(true)
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("fs-chat-stack", ctl_js)
+        self.assertIn("triggerNextEpisode(true)", ctl_js)
+        self.assertIn("nextEpTopBtn.dataset.sig", ctl_js)
+        self.assertIn("playBtn.dataset.sig", ctl_js)
+        self.assertIn("@media (max-width: 960px) and (orientation: landscape)", mesh_css)
+
 
 if __name__ == '__main__':
     unittest.main()
