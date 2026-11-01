@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261101_v55';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261101_v55';
-import { avatar } from '../profile.js?v=20261101_v55';
-import { api, qs } from '../api.js?v=20261101_v55';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v55';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261101_v56';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261101_v56';
+import { avatar } from '../profile.js?v=20261101_v56';
+import { api, qs } from '../api.js?v=20261101_v56';
+import { resolveMusicItem } from './selection-kinds.js?v=20261101_v56';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1145,24 +1145,39 @@ export function buildChat(ctx) {
   }
 
   const onVisualViewportResize = () => {
-    if (!window.visualViewport) return;
+    const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
     const vv = window.visualViewport;
-    const kbOpen = (window.innerHeight - vv.height > 110) || document.activeElement === input;
-    if (kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0)) {
+    const vvH = vv ? vv.height : rawH;
+    const isLandscape = rawW > rawH * 1.08;
+    const baseH = isLandscape ? Math.min(rawW, rawH) : rawH;
+    const kbOpen = Boolean(vv && ((baseH - vvH > 110) || document.activeElement === input));
+    if (!kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0)) {
+      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
+    } else if (kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0)) {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     }
-    document.documentElement.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
-    document.documentElement.style.setProperty('--vv-top', `${Math.round(vv.offsetTop || 0)}px`);
+    const effH = isLandscape ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
+    if (effH > 100) {
+      document.documentElement.style.setProperty('--vvh', `${Math.round(effH)}px`);
+    }
+    document.documentElement.style.setProperty('--vv-top', `${kbOpen && vv ? Math.round(vv.offsetTop || 0) : 0}px`);
     document.body.classList.toggle('kb-open', kbOpen);
     if (kbOpen) {
       list.scrollTop = list.scrollHeight;
     }
   };
+  const onWindowOrientationOrResize = () => {
+    onVisualViewportResize();
+    [60, 200, 500].forEach((ms) => setTimeout(onVisualViewportResize, ms));
+  };
+  window.addEventListener('resize', onWindowOrientationOrResize);
+  window.addEventListener('orientationchange', onWindowOrientationOrResize);
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', onVisualViewportResize);
     window.visualViewport.addEventListener('scroll', onVisualViewportResize);
-    onVisualViewportResize();
   }
+  onVisualViewportResize();
 
   let typingTimer = null;
   setTimeout(() => { syncVoiceUi(); syncMusicSimilarUi(true); }, 0);
@@ -1229,6 +1244,8 @@ export function buildChat(ctx) {
       clearTimeout(typingTimer);
       document.body.classList.remove('kb-open');
       document.removeEventListener('pointerdown', onDocOutsideTap);
+      window.removeEventListener('resize', onWindowOrientationOrResize);
+      window.removeEventListener('orientationchange', onWindowOrientationOrResize);
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', onVisualViewportResize);
         window.visualViewport.removeEventListener('scroll', onVisualViewportResize);

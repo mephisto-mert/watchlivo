@@ -5449,6 +5449,56 @@ async def rave_stream_manifest(request: Request):
             pending_inf = None
             has_default_aud = any('DEFAULT=YES' in l for l in valid_aud_lines)
             selected_aud_set = False
+            if not is_master and "#EXT-X-DISCONTINUITY" in raw and "#EXTINF:" in raw:
+                try:
+                    hdr_part, blocks, cur_blk, cur_dur, cur_uris = [], [], [], 0.0, []
+                    in_segs = False
+                    for r_ln in raw.splitlines():
+                        st_ln = r_ln.strip()
+                        if not st_ln:
+                            continue
+                        if st_ln == "#EXT-X-DISCONTINUITY":
+                            in_segs = True
+                            if cur_blk:
+                                blocks.append((cur_dur, cur_uris, cur_blk))
+                                cur_blk, cur_dur, cur_uris = [], 0.0, []
+                            continue
+                        if st_ln.startswith("#EXTINF:"):
+                            in_segs = True
+                            dm = re.search(r"#EXTINF:([\d.]+)", st_ln)
+                            if dm:
+                                cur_dur += float(dm.group(1))
+                            cur_blk.append(st_ln)
+                        elif not st_ln.startswith("#"):
+                            in_segs = True
+                            cur_uris.append(st_ln)
+                            cur_blk.append(st_ln)
+                        elif st_ln == "#EXT-X-ENDLIST":
+                            continue
+                        elif not in_segs:
+                            hdr_part.append(st_ln)
+                        else:
+                            cur_blk.append(st_ln)
+                    if cur_blk:
+                        blocks.append((cur_dur, cur_uris, cur_blk))
+                    tot_dur = sum(b[0] for b in blocks)
+                    if len(blocks) > 1 and tot_dur >= 180.0:
+                        ad_re = re.compile(r"(?:preroll|midroll|/ads?/|reklam|promo|sponsor|bumper|1xbet|melbet|mostbet|betwinner|casino)", re.I)
+                        kept_blocks = [
+                            b for idx_b, b in enumerate(blocks)
+                            if not ((b[0] <= 55.0 and (idx_b == 0 or b[0] < tot_dur * 0.08)) or any(ad_re.search(u) for u in b[1]))
+                        ]
+                        if kept_blocks:
+                            rebuilt = list(hdr_part)
+                            for idx_k, (_, _, b_lines) in enumerate(kept_blocks):
+                                if idx_k > 0:
+                                    rebuilt.append("#EXT-X-DISCONTINUITY")
+                                rebuilt.extend(b_lines)
+                            if "#EXT-X-ENDLIST" in raw:
+                                rebuilt.append("#EXT-X-ENDLIST")
+                            raw = "\n".join(rebuilt)
+                except Exception:
+                    pass
             for ln in raw.splitlines():
                 s_ln = ln.strip()
                 if s_ln:
@@ -5751,7 +5801,7 @@ def _srt_to_vtt(raw_bytes) -> str:
     txt = re.sub(r"(\d{1,2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}),(\d{3})", r"\1.\2 --> \3.\4", txt)
     txt = re.sub(r"(?m)^(\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}[.,]\d{3})", lambda m: f"00:{m.group(1).replace(',', '.')} --> 00:{m.group(2).replace(',', '.')}", txt)
     txt = re.sub(
-        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
+        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|dizipal|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|deneme\s*bonusu|freespin|bahis|casino|t\.me/|telegram|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
         "",
         txt,
     )
@@ -5886,79 +5936,6 @@ _INTRO_CACHE: dict[str, dict] = {}
 
 
 def _detect_intro_sync(imdb_id: str, tid: str, mtype: str, s: int, e: int, subs: list) -> dict | None:
-    if mtype != "tv":
-        return None
-    ck = f"v2:{imdb_id or tid}:{mtype}:{s}:{e}"
-    if ck in _INTRO_CACHE:
-        return _INTRO_CACHE[ck]
-    if len(_INTRO_CACHE) >= 500:
-        _INTRO_CACHE.pop(next(iter(_INTRO_CACHE)), None)
-    if imdb_id and imdb_id.startswith("tt"):
-        try:
-            u = f"https://api.introdb.app/intro?imdb_id={urllib.parse.quote(imdb_id)}&season={s}&episode={e}"
-            req = urllib.request.Request(u, headers={"User-Agent": UA137, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=2.2) as r:
-                d = json.loads(r.read().decode("utf-8", errors="ignore"))
-                s_sec = float(d.get("start_sec") or 0)
-                e_sec = float(d.get("end_sec") or 0)
-                if 0.0 <= s_sec <= 210.0 and 15.0 <= (e_sec - s_sec) <= 95.0 and e_sec <= 260.0:
-                    res = {"start": round(max(2.0, s_sec), 1), "end": round(e_sec, 1), "label": "⏩ İntroyu Atla"}
-                    _INTRO_CACHE[ck] = res
-                    return res
-        except Exception:
-            pass
-    if subs:
-        credit_re = re.compile(r"(çeviri|altyazı|subtitle|opensubtitles|synced|iyi seyirler|www\.|http)", re.I)
-        sdh_re = re.compile(r"^(?:\[[^\]]+\]|\([^)]+\)|♪.*♪)$", re.S)
-        for sub_item in subs[:4]:
-            try:
-                t_url = sub_item.get("url") or ""
-                if "url=" in t_url:
-                    raw_u = urllib.parse.parse_qs(urllib.parse.urlparse(t_url).query).get("url", [""])[0]
-                else:
-                    raw_u = t_url
-                if not raw_u.startswith("http"):
-                    continue
-                vtt = _fetch_vtt_sync(raw_u)
-                cues = []
-                for m in re.finditer(r"(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[.,](\d{3})\n([^\n]+(?:\n[^\n]+)?)", vtt):
-                    st = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)) + int(m.group(4)) / 1000.0
-                    et = int(m.group(5)) * 3600 + int(m.group(6)) * 60 + int(m.group(7)) + int(m.group(8)) / 1000.0
-                    txt = re.sub(r"<[^>]+>", "", m.group(9)).strip()
-                    if txt and et > st:
-                        cues.append((st, et, txt))
-                    if len(cues) >= 80:
-                        break
-                if len(cues) < 15:
-                    continue
-                spoken = [(st, et, tx) for st, et, tx in cues if not credit_re.search(tx) and not sdh_re.match(tx)]
-                credits = [(st, et, tx) for st, et, tx in cues if credit_re.search(tx) and 15 <= st <= 195]
-                if spoken:
-                    first_st = spoken[0][0]
-                    if credits:
-                        c_st, c_et, _ = credits[0]
-                        prev_s = [x for x in spoken if x[1] <= c_st + 2]
-                        next_s = [x for x in spoken if x[0] >= c_et - 1]
-                        g_start = prev_s[-1][1] + 1.0 if prev_s else 2.0
-                        g_end = next_s[0][0] - 1.0 if next_s else (c_et + 5.0)
-                        if 2.0 <= g_start <= 190.0 and 18.0 <= (g_end - g_start) <= 90.0 and g_end <= 245.0:
-                            res = {"start": round(max(2.0, g_start), 1), "end": round(g_end, 1), "label": "⏩ İntroyu Atla"}
-                            _INTRO_CACHE[ck] = res
-                            return res
-                    if 18.0 <= first_st <= 85.0:
-                        res = {"start": 2.0, "end": round(first_st - 1.0, 1), "label": "⏩ İntroyu Atla"}
-                        _INTRO_CACHE[ck] = res
-                        return res
-                    for i in range(len(spoken) - 1):
-                        if spoken[i][1] > 190:
-                            break
-                        gap = spoken[i + 1][0] - spoken[i][1]
-                        if 24.0 <= gap <= 88.0 and (spoken[i + 1][0] - 1.0) <= 245.0:
-                            res = {"start": round(spoken[i][1] + 1.0, 1), "end": round(spoken[i + 1][0] - 1.0, 1), "label": "⏩ İntroyu Atla"}
-                            _INTRO_CACHE[ck] = res
-                            return res
-            except Exception:
-                continue
     return None
 
 

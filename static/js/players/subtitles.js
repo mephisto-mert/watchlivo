@@ -184,36 +184,7 @@ export class SubtitleDubController {
     } catch (e) { /* ignore */ }
   }
 
-  _detectIntroFromCues(cues, media) {
-    if (!Array.isArray(cues) || cues.length < 15) return null;
-    const isTv = (media?.mediaType || '').toLowerCase() === 'tv';
-    if (!isTv) return null;
-    const creditRe = /(çeviri|altyazı|subtitle|opensubtitles|synced|iyi seyirler|www\.|http)/i;
-    const sdhRe = /^(?:\[[^\]]+\]|\([^)]+\)|♪.*♪)$/;
-    const spoken = cues.filter((c) => !creditRe.test(c.text || '') && !sdhRe.test((c.text || '').trim()));
-    const credits = cues.filter((c) => creditRe.test(c.text || '') && c.start >= 15 && c.start <= 210);
-    if (!spoken.length) return null;
-    const firstSt = spoken[0].start;
-    if (credits.length) {
-      const c0 = credits[0];
-      const prevS = spoken.filter((x) => x.end <= c0.start + 2);
-      const nextS = spoken.filter((x) => x.start >= c0.end - 1);
-      const gStart = prevS.length ? prevS[prevS.length - 1].end + 1.0 : 2.0;
-      const gEnd = nextS.length ? nextS[0].start - 1.0 : c0.end + 5.0;
-      if (gStart <= 210 && gEnd - gStart >= 18 && gEnd - gStart <= 95) {
-        return { start: Math.round(Math.max(2, gStart) * 10) / 10, end: Math.round(Math.min(gStart + 90, gEnd) * 10) / 10, label: '⏩ İntroyu Atla' };
-      }
-    }
-    if (firstSt >= 18 && firstSt <= 85) {
-      return { start: 2, end: Math.round((firstSt - 1.0) * 10) / 10, label: '⏩ İntroyu Atla' };
-    }
-    for (let i = 0; i < spoken.length - 1; i += 1) {
-      if (spoken[i].end > 210) break;
-      const gap = spoken[i + 1].start - spoken[i].end;
-      if (gap >= 24 && gap <= 90) {
-        return { start: Math.round((spoken[i].end + 1.0) * 10) / 10, end: Math.round((spoken[i + 1].start - 1.0) * 10) / 10, label: '⏩ İntroyu Atla' };
-      }
-    }
+  _detectIntroFromCues() {
     return null;
   }
 
@@ -255,7 +226,7 @@ export class SubtitleDubController {
 
   async initForMedia(media) {
     this.media = media;
-    this.intro = media?.intro || null;
+    this.intro = null;
     this.subCues = [];
     this.dubCues = [];
     this.secondaryCues = [];
@@ -345,18 +316,6 @@ export class SubtitleDubController {
     await this.setSubtitleTrack(this.selectedSubId, true);
     await this.setAudioTrack(this.selectedAudioId, true);
     this.adapter.events.onTracksChanged?.();
-    if (!this.intro && this.subtitleTracks.length) {
-      (async () => {
-        for (const st of this.subtitleTracks.slice(0, 2)) {
-          const cues = await this._loadCuesForTrack(st);
-          const det = this._detectIntroFromCues(cues, media);
-          if (det) {
-            this.intro = det;
-            break;
-          }
-        }
-      })().catch(() => {});
-    }
   }
 
   mergeHlsAudioTracks(hlsTracks) {

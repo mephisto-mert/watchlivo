@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v55';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v55';
-import { getProvider } from '../providers.js?v=20261101_v55';
-import { expectedPosition } from '../sync.js?v=20261101_v55';
-import { thumbFor } from './lobby.js?v=20261101_v55';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v55';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v55';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v55';
-import { avatar } from '../profile.js?v=20261101_v55';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v56';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v56';
+import { getProvider } from '../providers.js?v=20261101_v56';
+import { expectedPosition } from '../sync.js?v=20261101_v56';
+import { thumbFor } from './lobby.js?v=20261101_v56';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v56';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v56';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v56';
+import { avatar } from '../profile.js?v=20261101_v56';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -398,9 +398,16 @@ export function buildControls(frame, ctx) {
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
     const spec = VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal;
     if (v) {
-      v.style.filter = spec.css === 'none'
-        ? 'brightness(var(--video-brightness, 100%))'
-        : `${spec.css} brightness(var(--video-brightness, 100%))`;
+      if (spec.css === 'none' && Number(currentBrightness) === 100) {
+        v.style.filter = '';
+        v.style.webkitFilter = '';
+      } else {
+        const fVal = spec.css === 'none'
+          ? 'brightness(var(--video-brightness, 100%))'
+          : `${spec.css} brightness(var(--video-brightness, 100%))`;
+        v.style.filter = fVal;
+        v.style.webkitFilter = fVal;
+      }
     }
   }
 
@@ -807,7 +814,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, nextEpBanner, breakBanner, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -1034,12 +1041,7 @@ export function buildControls(frame, ctx) {
     updateUnmuteVisibility();
     renderCinemaSeats();
     const m = state.mesh?.media;
-    const intro = getActiveIntro();
-    const canSkipIntro = Boolean(isLeader() && intro && Number(intro.end) > Number(intro.start) && p >= Number(intro.start) && p < Number(intro.end) - 1.5);
-    if (canSkipIntro) {
-      skipIntroBtn.textContent = `${intro.label || '⏩ İntroyu Atla'} (${fmtTime(intro.end)})`;
-    }
-    skipIntroBtn.classList.toggle('hidden', !canSkipIntro);
+    skipIntroBtn.classList.add('hidden');
     const rem = d > 300 ? d - p : 9999;
     const curEpKey = m ? `${m.tmdbId || m.id || m.title}:${m.season || 1}:${m.episode || 1}` : '';
     if (m?.mediaType === 'tv' && m?.tmdbId && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
@@ -1657,12 +1659,71 @@ export function buildControls(frame, ctx) {
   }
 
   let lastMobileLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight * 1.15;
+  let lastStageW = 0;
+  let lastStageH = 0;
+
+  function syncVideoStageBounds(forceReflow = false) {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const vv = window.visualViewport;
+    const vvH = vv ? vv.height : rawH;
+    const isLand = rawW > rawH * 1.08;
+    const effH = isLand ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
+    if (effH > 100 && !document.body.classList.contains('kb-open')) {
+      document.documentElement.style.setProperty('--vvh', `${Math.round(effH)}px`);
+      document.documentElement.style.setProperty('--vv-top', '0px');
+    }
+    const inFs = isFullscreenActive();
+    const panelEl = frame.parentElement;
+    const refEl = (inFs || !panelEl) ? frame : panelEl;
+    const rect = refEl.getBoundingClientRect();
+    let w = Math.round(rect.width || (inFs ? rawW : 0));
+    let h = Math.round(rect.height || (inFs ? effH : 0));
+    if (inFs) {
+      w = Math.round(rawW || w);
+      h = Math.round(effH || h);
+    } else if (isLand && effH <= 560 && h > effH) {
+      h = Math.max(120, Math.round(effH - 50));
+    }
+    if (w <= 40 || h <= 40) return;
+    const sizeChanged = Math.abs(w - lastStageW) > 2 || Math.abs(h - lastStageH) > 2;
+    lastStageW = w;
+    lastStageH = h;
+    if (host.container) {
+      host.container.style.width = `${w}px`;
+      host.container.style.height = `${h}px`;
+      host.container.style.maxHeight = `${h}px`;
+    }
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    if (v) {
+      v.style.width = `${w}px`;
+      v.style.height = `${h}px`;
+      v.style.maxHeight = `${h}px`;
+      v.style.top = '0px';
+      v.style.left = '0px';
+      v.setAttribute('width', String(w));
+      v.setAttribute('height', String(h));
+      if (forceReflow || sizeChanged) {
+        v.style.objectFit = 'fill';
+        void v.offsetHeight;
+        requestAnimationFrame(() => {
+          v.style.objectFit = 'contain';
+          v.style.objectPosition = 'center center';
+        });
+      }
+    }
+  }
 
   function onViewportChange() {
     const ae = typeof document !== 'undefined' ? document.activeElement : null;
     const isInputFocused = Boolean(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
     if (!isInputFocused) {
-      try { window.scrollTo(0, 0); } catch (e) { /* ignore */ }
+      try {
+        window.scrollTo(0, 0);
+        document.documentElement.scrollTop = 0;
+        document.body.scrollTop = 0;
+      } catch (e) { /* ignore */ }
     }
     if (typeof window !== 'undefined' && !isInputFocused) {
       const isLandscape = window.innerWidth > window.innerHeight * 1.15;
@@ -1675,9 +1736,11 @@ export function buildControls(frame, ctx) {
       }
       lastMobileLandscape = isLandscape;
     }
+    syncVideoStageBounds(true);
     applySubPrefsStyle();
     host.adapter?.subs?.onTimeUpdate?.(position(), true);
-    [120, 450, 1100].forEach((ms) => setTimeout(() => {
+    [50, 160, 420, 950].forEach((ms) => setTimeout(() => {
+      syncVideoStageBounds(ms <= 200);
       applySubPrefsStyle();
       host.adapter?.subs?.onTimeUpdate?.(position(), true);
       const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
@@ -1686,8 +1749,21 @@ export function buildControls(frame, ctx) {
     }, ms));
   }
 
+  let stageResizeObs = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    stageResizeObs = new ResizeObserver(() => {
+      syncVideoStageBounds(false);
+    });
+    stageResizeObs.observe(frame);
+    setTimeout(() => {
+      if (frame.parentElement && stageResizeObs) stageResizeObs.observe(frame.parentElement);
+      syncVideoStageBounds(true);
+    }, 0);
+  }
+
   function onNativeFsChange() {
-    const nativeFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const nativeFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement || v?.webkitDisplayingFullscreen);
     if (!nativeFs && frame.dataset.fsMode === 'native') {
       frame.classList.remove('fullscreen');
       document.body.classList.remove('vortex-fs');
@@ -1704,7 +1780,7 @@ export function buildControls(frame, ctx) {
   function toggleFullscreen() {
     closeMenu();
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
-    if (isFullscreenActive()) {
+    if (isFullscreenActive() || v?.webkitDisplayingFullscreen) {
       frame.classList.remove('fullscreen');
       document.body.classList.remove('vortex-fs');
       frame.dataset.fsMode = '';
@@ -1721,24 +1797,37 @@ export function buildControls(frame, ctx) {
     }
     const reqFrameFs = frame.requestFullscreen || frame.webkitRequestFullscreen;
     const reqDocFs = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
-    frame.classList.add('fullscreen');
-    document.body.classList.add('vortex-fs');
-    onViewportChange();
-    revealControls(3200);
-    const fsTarget = reqFrameFs ? frame : document.documentElement;
     const reqFs = reqFrameFs || reqDocFs;
     if (reqFs) {
+      frame.classList.add('fullscreen');
+      document.body.classList.add('vortex-fs');
       frame.dataset.fsMode = 'native';
+      onViewportChange();
+      revealControls(3200);
+      const fsTarget = reqFrameFs ? frame : document.documentElement;
       Promise.resolve(reqFs.call(fsTarget)).then(() => {
         try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* ignore */ }
         onViewportChange();
       }).catch(() => {
         frame.dataset.fsMode = 'css';
+        onViewportChange();
       });
-    } else {
-      frame.dataset.fsMode = 'css';
-      try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* ignore */ }
+      return;
     }
+    const iosEnterFs = v && (v.webkitEnterFullscreen || v.webkitEnterFullScreen);
+    if (typeof iosEnterFs === 'function') {
+      try {
+        v.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
+        iosEnterFs.call(v);
+        return;
+      } catch (e) { /* fallback to CSS fullscreen below */ }
+    }
+    frame.classList.add('fullscreen');
+    document.body.classList.add('vortex-fs');
+    frame.dataset.fsMode = 'css';
+    try { screen.orientation?.lock?.('landscape').catch(() => {}); } catch (e) { /* ignore */ }
+    onViewportChange();
+    revealControls(3200);
   }
 
   let lastMediaSessionKey = '';
@@ -2030,6 +2119,7 @@ export function buildControls(frame, ctx) {
       clearInterval(tickTimer);
       clearTimeout(uiTimer);
       clearTimeout(breakBannerTimer);
+      try { stageResizeObs?.disconnect?.(); } catch (e) { /* ignore */ }
       window.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('fullscreenchange', onNativeFsChange);
       document.removeEventListener('webkitfullscreenchange', onNativeFsChange);
@@ -2099,6 +2189,7 @@ export function buildControls(frame, ctx) {
         loading.classList.add('hidden');
         errorBox.classList.add('hidden');
         applyVideoFilter();
+        syncVideoStageBounds(true);
         host.adapter?.subs?.onTimeUpdate?.(position(), true);
       }
       if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isHostOnly()) {

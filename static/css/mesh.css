@@ -21,11 +21,11 @@
 .panel-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
 .video-chat { min-width: 0; min-height: 0; width: 100%; display: flex; flex-direction: var(--layout-direction, row); gap: 0; }
-.panel-video { flex: 1 1 0%; min-width: 280px; min-height: 0; display: flex; }
+.panel-video { position: relative; flex: 1 1 0%; min-width: 280px; min-height: 0; display: flex; }
 .video-frame {
   --margin: calc(var(--unit) * .45); --padding: calc(var(--unit) * .3); --mesh-action-width: calc(var(--unit) * 1.4);
   --font-size-1: calc(var(--unit) * .66);
-  position: relative; flex: 1; margin: auto; width: 100%; height: 100%; border-radius: 10px; overflow: hidden;
+  position: relative; flex: 1; margin: 0; width: 100%; height: 100%; border-radius: 10px; overflow: hidden;
   background: radial-gradient(circle at 50% 42%, rgba(99, 102, 241, .06), rgba(99, 102, 241, .04) 48%, #040508 82%);
   display: flex; align-items: center; justify-content: center;
 }
@@ -67,7 +67,7 @@ body.vortex-fs .panel-video {
 }
 .player-host { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; z-index: 1; background: transparent; }
 .player-host > iframe, .player-host > .yt-mount, .player-host > .yt-mount > iframe { width: 100%; height: 100%; border: 0; display: block; background: #000; }
-.player-host > video, .player-host video { position: absolute; inset: 0; width: 100% !important; height: 100% !important; border: 0; display: block !important; background: transparent; object-fit: contain; z-index: 1; will-change: transform; transform: translateZ(0); backface-visibility: hidden; }
+.player-host > video, .player-host video { position: absolute; inset: 0; top: 0; left: 0; width: 100% !important; height: 100% !important; border: 0; display: block !important; background: transparent; object-fit: contain; object-position: center center; z-index: 1; }
 .player-host > div:not(.yt-mount) { position: absolute; z-index: 4; background: transparent !important; pointer-events: auto; }
 .ambilight-canvas { position: absolute; inset: -6%; width: 112%; height: 112%; object-fit: cover; filter: blur(44px) saturate(1.85) brightness(0.85); opacity: 0; display: none; pointer-events: none; z-index: 0; transition: opacity .6s ease; }
 .ambilight-canvas.on { display: block; }
@@ -258,25 +258,9 @@ body.vortex-fs .panel-video {
   bottom: max(68px, calc(var(--margin) + var(--mesh-action-width) + env(safe-area-inset-bottom, 0px) + 18px));
 }
 @media (max-width: 960px) and (orientation: portrait) {
-  .video-frame.fullscreen:not(:fullscreen):not(:-webkit-full-screen) {
-    inset: auto !important;
-    top: 50% !important;
-    left: 50% !important;
-    width: 100vh !important;
-    width: 100dvh !important;
-    height: 100vw !important;
-    max-width: 100vh !important;
-    max-width: 100dvh !important;
-    max-height: 100vw !important;
-    transform: translate(-50%, -50%) rotate(90deg) !important;
-    transform-origin: center center !important;
-  }
-  .video-frame.fullscreen:not(:fullscreen):not(:-webkit-full-screen) .controls {
-    padding: 14px 44px 18px !important;
-  }
   .video-frame.fullscreen .rave-subtitle-overlay {
     bottom: 24px !important;
-    max-width: 84% !important;
+    max-width: 88% !important;
   }
   .video-frame.fullscreen:has(.controls.ui-active) .rave-subtitle-overlay,
   .video-frame.fullscreen:has(.controls.show) .rave-subtitle-overlay {
@@ -445,7 +429,6 @@ video::cue {
 .video-frame {
   --video-brightness: 100%;
 }
-.video-frame video,
 .video-frame iframe {
   filter: brightness(var(--video-brightness, 100%));
   transition: filter .12s ease-out;
@@ -3954,6 +3937,97 @@ body.theater-mode .resize-handle {
     height: 82px !important;
   }
 }
+
+.skip-intro-pill,
+#ctl-skip-intro {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.panel-video {
+  position: relative !important;
+}
+.panel-video > .video-frame:not(.fullscreen):not(:fullscreen):not(:-webkit-full-screen) {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+}
+.player-host {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+}
+.player-host > video,
+.player-host video {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  margin: 0 !important;
+  object-fit: contain !important;
+  object-position: center center !important;
+  transform: none !important;
+  will-change: auto !important;
+}
+
+body.vortex-fs #mesh-root:not(.hidden),
+body.vortex-fs #mesh-root .mesh,
+body.vortex-fs #mesh-root .mesh-layout,
+body.vortex-fs #mesh-root .video-chat,
+body.vortex-fs #mesh-root .panel-video,
+body.vortex-fs #mesh-root .video-frame,
+.video-frame.fullscreen,
+.video-frame:fullscreen,
+.video-frame:-webkit-full-screen {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: var(--vvh, 100dvh) !important;
+  max-width: 100vw !important;
+  max-height: var(--vvh, 100dvh) !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  aspect-ratio: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  transform: none !important;
+  z-index: 99999 !important;
+  background: #000 !important;
+  overflow: hidden !important;
+}
+body.vortex-fs #mesh-root > .navbar,
+body.vortex-fs #mesh-root .panel-chat,
+body.vortex-fs #mesh-root .panel-side,
+body.vortex-fs #mesh-root .resize-handle {
+  display: none !important;
+}
+
 
 
 
