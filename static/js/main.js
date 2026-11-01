@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261101_v53';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v53';
-import { renderHome, destroyHome } from './views/home.js?v=20261101_v53';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v53';
-import { api } from './api.js?v=20261101_v53';
-import { toast } from './ui.js?v=20261101_v53';
+import { state, set } from './store.js?v=20261101_v54';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v54';
+import { renderHome, destroyHome } from './views/home.js?v=20261101_v54';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v54';
+import { api } from './api.js?v=20261101_v54';
+import { toast } from './ui.js?v=20261101_v54';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -170,7 +170,7 @@ async function boot() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261101_v53').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261101_v54').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
