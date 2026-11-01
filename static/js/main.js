@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261101_v56';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v56';
-import { renderHome, destroyHome } from './views/home.js?v=20261101_v56';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v56';
-import { api } from './api.js?v=20261101_v56';
-import { toast } from './ui.js?v=20261101_v56';
+import { state, set } from './store.js?v=20261102_v57';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261102_v57';
+import { renderHome, destroyHome } from './views/home.js?v=20261102_v57';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261102_v57';
+import { api } from './api.js?v=20261102_v57';
+import { h, toast } from './ui.js?v=20261102_v57';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -21,6 +21,7 @@ function parseRoute() {
 
 let current = null;
 let activeMeshRoomId = null;
+let enteringMeshRoomId = null;
 
 function ensureViewRoots(app) {
   let homeRoot = document.getElementById('home-root');
@@ -77,10 +78,20 @@ async function route() {
     if (current === 'home') destroyHome();
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');
-    if (activeMeshRoomId !== r.params.id || !state.mesh) {
-      if (activeMeshRoomId) leaveMeshView(true);
+    const hasMeshDom = Boolean(meshRoot.querySelector('.mesh-layout'));
+    if (enteringMeshRoomId === r.params.id && hasMeshDom) {
+      window.dispatchEvent(new Event('resize'));
+    } else if (activeMeshRoomId !== r.params.id || !state.mesh || !hasMeshDom) {
+      if (activeMeshRoomId && activeMeshRoomId !== r.params.id) {
+        leaveMeshView(true);
+      }
       activeMeshRoomId = r.params.id;
-      await enterMesh(meshRoot, r.params);
+      enteringMeshRoomId = r.params.id;
+      try {
+        await enterMesh(meshRoot, r.params);
+      } finally {
+        if (enteringMeshRoomId === r.params.id) enteringMeshRoomId = null;
+      }
     } else {
       window.dispatchEvent(new Event('resize'));
     }
@@ -142,8 +153,6 @@ async function boot() {
   if (isRedirectPending) {
     toast('Google hesabınız doğrulanıyor, lütfen bekleyin...', 8000);
   }
-  const redirectProf = await checkRedirectAuth();
-  const profile = redirectProf || loadProfile();
   let routed = false;
   const start = (p) => {
     set({ self: p });
@@ -153,15 +162,19 @@ async function boot() {
     }
     route();
   };
-  if (profile) {
-    start(profile);
+  const initialProfile = loadProfile();
+  if (initialProfile) {
+    start(initialProfile);
   } else {
     const guestFallback = { id: 'guest_' + Math.random().toString(36).slice(2, 9), name: 'Misafir İzleyici', handle: 'misafir', color: '#27DCC8', isGuest: true };
     start(guestFallback);
-    if (!location.hash || location.hash === '#/' || location.hash === '#') {
+    if (!isRedirectPending && (!location.hash || location.hash === '#/' || location.hash === '#')) {
       profileSetup({ dismissable: true, onDone: start });
     }
   }
+  checkRedirectAuth().then((redirectProf) => {
+    if (redirectProf) start(redirectProf);
+  }).catch(() => {});
   if ('serviceWorker' in navigator) {
     initRaveNotifications();
   }
@@ -170,7 +183,7 @@ async function boot() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261101_v56').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261102_v57').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -257,7 +270,7 @@ function initRaveNotifications() {
         method: 'POST',
         body: {
           uid: state.self?.uid || state.self?.id || state.clientId,
-          name: state.self?.name || 'Raver',
+          name: state.self?.name || 'İzleyici',
           subscription: { granted: true, ts: Date.now() },
         },
       }).catch(() => {});

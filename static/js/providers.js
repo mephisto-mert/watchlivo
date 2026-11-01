@@ -245,7 +245,7 @@ export const LOGOS = {
     '<defs><linearGradient id="rdj" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00f5d4"/><stop offset="100%" stop-color="#ff2a85"/></linearGradient></defs>' +
     '<rect x="8" y="8" width="28" height="28" rx="8" fill="url(#rdj)"/>' +
     '<text x="22" y="27.5" text-anchor="middle" fill="#09090b" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="14">DJ</text>' +
-    '<text x="84" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20">RaveDJ AI</text>'
+    '<text x="86" y="28" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="14.5">Watchlivo DJ</text>'
   ),
 };
 
@@ -336,8 +336,8 @@ export const PROVIDERS = [
   { id: 'drive', name: 'Google Drive', cat: 'global', badge: 'Klasör Gezgini · MKV / MP4 1080p', logo: LOGOS.drive, bg: '#10121a', accent: '#00ac47', web: true, kind: 'drive', freeNoAuth: true,
     homeUrl: 'https://drive.google.com', placeholder: "Google Drive klasör veya MKV/MP4 dosya bağlantısı yapıştır...",
     idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
-  { id: 'ravedj', name: 'RaveDJ AI', cat: 'global', badge: '2 Şarkıyı AI ile Birleştir · Mashup & Mix', logo: LOGOS.ravedj, bg: '#10121a', accent: '#00f5d4', web: true, kind: 'ravedj', freeNoAuth: true,
-    homeUrl: 'https://rave.dj', placeholder: "RaveDJ Mashup için şarkı veya YouTube bağlantısı gir...",
+  { id: 'ravedj', name: 'Watchlivo DJ', cat: 'global', badge: '2 Şarkıyı AI ile Birleştir · Mashup & Mix', logo: LOGOS.ravedj, bg: '#10121a', accent: '#00f5d4', web: true, kind: 'ravedj', freeNoAuth: true,
+    homeUrl: 'https://rave.dj', placeholder: "Watchlivo DJ Mashup için şarkı veya YouTube bağlantısı gir...",
     idParser: (u) => (u.match(/rave\.dj\/([\w-]+)/i) || [])[1] || null },
 ];
 

@@ -1,5 +1,5 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v56';
+import { SubtitleDubController } from './subtitles.js?v=20261102_v57';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -272,9 +272,11 @@ export class YouTubeAdapter {
     this.toggleVinylMode(true);
     if (this.audioEl) return;
     const a = document.createElement('audio');
-    a.crossOrigin = 'anonymous';
     a.preload = 'auto';
-    if (this.media?.audioPreviewUrl) a.src = this.media.audioPreviewUrl;
+    const fbSrc = this.media?.audioPreviewUrl
+      || (Array.isArray(this.media?.altUrls) && this.media.altUrls[0])
+      || (this.media?.videoId ? `/api/rave/yt-music-stream?v=${encodeURIComponent(this.media.videoId)}` : '');
+    if (fbSrc) a.src = fbSrc;
     a.currentTime = Math.max(0, startAt);
     a.addEventListener('playing', () => { this.ready = true; this.events.onBuffering?.(false); this.events.onPlay?.(); });
     a.addEventListener('pause', () => this.events.onPause?.());

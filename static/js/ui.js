@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261101_v56';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v57';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -303,7 +303,7 @@ export function openThemeModal() {
     h('div', { class: 'wl-modal-download-actions' },
       h('a', {
         class: 'btn primary wl-btn-apk-dl',
-        href: '/download/apk',
+        href: '/download/Watchlivo-v1.1.0.apk',
         download: 'Watchlivo-v1.1.0.apk',
         onclick: () => toast('📱 Android APK indiriliyor...', 4000)
       }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android APK İndir (v1.1)'),
@@ -333,7 +333,7 @@ export function openDownloadModal() {
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/apk',
+          href: '/download/Watchlivo-v1.1.0.apk',
           download: 'Watchlivo-v1.1.0.apk',
           onclick: () => toast('📱 Android APK indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')

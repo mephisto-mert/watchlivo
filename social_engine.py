@@ -74,21 +74,21 @@ COMMUNITY_PEERS = [
         "online": True,
         "status": "🎬 Dune: Part Two odasında",
         "watchMinutes": 420,
-        "medal": "🥇 Altın Raver",
+        "medal": "🥇 Altın İzleyici",
         "rankPill": "Top %1 İzleyici",
     },
     {
         "uid": "u_mert_dj",
-        "name": "Mert RaveDJ",
+        "name": "Mert Watchlivo DJ",
         "handle": "@mert_dj",
         "color": "#00F5D4",
         "avatarUrl": "",
         "country": "DE",
         "online": True,
-        "status": "🎧 RaveDJ Synthwave Mix dinliyor",
+        "status": "🎧 Watchlivo DJ Synthwave Mix dinliyor",
         "watchMinutes": 215,
-        "medal": "🥈 Gümüş Raver",
-        "rankPill": "RaveDJ Prodüktör",
+        "medal": "🥈 Gümüş İzleyici",
+        "rankPill": "Watchlivo DJ Prodüktör",
     },
     {
         "uid": "u_zeynep_anime",
@@ -100,7 +100,7 @@ COMMUNITY_PEERS = [
         "online": True,
         "status": "⛩️ Solo Leveling B2 izliyor",
         "watchMinutes": 140,
-        "medal": "🥉 Bronz Raver",
+        "medal": "🥉 Bronz İzleyici",
         "rankPill": "Anime Gurusu",
     },
 ]
@@ -122,12 +122,12 @@ def _clean(v: Any, limit: int = 200) -> str:
 
 def _compute_medal(minutes: int) -> str:
     if minutes >= 300:
-        return "🥇 Altın Raver"
+        return "🥇 Altın İzleyici"
     if minutes >= 120:
-        return "🥈 Gümüş Raver"
+        return "🥈 Gümüş İzleyici"
     if minutes >= 30:
-        return "🥉 Bronz Raver"
-    return "⚡ Yeni Raver"
+        return "🥉 Bronz İzleyici"
+    return "⚡ Yeni İzleyici"
 
 
 def _thread_key(u1: str, u2: str) -> str:
@@ -141,8 +141,8 @@ def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str,
         friends = [dict(p) for p in COMMUNITY_PEERS]
         _SOCIAL_USERS[uid_clean] = {
             "uid": uid_clean,
-            "name": _clean(name, 32) or "Raver",
-            "handle": _clean(handle, 32) or f"@{_clean(name, 16).lower().replace(' ', '_') or 'raver'}",
+            "name": _clean(name, 32) or "İzleyici",
+            "handle": _clean(handle, 32) or f"@{_clean(name, 16).lower().replace(' ', '_') or 'izleyici'}",
             "friends": friends,
             "requests": [
                 {
@@ -153,7 +153,7 @@ def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str,
                     "color": "#F59E0B",
                     "country": "NL",
                     "watchMinutes": 95,
-                    "medal": "🥉 Bronz Raver",
+                    "medal": "🥉 Bronz İzleyici",
                     "ts": _now() - 600,
                 }
             ],
@@ -222,7 +222,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     uid = _clean(body.get("uid") or request.scope.get("wl_uid") or body.get("fromName") or "guest_default", 64)
-    name = _clean(body.get("fromName") or body.get("name"), 32) or "Raver"
+    name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     handle = _clean(body.get("fromHandle") or body.get("handle"), 32)
     u = _ensure_user_social(uid, name, handle)
     action = _clean(body.get("action"), 24).lower()
@@ -248,7 +248,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
             "online": True,
             "status": "✨ Yeni Raver Arkadaşı",
             "watchMinutes": 15,
-            "medal": "⚡ Yeni Raver",
+            "medal": "⚡ Yeni İzleyici",
             "rankPill": "Arkadaş",
         }
         u["friends"].insert(0, new_friend)
@@ -260,11 +260,11 @@ async def social_friends_action(request: Request) -> JSONResponse:
                     "id": "req_" + uuid.uuid4().hex[:8],
                     "fromUid": uid,
                     "fromName": name,
-                    "fromHandle": u.get("handle", "@raver"),
+                    "fromHandle": u.get("handle", "@izleyici"),
                     "color": "#27DCC8",
                     "country": "TR",
                     "watchMinutes": 30,
-                    "medal": "🥉 Bronz Raver",
+                    "medal": "🥉 Bronz İzleyici",
                     "ts": _now(),
                 })
         return JSONResponse({"ok": True, "friend": new_friend, "friends": u["friends"]})
@@ -279,8 +279,8 @@ async def social_friends_action(request: Request) -> JSONResponse:
                 mins = int(target_req.get("watchMinutes") or 45)
                 new_fr = {
                     "uid": target_req.get("fromUid") or f"u_{uuid.uuid4().hex[:6]}",
-                    "name": target_req.get("fromName") or "Raver",
-                    "handle": target_req.get("fromHandle") or "@raver",
+                    "name": target_req.get("fromName") or "İzleyici",
+                    "handle": target_req.get("fromHandle") or "@izleyici",
                     "color": target_req.get("color") or "#F59E0B",
                     "avatarUrl": "",
                     "country": target_req.get("country") or "TR",
@@ -332,7 +332,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
     except Exception:
         body = {}
     uid = _clean(body.get("uid") or request.scope.get("wl_uid") or "guest_default", 64)
-    name = _clean(body.get("fromName") or body.get("name"), 32) or "Raver"
+    name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     color = _clean(body.get("color"), 16) or "#27DCC8"
     peer_id = _clean(body.get("peerId"), 64) or "u_ayla_cinema"
     text = _clean(body.get("text"), 1000)
@@ -388,7 +388,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
     if peer_bot:
         reply_txt = "Harika! Hemen odaya geliyorum, mısırları hazırla 🍿🔥"
         if "müzik" in text.lower() or "dj" in text.lower() or peer_id == "u_mert_dj":
-            reply_txt = "RaveDJ Mashup stüdyosunda yeni bir mix hazırladım, odada açalım! 🎧⚡"
+            reply_txt = "Watchlivo DJ Mashup stüdyosunda yeni bir mix hazırladım, odada açalım! 🎧⚡"
         elif "anime" in text.lower() or peer_id == "u_zeynep_anime":
             reply_txt = "Yeni bölümü birlikte izleyelim! Altyazılar 1080p hazır ⛩️✨"
         elif room_invite:
@@ -623,63 +623,64 @@ async def youtube_playlist(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # 5. RaveDJ AI Dual-Track Mashup & Mix Engine (RAVEDJ RENDERER PROVIDER)
 # ---------------------------------------------------------------------------
-def _resolve_yt_quick(query_or_url: str, fallback_vid: str, fallback_title: str, fallback_artist: str) -> Dict[str, Any]:
-    q = _clean(query_or_url, 200)
-    if not q:
-        return {
-            "videoId": fallback_vid,
-            "title": fallback_title,
-            "artist": fallback_artist,
-            "url": f"https://www.youtube.com/watch?v={fallback_vid}",
-            "thumbnail": f"https://i.ytimg.com/vi/{fallback_vid}/hqdefault.jpg",
-            "bpm": 124,
-        }
-    m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", q)
-    if m:
-        vid = m.group(1)
-        return {
-            "videoId": vid,
-            "title": f"RaveDJ Track ({vid})",
-            "artist": "YouTube Mix",
-            "url": f"https://www.youtube.com/watch?v={vid}",
-            "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-            "bpm": 126,
-        }
+def _resolve_mashup_track(query_or_url: str, fallback_query: str, fallback_title: str, fallback_artist: str) -> Dict[str, Any]:
+    import music_engine
+    q = _clean(query_or_url, 200) or fallback_query
     try:
-        s_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q)}&hl=tr"
-        req = urllib.request.Request(s_url, headers={"User-Agent": UA_CHROME})
-        with urllib.request.urlopen(req, timeout=3.0) as r:
-            html_str = r.read(350000).decode("utf-8", errors="ignore")
-        vm = re.search(r'"videoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"((?:\\.|[^"\\])*)"\}', html_str)
-        if vm:
-            vid = vm.group(1)
-            try:
-                t_str = json.loads(f'"{vm.group(2)}"')
-            except Exception:
-                t_str = vm.group(2)
-            bpm_val = 118 + (sum(ord(c) for c in vid) % 18)
+        res = music_engine._resolve_music_sync(q, "", "", "", "", "clip")
+        if res and res.get("url"):
+            bpm_val = 118 + (sum(ord(c) for c in q) % 18)
             return {
-                "videoId": vid,
-                "title": _clean(t_str, 120) or q,
-                "artist": q.split("-")[0].strip()[:40] if "-" in q else "RaveDJ Artist",
-                "url": f"https://www.youtube.com/watch?v={vid}",
-                "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                "videoId": res.get("videoId") or res.get("clipVideoId") or "",
+                "clipVideoId": res.get("clipVideoId") or res.get("videoId") or "",
+                "title": res.get("songTitle") or res.get("title") or fallback_title,
+                "artist": res.get("artist") or fallback_artist,
+                "url": res["url"],
+                "altUrls": res.get("altUrls") or [],
+                "audioPreviewUrl": res.get("audioPreviewUrl") or res["url"],
+                "mvUrl": res.get("mvUrl") or "",
+                "thumbnail": res.get("poster") or res.get("thumbnail") or "/static/watchlivo-poster.svg",
+                "duration": int(res.get("duration") or 210),
                 "bpm": bpm_val,
             }
     except Exception:
         pass
-    bpm_fb = 120 + (sum(ord(c) for c in q) % 16)
+    # Guaranteed fallback via iTunes / SoundCloud resolver
+    try:
+        res_fb = music_engine._resolve_music_sync(fallback_query, fallback_title, fallback_artist, "", "", "clip")
+        if res_fb and res_fb.get("url"):
+            return {
+                "videoId": res_fb.get("videoId") or res_fb.get("clipVideoId") or "",
+                "clipVideoId": res_fb.get("clipVideoId") or res_fb.get("videoId") or "",
+                "title": res_fb.get("songTitle") or fallback_title,
+                "artist": res_fb.get("artist") or fallback_artist,
+                "url": res_fb["url"],
+                "altUrls": res_fb.get("altUrls") or [],
+                "audioPreviewUrl": res_fb.get("audioPreviewUrl") or res_fb["url"],
+                "mvUrl": res_fb.get("mvUrl") or "",
+                "thumbnail": res_fb.get("poster") or res_fb.get("thumbnail") or "/static/watchlivo-poster.svg",
+                "duration": int(res_fb.get("duration") or 210),
+                "bpm": 124,
+            }
+    except Exception:
+        pass
     return {
-        "videoId": fallback_vid,
-        "title": q,
+        "videoId": "",
+        "clipVideoId": "",
+        "title": q or fallback_title,
         "artist": fallback_artist,
-        "url": f"https://www.youtube.com/watch?v={fallback_vid}",
-        "thumbnail": f"https://i.ytimg.com/vi/{fallback_vid}/hqdefault.jpg",
-        "bpm": bpm_fb,
+        "url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "altUrls": ["https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"],
+        "audioPreviewUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "mvUrl": "",
+        "thumbnail": "/static/watchlivo-poster.svg",
+        "duration": 210,
+        "bpm": 124,
     }
 
 
 async def ravedj_mashup(request: Request) -> JSONResponse:
+    import asyncio
     try:
         body = await request.json()
     except Exception:
@@ -687,34 +688,48 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
     q_a = _clean(body.get("trackA") or body.get("a"), 200)
     q_b = _clean(body.get("trackB") or body.get("b"), 200)
     if not q_a and not q_b:
-        return JSONResponse({"ok": False, "error": "Mashup için en az iki şarkı veya YouTube bağlantısı girin."}, status_code=400)
+        return JSONResponse({"ok": False, "error": "Mashup için en az iki şarkı veya bağlantı girin."}, status_code=400)
 
-    tr_a = _resolve_yt_quick(q_a, "4xDzrJKXOOY", "Synthwave Midnight", "The Midnight")
-    tr_b = _resolve_yt_quick(q_b, "jfKfPfyJRdk", "Cyberpunk Nightdrive", "Kavinsky")
+    loop = asyncio.get_running_loop()
+    tr_a, tr_b = await asyncio.gather(
+        loop.run_in_executor(None, _resolve_mashup_track, q_a, "Semicenk Canın Sağ Olsun", "Canın Sağ Olsun", "Semicenk"),
+        loop.run_in_executor(None, _resolve_mashup_track, q_b, "Blok3 Aklına Ben Gelicem", "Aklına Ben Gelicem", "Blok3"),
+    )
     target_bpm = int(round((int(tr_a["bpm"]) + int(tr_b["bpm"])) / 2.0))
-    short_a = _clean(tr_a["title"].split("(")[0].split("|")[0], 36)
-    short_b = _clean(tr_b["title"].split("(")[0].split("|")[0], 36)
-    mashup_title = f"🎧 RaveDJ Mashup: {short_a} × {short_b} ({target_bpm} BPM)"
+    short_a = _clean(tr_a["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
+    short_b = _clean(tr_b["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
+    mashup_title = f"🎧 Watchlivo DJ: {short_a} × {short_b} ({target_bpm} BPM)"
+
+    combined_alts = []
+    for u in [tr_a.get("audioPreviewUrl"), *(tr_a.get("altUrls") or []), tr_b.get("url"), tr_b.get("audioPreviewUrl"), *(tr_b.get("altUrls") or [])]:
+        if u and u != tr_a["url"] and u not in combined_alts:
+            combined_alts.append(u)
 
     mashup_media = {
-        "id": "ravedj_" + uuid.uuid4().hex[:8],
-        "provider": "youtube",
-        "videoId": tr_a["videoId"],
-        "altVideoIds": [tr_b["videoId"]],
+        "id": "wldj_" + uuid.uuid4().hex[:8],
+        "provider": "direct",
+        "streamType": "direct",
+        "videoId": tr_a.get("videoId") or "",
+        "clipVideoId": tr_a.get("clipVideoId") or tr_b.get("clipVideoId") or "",
+        "altVideoIds": [tr_b.get("videoId")] if tr_b.get("videoId") else [],
         "url": tr_a["url"],
+        "altUrls": combined_alts,
+        "audioPreviewUrl": tr_a.get("audioPreviewUrl") or tr_a["url"],
+        "mvUrl": tr_a.get("mvUrl") or tr_b.get("mvUrl") or "",
         "title": mashup_title,
         "songTitle": f"{short_a} × {short_b}",
-        "artist": f"RaveDJ AI ({target_bpm} BPM)",
-        "channel": "RaveDJ AI Mashup Studio",
+        "artist": f"Watchlivo DJ AI ({target_bpm} BPM)",
+        "channel": "Watchlivo DJ AI Mashup Studio",
         "thumbnail": tr_a["thumbnail"],
         "poster": tr_a["thumbnail"],
-        "duration": 210,
+        "duration": int(tr_a.get("duration") or 210),
+        "bpm": target_bpm,
         "isMusic": True,
         "isRemix": True,
         "isRaveDJ": True,
         "musicMode": "clip",
-        "versionBadge": f"🎧 RaveDJ {target_bpm} BPM",
-        "musicPlatformLabel": "RaveDJ AI Beat-Match",
+        "versionBadge": f"🎧 Watchlivo DJ {target_bpm} BPM",
+        "musicPlatformLabel": "Watchlivo DJ Beat-Match",
         "mashupTracks": [tr_a, tr_b],
         "crossfadePoints": [18, 45, 78, 112, 148, 180],
     }
@@ -724,8 +739,8 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
 async def ravedj_trending(request: Request) -> JSONResponse:
     presets = [
         {
-            "id": "ravedj_preset_1",
-            "title": "🎧 RaveDJ: Blinding Lights × Midnight City (126 BPM)",
+            "id": "wldj_preset_1",
+            "title": "🎧 Watchlivo DJ: Blinding Lights × Midnight City (126 BPM)",
             "trackA": "The Weeknd Blinding Lights",
             "trackB": "M83 Midnight City",
             "bpm": 126,
@@ -733,8 +748,8 @@ async def ravedj_trending(request: Request) -> JSONResponse:
             "thumbnail": "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
         },
         {
-            "id": "ravedj_preset_2",
-            "title": "🎧 RaveDJ: Starboy × Nightcall Synth Mix (118 BPM)",
+            "id": "wldj_preset_2",
+            "title": "🎧 Watchlivo DJ: Starboy × Nightcall Synth Mix (118 BPM)",
             "trackA": "The Weeknd Starboy",
             "trackB": "Kavinsky Nightcall",
             "bpm": 118,
@@ -742,16 +757,16 @@ async def ravedj_trending(request: Request) -> JSONResponse:
             "thumbnail": "https://i.ytimg.com/vi/34Na4j8AVgA/hqdefault.jpg",
         },
         {
-            "id": "ravedj_preset_3",
-            "title": "🎧 RaveDJ: Tokyo Drift × Phonk Overdrive (134 BPM)",
-            "trackA": "Teriyaki Boyz Tokyo Drift",
-            "trackB": "Kordhell Murder In My Mind",
-            "bpm": 134,
+            "id": "wldj_preset_3",
+            "title": "🎧 Watchlivo DJ: Semicenk × Blok3 Hit Mix (128 BPM)",
+            "trackA": "Semicenk Canın Sağ Olsun",
+            "trackB": "Blok3 Aklına Ben Gelicem",
+            "bpm": 128,
             "videoId": "iuJDhFRDx9M",
             "thumbnail": "https://i.ytimg.com/vi/iuJDhFRDx9M/hqdefault.jpg",
         },
     ]
-    return JSONResponse({"ok": True, "presets": presets})
+    return JSONResponse({"ok": True, "items": presets, "presets": presets})
 
 
 # ---------------------------------------------------------------------------
@@ -799,7 +814,7 @@ async def ai_image_generate(request: Request) -> JSONResponse:
     prompt = _clean(body.get("prompt"), 200)
     style = _clean(body.get("style") or "Cyberpunk", 24)
     tagged_user = _clean(body.get("taggedUser") or body.get("tag"), 32)
-    creator = _clean(body.get("user") or "Raver", 32)
+    creator = _clean(body.get("user") or "İzleyici", 32)
     if not prompt:
         return JSONResponse({"ok": False, "error": "Görsel üretmek için bir açıklama (prompt) yazın."}, status_code=400)
 

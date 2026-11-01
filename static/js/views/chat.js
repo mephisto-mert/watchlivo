@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261101_v56';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261101_v56';
-import { avatar } from '../profile.js?v=20261101_v56';
-import { api, qs } from '../api.js?v=20261101_v56';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v56';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v57';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v57';
+import { avatar } from '../profile.js?v=20261102_v57';
+import { api, qs } from '../api.js?v=20261102_v57';
+import { resolveMusicItem } from './selection-kinds.js?v=20261102_v57';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1157,11 +1157,12 @@ export function buildChat(ctx) {
     } else if (kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0)) {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     }
-    const effH = isLandscape ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
+    const rawEffH = isLandscape ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
+    const effH = Math.max(320, Math.round(rawH * 0.45), Math.round(rawEffH));
     if (effH > 100) {
       document.documentElement.style.setProperty('--vvh', `${Math.round(effH)}px`);
     }
-    document.documentElement.style.setProperty('--vv-top', `${kbOpen && vv ? Math.round(vv.offsetTop || 0) : 0}px`);
+    document.documentElement.style.setProperty('--vv-top', '0px');
     document.body.classList.toggle('kb-open', kbOpen);
     if (kbOpen) {
       list.scrollTop = list.scrollHeight;

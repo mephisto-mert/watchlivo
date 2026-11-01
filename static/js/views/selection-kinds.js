@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261101_v56';
-import { api, qs } from '../api.js?v=20261101_v56';
-import { parseVideoUrl } from '../providers.js?v=20261101_v56';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261101_v56';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261101_v56';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261101_v56';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261102_v57';
+import { api, qs } from '../api.js?v=20261102_v57';
+import { parseVideoUrl } from '../providers.js?v=20261102_v57';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261102_v57';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261102_v57';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261102_v57';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -1204,7 +1204,7 @@ export function renderDriveKind(p, body, pick) {
     listHolder.replaceChildren(spinner());
     try {
       const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
-      const items = res.items || [];
+      const items = res.items || res.presets || [];
       qualityHolder.replaceChildren(
         h('span', { style: { fontSize: '.78rem', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' } }, '🎞️ Çözünürlük & MKV/MP4 Akış Kalitesi:'),
         ...['1080p', '720p', '480p'].map((q) => h('button', {
@@ -1269,18 +1269,18 @@ export function renderRaveDjKind(p, body, pick) {
         timeout: 15000,
       });
       if (res?.mashup) {
-        toast(`🎧 RaveDJ AI Mashup hazır: ${res.mashup.title} (${res.mashup.bpm} BPM)`);
+        toast(`🎧 Watchlivo DJ Mashup hazır: ${res.mashup.title}`);
         await pick(res.mashup);
       }
     } catch (e) {
-      toast('RaveDJ Mashup oluşturulamadı, lütfen tekrar dene');
+      toast('Watchlivo DJ Mashup oluşturulamadı, lütfen tekrar dene');
     } finally {
       statusBox.replaceChildren();
     }
   };
 
   api('/api/rave/ravedj-trending').then((res) => {
-    const items = res.items || [];
+    const items = res.items || res.presets || [];
     presetGrid.replaceChildren(...items.map((it) => h('div', {
       class: 'vcard',
       role: 'button',
@@ -1303,9 +1303,9 @@ export function renderRaveDjKind(p, body, pick) {
         border: '1px solid rgba(236,72,153,0.35)', marginBottom: '14px',
       },
     },
-      h('div', { style: { fontWeight: '800', fontSize: '1rem', color: '#f8fafc', marginBottom: '6px' } }, '🎧 RaveDJ AI Mashup & Çift Şarkı Mix Motoru'),
+      h('div', { style: { fontWeight: '800', fontSize: '1rem', color: '#f8fafc', marginBottom: '6px' } }, '🎧 Watchlivo DJ AI Mashup & Çift Şarkı Mix Motoru'),
       h('div', { style: { fontSize: '.82rem', color: '#cbd5e1', marginBottom: '12px' } },
-        'İki farklı şarkıyı veya YouTube bağlantısını seç; RaveDJ yapay zeka BPM & vokal-ritim sentezleyici ile anında ortak Mashup oluşturup odada başlat!'),
+        'İki farklı şarkıyı veya YouTube bağlantısını seç; Watchlivo DJ yapay zeka BPM & vokal-ritim sentezleyici ile anında ortak Mashup oluşturup odada başlat!'),
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '12px' } },
         trackAInp,
         trackBInp),
@@ -1315,7 +1315,7 @@ export function renderRaveDjKind(p, body, pick) {
         onclick: () => createMashup(trackAInp.value.trim(), trackBInp.value.trim()),
       }, '⚡ AI Mashup Oluştur & Odaya Yansıt'),
       statusBox),
-    h('div', { class: 'section-head' }, h('h2', {}, '🔥 Popüler RaveDJ Mashup Şablonları')),
+    h('div', { class: 'section-head' }, h('h2', {}, '🔥 Popüler Watchlivo DJ Mashup Şablonları')),
     presetGrid
   );
 }

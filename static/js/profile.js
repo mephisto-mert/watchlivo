@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261101_v56';
-import { api } from './api.js?v=20261101_v56';
-import { state, set } from './store.js?v=20261101_v56';
+import { h, popup, toast } from './ui.js?v=20261102_v57';
+import { api } from './api.js?v=20261102_v57';
+import { state, set } from './store.js?v=20261102_v57';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -53,7 +53,7 @@ export function saveProfile(data = {}) {
   const rawHandle = String(data.handle ?? prev.handle ?? '').trim().replace(/^@+/, '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
   const resolvedId = data.uid || data.id || prev.id || prev.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
   const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 145) || 145);
-  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın Raver' : watchMinutes >= 120 ? '🥈 Gümüş Raver' : '🥉 Bronz Raver');
+  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
   const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
   const hideLocation = Boolean(data.hideLocation ?? prev.hideLocation ?? false);
   const p = {
@@ -111,7 +111,7 @@ export function initials(name) {
 export const PRESET_GIF_AVATARS = [
   { id: 'none', label: '🔤 Harf Avatar', url: '' },
   { id: 'cyber_cat', label: '🐱 Neon Kedi (GIF)', url: 'https://media.tenor.com/2roX3uxz_68AAAAC/cat-space.gif' },
-  { id: 'synth_dj', label: '🎧 Rave DJ (GIF)', url: 'https://media.tenor.com/bCfpwMjfAi0AAAAC/cat-vibing.gif' },
+  { id: 'synth_dj', label: '🎧 Watchlivo DJ (GIF)', url: 'https://media.tenor.com/bCfpwMjfAi0AAAAC/cat-vibing.gif' },
   { id: 'cinema_pop', label: '🍿 Sinema (GIF)', url: 'https://media.tenor.com/5lLcKZ4IMhgAAAAC/popcorn-eating.gif' },
 ];
 
@@ -351,7 +351,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       let selectedAvatarUrl = current.avatarUrl || current.avatar || '';
       let hideLocState = Boolean(current.hideLocation);
       const userMins = Number(current.watchMinutes || 145);
-      const userMedal = current.medal || (userMins >= 300 ? '🥇 Altın Raver' : userMins >= 120 ? '🥈 Gümüş Raver' : '🥉 Bronz Raver');
+      const userMedal = current.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
       const errBox = h('div', { class: 'wl-auth-err' });
       const weekBars = [
         ['Pzt', 35], ['Sal', 60], ['Çar', 45], ['Per', 80], ['Cum', 95], ['Cmt', 100], ['Paz', 70],
@@ -771,7 +771,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
   modalRef = popup({
     title: isLoggedMember && activeTab === 'account' ? 'Watchlivo Hesabım' : "Watchlivo'ya Giriş Yap",
     message: isLoggedMember && activeTab === 'account' ? null : 'Birlikte kesintisiz sinema, dizi ve müzik odalarına katıl.',
-    dismissable: Boolean(dismissable && isLoggedMember),
+    dismissable: Boolean(dismissable),
     content: root,
     options: [],
   });
@@ -782,7 +782,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
 // RAVE.IO PARITY: Direct Messages (DMThreads / DirectMessageView) & Friendships
 // ============================================================================
 export async function openDmModal(initialPeerId = null) {
-  const me = state.self || loadProfile() || { id: 'guest_default', uid: 'guest_default', name: 'Raver', handle: 'raver', color: '#27dcc8' };
+  const me = state.self || loadProfile() || { id: 'guest_default', uid: 'guest_default', name: 'İzleyici', handle: 'izleyici', color: '#27dcc8' };
   const myUid = me.uid || me.id || 'guest_default';
   let socialData = { friends: [], requests: [], threads: [], totalUnread: 0 };
   let activePeerId = initialPeerId || 'u_ayla_cinema';
@@ -850,7 +850,7 @@ export async function openDmModal(initialPeerId = null) {
         ...socialData.requests.map((req) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '.82rem' } },
             avatar({ name: req.fromName, color: req.color }, 28),
-            h('span', {}, `${req.fromName} (${req.fromHandle || '@raver'}) · ${req.medal || '🥉 Bronz Raver'}`)),
+            h('span', {}, `${req.fromName} (${req.fromHandle || '@izleyici'}) · ${req.medal || '🥉 Bronz İzleyici'}`)),
           h('div', { style: { display: 'flex', gap: '6px' } },
             h('button', {
               type: 'button',
@@ -875,7 +875,7 @@ export async function openDmModal(initialPeerId = null) {
 
     // 2-Column split: Left = DMThreads, Right = DirectMessageView
     const activePeer = (socialData.friends || []).find((f) => f.uid === activePeerId) || socialData.friends?.[0] || {
-      uid: activePeerId, name: 'Ayla Sinema', handle: '@ayla_cinema', color: '#FF2A85', medal: '🥇 Altın Raver', watchMinutes: 420,
+      uid: activePeerId, name: 'Ayla Sinema', handle: '@ayla_cinema', color: '#FF2A85', medal: '🥇 Altın İzleyici', watchMinutes: 420,
     };
 
     const threadsCol = h('div', {
@@ -920,7 +920,7 @@ export async function openDmModal(initialPeerId = null) {
         },
       },
       h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '.7rem', color: m.color || '#27dcc8', marginBottom: '2px' } },
-        h('strong', {}, m.fromName || 'Raver'),
+        h('strong', {}, m.fromName || 'İzleyici'),
         h('span', { style: { color: 'rgba(255,255,255,0.45)' } }, m.time || '')),
       h('div', { style: { fontSize: '.84rem', color: '#f8fafc', wordBreak: 'break-word' } }, m.text || ''),
       m.roomInvite ? h('button', {
@@ -949,7 +949,7 @@ export async function openDmModal(initialPeerId = null) {
           method: 'POST',
           body: {
             uid: myUid,
-            fromName: me.name || 'Raver',
+            fromName: me.name || 'İzleyici',
             color: me.color || '#27dcc8',
             peerId: activePeer.uid,
             text: txt,
@@ -973,8 +973,8 @@ export async function openDmModal(initialPeerId = null) {
       h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
         avatar(activePeer, 32, { online: true }),
         h('div', {},
-          h('strong', { style: { fontSize: '.86rem' } }, `${activePeer.name} (${activePeer.handle || '@raver'})`),
-          h('div', { class: 'Tooltip__friend-tooltip-minutes', style: { fontSize: '.72rem', color: '#27dcc8' } }, `${activePeer.medal || '🥇 Altın Raver'} · ⏱️ ${activePeer.watchMinutes || 180} dk birlikte izlendi`))),
+          h('strong', { style: { fontSize: '.86rem' } }, `${activePeer.name} (${activePeer.handle || '@izleyici'})`),
+          h('div', { class: 'Tooltip__friend-tooltip-minutes', style: { fontSize: '.72rem', color: '#27dcc8' } }, `${activePeer.medal || '🥇 Altın İzleyici'} · ⏱️ ${activePeer.watchMinutes || 180} dk birlikte izlendi`))),
       state.mesh?.id ? h('button', {
         type: 'button',
         class: 'btn sm',
@@ -994,7 +994,7 @@ export async function openDmModal(initialPeerId = null) {
   await loadMessages(activePeerId);
 
   popup({
-    title: '💬 Özel Mesajlar (DM) & Raver Arkadaşlarım',
+    title: '💬 Özel Mesajlar (DM) & Watchlivo Arkadaşlarım',
     content: root,
     dismissable: true,
     options: [{ label: 'Kapat', class: 'btn' }],
@@ -1048,7 +1048,7 @@ export function openReportModal({ targetType = 'room', targetId = '', targetLabe
                 targetId: targetId || state.mesh?.id || 'general',
                 reason: selectedReason,
                 details: detailsInp.value.trim(),
-                reporter: state.self?.name || 'Raver',
+                reporter: state.self?.name || 'İzleyici',
               },
             });
             toast('✓ Bildiriminiz moderasyon ekibine iletildi. Teşekkürler!');

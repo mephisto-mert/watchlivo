@@ -6351,11 +6351,6 @@ async def index(request: Request):
 
 
 async def download_apk_endpoint(request: Request):
-    if IS_VERCEL:
-        return RedirectResponse(
-            "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo-v1.1.apk",
-            status_code=302,
-        )
     apk_file = STATIC_DIR / "Watchlivo-v1.1.apk"
     if not apk_file.exists():
         apk_file = STATIC_DIR / "Watchlivo-v1.0.apk"
@@ -6364,12 +6359,13 @@ async def download_apk_endpoint(request: Request):
             apk_file,
             media_type="application/vnd.android.package-archive",
             filename="Watchlivo-v1.1.0.apk",
-            headers={"Content-Disposition": 'attachment; filename="Watchlivo-v1.1.0.apk"'},
+            headers={
+                "Content-Disposition": 'attachment; filename="Watchlivo-v1.1.0.apk"',
+                "Cache-Control": "public, max-age=3600",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
-    return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo-v1.1.apk",
-        status_code=302,
-    )
+    return RedirectResponse("/static/Watchlivo-v1.1.apk", status_code=302)
 
 
 async def download_windows_endpoint(request: Request):
@@ -6729,6 +6725,8 @@ app = Starlette(
         Route("/sw.js", service_worker),
         Route("/api/health", health),
         Route("/download/apk", download_apk_endpoint),
+        Route("/download/Watchlivo-v1.1.0.apk", download_apk_endpoint),
+        Route("/download/Watchlivo-v1.1.apk", download_apk_endpoint),
         Route("/download/ipa", download_ipa_endpoint),
         Route("/download/ios", download_ios_endpoint),
         Route("/download/windows", download_windows_endpoint),

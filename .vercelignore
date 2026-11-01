@@ -5,6 +5,5 @@ __pycache__
 tests/
 uploads/
 static/Watchlivo.exe
-static/*.apk
 *.db
 *.db-journal

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v56';
-import { expectedPosition } from '../sync.js?v=20261101_v56';
-import { state } from '../store.js?v=20261101_v56';
+import { SubtitleDubController } from './subtitles.js?v=20261102_v57';
+import { expectedPosition } from '../sync.js?v=20261102_v57';
+import { state } from '../store.js?v=20261102_v57';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -147,6 +147,40 @@ export class Html5Adapter {
       const frameParent = this.container.parentElement || this.container;
       frameParent.querySelectorAll('#btn-toggle-vinyl-mode').forEach((b) => b.remove());
       frameParent.append(toggleBtn);
+      if (media?.isRaveDJ && Array.isArray(media.mashupTracks) && media.mashupTracks.length >= 2) {
+        const trB = media.mashupTracks[1];
+        const bSrc = trB?.url || trB?.audioPreviewUrl || (Array.isArray(trB?.altUrls) && trB.altUrls[0]) || '';
+        if (bSrc && bSrc !== media.url) {
+          const deckB = document.createElement('audio');
+          deckB.preload = 'auto';
+          deckB.loop = true;
+          deckB.src = bSrc;
+          deckB.volume = 0.28;
+          this.mashupDeckB = deckB;
+          this.container.append(deckB);
+          const syncDeckB = () => {
+            if (!this.mashupDeckB || this.video !== v) return;
+            const ct = Number(v.currentTime || 0);
+            const phase = (Math.sin(ct * (Math.PI / 22)) + 1) * 0.5;
+            const baseVol = Math.max(0, Math.min(1, (this.baseVolume || 80) / 100));
+            this.mashupDeckB.muted = Boolean(v.muted);
+            this.mashupDeckB.volume = Math.max(0.08, Math.min(0.65, baseVol * (0.22 + phase * 0.36)));
+          };
+          v.addEventListener('timeupdate', syncDeckB);
+          v.addEventListener('playing', () => {
+            if (this.mashupDeckB && !v.paused) {
+              this.mashupDeckB.muted = Boolean(v.muted);
+              this.mashupDeckB.play().catch(() => {});
+            }
+          });
+          v.addEventListener('pause', () => { this.mashupDeckB?.pause?.(); });
+          v.addEventListener('seeked', () => {
+            if (this.mashupDeckB && Number.isFinite(this.mashupDeckB.duration) && this.mashupDeckB.duration > 1) {
+              try { this.mashupDeckB.currentTime = (v.currentTime || 0) % this.mashupDeckB.duration; } catch (e) { /* ignore */ }
+            }
+          });
+        }
+      }
     } else {
       const frameParent = this.container.parentElement || this.container;
       frameParent.querySelectorAll('#btn-toggle-vinyl-mode').forEach((b) => b.remove());
@@ -1184,6 +1218,7 @@ export class Html5Adapter {
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }
     if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.bgYtEl) { try { this.bgYtEl.removeAttribute('src'); this.bgYtEl.remove(); } catch (e) { /* ignore */ } this.bgYtEl = null; }
+    if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); this.mashupDeckB.remove(); } catch (e) { /* ignore */ } this.mashupDeckB = null; }
     if (this.video) {
       try {
         this.video.pause();

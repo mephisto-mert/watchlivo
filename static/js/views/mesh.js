@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v56';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v56';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v56';
-import { MeshConnection } from '../realtime.js?v=20261101_v56';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v56';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v56';
-import { buildLayout } from './mesh-layout.js?v=20261101_v56';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v56';
-import { Voice } from '../voice.js?v=20261101_v56';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v56';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261102_v57';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261102_v57';
+import { resolveMusicItem } from './selection-kinds.js?v=20261102_v57';
+import { MeshConnection } from '../realtime.js?v=20261102_v57';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261102_v57';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261102_v57';
+import { buildLayout } from './mesh-layout.js?v=20261102_v57';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261102_v57';
+import { Voice } from '../voice.js?v=20261102_v57';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261102_v57';
 
 let ctx = null;
 
@@ -572,7 +572,7 @@ function onMessage(data) {
 function askPassword() {
   const input = h('input', { class: 'input', type: 'password', placeholder: 'Oda şifresi' });
   popup({ title: 'Bu oda şifreli', content: input, dismissable: false, options: [
-    { label: 'Katıl', primary: true, onClick: () => { const id = state.route.params.id; leaveMeshView(); enterMesh(document.getElementById('app'), { id, pwd: input.value }); } },
+    { label: 'Katıl', primary: true, onClick: () => { const id = state.route.params.id; leaveMeshView(); enterMesh(document.getElementById('mesh-root') || document.getElementById('app'), { id, pwd: input.value }); } },
     { label: 'Ana Sayfa', onClick: () => window.vortexNavigate('/') },
   ] });
 }
@@ -929,6 +929,9 @@ const actions = {
 
 export async function enterMesh(app, params) {
   leaveMeshView();
+  const targetRoot = (!app || app.id === 'app') ? (document.getElementById('mesh-root') || app) : app;
+  if (targetRoot) targetRoot.classList.remove('hidden');
+  app = targetRoot;
   let initialCid = null;
   try {
     if (params.r_tok && params.id) {

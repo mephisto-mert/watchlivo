@@ -783,6 +783,55 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("#ctl-pip,", mesh_css)
         self.assertNotIn("#nav-minimize-room,", mesh_css)
 
+    def test_v57_apk_watchlivodj_and_mobile_room_entry(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. APK download endpoints must serve real signed Android APK binary (PK\x03\x04)
+        for apk_route in ("/download/apk", "/download/Watchlivo-v1.1.0.apk", "/download/Watchlivo-v1.1.apk"):
+            resp = self.client.get(apk_route)
+            self.assertEqual(resp.status_code, 200, f"Failed on {apk_route}")
+            self.assertEqual(resp.headers.get("content-type"), "application/vnd.android.package-archive")
+            self.assertTrue(resp.content.startswith(b"PK\x03\x04"), f"Invalid APK ZIP header on {apk_route}")
+            self.assertGreater(len(resp.content), 20000)
+
+        # 2. Watchlivo DJ trending & mashup endpoints
+        tr_resp = self.client.get("/api/rave/ravedj-trending")
+        self.assertEqual(tr_resp.status_code, 200)
+        tr_data = tr_resp.json()
+        self.assertTrue(len(tr_data.get("items") or []) > 0)
+        self.assertTrue(len(tr_data.get("presets") or []) > 0)
+        self.assertIn("Watchlivo DJ", tr_data["items"][0]["title"])
+        self.assertNotIn("RaveDJ", tr_data["items"][0]["title"])
+
+        m_resp = self.client.post(
+            "/api/rave/ravedj-mashup",
+            json={"trackA": "Semicenk Canin Sag Olsun", "trackB": "Lvbel C5 Doberman", "bpm": 124},
+        )
+        self.assertEqual(m_resp.status_code, 200)
+        m_data = m_resp.json()
+        self.assertTrue(m_data.get("ok"))
+        mashup = m_data.get("mashup") or {}
+        self.assertEqual(mashup.get("provider"), "direct")
+        self.assertTrue(bool(mashup.get("url")))
+        self.assertTrue(bool(mashup.get("audioPreviewUrl")))
+        self.assertIn("Watchlivo DJ", mashup.get("title", ""))
+        self.assertNotIn("RaveDJ", mashup.get("title", ""))
+        self.assertTrue(len(mashup.get("mashupTracks") or []) >= 1)
+
+        # 3. Mobile room entry & Watchlivo DJ branding static checks
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("import { h, toast } from", main_js)
+        self.assertIn("const hasMeshDom = Boolean(meshRoot.querySelector('.mesh-layout'));", main_js)
+        self.assertIn("enteringMeshRoomId", main_js)
+
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        self.assertIn("document.getElementById('mesh-root')", mesh_js)
+
+        providers_js = (root / "static" / "js" / "providers.js").read_text(encoding="utf-8")
+        self.assertIn("name: 'Watchlivo DJ'", providers_js)
+        self.assertNotIn("name: 'RaveDJ'", providers_js)
+
 
 if __name__ == '__main__':
     unittest.main()
