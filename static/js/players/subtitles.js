@@ -789,7 +789,7 @@ export class SubtitleDubController {
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti && (!track.url || cleanUrl(track.url) === cleanUrl(this.adapter.currentUrl))) {
       this._applyHlsAudioSelection();
-    } else if (track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (!isInit && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();

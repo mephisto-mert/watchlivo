@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261101_v49';
-import { api } from './api.js?v=20261101_v49';
-import { state } from './store.js?v=20261101_v49';
+import { clock } from './sync.js?v=20261101_v50';
+import { api } from './api.js?v=20261101_v50';
+import { state } from './store.js?v=20261101_v50';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -497,7 +497,7 @@ export class MeshConnection {
       const isPaused = obj.type === 'pause' || (obj.type === 'heartbeat' && obj.playing === false);
       const baseMedia = this.lastRoom?.media || {};
       this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
-    } else if (obj.type === 'chat' && obj.text) {
+    } else if (obj.type === 'chat' && (obj.text || obj.gif || obj.snapshot || obj.audioNote)) {
       let hhmm = '';
       try {
         hhmm = new Intl.DateTimeFormat('tr-TR', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
@@ -509,7 +509,11 @@ export class MeshConnection {
         id: obj.clientMsgId || `p2p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
         user: this.profile.name,
         color: this.profile.color,
-        text: String(obj.text).slice(0, 600),
+        text: String(obj.text || '').slice(0, 600),
+        gif: obj.gif || '',
+        snapshot: obj.snapshot || '',
+        videoTime: obj.videoTime ?? null,
+        audioNote: obj.audioNote || null,
         replyTo: obj.replyTo || null,
         time: hhmm,
         ts: Date.now() / 1000,

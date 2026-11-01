@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261101_v49';
-import { state, set, getFriends } from '../store.js?v=20261101_v49';
-import { avatar, profileSetup } from '../profile.js?v=20261101_v49';
-import { api } from '../api.js?v=20261101_v49';
-import { createSelection } from './selection.js?v=20261101_v49';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261101_v49';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261101_v50';
+import { state, set, getFriends } from '../store.js?v=20261101_v50';
+import { avatar, profileSetup } from '../profile.js?v=20261101_v50';
+import { api } from '../api.js?v=20261101_v50';
+import { createSelection } from './selection.js?v=20261101_v50';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261101_v50';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261101_v49', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261101_v50', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -51,7 +51,24 @@ export async function createRoomWithMedia(media) {
     cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
     sessionStorage.setItem('vortex_cid', cid);
   } catch (e) { /* ignore */ }
-  const res = await api('/api/rooms/create', { method: 'POST', body: { name: `${self.name || 'İzleyici'} odası`, privacy: 'public', playMode: 'leader', creator: self.name || 'İzleyici', creatorId: self.id || '', clientId: cid, media: cleanMedia } });
+  const res = await api('/api/rooms/create', {
+    method: 'POST',
+    body: {
+      name: `${self.name || 'İzleyici'} odası`,
+      privacy: 'public',
+      playMode: 'leader',
+      creator: self.name || 'İzleyici',
+      creatorId: self.id || '',
+      clientId: cid,
+      color: self.color || '#27DCC8',
+      avatarUrl: self.avatarUrl || '',
+      medal: self.medal || '',
+      watchMinutes: self.watchMinutes || 0,
+      hideLocation: Boolean(self.hideLocation),
+      device: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '') ? 'Mobil' : 'Web',
+      media: cleanMedia,
+    },
+  });
   if (!res.room?.id) throw new Error('Oda oluşturulamadı');
   try {
     const prevRecents = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]');

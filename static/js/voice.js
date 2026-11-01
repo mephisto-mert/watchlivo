@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261101_v49';
+import { toast } from './ui.js?v=20261101_v50';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -597,7 +597,7 @@ export class Voice {
         e.track.onended = () => this._removeVideoBubble(id);
         e.track.onunmute = () => {
           const curP = (this.participants || []).find((x) => x.id === id);
-          if (curP?.cam === false && curP?.screen === false) return;
+          if (!curP?.cam && !curP?.screen) return;
           this._attachVideoBubble(id, vStream, curP?.name || 'Katılımcı', Boolean(curP?.screen));
         };
       } else if (e.track.kind === 'audio') {
@@ -713,7 +713,7 @@ export class Voice {
       const iAmActive = Boolean(this.micOn || this.camOn || this.screenOn);
       for (const p of list) {
         if (p.id && p.id !== selfId) {
-          if (p.cam === false && p.screen === false) {
+          if (!p.cam && !p.screen) {
             this._removeVideoBubble(p.id);
           } else if (p.cam || p.screen) {
             const existingSt = this.peers.get(p.id);
@@ -922,6 +922,7 @@ export class Voice {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
       const ac = new Ctx();
+      this.synthAudioCtx = ac;
       const dest = ac.createMediaStreamDestination();
       const osc = ac.createOscillator();
       const g = ac.createGain();

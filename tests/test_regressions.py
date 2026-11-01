@@ -671,6 +671,53 @@ class RegressionTests(unittest.TestCase):
         listed_ids = [rm["id"] for rm in (r_list.json().get("rooms") or [])]
         self.assertNotIn(room_id, listed_ids)
 
+    def test_v50_ten_subagent_audit_and_seven_worlds_stream(self):
+        # 1. Single user creates room and immediately calls init (even without clientToken or with rotated cid + isCreator) -> ZERO duplicate avatars and ZERO duplicate join chat messages
+        r_cr = self.client.post("/api/rooms/create", json={
+            "name": "Mert Can Yıldız odası",
+            "creator": "Mert Can Yıldız",
+            "creatorId": "u_mert_v50",
+            "clientId": "h_mert_v50_a",
+            "color": "#f43f5e",
+            "device": "Web",
+            "media": {
+                "title": "Yedi Dünya, Bir Gezegen — S1:B1 · Antarktika",
+                "tmdbId": "90790",
+                "url": "/api/rave/resolve-catalog?tmdbId=90790&mediaType=tv&season=1&episode=1",
+                "provider": "cinema",
+            },
+        })
+        self.assertEqual(r_cr.status_code, 200)
+        rid = r_cr.json()["room"]["id"]
+        r_init = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_mert_v50_a",
+            "username": "Mert Can Yıldız",
+            "color": "#f43f5e",
+            "device": "Web",
+            "isCreator": True,
+        })
+        self.assertEqual(r_init.status_code, 200)
+        init_room = r_init.json()["room"]
+        self.assertEqual(len(init_room["participants"]), 1)
+        self.assertEqual(init_room["participants"][0]["color"], "#f43f5e")
+        join_msgs = [m for m in init_room["chat"] if "odaya katıldı" in str(m.get("text") or "")]
+        self.assertEqual(len(join_msgs), 1)
+
+        # 2. Curated 7/24 rooms block pause, seek, queue_add, vote_skip, and host_action from viewers
+        self.client.post("/api/rooms/tv-trt1/sync", json={"type": "init", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
+        r_tv_pause = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "pause", "clientId": "h_tv_v1", "username": "IzleyiciTV", "currentTime": 10})
+        self.assertTrue(r_tv_pause.json()["room"]["media"]["playing"])
+        r_tv_q = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "queue_add", "clientId": "h_tv_v1", "username": "IzleyiciTV", "item": {"title": "Hack", "url": "https://example.com/a.mp4"}})
+        self.assertEqual(len(r_tv_q.json()["room"]["queue"]), 0)
+        r_tv_priv = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "host_action", "action": "set_privacy", "privacy": "private", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
+        self.assertEqual(r_tv_priv.json()["room"]["privacy"], "public")
+
+        # 3. Seven Worlds, One Planet (tmdbId=90790) resolves on Vercel (IS_VERCEL=True) via Vidmoly HLS
+        with patch.object(server, "IS_VERCEL", True):
+            st_list = server._extract_hdfc_sync("tv", 1, 1, "Seven Worlds, One Planet", "Yedi Dünya, Bir Gezegen", "tv:90790:1:1", "2019", tid="90790")
+        self.assertTrue(any("vidmoly.biz/embed-" in u for u, _ in st_list), f"Expected vidmoly HLS stream for 90790, got {st_list}")
+
 
 if __name__ == '__main__':
     unittest.main()

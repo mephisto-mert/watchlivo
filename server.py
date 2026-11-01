@@ -2369,6 +2369,14 @@ def _decode_rapidvid_embed(vod_url: str, ref: str = "https://www.fullhdfilmizles
 
 def _is_vault_url_expired(url: str) -> bool:
     u_low = str(url or "").lower()
+    if "hakunaymatata.com" in u_low and "t=" in u_low:
+        try:
+            qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+            t_val = float(qs.get("t") or 0)
+            if t_val > 0 and t_val < time.time() - 3000:
+                return True
+        except Exception:
+            pass
     if "pilavyer" in u_low and "token=" in str(url or ""):
         try:
             qs = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
@@ -2452,7 +2460,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 for u_st in v_ent["streams"]:
                     if isinstance(u_st, (list, tuple)) and len(u_st) >= 2:
                         raw_su, st_t = str(u_st[0]), str(u_st[1])
-                        if not raw_su.startswith("http") or "ineedskin.cfd" in raw_su.lower() or "shrek.dragonballzfans.xyz" in raw_su.lower() or "goldenkite.top" in raw_su.lower():
+                        if not raw_su.startswith("http") or "ineedskin.cfd" in raw_su.lower() or "shrek.dragonballzfans.xyz" in raw_su.lower() or "goldenkite.top" in raw_su.lower() or ".asia/" in raw_su.lower():
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
@@ -2472,7 +2480,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         is_true_1080_vault = (
                             st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr")
-                            or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
+                            or (st_t == "hls" and any(d in raw_su.lower() for d in ("fuckme.dragonballzfans.xyz", "vidmoly.", "vmbox.", "vmnow.", "vmpx.")))
                             or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
                             or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
                             or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
@@ -2555,14 +2563,14 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 pass
         if res:
             return res + [x for x in fallback_res if x not in res]
-    if IS_VERCEL:
+    if IS_VERCEL and mtype != "tv":
         return res + [x for x in fallback_res if x not in res]
 
     # 3. Live extraction from https://www.hdfilmcehennemi.nl/ (movies & series)
     hfnl_targets = []
-    if source_url and "hdfilmcehennemi.nl" in source_url:
+    if not IS_VERCEL and source_url and "hdfilmcehennemi.nl" in source_url:
         hfnl_targets.append(source_url)
-    for q in list(dict.fromkeys(q_cands))[:3]:
+    for q in ([] if IS_VERCEL else list(dict.fromkeys(q_cands))[:3]):
         if hfnl_targets:
             break
         try:
@@ -2584,12 +2592,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                     break
         except Exception:
             continue
-    if not hfnl_targets:
+    if not IS_VERCEL and not hfnl_targets:
         for q in list(dict.fromkeys(q_cands))[:2]:
             sl_h = _to_ascii_slug(q)
             if sl_h:
                 hfnl_targets.append(f"https://www.hdfilmcehennemi.nl/dizi/{sl_h}/sezon-{s}/bolum-{e}/" if mtype == "tv" else f"https://www.hdfilmcehennemi.nl/{sl_h}/")
-    for h_u in hfnl_targets[:2]:
+    for h_u in ([] if IS_VERCEL else hfnl_targets[:2]):
         try:
             if mtype == "tv":
                 if "/sezon-" in h_u:
@@ -2640,14 +2648,30 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                     dt = re.sub(r"\s+\d+\.\s*Sezon.*$", "", html_mod.unescape(tm_d.group(1)), flags=re.I).strip()
                     if dt and not _titles_match(dt, valid_titles, "", year, "tv"):
                         continue
-                m_king = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/king/king\.php\?v=[^"\']+)["\']', dhtml, re.I)
-                if m_king:
-                    ku = ("https:" + m_king.group(1)) if m_king.group(1).startswith("//") else m_king.group(1)
-                    khtml = urllib.request.urlopen(urllib.request.Request(ku, headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-                    m_moly = re.search(r'https?://dbx\.molystream\.org/embed/([a-zA-Z0-9_-]+)', khtml)
-                    if m_moly:
-                        res.append((f"https://dbx.molystream.org/embed/sheila/{m_moly.group(1)}", "hls_dbx"))
-                        break
+                if not IS_VERCEL:
+                    m_king = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/king/king\.php\?v=[^"\']+)["\']', dhtml, re.I)
+                    if m_king:
+                        ku = ("https:" + m_king.group(1)) if m_king.group(1).startswith("//") else m_king.group(1)
+                        khtml = urllib.request.urlopen(urllib.request.Request(ku, headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                        m_moly = re.search(r'https?://dbx\.molystream\.org/embed/([a-zA-Z0-9_-]+)', khtml)
+                        if m_moly:
+                            res.append((f"https://dbx.molystream.org/embed/sheila/{m_moly.group(1)}", "hls_dbx"))
+                m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?v=[^"\']+)["\']', dhtml, re.I)
+                if not m_vm_ifr:
+                    try:
+                        dhtml2 = urllib.request.urlopen(urllib.request.Request(ep_u.rstrip("/") + "/2/", headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.0).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                        m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?v=[^"\']+)["\']', dhtml2, re.I)
+                    except Exception:
+                        pass
+                if m_vm_ifr:
+                    mu = ("https:" + m_vm_ifr.group(1)) if m_vm_ifr.group(1).startswith("//") else m_vm_ifr.group(1)
+                    mhtml = urllib.request.urlopen(urllib.request.Request(mu, headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.0).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                    m_vm_emb = re.search(r'https?://vidmoly\.[a-z]+/embed-[a-zA-Z0-9_-]+\.html', mhtml, re.I)
+                    if m_vm_emb:
+                        vm_emb_u = re.sub(r'vidmoly\.[a-z]+', 'vidmoly.biz', m_vm_emb.group(0))
+                        res.append((vm_emb_u, "hls"))
+                if res:
+                    break
             except Exception:
                 continue
     return res if res else fallback_res
@@ -3032,9 +3056,20 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     for prefer_h264 in (True, False):
                         for qk in ("1080", "720", "1440", "2160", "4k", "480", "360"):
                             qu = (quals.get(qk) or {}).get("url") or ""
-                            if qu.startswith("https://"):
+                            if qu.startswith("https://") and not _is_vault_url_expired(qu):
                                 if prefer_h264 and "/resource/h265/" in qu.lower():
                                     continue
+                                if "hakunaymatata.com" in qu.lower():
+                                    try:
+                                        hk_req = urllib.request.Request(qu, headers={
+                                            "User-Agent": "com.community.oneroom/50020115 (Linux; U; Android 15; en_US; OPPO CPH2579; Build/AP3A.240905.015.A2; Cronet/140.0.7339.51)",
+                                            "Range": "bytes=0-1023",
+                                        })
+                                        with _public_open(hk_req, timeout=2.0) as hk_r:
+                                            if hk_r.status not in (200, 206):
+                                                continue
+                                    except Exception:
+                                        continue
                                 chosen_qk, chosen_qu = qk, qu
                                 break
                         if chosen_qu:
@@ -4191,6 +4226,18 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     audio_tracks = fut_audio.result(timeout=5.5)
                 except Exception:
                     audio_tracks = []
+            late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
+            if late_embeds:
+                meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
+                for esub in late_embeds:
+                    eu = str(esub.get("url") or "").strip()
+                    raw_l = str(esub.get("lang") or esub.get("label") or "").lower().strip()
+                    base_l = re.split(r"[\s(\[-]", raw_l)[0].strip()
+                    linfo = SUB_LANG_MAP.get(raw_l) or SUB_LANG_MAP.get(base_l)
+                    if eu.startswith("http") and linfo and not any(urllib.parse.quote(eu, safe="") in str(st_item.get("url") or "") for st_item in sub_tracks):
+                        lcode, llabel, _ = linfo
+                        vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(eu, safe='')}&lang={lcode}{meta_q_late}"
+                        sub_tracks.insert(0, {"id": f"{lcode}-hls", "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
             if not intro_seg and sub_tracks:
                 intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
             sub_tracks = _filter_live_subs(sub_tracks)
@@ -4898,6 +4945,12 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             eff_ref = "https://dbx.molystream.org/"
         elif "makesomthingup" in url or "centralodsseyproud" in url or "/r6/" in url:
             eff_ref = "https://one.makesomthingup.click/"
+        elif "daioncdn.net/startv" in url:
+            eff_ref = "https://www.startv.com.tr/"
+        elif "daioncdn.net/ntv" in url:
+            eff_ref = "https://www.ntv.com.tr/"
+        elif any(d in url for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+            eff_ref = "https://vidmoly.biz/"
     hdrs = {
         "User-Agent": (
             "com.community.oneroom/50020115 (Linux; U; Android 15; en_US; OPPO CPH2579; Build/AP3A.240905.015.A2; Cronet/140.0.7339.51)"
@@ -5119,9 +5172,34 @@ async def rave_stream_manifest(request: Request):
             elif ref_mode == "hx" or "dragonballzfans" in target:
                 hdrs["Referer"] = "https://flixer.su/"
                 hdrs["Origin"] = "https://flixer.su"
+            elif "daioncdn.net/startv" in target:
+                hdrs["Referer"] = "https://www.startv.com.tr/"
+                hdrs["Origin"] = "https://www.startv.com.tr"
+            elif "daioncdn.net/ntv" in target:
+                hdrs["Referer"] = "https://www.ntv.com.tr/"
+                hdrs["Origin"] = "https://www.ntv.com.tr"
+            elif any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+                hdrs["Referer"] = "https://vidmoly.biz/"
+                hdrs["Origin"] = "https://vidmoly.biz"
             cur_target = "https://shrek.dragonballzfans.xyz/" + target.split("serve.dragonballzfans.xyz/", 1)[1] if "serve.dragonballzfans.xyz/" in target else target
             now_dp = time.time()
-            if is_hfnl and ("/master.txt" in cur_target or "hdfilmcehennemi.mobi/video/embed/" in cur_target):
+            if "vidmoly." in cur_target and "/embed-" in cur_target:
+                dp_c = _DP_M3U8_CACHE.get(cur_target)
+                if dp_c and dp_c[1] > now_dp:
+                    cur_target = dp_c[0]
+                else:
+                    try:
+                        vm_u = re.sub(r"vidmoly\.[a-z]+", "vidmoly.biz", cur_target)
+                        with _public_open(urllib.request.Request(vm_u, headers={"User-Agent": UA137, "Referer": "https://www.dizibox.live/"}), timeout=3.8) as vmr:
+                            vm_html = vmr.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                        m_vm = re.search(r"https?://[^\s'\"<>]+\.m3u8[^\s'\"<>]*", vm_html)
+                        if m_vm:
+                            fresh_vm = m_vm.group(0)
+                            _DP_M3U8_CACHE[cur_target] = (fresh_vm, now_dp + 1800)
+                            cur_target = fresh_vm
+                    except Exception:
+                        pass
+            elif is_hfnl and ("/master.txt" in cur_target or "hdfilmcehennemi.mobi/video/embed/" in cur_target):
                 dp_c = _DP_M3U8_CACHE.get(cur_target)
                 if dp_c and dp_c[1] > now_dp:
                     cur_target = dp_c[0]
@@ -5231,10 +5309,10 @@ async def rave_stream_manifest(request: Request):
             cur_k = ""
             if not raw and tid.isdigit() and not is_probe:
                 s_i, e_i = int(s_num or 1), int(e_num or 1)
-                mt_guess = "tv" if (f"v33:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v32:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v33:movie:{tid}:1:1" in _STREAM_CACHE or f"v32:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                mt_guess = "tv" if (f"v34:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v33:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v32:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v34:movie:{tid}:1:1" in _STREAM_CACHE or f"v33:movie:{tid}:1:1" in _STREAM_CACHE or f"v32:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                 cands = []
                 for mt_try in (mt_guess, "movie" if mt_guess == "tv" else "tv"):
-                    for ver_p in ("v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])

@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v49';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v49';
-import { getProvider } from '../providers.js?v=20261101_v49';
-import { expectedPosition } from '../sync.js?v=20261101_v49';
-import { thumbFor } from './lobby.js?v=20261101_v49';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v49';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v49';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v49';
-import { avatar } from '../profile.js?v=20261101_v49';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v50';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v50';
+import { getProvider } from '../providers.js?v=20261101_v50';
+import { expectedPosition } from '../sync.js?v=20261101_v50';
+import { thumbFor } from './lobby.js?v=20261101_v50';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v50';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v50';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v50';
+import { avatar } from '../profile.js?v=20261101_v50';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -481,10 +481,6 @@ export function buildControls(frame, ctx) {
     let targetEp = (curE || 1) + 1;
     let epName = '';
     try {
-      m.season = targetSeason;
-      m.episode = targetEp;
-      m.title = `${cleanTitle} — S${targetSeason}:B${targetEp} - ${targetEp}. Bölüm`;
-      update();
       showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
@@ -1240,11 +1236,7 @@ export function buildControls(frame, ctx) {
           if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
           if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
           if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-          if (host.adapter?.switchStreamSource) {
-            host.adapter.switchStreamSource(fresh.url);
-          } else {
-            await host.setMedia(m, position(), true);
-          }
+          await host.setMedia(m, position(), true);
           loading.classList.add('hidden');
           showOverlay('✅ Yayın kaynağı yenilendi', 2200);
           update();
@@ -1253,6 +1245,7 @@ export function buildControls(frame, ctx) {
       }
     } catch (e) { /* ignore */ }
     loading.classList.add('hidden');
+    errorBox.classList.remove('hidden');
     toast('Alternatif yayın kaynağı bulunamadı.');
   }
 

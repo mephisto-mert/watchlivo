@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v49';
-import { expectedPosition } from '../sync.js?v=20261101_v49';
-import { state } from '../store.js?v=20261101_v49';
+import { SubtitleDubController } from './subtitles.js?v=20261101_v50';
+import { expectedPosition } from '../sync.js?v=20261101_v50';
+import { state } from '../store.js?v=20261101_v50';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -293,6 +293,7 @@ export class Html5Adapter {
     const isDrmUrl = (u) => /\/(?:cbcs|cenc)\//i.test(String(u || ''));
     const isHevcUrl = (u) => /\/resource\/h265\/|[._-]h265[._-]|[._-]hevc[._-]/i.test(String(u || ''));
     const isDemoTestUrl = (u) => /unified-streaming\.com|tears-of-steel|test-streams\.mux\.dev|shaka-demo-assets|angel-one|aHR0cHM6Ly9kZW1vLnVuaWZpZWQtc3RyZWFtaW5n|aHR0cHM6Ly90ZXN0LXN0cmVhbXMubXV4|aHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL3NoYWth/i.test(String(u || ''));
+    this.subs._loadMediaSyncPrefs?.(media);
     const prefAudio = (!this.isMusic && Array.isArray(media.audioTracks))
       ? media.audioTracks.find((t) => t.mode === 'stream' && (t.audioLang || t.targetLang || t.lang) && (t.id === this.subs.selectedAudioId || t.targetLang === this.subs.selectedAudioId || t.lang === this.subs.selectedAudioId || t.audioLang === this.subs.selectedAudioId) && t.url && !isDemoTestUrl(t.url))
       : null;
@@ -304,7 +305,8 @@ export class Html5Adapter {
       if (!raw) return '';
       const mSid = raw.match(/[?&]sid=([^&#]+)/);
       if (mSid && (raw.includes('/api/rave/stream') || raw.includes('/api/rave/stream_manifest') || raw.includes('/api/rave/stream_chunk'))) {
-        return `sid:${mSid[1]}`;
+        const mAud = raw.match(/[?&]aud=([^&#]+)/);
+        return `sid:${mSid[1]}${mAud ? `:aud:${mAud[1]}` : ''}`;
       }
       return raw.replace(/&ext=\.m3u8\b/i, '');
     };
@@ -322,6 +324,9 @@ export class Html5Adapter {
     }
     if (media.url && media.url !== rawInitialUrl) pushAlt(media.url);
     for (const u of (media.altUrls || [])) pushAlt(u);
+    if (Array.isArray(media.servers)) {
+      for (const srv of media.servers) if (srv?.url) pushAlt(srv.url);
+    }
     if (Array.isArray(media.audioTracks)) {
       for (const t of media.audioTracks) if (t?.url) pushAlt(t.url);
     }
@@ -338,8 +343,8 @@ export class Html5Adapter {
     const url = initialCandidate || (alts[nativeAltIdx++] || '');
     this.currentUrl = url;
     if (this.isMusic) {
-      const wantClip = media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
-      this._setMusicVisualMode?.(wantClip ? 'clip' : (isAudioOnlyUrl(url) ? 'vinyl' : 'clip'));
+      const wantClip = !media.live && media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
+      this._setMusicVisualMode?.(wantClip ? 'clip' : ((media.live || isAudioOnlyUrl(url)) ? 'vinyl' : 'clip'));
     }
     this.subs.initForMedia(media);
 
@@ -389,15 +394,9 @@ export class Html5Adapter {
               if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
               if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
               const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
-              let addedAny = false;
-              for (const fu of freshList) {
-                const s = String(fu || '').trim();
-                if (s && !isDrmUrl(s) && !isDemoTestUrl(s) && !seenUrls.has(s)) {
-                  seenUrls.add(s);
-                  alts.push(s);
-                  addedAny = true;
-                }
-              }
+              const prevLen = alts.length;
+              for (const fu of freshList) pushAlt(fu);
+              const addedAny = alts.length > prevLen;
               if (addedAny && nativeAltIdx < alts.length) {
                 triedProxySegs = false;
                 loadCandidateUrl(alts[nativeAltIdx++], doneCb);

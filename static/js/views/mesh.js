@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v49';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v49';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v49';
-import { MeshConnection } from '../realtime.js?v=20261101_v49';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v49';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v49';
-import { buildLayout } from './mesh-layout.js?v=20261101_v49';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v49';
-import { Voice } from '../voice.js?v=20261101_v49';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v49';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v50';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v50';
+import { resolveMusicItem } from './selection-kinds.js?v=20261101_v50';
+import { MeshConnection } from '../realtime.js?v=20261101_v50';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v50';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v50';
+import { buildLayout } from './mesh-layout.js?v=20261101_v50';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v50';
+import { Voice } from '../voice.js?v=20261101_v50';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v50';
 
 let ctx = null;
 
@@ -325,6 +325,7 @@ async function loadMedia(media) {
                 streamType: res.streamType || 'hls',
                 url: res.url,
                 altUrls: res.altUrls || [],
+                servers: (res.servers && res.servers.length) ? res.servers : (media.servers || []),
                 audioTracks: (res.audioTracks && res.audioTracks.length) ? res.audioTracks : media.audioTracks,
                 subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
                 intro: res.intro || media.intro,
@@ -680,7 +681,7 @@ const actions = {
     if (!ctx || !media) return;
     const mode = state.mesh?.playMode || 'leader';
     if (mode === 'leader' && !isLeader()) { toast("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir."); return; }
-    if (mode === 'leader' || mode === 'cohost' || mode === 'quickplay' || !state.mesh?.media?.url) {
+    if (isLeader() || mode === 'leader' || mode === 'cohost' || mode === 'quickplay' || !state.mesh?.media?.url) {
       ctx.userPaused = false;
       ctx.lastLeaderActionAt = Date.now();
       const startPos = Number.isFinite(Number(media.currentTime)) && Number(media.currentTime) > 0 ? Number(media.currentTime) : 0;
@@ -704,6 +705,10 @@ const actions = {
     if (!ctx || !media) return;
     ctx.conn.send('queue_add', { item: media });
     toast(`🎵 Sıraya eklendi: ${media.songTitle || media.title}`);
+  },
+  queueBatch(items) {
+    if (!ctx || !Array.isArray(items) || !items.length) return;
+    ctx.conn.send('queue_add_batch', { items });
   },
   voteVideo(index) { ctx.conn.send('vote_video', { index }); },
   playQueueIndex(index) { ctx.conn.send('queue_play_index', { index }); },
@@ -1059,6 +1064,10 @@ function onPlayerEvent(ev, arg) {
       ctx.lastEndedKey = curKey;
       actions.ended();
     }
+  }
+  if (ev === 'select-similar-music' && arg) {
+    actions.pickMedia(arg);
+    return;
   }
   if (ev === 'autoplay-blocked') ctx.layout.showUnmute(true);
   if (ev === 'unmuted') ctx.layout.showUnmute(false);
