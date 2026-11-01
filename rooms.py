@@ -223,8 +223,8 @@ def _dedupe_room_participants(room: Dict[str, Any], prefer_cid: str = "") -> Non
         prev_cid, prev_p = by_ident[ident]
         prev_seen = float(prev_p.get("lastSeen") or 0.0)
         cur_seen = float(p.get("lastSeen") or 0.0)
-        prev_alive = (t_now - prev_seen) <= 10.0
-        cur_alive = (t_now - cur_seen) <= 10.0
+        prev_alive = (t_now - prev_seen) <= 35.0
+        cur_alive = (t_now - cur_seen) <= 35.0
         # If both sessions are actively polling within the last 10s, they are 2 separate open devices/tabs — keep both!
         if prev_alive and cur_alive:
             if prev_cid in (creator_cid, host_cid):
@@ -768,7 +768,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     room["co_hosts"] = [c for c in merged_co if c not in kicked and c not in left_map]
     cur_h_id = room.get("host_id")
     cur_h = merged_p.get(cur_h_id or "")
-    cur_h_alive = bool(cur_h and cur_h.get("transport") != "bot" and (t - float(cur_h.get("lastSeen") or 0) <= 12.0))
+    cur_h_alive = bool(cur_h and cur_h.get("transport") != "bot" and (t - float(cur_h.get("lastSeen") or 0) <= HTTP_PARTICIPANT_TTL))
     snap_h_id = snap.get("host_id")
     if snap_h_id and snap_h_id in merged_p and snap_h_id not in kicked and snap_h_id not in left_map:
         if not cur_h_alive or (snap.get("host_transferred") and s_rev > r_rev):
@@ -1305,6 +1305,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
     live_ws = SOCKETS.get(rid_str, {})
     p_map = room.get("participants") or {}
     creator_cid = str(room.get("creatorCid") or "").strip()
+    alive_ttl = 10.0 if (cid and cid not in p_map) else HTTP_PARTICIPANT_TTL
     if creator_cid:
         if cid and cid == creator_cid:
             return True
@@ -1312,7 +1313,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
         creator_cid_alive = bool(
             creator_p
             and creator_p.get("transport") != "bot"
-            and (creator_cid in live_ws or (t_now - float(creator_p.get("lastSeen") or 0.0) <= 10.0))
+            and (creator_cid in live_ws or (t_now - float(creator_p.get("lastSeen") or 0.0) <= alive_ttl))
         )
         if creator_cid_alive:
             return False
@@ -1332,7 +1333,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
         cur_host_alive = bool(
             cur_host_p
             and cur_host_p.get("transport") != "bot"
-            and (cur_host_id in live_ws or (t_now - float(cur_host_p.get("lastSeen") or 0.0) <= 10.0))
+            and (cur_host_id in live_ws or (t_now - float(cur_host_p.get("lastSeen") or 0.0) <= alive_ttl))
         )
         if cur_host_alive:
             return False
@@ -1560,7 +1561,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     cur_host_alive = bool(
         cur_host
         and cur_host.get("transport") != "bot"
-        and (cur_host_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 10.0))
+        and (cur_host_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= HTTP_PARTICIPANT_TTL))
     )
     cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
     is_creator = _is_creator_of_room(room, cid, me, data)
@@ -1587,7 +1588,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         cur_host_alive = bool(
             cur_host
             and cur_host.get("transport") != "bot"
-            and (cur_h_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 10.0))
+            and (cur_h_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= HTTP_PARTICIPANT_TTL))
         )
         if not is_host:
             if can_control and not cur_host_alive:
