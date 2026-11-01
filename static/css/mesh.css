@@ -510,7 +510,7 @@ video::cue {
 }
 
 /* Mobile: stack video over chat (Rave layout-direction column), side panels become sheets */
-@media (max-width: 960px) {
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
   :root { --vvh: 100dvh; }
   .mesh { width: 100%; height: var(--vvh, 100dvh); }
   .ctl-mid { touch-action: none; }
@@ -1160,7 +1160,7 @@ video::cue {
   background: #05070e !important; box-shadow: 0 16px 48px rgba(0, 0, 0, .85) !important;
 }
 .cam-bubble.spotlight video { object-fit: contain !important; transform: none !important; }
-@media (max-width: 960px) {
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
   .cam-bubble { width: 100px; border-radius: 11px; }
   .cam-bubble.is-screen-share { width: 148px; height: 86px; }
   .cam-bubble.expanded { width: 158px !important; height: 104px !important; }
@@ -3166,7 +3166,7 @@ body.theater-mode .resize-handle {
   display: none !important;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
   body:not(.mesh-minimized) #mesh-root:not(.hidden) {
     position: fixed !important;
     left: 0 !important;
@@ -3602,7 +3602,7 @@ body.theater-mode .resize-handle {
   overflow: visible !important;
 }
 
-@media (max-width: 960px) {
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
   .video-frame:not(.fullscreen):not(:fullscreen):not(:-webkit-full-screen) .ctl-menu.acrylic {
     position: fixed !important;
     left: 10px !important;
