@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261101_v52';
-import { api, qs } from './api.js?v=20261101_v52';
-import { state, set, setView } from './store.js?v=20261101_v52';
+import { h, toast, popup } from './ui.js?v=20261101_v53';
+import { api, qs } from './api.js?v=20261101_v53';
+import { state, set, setView } from './store.js?v=20261101_v53';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -280,13 +280,13 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     let info = {};
     try {
       info = await api(`/api/rave/seasons?${qs({
-        tmdbId: item.tmdbId || item.id || '',
+        tmdbId: /^\d+$/.test(String(item.tmdbId || '')) ? String(item.tmdbId) : (/^\d+$/.test(String(item.id || '')) ? String(item.id) : ''),
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
-    const tid = info.tmdbId || item.tmdbId || item.id || '';
+    const tid = info.tmdbId || (/^\d+$/.test(String(item.tmdbId || '')) ? String(item.tmdbId) : (/^\d+$/.test(String(item.id || '')) ? String(item.id) : ''));
     const imdbId = info.imdbId || item.imdbId || '';
     const title = info.title || item.title || 'Yapım';
     const origTitle = info.originalTitle || item.originalTitle || title;

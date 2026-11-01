@@ -290,14 +290,15 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         duration = max(0.0, float(data.get("duration") or 0))
     except (TypeError, ValueError):
         duration = 0.0
+    is_tv = clean_str(data.get("mediaType"), 16) == "tv"
     try:
-        season = max(1, int(data.get("season") or 1))
+        season = max(1, int(data.get("season") or 1)) if is_tv else 0
     except (TypeError, ValueError):
-        season = 1
+        season = 1 if is_tv else 0
     try:
-        episode = max(1, int(data.get("episode") or 1))
+        episode = max(1, int(data.get("episode") or 1)) if is_tv else 0
     except (TypeError, ValueError):
-        episode = 1
+        episode = 1 if is_tv else 0
     alt_urls = [clean_str(u, 1500) for u in (data.get("altUrls") or []) if isinstance(u, str) and u.startswith(("https://", "/api/rave/"))][:6]
     servers = []
     for srv in (data.get("servers") or [])[:8]:
@@ -353,6 +354,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "streamType": clean_str(data.get("streamType"), 16),
         "providerUrl": clean_str(data.get("providerUrl"), 2000),
         "officialUrl": clean_str(data.get("officialUrl"), 2000),
+        "sourceUrl": clean_str(data.get("sourceUrl"), 2000),
         "altUrls": alt_urls,
         "servers": servers,
         "subtitleTracks": sub_tracks,

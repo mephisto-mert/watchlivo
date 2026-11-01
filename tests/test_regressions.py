@@ -742,6 +742,47 @@ class RegressionTests(unittest.TestCase):
         self.assertAlmostEqual(room["media"]["currentTime"], 10.0, places=1)
         self.assertEqual(seek_back["broadcast"][0][0]["action"], "seek")
 
+    def test_v53_mobile_landscape_pip_and_episode_fixes(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        # 1. clean_media sets season=0, episode=0 for movies even if season=1, episode=1 passed, and preserves sourceUrl + season/episode for TV
+        cm_movie = rooms.clean_media({
+            "title": "Örümcek Adam: Örümcek Evrenine Geçiş (2023)",
+            "url": "https://cdn.example.com/spiderman.m3u8",
+            "mediaType": "movie",
+            "season": 1,
+            "episode": 1,
+            "sourceUrl": "https://www.fullhdfilmizlesene.now/film/orumcek-adam/",
+        })
+        self.assertEqual(cm_movie["season"], 0)
+        self.assertEqual(cm_movie["episode"], 0)
+        self.assertEqual(cm_movie["sourceUrl"], "https://www.fullhdfilmizlesene.now/film/orumcek-adam/")
+
+        cm_tv = rooms.clean_media({
+            "title": "Arcane — 1. Sezon 2. Bölüm",
+            "url": "https://cdn.example.com/arcane-s1e2.m3u8",
+            "mediaType": "tv",
+            "season": 1,
+            "episode": 2,
+            "sourceUrl": "https://www.dizibox.live/diziler/arcane/",
+        })
+        self.assertEqual(cm_tv["season"], 1)
+        self.assertEqual(cm_tv["episode"], 2)
+        self.assertEqual(cm_tv["sourceUrl"], "https://www.dizibox.live/diziler/arcane/")
+
+        # 2. controls.js never activates is-hero-cover over video, guards movies from S1:B1/B2, and falls back to floating PiP
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("stageBackdrop.classList.toggle('is-hero-cover', false);", ctl_js)
+        self.assertIn("const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));", ctl_js)
+        self.assertIn("if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video)", ctl_js)
+
+        # 3. mesh.css keeps #ctl-pip and #nav-minimize-room visible on mobile, allows mesh-minimized on mobile, and locks .player-host > video to 100%
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("body:not(.mesh-minimized) #mesh-root:not(.hidden)", mesh_css)
+        self.assertIn("@media (max-width: 960px) and (orientation: landscape), (orientation: landscape) and (max-height: 560px)", mesh_css)
+        self.assertNotIn("#ctl-pip,", mesh_css)
+        self.assertNotIn("#nav-minimize-room,", mesh_css)
+
 
 if __name__ == '__main__':
     unittest.main()

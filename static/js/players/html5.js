@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v52';
-import { expectedPosition } from '../sync.js?v=20261101_v52';
-import { state } from '../store.js?v=20261101_v52';
+import { SubtitleDubController } from './subtitles.js?v=20261101_v53';
+import { expectedPosition } from '../sync.js?v=20261101_v53';
+import { state } from '../store.js?v=20261101_v53';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -42,7 +42,7 @@ export class Html5Adapter {
     v.playsInline = true;
     v.setAttribute('playsinline', '');
     v.setAttribute('webkit-playsinline', '');
-    v.disableRemotePlayback = true;
+    v.disablePictureInPicture = false;
     v.preload = 'auto';
     v.preservesPitch = true;
     try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
@@ -1132,14 +1132,14 @@ export class Html5Adapter {
       if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
         await document.exitPictureInPicture();
         this.events.onPipChange?.(false);
-        return false;
+        return 'exited';
       }
       if (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture')) {
         const nextMode = v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
         v.webkitSetPresentationMode(nextMode);
         const active = nextMode === 'picture-in-picture';
         this.events.onPipChange?.(active);
-        return active;
+        return active ? 'entered' : 'exited';
       }
       if (typeof v.requestPictureInPicture === 'function') {
         await v.requestPictureInPicture();

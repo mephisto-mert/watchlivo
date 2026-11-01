@@ -2444,6 +2444,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 fb_ep_keys.append(f"{mtype}:{nt}:1:1")
 
     if mtype == "tv" and (s > 1 or e > 1):
+        if not source_url:
+            for vk_fb in fb_ep_keys:
+                v_fb = v_streams.get(vk_fb)
+                if isinstance(v_fb, dict) and v_fb.get("sourceUrl") and "/film/" not in str(v_fb.get("sourceUrl")):
+                    source_url = str(v_fb.get("sourceUrl"))
+                    break
         fb_ep_keys = []
 
     def _collect_vault_keys(key_list, target_list):
@@ -4164,7 +4170,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "id": eff_tid or tid,
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
-                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "sourceUrl": source_url or "",
@@ -4195,7 +4201,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "id": eff_tid or tid,
                     "provider": "youtube",
                     "catalogProvider": prov if prov in PROV_LABELS else "youtube",
-                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "sourceUrl": source_url or "",
@@ -4286,7 +4292,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "id": eff_tid or tid,
                 "provider": eff_prov,
                 "catalogProvider": eff_prov,
-                "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s, "episode": e,
+                "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
                 "seriesTitle": disp or tr_title or orig_title,
                 "originalTitle": orig_title, "year": year, "origLang": orig_lang,
                 "sourceUrl": source_url or "",
