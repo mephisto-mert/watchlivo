@@ -186,7 +186,7 @@ export class SyncEngine {
     if (this.wasBuffering && !ad.isBuffering()) {
       this.wasBuffering = false;
       this.deferStartedAt = 0;
-      if (!leader && abs > 5.5 && buffered(expected) && now > this.seekUntil) {
+      if (abs > 5.5 && buffered(expected) && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         ad.seek(expected);
         this.seekUntil = now + SEEK_SETTLE_MS;
@@ -209,13 +209,19 @@ export class SyncEngine {
         this.lastSeekTarget = startTarget;
         ad.seek(startTarget);
         this.seekUntil = now + SEEK_SETTLE_MS;
-      } else if (now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.() && ((abs > 3.5 && now - this.lastLeaderBroadcast > 4000) || (now - this.lastLeaderBroadcast > 15000))) {
-        this.lastLeaderBroadcast = now;
-        this.onLeaderSync(curr);
+        this.mode = 'inSync';
+        this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
+        return CYCLE_MS;
       }
-      this.mode = 'inSync';
-      this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
-      return CYCLE_MS;
+      if (delta <= JUMP_DELTA) {
+        if (now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.() && ((delta < -JUMP_DELTA && now - this.lastLeaderBroadcast > 4000) || (abs <= 2.0 && now - this.lastLeaderBroadcast > 15000))) {
+          this.lastLeaderBroadcast = now;
+          this.onLeaderSync(curr);
+        }
+        this.mode = 'inSync';
+        this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
+        return CYCLE_MS;
+      }
     }
 
     const activelySeekingToTarget = Boolean(ad.video?.seeking && Math.abs(expected - (this.lastSeekTarget ?? -999)) < 4.5);

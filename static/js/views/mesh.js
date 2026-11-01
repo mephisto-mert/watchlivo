@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v50';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v50';
-import { resolveMusicItem } from './selection-kinds.js?v=20261101_v50';
-import { MeshConnection } from '../realtime.js?v=20261101_v50';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v50';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v50';
-import { buildLayout } from './mesh-layout.js?v=20261101_v50';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v50';
-import { Voice } from '../voice.js?v=20261101_v50';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v50';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261101_v51';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261101_v51';
+import { resolveMusicItem } from './selection-kinds.js?v=20261101_v51';
+import { MeshConnection } from '../realtime.js?v=20261101_v51';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261101_v51';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261101_v51';
+import { buildLayout } from './mesh-layout.js?v=20261101_v51';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261101_v51';
+import { Voice } from '../voice.js?v=20261101_v51';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261101_v51';
 
 let ctx = null;
 
@@ -603,7 +603,8 @@ const actions = {
     const t = Math.max(0, Number.isFinite(explicitTime) ? explicitTime : (ad.getTime?.() ?? 0));
     const expNow = expectedPosition(state.mesh?.media);
     if ((!forceAnchor && t < 0.15) || (expNow > 30 && t < 2 && ad.initialSeekPending > 5)) return;
-    const playing = !ctx.userPaused && !ad.isPaused?.();
+    if (!forceAnchor && !ctx.userPaused && expNow > 3.0 && t < expNow - 2.0) return;
+    const playing = !ctx.userPaused;
     ctx.lastLeaderActionAt = Date.now();
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
@@ -1054,9 +1055,6 @@ function onPlayerEvent(ev, arg) {
   }
   if (ev === 'play' && arg?.native && isLeader() && !ctx.host.loading && ctx.userPaused) {
     actions.play();
-  }
-  if (ev === 'pause' && arg?.native && isLeader() && !document.hidden && !ctx.host.loading && !ctx.userPaused) {
-    actions.pause();
   }
   if (ev === 'ended') {
     const curKey = mediaKey(state.mesh?.media);

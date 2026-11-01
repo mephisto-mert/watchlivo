@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v50';
-import { expectedPosition } from '../sync.js?v=20261101_v50';
-import { state } from '../store.js?v=20261101_v50';
+import { SubtitleDubController } from './subtitles.js?v=20261101_v51';
+import { expectedPosition } from '../sync.js?v=20261101_v51';
+import { state } from '../store.js?v=20261101_v51';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -259,22 +259,15 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      const fsTransition = Boolean(this._lastFsChangeAt && Date.now() - this._lastFsChangeAt < 650);
-      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2200);
-      const isTransientPause = Boolean(fsTransition || v.seeking || recentSeek || v.readyState < 2);
-      if (this.wantPlaying && !this.hasEnded && !v.ended && isTransientPause) {
+      if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
-        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 400 : 250;
+        const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
+        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 350 : 200;
         this.resumeTimer = setTimeout(() => {
           if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {
             this.tryPlay();
           }
         }, delayMs);
-        return;
-      }
-      if (this.wantPlaying && !v.seeking) {
-        this.wantPlaying = false;
-        this.events.onPause?.({ native: true });
         return;
       }
       this.events.onPause?.();
@@ -587,6 +580,14 @@ export class Html5Adapter {
             this.lastSeekAt = Date.now();
           }
           if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
+            if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+              this._switchedToProxySegs = true;
+              const proxied = withProxySegs(srcUrl);
+              if (proxied && proxied !== srcUrl) {
+                loadCandidateUrl(proxied, doneCb);
+                return;
+              }
+            }
             netRetries += 1;
             if (netRetries <= 2) {
               setTimeout(() => {

@@ -718,6 +718,30 @@ class RegressionTests(unittest.TestCase):
             st_list = server._extract_hdfc_sync("tv", 1, 1, "Seven Worlds, One Planet", "Yedi Dünya, Bir Gezegen", "tv:90790:1:1", "2019", tid="90790")
         self.assertTrue(any("vidmoly.biz/embed-" in u for u, _ in st_list), f"Expected vidmoly HLS stream for 90790, got {st_list}")
 
+    def test_v51_rave_io_direct_cdn_and_wall_clock_sync(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        # 1. Native <video> pause during buffering never emits native:true pause or triggers actions.pause()
+        self.assertNotIn("this.events.onPause?.({ native: true })", html5_js)
+        self.assertNotIn("if (ev === 'pause' && arg?.native", mesh_js)
+        # 2. Leader lag (>JUMP_DELTA behind expected) uses Rave wall-clock catchup instead of dragging room backwards
+        self.assertIn("if (delta <= JUMP_DELTA)", sync_js)
+        room = rooms.new_room("v51-rave-sync-room", "Rave Sync", "public", "leader", "Kurucu", "u_k1", "")
+        rooms.add_participant(room, "h_k1", {"username": "Kurucu", "userId": "u_k1", "_internalCreator": True}, "http")
+        room["host_id"] = "h_k1"
+        rooms.set_media(room, {"title": "Spider-Man", "url": "https://cdn.example.com/sm.m3u8", "provider": "hls"}, "Kurucu", 45.0)
+        # Lagging heartbeat from leader (e.g. leader buffered at 22.0s while room clock is at 45.0s) must NOT drag room backwards
+        hb_lag = rooms.handle_action(room, "h_k1", {"type": "heartbeat", "currentTime": 22.0, "playing": True})
+        self.assertGreaterEqual(room["media"]["currentTime"], 45.0)
+        self.assertEqual(len(hb_lag["broadcast"]), 0)
+        # Explicit seek from leader CAN still seek backwards to 10.0s
+        seek_back = rooms.handle_action(room, "h_k1", {"type": "seek", "currentTime": 10.0})
+        self.assertAlmostEqual(room["media"]["currentTime"], 10.0, places=1)
+        self.assertEqual(seek_back["broadcast"][0][0]["action"], "seek")
+
 
 if __name__ == '__main__':
     unittest.main()

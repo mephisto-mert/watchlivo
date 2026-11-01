@@ -232,16 +232,29 @@ def _http_json(url: str, **kw):
     return json.loads(_http(url, **kw).decode("utf-8", errors="ignore"))
 
 
+_DNS_PUBLIC_CACHE: dict[tuple[str, int], tuple[bool, float]] = {}
+
+
 def public_http_url(url: str) -> bool:
     """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local ranges (SSRF guard)."""
     try:
         p = urllib.parse.urlparse(url)
         if p.scheme not in ("http", "https") or not p.hostname:
             return False
-        for info in socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80)):
+        port = p.port or (443 if p.scheme == "https" else 80)
+        ck = (p.hostname.lower(), port)
+        now_d = time.time()
+        hit = _DNS_PUBLIC_CACHE.get(ck)
+        if hit and now_d - hit[1] < 300.0:
+            return hit[0]
+        for info in socket.getaddrinfo(p.hostname, port):
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                _DNS_PUBLIC_CACHE[ck] = (False, now_d)
                 return False
+        if len(_DNS_PUBLIC_CACHE) > 1000:
+            _DNS_PUBLIC_CACHE.clear()
+        _DNS_PUBLIC_CACHE[ck] = (True, now_d)
         return True
     except Exception:
         return False
@@ -5363,7 +5376,8 @@ async def rave_stream_manifest(request: Request):
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             is_master = "#EXT-X-STREAM-INF" in raw
-            ps_q = ("&proxy_segs=1" if (proxy_segs or cur_is_dp or cur_is_hfnl or cur_is_fhd or cur_is_pv or cur_is_dbx or cur_is_dl) else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_fp)
+            ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
@@ -5397,18 +5411,14 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
                 if cur_is_ve:
                     return _proxy_u(u_str, "https://player.videasy.to/", ".ts")
-                if cur_is_hfnl or ("cdnimages" in u_str and "/hls/" in u_str):
-                    return _proxy_u(u_str, "https://hdfilmcehennemi.mobi/", ".ts")
                 if cur_is_dbx or "molystream" in u_str or "/sheila_" in u_str:
                     return _proxy_u(u_str, "https://dbx.molystream.org/", ".ts")
-                if cur_is_dl or "makesomthingup" in u_str or "centralodsseyproud" in u_str or "/r6/" in u_str:
-                    return _proxy_u(u_str, "https://one.makesomthingup.click/", ".ts")
                 if cur_is_dp or "uk-traffic-" in u_str:
                     dp_ref = f"{urllib.parse.urlparse(cur_target).scheme}://{urllib.parse.urlparse(cur_target).netloc}/" if ("dplayer" in cur_target or ".com/f/" in u_str) else "https://x.ag2m5.cfd/"
                     return _proxy_u(u_str, dp_ref, ".ts")
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
-                if "dragonballzfans" in u_str or proxy_segs or cur_is_fhd or cur_is_pv:
+                if "dragonballzfans" in u_str or proxy_segs:
                     ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
                         "https://rapidvid.org/" if cur_is_fhd else (
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (

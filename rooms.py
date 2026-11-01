@@ -1621,6 +1621,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             want_play = False
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
+        if prev_playing and want_play and cur_live > 3.0 and inc_t < cur_live - 2.0:
+            room["media"]["currentTime"] = cur_live
+            room["media"]["updatedAt"] = t_now
+            return out
         _apply_time(room, data)
         room["media"]["playing"] = want_play
         if prev_playing and want_play and cur_live > 2.0 and abs(inc_t - cur_live) <= 2.5 and room.get("privacy") == prev_privacy:
