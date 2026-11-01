@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261101_v51';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261101_v51';
-import { avatar } from '../profile.js?v=20261101_v51';
-import { clock } from '../sync.js?v=20261101_v51';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261101_v51';
-import { copyInvite, inviteUrl } from './chat.js?v=20261101_v51';
-import { parseVideoUrl } from '../providers.js?v=20261101_v51';
-import { resolveMedia } from './selection.js?v=20261101_v51';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261101_v52';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261101_v52';
+import { avatar } from '../profile.js?v=20261101_v52';
+import { clock } from '../sync.js?v=20261101_v52';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261101_v52';
+import { copyInvite, inviteUrl } from './chat.js?v=20261101_v52';
+import { parseVideoUrl } from '../providers.js?v=20261101_v52';
+import { resolveMedia } from './selection.js?v=20261101_v52';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -201,6 +201,21 @@ function Friends() {
       style: { width: '100%', justifyContent: 'center', gap: '6px' },
       onclick: () => openFriendsManagerModal(),
     }, '👥 + Arkadaş Ekle & Arkadaş Listem'),
+    h('div', { style: { display: 'flex', gap: '6px', width: '100%' } },
+      h('button', {
+        type: 'button',
+        class: 'btn sm primary',
+        id: 'btn-send-room-push',
+        style: { flex: '1', justifyContent: 'center' },
+        onclick: () => window.vortexSendRoomNotification?.(),
+      }, '🔔 Arkadaşlara Bildirim Gönder'),
+      h('button', {
+        type: 'button',
+        class: 'btn sm ghost',
+        id: 'btn-enable-push',
+        style: { justifyContent: 'center' },
+        onclick: () => window.vortexRequestPushPermission?.(),
+      }, '🔔 Bildirim İzni')),
     h('div', { class: 'share-box' },
       h('input', { class: 'input', value: url, readonly: true, onclick: (e) => e.target.select() }),
       h('button', { class: 'btn primary', onclick: copyInvite, 'aria-label': 'Kopyala' }, h('span', { html: icons.copy, style: { display: 'flex' } }))),

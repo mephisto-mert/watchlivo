@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261101_v51';
-import { expectedPosition } from '../sync.js?v=20261101_v51';
-import { state } from '../store.js?v=20261101_v51';
+import { SubtitleDubController } from './subtitles.js?v=20261101_v52';
+import { expectedPosition } from '../sync.js?v=20261101_v52';
+import { state } from '../store.js?v=20261101_v52';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -45,6 +45,7 @@ export class Html5Adapter {
     v.disableRemotePlayback = true;
     v.preload = 'auto';
     v.preservesPitch = true;
+    try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
     if (media?.thumbnail || media?.poster) v.poster = media.thumbnail || media.poster;
     this.video = v;
     const validStart = (Number.isFinite(startAt) && startAt > 0.5) ? Number(startAt) : 0;
@@ -172,7 +173,35 @@ export class Html5Adapter {
         this.bgMvEl.play().catch(() => {});
       }
       if (!v.muted && v.volume > 0) this.events.onUnmuted?.();
+      this._requestWakeLock?.();
       reportPlay(wasPausedWant);
+    });
+    const onPipChange = () => {
+      this.events.onPipChange?.(this.isPiP());
+    };
+    v.addEventListener('enterpictureinpicture', onPipChange);
+    v.addEventListener('leavepictureinpicture', onPipChange);
+    v.addEventListener('webkitpresentationmodechanged', onPipChange);
+    if (this._visHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._visHandler);
+    }
+    this._visHandler = () => {
+      if (this._destroyed || this.video !== v) return;
+      if (document.visibilityState === 'visible') {
+        if (this.wantPlaying && !this.hasEnded) {
+          this._requestWakeLock?.();
+          if (v.paused && !v.ended) this.tryPlay();
+        }
+      } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded) {
+        if (v.paused && !v.ended) {
+          v.play?.().catch(() => {});
+        }
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this._visHandler);
+    }
+    v.addEventListener('noop', () => {
     });
     v.addEventListener('volumechange', () => { if (!v.paused && !v.muted && v.volume > 0) { this.audioUnlocked = true; this.events.onUnmuted?.(); } });
     v.addEventListener('loadeddata', () => { if (v.readyState >= 2) { clearBuf(); this.events.onReady?.(); } });
@@ -1088,7 +1117,58 @@ export class Html5Adapter {
     this.hls.currentLevel = n;
     this.events.onTracksChanged?.();
   }
+  isPiP() {
+    const v = this.video;
+    if (!v) return false;
+    return Boolean(
+      (typeof document !== 'undefined' && document.pictureInPictureElement === v) ||
+      v.webkitPresentationMode === 'picture-in-picture'
+    );
+  }
+  async togglePiP() {
+    const v = this.video;
+    if (!v) return false;
+    try {
+      if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
+        await document.exitPictureInPicture();
+        this.events.onPipChange?.(false);
+        return false;
+      }
+      if (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture')) {
+        const nextMode = v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
+        v.webkitSetPresentationMode(nextMode);
+        const active = nextMode === 'picture-in-picture';
+        this.events.onPipChange?.(active);
+        return active;
+      }
+      if (typeof v.requestPictureInPicture === 'function') {
+        await v.requestPictureInPicture();
+        this.events.onPipChange?.(true);
+        return true;
+      }
+    } catch (e) { /* fallback handled by caller */ }
+    return false;
+  }
+  async _requestWakeLock() {
+    if (typeof navigator === 'undefined' || !navigator.wakeLock?.request) return;
+    try {
+      if (this._wakeLock) return;
+      this._wakeLock = await navigator.wakeLock.request('screen');
+      this._wakeLock.addEventListener?.('release', () => { this._wakeLock = null; });
+    } catch (e) { /* ignore */ }
+  }
+  _releaseWakeLock() {
+    if (this._wakeLock) {
+      try { this._wakeLock.release(); } catch (e) { /* ignore */ }
+      this._wakeLock = null;
+    }
+  }
   destroy() {
+    this._releaseWakeLock();
+    if (this._visHandler && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this._visHandler);
+      this._visHandler = null;
+    }
     this._destroyed = true;
     this.wantPlaying = false;
     clearTimeout(this.loadReadyTimer);

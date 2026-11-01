@@ -41,6 +41,27 @@ _LINK_PREVIEW_CACHE: Dict[str, Dict[str, Any]] = {}
 _TRANSLATE_CACHE: Dict[str, str] = {}
 _AI_IMAGE_HISTORY: List[Dict[str, Any]] = []
 _REPORTS_LOG: List[Dict[str, Any]] = []
+_NOTIFICATION_QUEUES: Dict[str, List[Dict[str, Any]]] = {}
+_PUSH_SUBSCRIPTIONS: Dict[str, Dict[str, Any]] = {}
+
+
+def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    key = str(target_key or "*").strip().lower() or "*"
+    item = {
+        "id": payload.get("id") or ("ntf_" + uuid.uuid4().hex[:10]),
+        "type": str(payload.get("type") or "room_invite"),
+        "title": _clean(payload.get("title") or "Watchlivo — Sinema Daveti", 120),
+        "body": _clean(payload.get("body") or "Arkadaşın seni sinema odasına çağırıyor!", 240),
+        "fromUid": _clean(payload.get("fromUid"), 64),
+        "fromName": _clean(payload.get("fromName") or "Arkadaşın", 40),
+        "roomId": _clean(payload.get("roomId"), 80),
+        "url": _clean(payload.get("url"), 240),
+        "ts": float(payload.get("ts") or time.time()),
+    }
+    q = _NOTIFICATION_QUEUES.setdefault(key, [])
+    q.append(item)
+    del q[:-50]
+    return item
 
 COMMUNITY_PEERS = [
     {
@@ -351,6 +372,16 @@ async def social_dm_send(request: Request) -> JSONResponse:
     if peer_id in _SOCIAL_USERS and peer_id != uid:
         peer_u = _SOCIAL_USERS[peer_id]
         peer_u.setdefault("unread", {})[uid] = int(peer_u.get("unread", {}).get(uid) or 0) + 1
+    if peer_id != uid:
+        _queue_notification(peer_id, {
+            "type": "room_invite" if room_invite else "dm",
+            "title": f"🎬 {name} seni odaya davet etti!" if room_invite else f"💬 {name} sana mesaj gönderdi",
+            "body": text or "Tek tıkla sinema odasına katıl!",
+            "fromUid": uid,
+            "fromName": name,
+            "roomId": room_invite,
+            "url": f"/#/mesh/{urllib.parse.quote(room_invite)}" if room_invite else "/#/",
+        })
 
     # Community peer instant interactive response
     peer_bot = next((p for p in COMMUNITY_PEERS if p["uid"] == peer_id), None)
@@ -903,3 +934,76 @@ async def moderation_report(request: Request) -> JSONResponse:
     _REPORTS_LOG.append(entry)
     del _REPORTS_LOG[:-100]
     return JSONResponse({"ok": True, "reportId": entry["id"], "message": "Bildiriminiz moderasyon ekibine iletildi."})
+
+
+# ---------------------------------------------------------------------------
+# 9. Rave Push & Background Notifications (Service Worker + Acrylic Toast)
+# ---------------------------------------------------------------------------
+async def notifications_subscribe(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    uid = _clean(body.get("uid") or request.scope.get("wl_uid") or body.get("name") or "guest_default", 64).lower()
+    sub = body.get("subscription") if isinstance(body.get("subscription"), dict) else {}
+    _PUSH_SUBSCRIPTIONS[uid] = {
+        "uid": uid,
+        "name": _clean(body.get("name"), 32),
+        "subscription": sub,
+        "updatedAt": _now(),
+    }
+    return JSONResponse({"ok": True, "subscribed": True, "uid": uid})
+
+
+async def notifications_send(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    from_uid = _clean(body.get("fromUid") or request.scope.get("wl_uid") or "guest_default", 64)
+    from_name = _clean(body.get("fromName") or body.get("sender") or "Arkadaşın", 40)
+    room_id = _clean(body.get("roomId"), 80)
+    room_title = _clean(body.get("roomTitle") or "Sinema Odası", 120)
+    target_uid = _clean(body.get("targetUid") or "*", 64).lower()
+    url = _clean(body.get("url") or (f"/#/mesh/{urllib.parse.quote(room_id)}" if room_id else "/#/"), 240)
+    title = _clean(body.get("title") or f"🎬 {from_name} seni odaya çağırıyor!", 120)
+    msg_body = _clean(body.get("body") or f'"{room_title}" odası şu an canlı. Tek tıkla katıl!', 240)
+    item = _queue_notification(target_uid, {
+        "type": _clean(body.get("type") or "room_invite", 32),
+        "title": title,
+        "body": msg_body,
+        "fromUid": from_uid,
+        "fromName": from_name,
+        "roomId": room_id,
+        "url": url,
+    })
+    return JSONResponse({"ok": True, "notification": item})
+
+
+async def notifications_poll(request: Request) -> JSONResponse:
+    q = request.query_params
+    uid = _clean(q.get("uid") or request.scope.get("wl_uid") or "guest_default", 64).lower()
+    name = _clean(q.get("name"), 40).lower()
+    try:
+        since = float(q.get("since") or ( _now() - 30.0 ))
+    except (TypeError, ValueError):
+        since = _now() - 30.0
+    out: List[Dict[str, Any]] = []
+    seen_ids = set()
+    for key in (uid, name, "*"):
+        if not key:
+            continue
+        for item in _NOTIFICATION_QUEUES.get(key, []):
+            if item["id"] in seen_ids:
+                continue
+            if float(item.get("ts") or 0) <= since:
+                continue
+            if item.get("fromUid", "").lower() == uid and uid != "guest_default":
+                continue
+            if name and item.get("fromName", "").lower() == name:
+                continue
+            seen_ids.add(item["id"])
+            out.append(item)
+    out.sort(key=lambda x: float(x.get("ts") or 0))
+    return JSONResponse({"ok": True, "notifications": out[-10:], "serverTs": _now()})
+

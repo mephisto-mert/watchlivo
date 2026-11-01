@@ -6340,7 +6340,8 @@ async def manifest_json(request: Request):
 
 
 async def service_worker(request: Request):
-    js = "self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.registration.unregister()));"
+    sw_path = STATIC_DIR / "sw.js"
+    js = sw_path.read_text(encoding="utf-8") if sw_path.exists() else "self.addEventListener('install',()=>self.skipWaiting());"
     return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
@@ -6770,6 +6771,9 @@ app = Starlette(
         Route("/api/rave/ai-image-history", social_engine.ai_image_history, methods=["GET"]),
         Route("/api/rave/gdrive-folder", social_engine.gdrive_folder_browse, methods=["GET"]),
         Route("/api/rave/report", social_engine.moderation_report, methods=["POST"]),
+        Route("/api/rave/notifications/subscribe", social_engine.notifications_subscribe, methods=["POST"]),
+        Route("/api/rave/notifications/send", social_engine.notifications_send, methods=["POST"]),
+        Route("/api/rave/notifications/poll", social_engine.notifications_poll, methods=["GET"]),
         Route("/api/rave/ai-status", rave_ai_status),
         Route("/api/rave/ai-chat", rave_ai_chat, methods=["GET", "POST"]),
         Route("/api/rave/suno-generate", rave_suno_generate, methods=["POST"]),

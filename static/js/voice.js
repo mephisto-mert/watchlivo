@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261101_v51';
+import { toast } from './ui.js?v=20261101_v52';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -510,7 +510,18 @@ export class Voice {
         }
         this._layoutCameraBubbles();
       };
-      wrap.append(vid, tag, swapBtn, spotBtn, sizeBtn);
+      const shapeBtn = document.createElement('button');
+      shapeBtn.type = 'button';
+      shapeBtn.className = 'cam-bubble-btn shape-btn';
+      shapeBtn.title = 'Yuvarlak / Dikdörtgen Kamera';
+      shapeBtn.textContent = '▭';
+      shapeBtn.onclick = (e) => {
+        e.stopPropagation();
+        const isRect = wrap.classList.toggle('rect-mode');
+        shapeBtn.textContent = isRect ? '◯' : '▭';
+        this._layoutCameraBubbles();
+      };
+      wrap.append(vid, tag, shapeBtn, swapBtn, spotBtn, sizeBtn);
       this._makeBubbleInteractive(wrap, dock);
       dock.appendChild(wrap);
       requestAnimationFrame(() => this._layoutCameraBubbles());
@@ -719,6 +730,11 @@ export class Voice {
             const existingSt = this.peers.get(p.id);
             if (existingSt?.remoteVideoStream && !document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`)) {
               this._attachVideoBubble(p.id, existingSt.remoteVideoStream, p.name || 'Katılımcı', Boolean(p.screen));
+            }
+            const peerBubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`);
+            if (peerBubble) {
+              peerBubble.classList.toggle('is-speaking', Boolean(p.speaking));
+              peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
             }
           }
           const peerActive = Boolean(!p.muted || p.cam || p.screen || p.speaking);
@@ -1041,6 +1057,13 @@ export class Voice {
         const norm = Math.min(1, avg / 55);
         this.onMicLevel?.(norm);
         const now = avg > 14;
+        const rmsSq = buf.reduce((acc, val) => acc + (val / 255) * (val / 255), 0) / (buf.length || 1);
+        this._rmsVol = Math.max(Math.sqrt(rmsSq), (this._rmsVol || 0) * 0.78);
+        const selfBubble = document.querySelector('#vortex-cam-dock [data-cam-id="self"]');
+        if (selfBubble) {
+          selfBubble.classList.toggle('is-speaking', now);
+          selfBubble.style.setProperty('--voice-scale', now ? (1 + Math.min(0.14, this._rmsVol * 0.42)).toFixed(3) : '1');
+        }
         if (now !== speaking) {
           speaking = now;
           this.selfSpeaking = now;

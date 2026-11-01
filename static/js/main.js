@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261101_v51';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v51';
-import { renderHome, destroyHome } from './views/home.js?v=20261101_v51';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v51';
-import { api } from './api.js?v=20261101_v51';
-import { toast } from './ui.js?v=20261101_v51';
+import { state, set } from './store.js?v=20261101_v52';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261101_v52';
+import { renderHome, destroyHome } from './views/home.js?v=20261101_v52';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261101_v52';
+import { api } from './api.js?v=20261101_v52';
+import { toast } from './ui.js?v=20261101_v52';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -163,8 +163,154 @@ async function boot() {
     }
   }
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then((rs) => rs.forEach((r) => r.unregister())).catch(() => {});
+    initRaveNotifications();
   }
+}
+
+function initRaveNotifications() {
+  let swReg = null;
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js?v=20261101_v52').then((reg) => {
+      swReg = reg;
+    }).catch(() => {});
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      const d = event.data || {};
+      if (d.type === 'WATCHLIVO_NOTIFICATION_CLICK' && d.url) {
+        const cleanHash = String(d.url).replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
+        if (cleanHash) navigate(cleanHash);
+      }
+    });
+  }
+
+  const ensureStack = () => {
+    let st = document.getElementById('rave-notif-stack');
+    if (!st) {
+      st = h('div', { class: 'rave-notif-stack', id: 'rave-notif-stack' });
+      document.body.appendChild(st);
+    }
+    return st;
+  };
+
+  window.vortexShowNotificationCard = (payload = {}) => {
+    const title = String(payload.title || 'Watchlivo — Sinema Daveti');
+    const body = String(payload.body || 'Arkadaşın seni sinema odasına çağırıyor!');
+    const roomId = String(payload.roomId || '');
+    const targetUrl = String(payload.url || (roomId ? `/#/mesh/${encodeURIComponent(roomId)}` : ''));
+    const stack = ensureStack();
+    while (stack.childElementCount >= 3) {
+      stack.firstElementChild?.remove();
+    }
+    const card = h('div', { class: 'rave-notif-card' },
+      h('div', { class: 'rave-notif-icon' }, payload.type === 'dm' ? '💬' : '🎬'),
+      h('div', { class: 'rave-notif-body' },
+        h('div', { class: 'rave-notif-title' }, title),
+        h('div', { class: 'rave-notif-text' }, body)),
+      h('div', { class: 'rave-notif-actions' },
+        (roomId || targetUrl) ? h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: () => {
+            card.remove();
+            if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
+            else if (targetUrl) {
+              const cleanHash = targetUrl.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
+              if (cleanHash) navigate(cleanHash);
+            }
+          },
+        }, 'Katıl') : null,
+        h('button', {
+          type: 'button',
+          class: 'btn sm ghost',
+          onclick: () => card.remove(),
+        }, '✕')));
+    stack.appendChild(card);
+    setTimeout(() => { try { card.remove(); } catch (e) { /* ignore */ } }, 9000);
+
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (document.visibilityState === 'hidden' || payload.forceOsNotification)) {
+      if (swReg?.active) {
+        swReg.active.postMessage({ type: 'WATCHLIVO_SHOW_NOTIFICATION', payload });
+      } else {
+        try {
+          const n = new Notification(title, { body, icon: '/static/watchlivo-icon-192.png' });
+          n.onclick = () => {
+            window.focus();
+            if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
+            n.close();
+          };
+        } catch (e) { /* ignore */ }
+      }
+    }
+  };
+
+  window.vortexRequestPushPermission = async () => {
+    if (typeof Notification === 'undefined') {
+      toast('Bu tarayıcı bildirimleri desteklemiyor.');
+      return false;
+    }
+    let perm = Notification.permission;
+    if (perm !== 'granted') {
+      try { perm = await Notification.requestPermission(); } catch (e) { /* ignore */ }
+    }
+    if (perm === 'granted') {
+      try { localStorage.setItem('vortex_push_enabled', 'on'); } catch (e) { /* ignore */ }
+      await api('/api/rave/notifications/subscribe', {
+        method: 'POST',
+        body: {
+          uid: state.self?.uid || state.self?.id || state.clientId,
+          name: state.self?.name || 'Raver',
+          subscription: { granted: true, ts: Date.now() },
+        },
+      }).catch(() => {});
+      toast('🔔 Arka plan ve masaüstü bildirimleri açıldı!');
+      window.vortexShowNotificationCard?.({
+        title: '🔔 Bildirimler Aktif',
+        body: 'Arkadaşların oda açtığında veya davet gönderdiğinde anında bildirim alacaksın.',
+        forceOsNotification: true,
+      });
+      return true;
+    }
+    toast('⚠️ Bildirim izni verilmedi. Tarayıcı adres çubuğundan izin verebilirsin.');
+    return false;
+  };
+
+  window.vortexSendRoomNotification = async (extra = {}) => {
+    const rid = extra.roomId || state.mesh?.id || '';
+    const rTitle = extra.roomTitle || state.mesh?.media?.title || state.mesh?.name || 'Sinema Odası';
+    const sender = state.self?.name || 'Arkadaşın';
+    const res = await api('/api/rave/notifications/send', {
+      method: 'POST',
+      body: {
+        fromUid: state.self?.uid || state.self?.id || state.clientId,
+        fromName: sender,
+        roomId: rid,
+        roomTitle: rTitle,
+        targetUid: extra.targetUid || '*',
+        url: `${location.origin}/#/mesh/${encodeURIComponent(rid)}`,
+      },
+    }).catch(() => null);
+    if (res?.ok) {
+      toast('🔔 Arkadaşlarına anlık oda daveti bildirimi gönderildi!');
+    }
+    return res;
+  };
+
+  let lastNotifTs = Date.now() / 1000;
+  const seenNotifIds = new Set();
+  setInterval(async () => {
+    const uid = state.self?.uid || state.self?.id || state.clientId || 'guest_default';
+    const name = state.self?.name || '';
+    const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
+    if (res?.ok && Array.isArray(res.notifications)) {
+      for (const item of res.notifications) {
+        if (!item?.id || seenNotifIds.has(item.id)) continue;
+        seenNotifIds.add(item.id);
+        lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
+        if (item.roomId && item.roomId === state.mesh?.id) continue;
+        window.vortexShowNotificationCard?.({ ...item, forceOsNotification: true });
+      }
+      if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+    }
+  }, 12000);
 }
 
 boot();

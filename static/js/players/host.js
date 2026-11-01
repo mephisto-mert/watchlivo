@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261101_v51';
-import { Html5Adapter } from './html5.js?v=20261101_v51';
-import { VimeoAdapter } from './vimeo.js?v=20261101_v51';
-import { EmbedAdapter } from './embed.js?v=20261101_v51';
-import { WebviewAdapter } from './webview.js?v=20261101_v51';
+import { YouTubeAdapter } from './youtube.js?v=20261101_v52';
+import { Html5Adapter } from './html5.js?v=20261101_v52';
+import { VimeoAdapter } from './vimeo.js?v=20261101_v52';
+import { EmbedAdapter } from './embed.js?v=20261101_v52';
+import { WebviewAdapter } from './webview.js?v=20261101_v52';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -121,6 +121,7 @@ export class PlayerHost {
       onBuffering: guard((b) => this.onEvent('buffering', b)),
       onSubtitleCue: guard((txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' })),
       onTracksChanged: guard(() => this.onEvent('tracks-changed')),
+      onPipChange: guard((active) => this.onEvent('pip-change', active)),
       onError: guard((msg) => { this.error = msg; this.onEvent('error', msg); }),
       onUnmuted: guard(() => {
         if (this.userMuted) {
@@ -215,6 +216,17 @@ export class PlayerHost {
     this.adapter?.setVolume(this._effectiveVolume());
     if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying !== false) this.adapter?.play?.();
     this.onEvent('unmuted');
+  }
+
+  isPiP() {
+    return Boolean(this.adapter?.isPiP?.());
+  }
+
+  async togglePiP() {
+    if (typeof this.adapter?.togglePiP === 'function') {
+      return await this.adapter.togglePiP();
+    }
+    return false;
   }
 
   destroyAdapterOnly() {

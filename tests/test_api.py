@@ -36,6 +36,50 @@ def test_api_smoke_inprocess():
     assert r_bad.status_code == 400
 
 
+def test_rave_3_approved_features():
+    """Verify the 3 Rave.io parity features (Camera Bubbles + RMS, Push Notifications, PiP + LockScreen)."""
+    import os
+    import pathlib
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from starlette.testclient import TestClient
+    import server
+    client = TestClient(server.app)
+
+    # 1. Service Worker & Push Notification Endpoints
+    r_sw = client.get("/sw.js")
+    assert r_sw.status_code == 200
+    assert "WATCHLIVO_SHOW_NOTIFICATION" in r_sw.text
+    assert "showNotification" in r_sw.text
+
+    r_sub = client.post("/api/rave/notifications/subscribe", json={"uid": "u_test_1", "name": "TestUser", "subscription": {"granted": True}})
+    assert r_sub.status_code == 200 and r_sub.json().get("ok") is True
+
+    r_send = client.post("/api/rave/notifications/send", json={
+        "fromUid": "u_host_1",
+        "fromName": "Mert Can",
+        "roomId": "test-room-123",
+        "roomTitle": "Örümcek Adam: Örümcek Evrenine Geçiş",
+        "targetUid": "u_test_1",
+    })
+    assert r_send.status_code == 200 and r_send.json().get("ok") is True
+
+    r_poll = client.get("/api/rave/notifications/poll?uid=u_test_1&since=0")
+    assert r_poll.status_code == 200
+    notifs = r_poll.json().get("notifications", [])
+    assert any(n.get("roomId") == "test-room-123" for n in notifs)
+
+    # 2. Verify Camera Bubbles & PiP & Lock-Screen MediaSession in static bundle
+    base = pathlib.Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "static"
+    voice_js = (base / "js" / "voice.js").read_text(encoding="utf-8")
+    assert "--voice-scale" in voice_js and "shape-btn" in voice_js
+    chat_js = (base / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+    assert "btn-discord-head-cam" in chat_js
+    controls_js = (base / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+    assert "ctl-pip" in controls_js and "togglePiP" in controls_js
+    html5_js = (base / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+    assert "requestPictureInPicture" in html5_js and "wakeLock" in html5_js
+
+
 if __name__ == "__main__":
     s, r = call("/api/health")
     check("health", s == 200 and r.get("ok"), json.dumps(r))

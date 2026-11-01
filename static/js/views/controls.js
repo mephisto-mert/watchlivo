@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v51';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v51';
-import { getProvider } from '../providers.js?v=20261101_v51';
-import { expectedPosition } from '../sync.js?v=20261101_v51';
-import { thumbFor } from './lobby.js?v=20261101_v51';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v51';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v51';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v51';
-import { avatar } from '../profile.js?v=20261101_v51';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261101_v52';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261101_v52';
+import { getProvider } from '../providers.js?v=20261101_v52';
+import { expectedPosition } from '../sync.js?v=20261101_v52';
+import { thumbFor } from './lobby.js?v=20261101_v52';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261101_v52';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261101_v52';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261101_v52';
+import { avatar } from '../profile.js?v=20261101_v52';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -310,6 +310,21 @@ export function buildControls(frame, ctx) {
   const subBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-sub-btn', 'data-tip': 'Altyazı & Dublaj', 'aria-label': 'Altyazı ve Dublaj', ...tapProps(() => toggleMenu('subtitle')) }, ico('subtitles'), h('span', { class: 'ctl-btn-lbl' }, 'Altyazı & Ses'));
   const snapBtn = h('button', { class: 'ctl-action', id: 'ctl-snap', 'data-tip': 'Anlık Kare Yakala (PNG)', 'aria-label': 'Ekran Görüntüsü', ...tapProps(() => takeVideoSnapshot()) }, ico('snapshot'));
   const gearBtn = h('button', { class: 'ctl-action', id: 'ctl-gear', 'data-tip': 'Oynatıcı Ayarları', 'aria-label': 'Ayarlar', ...tapProps(() => toggleMenu('list')) }, ico('settings'));
+  const togglePiP = async () => {
+    closeMenu();
+    const ok = await host.togglePiP?.();
+    if (ok !== undefined && host.adapter?.video) {
+      update();
+      showOverlay(host.isPiP?.() ? '⧉ Pencere İçinde Pencere (PiP) Açık' : '⧉ PiP Kapatıldı', 1800);
+      return;
+    }
+    if (typeof window.vortexMinimizeRoom === 'function') {
+      window.vortexMinimizeRoom();
+    } else {
+      toast('Bu video kaynağında PiP desteklenmiyor.');
+    }
+  };
+  const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...tapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...tapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
   const menu = h('div', { class: 'ctl-menu acrylic hidden' });
@@ -769,7 +784,7 @@ export function buildControls(frame, ctx) {
   const barRow = h('div', { class: 'ctl-bar-row' },
     h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time),
     h('div', { class: 'ctl-spacer' }),
-    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, theaterBtn, fsBtn));
+    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, pipBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
@@ -841,6 +856,7 @@ export function buildControls(frame, ctx) {
       update();
     }
     else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); toggleFullscreen(); }
+    else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePiP(); }
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); ctx.toggleTheaterMode?.(); }
     else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }
     else if (e.key === '[' || e.key === 'z' || e.key === 'Z' || e.key === ',') {
@@ -1944,6 +1960,7 @@ export function buildControls(frame, ctx) {
     centerPlayBtn.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('is-paused', showCenterHud);
     theaterBtn.classList.toggle('on', Boolean(ctx.isTheaterMode?.()));
+    pipBtn.classList.toggle('on', Boolean(host.isPiP?.()));
     const volIconName = isActuallyMuted() ? 'mute' : 'volume';
     if (volBtn.dataset.sig !== volIconName) {
       volBtn.dataset.sig = volIconName;
@@ -2062,6 +2079,10 @@ export function buildControls(frame, ctx) {
         dualCue.textContent = '';
         dualCue.classList.add('hidden');
         subOverlay.classList.toggle('hidden', !primaryTxt || curSub === 'off');
+        return;
+      }
+      if (ev === 'pip-change') {
+        pipBtn.classList.toggle('on', Boolean(arg));
         return;
       }
       if (ev === 'tracks-changed') {
