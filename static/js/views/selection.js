@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v60';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v60';
-import { api, qs } from '../api.js?v=20261102_v60';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v60';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v60';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v60';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v61';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v61';
+import { api, qs } from '../api.js?v=20261102_v61';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v61';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v61';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v61';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -35,31 +35,27 @@ export function attachTilt(card) {
 
 export function providerTile(p, onClick) {
   const isHero = p.id === 'cinema';
-  const badgeEl = isHero
-    ? h('span', { class: 'p-badge-live' }, '4K • AÇIK')
-    : h('span', { class: 'p-badge-portal' }, '4K VİTRİN');
-
+  const shortName = p.id === 'cinema' ? 'Sinema+' : (p.id === 'ravedj' ? 'Watchlivo DJ' : p.name);
   const card = h('div', {
-    class: `platform-card provider-tile ${isHero ? 'featured-glow hero-provider-tile' : ''}`,
+    class: `provider-tile rave-icon-tile ${isHero ? 'hero-provider-tile' : ''}`,
     role: 'button',
     tabindex: '0',
     'data-provider': p.id,
     'data-brand': p.id,
     'data-category': p.cat || 'global',
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#6366f1' },
+    title: `${p.name}${p.badge ? ' — ' + p.badge : ''}`,
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#27DCC8' },
     onclick: () => onClick(p),
     onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
   },
-    h('div', { class: 'platform-top' },
-      h('div', { class: 'platform-top-brand' },
-        p.logo
-          ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
-          : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#6366f1' }, html: icons[p.glyph] }) : null)),
-      badgeEl),
-    h('div', { class: 'p-title ptitle' }, p.name),
-    p.badge ? h('div', { class: 'p-desc psub' }, p.badge) : null);
+    h('div', { class: 'provider-logo-wrap' },
+      p.logo
+        ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
+        : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#27DCC8' }, html: icons[p.glyph] }) : h('span', { style: { fontWeight: '800', fontSize: '.85rem' } }, shortName.slice(0, 2)))),
+    h('div', { class: 'provider-meta' },
+      h('span', { class: 'ptitle' }, shortName)));
 
-  return attachTilt(card);
+  return card;
 }
 
 export function videoCard(media, onPick) {
@@ -307,7 +303,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           ...filteredProviders.filter((p) => !RAVE_TOP_IDS.includes(p.id)),
         ]
       : filteredProviders;
-    const defaultCap = 30;
+    const defaultCap = 11;
     const isCollapsedGrid = !compact && catFilter === 'all' && !showAllProviders && orderedAll.length > defaultCap;
     const visibleProviders = isCollapsedGrid ? orderedAll.slice(0, defaultCap) : orderedAll;
     const hiddenCount = orderedAll.length - visibleProviders.length;
@@ -517,7 +513,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             }, ctaLabel)));
       }));
 
-    const heroBanner = (!compact && !superQuery) ? h('div', {
+    const heroBanner = (!compact && !superQuery && showTrending) ? h('div', {
       class: 'gazestream-hero hero-with-rail',
       onmouseenter: () => { heroHovered = true; },
       onmouseleave: () => { heroHovered = false; },
@@ -637,11 +633,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             h('button', { type: 'button', class: 'btn sm', onclick: () => { provider = getProvider('cinema'); render(); } }, 'Tümünü Gör →'))),
         heroStripRow)) : null;
 
-    const gridSection = h('div', { class: 'section-row' },
-      !compact ? h('div', { class: 'section-heading' },
-        h('h2', {}, 'Streaming Ağ Geçitleri & Platformlar'),
-        h('span', { class: 'section-sub' }, `${PROVIDERS.length} Doğrulanmış Canlı Platform & Katalog Entegrasyonu`)) : null,
-      h('div', { class: compact ? 'provider-grid compact' : 'platform-glass-grid' },
+    const gridSection = h('div', { class: 'section-row rave-providers-section' },
+      h('div', { class: compact ? 'provider-grid compact' : 'provider-grid rave-home-provider-grid' },
         ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
         ...(moreTile ? [moreTile] : [])));
 

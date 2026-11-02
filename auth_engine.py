@@ -316,13 +316,15 @@ def sign_auth_token(user: Dict[str, Any]) -> str:
     attacker guess or reuse credentials.
     """
     issued = int(time.time())
+    raw_av = str(user.get("avatar") or "🎬")
+    safe_av = "📷" if (raw_av.startswith("data:image/") or len(raw_av) > 120) else raw_av
     payload = {
         "uid": user["uid"],
         "email": user.get("email", ""),
         "handle": user.get("handle", ""),
         "name": user.get("name", ""),
         "color": user.get("color", "#00f5d4"),
-        "avatar": user.get("avatar", "🎬"),
+        "avatar": safe_av,
         "provider": user.get("authProvider", "email"),
         "verified": bool(user.get("verified", True)),
         "iat": issued,
@@ -927,6 +929,13 @@ async def auth_profile(request: Request) -> JSONResponse:
                 "salt": salt,
                 "color": user["color"],
                 "avatar": user["avatar"],
+                "avatar_url": user.get("avatarUrl", ""),
+                "bio": user.get("bio", ""),
+                "status_text": user.get("statusText", ""),
+                "status_emoji": user.get("statusEmoji", "🍿"),
+                "hide_watching": 1 if user.get("hideWatching") else 0,
+                "hide_friends": 1 if user.get("hideFriends") else 0,
+                "hide_location": 1 if user.get("hideLocation") else 0,
                 "auth_provider": user["authProvider"],
                 "verified": 1,
                 "created_at": time.time(),

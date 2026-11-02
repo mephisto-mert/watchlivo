@@ -4193,3 +4193,27 @@ body.vortex-fs #mesh-root .resize-handle {
     color: #f8fafc !important;
   }
 }
+
+
+/* v61: Mobile Room Top Bar — Always Show Playing Movie/Series Name (#room-header-title) */
+@media (max-width: 960px) {
+  #mesh-root > .navbar .room-brand-capsule .logo {
+    display: none !important;
+  }
+  #mesh-root > .navbar .room-brand-capsule {
+    max-width: min(62vw, 260px) !important;
+    padding: 3px 9px !important;
+    gap: 6px !important;
+  }
+  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar #room-header-title {
+    display: inline-block !important;
+    max-width: min(36vw, 155px) !important;
+    font-size: 0.76rem !important;
+    font-weight: 800 !important;
+    color: #ffffff !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}

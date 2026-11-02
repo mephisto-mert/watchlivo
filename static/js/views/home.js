@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v60';
-import { state, set, getFriends } from '../store.js?v=20261102_v60';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v60';
-import { api } from '../api.js?v=20261102_v60';
-import { createSelection } from './selection.js?v=20261102_v60';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v60';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v61';
+import { state, set, getFriends } from '../store.js?v=20261102_v61';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v61';
+import { api } from '../api.js?v=20261102_v61';
+import { createSelection } from './selection.js?v=20261102_v61';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v61';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v60', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v61', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -210,13 +210,10 @@ export function renderHome(app) {
 
   const makeDockLabel = (id) => ({
     home: 'Keşfet',
-    cinema: 'Sinema & Dizi',
+    cinema: 'Sinema+',
+    rooms: 'Odalar',
     tv: 'Canlı TV',
-    radio: 'Radyo',
-    friends: 'Odalar',
-    favs: 'Favoriler',
-    watch: 'Canlı Oda',
-    settings: 'Tema'
+    profile: 'Profil',
   }[id] || id);
 
   const makeDockBtn = (id, title, svgHtml, isAct, onClick) => {
@@ -237,7 +234,7 @@ export function renderHome(app) {
   };
 
   const dockEl = h('nav', { class: 'floating-dock', 'aria-label': 'Hızlı Gezinti' },
-    makeDockBtn('home', 'Ana Hub & Platformlar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>', true, () => {
+    makeDockBtn('home', 'Rave Hub & Odalar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>', true, () => {
       selection.setProvider(null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
@@ -245,7 +242,17 @@ export function renderHome(app) {
       selection.setProvider('cinema');
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
-    makeDockBtn('tv', '7/24 Canlı TV Kanalları', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
+    makeDockBtn('rooms', 'Herkese Açık & Arkadaş Odaları', icons.rooms, false, () => {
+      selection.setProvider(null);
+      filter = 'all';
+      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      draw(true);
+      setTimeout(() => {
+        const el = document.getElementById('lobby-anchor');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 40);
+    }),
+    makeDockBtn('tv', '7/24 Canlı TV & Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
       selection.setProvider(null);
       filter = 'all';
       tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
@@ -255,52 +262,23 @@ export function renderHome(app) {
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 40);
     }),
-    makeDockBtn('radio', '7/24 Canlı Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.5 3.24 6.15zM12 11c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/></svg>', false, () => {
-      selection.setProvider(null);
-      filter = 'all';
-      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
-      draw(true);
-      setTimeout(() => {
-        const el = document.getElementById('lobby-sec-radio') || document.getElementById('lobby-anchor');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 40);
-    }),
-    makeDockBtn('friends', 'Arkadaş Odaları & Çevre', icons.friends, false, () => {
-      selection.setProvider(null);
-      filter = 'friends';
-      tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b.textContent.includes('Arkadaşlar')));
-      draw(true);
-      setTimeout(() => {
-        const el = document.getElementById('lobby-anchor');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }, 40);
-    }),
-    makeDockBtn('favs', 'Favori Dizi & Filmlerim', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>', false, () => {
-      selection.openFavorites?.();
-      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
-    }),
-    makeDockBtn('watch', 'Canlı İzleme Odası', icons.rooms, false, async () => {
-      try {
-        const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
-        if (rec) { openRoom({ id: rec }); return; }
-      } catch (e) { /* ignore */ }
-      try { await createRoomWithMedia(null); } catch (e) { toast('Oda oluşturulamadı'); }
-    }),
-    makeDockBtn('settings', 'Ayarlar & Tema', '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>', false, () => openAppSettings())
+    makeDockBtn('profile', 'Profilim & Ayarlar', icons.friends, false, () => {
+      profileSetup({ current: state.self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); renderHome(app); } });
+    })
   );
 
   const glassWindow = h('div', { class: 'glass-main-window' },
-    appBanner,
     selection,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },
       h('div', { class: 'lobby-toolbar-left' },
-        h('h2', { class: 'lobby-heading' }, 'Odalar & 7/24 Canlı Yayınlar'),
+        h('h2', { class: 'lobby-heading' }, 'Canlı Odalar'),
         tabs),
-      h('div', { class: 'lobby-toolbar-right', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
+      h('div', { class: 'lobby-toolbar-right', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'nowrap' } },
         h('button', {
           type: 'button',
           class: 'btn sm primary',
           id: 'btn-toolbar-friends',
+          style: { flexShrink: '0' },
           onclick: () => openFriendsManagerModal(() => draw(true)),
         }, '👥 + Arkadaş Ekle'),
         lobbySearch)),

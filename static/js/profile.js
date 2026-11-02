@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261102_v60';
-import { api } from './api.js?v=20261102_v60';
-import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261102_v60';
+import { h, popup, toast } from './ui.js?v=20261102_v61';
+import { api } from './api.js?v=20261102_v61';
+import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261102_v61';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -173,7 +173,7 @@ export function avatar(user, size = 32, { speaking = false, online = false } = {
   const minsTxt = user?.watchMinutes ? ` · ${user.watchMinutes} dk izleme` : '';
   const label = user?.name ? (user?.handle ? `${user.name} (@${String(user.handle).replace(/^@/, '')})${medalTxt}${minsTxt}` : `${user.name}${medalTxt}${minsTxt}`) : '';
   const imgUrl = String(user?.avatarUrl || user?.avatar || '').trim();
-  const hasImg = imgUrl && (imgUrl.startsWith('https://') || imgUrl.startsWith('/static/') || imgUrl.startsWith('/uploads/') || imgUrl.startsWith('data:image/'));
+  const hasImg = Boolean(imgUrl && (imgUrl.startsWith('https://') || imgUrl.startsWith('http://') || imgUrl.startsWith('/static/') || imgUrl.startsWith('/uploads/') || imgUrl.startsWith('data:image/') || imgUrl.startsWith('blob:')));
   const el = h('span', {
     class: `avatar ${speaking ? 'speaking' : ''} ${user?.verified ? 'verified-avatar' : ''} ${hasImg ? 'has-img-avatar' : ''}`,
     title: label,
@@ -614,35 +614,100 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
       };
 
-      // Hidden file input for device photo upload
+      const syncAvatarEverywhere = (newAvatarDataUrl) => {
+        selectedAvatarUrl = newAvatarDataUrl;
+        avatarInp.value = newAvatarDataUrl.startsWith('data:image/') ? '' : newAvatarDataUrl;
+        refreshLiveCard();
+        const curName = nameInp.value.trim() || profObj.name || 'İzleyici';
+        const curHandle = handleInp.value.trim().replace(/^@+/, '') || profObj.handle || 'uye';
+        const curBio = bioInp.value.trim();
+        const curStatus = statusInp.value.trim();
+        const autoPayload = {
+          name: curName,
+          handle: curHandle,
+          color,
+          avatar: newAvatarDataUrl,
+          avatarUrl: newAvatarDataUrl,
+          bio: curBio,
+          statusText: curStatus,
+          statusEmoji: selectedStatusEmoji || '🍿',
+          hideWatching: hideWatchingState,
+          hideFriends: hideFriendsState,
+          hideLocation: hideLocState,
+        };
+        const saved = isLoggedMember
+          ? saveProfile({ ...profObj, ...autoPayload, isGuest: false })
+          : saveGuestProfile({ ...profObj, ...autoPayload });
+        Object.assign(profObj, saved);
+        current = saved;
+        // Immediately refresh top navbar avatar & any room participant avatar in DOM
+        const navBtn = document.getElementById('nav-account-btn');
+        if (navBtn) {
+          const oldAv = navBtn.querySelector('.avatar');
+          if (oldAv) oldAv.replaceWith(avatar(saved, 30));
+        }
+        if (state.mesh && Array.isArray(state.mesh.participants)) {
+          state.mesh.participants.forEach((pt) => {
+            if (pt.id === state.clientId || pt.name === saved.name) {
+              pt.avatar = newAvatarDataUrl;
+              pt.avatarUrl = newAvatarDataUrl;
+            }
+          });
+        }
+        if (isLoggedMember && saved.authToken) {
+          api('/api/auth/profile', {
+            method: 'POST',
+            body: { ...autoPayload, authToken: saved.authToken },
+          }).then((res) => {
+            if (res?.authToken) {
+              saveProfile({ ...saved, authToken: res.authToken, isGuest: false });
+            }
+          }).catch(() => {});
+        }
+        onDone?.(saved);
+      };
+
+      // Native file input for device gallery photo upload
       const fileInp = h('input', {
         type: 'file',
-        accept: 'image/*',
-        style: { display: 'none' },
+        id: 'wl-avatar-file-input',
+        accept: 'image/*,image/heic,image/heif,image/webp,image/gif',
+        style: { position: 'absolute', width: '1px', height: '1px', opacity: '0', pointerEvents: 'none' },
         onchange: (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
           const reader = new FileReader();
           reader.onload = (ev) => {
+            const rawDataUrl = String(ev.target?.result || '');
+            if (!rawDataUrl) return;
             const img = new Image();
             img.onload = () => {
-              const canvas = document.createElement('canvas');
-              const sz = 160;
-              canvas.width = sz;
-              canvas.height = sz;
-              const cctx = canvas.getContext('2d');
-              const minSide = Math.min(img.width, img.height);
-              const sx = (img.width - minSide) / 2;
-              const sy = (img.height - minSide) / 2;
-              cctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, sz, sz);
-              selectedAvatarUrl = canvas.toDataURL('image/jpeg', 0.82);
-              avatarInp.value = '';
-              refreshLiveCard();
-              toast('📷 Profil fotoğrafın yüklendi!');
+              try {
+                const canvas = document.createElement('canvas');
+                const sz = 180;
+                canvas.width = sz;
+                canvas.height = sz;
+                const cctx = canvas.getContext('2d');
+                const minSide = Math.max(1, Math.min(img.width || sz, img.height || sz));
+                const sx = Math.max(0, ((img.width || sz) - minSide) / 2);
+                const sy = Math.max(0, ((img.height || sz) - minSide) / 2);
+                cctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, sz, sz);
+                const outUrl = canvas.toDataURL('image/jpeg', 0.85);
+                syncAvatarEverywhere(outUrl && outUrl.length > 64 ? outUrl : rawDataUrl);
+                toast('📷 Profil fotoğrafın galeriden yüklendi ve kaydedildi!');
+              } catch (_) {
+                syncAvatarEverywhere(rawDataUrl);
+                toast('📷 Profil fotoğrafın güncellendi!');
+              }
             };
-            img.src = String(ev.target?.result || '');
+            img.onerror = () => {
+              syncAvatarEverywhere(rawDataUrl);
+              toast('📷 Profil fotoğrafın güncellendi!');
+            };
+            img.src = rawDataUrl;
           };
           reader.readAsDataURL(file);
+          e.target.value = '';
         },
       });
       liveAvatarWrap.onclick = () => fileInp.click();
@@ -689,21 +754,27 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         // Photo Upload & GIF Picker
         h('label', { class: 'wl-field-label' }, '📷 Profil Fotoğrafı Seç / Yükle'),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' } },
-          h('button', {
-            type: 'button',
+          h('label', {
+            for: 'wl-avatar-file-input',
             id: 'wl-upload-photo-btn',
             class: 'btn sm primary',
-            style: { fontSize: '.75rem', padding: '5px 10px' },
-            onclick: () => fileInp.click(),
-          }, '📷 Cihazdan Fotoğraf Yükle'),
+            role: 'button',
+            tabindex: '0',
+            style: { fontSize: '.75rem', padding: '5px 11px', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '5px' },
+            onclick: (e) => {
+              if (e.target !== fileInp) {
+                e.preventDefault();
+                fileInp.click();
+              }
+            },
+          }, '📷 Galeriden Fotoğraf Seç / Yükle'),
           ...PRESET_GIF_AVATARS.map((pr) => h('button', {
             type: 'button',
             class: 'btn sm',
             style: { fontSize: '.73rem', padding: '4px 8px', background: selectedAvatarUrl === pr.url ? 'rgba(39,220,200,0.22)' : 'rgba(255,255,255,0.06)', border: selectedAvatarUrl === pr.url ? '1px solid #27dcc8' : '1px solid rgba(255,255,255,0.12)' },
             onclick: () => {
-              selectedAvatarUrl = pr.url;
-              avatarInp.value = pr.url;
-              refreshLiveCard();
+              syncAvatarEverywhere(pr.url);
+              toast(pr.url ? `${pr.label} seçildi!` : '🔤 Harf avatarına geçildi');
             },
           }, pr.label))),
         avatarInp,

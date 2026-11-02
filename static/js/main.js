@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261102_v60';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261102_v60';
-import { renderHome, destroyHome } from './views/home.js?v=20261102_v60';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261102_v60';
-import { api } from './api.js?v=20261102_v60';
-import { h, toast } from './ui.js?v=20261102_v60';
+import { state, set } from './store.js?v=20261102_v61';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261102_v61';
+import { renderHome, destroyHome } from './views/home.js?v=20261102_v61';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261102_v61';
+import { api } from './api.js?v=20261102_v61';
+import { h, toast } from './ui.js?v=20261102_v61';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -96,6 +96,9 @@ async function route() {
       window.dispatchEvent(new Event('resize'));
     }
   } else {
+    if (activeMeshRoomId && state.mesh) {
+      document.body.classList.add('mesh-minimized');
+    }
     const keepMinimized = Boolean(activeMeshRoomId && document.body.classList.contains('mesh-minimized') && state.mesh);
     if (!keepMinimized) {
       document.body.classList.remove('mesh-minimized');
@@ -183,7 +186,7 @@ async function boot() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261102_v60').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261102_v61').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

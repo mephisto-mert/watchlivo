@@ -3718,9 +3718,261 @@ header.navbar.top-nav-capsule {
   .platform-card .ptitle {
     font-size: 0.76rem !important;
   }
-  .tv-channels-grid,
   .lobby-grid {
-    grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)) !important;
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+    padding: 4px 0 !important;
+  }
+  .tv-channels-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px !important;
   }
 }
+
+/* ============================================================================
+   v61: 1:1 RAVE.IO (web.rave.io) HOME, PROVIDER STRIP & LOBBY ROOM CARD PARITY
+   ============================================================================ */
+.rave-providers-section {
+  margin: 0 0 6px 0 !important;
+  padding: 0 !important;
+}
+.provider-grid.rave-home-provider-grid {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)) !important;
+  gap: 8px !important;
+  padding: 4px 0 8px 0 !important;
+}
+.provider-tile.rave-icon-tile {
+  height: 64px !important;
+  min-height: 64px !important;
+  max-height: 64px !important;
+  padding: 8px 6px 6px !important;
+  border-radius: 14px !important;
+  background: rgba(16, 20, 32, 0.92) !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  grid-column: span 1 !important;
+}
+.provider-tile.rave-icon-tile.hero-provider-tile {
+  background: linear-gradient(135deg, rgba(39, 220, 200, 0.16), rgba(99, 102, 241, 0.16)) !important;
+  border-color: rgba(39, 220, 200, 0.45) !important;
+}
+.provider-tile.rave-icon-tile .provider-logo-wrap {
+  height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+.provider-tile.rave-icon-tile .provider-logo-wrap img {
+  height: 22px !important;
+  max-height: 22px !important;
+  width: auto !important;
+  max-width: 84px !important;
+  object-fit: contain !important;
+}
+.provider-tile.rave-icon-tile .ptitle {
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  color: #f8fafc !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 96% !important;
+}
+
+/* Rave.io Horizontal Room Card (.meshthumb) — Always Readable Title & Metadata */
+.lobby-toolbar {
+  margin-top: 2px !important;
+  padding: 8px 4px 6px !important;
+}
+.meshthumb {
+  height: 92px !important;
+  min-height: 92px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch !important;
+  border-radius: 16px !important;
+  background: linear-gradient(145deg, rgba(18, 23, 36, 0.96), rgba(11, 14, 23, 0.98)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.11) !important;
+  overflow: hidden !important;
+}
+.meshthumb-img {
+  width: 138px !important;
+  min-width: 138px !important;
+  max-width: 138px !important;
+  height: 80px !important;
+  margin: 6px 0 6px 6px !important;
+  aspect-ratio: auto !important;
+  border-radius: 12px !important;
+  flex-shrink: 0 !important;
+}
+.meshthumb-body {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  padding: 8px 12px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  gap: 3px !important;
+  overflow: hidden !important;
+}
+.meshthumb-title {
+  font-size: 0.92rem !important;
+  font-weight: 800 !important;
+  color: #ffffff !important;
+  line-height: 1.25 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  display: block !important;
+}
+.meshthumb-sub {
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
+  color: #94a3b8 !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  opacity: 1 !important;
+}
+.meshthumb-meta-row {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 6px !important;
+  flex-wrap: nowrap !important;
+  margin-top: 2px !important;
+  min-width: 0 !important;
+}
+.meshthumb-users {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+.meshthumb-join-hint {
+  color: #27DCC8 !important;
+  font-weight: 700 !important;
+  font-size: 0.72rem !important;
+  margin-left: 4px !important;
+}
+.meshthumb-lang-badge {
+  flex-shrink: 0 !important;
+  white-space: nowrap !important;
+  font-size: 0.65rem !important;
+  padding: 2px 6px !important;
+}
+
+@media (max-width: 720px) {
+  .rave-top-bar {
+    gap: 6px !important;
+    margin-bottom: 6px !important;
+    padding: 4px 0 2px !important;
+  }
+  .provider-grid.rave-home-provider-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    padding: 2px 0 6px 0 !important;
+  }
+  .provider-tile.rave-icon-tile {
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    padding: 6px 4px 4px !important;
+    border-radius: 12px !important;
+    gap: 3px !important;
+  }
+  .provider-tile.rave-icon-tile .provider-logo-wrap {
+    height: 20px !important;
+  }
+  .provider-tile.rave-icon-tile .provider-logo-wrap img {
+    height: 18px !important;
+    max-height: 18px !important;
+    max-width: 68px !important;
+  }
+  .provider-tile.rave-icon-tile .ptitle {
+    font-size: 0.64rem !important;
+  }
+  .lobby-toolbar {
+    gap: 6px !important;
+    padding: 6px 2px 4px !important;
+  }
+  .lobby-toolbar-left {
+    width: 100% !important;
+    justify-content: space-between !important;
+    gap: 6px !important;
+  }
+  .lobby-heading {
+    font-size: 1rem !important;
+  }
+  .lobby-tabs {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    gap: 5px !important;
+    width: 100% !important;
+    scrollbar-width: none !important;
+  }
+  .lobby-tabs::-webkit-scrollbar {
+    display: none !important;
+  }
+  .lobby-tab {
+    flex-shrink: 0 !important;
+    padding: 4px 10px !important;
+    font-size: 0.72rem !important;
+  }
+  .lobby-toolbar-right {
+    width: 100% !important;
+    flex: 1 1 100% !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+  }
+  .lobby-toolbar-right .input {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    padding: 6px 10px !important;
+    font-size: 0.8rem !important;
+  }
+  .meshthumb-img {
+    width: 124px !important;
+    min-width: 124px !important;
+    max-width: 124px !important;
+    height: 78px !important;
+  }
+  .tv-glass-card {
+    padding: 10px !important;
+    gap: 8px !important;
+    align-items: center !important;
+  }
+  .tv-logo-box {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 9.5px !important;
+    border-radius: 9px !important;
+  }
+  .tv-info {
+    padding-right: 0 !important;
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+  }
+  .tv-badge {
+    position: static !important;
+    align-self: flex-start !important;
+    font-size: 8px !important;
+    padding: 1px 5px !important;
+    margin-bottom: 2px !important;
+  }
+  .tv-name {
+    font-size: 0.76rem !important;
+  }
+  .tv-desc {
+    font-size: 0.66rem !important;
+  }
+}
+

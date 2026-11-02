@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261102_v60';
-import { avatar } from '../profile.js?v=20261102_v60';
-import { getProvider } from '../providers.js?v=20261102_v60';
-import { api, qs } from '../api.js?v=20261102_v60';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261102_v60';
-import { expectedPosition } from '../sync.js?v=20261102_v60';
+import { h, icons, popup, toast } from '../ui.js?v=20261102_v61';
+import { avatar } from '../profile.js?v=20261102_v61';
+import { getProvider } from '../providers.js?v=20261102_v61';
+import { api, qs } from '../api.js?v=20261102_v61';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261102_v61';
+import { expectedPosition } from '../sync.js?v=20261102_v61';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -93,20 +93,26 @@ export function meshThumb(room, onOpen) {
   const thumb = thumbFor(media, room.id);
   const brand = LIVE_BRANDS[room.id];
   const dur = Number(media.duration || 0);
-  const viewerCount = room.count ?? (room.participants || []).length;
+  const viewerCount = Math.max(1, Number(room.count ?? (room.participants || []).length) || 1);
   const hasHumanViewer = room.curated ? viewerCount > 1 : viewerCount > 0;
   const rawPos = hasHumanViewer ? expectedPosition(media) : 0;
   const pos = dur > 0 ? (rawPos % dur) : rawPos;
   const pct = dur > 0 ? Math.min(100, Math.max(0, (pos / dur) * 100)) : 0;
   const users = room.participants || [];
-  const privacyLabel = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', nearby: '📍 Çevremdekiler', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' }[room.privacy] || '';
+  const privacyLabel = { public: '🌐 Herkese Açık', friends: '👥 Arkadaşlar', nearby: '📍 Çevremdekiler', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' }[room.privacy || 'public'] || '🌐 Herkese Açık';
   const hasTr = Boolean(
     media.catalogProvider ||
     (media.audioTracks || []).some((a) => /tr|türk/i.test(`${a.lang} ${a.label}`)) ||
     (media.subtitleTracks || []).some((s) => /tr|türk/i.test(`${s.lang} ${s.label}`)) ||
     /dublaj|altyaz/i.test(media.title || '')
   );
-  const liveLabel = room.curated ? '🟢 7/24 CANLI' : (room.privacy === 'friends' ? `👥 Sadece Arkadaşlar · ${viewerCount}` : `🔴 ${viewerCount} izleyici`);
+  const liveLabel = room.curated ? '🟢 7/24 CANLI' : (room.privacy === 'friends' ? `👥 ${viewerCount} izleyici` : `🔴 ${viewerCount} izleyici`);
+  const cleanMediaTitle = (media.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(media.title))) ? String(media.title).trim() : '';
+  const displayTitle = cleanMediaTitle || room.name || 'Watchlivo Odası';
+  const hostName = room.creator || users[0]?.name || 'Lider';
+  const subLine = room.curated
+    ? `${room.name || displayTitle} · 7/24 Kesintisiz`
+    : `👤 ${hostName} · ${privacyLabel}`;
 
   return h('div', {
     class: `meshthumb ${room.curated ? 'curated-room' : ''} ${room.privacy === 'friends' ? 'friends-only-room' : ''}`,
@@ -119,20 +125,20 @@ export function meshThumb(room, onOpen) {
     onkeydown: (e) => { if (e.key === 'Enter') onOpen(room); },
   },
     h('div', { class: 'meshthumb-img' },
-      thumb ? h('img', { src: thumb, alt: '', decoding: 'async', onerror: (e) => { e.target.style.display = 'none'; } }) : null,
+      thumb ? h('img', { src: thumb, alt: displayTitle, decoding: 'async', onerror: (e) => { e.target.style.display = 'none'; } }) : null,
       h('span', { class: `meshthumb-live-badge ${room.curated ? 'is-247' : ''} ${room.privacy === 'friends' ? 'is-friends' : ''}` }, liveLabel),
       (!room.curated && prov?.logo) ? h('img', { class: 'meshthumb-prov', src: prov.logo, alt: prov.name }) : null,
       dur > 0 ? h('span', { class: 'meshthumb-time' }, `${fmtRoomClock(pos)} / ${fmtRoomClock(dur)}`) : null,
       h('div', { class: 'play-hover', html: icons.play })),
     h('div', { class: 'meshthumb-body' },
-      h('div', { class: 'meshthumb-title' }, media.title || room.name || 'Oda'),
-      h('div', { class: 'meshthumb-sub' }, `${room.name || ''}${privacyLabel ? ' · ' + privacyLabel : ''}`),
+      h('div', { class: 'meshthumb-title', title: displayTitle }, displayTitle),
+      h('div', { class: 'meshthumb-sub', title: subLine }, subLine),
       h('div', { class: 'meshthumb-meta-row' },
         h('div', { class: 'meshthumb-users' },
           users.slice(0, 5).map((u) => avatar(u, 20)),
-          room.count > 5 ? h('span', { class: 'more' }, `+${room.count - 5}`) : null,
-          room.count === 0 ? h('span', { class: 'more' }, 'Boş oda') : null),
-        hasTr ? h('span', { class: 'meshthumb-lang-badge' }, '🇹🇷 Dublaj & Altyazı') : null),
+          viewerCount > 5 ? h('span', { class: 'more' }, `+${viewerCount - 5}`) : null,
+          h('span', { class: 'more meshthumb-join-hint' }, 'Katıl →')),
+        hasTr ? h('span', { class: 'meshthumb-lang-badge' }, '🇹🇷 TR') : null),
       dur > 0 ? h('div', { class: 'meshthumb-progress' }, h('div', { style: { width: `${pct}%` } })) : null),
     room.hasPassword ? h('span', { class: 'meshthumb-lock', html: icons.lock }) : null);
 }
@@ -365,14 +371,20 @@ function sortByBrandOrder(list) {
   });
 }
 
-// Rave lobby sections: Pinned/Recent · Friends · Nearby · Public
+// Rave lobby sections: Public FIRST (1:1 rave.io) · Friends · Nearby · Live TV & Radio
 export function renderLobbySections(container, rooms, onOpen, { filter = 'all', query = '' } = {}) {
   const q = query.trim().toLowerCase();
-  const match = (r) => !q || `${r.name} ${r.media?.title || ''} ${r.creator || ''}`.toLowerCase().includes(q);
-  const visible = rooms.filter((r) => r.id !== state.mesh?.id && match(r));
+  const match = (r) => !q || `${r.name || ''} ${r.media?.title || ''} ${r.creator || ''}`.toLowerCase().includes(q);
+  const mergedRooms = Array.isArray(rooms) ? [...rooms] : [];
+  if (state.mesh?.id && !state.mesh.curated && state.mesh.privacy !== 'private' && state.mesh.privacy !== 'hidden') {
+    if (!mergedRooms.some((r) => r.id === state.mesh.id)) {
+      mergedRooms.unshift(state.mesh);
+    }
+  }
+  const visible = mergedRooms.filter((r) => match(r));
   const recents = recentIds();
-  if (rooms.length > 0 && recents.length > 0) {
-    const liveIds = new Set(rooms.map((r) => r.id));
+  if (mergedRooms.length > 0 && recents.length > 0) {
+    const liveIds = new Set(mergedRooms.map((r) => r.id));
     const validRecents = recents.filter((id) => liveIds.has(id) || id === state.mesh?.id);
     if (validRecents.length !== recents.length) {
       try { localStorage.setItem(RECENT_KEY, JSON.stringify(validRecents)); } catch (e) { /* ignore */ }
@@ -381,36 +393,43 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
   const friends = getFriends();
   const myName = (state.self?.name || '').trim().toLowerCase();
 
+  const publicRooms = visible
+    .filter((r) => !r.curated && (r.privacy === 'public' || !r.privacy))
+    .sort((a, b) => ((b.count || 0) - (a.count || 0)) || String(a.id).localeCompare(String(b.id)));
+
   const friendRooms = visible.filter((r) =>
     !r.curated && (
-      isFriend(r.creator) ||
-      (r.participants || []).some((p) => isFriend(p)) ||
-      (r.privacy === 'friends' && (
+      r.privacy === 'friends' && (
+        isFriend(r.creator) ||
+        (r.participants || []).some((p) => isFriend(p)) ||
         (myName && String(r.creator || '').trim().toLowerCase() === myName) ||
         recents.includes(r.id)
-      ))
+      ) ||
+      (filter === 'friends' && (isFriend(r.creator) || (r.participants || []).some((p) => isFriend(p))))
     )
   );
+
   const nearbyRooms = visible.filter((r) =>
-    !r.curated && r.privacy !== 'friends' && r.privacy !== 'private' && (
+    !r.curated && r.privacy !== 'friends' && r.privacy !== 'private' && r.privacy !== 'hidden' && (
       r.privacy === 'nearby' ||
-      (filter === 'nearby' && (r.id === 'kinox-dizi-maraton' || r.id === 'kinox-sinema-tr')) ||
-      (r.privacy === 'public' && (r.participants || []).some((p) => p.country === 'TR'))
+      (filter === 'nearby' && (
+        r.privacy === 'public' && (r.participants || []).some((p) => p.country === 'TR') ||
+        r.id === 'kinox-dizi-maraton' || r.id === 'kinox-sinema-tr'
+      ))
     )
   );
 
   const isTvRoom = (r) => Boolean(r.curated && r.media?.live && !r.media?.isMusic && LIVE_BRANDS[r.id]);
   const isRadioRoom = (r) => Boolean(r.curated && r.media?.live && r.media?.isMusic && LIVE_BRANDS[r.id]);
   const sections = [
-    { key: 'recent', title: 'Son Ziyaret Ettiklerin', list: visible.filter((r) => !r.curated && recents.includes(r.id) && r.count > 0) },
-    { key: 'friends', title: '👥 Arkadaş Odaları (Sadece Arkadaşlar)', list: friendRooms, empty: 'Henüz aktif bir arkadaş odası yok. "+ Arkadaş Ekle" butonuyla arkadaşlarını ekleyebilir veya odanı "Sadece Arkadaşlar" moduna alabilirsin.' },
-    { key: 'nearby', title: 'Çevremdekiler (Türkiye · Yakındaki Odalar)', list: nearbyRooms, empty: 'Şu anda yakındaki oda yok' },
-    { key: 'public', title: 'Herkese Açık Odalar', list: visible.filter((r) => r.privacy === 'public' && !r.curated).sort((a, b) => (b.count - a.count) || String(a.id).localeCompare(String(b.id))), empty: q ? 'Bu arama ölçütleriyle bir oda bulamadık' : 'Şu anda herkese açık oda yok' },
+    { key: 'public', title: '🌐 Herkese Açık Odalar', list: publicRooms, empty: q ? 'Bu arama ölçütleriyle bir oda bulamadık' : 'Şu anda herkese açık oda yok — "+ Oda Oluştur" ile hemen ilk odayı başlat!' },
+    { key: 'friends', title: '👥 Arkadaş Odaları', list: friendRooms, empty: 'Henüz aktif bir arkadaş odası yok. "+ Arkadaş Ekle" butonuyla arkadaşlarını ekleyebilirsin.' },
+    { key: 'nearby', title: '📍 Çevremdekiler (Türkiye · Yakındaki Odalar)', list: nearbyRooms, empty: 'Şu anda yakındaki oda yok' },
     { key: 'tv', title: '📺 Canlı TV Kanalları · 7/24', list: sortByBrandOrder(visible.filter(isTvRoom)) },
     { key: 'radio', title: '📻 Canlı Radyolar · 7/24', list: sortByBrandOrder(visible.filter(isRadioRoom)) },
   ].filter((s) => filter === 'all' || s.key === filter || (filter === 'public' && (s.key === 'tv' || s.key === 'radio')));
 
-  const layoutSig = `${filter}|${q}|${friends.map((f) => f.name).join(',')}|${sections.map((s) => `${s.key}:${s.list.map((r) => `${r.id}:${r.privacy}`).join(',')}`).join(';')}`;
+  const layoutSig = `${filter}|${q}|${friends.map((f) => f.name).join(',')}|${sections.map((s) => `${s.key}:${s.list.map((r) => `${r.id}:${r.privacy}:${r.media?.title || r.name}`).join(',')}`).join(';')}`;
   if (container.dataset.layoutSig === layoutSig && container.querySelector('.meshthumb')) {
     const byId = new Map(visible.map((r) => [r.id, r]));
     container.querySelectorAll('.meshthumb[data-room]').forEach((card) => {
@@ -419,11 +438,12 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
       card.onclick = () => onOpen(r);
       const badge = card.querySelector('.meshthumb-live-badge');
       if (badge && !r.curated) {
-        const vc = r.count ?? (r.participants || []).length;
-        badge.textContent = r.privacy === 'friends' ? `👥 Sadece Arkadaşlar · ${vc}` : `🔴 ${vc} izleyici`;
+        const vc = Math.max(1, Number(r.count ?? (r.participants || []).length) || 1);
+        badge.textContent = r.privacy === 'friends' ? `👥 ${vc} izleyici` : `🔴 ${vc} izleyici`;
       }
       const titleEl = card.querySelector('.meshthumb-title');
-      if (titleEl && (r.media?.title || r.name)) titleEl.textContent = r.media?.title || r.name;
+      const cleanT = (r.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(r.media.title))) ? String(r.media.title).trim() : (r.name || 'Watchlivo Odası');
+      if (titleEl && cleanT) titleEl.textContent = cleanT;
     });
     return;
   }
@@ -431,7 +451,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
   container.dataset.layoutSig = layoutSig;
   container.replaceChildren();
 
-  if (filter === 'all' || filter === 'friends') {
+  if (filter === 'friends' || (filter === 'all' && friends.length > 0)) {
     const friendsBar = h('div', { class: 'friends-strip' },
       h('span', { class: 'friends-strip-title' }, `👥 Arkadaşlarım (${friends.length})`),
       ...(friends.length
@@ -458,7 +478,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
   for (const s of sections) {
     const list = filter === 'all' ? s.list.filter((r) => !renderedRoomIds.has(r.id)) : s.list;
     list.forEach((r) => renderedRoomIds.add(r.id));
-    if (!list.length && (s.key === 'recent' || (filter === 'all' && s.key !== 'public'))) continue;
+    if (!list.length && (filter === 'all' && s.key !== 'public')) continue;
     container.append(h('div', { class: 'section-head', id: `lobby-sec-${s.key}` }, h('h2', {}, s.title), h('span', { class: 'dim' }, list.length ? `${list.length} aktif oda` : '')));
     if (!list.length) container.append(h('div', { class: 'lobby-empty' }, s.empty));
     else if (s.key === 'tv' || s.key === 'radio') container.append(h('div', { class: 'tv-channels-grid' }, list.map((r) => tvGlassCard(r, onOpen))));
