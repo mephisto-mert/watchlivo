@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v63';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v63';
-import { api, qs } from '../api.js?v=20261102_v63';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v63';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v63';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v63';
+import { h, icons, popup, toast, fill, state } from '../ui.js?v=20261102_v64';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v64';
+import { api, qs } from '../api.js?v=20261102_v64';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v64';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v64';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v64';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -395,7 +395,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
         }))) : null;
 
-    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
+    const historyList = (!compact && showAllProviders && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
     const historyRail = historyList.length ? h('div', { class: 'continue-strip' },
       h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar:'),
       ...historyList.map((item) => {
