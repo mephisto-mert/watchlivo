@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v76';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261103_v77';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -337,11 +337,21 @@ export function buildThemeStudio() {
   return wrap;
 }
 
+export function isNativeWatchlivoApp() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
+}
+if (typeof document !== 'undefined' && isNativeWatchlivoApp()) {
+  document.documentElement.classList.add('is-native-apk');
+}
+
 export function openThemeModal() {
+  const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'theme-modal-body' },
     buildThemeStudio(),
-    h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları'),
-    h('div', { class: 'wl-modal-download-actions' },
+    !inApk ? h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları') : null,
+    !inApk ? h('div', { class: 'wl-modal-download-actions' },
       h('a', {
         class: 'btn primary wl-btn-apk-dl',
         href: '/download/Watchlivo-v1.1.0.apk',
@@ -353,9 +363,9 @@ export function openThemeModal() {
         href: '/download/windows',
         download: 'Watchlivo.exe',
         onclick: () => toast('💻 Windows Masaüstü indiriliyor...', 4000)
-      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows İndir (EXE)'))
+      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows İndir (EXE)')) : null
   );
-  popup({ title: 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
+  popup({ title: inApk ? 'Görünüm & Tema Ayarları' : 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
 }
 
 export function openDownloadModal() {

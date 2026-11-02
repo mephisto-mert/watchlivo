@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261102_v76';
-import { expectedPosition } from '../sync.js?v=20261102_v76';
-import { state } from '../store.js?v=20261102_v76';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v77';
+import { expectedPosition } from '../sync.js?v=20261103_v77';
+import { state } from '../store.js?v=20261103_v77';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -423,7 +423,7 @@ export class Html5Adapter {
     const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
     const isApple = /Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-    const useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
+    let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
     this.useNativeHls = useNativeHls;
     const withProxySegs = (u) => {
       const s = String(u || '');
@@ -509,11 +509,24 @@ export class Html5Adapter {
           attachHlsJs(nextUrl, doneCb, resumePos);
           return;
         }
+        if (!canNativeHls) {
+          if (nativeAltIdx < alts.length) {
+            loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+          } else {
+            handleExhaustedCandidates(nextUrl, doneCb);
+          }
+          return;
+        }
+        useNativeHls = true;
+        this.useNativeHls = true;
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
         v.src = withProxySegs(nextUrl);
         v.load();
-        v.addEventListener('loadedmetadata', restorePosOnLoad, { once: true });
+        v.addEventListener('loadedmetadata', () => {
+          this.subs.mergeNativeAudioTracks?.(v.audioTracks);
+          restorePosOnLoad();
+        }, { once: true });
         if (this.wantPlaying) this.tryPlay();
         return;
       }
@@ -537,7 +550,9 @@ export class Html5Adapter {
       const effStart = Number(customStart ?? startAt) || 0;
       const uaStr = navigator.userAgent || '';
       const isAndroid = /Android/i.test(uaStr);
-      const isMobileScreen = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (typeof window !== 'undefined' && window.innerWidth <= 900);
+      const isTouchDev = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
+      const isIpadDesktop = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+      const isMobileScreen = isAndroid || isIpadDesktop || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (isTouchDev && typeof window !== 'undefined' && window.innerWidth <= 900);
       this.hls = new window.Hls({
         enableWorker: !isAndroid,
         lowLatencyMode: false,
@@ -611,6 +626,8 @@ export class Html5Adapter {
       });
       let netRetries = 0;
       let mediaRetries = 0;
+      let singleLevelStalls = 0;
+      let firstSingleStallAt = 0;
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
         if (data?.frag?.type === 'audio' && !this.isMusic && v.readyState < 3) {
@@ -654,9 +671,23 @@ export class Html5Adapter {
               }
             } catch (err) { /* ignore */ }
             try {
+              const lvlCount = this.hls.levels?.length || 0;
               const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
-              if (this.hls.levels?.length > 1 && curLvl > 0) {
+              if (lvlCount > 1 && curLvl > 0) {
                 this.hls.nextAutoLevel = Math.max(0, curLvl - 1);
+              } else if (lvlCount <= 1 && nativeAltIdx < alts.length) {
+                const nowMs = Date.now();
+                if (!firstSingleStallAt || nowMs - firstSingleStallAt > 24000) {
+                  firstSingleStallAt = nowMs;
+                  singleLevelStalls = 1;
+                } else {
+                  singleLevelStalls += 1;
+                }
+                if (singleLevelStalls >= 2) {
+                  singleLevelStalls = 0;
+                  loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+                  return;
+                }
               }
             } catch (err) { /* ignore */ }
           }
@@ -687,10 +718,13 @@ export class Html5Adapter {
               loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             } else if (canNativeHls && !triedHlsFallback) {
               triedHlsFallback = true;
+              useNativeHls = true;
+              this.useNativeHls = true;
               try { this.hls.destroy(); } catch (err) { /* ignore */ }
               this.hls = null;
               v.src = withProxySegs(srcUrl);
               v.load();
+              v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
               if (curResume >= 5) {
                 v.addEventListener('loadedmetadata', () => { try { v.currentTime = curResume; } catch (e) {} }, { once: true });
               }
@@ -792,7 +826,8 @@ export class Html5Adapter {
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
     let stallChecks = 0;
-    const isMobViewport = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') || (typeof window !== 'undefined' && window.innerWidth <= 900);
+    const isTouchVp = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
+    const isMobViewport = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (isTouchVp && typeof window !== 'undefined' && window.innerWidth <= 900);
     const stallWindowMs = this.isMusic ? 4500 : (isMobViewport ? 16500 : 13000);
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
@@ -823,11 +858,14 @@ export class Html5Adapter {
             loadCandidateUrl(alts[nativeAltIdx++]);
           } else if (isHls && canNativeHls && this.hls && !triedHlsFallback) {
             triedHlsFallback = true;
+            useNativeHls = true;
+            this.useNativeHls = true;
             const resumeAt = Math.max(v.currentTime || 0, startAt || 0);
             try { this.hls.destroy(); } catch (e) { /* ignore */ }
             this.hls = null;
             v.src = withProxySegs(this.currentUrl || url);
             v.load();
+            v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
             if (resumeAt >= 1) {
               v.addEventListener('loadedmetadata', () => { try { v.currentTime = resumeAt; } catch (e) {} }, { once: true });
             }
@@ -1220,6 +1258,16 @@ export class Html5Adapter {
     if (n >= 0) this.hls.autoLevelCapping = -1;
     this.hls.currentLevel = n;
     this.events.onTracksChanged?.();
+  }
+  canPiP() {
+    const v = this.video;
+    if (!v) return false;
+    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv\b/i.test(navigator.userAgent || '')));
+    if (isNativeApk) return false;
+    return Boolean(
+      (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function') ||
+      (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+    );
   }
   isPiP() {
     const v = this.video;

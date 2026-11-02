@@ -145,7 +145,7 @@ body.vortex-fs .panel-video {
 .stage-empty p { margin: 0; opacity: .7; max-width: 30em; line-height: 1.45; }
 .stage-overlay-msg { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 6; padding: .4em .9em; border-radius: 99px; font-size: .82em; font-weight: 700; background: rgba(0,0,0,.6); backdrop-filter: var(--blur); }
 .stage-error { position: absolute; inset: 0; z-index: 22; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .7em; background: rgba(0,0,0,.86); text-align: center; padding: 1.5em; }
-.unmute-pill { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 20; pointer-events: auto; cursor: pointer; }
+.unmute-pill { position: absolute; left: 50%; top: calc(50% + 56px); transform: translate(-50%, -50%); z-index: 38; pointer-events: auto !important; cursor: pointer; box-shadow: 0 8px 28px rgba(0,0,0,.65); }
 .unmute-pill:active { transform: translate(-50%, -50%) scale(.95); }
 
 /* Player controls overlay (Rave VideoPlayerControlsFC) */
@@ -326,7 +326,7 @@ video::cue {
 .ctl-menu-switch-tab { margin-top: .35em; border-top: 1px solid hsla(0,0%,100%,.1); border-radius: 0 0 8px 8px; font-weight: 700; color: #a5b4fc; }
 .ctl-pref-group { padding: .35em .5em; }
 .ctl-pref-pills { display: flex; gap: 4px; flex-wrap: wrap; }
-.ctl-pref-pill { flex: 1; min-width: 54px; padding: .34em .5em; border-radius: 7px; font-size: .76em; font-weight: 700; background: hsla(0,0%,100%,.08); color: rgba(255,255,255,.8); border: 1px solid transparent; cursor: pointer; text-align: center; }
+.ctl-pref-pill { flex: 1; min-width: 0; padding: .34em .38em; border-radius: 7px; font-size: .76em; font-weight: 700; background: hsla(0,0%,100%,.08); color: rgba(255,255,255,.8); border: 1px solid transparent; cursor: pointer; text-align: center; }
 .ctl-pref-pill.on { background: rgba(99,102,241,.35); border-color: #818cf8; color: #fff; }
 .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #0fff0c; display: inline-block; }
 
@@ -378,7 +378,7 @@ video::cue {
 .reaction-bar button:hover { background: hsla(0,0%,100%,.1); }
 .float-emoji { position: absolute; bottom: 12%; font-size: 2em; animation: floatUp 2.4s ease-out forwards; pointer-events: none; z-index: 7; }
 @keyframes floatUp { 0% { transform: translateY(0) scale(.6); opacity: 0; } 15% { opacity: 1; transform: scale(1.1); } 100% { transform: translateY(-260px) scale(1); opacity: 0; } }
-.gif-panel { position: absolute; left: .5em; right: .5em; bottom: calc(100% + 4px); height: 300px; border-radius: 14px; display: flex; flex-direction: column; padding: .5em; z-index: 10; }
+.gif-panel { position: absolute; left: .5em; right: .5em; bottom: calc(100% + 6px); height: 300px; border-radius: 14px; display: flex; flex-direction: column; padding: .5em; z-index: 70 !important; background: rgba(14, 18, 28, 0.98) !important; border: 1px solid var(--wl-border) !important; box-shadow: 0 -12px 32px rgba(0,0,0,.75) !important; }
 .gif-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: .5em; }
 .gif-grid img { width: 100%; border-radius: 8px; cursor: pointer; display: block; }
 
@@ -1705,15 +1705,15 @@ body.mesh-minimized #mesh-root .mini-player-bar {
 
 :root, html, body {
   color-scheme: dark !important;
-  --wl-bg-primary: #080A0F;
-  --wl-bg-secondary: #10141D;
-  --wl-bg-elevated: #171D28;
+  --wl-bg-primary: var(--bg-base, #080A0F);
+  --wl-bg-secondary: var(--bg-elevated, #10141D);
+  --wl-bg-elevated: var(--card-surface, #171D28);
   --wl-text-primary: #F5F7FA;
   --wl-text-secondary: #A0A9B8;
-  --wl-accent: #27DCC8;
-  --wl-accent-hover: #34EAD6;
-  --wl-accent-soft: rgba(39, 220, 200, 0.14);
-  --wl-accent-border: rgba(39, 220, 200, 0.38);
+  --wl-accent: var(--accent, #27DCC8);
+  --wl-accent-hover: var(--accent-2, #34EAD6);
+  --wl-accent-soft: color-mix(in srgb, var(--accent, #27DCC8) 16%, transparent);
+  --wl-accent-border: color-mix(in srgb, var(--accent, #27DCC8) 40%, transparent);
   --wl-divider: rgba(255, 255, 255, 0.07);
   --wl-border: rgba(255, 255, 255, 0.09);
 }
@@ -1837,7 +1837,7 @@ body.mesh-minimized #mesh-root .mini-player-bar {
   font-size: 0.84rem !important;
   font-weight: 700 !important;
   color: var(--wl-text-primary) !important;
-  max-width: 210px !important;
+  max-width: clamp(160px, 24vw, 380px) !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
@@ -2404,7 +2404,7 @@ body.theater-mode .resize-handle {
   width: 40px !important;
   height: 40px !important;
   border-radius: 10px !important;
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: var(--btn-primary-bg, linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%)) !important;
   border: none !important;
   color: #080A0F !important;
   box-shadow: 0 4px 16px rgba(39, 220, 200, 0.35) !important;
@@ -3192,7 +3192,7 @@ body.theater-mode .resize-handle {
   #mesh-root > .navbar {
     height: 44px !important;
     min-height: 44px !important;
-    padding: 0 6px !important;
+    padding: 0 max(6px, env(safe-area-inset-right, 0px)) 0 max(6px, env(safe-area-inset-left, 0px)) !important;
     flex-shrink: 0 !important;
   }
   #mesh-root > .navbar .nav-icon.room-nav-pill {
@@ -3236,7 +3236,7 @@ body.theater-mode .resize-handle {
     overflow: hidden !important;
   }
   .mesh-layout {
-    padding: 4px 6px 6px !important;
+    padding: 4px max(6px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px)) !important;
     height: 100% !important;
     max-height: 100% !important;
     overflow: hidden !important;
@@ -3381,7 +3381,7 @@ body.theater-mode .resize-handle {
     gap: 4px !important;
     flex-shrink: 0 !important;
   }
-  .discord-call-bar:not(.in-call) .discord-peers-strip,
+  .discord-call-bar:not(.in-call) .discord-call-peers,
   .discord-call-bar:not(.in-call) .discord-call-controls {
     display: none !important;
   }
@@ -4092,8 +4092,8 @@ body.vortex-fs #mesh-root .resize-handle {
     padding: 0 4px !important;
     gap: 3px !important;
   }
-  #mesh-root > .navbar .nav-left,
-  #mesh-root > .navbar .nav-right {
+  #mesh-root > .navbar .navbar-left,
+  #mesh-root > .navbar .navbar-right {
     gap: 3px !important;
   }
   #mesh-root > .navbar .nav-icon.room-nav-pill {
@@ -4321,5 +4321,148 @@ body.vortex-fs #mesh-root .resize-handle {
     font-size: 0.56rem !important;
     padding: 2px 4px !important;
     white-space: nowrap !important;
+  }
+}
+
+/* ==========================================================================
+   v77: 20-Device Multi-Engine Responsive, Foldable, Split-Screen & Overflow Fixes
+   ========================================================================== */
+
+/* 1. Container-aware & laptop-width player control bar (zero clipping 961px-1536px) */
+.video-frame {
+  container-type: inline-size;
+}
+@container (max-width: 980px) {
+  .ctl-btn-lbl { display: none !important; }
+  .ctl-action.ctl-labeled-pill { width: 34px !important; min-width: 34px !important; padding: 0 !important; }
+  .ctl-bar-row, .ctl-cluster-left, .ctl-cluster-right { gap: 4px !important; }
+  .ctl-action { width: 34px !important; height: 34px !important; min-width: 34px !important; }
+  #ctl-play { width: 36px !important; height: 36px !important; min-width: 36px !important; }
+  .vol-wrap input[type="range"] { width: 46px !important; }
+  .ctl-bar-row .ctl-time { font-size: 0.7rem !important; padding: 4px 7px !important; }
+}
+@media (min-width: 961px) and (max-width: 1480px) {
+  .video-frame:not(.fullscreen) .ctl-btn-lbl { display: none !important; }
+  .video-frame:not(.fullscreen) .ctl-action.ctl-labeled-pill { width: 34px !important; min-width: 34px !important; padding: 0 !important; }
+  .video-frame:not(.fullscreen) .ctl-bar-row,
+  .video-frame:not(.fullscreen) .ctl-cluster-left,
+  .video-frame:not(.fullscreen) .ctl-cluster-right { gap: 4px !important; }
+  .video-frame:not(.fullscreen) .vol-wrap input[type="range"] { width: 46px !important; }
+}
+.mesh-layout.has-left .video-frame:not(.fullscreen) .ctl-btn-lbl,
+.mesh-layout.has-right .video-frame:not(.fullscreen) .ctl-btn-lbl {
+  display: none !important;
+}
+.mesh-layout.has-left .video-frame:not(.fullscreen) .ctl-action.ctl-labeled-pill,
+.mesh-layout.has-right .video-frame:not(.fullscreen) .ctl-action.ctl-labeled-pill {
+  width: 34px !important; min-width: 34px !important; padding: 0 !important;
+}
+
+/* 2. Foldables (Z Fold 5 768x1076), Portrait Tablets (744x1133, 800x1280) & Win11 Split-Screen (958x1032) */
+@media (min-width: 601px) and (max-width: 960px) and (min-height: 561px) {
+  body:not(.vortex-fs):not(.mesh-minimized):not(.kb-open) #mesh-root:not(.hidden) .panel-video {
+    height: auto !important;
+    aspect-ratio: 16 / 9 !important;
+    min-height: 240px !important;
+    max-height: min(46dvh, 490px) !important;
+  }
+}
+@media (min-width: 601px) and (max-width: 960px) and (pointer: fine) {
+  #mesh-root > .navbar .nav-icon.room-nav-pill#nav-vote { display: inline-flex !important; }
+  .video-frame .vol-wrap { display: inline-flex !important; }
+  .video-frame .vol-wrap input[type="range"] { width: 44px !important; }
+  .video-frame #ctl-theater { display: inline-flex !important; }
+  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar #room-header-title { max-width: min(42vw, 280px) !important; }
+}
+
+/* 3. iPad Pro 12.9" Portrait (1024x1366): Stacked 16:9 Stage + Full-Width Chat */
+@media (min-width: 961px) and (max-width: 1060px) and (min-height: 1180px) {
+  body:not(.vortex-fs):not(.mesh-minimized) .video-chat:not(.no-chat) {
+    flex-direction: column !important;
+    gap: 8px !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .video-chat:not(.no-chat) .resize-handle {
+    display: none !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .video-chat:not(.no-chat) .panel-video {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    aspect-ratio: 16 / 9 !important;
+    max-height: 46dvh !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .video-chat:not(.no-chat) .panel-chat {
+    flex: 1 1 0% !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+}
+
+/* 4. Discord Voice Call Peers Overflow Guard & Single-Scrollbar CC Menu */
+.discord-call-bar { min-width: 0 !important; max-width: 100% !important; overflow: hidden !important; }
+.discord-call-peers {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: auto !important;
+  flex-wrap: nowrap !important;
+  scrollbar-width: none !important;
+}
+.discord-call-peers .discord-peer-chip { flex-shrink: 0 !important; }
+
+.ctl-menu.acrylic:has(.ctl-menu-scroll) {
+  overflow-y: hidden !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+.ctl-menu.acrylic .ctl-menu-scroll {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.gif-grid {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+/* 5. Ultra-Narrow Cover Screens (Z Fold 5 Cover 344px / 320px SE1) Zero Overflow */
+@media (max-width: 356px) {
+  #mesh-root > .navbar .nav-icon.room-nav-pill {
+    height: 26px !important;
+    min-height: 26px !important;
+    min-width: 26px !important;
+    padding: 0 4px !important;
+  }
+  #mesh-root > .navbar .room-brand-capsule {
+    max-width: 124px !important;
+    padding: 2px 5px !important;
+  }
+  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar #room-header-title {
+    max-width: 68px !important;
+    font-size: 0.68rem !important;
+  }
+  .chatbar { gap: 3px !important; padding-left: 4px !important; padding-right: 4px !important; }
+  .chatbar .mic-btn { width: 28px !important; height: 28px !important; min-width: 28px !important; }
+  .chatbar .chat-input { padding: 1px 3px 1px 8px !important; }
+  .chatbar .chat-input .ctl-action { width: 25px !important; height: 25px !important; min-width: 25px !important; }
+}
+
+/* 6. Desktop Room Toast Clearance & Firefox Compositor Optimization */
+@media (min-width: 961px) {
+  body:has(#mesh-root:not(.hidden)):not(.mesh-minimized) .toast-root {
+    bottom: 78px !important;
+  }
+}
+@-moz-document url-prefix() {
+  .ctl-top, .ctl-bottom, .panel-side, .discord-call-bar {
+    backdrop-filter: none !important;
+  }
+  .ctl-top, .ctl-bottom {
+    background: rgba(9, 12, 20, 0.92) !important;
   }
 }

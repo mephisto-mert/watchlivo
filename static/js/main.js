@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261102_v76';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261102_v76';
-import { renderHome, destroyHome } from './views/home.js?v=20261102_v76';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261102_v76';
-import { api } from './api.js?v=20261102_v76';
-import { h, toast } from './ui.js?v=20261102_v76';
+import { state, set } from './store.js?v=20261103_v77';
+import { loadProfile, saveProfile, profileSetup, checkRedirectAuth } from './profile.js?v=20261103_v77';
+import { renderHome, destroyHome } from './views/home.js?v=20261103_v77';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v77';
+import { api } from './api.js?v=20261103_v77';
+import { h, toast } from './ui.js?v=20261103_v77';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -169,7 +169,23 @@ async function boot() {
   if (initialProfile) {
     start(initialProfile);
   } else {
-    const guestFallback = { id: 'guest_' + Math.random().toString(36).slice(2, 9), name: 'Misafir İzleyici', handle: 'misafir', color: '#27DCC8', isGuest: true };
+    let guestFallback = null;
+    try {
+      guestFallback = JSON.parse(sessionStorage.getItem('vortex_temp_guest_v1') || 'null');
+    } catch (e) { guestFallback = null; }
+    if (!guestFallback || !guestFallback.id || !guestFallback.name || guestFallback.name === 'Misafir İzleyici') {
+      const gTag = Math.floor(1000 + Math.random() * 9000);
+      const gColors = ['#27DCC8', '#6366f1', '#8b5cf6', '#f43f5e', '#f59e0b', '#22c55e', '#38bdf8', '#ec4899'];
+      guestFallback = {
+        id: 'guest_' + Math.random().toString(36).slice(2, 10),
+        uid: '',
+        name: `Misafir #${gTag}`,
+        handle: `misafir${gTag}`,
+        color: gColors[gTag % gColors.length],
+        isGuest: true,
+      };
+      try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (e) { /* ignore */ }
+    }
     start(guestFallback);
     if (!isRedirectPending && (!location.hash || location.hash === '#/' || location.hash === '#')) {
       profileSetup({ dismissable: true, onDone: start });
@@ -186,7 +202,7 @@ async function boot() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261102_v76').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261103_v77').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

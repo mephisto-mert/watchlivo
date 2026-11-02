@@ -188,7 +188,7 @@ body:not(.mesh-minimized):has(main.mesh) .bg-img { display: none !important; }
 .icon { width: 1.25em; height: 1.25em; flex-shrink: 0; display: inline-block; vertical-align: middle; }
 .badge {
   position: absolute; right: -2px; top: -2px;
-  min-width: 1.25em; height: 1.25em; padding: 0 .32em; border-radius: 99px; background: var(--accent); color: #fff;
+  min-width: 1.25em; height: 1.25em; padding: 0 .32em; border-radius: 99px; background: var(--accent); color: #06090f;
   font-size: .68em; font-weight: 800; display: flex; align-items: center; justify-content: center;
   box-shadow: 0 2px 6px rgba(0,0,0,.5); border: 1.5px solid var(--bg-base);
 }
@@ -1455,14 +1455,15 @@ body { min-height: 100vh; padding-left: env(safe-area-inset-left); padding-right
 * { -webkit-tap-highlight-color: transparent; }
 @media (pointer: coarse) { .ctl-action, .mic-btn, .provider-cat-pill, .lobby-tab { min-height: 36px; } }
 /* Geniş monitörler ve TV'ler: arayüzü ölçekle */
-@media (min-width: 1700px) { html { font-size: 17px; } }
-@media (min-width: 2200px) { html { font-size: 21px; } .provider-grid, #lobby-box, .lobby-toolbar { max-width: min(1900px, 94%) !important; width: min(1900px, 94%); } }
-@media (min-width: 3000px) { html { font-size: 28px; } .provider-grid, #lobby-box, .lobby-toolbar { max-width: min(2800px, 94%) !important; width: min(2800px, 94%); } }
-@media (min-width: 5000px) { html { font-size: 40px; } }
+@media (min-width: 1800px) and (min-height: 1000px) { html { font-size: 16.5px; } }
+@media (min-width: 2400px) and (min-height: 1350px) { .provider-grid, #lobby-box, .lobby-toolbar { max-width: min(1960px, 94%) !important; width: min(1960px, 94%); } }
+@media (min-width: 2600px) and (min-height: 1600px) { html { font-size: 18px; } }
+@media (min-width: 3600px) and (min-height: 1950px) { html { font-size: 22px; } .provider-grid, #lobby-box, .lobby-toolbar { max-width: min(2800px, 94%) !important; width: min(2800px, 94%); } }
+@media (min-width: 5000px) and (min-height: 2600px) { html { font-size: 34px; } }
 /* TV uzaktan kumanda / D-pad odak halkası */
-:focus-visible { outline: 3px solid #6366f1; outline-offset: 3px; border-radius: 12px; }
-@media (hover: none) and (min-width: 1280px), (min-width: 1280px) and (pointer: none) {
-  .provider-tile:focus-visible, .meshthumb:focus-visible { transform: scale(1.1); z-index: 5; box-shadow: 0 0 0 4px #6366f1, 0 20px 50px rgba(0,0,0,.7); }
+:focus-visible { outline: 3px solid var(--accent, #6366f1); outline-offset: 3px; border-radius: 12px; }
+@media (hover: none) and (min-width: 1850px) and (min-height: 1000px), (min-width: 1280px) and (pointer: none) {
+  .provider-tile:focus-visible, .meshthumb:focus-visible { transform: scale(1.08); z-index: 5; box-shadow: 0 0 0 4px var(--accent, #6366f1), 0 20px 50px rgba(0,0,0,.7); }
   html { font-size: 20px; }
 }
 /* Küçük telefonlar */
@@ -4691,9 +4692,10 @@ header.navbar.top-nav-capsule {
 .wl-theme-strip-pills {
   display: flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
+  justify-content: flex-start !important;
   gap: 5px !important;
-  flex: 1 1 auto !important;
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
   overflow-x: auto !important;
   scrollbar-width: none !important;
 }
@@ -5426,4 +5428,20 @@ header.navbar.top-nav-capsule {
     background: color-mix(in srgb, var(--bg-elevated) 95%, #000000) !important;
     border-top: 1px solid color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.1)) !important;
   }
+}
+
+/* v77: Native Android APK WebView Hide Redundant Download Prompts & Badge Contrast */
+html.is-native-apk #nav-btn-apk,
+html.is-native-apk #nav-download-btn,
+html.is-native-apk #home-app-banner,
+html.is-native-apk .wl-btn-apk-dl,
+html.is-native-apk #ctl-pip,
+#ctl-pip.hidden {
+  display: none !important;
+}
+:root[data-theme="indigo"] .badge:not(.red),
+:root[data-theme="midnight"] .badge:not(.red),
+:root[data-theme="cosmic"] .badge:not(.red),
+:root[data-theme="graphite"] .badge:not(.red) {
+  color: #ffffff !important;
 }

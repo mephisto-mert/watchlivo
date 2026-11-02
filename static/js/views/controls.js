@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261102_v76';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261102_v76';
-import { getProvider } from '../providers.js?v=20261102_v76';
-import { expectedPosition } from '../sync.js?v=20261102_v76';
-import { thumbFor } from './lobby.js?v=20261102_v76';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261102_v76';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261102_v76';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261102_v76';
-import { avatar } from '../profile.js?v=20261102_v76';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v77';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261103_v77';
+import { getProvider } from '../providers.js?v=20261103_v77';
+import { expectedPosition } from '../sync.js?v=20261103_v77';
+import { thumbFor } from './lobby.js?v=20261103_v77';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v77';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v77';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v77';
+import { avatar } from '../profile.js?v=20261103_v77';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -68,10 +68,10 @@ export function buildControls(frame, ctx) {
     subCue.style.color = colorMap[p.color] || '#ffffff';
     subCue.style.fontFamily = fontMap[p.font] || fontMap['sans-serif'];
     subCue.style.fontSize = fs
-      ? `calc(clamp(16px, 2.3vmax, 28px) * ${Number(p.size || 1)})`
+      ? `calc(clamp(16px, 2.2vmin, 48px) * ${Number(p.size || 1)})`
       : isMob
-        ? `calc(clamp(11px, 3.0vw, 14px) * ${Number(p.size || 1)})`
-        : `calc(clamp(14px, 2.0vmax, 22px) * ${Number(p.size || 1)})`;
+        ? `calc(clamp(11px, 3.0vw, 15px) * ${Number(p.size || 1)})`
+        : `calc(clamp(14px, 1.95vmin, 42px) * ${Number(p.size || 1)})`;
     subCue.style.padding = (isMob && !fs) ? '.15em .48em' : '.24em .68em';
     subCue.style.background = `rgba(8, 8, 14, ${Number(p.bgOpacity ?? 0.65)})`;
     const edge = p.edgeStyle || (p.shadow === false ? 'none' : 'drop');
@@ -83,7 +83,7 @@ export function buildControls(frame, ctx) {
       subCue.style.textShadow = '0 2px 6px rgba(0,0,0,.95), 0 0 2px #000';
     }
     const lift = Number(p.bottomOffset || 0);
-    subOverlay.style.transform = lift > 0 ? `translateY(-${lift}px)` : '';
+    subOverlay.style.transform = lift > 0 ? `translate(-50%, -${lift}px)` : '';
   }
   applySubPrefsStyle();
 
@@ -191,8 +191,20 @@ export function buildControls(frame, ctx) {
     type: 'button',
     class: 'btn ctl-pill ctl-break-pill',
     id: 'ctl-break-btn',
-    title: 'Oda kurucusuna mola (duraklatma) isteği gönder',
-    ...tapProps(() => actions.requestBreak?.()),
+    title: 'Mola (duraklatma) isteği gönder veya odayı duraklat',
+    ...tapProps(() => {
+      if (state.mesh?.curated) {
+        toast('7/24 canlı TV yayını duraklatılamaz');
+        return;
+      }
+      if (isLeader()) {
+        actions.pause?.();
+        toast('☕ Mola verildi — video duraklatıldı');
+        showOverlay('☕ Mola Zamanı — Video duraklatıldı', 3000);
+        return;
+      }
+      actions.requestBreak?.();
+    }),
   }, '☕ Mola Zamanı');
   let breakBannerTimer = null;
   const breakBannerText = h('div', { class: 'break-banner-text', id: 'ctl-break-banner-text' }, '☕ Mola Zamanı — Duraklatma isteği geldi!');
@@ -227,8 +239,10 @@ export function buildControls(frame, ctx) {
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
   const syncDot = h('span', { class: 'sync-dot', title: 'Senkron' });
   const syncText = h('span', { class: 'ctl-time', style: { opacity: .7 } });
+  const canSeekNow = () => Boolean(isLeader() && !state.mesh?.curated && !timeline.classList.contains('locked') && (!host.adapter || host.adapter.caps?.seek));
   const seekStep = (delta) => {
-    if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+    if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
+    if (!canSeekNow()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
     const base = (ctx.lastSeekAt && Date.now() - ctx.lastSeekAt < 1600 && Number.isFinite(ctx.lastSeekTarget))
       ? ctx.lastSeekTarget
       : position();
@@ -303,7 +317,8 @@ export function buildControls(frame, ctx) {
     h('span', { style: { left: '75%' } }));
   const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, trackTicks, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
-  const volRange = h('input', { type: 'range', min: '0', max: '100', value: String(host.volume), 'aria-label': 'Ses', oninput: (e) => { host.setVolume(e.target.value); unmute.classList.add('hidden'); update(); } });
+  const isIosFixedVol = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const volRange = h('input', { type: 'range', min: '0', max: '100', value: String(host.volume), 'aria-label': 'Ses', style: isIosFixedVol ? { display: 'none' } : undefined, oninput: (e) => { host.setVolume(e.target.value); unmute.classList.add('hidden'); update(); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
   const skipBtn = h('button', { class: 'ctl-action', id: 'ctl-skip', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
   const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', ...tapProps(() => toggleMenu('speed')) }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
@@ -318,12 +333,11 @@ export function buildControls(frame, ctx) {
       showOverlay(host.isPiP?.() ? '⧉ Pencere İçinde Pencere (PiP) Açık' : '⧉ PiP Kapatıldı', 1800);
       return;
     }
-    if (document.body.classList.contains('mesh-minimized')) { document.body.classList.remove('mesh-minimized'); return; }
-    if (typeof window.vortexMinimizeRoom === 'function') {
-      window.vortexMinimizeRoom();
-    } else {
-      toast('Bu video kaynağında PiP desteklenmiyor.');
+    if (typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent || '')) {
+      toast('⧉ Firefox üzerinde videonun sağ kenarındaki yerleşik PiP simgesini kullanabilirsin');
+      return;
     }
+    toast('Bu cihazda Pencere İçinde Pencere (PiP) desteklenmiyor.');
   };
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...tapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
@@ -821,9 +835,11 @@ export function buildControls(frame, ctx) {
     const tag = (e.target?.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
     if (e.key === 'Escape') {
-      if (!menu.classList.contains('hidden')) { e.preventDefault(); closeMenu(); }
+      if (!menu.classList.contains('hidden')) { e.preventDefault(); closeMenu(); return; }
+      if (isFullscreenActive()) { e.preventDefault(); toggleFullscreen(); return; }
       return;
     }
+    if (e.key === ' ' && (tag === 'button' || tag === 'select' || tag === 'a')) return;
     if (e.key === ' ' || e.key === 'k') {
       e.preventDefault();
       if (!isLeader()) {
@@ -896,7 +912,7 @@ export function buildControls(frame, ctx) {
   let scrubbing = false;
   const seekFromEvent = (e, commit = true) => {
     const d = duration();
-    if (!d || !isLeader()) return;
+    if (!d || !canSeekNow()) return;
     const r = timeline.getBoundingClientRect();
     const isRotated = r.height > r.width;
     const ratio = isRotated
@@ -909,9 +925,9 @@ export function buildControls(frame, ctx) {
     if (commit) actions.seek(target);
   };
   timeline.addEventListener('pointerdown', (e) => {
-    if (!isLeader()) {
+    if (!canSeekNow()) {
       e.stopPropagation();
-      toast('Videoyu yalnızca oda başkanı sarabilir');
+      toast(state.mesh?.curated ? '7/24 canlı yayın akışı ileri/geri sarılamaz' : 'Videoyu yalnızca oda başkanı sarabilir');
       return;
     }
     if (!duration()) return;
@@ -970,8 +986,8 @@ export function buildControls(frame, ctx) {
   timeline.addEventListener('pointercancel', endScrub);
   timeline.addEventListener('click', (e) => {
     e.stopPropagation();
-    if (!isLeader()) {
-      toast('Videoyu yalnızca oda başkanı sarabilir');
+    if (!canSeekNow()) {
+      toast(state.mesh?.curated ? '7/24 canlı yayın akışı ileri/geri sarılamaz' : 'Videoyu yalnızca oda başkanı sarabilir');
       return;
     }
     if (Date.now() - lastScrubEndedAt < 380) return;
@@ -1417,7 +1433,7 @@ export function buildControls(frame, ctx) {
       const curFps = Number(host.adapter?.subs?.fpsScale || 1.0);
       const offsetRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.2em' } },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, `⏱️ Altyazı Senkron Kaydırma (${curOff >= 0 ? '+' : ''}${curOff} sn)`),
-        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px' } },
+        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(44px, 1fr))', gap: '4px' } },
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-2.0); renderMenuView('subtitle'); } }, '-2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.5); renderMenuView('subtitle'); } }, '-0.5s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.2); renderMenuView('subtitle'); } }, '-0.2s'),
@@ -1806,7 +1822,7 @@ export function buildControls(frame, ctx) {
       return;
     }
     const iosEnterFs = v && (v.webkitEnterFullscreen || v.webkitEnterFullScreen);
-    if (typeof iosEnterFs === 'function') {
+    if (typeof iosEnterFs === 'function' && v.readyState >= 1) {
       try {
         v.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
         iosEnterFs.call(v);
@@ -2043,7 +2059,14 @@ export function buildControls(frame, ctx) {
     centerPlayBtn.classList.toggle('is-paused', showCenterHud);
     centerHud.classList.toggle('is-paused', showCenterHud);
     theaterBtn.classList.toggle('on', Boolean(ctx.isTheaterMode?.()));
+    const canShowPip = host.adapter
+      ? Boolean(host.canPiP?.())
+      : (typeof document !== 'undefined'
+        && !document.documentElement.classList.contains('is-native-apk')
+        && Boolean(document.pictureInPictureEnabled || typeof HTMLVideoElement?.prototype?.webkitSetPresentationMode === 'function'));
     pipBtn.classList.toggle('on', Boolean(host.isPiP?.()));
+    pipBtn.classList.toggle('hidden', !canShowPip);
+    pipBtn.style.display = canShowPip ? '' : 'none';
     const volIconName = isActuallyMuted() ? 'mute' : 'volume';
     if (volBtn.dataset.sig !== volIconName) {
       volBtn.dataset.sig = volIconName;
@@ -2150,8 +2173,16 @@ export function buildControls(frame, ctx) {
     },
     syncStatus: (s) => {
       const ms = Math.round((s.delta || 0) * 1000);
-      syncDot.style.background = s.mode === 'inSync' || s.mode === 'paused' || s.mode === 'live' || s.mode === 'embed' ? '#27DCC8' : Math.abs(ms) < 400 ? '#f59e0b' : '#ff3b5c';
-      syncText.textContent = s.mode === 'idle' || s.mode === 'live' || s.mode === 'embed' ? 'Senkron' : `${ms >= 0 ? '+' : ''}${ms}ms · Senkron`;
+      syncDot.style.background = s.mode === 'inSync' || s.mode === 'paused' || s.mode === 'live' || s.mode === 'embed'
+        ? '#27DCC8'
+        : s.mode === 'buffering' || Math.abs(ms) < 400
+          ? '#f59e0b'
+          : '#ff3b5c';
+      syncText.textContent = s.mode === 'idle' || s.mode === 'live' || s.mode === 'embed'
+        ? 'Senkron'
+        : s.mode === 'buffering'
+          ? `${ms >= 0 ? '+' : ''}${Math.round(ms / 1000)}sn · Önbellek`
+          : `${ms >= 0 ? '+' : ''}${ms}ms · Senkron`;
       frame.dataset.syncMode = s.mode;
       frame.dataset.syncDelta = String(ms);
     },

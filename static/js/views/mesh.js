@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261102_v76';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261102_v76';
-import { resolveMusicItem } from './selection-kinds.js?v=20261102_v76';
-import { MeshConnection } from '../realtime.js?v=20261102_v76';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261102_v76';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261102_v76';
-import { buildLayout } from './mesh-layout.js?v=20261102_v76';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261102_v76';
-import { Voice } from '../voice.js?v=20261102_v76';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261102_v76';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v77';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v77';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v77';
+import { MeshConnection } from '../realtime.js?v=20261103_v77';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v77';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v77';
+import { buildLayout } from './mesh-layout.js?v=20261103_v77';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v77';
+import { Voice } from '../voice.js?v=20261103_v77';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v77';
 
 let ctx = null;
 
@@ -67,7 +67,14 @@ function clearSavedChat(id) {
 const isTimeKeeper = () => isActiveTimeKeeper()
   || Boolean(ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 5000);
 
-const deviceLabel = () => (/iPhone|iPad|Android|Mobile/i.test(navigator.userAgent) ? 'Mobil' : (window.vortexDesktop ? 'Masaüstü' : 'Web'));
+const deviceLabel = () => {
+  const ua = navigator.userAgent || '';
+  if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
+  if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'Tablet';
+  if (/iPad|Tablet/i.test(ua)) return 'Tablet';
+  if (/iPhone|Android|Mobile/i.test(ua)) return 'Mobil';
+  return window.vortexDesktop ? 'Masaüstü' : 'Web';
+};
 
 function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (!room) return;
@@ -654,6 +661,7 @@ const actions = {
   },
   seek(t) {
     if (!ctx) return;
+    if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
     if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
     const d = Number(ctx.host.adapter?.getDuration?.() || state.mesh?.media?.duration || 0);
     const target = d > 0 ? Math.max(0, Math.min(d - 0.5, Number(t) || 0)) : Math.max(0, Number(t) || 0);

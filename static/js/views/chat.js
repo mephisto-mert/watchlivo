@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v76';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v76';
-import { avatar } from '../profile.js?v=20261102_v76';
-import { api, qs } from '../api.js?v=20261102_v76';
-import { resolveMusicItem } from './selection-kinds.js?v=20261102_v76';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v77';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v77';
+import { avatar } from '../profile.js?v=20261103_v77';
+import { api, qs } from '../api.js?v=20261103_v77';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v77';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -176,8 +176,30 @@ export const inviteUrl = () => {
 };
 
 export async function copyInvite() {
-  try { await navigator.clipboard.writeText(inviteUrl()); toast('Paylaşım bağlantısı panoya kopyalandı'); }
-  catch (e) { prompt('Davet bağlantısı', inviteUrl()); }
+  const url = inviteUrl();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast('Paylaşım bağlantısı panoya kopyalandı');
+      return;
+    }
+  } catch (e) { /* fallback below */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const copied = document.execCommand('copy');
+    ta.remove();
+    if (copied) {
+      toast('Paylaşım bağlantısı panoya kopyalandı');
+      return;
+    }
+  } catch (e) { /* fallback below */ }
+  prompt('Davet bağlantısı', url);
 }
 
 export function buildChat(ctx) {
@@ -256,9 +278,19 @@ export function buildChat(ctx) {
     class: 'react-break-btn',
     id: 'btn-chat-break',
     'aria-label': 'Mola Zamanı',
-    title: 'Oda kurucusuna mola (duraklatma) isteği gönder',
-    onpointerdown: (e) => { e.preventDefault(); actions.requestBreak?.(); },
-    onclick: () => actions.requestBreak?.(),
+    title: 'Mola (duraklatma) isteği gönder veya odayı duraklat',
+    onclick: () => {
+      if (state.mesh?.curated) {
+        toast('7/24 canlı TV yayını duraklatılamaz');
+        return;
+      }
+      if (isLeader()) {
+        actions.pause?.();
+        toast('☕ Mola verildi — video duraklatıldı');
+        return;
+      }
+      actions.requestBreak?.();
+    },
   }, '☕ Mola Zamanı');
   const reactions = h('div', { class: 'reaction-bar' },
     h('div', { class: 'reaction-emoji-grid' },
@@ -306,8 +338,6 @@ export function buildChat(ctx) {
   const dJoinBtn = h('button', {
     type: 'button',
     class: 'discord-join-btn',
-    id: 'btn-discord-call',
-    onclick: () => toggleCallJoin(),
     id: 'btn-discord-call',
     onclick: () => toggleCallJoin(),
   }, h('span', { html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), 'Sesliye Katıl');
@@ -475,8 +505,12 @@ export function buildChat(ctx) {
     }
   });
   input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
+  const isVirtualKbDevice = () => Boolean(
+    (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches) ||
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && typeof window !== 'undefined' && window.innerWidth <= 960 && !window.matchMedia?.('(pointer: fine)')?.matches)
+  );
   input.addEventListener('focus', () => {
-    document.body.classList.add('kb-open');
+    if (isVirtualKbDevice()) document.body.classList.add('kb-open');
     try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     setTimeout(() => {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
@@ -630,6 +664,7 @@ export function buildChat(ctx) {
   }
 
   async function toggleGif() {
+    closeToolsPopover();
     if (!gifPanel.classList.contains('hidden')) { gifPanel.classList.add('hidden'); return; }
     const q = h('input', { class: 'input', placeholder: 'GIF ara...' });
     const grid = h('div', { class: 'gif-grid' });

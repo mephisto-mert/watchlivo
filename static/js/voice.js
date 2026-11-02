@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261102_v76';
+import { toast } from './ui.js?v=20261103_v77';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -571,8 +571,17 @@ export class Voice {
     }
   }
 
+  _orderedPeerTargets() {
+    const selfId = this.getSelfId();
+    return [...(this.participants || [])]
+      .filter((p) => p && p.id && p.id !== selfId)
+      .sort((a, b) => Number(Boolean(b.inCall || b.cam || b.screen || b.speaking)) - Number(Boolean(a.inCall || a.cam || a.screen || a.speaking)))
+      .slice(0, 12);
+  }
+
   peer(id) {
     if (this.peers.has(id)) return this.peers.get(id);
+    if (this.peers.size >= 12) return null;
     const pc = new RTCPeerConnection({ iceServers: ICE });
     const audio = document.createElement('audio');
     audio.autoplay = true;
@@ -664,6 +673,7 @@ export class Voice {
       }
     }
     const st = this.peer(from);
+    if (!st) return;
     const { pc } = st;
     const polite = String(this.getSelfId()) < String(from);
     try {
@@ -704,7 +714,7 @@ export class Voice {
     if (!this.micOn && !this.camOn && !this.screenOn) return;
     if (!this.peers.has(id) && this.peers.size >= 12) return;
     const st = this.peer(id);
-    if (String(this.getSelfId()) < String(id)) this._negotiate(id, st);
+    if (st && String(this.getSelfId()) < String(id)) this._negotiate(id, st);
   }
 
   syncPeers(participants) {
@@ -795,7 +805,7 @@ export class Voice {
 
   async _attachOrReplaceVideoTrack(stream) {
     const vTrack = stream?.getVideoTracks?.()[0] || null;
-    for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+    for (const p of this._orderedPeerTargets()) this.peer(p.id);
     for (const [id, st] of this.peers.entries()) {
       try {
         if (st.videoSender) {
@@ -964,18 +974,46 @@ export class Voice {
       return false;
     }
     try {
-      if (!this.stream) {
+      let realMicAcquired = Boolean(this.stream && !this._usingSynthStream);
+      if (!this.stream || this._usingSynthStream) {
+        this.micPending = true;
+        this.onStateChange?.();
         try {
-          this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+          const gumPromise = navigator.mediaDevices?.getUserMedia
+            ? navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+            : Promise.reject(new Error('getUserMedia unavailable'));
+          const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 7500));
+          const freshStream = await Promise.race([gumPromise, timeoutPromise]);
+          if (this._usingSynthStream) {
+            this.stream?.getTracks().forEach((t) => t.stop());
+            this.synthAudioCtx?.close?.().catch(() => {});
+            this.synthAudioCtx = null;
+          }
+          this.stream = freshStream;
+          this._usingSynthStream = false;
+          realMicAcquired = true;
           this.watchSpeaking();
         } catch (err) {
-          this.stream = this._createSyntheticAudioStream();
+          realMicAcquired = false;
+        } finally {
+          this.micPending = false;
         }
+      }
+      if (!realMicAcquired) {
+        this.micOn = false;
+        this.selfSpeaking = false;
+        if (this.inCall) {
+          for (const p of this._orderedPeerTargets()) this.peer(p.id);
+          this.send('voice_state', { muted: true, speaking: false, inCall: true });
+        }
+        this.onStateChange?.();
+        toast('🎧 Mikrofon bulunamadı veya izin verilmedi — dinleyici modundasın');
+        return false;
       }
       this.stream?.getTracks().forEach((t) => { t.enabled = true; });
       this.micOn = true;
       this.inCall = true;
-      for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+      for (const p of this._orderedPeerTargets()) this.peer(p.id);
       const aTrack = this.stream?.getAudioTracks?.()[0];
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
@@ -991,6 +1029,8 @@ export class Voice {
       toast('🎙️ Mikrofon açıldı — sesin odaya iletiliyor');
       return true;
     } catch (e) {
+      this.micPending = false;
+      this.onStateChange?.();
       toast('⚠️ Mikrofon açılamadı.');
       return false;
     }
@@ -999,7 +1039,7 @@ export class Voice {
   async joinCall({ withMic = true, withCam = false } = {}) {
     this.inCall = true;
     this._playCallChime(true);
-    for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+    for (const p of this._orderedPeerTargets()) this.peer(p.id);
     for (const [id, st] of this.peers.entries()) {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
@@ -1007,6 +1047,8 @@ export class Voice {
         st.audio.play?.().catch(() => {});
       }
     }
+    this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
+    this.onStateChange?.();
     if (withMic && !this.micOn) {
       await this.toggleMic();
     }
@@ -1020,9 +1062,18 @@ export class Voice {
   }
 
   async leaveCall() {
+    this.micPending = false;
     if (this.micOn) await this.toggleMic();
     if (this.camOn) await this.toggleCamera();
     if (this.screenOn) await this.toggleScreenShare();
+    clearInterval(this.speakTimer);
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this._usingSynthStream = false;
+    this.audioCtx?.close?.().catch(() => {});
+    this.audioCtx = null;
+    this.synthAudioCtx?.close?.().catch(() => {});
+    this.synthAudioCtx = null;
     this.inCall = false;
     this.deafened = false;
     for (const st of this.peers.values()) {

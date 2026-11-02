@@ -195,6 +195,33 @@ class RateLimiter:
             bucket.append(t)
             return True, 0.0
 
+    def peek(self, key: str) -> Tuple[bool, float]:
+        """Check whether key is currently rate-limited without consuming a token."""
+        full_key = f"{self.name}:{key}"[:200]
+        url, _ = self._kv_cfg()
+        if url:
+            raw_cnt = self._kv("GET", full_key)
+            try:
+                cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                cnt_int = 0
+            if cnt_int >= self.limit:
+                ttl = self._kv("TTL", full_key)
+                try:
+                    retry = max(1.0, float(ttl))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    retry = self.window
+                return False, retry
+            return True, 0.0
+        t = time.time()
+        with self._lock:
+            bucket = self._hits.get(full_key) or []
+            cutoff = t - self.window
+            live = [ts for ts in bucket if ts >= cutoff]
+            if len(live) >= self.limit:
+                return False, max(1.0, self.window - (t - live[0]))
+            return True, 0.0
+
     def reset(self, key: str) -> None:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
@@ -251,6 +278,10 @@ def too_many_response(retry_after: float):
     )
 
 
+_SAFE_HOST_CACHE: "OrderedDict[Tuple[str, int], float]" = OrderedDict()
+_SAFE_HOST_LOCK = threading.Lock()
+
+
 def is_safe_public_url(url: str) -> bool:
     """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local ranges (SSRF guard)."""
     import ipaddress
@@ -261,10 +292,21 @@ def is_safe_public_url(url: str) -> bool:
         p = urllib.parse.urlparse(str(url or "").strip())
         if p.scheme not in ("http", "https") or not p.hostname:
             return False
-        for info in socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80)):
+        host = p.hostname.lower()
+        port = int(p.port or (443 if p.scheme == "https" else 80))
+        now_t = time.time()
+        with _SAFE_HOST_LOCK:
+            exp = _SAFE_HOST_CACHE.get((host, port))
+            if exp and exp > now_t:
+                return True
+        for info in socket.getaddrinfo(host, port):
             ip = ipaddress.ip_address(info[4][0])
             if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
                 return False
+        with _SAFE_HOST_LOCK:
+            _SAFE_HOST_CACHE[(host, port)] = now_t + 90.0
+            while len(_SAFE_HOST_CACHE) > 1024:
+                _SAFE_HOST_CACHE.popitem(last=False)
         return True
     except Exception:
         return False

@@ -283,10 +283,17 @@ export class SubtitleDubController {
             if (this.media) this.media.subtitleTracks = merged;
           }
           if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
-            this.audioTracks = data.audioTracks.filter(Boolean);
+            const seenAudIds = new Set();
+            this.audioTracks = data.audioTracks.filter((at) => {
+              if (!at || !at.id || seenAudIds.has(at.id)) return false;
+              seenAudIds.add(at.id);
+              return true;
+            });
             if (this.media) this.media.audioTracks = this.audioTracks;
             if (this.adapter?.hls?.audioTracks?.length > 1) {
               this.mergeHlsAudioTracks(this.adapter.hls.audioTracks);
+            } else if (this.adapter?.video?.audioTracks?.length > 1) {
+              this.mergeNativeAudioTracks(this.adapter.video.audioTracks);
             }
           }
           if (data.intro && !this.intro) {
@@ -304,17 +311,18 @@ export class SubtitleDubController {
     const initAudTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId)
       || this.audioTracks.find((t) => (t.targetLang || t.lang) === this.selectedAudioId)
       || this.audioTracks[0];
-    const isTurkishSpeechActive = Boolean(
+    const hasVerifiedTrStream = Boolean(
       initAudTrack && (
         initAudTrack.id === 'tr-orig'
-        || initAudTrack.id === 'tr-dub'
-        || initAudTrack.audioLang === 'tr'
-        || initAudTrack.lang === 'tr'
+        || ((initAudTrack.id === 'tr-dub' || initAudTrack.audioLang === 'tr' || initAudTrack.lang === 'tr')
+            && (initAudTrack.url || typeof initAudTrack.hlsIndex === 'number' || typeof initAudTrack.nativeIndex === 'number'))
         || (media?.origLang === 'tr' && (!this.selectedAudioId || this.selectedAudioId === 'orig'))
         || (Array.isArray(media?.platformAudioLangs) && media.platformAudioLangs.length === 1 && media.platformAudioLangs[0] === 'tr')
       )
     );
-    if (isTurkishSpeechActive && String(this.selectedSubId || '').startsWith('tr')) {
+    let savedExplicitSub = '';
+    try { savedExplicitSub = localStorage.getItem('vortex_sub_lang') || ''; } catch (e) { /* ignore */ }
+    if (hasVerifiedTrStream && !savedExplicitSub && String(this.selectedSubId || '').startsWith('tr')) {
       this._prevSubBeforeDub = this.selectedSubId;
       this.selectedSubId = 'off';
     }
@@ -364,6 +372,56 @@ export class SubtitleDubController {
     });
     this._applyHlsAudioSelection();
     this.adapter.events.onTracksChanged?.();
+  }
+
+  mergeNativeAudioTracks(nativeTracks) {
+    if (!nativeTracks || nativeTracks.length <= 1) return;
+    for (let idx = 0; idx < nativeTracks.length; idx += 1) {
+      const nt = nativeTracks[idx];
+      const rawInfo = `${nt?.language || ''} ${nt?.label || ''}`.toLowerCase();
+      const isTr = /\b(tr|tur|türk|turkish|türkçe)\b/i.test(rawInfo);
+      if (isTr) {
+        const exTr = this.audioTracks.find((t) => t.id === 'tr-dub' || (t.audioLang || t.targetLang || t.lang) === 'tr');
+        if (exTr) exTr.nativeIndex = idx;
+        else {
+          this.audioTracks.push({
+            id: 'tr-dub', nativeIndex: idx, lang: 'tr', targetLang: 'tr', audioLang: 'tr',
+            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'native',
+          });
+        }
+      } else {
+        const exOrig = this.audioTracks.find((t) => t.id === 'orig' || (t.audioLang && t.audioLang !== 'tr'));
+        if (exOrig && typeof exOrig.nativeIndex !== 'number') exOrig.nativeIndex = idx;
+        else if (!exOrig) {
+          this.audioTracks.unshift({
+            id: 'orig', nativeIndex: idx, lang: 'orig', targetLang: 'orig',
+            audioLang: (nt?.language || 'orig').toLowerCase(),
+            label: `🎬 ${nt?.label || nt?.language || 'Orijinal Ses'} (Orijinal Stüdyo Ses)`, mode: 'native',
+          });
+        }
+      }
+    }
+    this._applyNativeAudioSelection();
+    this.adapter.events.onTracksChanged?.();
+  }
+
+  _applyNativeAudioSelection() {
+    const nativeTracks = this.adapter?.video?.audioTracks;
+    if (!nativeTracks || nativeTracks.length <= 1) return;
+    const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
+    let targetIdx = typeof track?.nativeIndex === 'number' ? track.nativeIndex : -1;
+    if (targetIdx < 0) {
+      const wantTr = (track?.targetLang || track?.audioLang || track?.lang) === 'tr' || track?.id === 'tr-dub';
+      for (let i = 0; i < nativeTracks.length; i += 1) {
+        const isTr = /\b(tr|tur|türk|turkish|türkçe)\b/i.test(`${nativeTracks[i]?.language || ''} ${nativeTracks[i]?.label || ''}`);
+        if (wantTr === isTr) { targetIdx = i; break; }
+      }
+    }
+    if (targetIdx >= 0 && targetIdx < nativeTracks.length) {
+      for (let i = 0; i < nativeTracks.length; i += 1) {
+        try { nativeTracks[i].enabled = (i === targetIdx); } catch (e) { /* ignore */ }
+      }
+    }
   }
 
   _applyHlsAudioSelection() {
@@ -421,19 +479,31 @@ export class SubtitleDubController {
     }
   }
 
+  _isNativeSubView(v) {
+    return Boolean(
+      v && (
+        v.webkitDisplayingFullscreen ||
+        v.webkitPresentationMode === 'picture-in-picture' ||
+        document.fullscreenElement === v ||
+        document.webkitFullscreenElement === v ||
+        document.pictureInPictureElement === v
+      )
+    );
+  }
+
   _disableAllNativeTextTracks() {
     const v = this.adapter?.video;
     if (!v || !v.textTracks) return;
-    const nativeVideoFs = Boolean(
-      v.webkitDisplayingFullscreen ||
-      document.fullscreenElement === v ||
-      document.webkitFullscreenElement === v ||
-      document.pictureInPictureElement === v
-    );
-    if (nativeVideoFs) return;
+    if (this._isNativeSubView(v)) return;
+    const isFirefox = typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent || '');
     for (let i = 0; i < v.textTracks.length; i += 1) {
+      const tt = v.textTracks[i];
       try {
-        if (v.textTracks[i].mode !== 'disabled') v.textTracks[i].mode = 'disabled';
+        if (isFirefox && this._activeTrackEl?.track === tt && this.selectedSubId !== 'off') {
+          if (tt.mode !== 'hidden') tt.mode = 'hidden';
+        } else if (tt.mode !== 'disabled') {
+          tt.mode = 'disabled';
+        }
       } catch (e) { /* ignore */ }
     }
   }
@@ -489,17 +559,20 @@ export class SubtitleDubController {
     }
     v.querySelectorAll('track').forEach((t) => t.remove());
     this._disableAllNativeTextTracks();
+    this._activeTrackEl = null;
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);
       v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
       v.removeEventListener('webkitendfullscreen', this._fsHandler);
+      v.removeEventListener('webkitpresentationmodechanged', this._fsHandler);
       v.removeEventListener('enterpictureinpicture', this._fsHandler);
       v.removeEventListener('leavepictureinpicture', this._fsHandler);
       this._fsHandler = null;
     }
     if (!track?.url || !this.subCues.length) return;
     try {
+      const isFirefox = typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent || '');
       const vttBlobUrl = this._buildSyncedVttBlob();
       const trEl = document.createElement('track');
       trEl.kind = 'subtitles';
@@ -507,10 +580,11 @@ export class SubtitleDubController {
       trEl.srclang = track.lang || 'tr';
       trEl.src = vttBlobUrl || track.url;
       v.appendChild(trEl);
+      this._activeTrackEl = trEl;
       try {
         if (trEl.track) {
-          const isIosOrPip = Boolean(v.webkitDisplayingFullscreen || document.pictureInPictureElement === v);
-          trEl.track.mode = isIosOrPip ? 'showing' : 'disabled';
+          const isIosOrPip = this._isNativeSubView(v);
+          trEl.track.mode = isIosOrPip ? 'showing' : (isFirefox ? 'hidden' : 'disabled');
         }
       } catch (e) { /* ignore */ }
       let srcSettled = false;
@@ -559,10 +633,7 @@ export class SubtitleDubController {
         }
       };
       const setMode = () => {
-        const nativeVideoFs = Boolean(
-          v.webkitDisplayingFullscreen ||
-          document.pictureInPictureElement === v
-        );
+        const nativeVideoFs = this._isNativeSubView(v);
         if (v.textTracks) {
           for (let i = 0; i < v.textTracks.length; i += 1) {
             const tt = v.textTracks[i];
@@ -575,6 +646,10 @@ export class SubtitleDubController {
             ensureNativeCues();
             dedupTrackCues(trEl.track);
             trEl.track.mode = 'showing';
+          } else if (isFirefox) {
+            if (trEl.track.mode !== 'hidden') trEl.track.mode = 'hidden';
+            ensureNativeCues();
+            dedupTrackCues(trEl.track);
           } else {
             trEl.track.mode = 'disabled';
           }
@@ -586,6 +661,7 @@ export class SubtitleDubController {
       setTimeout(() => { srcSettled = true; setMode(); }, 650);
       v.addEventListener('webkitbeginfullscreen', setMode);
       v.addEventListener('webkitendfullscreen', setMode);
+      v.addEventListener('webkitpresentationmodechanged', setMode);
       v.addEventListener('enterpictureinpicture', setMode);
       v.addEventListener('leavepictureinpicture', setMode);
       this._fsHandler = setMode;
@@ -765,6 +841,7 @@ export class SubtitleDubController {
       this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();
+      this._applyNativeAudioSelection();
     }
     this.syncVideoVolume();
     this.adapter.events.onTracksChanged?.();
@@ -841,9 +918,7 @@ export class SubtitleDubController {
     if (!Number.isFinite(t)) return;
     this._disableAllNativeTextTracks();
     const v = this.adapter?.video;
-    const nativeVideoFs = Boolean(
-      v && (v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v || document.pictureInPictureElement === v)
-    );
+    const nativeVideoFs = this._isNativeSubView(v);
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
     if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && this.subtitleTracks.length) {
@@ -930,7 +1005,9 @@ export class SubtitleDubController {
     const duckFactor = Math.min(voiceDuck, ttsDuck);
     const v = this.adapter?.video;
     if (v) {
-      v.volume = Math.min(1, Math.max(0, ((this.adapter.baseVolume ?? 80) / 100) * duckFactor));
+      try {
+        v.volume = Math.min(1, Math.max(0, ((this.adapter.baseVolume ?? 80) / 100) * duckFactor));
+      } catch (e) { /* iOS/iPadOS volume is read-only */ }
     }
     if (this.adapter?.player?.setVolume) {
       try {
@@ -962,6 +1039,7 @@ export class SubtitleDubController {
       if (v) {
         v.removeEventListener('webkitbeginfullscreen', this._fsHandler);
         v.removeEventListener('webkitendfullscreen', this._fsHandler);
+        v.removeEventListener('webkitpresentationmodechanged', this._fsHandler);
         v.removeEventListener('enterpictureinpicture', this._fsHandler);
         v.removeEventListener('leavepictureinpicture', this._fsHandler);
       }

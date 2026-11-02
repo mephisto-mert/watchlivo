@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261102_v76';
-import { Html5Adapter } from './html5.js?v=20261102_v76';
-import { VimeoAdapter } from './vimeo.js?v=20261102_v76';
-import { EmbedAdapter } from './embed.js?v=20261102_v76';
-import { WebviewAdapter } from './webview.js?v=20261102_v76';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v77';
+import { Html5Adapter } from './html5.js?v=20261103_v77';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v77';
+import { EmbedAdapter } from './embed.js?v=20261103_v77';
+import { WebviewAdapter } from './webview.js?v=20261103_v77';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -68,13 +68,18 @@ export class PlayerHost {
     this.error = null;
     this.autoplayBlocked = false;
     this.userUnlocked = false;
-    this._gestureHandler = () => {
+    this._gestureHandler = (e) => {
+      if (e?.type === 'keydown') {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const k = String(e.key || '').toLowerCase();
+        if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift') return;
+      }
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
         this.unlockAudio();
       }
     };
     if (typeof window !== 'undefined') {
-      ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((ev) => {
+      ['touchend', 'click', 'keydown'].forEach((ev) => {
         window.addEventListener(ev, this._gestureHandler, { capture: true, passive: true });
       });
     }
@@ -112,17 +117,18 @@ export class PlayerHost {
     if (!media || (!media.url && !media.videoId)) { this.onEvent('empty'); return true; }
     const Cls = adapterFor(media);
     let ad = null;
+    let settledReady = false;
     const guard = (fn) => (...args) => { if (this.adapter === ad) fn(...args); };
     const events = {
-      onReady: guard(() => this.onEvent('ready')),
-      onPlay: (arg) => this.onEvent('play', arg),
+      onReady: guard(() => { settledReady = true; this.loading = false; this.onEvent('ready'); }),
+      onPlay: (arg) => { if (this.adapter === ad) { settledReady = true; this.loading = false; } this.onEvent('play', arg); },
       onPause: (arg) => this.onEvent('pause', arg),
       onEnded: guard(() => this.onEvent('ended')),
       onBuffering: guard((b) => this.onEvent('buffering', b)),
       onSubtitleCue: guard((txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' })),
       onTracksChanged: guard(() => this.onEvent('tracks-changed')),
       onPipChange: guard((active) => this.onEvent('pip-change', active)),
-      onError: guard((msg) => { this.error = msg; this.onEvent('error', msg); }),
+      onError: guard((msg) => { settledReady = true; this.loading = false; this.error = msg; this.onEvent('error', msg); }),
       onUnmuted: guard(() => {
         if (this.userMuted) {
           this.adapter?.setMuted?.(true);
@@ -168,8 +174,18 @@ export class PlayerHost {
       }
     } finally {
       if (this.adapter === ad) {
-        this.loading = false;
-        this.onEvent('loaded');
+        const videoReady = !ad.video || ad.video.readyState >= 2;
+        if (settledReady || videoReady || this.error) {
+          this.loading = false;
+          this.onEvent('loaded');
+        } else {
+          setTimeout(() => {
+            if (this.adapter === ad && this.loading) {
+              this.loading = false;
+              this.onEvent('loaded');
+            }
+          }, 18000);
+        }
       }
     }
     return true;
@@ -222,6 +238,18 @@ export class PlayerHost {
     return Boolean(this.adapter?.isPiP?.());
   }
 
+  canPiP() {
+    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv\b/i.test(navigator.userAgent || '')) || (typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-native-apk')));
+    if (isNativeApk) return false;
+    if (typeof this.adapter?.canPiP === 'function') return Boolean(this.adapter.canPiP());
+    const v = this.adapter?.video;
+    if (!v) return false;
+    return Boolean(
+      (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function') ||
+      (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+    );
+  }
+
   async togglePiP() {
     if (typeof this.adapter?.togglePiP === 'function') {
       return await this.adapter.togglePiP();
@@ -237,7 +265,7 @@ export class PlayerHost {
 
   destroy() {
     if (typeof window !== 'undefined' && this._gestureHandler) {
-      ['pointerdown', 'touchstart', 'keydown', 'click'].forEach((ev) => {
+      ['touchend', 'click', 'keydown'].forEach((ev) => {
         window.removeEventListener(ev, this._gestureHandler, { capture: true });
       });
     }

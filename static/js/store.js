@@ -151,6 +151,7 @@ export const isHostOnly = () => {
 };
 export const isLeader = () => {
   if (!state.mesh) return false;
+  if (state.mesh.curated) return false;
   if (isHostOnly()) return true;
   if (state.mesh.playMode === 'cohost') return true;
   if (Array.isArray(state.mesh.co_hosts) && state.clientId && state.mesh.co_hosts.includes(state.clientId)) return true;
@@ -160,6 +161,7 @@ export const isLeader = () => {
 };
 export const canSelectVideo = () => {
   if (!state.mesh) return true;
+  if (state.mesh.curated) return false;
   if (state.mesh.playMode !== 'leader') return true;
   return isLeader();
 };

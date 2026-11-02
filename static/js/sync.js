@@ -258,10 +258,17 @@ export class SyncEngine {
       const behindAct = (delta > 0 && delta < STARVE_CEILING && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
         : 'jump';
-      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < DEFER_MAX_MS)) {
+      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < Math.min(DEFER_MAX_MS, 6500))) {
         if (!this.deferStartedAt) this.deferStartedAt = now;
-        this.mode = 'inSync';
-        this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: base });
+        const showBuf = abs > 3.5;
+        this.mode = showBuf ? 'buffering' : 'inSync';
+        this.onStatus({
+          mode: this.mode,
+          delta: showBuf ? delta : 0,
+          curr,
+          expected: showBuf ? expected : curr,
+          rate: base,
+        });
         return 1000;
       }
       this.deferStartedAt = 0;

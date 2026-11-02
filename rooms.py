@@ -186,6 +186,15 @@ def _cid_is_active(room: Dict[str, Any], cid: str, verified_uid: str = "", data:
         return False
 
 
+def _is_generic_guest_name(raw_name: Any) -> bool:
+    slug = re.sub(r"[^a-z0-9]", "", str(raw_name or "").lower())
+    if not slug:
+        return True
+    if slug in ("misafir", "izleyici", "misafirizleyici", "guest", "viewer", "user", "kullanici"):
+        return True
+    return slug.startswith(("misafir", "izleyici", "guest"))
+
+
 def _participant_identity_key(p: Dict[str, Any]) -> str:
     if not isinstance(p, dict) or p.get("transport") == "bot":
         return ""
@@ -195,7 +204,7 @@ def _participant_identity_key(p: Dict[str, Any]) -> str:
     name_slug = re.sub(r"[^a-z0-9]", "", str(p.get("name") or "").lower())
     color = str(p.get("color") or "").lower().strip()
     device = str(p.get("device") or "").lower().strip()
-    if name_slug and name_slug not in ("misafir", "izleyici"):
+    if name_slug and not _is_generic_guest_name(name_slug):
         return f"ncd:{name_slug}|{color}|{device}"
     return ""
 
@@ -996,7 +1005,7 @@ class MemoryStore:
         except Exception:
             self.tmp_dir = None
 
-    def lock(self, room_id: str):
+    def lock(self, room_id: str, remote: bool = False):
         return self.locks.setdefault(room_id, asyncio.Lock())
 
     async def get(self, room_id: str, force_fresh: bool = False) -> Optional[Dict[str, Any]]:
@@ -1052,7 +1061,7 @@ class MemoryStore:
 class _RedisLock:
     _UNLOCK_LUA = 'if redis.call("get",KEYS[1]) == ARGV[1] then return redis.call("del",KEYS[1]) else return 0 end'
 
-    def __init__(self, store: "RedisStore", room_id: str, remote: bool = False) -> None:
+    def __init__(self, store: "RedisStore", room_id: str, remote: bool = True) -> None:
         self.store, self.room_id, self.remote = store, room_id, remote
         self.key, self.token = f"vortex:lock:{room_id}", uuid.uuid4().hex
         self.local_lock = store._local_lock(room_id)
@@ -1061,12 +1070,12 @@ class _RedisLock:
     async def __aenter__(self):
         await self.local_lock.acquire()
         if self.remote:
-            for _ in range(30):
-                res = await self.store.cmd("SET", self.key, self.token, "NX", "PX", "3000")
+            for _ in range(45):
+                res = await self.store.cmd("SET", self.key, self.token, "NX", "PX", "4000")
                 if res == "OK":
                     self.acquired_remote = True
                     break
-                await asyncio.sleep(0.04)
+                await asyncio.sleep(0.035)
         return self
 
     async def __aexit__(self, *exc):
@@ -1118,7 +1127,7 @@ class RedisStore:
         except Exception:
             return None
 
-    def lock(self, room_id: str, remote: bool = False):
+    def lock(self, room_id: str, remote: bool = True):
         return _RedisLock(self, room_id, remote=remote)
 
     async def get(self, room_id: str, force_fresh: bool = False) -> Optional[Dict[str, Any]]:
@@ -1765,6 +1774,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if room.get("curated"):
             deny("7/24 canlı yayın odalarında sıraya video eklenemez.")
             return out
+        me_rl = room["participants"][cid].setdefault("_rl", {})
+        if now() - float(me_rl.get("queue_add") or 0.0) < 0.35:
+            return out
+        me_rl["queue_add"] = now()
         item = clean_media(data.get("item") or {})
         item.update({"id": f"q_{uuid.uuid4().hex[:8]}", "votes": [name], "addedBy": name})
         if (mode == "quickplay" and can_control) or (can_control and not room["media"].get("url") and not room["media"].get("videoId")):
@@ -1839,6 +1852,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if room.get("curated"):
             deny("7/24 canlı yayın odalarında sıraya video eklenemez.")
             return out
+        me_rl = room["participants"][cid].setdefault("_rl", {})
+        if now() - float(me_rl.get("queue_add_batch") or 0.0) < 2.0:
+            return out
+        me_rl["queue_add_batch"] = now()
         raw_items = data.get("items") or []
         if not isinstance(raw_items, list) or not raw_items:
             return out
@@ -1879,6 +1896,25 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             out["broadcast"].append(({"type": "skip_votes", "votes": room["skip_votes"], "needed": needed}, None))
 
     elif mtype == "video_ended":
+        if room.get("curated"):
+            return out
+        host_p = (room.get("participants") or {}).get(room.get("host_id") or "")
+        leader_online = bool(host_p and (now() - float(host_p.get("lastSeen") or 0.0) <= 35.0))
+        if mode == "leader" and not can_control and leader_online:
+            return out
+        m_cur = room["media"]
+        try:
+            m_dur = float(m_cur.get("duration") or 0.0)
+        except (TypeError, ValueError):
+            m_dur = 0.0
+        if not can_control and m_dur > 30.0:
+            t_ref = now()
+            exp_pos = float(m_cur.get("currentTime") or 0.0) + (
+                max(0.0, t_ref - float(m_cur.get("updatedAt") or t_ref)) * float(m_cur.get("rate") or 1.0)
+                if m_cur.get("playing") else 0.0
+            )
+            if exp_pos < m_dur - 25.0:
+                return out
         key = clean_str(data.get("key"), 2100)
         if key and key == media_key(room["media"]) and room["endedKey"] != key:
             room["endedKey"] = key
@@ -2071,10 +2107,13 @@ def _handle_social(room, cid, data, out, name, is_host):
             if target_m is not None:
                 reacts = dict(target_m.get("reactions") or {})
                 users = list(reacts.get(emoji) or [])
-                if name in users:
+                actor_tag = f"{name}#{cid[-4:]}" if _is_generic_guest_name(name) and "#" not in name else name
+                if actor_tag in users:
+                    users.remove(actor_tag)
+                elif name in users and actor_tag != name:
                     users.remove(name)
                 else:
-                    users.append(name)
+                    users.append(actor_tag)
                 if users:
                     reacts[emoji] = users[:30]
                 else:
@@ -2281,13 +2320,14 @@ def _handle_social(room, cid, data, out, name, is_host):
             opt_idx = int(data.get("optionIndex", -1))
         except (TypeError, ValueError):
             opt_idx = -1
-        voter_tag = name if name != "Misafir" else f"Misafir#{cid[-4:]}"
+        is_gen_guest = _is_generic_guest_name(name) and "#" not in name
+        voter_tag = f"{name}#{cid[-4:]}" if is_gen_guest else name
         for poll in (room.get("polls") or []):
             if poll.get("id") == pid and 0 <= opt_idx < len(poll.get("options") or []):
                 cur_votes = poll["options"][opt_idx].get("votes") or []
-                already = (voter_tag in cur_votes) or (name != "Misafir" and name in cur_votes)
+                already = (voter_tag in cur_votes) or (not is_gen_guest and name in cur_votes)
                 for o in poll["options"]:
-                    o["votes"] = [v for v in (o.get("votes") or []) if v != voter_tag and (name == "Misafir" or v != name)]
+                    o["votes"] = [v for v in (o.get("votes") or []) if v != voter_tag and (is_gen_guest or v != name)]
                 if not already:
                     poll["options"][opt_idx]["votes"].append(voter_tag)
                 room["rev"] = int(room.get("rev") or 1) + 1
@@ -2495,8 +2535,14 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.close()
             return
         if has_password(room) and cid not in (room.get("participants") or {}):
-            allowed, _retry = _JOIN_LIMITER.hit(f"ws:{room_id}:{client_ip(websocket)}")
-            if not allowed or not verify_room_password(room, q.get("pwd", "")):
+            ws_rl_key = f"ws:{room_id}:{client_ip(websocket)}"
+            allowed, _retry = _JOIN_LIMITER.peek(ws_rl_key)
+            if not allowed:
+                await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
+                await websocket.close()
+                return
+            if not verify_room_password(room, q.get("pwd", "")):
+                _JOIN_LIMITER.hit(ws_rl_key)
                 await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
                 await websocket.close()
                 return
@@ -2515,7 +2561,7 @@ async def ws_endpoint(websocket: WebSocket):
         p, is_new_ws = add_participant(room, cid, join_data, "ws")
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
         SOCKETS.setdefault(room_id, {})[cid] = websocket
-        await STORE.put(room)
+        await STORE.put(room, force_disk=bool(is_new_ws))
     await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
     await broadcast(room_id, {"type": "user_joined", "user": {"id": cid, "name": p["name"]}, "room": serialize(room)}, exclude=cid)
     if join_msg:
@@ -2538,10 +2584,11 @@ async def ws_endpoint(websocket: WebSocket):
                 explicit_ws_leave = True
                 explicit_ws_close = data.get("type") == "close_room"
                 break
-            async with STORE.lock(room_id):
-                room = await STORE.get(room_id)
+            async with STORE.lock(room_id, remote=True):
+                room = await STORE.get(room_id, force_fresh=True)
                 if not room or cid not in room["participants"]:
                     break
+                prev_rev_ws = int(room.get("rev") or 1)
                 room["participants"][cid]["lastSeen"] = now()
                 out = handle_action(room, cid, data)
                 if out.get("close_room") or room.get("_close_room_now"):
@@ -2549,7 +2596,7 @@ async def ws_endpoint(websocket: WebSocket):
                     _LOBBY_CACHE["ts"] = 0.0
                     await broadcast(room_id, {"type": "room_closed", "roomId": room_id})
                     break
-                await STORE.put(room)
+                await STORE.put(room, force_disk=bool(int(room.get("rev") or 1) != prev_rev_ws or out.get("broadcast")))
             await deliver(room_id, out, websocket)
             _after(room_id, out)
     except (WebSocketDisconnect, RuntimeError):
@@ -2587,7 +2634,7 @@ async def ws_endpoint(websocket: WebSocket):
                         ensure_host(room)
                         room["lastActiveAt"] = t_disc
                         room["rev"] = int(room.get("rev") or 1) + 1
-                        await STORE.put(room)
+                        await STORE.put(room, force_disk=True)
                         await broadcast(room_id, _room_event(room))
                 else:
                     if cur_p:
@@ -2626,7 +2673,13 @@ async def http_sync(request: Request):
     except (TypeError, ValueError):
         since_rev = 0
     out: Dict[str, Any] = {}
-    async with STORE.lock(room_id):
+    need_remote_lock = bool(
+        data.get("type") not in (None, "", "poll", "ping")
+        or data.get("activeMedia")
+        or data.get("recentChat")
+        or not signed_cid
+    )
+    async with STORE.lock(room_id, remote=need_remote_lock):
         is_curated_id = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
         is_action = data.get("type") not in (None, "", "poll", "init", "ping")
         room = await STORE.get(room_id, force_fresh=bool(is_action or data.get("type") in ("init", "leave", "close_room")))
@@ -2699,10 +2752,14 @@ async def http_sync(request: Request):
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
         if has_password(room) and cid not in (room.get("participants") or {}):
-            allowed, retry_after = _JOIN_LIMITER.hit(f"http:{room_id}:{client_ip(request)}")
+            http_rl_key = f"http:{room_id}:{client_ip(request)}"
+            allowed, retry_after = _JOIN_LIMITER.peek(http_rl_key)
             if not allowed:
                 return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_after)}, status_code=429)
             if not verify_room_password(room, data.get("pwd", "")):
+                allowed_hit, retry_hit = _JOIN_LIMITER.hit(http_rl_key)
+                if not allowed_hit:
+                    return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_hit)}, status_code=429)
                 return JSONResponse({"error": "password_required"}, status_code=403)
         prev_host = pre_merge_host if pre_merge_host is not None else room.get("host_id")
         prev_seen = pre_merge_seen or float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
@@ -2778,7 +2835,7 @@ async def http_sync(request: Request):
         if mutated and not is_action:
             room["rev"] = int(room.get("rev") or 1) + 1
         t_cur = now()
-        if mutated or is_new or (t_cur - prev_seen > 4.0):
+        if mutated or is_new or (t_cur - prev_seen > 15.0):
             await STORE.put(room, force_disk=bool(mutated or is_new))
         cur_rev = int(room.get("rev") or 1)
         m = room["media"]
@@ -2806,7 +2863,7 @@ async def http_sync(request: Request):
                 "ok": True, "unchanged": True, "clientId": cid, "clientToken": sign_client_token(room_id, cid), "rev": cur_rev, "serverTime": t_cur,
                 "participantCount": ser_Quick["participantCount"],
                 "participants": ser_Quick["participants"],
-                "chat": chat_list[-20:],
+                "chat": [],
                 "privacy": room.get("privacy", "public"),
                 "playMode": room.get("playMode", "leader"),
                 "voipMode": room.get("voipMode", "all"),

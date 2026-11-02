@@ -5246,6 +5246,11 @@ _KNOWN_LARGE_MP4_URLS: set[str] = set()
 
 
 def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
+    if not rng or (rng.startswith("bytes=0-") and rng != "bytes=0-1023"):
+        with _SEG_TABLE_LOCK:
+            early_cached = _SEGMENT_CACHE.get(url)
+        if early_cached and (time.time() - early_cached[0] < 90):
+            return early_cached[1], 200, "", early_cached[2]
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
     is_hakuna = "hakunaymatata.com" in url
@@ -6002,7 +6007,7 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
     return data, ct
 
 
-_POSTER_LIMIT = RateLimiter(360, 60.0, name="poster")
+_POSTER_LIMIT = RateLimiter(900, 60.0, name="poster")
 
 
 async def poster_proxy(request: Request):
@@ -6040,6 +6045,9 @@ async def poster_proxy(request: Request):
     return RedirectResponse("/static/watchlivo-poster.svg")
 
 
+_ASYNC_SEG_INFLIGHT: dict[str, asyncio.Future] = {}
+
+
 async def stream_proxy(request: Request):
     url = (request.query_params.get("url") or "").strip()
     ref = (request.query_params.get("referer") or "").strip()
@@ -6053,8 +6061,43 @@ async def stream_proxy(request: Request):
         return JSONResponse({"error": "İmzasız proxy isteği reddedildi"}, status_code=403, headers={"Cache-Control": "no-store", **cors_hdrs})
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
     ext_hint = (request.query_params.get("ext") or "").strip().lower()
+    can_coalesce = request.method != "HEAD" and (not rng or (rng.startswith("bytes=0-") and rng != "bytes=0-1023"))
+    if can_coalesce:
+        with _SEG_TABLE_LOCK:
+            fast_hit = _SEGMENT_CACHE.get(url)
+        if fast_hit and (time.time() - fast_hit[0] < 90):
+            f_data, f_ct = fast_hit[1], fast_hit[2]
+            return Response(f_data, status_code=200, headers={
+                "Content-Type": f_ct,
+                "Content-Length": str(len(f_data)),
+                "Accept-Ranges": "bytes",
+                "Vary": "Range",
+                "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600",
+                **cors_hdrs,
+            })
     try:
-        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)
+        if can_coalesce:
+            inflight = _ASYNC_SEG_INFLIGHT.get(url)
+            if inflight is not None and not inflight.done():
+                data, status, cr, ct = await asyncio.wait_for(asyncio.shield(inflight), timeout=22)
+            else:
+                loop = asyncio.get_running_loop()
+                fut = loop.create_future()
+                _ASYNC_SEG_INFLIGHT[url] = fut
+                try:
+                    res_tup = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)
+                    if not fut.done():
+                        fut.set_result(res_tup)
+                    data, status, cr, ct = res_tup
+                except Exception as exc_f:
+                    if not fut.done():
+                        fut.set_exception(exc_f)
+                    raise
+                finally:
+                    if _ASYNC_SEG_INFLIGHT.get(url) is fut:
+                        _ASYNC_SEG_INFLIGHT.pop(url, None)
+        else:
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)
         cache_ctl = (
             "private, max-age=300"
             if (rng or status == 206)
@@ -6589,7 +6632,7 @@ async def rave_tts(request: Request):
         return Response(b"", media_type="audio/mpeg", status_code=502)
 
 
-_EXTRACT_LIMIT = RateLimiter(45, 60.0, name="extract")
+_EXTRACT_LIMIT = RateLimiter(120, 60.0, name="extract")
 
 
 async def extract_video(request: Request):

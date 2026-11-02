@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v76';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v76';
-import { avatar } from '../profile.js?v=20261102_v76';
-import { clock } from '../sync.js?v=20261102_v76';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v76';
-import { copyInvite, inviteUrl } from './chat.js?v=20261102_v76';
-import { parseVideoUrl } from '../providers.js?v=20261102_v76';
-import { resolveMedia } from './selection.js?v=20261102_v76';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v77';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v77';
+import { avatar } from '../profile.js?v=20261103_v77';
+import { clock } from '../sync.js?v=20261103_v77';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v77';
+import { copyInvite, inviteUrl } from './chat.js?v=20261103_v77';
+import { parseVideoUrl } from '../providers.js?v=20261103_v77';
+import { resolveMedia } from './selection.js?v=20261103_v77';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -71,13 +71,18 @@ function Settings(ctx) {
             }
           },
         }, '🚪 Odayı Kapat ve Herkesi Çıkar')) : null,
-      h('div', { class: 'settings-group' },
-        h('h4', {}, 'Watchlivo Uygulamaları'),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-          h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
-          h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
-        )
-      )
+      (() => {
+        const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+        const inApk = /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
+        if (inApk) return null;
+        return h('div', { class: 'settings-group' },
+          h('h4', {}, 'Watchlivo Uygulamaları'),
+          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+            h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
+            h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
+          )
+        );
+      })()
     );
   };
   update();
