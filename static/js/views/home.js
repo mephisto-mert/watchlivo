@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v70';
-import { state, set, getFriends } from '../store.js?v=20261102_v70';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v70';
-import { api } from '../api.js?v=20261102_v70';
-import { createSelection } from './selection.js?v=20261102_v70';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v70';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v71';
+import { state, set, getFriends } from '../store.js?v=20261102_v71';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v71';
+import { api } from '../api.js?v=20261102_v71';
+import { createSelection } from './selection.js?v=20261102_v71';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v71';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v70', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v71', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -284,7 +284,14 @@ export function renderHome(app) {
           const rndBtn = document.getElementById('btn-random-movie');
           if (rndBtn) rndBtn.click();
         },
-      }, '🎲 Rastgele Film'))
+      }, '🎲 Rastgele Film'),
+      h('button', {
+        type: 'button',
+        id: 'btn-dock-themes',
+        class: 'dock-quick-btn theme-btn',
+        title: '21st.dev 8 Sinema Teması Seçici',
+        onclick: () => openThemeModal(),
+      }, '🎨 8 Tema'))
   );
 
   const glassWindow = h('div', { class: 'glass-main-window' },

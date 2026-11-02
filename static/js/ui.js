@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v70';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v71';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -255,23 +255,29 @@ export function buildThemeStudio() {
   const draw = () => {
     const scroller = wrap.closest('.popup, .panel-body');
     const prevScroll = scroller ? scroller.scrollTop : 0;
-    const prefs = state.uiPrefs || { theme: 'obsidian', ambient: 'low', density: 'comfortable', cardStyle: 'glass' };
+    const prefs = state.uiPrefs || { theme: 'supabase', ambient: 'low', density: 'comfortable', cardStyle: 'glass' };
 
     wrap.replaceChildren(
-      h('div', { class: 'theme-sec-title' }, '🎨 Koyu Tema Şeması (Dark Mode)'),
-      h('div', { class: 'theme-grid' }, THEME_SCHEMAS.map((t) =>
+      h('div', { class: 'theme-sec-title' }, '🎨 21st.dev Onaylı 8 Sinema Teması (MiroFish Seçkisi)'),
+      h('div', { class: 'theme-grid theme-grid-8' }, THEME_SCHEMAS.map((t) =>
         h('button', {
           type: 'button',
           class: `theme-card ${prefs.theme === t.id ? 'on' : ''}`,
           'data-theme-id': t.id,
-          onclick: () => { setUiPref({ theme: t.id }); draw(); },
+          onclick: () => {
+            setUiPref({ theme: t.id });
+            draw();
+            toast(`🎨 Tema uygulandı: ${t.name}`);
+          },
         },
           h('span', { class: 'theme-swatch', style: { background: t.swatch, '--swatch-accent': t.accent } },
             h('span', { class: 'theme-swatch-dot', style: { background: t.accent } })),
           h('div', { class: 'theme-meta' },
-            h('b', {}, t.name),
+            h('div', { class: 'theme-title-row' },
+              h('b', {}, t.name),
+              t.badge ? h('span', { class: 'theme-score-badge', style: { '--badge-c': t.accent } }, t.badge) : null),
             h('small', {}, t.desc))))),
-      h('div', { class: 'theme-sec-title' }, '✨ Sahne Ambiyans Işığı'),
+      h('div', { class: 'theme-sec-title' }, '✨ Sahne Ambiyans Işığı (Aurora / Glow)'),
       h('div', { class: 'seg' }, [
         ['off', 'Kapalı', 'Saf siyah arka plan'],
         ['low', 'Loş Sinema', 'Göz yormayan hafif ambiyans'],

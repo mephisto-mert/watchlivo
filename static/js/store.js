@@ -3,16 +3,33 @@ const listeners = new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
 
 export const THEME_SCHEMAS = [
-  { id: 'obsidian', name: 'Sinema İndigo',   desc: 'Watchlivo Studio koyu karbon & kraliyet indigosu', swatch: '#07080d', accent: '#6366f1' },
-  { id: 'oled',     name: 'OLED Tam Siyah',  desc: 'Sıfır ışık sızıntılı #000000 sinema modu', swatch: '#000000', accent: '#38bdf8' },
-  { id: 'crimson',  name: 'Kızıl Sinema',    desc: 'Netflix & Teleparty koyu kızıl ambiyans', swatch: '#0b0608', accent: '#f43f5e' },
-  { id: 'midnight', name: 'Gece Safiri',     desc: 'Hyperbeam & IMAX gece mavisi tonları', swatch: '#070a10', accent: '#3b82f6' },
-  { id: 'emerald',  name: 'Zümrüt Matris',   desc: 'Koyu zümrüt ve siber siyah kontrast', swatch: '#050b09', accent: '#6366f1' },
+  { id: 'supabase',   name: 'Supabase Horizon', badge: '98p · Varsayılan', desc: '21st.dev Obsidyen & Zümrüt-Turkuaz stüdyo', swatch: 'linear-gradient(135deg, #06090e 0%, #0d1f1d 100%)', accent: '#27dcc8', accent2: '#10b981' },
+  { id: 'vercel',     name: 'Vercel OLED',      badge: '97p · Saf Siyah',  desc: '21st.dev #000000 OLED & 1px gümüş kontrast', swatch: 'linear-gradient(135deg, #000000 0%, #111318 100%)', accent: '#38bdf8', accent2: '#e2e8f0' },
+  { id: 'graphite',   name: 'Graphite Cinema',  badge: '95p · Göz Dostu',  desc: '21st.dev Mat antrasit uzun maraton sinema', swatch: 'linear-gradient(135deg, #0d0f14 0%, #181c26 100%)', accent: '#818cf8', accent2: '#6366f1' },
+  { id: 't3chat',     name: 'T3 Chat Cosmic',   badge: '94p · Sosyal Oda', desc: '21st.dev Kozmik mor & neon eflatun parti', swatch: 'linear-gradient(135deg, #0c0916 0%, #1e1136 100%)', accent: '#c084fc', accent2: '#f472b6' },
+  { id: 'indigo',     name: 'Indigo IMAX',      badge: '93p · 4K IMAX',    desc: '21st.dev Gece mavisi & Oceanic Glow', swatch: 'linear-gradient(135deg, #060b16 0%, #0f2042 100%)', accent: '#3b82f6', accent2: '#06b6d4' },
+  { id: 'amber',      name: 'Amber VIP Luxury', badge: '92p · Altın Sinema', desc: '21st.dev Sıcak altın-kehribar VIP salon', swatch: 'linear-gradient(135deg, #0e0b07 0%, #271c0c 100%)', accent: '#f59e0b', accent2: '#fbbf24' },
+  { id: 'catppuccin', name: 'Catppuccin Mocha', badge: '90p · Anime Gece', desc: '21st.dev Kadife mocha & pastel lavanta', swatch: 'linear-gradient(135deg, #11111b 0%, #1e1e2e 100%)', accent: '#b4befe', accent2: '#cba6f7' },
+  { id: 'mint',       name: 'Mint Signal',      badge: '89p · Canlı Yayın', desc: '21st.dev Arduvaz & sinyal yeşili kontrast', swatch: 'linear-gradient(135deg, #071013 0%, #0d2629 100%)', accent: '#2dd4bf', accent2: '#14b8a6' },
 ];
+
+const LEGACY_THEME_MAP = {
+  obsidian: 'supabase',
+  oled: 'vercel',
+  crimson: 't3chat',
+  midnight: 'indigo',
+  emerald: 'mint',
+};
+
+function normalizeThemeId(id) {
+  if (!id) return 'supabase';
+  const mapped = LEGACY_THEME_MAP[id] || id;
+  return THEME_SCHEMAS.some((t) => t.id === mapped) ? mapped : 'supabase';
+}
 
 function loadUiPrefs() {
   const defaults = {
-    theme: 'obsidian',
+    theme: 'supabase',
     ambient: 'low',
     density: 'comfortable',
     cardStyle: 'glass',
@@ -24,7 +41,9 @@ function loadUiPrefs() {
   };
   try {
     const raw = JSON.parse(localStorage.getItem(UI_PREFS_KEY) || '{}');
-    return { ...defaults, ...raw };
+    const merged = { ...defaults, ...raw };
+    merged.theme = normalizeThemeId(merged.theme);
+    return merged;
   } catch (e) {
     return defaults;
   }
@@ -33,12 +52,18 @@ function loadUiPrefs() {
 export function applyUiPrefs(prefs = state?.uiPrefs) {
   if (typeof document === 'undefined' || !prefs) return;
   const root = document.documentElement;
-  root.dataset.theme = prefs.theme || 'obsidian';
+  const themeId = normalizeThemeId(prefs.theme);
+  root.dataset.theme = themeId;
   root.dataset.ambient = prefs.ambient || 'low';
   root.dataset.density = prefs.density || 'comfortable';
   root.dataset.cardStyle = prefs.cardStyle || 'glass';
   root.dataset.subSize = prefs.subSize || 'md';
   root.dataset.subColor = prefs.subColor || 'white';
+  const schema = THEME_SCHEMAS.find((t) => t.id === themeId) || THEME_SCHEMAS[0];
+  if (schema) {
+    root.style.setProperty('--theme-accent', schema.accent);
+    root.style.setProperty('--theme-accent-2', schema.accent2 || schema.accent);
+  }
   const sizeMap = { sm: '0.92rem', md: '1.15rem', lg: '1.42rem', xl: '1.72rem' };
   const colorMap = { white: '#ffffff', yellow: '#fde047', cyan: '#6366f1', box: '#ffffff' };
   const bgMap = { white: 'rgba(7, 8, 13, 0.72)', yellow: 'rgba(7, 8, 13, 0.78)', cyan: 'rgba(7, 8, 13, 0.82)', box: 'rgba(0, 0, 0, 0.92)' };
