@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261102_v58';
-import { api } from './api.js?v=20261102_v58';
-import { state, set } from './store.js?v=20261102_v58';
+import { h, popup, toast } from './ui.js?v=20261102_v59';
+import { api } from './api.js?v=20261102_v59';
+import { state, set } from './store.js?v=20261102_v59';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -35,13 +35,51 @@ export function loadProfile() {
       const p = JSON.parse(localStorage.getItem(k) || 'null');
       if (p && !p.id && p.uid) p.id = p.uid;
       if (p && !p.uid && p.id) p.uid = p.id;
-      if (p && p.name && p.id && !p.isGuest && !/^Misafir/i.test(String(p.name))) {
-        if (!p.authToken) p.authToken = getVaultToken(p.email || p.handle) || '';
-        return p;
+      if (p && p.name && p.id) {
+        if (!p.isGuest && !/^Misafir/i.test(String(p.name))) {
+          if (!p.authToken) p.authToken = getVaultToken(p.email || p.handle) || '';
+          return p;
+        }
+        if (p.isGuest && p.guestConfirmed) {
+          return p;
+        }
       }
     } catch (e) { /* ignore */ }
   }
   return null;
+}
+
+export function saveGuestProfile(data = {}) {
+  const prev = (() => {
+    try { return JSON.parse(localStorage.getItem(KEY) || 'null') || {}; } catch (e) { return {}; }
+  })();
+  const randSuffix = Math.floor(1000 + Math.random() * 9000);
+  const defaultGuestName = (prev.isGuest && prev.name && prev.name !== 'Misafir İzleyici') ? prev.name : `Misafir #${randSuffix}`;
+  const name = String(data.name || defaultGuestName).trim().slice(0, 24) || defaultGuestName;
+  const resolvedId = data.uid || data.id || (prev.isGuest && (prev.id || prev.uid)) || ('guest_' + Math.random().toString(36).slice(2, 10));
+  const handle = String(data.handle || prev.handle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || `misafir${randSuffix}`);
+  const p = {
+    id: resolvedId,
+    uid: resolvedId,
+    name,
+    handle,
+    email: '',
+    color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+    avatar: String(data.avatarUrl || data.avatar || prev.avatarUrl || '').trim(),
+    avatarUrl: String(data.avatarUrl || data.avatar || prev.avatarUrl || '').trim(),
+    hideLocation: Boolean(data.hideLocation ?? prev.hideLocation ?? false),
+    watchMinutes: Math.max(0, Number(prev.watchMinutes || 15)),
+    medal: '🍿 Misafir İzleyici',
+    authProvider: 'guest',
+    authToken: '',
+    verified: false,
+    isGuest: true,
+    guestConfirmed: true,
+  };
+  localStorage.setItem(KEY, JSON.stringify(p));
+  localStorage.setItem(LAST_PROVIDER_KEY, 'guest');
+  try { set({ self: p }); } catch (_) {}
+  return p;
 }
 
 export function saveProfile(data = {}) {
@@ -329,9 +367,28 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     return row;
   };
 
-  const renderSocialButtons = () => h('div', { class: 'wl-social-stack' },
-    h('div', { class: 'wl-auth-divider' }, h('span', {}, 'veya Google ile Tek Tıkla Giriş')),
+  const doGuestLogin = (customName = '') => {
+    const prof = saveGuestProfile({ name: customName, color });
+    finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
+  };
+
+  const renderSocialButtons = ({ hideGuestBtn = false } = {}) => h('div', { class: 'wl-social-stack' },
+    h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Tek Tıkla Giriş' : 'veya Hızlı Giriş Seçenekleri')),
     h('div', { class: 'wl-social-row' },
+      !hideGuestBtn ? h('button', {
+        type: 'button',
+        id: 'wl-instant-guest-btn',
+        class: 'wl-social-btn wl-social-guest',
+        style: {
+          background: 'linear-gradient(135deg, rgba(39, 220, 200, 0.18), rgba(99, 102, 241, 0.18))',
+          border: '1px solid rgba(39, 220, 200, 0.48)',
+          color: '#5eead4',
+          fontWeight: '700',
+        },
+        onclick: () => doGuestLogin(),
+      },
+      h('span', {}, '👤 Kayıt Olmadan Misafir Olarak Gir'),
+      lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null,
       h('button', {
         type: 'button',
         class: 'wl-social-btn wl-social-google',
@@ -340,7 +397,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
       h('span', {}, 'Google ile Devam Et'),
       lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null)),
-    h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · watchlivo.online Resmi Hesap Doğrulaması'));
+    h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Kayıtsız Misafir veya Resmi Hesap ile Kesintisiz İzle'));
 
   const draw = () => {
     root.replaceChildren();
@@ -424,12 +481,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             type: 'button',
             class: 'btn wl-btn-logout',
             onclick: () => {
-              logoutProfile();
+              const guestProf = logoutProfile();
               isLoggedMember = false;
-              current = null;
+              current = guestProf;
               activeTab = 'login';
-              onDone?.(null);
-              toast('Oturum kapatıldı. Lütfen hesabınızla giriş yapın.');
+              onDone?.(guestProf);
+              toast('Oturum kapatıldı. Misafir olarak devam edebilir veya giriş yapabilirsiniz.');
               draw();
             },
           }, '🚪 Çıkış Yap (Başka Hesaba Geç)'),
@@ -441,12 +498,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       return;
     }
 
-    if (!['login', 'register', 'phone'].includes(activeTab)) activeTab = 'register';
+    if (!['login', 'register', 'guest'].includes(activeTab)) activeTab = 'register';
     const tabsBar = h('div', { class: 'wl-auth-tabs' },
       [
         ['login', '🔑 Giriş Yap'],
         ['register', '✨ Kayıt Ol'],
-        ['phone', '📱 Telefon'],
+        ['guest', '👤 Misafir Girişi'],
       ].map(([id, lbl]) =>
         h('button', {
           type: 'button',
@@ -455,189 +512,36 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }, lbl)));
     root.append(tabsBar);
 
-    if (activeTab === 'phone') {
-      const errBox = h('div', { class: 'wl-auth-err' });
-
-      if (!phoneConfirmation) {
-        const phoneInp = h('input', {
-          class: 'input',
-          type: 'tel',
-          placeholder: '5XX XXX XX XX',
-          autocomplete: 'tel',
-          style: { flex: '1' },
-        });
-        const prefixBox = h('div', { class: 'wl-phone-prefix' }, '🇹🇷 +90');
-        const phoneRow = h('div', { class: 'wl-phone-row' }, prefixBox, phoneInp);
-        const recaptchaBox = h('div', { id: 'wl-recaptcha-container', style: { minHeight: '0' } });
-
-        const sendSms = async () => {
-          errBox.style.color = '#fb7185';
-          errBox.textContent = '';
-          let raw = phoneInp.value.trim().replace(/[\s\-\(\)]/g, '');
-          if (!raw) {
-            errBox.textContent = 'Lütfen telefon numaranızı girin.';
-            return;
-          }
-          let formatted = raw;
-          if (formatted.startsWith('05')) formatted = '+90' + formatted.slice(1);
-          else if (formatted.startsWith('5') && formatted.length === 10) formatted = '+90' + formatted;
-          else if (!formatted.startsWith('+')) formatted = '+90' + formatted.replace(/^0+/, '');
-
-          if (formatted.length < 11) {
-            errBox.textContent = 'Lütfen geçerli bir telefon numarası girin (+90 5XX XXX XX XX).';
-            return;
-          }
-
-          phoneSending = true;
-          smsBtn.disabled = true;
-          smsBtn.textContent = '⏳ SMS Gönderiliyor...';
-
-          try {
-            const fb = await getFirebaseAuth();
-            if (fb?.auth && fb?.signInWithPhoneNumber && fb?.RecaptchaVerifier) {
-              fb.auth.languageCode = 'tr';
-              recaptchaBox.replaceChildren();
-              const verifier = new fb.RecaptchaVerifier(fb.auth, recaptchaBox, { size: 'invisible' });
-              const confirmation = await fb.signInWithPhoneNumber(fb.auth, formatted, verifier);
-              phoneConfirmation = confirmation;
-              phonePendingNumber = formatted;
-              phoneSending = false;
-              toast(`📱 Firebase SMS kodu gönderildi: ${formatted}`);
-              draw();
-              return;
-            }
-          } catch (fbErr) {
-            console.warn('Firebase SMS provider error, using Watchlivo secure SMS engine:', fbErr);
-          }
-
-          try {
-            const res = await api('/api/auth/phone/send-code', {
-              method: 'POST',
-              body: { phone: formatted },
-            });
-            phoneConfirmation = { backend: true, code: res.code };
-            phonePendingNumber = formatted;
-            phoneSending = false;
-            toast(res.code ? `📱 SMS Onay Kodu: ${res.code}` : (res.message || '📱 SMS Onay Kodu telefonunuza gönderildi.'), 8000);
-            draw();
-            setTimeout(() => {
-              const codeEl = root.querySelector('input[autocomplete="one-time-code"]');
-              if (codeEl && res.code) {
-                codeEl.value = res.code;
-              }
-            }, 60);
-          } catch (err) {
-            phoneSending = false;
-            smsBtn.disabled = false;
-            smsBtn.textContent = '📱 SMS Onay Kodu Gönder';
-            errBox.textContent = err?.data?.error || err.message || 'SMS kodu gönderilemedi. Lütfen numarayı kontrol edin.';
-          }
-        };
-
-        const smsBtn = h('button', {
-          type: 'button',
-          class: 'btn primary wl-btn-full wl-btn-primary-gradient',
-          onclick: sendSms,
-        }, '📱 SMS Onay Kodu Gönder');
-
-        phoneInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendSms(); });
-
-        root.append(
-          h('div', { class: 'wl-auth-form' },
-            h('div', { style: { fontSize: '.84rem', color: 'rgba(255,255,255,0.7)', lineHeight: '1.4', marginBottom: '2px' } },
-              'Telefonunuza gelecek tek kullanımlık SMS koduyla şifresiz ve anında giriş yapın.'),
-            phoneRow,
-            recaptchaBox,
-            errBox,
-            smsBtn),
-          renderSocialButtons());
-        return;
-      }
-
-      // Step 2: Code verification
-      const codeInp = h('input', {
+    if (activeTab === 'guest') {
+      const existingGuestName = (current && current.isGuest && current.name && current.name !== 'Misafir İzleyici') ? current.name : '';
+      const guestNameInp = h('input', {
         class: 'input',
-        type: 'text',
-        inputmode: 'numeric',
-        maxlength: '6',
-        placeholder: '6 Haneli SMS Kodu',
-        autocomplete: 'one-time-code',
-        style: { textAlign: 'center', fontSize: '1.25rem', letterSpacing: '.3em', fontWeight: '700' },
+        id: 'wl-guest-name-input',
+        maxlength: '24',
+        placeholder: 'Görünen Adın (İsteğe bağlı — boş bırakırsan otomatik atanır)',
+        value: existingGuestName,
       });
 
-      const verifyCode = async () => {
-        errBox.style.color = '#fb7185';
-        errBox.textContent = '';
-        const code = codeInp.value.trim();
-        if (code.length < 6) {
-          errBox.textContent = 'Lütfen 6 haneli doğrulama kodunu eksiksiz girin.';
-          return;
-        }
-        verifyBtn.disabled = true;
-        verifyBtn.textContent = '⏳ Doğrulanıyor...';
-        try {
-          if (phoneConfirmation && typeof phoneConfirmation.confirm === 'function') {
-            try {
-              const cred = await phoneConfirmation.confirm(code);
-              const idToken = await cred.user.getIdToken();
-              const reqName = (!state.self?.isGuest && state.self?.name && state.self.name !== 'Hesap Girişi') ? state.self.name : '';
-              const res = await api('/api/auth/oauth', {
-                method: 'POST',
-                body: { provider: 'phone', idToken, color, name: reqName },
-              });
-              if (res?.ok && res.user) {
-                const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-                finish(prof, `✓ ${prof.name} olarak giriş yapıldı!`);
-                return;
-              }
-            } catch (fbConfirmErr) {
-              console.warn('Firebase confirm failed, falling back to server verification:', fbConfirmErr);
-            }
-          }
-          const reqName = (!state.self?.isGuest && state.self?.name && state.self.name !== 'Hesap Girişi') ? state.self.name : '';
-          const res = await api('/api/auth/phone/verify-code', {
-            method: 'POST',
-            body: { phone: phonePendingNumber, code, color, name: reqName },
-          });
-          if (res?.ok && res.user) {
-            const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-            finish(prof, `✓ ${prof.name} olarak giriş yapıldı!`);
-          } else {
-            throw new Error(res?.error || 'Giriş tamamlanamadı.');
-          }
-        } catch (err) {
-          verifyBtn.disabled = false;
-          verifyBtn.textContent = '✅ Kodu Doğrula & Giriş Yap';
-          errBox.textContent = err?.data?.error || err.message || 'Doğrulama başarısız oldu.';
-        }
-      };
-
-      const verifyBtn = h('button', {
+      const guestBtn = h('button', {
         type: 'button',
+        id: 'wl-guest-submit-btn',
         class: 'btn primary wl-btn-full wl-btn-primary-gradient',
-        onclick: verifyCode,
-      }, '✅ Kodu Doğrula & Giriş Yap');
+        onclick: () => doGuestLogin(guestNameInp.value.trim()),
+      }, '🎬 Kayıt Olmadan Hemen İzlemeye Başla');
 
-      const backBtn = h('button', {
-        type: 'button',
-        class: 'wl-auth-link-btn',
-        onclick: () => {
-          phoneConfirmation = null;
-          draw();
-        },
-      }, '‹ Numarayı Değiştir veya Tekrar Kod İste');
-
-      codeInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyCode(); });
+      guestNameInp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') doGuestLogin(guestNameInp.value.trim());
+      });
 
       root.append(
         h('div', { class: 'wl-auth-form' },
-          h('div', { style: { fontSize: '.84rem', color: '#6ee7b7', lineHeight: '1.4' } },
-            `📲 ${phonePendingNumber} numarasına gönderilen SMS kodunu girin:`),
-          codeInp,
-          errBox,
-          verifyBtn,
-          backBtn),
-        renderSocialButtons());
+          h('div', { style: { fontSize: '.84rem', color: 'rgba(255,255,255,0.78)', lineHeight: '1.45', marginBottom: '2px' } },
+            'Kayıt olmadan veya e-posta girmeden doğrudan misafir olarak odalara katılabilir, kendi odanı açabilir ve tüm dizi, film ve müzikleri izleyebilirsin.'),
+          guestNameInp,
+          h('label', { class: 'wl-field-label' }, 'Profil Neon Rengin'),
+          renderColorPicker(),
+          guestBtn),
+        renderSocialButtons({ hideGuestBtn: true }));
       return;
     }
 

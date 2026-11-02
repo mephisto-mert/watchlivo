@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v58';
-import { state, set, getFriends } from '../store.js?v=20261102_v58';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v58';
-import { api } from '../api.js?v=20261102_v58';
-import { createSelection } from './selection.js?v=20261102_v58';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v58';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v59';
+import { state, set, getFriends } from '../store.js?v=20261102_v59';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v59';
+import { api } from '../api.js?v=20261102_v59';
+import { createSelection } from './selection.js?v=20261102_v59';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v59';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v58', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v59', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -98,18 +98,19 @@ export function renderHome(app) {
   setBackground(null);
   const self = state.self;
   const isMember = Boolean(self && !self.isGuest && (self.email || self.authToken));
+  const isConfirmedGuest = Boolean(self && self.isGuest && self.guestConfirmed);
   const nav = h('header', { class: 'top-nav-capsule navbar' },
     h('div', { class: 'nav-left navbar-left' },
       h('button', {
         class: 'user-profile-badge wl-nav-account-btn',
         id: 'nav-account-btn',
-        title: isMember ? `${self.name} (@${self.handle}) — Hesap Ayarları` : 'Watchlivo Giriş Yap / Kayıt Ol',
-        onclick: () => profileSetup({ current: self, dismissable: isMember, onDone: (p) => { set({ self: p }); renderHome(app); } }),
+        title: isMember ? `${self.name} (@${self.handle}) — Hesap Ayarları` : (isConfirmedGuest ? `${self.name} (Misafir) — Giriş Yap / Hesap Aç` : 'Watchlivo Giriş Yap / Misafir İzle'),
+        onclick: () => profileSetup({ current: self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); renderHome(app); } }),
       },
       avatar(self, 30),
       h('div', { class: 'user-meta wl-nav-account-text' },
-        h('span', { class: 'uname' }, isMember ? self.name : 'Giriş Yap / Kayıt Ol'),
-        h('span', { class: 'utag wl-nav-account-sub' }, isMember ? `✓ @${self.handle || 'uye'}` : '🔒 Resmi Hesap Girişi'))),
+        h('span', { class: 'uname' }, isMember ? self.name : (isConfirmedGuest ? self.name : 'Giriş Yap / Misafir Gir')),
+        h('span', { class: 'utag wl-nav-account-sub' }, isMember ? `✓ @${self.handle || 'uye'}` : (isConfirmedGuest ? '👤 Misafir · Hesap Aç' : '🔓 Kayıtsız İzle / Giriş')))),
       navIcon('rooms', 'Odalar', () => {
         const anchor = document.getElementById('lobby-anchor');
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
