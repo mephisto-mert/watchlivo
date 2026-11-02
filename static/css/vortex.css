@@ -609,6 +609,7 @@ a { color: var(--accent); }
   display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px; border-radius: 99px; font-size: .66em; font-weight: 800;
   background: rgba(8,9,15,.86); color: #fff; border: 1px solid rgba(255,59,92,.55);
+  -webkit-backdrop-filter: blur(6px);
   backdrop-filter: blur(6px);
 }
 .meshthumb-live-badge.is-247 { border-color: rgba(99, 102, 241,.65); color: #a7f3d0; }
@@ -1398,7 +1399,7 @@ a { color: var(--accent); }
 
 /* ===== Cihaz uyumluluğu: TV (4K/8K), geniş monitör, tablet, telefon, katlanabilir ===== */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body { min-height: 100dvh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+body { min-height: 100vh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }{ min-height: 100dvh; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 .navbar { padding-top: env(safe-area-inset-top); height: calc(var(--header-height) + env(safe-area-inset-top)); }
 .chatbar { padding-bottom: calc(.55em + env(safe-area-inset-bottom)); }
 * { -webkit-tap-highlight-color: transparent; }
@@ -2099,6 +2100,7 @@ body {
 .platform-card::after, .tv-glass-card::after {
   content: "";
   position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
   inset: 0;
   border-radius: inherit;
   background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.14) 50%, transparent 65%);
@@ -2901,6 +2903,7 @@ header.navbar.top-nav-capsule {
 }
 .hero-backdrop {
   position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
   inset: 0;
   background-size: cover;
   background-position: center 22%;
@@ -2910,6 +2913,7 @@ header.navbar.top-nav-capsule {
 }
 .hero-gradient-overlay {
   position: absolute;
+  top: 0; right: 0; bottom: 0; left: 0;
   inset: 0;
   background:
     linear-gradient(90deg, rgba(7, 8, 13, 0.96) 0%, rgba(7, 8, 13, 0.82) 48%, rgba(7, 8, 13, 0.28) 100%),

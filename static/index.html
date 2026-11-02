@@ -22,13 +22,41 @@
   <title>Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları</title>
   <link rel="canonical" href="https://watchlivo.online/" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261102_v57" type="image/svg+xml" />
-  <link rel="apple-touch-icon" href="/static/watchlivo-logo.svg?v=20261102_v57" />
+  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261102_v58" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="/static/watchlivo-logo.svg?v=20261102_v58" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/vortex.css?v=20261102_v57" />
-  <link rel="stylesheet" href="/static/css/mesh.css?v=20261102_v57" />
+  <link rel="stylesheet" href="/static/css/vortex.css?v=20261102_v58" />
+  <link rel="stylesheet" href="/static/css/mesh.css?v=20261102_v58" />
+  <script>
+    (function(){
+      if (!Element.prototype.replaceChildren) {
+        Element.prototype.replaceChildren = function() {
+          while (this.firstChild) this.removeChild(this.firstChild);
+          for (var i = 0; i < arguments.length; i++) {
+            var n = arguments[i];
+            this.appendChild(typeof n === 'string' ? document.createTextNode(n) : n);
+          }
+        };
+      }
+      if (!String.prototype.replaceAll) {
+        String.prototype.replaceAll = function(s, r) {
+          return s instanceof RegExp ? this.replace(s, r) : this.split(s).join(r);
+        };
+      }
+      if (!Array.prototype.at) {
+        Array.prototype.at = function(n) {
+          n = Math.trunc(n) || 0;
+          if (n < 0) n += this.length;
+          return (n < 0 || n >= this.length) ? undefined : this[n];
+        };
+      }
+      if (!Object.hasOwn) {
+        Object.hasOwn = function(o, p) { return Object.prototype.hasOwnProperty.call(o, p); };
+      }
+    })();
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js" defer></script>
 </head>
 <body>
@@ -39,6 +67,6 @@
   <div id="app" class="app"></div>
   <div id="popup-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
-  <script type="module" src="/static/js/main.js?v=20261102_v57"></script>
+  <script type="module" src="/static/js/main.js?v=20261102_v58"></script>
 </body>
 </html>
