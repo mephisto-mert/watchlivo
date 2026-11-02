@@ -4053,3 +4053,475 @@ header.navbar.top-nav-capsule {
     text-overflow: ellipsis !important;
   }
 }
+
+/* ============================================================================
+   v70: WATCHLIVO CINEMA STUDIO OVERHAUL (85.000+ ARCHIVE & LARGE BENTO CARDS)
+   ============================================================================ */
+
+@media (min-width: 901px) {
+  body:not(.in-room) .app-layout {
+    width: min(94vw, 1580px) !important;
+    max-width: 1580px !important;
+    margin: 0 auto !important;
+    padding: 14px 0 80px !important;
+  }
+
+  body:not(.in-room) #lobby-box,
+  body:not(.in-room) #lobby-anchor,
+  body:not(.in-room) .selection,
+  body:not(.in-room) .sel-head,
+  body:not(.in-room) .sel-search,
+  body:not(.in-room) .catalog-wrap,
+  body:not(.in-room) .poster-grid,
+  body:not(.in-room) .rave-top-bar,
+  body:not(.in-room) .continue-strip,
+  body:not(.in-room) .rave-providers-section,
+  body:not(.in-room) .section-head,
+  body:not(.in-room) .lobby-grid,
+  body:not(.in-room) .tv-channels-grid,
+  body:not(.in-room) .friends-strip {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  body:not(.in-room) .floating-dock {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 6px 0 18px !important;
+    padding: 10px 16px !important;
+    border-radius: 18px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    background: linear-gradient(135deg, rgba(16, 22, 34, 0.95), rgba(10, 14, 22, 0.98)) !important;
+    border: 1px solid rgba(39, 220, 200, 0.18) !important;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  }
+
+  body:not(.in-room) .floating-dock .dock-item {
+    height: 40px !important;
+    padding: 0 16px !important;
+    border-radius: 12px !important;
+    font-size: 0.85rem !important;
+    font-weight: 700 !important;
+    gap: 8px !important;
+  }
+
+  .dock-studio-meta {
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+    margin-left: auto !important;
+    flex-shrink: 0 !important;
+  }
+
+  .dock-studio-badge,
+  .dock-archive-pill {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 7px 14px !important;
+    border-radius: 999px !important;
+    background: rgba(39, 220, 200, 0.09) !important;
+    border: 1px solid rgba(39, 220, 200, 0.26) !important;
+    color: #dcfffb !important;
+    font-size: 0.77rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.01em !important;
+    white-space: nowrap !important;
+  }
+
+  .dock-live-dot,
+  .dock-pulse-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 50% !important;
+    background: #27dcc8 !important;
+    box-shadow: 0 0 10px #27dcc8 !important;
+    display: inline-block !important;
+  }
+
+  .dock-quick-pill,
+  .dock-quick-btn {
+    height: 34px !important;
+    padding: 0 13px !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    color: #eef5ff !important;
+    font-size: 0.76rem !important;
+    font-weight: 700 !important;
+    cursor: pointer !important;
+    transition: all 0.18s ease !important;
+    white-space: nowrap !important;
+  }
+
+  .dock-quick-pill:hover,
+  .dock-quick-btn:hover {
+    background: rgba(39, 220, 200, 0.15) !important;
+    border-color: rgba(39, 220, 200, 0.42) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px) !important;
+  }
+}
+
+@media (max-width: 1280px) {
+  .dock-studio-badge,
+  .dock-archive-pill {
+    display: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .dock-studio-meta {
+    display: none !important;
+  }
+}
+
+/* v70: Top Search & Category Bar Studio Polish */
+.rave-top-bar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 14px !important;
+  margin-bottom: 14px !important;
+  padding: 12px 16px !important;
+  border-radius: 18px !important;
+  background: linear-gradient(135deg, rgba(16, 22, 34, 0.86), rgba(10, 14, 22, 0.92)) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32) !important;
+}
+
+.rave-top-bar .home-search {
+  flex: 1 1 320px !important;
+  max-width: 480px !important;
+  height: 46px !important;
+  border-radius: 13px !important;
+  padding: 0 8px 0 16px !important;
+  background: rgba(8, 12, 19, 0.92) !important;
+  border: 1px solid rgba(39, 220, 200, 0.24) !important;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.45) !important;
+}
+
+.rave-top-bar .home-search input {
+  font-size: 0.9rem !important;
+  font-weight: 500 !important;
+}
+
+.rave-top-bar .home-search .btn.primary {
+  height: 34px !important;
+  padding: 0 18px !important;
+  border-radius: 10px !important;
+  font-size: 0.82rem !important;
+  font-weight: 800 !important;
+}
+
+.rave-top-bar .provider-cat-bar {
+  gap: 8px !important;
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+}
+
+@media (min-width: 901px) {
+  .rave-top-bar .provider-cat-bar {
+    justify-content: flex-end !important;
+  }
+}
+
+.provider-cat-pill {
+  height: 36px !important;
+  padding: 0 12px !important;
+  border-radius: 11px !important;
+  font-size: 0.77rem !important;
+  font-weight: 700 !important;
+  flex-shrink: 0 !important;
+}
+
+/* v70: Providers Section Header */
+.rave-providers-head {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  margin: 4px 0 12px !important;
+  flex-wrap: wrap !important;
+}
+
+.rave-providers-title-group {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  flex-wrap: wrap !important;
+}
+
+.rave-providers-title {
+  font-size: 1.08rem !important;
+  font-weight: 800 !important;
+  color: #f4f8ff !important;
+  letter-spacing: -0.015em !important;
+}
+
+.rave-providers-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 4px 11px !important;
+  border-radius: 999px !important;
+  background: rgba(39, 220, 200, 0.12) !important;
+  border: 1px solid rgba(39, 220, 200, 0.3) !important;
+  color: #27dcc8 !important;
+  font-size: 0.74rem !important;
+  font-weight: 800 !important;
+}
+
+.rave-providers-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+}
+
+.provider-head-btn {
+  height: 34px !important;
+  padding: 0 14px !important;
+  border-radius: 10px !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #dbe7fb !important;
+  font-size: 0.76rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: all 0.18s ease !important;
+}
+
+.provider-head-btn.primary {
+  background: linear-gradient(135deg, rgba(39, 220, 200, 0.2), rgba(20, 165, 255, 0.18)) !important;
+  border-color: rgba(39, 220, 200, 0.42) !important;
+  color: #ffffff !important;
+}
+
+.provider-head-btn:hover {
+  background: rgba(39, 220, 200, 0.18) !important;
+  border-color: rgba(39, 220, 200, 0.48) !important;
+  color: #ffffff !important;
+}
+
+/* v70: Large 6-Column Studio Platform Bento Grid (Desktop & Tablet) */
+@media (min-width: 721px) {
+  .provider-grid.rave-home-provider-grid {
+    display: grid !important;
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+    gap: 14px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 4px 0 10px 0 !important;
+  }
+
+  .provider-tile.rave-icon-tile {
+    position: relative !important;
+    height: 112px !important;
+    min-height: 112px !important;
+    max-height: 112px !important;
+    padding: 15px 16px 13px !important;
+    border-radius: 18px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    text-align: left !important;
+    gap: 6px !important;
+    background:
+      radial-gradient(125% 110% at 100% 0%, color-mix(in srgb, var(--brand, #27dcc8) 28%, transparent) 0%, rgba(16, 22, 34, 0.94) 68%),
+      linear-gradient(180deg, rgba(20, 27, 42, 0.96) 0%, rgba(11, 15, 24, 0.99) 100%) !important;
+    border: 1px solid color-mix(in srgb, var(--brand, #27dcc8) 38%, rgba(255, 255, 255, 0.09)) !important;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease, border-color 0.2s ease !important;
+    overflow: hidden !important;
+  }
+
+  .provider-tile.rave-icon-tile:hover {
+    transform: translateY(-4px) scale(1.015) !important;
+    border-color: color-mix(in srgb, var(--brand, #27dcc8) 78%, #ffffff) !important;
+    box-shadow:
+      0 18px 36px rgba(0, 0, 0, 0.52),
+      0 0 26px color-mix(in srgb, var(--brand, #27dcc8) 34%, transparent) !important;
+  }
+
+  .provider-tile.rave-icon-tile[data-provider="cinema"] {
+    background:
+      radial-gradient(135% 120% at 100% 0%, rgba(39, 220, 200, 0.34) 0%, rgba(255, 184, 0, 0.14) 45%, rgba(15, 22, 34, 0.96) 78%),
+      linear-gradient(180deg, rgba(22, 32, 48, 0.98) 0%, rgba(11, 16, 26, 0.99) 100%) !important;
+    border-color: rgba(39, 220, 200, 0.62) !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.42), 0 0 22px rgba(39, 220, 200, 0.2) !important;
+  }
+
+  .provider-tile.rave-icon-tile .provider-logo-wrap {
+    height: 36px !important;
+    width: auto !important;
+    max-width: 68% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    margin: 0 !important;
+  }
+
+  .provider-tile.rave-icon-tile .provider-logo-wrap img,
+  .provider-tile.rave-icon-tile .provider-logo-img {
+    height: 32px !important;
+    max-height: 34px !important;
+    width: auto !important;
+    max-width: 140px !important;
+    object-fit: contain !important;
+    object-position: left center !important;
+    filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.45)) !important;
+  }
+
+  .provider-tile.rave-icon-tile .provider-corner-tag {
+    position: absolute !important;
+    top: 11px !important;
+    right: 11px !important;
+    padding: 3px 8px !important;
+    border-radius: 999px !important;
+    font-size: 0.63rem !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.03em !important;
+    color: #f4f9ff !important;
+    background: color-mix(in srgb, var(--brand, #27dcc8) 24%, rgba(9, 13, 21, 0.88)) !important;
+    border: 1px solid color-mix(in srgb, var(--brand, #27dcc8) 52%, rgba(255, 255, 255, 0.16)) !important;
+    pointer-events: none !important;
+    white-space: nowrap !important;
+  }
+
+  .provider-tile.rave-icon-tile .provider-meta {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: flex-end !important;
+    gap: 2px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .provider-tile.rave-icon-tile .ptitle {
+    font-size: 0.96rem !important;
+    font-weight: 800 !important;
+    color: #f6faff !important;
+    line-height: 1.18 !important;
+    letter-spacing: -0.01em !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+  }
+
+  .provider-tile.rave-icon-tile .psub {
+    display: block !important;
+    font-size: 0.72rem !important;
+    font-weight: 500 !important;
+    color: rgba(204, 219, 242, 0.78) !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
+  }
+
+  .provider-tile.rave-icon-tile.extend-tile {
+    height: 112px !important;
+    min-height: 112px !important;
+    max-height: 112px !important;
+    padding: 15px 16px 13px !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    background: linear-gradient(135deg, rgba(39, 220, 200, 0.14), rgba(16, 22, 34, 0.95)) !important;
+    border: 1px dashed rgba(39, 220, 200, 0.48) !important;
+  }
+
+  .provider-tile.rave-icon-tile.extend-tile .extend-plus {
+    font-size: 1.35rem !important;
+    font-weight: 900 !important;
+    color: #27dcc8 !important;
+  }
+}
+
+@media (min-width: 721px) and (max-width: 1220px) {
+  .provider-grid.rave-home-provider-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+}
+
+/* v70: Mobile Cleanliness Guard (Keep 4-Col Mobile Cards Uncluttered) */
+@media (max-width: 720px) {
+  .provider-tile.rave-icon-tile .psub,
+  .provider-tile.rave-icon-tile .provider-corner-tag {
+    display: none !important;
+  }
+  .rave-providers-head {
+    margin: 2px 0 8px !important;
+    gap: 6px !important;
+  }
+  .rave-providers-title {
+    font-size: 0.92rem !important;
+  }
+  .rave-providers-badge {
+    font-size: 0.68rem !important;
+    padding: 2px 8px !important;
+  }
+  .rave-providers-actions .provider-head-btn.primary {
+    display: none !important;
+  }
+  .rave-providers-actions .provider-head-btn {
+    height: 28px !important;
+    padding: 0 10px !important;
+    font-size: 0.7rem !important;
+  }
+}
+
+/* v70: Desktop Lobby Toolbar & Room Search Full-Width Alignment */
+@media (min-width: 901px) {
+  #lobby-anchor,
+  #lobby-anchor.lobby-toolbar {
+    margin-top: 18px !important;
+    padding: 14px 18px !important;
+    border-radius: 18px !important;
+    background: linear-gradient(135deg, rgba(16, 22, 34, 0.88), rgba(10, 14, 22, 0.94)) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28) !important;
+  }
+
+  .lobby-toolbar-right {
+    flex: 0 0 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
+  }
+
+  #lobby-search,
+  .lobby-search-compact {
+    width: 280px !important;
+    min-width: 260px !important;
+    max-width: 340px !important;
+    height: 38px !important;
+    border-radius: 11px !important;
+    padding: 0 14px !important;
+    font-size: 0.82rem !important;
+    background: rgba(8, 12, 19, 0.92) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  }
+
+  .friends-strip {
+    padding: 14px 18px !important;
+    border-radius: 16px !important;
+    margin: 12px 0 18px !important;
+  }
+
+  .tv-channels-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 14px !important;
+  }
+}

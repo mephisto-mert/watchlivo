@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v68';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v68';
-import { avatar } from '../profile.js?v=20261102_v68';
-import { clock } from '../sync.js?v=20261102_v68';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v68';
-import { copyInvite, inviteUrl } from './chat.js?v=20261102_v68';
-import { parseVideoUrl } from '../providers.js?v=20261102_v68';
-import { resolveMedia } from './selection.js?v=20261102_v68';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v70';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v70';
+import { avatar } from '../profile.js?v=20261102_v70';
+import { clock } from '../sync.js?v=20261102_v70';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v70';
+import { copyInvite, inviteUrl } from './chat.js?v=20261102_v70';
+import { parseVideoUrl } from '../providers.js?v=20261102_v70';
+import { resolveMedia } from './selection.js?v=20261102_v70';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -125,7 +125,7 @@ function Vote(ctx) {
       urlInput,
       h('button', { type: 'button', class: 'btn sm primary', onclick: () => addFromInput(false) }, '+ Ekle')),
     h('div', { style: { display: 'flex', gap: '6px' } },
-      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 40.000+ Katalog & YouTube Ara')));
+      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 85.000+ Katalog & YouTube Ara')));
 
   const update = () => {
     if (el.contains(document.activeElement) && document.activeElement === urlInput) return;

@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v68';
-import { state, set, getFriends } from '../store.js?v=20261102_v68';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v68';
-import { api } from '../api.js?v=20261102_v68';
-import { createSelection } from './selection.js?v=20261102_v68';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v68';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v70';
+import { state, set, getFriends } from '../store.js?v=20261102_v70';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v70';
+import { api } from '../api.js?v=20261102_v70';
+import { createSelection } from './selection.js?v=20261102_v70';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v70';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v68', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v70', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -169,7 +169,7 @@ export function renderHome(app) {
   let filter = 'all';
   let query = '';
   const lobbyBox = h('div', { id: 'lobby-box' });
-  const lobbySearch = h('input', { class: 'input', placeholder: 'Katılacak yeni odalar keşfet...', style: { maxWidth: '360px' } });
+  const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', style: { maxWidth: '360px' } });
   const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['nearby', 'Çevremdekiler'], ['public', 'Herkese Açık']].map(([k, label]) =>
     h('button', { class: `lobby-tab ${k === filter ? 'on' : ''}`, onclick: (e) => { filter = k; tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); draw(true); } }, label)));
   let lastRoomsSig = '';
@@ -210,9 +210,9 @@ export function renderHome(app) {
 
   const makeDockLabel = (id) => ({
     home: 'Keşfet',
-    cinema: 'Sinema+',
-    rooms: 'Odalar',
-    tv: 'Canlı TV',
+    cinema: '85.000+ Sinema+',
+    rooms: 'Canlı Odalar',
+    tv: '7/24 Canlı TV',
     profile: 'Profil',
   }[id] || id);
 
@@ -238,7 +238,7 @@ export function renderHome(app) {
       selection.setProvider(null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
-    makeDockBtn('cinema', '40.000+ Sinema, Dizi & Anime', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
+    makeDockBtn('cinema', '85.000+ Sinema, Dizi & Anime', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
       selection.setProvider('cinema');
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
@@ -264,7 +264,27 @@ export function renderHome(app) {
     }),
     makeDockBtn('profile', 'Profilim & Ayarlar', icons.friends, false, () => {
       profileSetup({ current: state.self, dismissable: true, onDone: (p) => { if (p) set({ self: p }); renderHome(app); } });
-    })
+    }),
+    h('div', { class: 'dock-studio-meta' },
+      h('span', { class: 'dock-archive-pill' },
+        h('span', { class: 'dock-pulse-dot' }),
+        '85.000+ Film, Dizi & Anime · 4K TR Dublaj & Altyazı'),
+      h('button', {
+        type: 'button',
+        class: 'dock-quick-btn',
+        onclick: () => {
+          selection.setProvider(null);
+          setTimeout(() => document.getElementById('btn-trending-toggle')?.click(), 30);
+        },
+      }, '🔥 Vitrin & Trendler'),
+      h('button', {
+        type: 'button',
+        class: 'dock-quick-btn random',
+        onclick: () => {
+          const rndBtn = document.getElementById('btn-random-movie');
+          if (rndBtn) rndBtn.click();
+        },
+      }, '🎲 Rastgele Film'))
   );
 
   const glassWindow = h('div', { class: 'glass-main-window' },
@@ -273,7 +293,7 @@ export function renderHome(app) {
       h('div', { class: 'lobby-toolbar-left' },
         h('h2', { class: 'lobby-heading' }, 'Canlı Odalar'),
         tabs),
-      h('div', { class: 'lobby-toolbar-right', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'nowrap' } },
+      h('div', { class: 'lobby-toolbar-right' },
         h('button', {
           type: 'button',
           class: 'btn sm primary',

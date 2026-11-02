@@ -229,7 +229,7 @@ export const LOGOS = {
     '<rect x="6" y="7" width="30" height="30" rx="9" fill="url(#chub)"/>' +
     '<path d="M16 14v16l13-8-13-8z" fill="#ffffff"/>' +
     '<text x="42" y="21" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13.2" letter-spacing="0.3">SİNEMA, DİZİ &amp; ANİME+</text>' +
-    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">40.000+ FİLM · DİZİ · ANİMETRİX 4K</text>'
+    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">85.000+ FİLM · DİZİ · ANİMETRİX 4K</text>'
   ),
   vk: svgRaw(
     '<rect x="8" y="8" width="28" height="28" rx="8" fill="#0077ff"/>' +
@@ -251,14 +251,14 @@ export const LOGOS = {
 
 export const PROVIDER_CATEGORIES = [
   { id: 'all', label: '🌐 Tüm Platformlar' },
-  { id: 'free_tr', label: '🍿 40.000+ Ana Arşiv' },
+  { id: 'free_tr', label: '🍿 85.000+ Ana Arşiv' },
   { id: 'global', label: '🎬 Global Sinema & Anime' },
   { id: 'tr', label: '🇹🇷 Yerli Platformlar' },
 ];
 
 export const PROVIDERS = [
-  { id: 'cinema', name: 'Sinema, Dizi & Anime+', cat: 'free_tr', badge: '40.000+ Film · Dizi · Anime · TR Dublaj & Altyazı', logo: LOGOS.cinema, bg: '#10121a', accent: '#ff6b00', web: true, kind: 'catalog', freeNoAuth: true,
-    homeUrl: '', placeholder: '40.000+ ücretsiz film, yabancı dizi, Animetrix/Animecix anime ara veya bağlantı yapıştır...',
+  { id: 'cinema', name: 'Sinema, Dizi & Anime+', cat: 'free_tr', badge: '85.000+ Film · Dizi · Anime · TR Dublaj & Altyazı', logo: LOGOS.cinema, bg: '#10121a', accent: '#ff6b00', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: '', placeholder: '85.000+ ücretsiz film, yabancı dizi, Animetrix/Animecix anime ara veya bağlantı yapıştır...',
     idParser: (u) => (
       (u.match(/hdfilmcehennemi\.[a-z.]+\/((?:film|dizi|bolum)\/[\w-]+)/i) || [])[1] ||
       (u.match(/dizibox\.[a-z.]+\/((?:diziler\/)?[\w-]+(?:-izle)?)/i) || [])[1] ||

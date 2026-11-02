@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261102_v68';
-import { api, qs } from '../api.js?v=20261102_v68';
-import { parseVideoUrl } from '../providers.js?v=20261102_v68';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261102_v68';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261102_v68';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261102_v68';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261102_v70';
+import { api, qs } from '../api.js?v=20261102_v70';
+import { parseVideoUrl } from '../providers.js?v=20261102_v70';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261102_v70';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261102_v70';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261102_v70';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -555,7 +555,7 @@ export function renderDesktopKind(p, body, pick) {
 }
 
 const CATALOG_CATEGORIES = [
-  { id: 'all', label: '✨ Tüm Katalog (40.000+)' },
+  { id: 'all', label: '✨ Tüm Katalog (85.000+)' },
   { id: 'series', label: '📺 Tüm Diziler' },
   { id: 'movies', label: '🎬 Tüm Filmler' },
   { id: 'anime', label: '⛩️ Anime (Animetrix / Fansub)' },
@@ -614,7 +614,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   let hasMorePages = true;
   let loadingMore = false;
   let catalogTotals = p.id === 'cinema' || p.freeNoAuth
-    ? { totalAvailable: 42600, totalTv: 18400, totalMovies: 24200 }
+    ? { totalAvailable: 86400, totalTv: 31600, totalMovies: 54800 }
     : { totalAvailable: 3500, totalTv: 1400, totalMovies: 2100 };
   let ioObserver = null;
 

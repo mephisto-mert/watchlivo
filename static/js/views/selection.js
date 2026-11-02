@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v68';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v68';
-import { api, qs } from '../api.js?v=20261102_v68';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v68';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v68';
-import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v68';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v70';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v70';
+import { api, qs } from '../api.js?v=20261102_v70';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v70';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v70';
+import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v70';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -33,9 +33,66 @@ export function attachTilt(card) {
   return card;
 }
 
+const PROVIDER_SUBTITLES = {
+  cinema: '85.000+ Film · Dizi · Anime 4K',
+  youtube: 'Video, Müzik & Canlı Yayın',
+  ravedj: 'AI Mashup & Ortak DJ Mix',
+  drive: 'Bulut 1080p MKV & MP4',
+  netflix: '4K HDR · TR Dublaj & Altyazı',
+  disney: 'Star Wars · Marvel · Pixar 4K',
+  prime: 'Amazon Originals · 4K UHD',
+  max: 'HBO · Harry Potter · LOTR 4K',
+  apple: 'Apple Originals · 4K Dolby',
+  exxen: 'Gibi · Konuşanlar · Yerli Şov',
+  blutv: 'Behzat Ç. · İlk ve Son · HBO',
+  gain: 'Ayak İşleri · 10 Bin Adım',
+  tod: 'beIN Originals · Yerli & Global',
+  tabii: 'Gassal · TRT Orijinal Yapımlar',
+  tvplus: 'Yerli Sinema & Vizyon 4K',
+  puhutv: 'Şahsiyet · Yeşilçam Klasikleri',
+  mubi: 'Festival & Bağımsız Sinema',
+  crunchyroll: '4K Anime · Fansub & Dublaj',
+  hulu: 'FX Originals & Yabancı Dizi',
+  paramount: 'Showtime & Gişe Filmleri',
+  peacock: 'NBC Universal & Sitcom 4K',
+  vk: 'HD Sinema & Dizi Akışı',
+  rutube: 'HD Video & Sinema',
+  pluto: 'Ücretsiz Sinema & TV',
+  tubi: 'Ücretsiz Gişe & Klasikler',
+};
+
+const PROVIDER_CORNER_TAGS = {
+  cinema: '85.000+ 4K',
+  youtube: 'CANLI & 4K',
+  ravedj: 'AI MASHUP',
+  drive: 'DIRECT HD',
+  netflix: '4K DUBLAJ',
+  disney: '4K IMAX',
+  prime: '4K UHD',
+  max: 'HBO 4K',
+  apple: '4K HDR',
+  exxen: 'YERLİ HD',
+  blutv: 'YERLİ 4K',
+  gain: 'ORİJİNAL',
+  tod: 'YERLİ & FİLM',
+  tabii: 'TRT ORİJİNAL',
+  tvplus: 'VİZYON HD',
+  puhutv: 'YEŞİLÇAM & DİZİ',
+  mubi: 'KÜLT SİNEMA',
+  crunchyroll: 'ANİME 4K',
+  hulu: 'FX & DİZİ',
+  paramount: 'SİNEMA 4K',
+  peacock: 'STÜDYO HD',
+  vk: 'HD AKIŞ',
+  pluto: '7/24 FİLM',
+  tubi: 'ÜCRETSİZ',
+};
+
 export function providerTile(p, onClick) {
   const isHero = p.id === 'cinema';
   const shortName = p.id === 'cinema' ? 'Sinema+' : (p.id === 'ravedj' ? 'Watchlivo DJ' : p.name);
+  const subText = PROVIDER_SUBTITLES[p.id] || p.badge || '4K Senkron İzle';
+  const cornerTag = PROVIDER_CORNER_TAGS[p.id] || (p.cat === 'tr' ? 'YERLİ' : '4K HD');
   const card = h('div', {
     class: `provider-tile rave-icon-tile ${isHero ? 'hero-provider-tile' : ''}`,
     role: 'button',
@@ -43,17 +100,19 @@ export function providerTile(p, onClick) {
     'data-provider': p.id,
     'data-brand': p.id,
     'data-category': p.cat || 'global',
-    title: `${p.name}${p.badge ? ' — ' + p.badge : ''}`,
+    title: `${p.name} — ${subText}`,
     style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#27DCC8' },
     onclick: () => onClick(p),
     onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
   },
+    h('span', { class: 'provider-corner-tag' }, cornerTag),
     h('div', { class: 'provider-logo-wrap' },
       p.logo
         ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
-        : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#27DCC8' }, html: icons[p.glyph] }) : h('span', { style: { fontWeight: '800', fontSize: '.85rem' } }, shortName.slice(0, 2)))),
+        : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#27DCC8' }, html: icons[p.glyph] }) : h('span', { style: { fontWeight: '800', fontSize: '.95rem' } }, shortName.slice(0, 2)))),
     h('div', { class: 'provider-meta' },
-      h('span', { class: 'ptitle' }, shortName)));
+      h('span', { class: 'ptitle' }, shortName),
+      h('span', { class: 'psub' }, subText)));
 
   return card;
 }
@@ -128,7 +187,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let provider = initialProvider ? getProvider(initialProvider) : null;
   let superQuery = '';
   let catFilter = 'all';
-  let showAllProviders = false;
+  let showAllProviders = typeof window !== 'undefined' ? window.innerWidth > 900 : true;
   let showTrending = false;
   let trendingItems = shuffleArray(HERO_DEFAULT_POOL);
   let trendingFetched = false;
@@ -252,7 +311,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     try {
       await ensureTrending(true);
       if (!provider && root.isConnected) renderGrid();
-      toast('🎲 40.000+ Arşivden yeni vitrin önerileri getirildi!');
+      toast('🎲 85.000+ Arşivden yeni vitrin önerileri getirildi!');
     } finally {
       if (btnEl && btnEl.isConnected) {
         btnEl.disabled = false;
@@ -292,7 +351,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   ];
 
   function renderGrid() {
-    const input = h('input', { placeholder: 'Film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { placeholder: '85.000+ film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
     const run = () => { superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
@@ -303,7 +362,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           ...filteredProviders.filter((p) => !RAVE_TOP_IDS.includes(p.id)),
         ]
       : filteredProviders;
-    const defaultCap = 7;
+    const defaultCap = 11;
     const isCollapsedGrid = !compact && catFilter === 'all' && !showAllProviders && orderedAll.length > defaultCap;
     const visibleProviders = isCollapsedGrid ? orderedAll.slice(0, defaultCap) : orderedAll;
     const hiddenCount = orderedAll.length - visibleProviders.length;
@@ -333,13 +392,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         id: 'btn-random-movie',
         class: 'provider-cat-pill random-pill',
         onclick: (e) => pickRandomMovie(e.currentTarget),
-      }, '🎲 Rastgele Film') : null,
-      !compact && catFilter === 'all' && showAllProviders ? h('button', {
-        type: 'button',
-        id: 'provider-expand-btn',
-        class: 'provider-cat-pill expand-toggle active',
-        onclick: () => { showAllProviders = false; renderGrid(); },
-      }, '▲ Daralt') : null);
+      }, '🎲 Rastgele Film') : null);
 
     const openTvSeriesModal = (tvItem, tvProv) => {
       const box = h('div', { style: { minHeight: '340px' } });
@@ -361,7 +414,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const trendingRail = !compact && showTrending && trendingItems.length ? h('div', { class: 'trending-strip' },
       h('div', { class: 'trending-strip-head' },
-        h('span', { class: 'trending-strip-title' }, '🔥 40.000+ Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
+        h('span', { class: 'trending-strip-title' }, '🔥 85.000+ Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
         h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
           h('button', { type: 'button', class: 'btn sm', onclick: (e) => shuffleShowcaseUI(e.currentTarget) }, '🎲 Yenile & Karıştır'),
           h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×'))),
@@ -395,7 +448,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
         }))) : null;
 
-    const historyList = (!compact && showAllProviders && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
+    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
     const historyRail = historyList.length ? h('div', { class: 'continue-strip' },
       h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar:'),
       ...historyList.map((item) => {
@@ -435,7 +488,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const topBar = compact
       ? h('div', {}, searchEl, catBar)
-      : h('div', { class: 'rave-top-bar' }, searchEl, ...(showAllProviders ? [catBar] : []));
+      : h('div', { class: 'rave-top-bar' }, searchEl, catBar);
 
     const moreTile = isCollapsedGrid ? h('div', {
       class: 'provider-tile rave-icon-tile extend-tile',
@@ -447,7 +500,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     },
       h('div', { class: 'extend-plus' }, `+${hiddenCount}`),
       h('div', { class: 'provider-meta' },
-        h('span', { class: 'ptitle' }, 'Tümü'))) : null;
+        h('span', { class: 'ptitle' }, 'Tümü'),
+        h('span', { class: 'psub' }, `${orderedAll.length} Stüdyo & Arşiv`))) : null;
 
     const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
     const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
@@ -562,12 +616,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 provider = getProvider('cinema');
                 render();
               },
-            }, '🎬 40.000+ Kataloğu Aç'),
+            }, '🎬 85.000+ Kataloğu Aç'),
             h('button', {
               type: 'button',
               id: 'btn-shuffle-hero',
               class: 'btn-download-glass hero-shuffle-btn',
-              title: '40.000+ içerikten vitrini rastgele karıştır',
+              title: '85.000+ içerikten vitrini rastgele karıştır',
               onclick: (e) => shuffleShowcaseUI(e.currentTarget),
             }, '🎲 Vitrini Karıştır'),
             h('button', {
@@ -607,7 +661,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           }))),
       h('div', { class: 'hero-showcase-strip' },
         h('div', { class: 'hero-showcase-head' },
-          h('span', { class: 'hero-showcase-title' }, `🎬 40.000+ Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
+          h('span', { class: 'hero-showcase-title' }, `🎬 85.000+ Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
           h('div', { class: 'hero-showcase-arrows' },
             h('button', {
               type: 'button',
@@ -624,7 +678,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               type: 'button',
               id: 'btn-shuffle-showcase',
               class: 'btn sm primary',
-              title: '40.000+ arşivden yeni rastgele vitrin önerileri getir',
+              title: '85.000+ arşivden yeni rastgele vitrin önerileri getir',
               onclick: (e) => shuffleShowcaseUI(e.currentTarget),
             }, '🎲 Karıştır'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
@@ -633,6 +687,22 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         heroStripRow)) : null;
 
     const gridSection = h('div', { class: 'section-row rave-providers-section' },
+      !compact ? h('div', { class: 'rave-providers-head' },
+        h('div', { class: 'rave-providers-title-group' },
+          h('span', { class: 'rave-providers-title' }, '🎬 Yayın Platformları & Stüdyolar'),
+          h('span', { class: 'rave-providers-badge' }, `${PROVIDERS.length} Platform · 85.000+ Film, Dizi & Anime`)),
+        h('div', { class: 'rave-providers-actions' },
+          h('button', {
+            type: 'button',
+            class: 'provider-head-btn primary',
+            onclick: () => { provider = getProvider('cinema'); render(); },
+          }, '🍿 85.000+ Ana Arşivi Aç'),
+          catFilter === 'all' ? h('button', {
+            type: 'button',
+            id: 'provider-expand-btn',
+            class: 'provider-head-btn',
+            onclick: () => { showAllProviders = !showAllProviders; renderGrid(); },
+          }, showAllProviders ? '▲ Kompakt Görünüm (12)' : `▼ Tüm Platformları Göster (${orderedAll.length})`) : null)) : null,
       h('div', { class: compact ? 'provider-grid compact' : 'provider-grid rave-home-provider-grid' },
         ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
         ...(moreTile ? [moreTile] : [])));

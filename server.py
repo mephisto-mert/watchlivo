@@ -1487,8 +1487,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "")
 
     items = items[:120] if pg == 1 else items[:96]
-    tot_tv = max(totals["tv"], 18400 if is_free_tr else sum(1 for x in items if x["mediaType"] == "tv") * 18, 1200)
-    tot_mv = max(totals["movie"], 24200 if is_free_tr else sum(1 for x in items if x["mediaType"] != "tv") * 22, 1800)
+    tot_tv = max(totals["tv"], 31600 if is_free_tr else sum(1 for x in items if x["mediaType"] == "tv") * 18, 1200)
+    tot_mv = max(totals["movie"], 54800 if is_free_tr else sum(1 for x in items if x["mediaType"] != "tv") * 22, 1800)
     payload = {
         "items": items,
         "totalAvailable": tot_tv + tot_mv,
@@ -4760,9 +4760,9 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     final_items = (with_backdrop + others)[:max(12, min(96, int(limit or 40)))]
     return {
         "items": final_items,
-        "totalAvailable": 42600,
-        "totalTv": 18400,
-        "totalMovies": 24200,
+        "totalAvailable": 86400,
+        "totalTv": 31600,
+        "totalMovies": 54800,
         "page": 1,
         "category": cat_c,
         "shuffled": True,
@@ -4788,7 +4788,7 @@ async def provider_catalog(request: Request):
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_showcase_shuffle_sync, category, mt_filter, limit), timeout=5.0)
         except Exception:
-            res = {"items": [], "totalAvailable": 42600, "totalTv": 18400, "totalMovies": 24200, "page": 1, "category": category, "shuffled": True, "hasMore": True}
+            res = {"items": [], "totalAvailable": 86400, "totalTv": 31600, "totalMovies": 54800, "page": 1, "category": category, "shuffled": True, "hasMore": True}
         return JSONResponse(
             {"provider": prov, "query": "", **res},
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
