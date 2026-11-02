@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261102_v75';
-import { expectedPosition } from '../sync.js?v=20261102_v75';
-import { state } from '../store.js?v=20261102_v75';
+import { SubtitleDubController } from './subtitles.js?v=20261102_v76';
+import { expectedPosition } from '../sync.js?v=20261102_v76';
+import { state } from '../store.js?v=20261102_v76';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -535,7 +535,9 @@ export class Html5Adapter {
         doneCb?.();
       };
       const effStart = Number(customStart ?? startAt) || 0;
-      const isAndroid = /Android/i.test(navigator.userAgent || '');
+      const uaStr = navigator.userAgent || '';
+      const isAndroid = /Android/i.test(uaStr);
+      const isMobileScreen = isAndroid || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (typeof window !== 'undefined' && window.innerWidth <= 900);
       this.hls = new window.Hls({
         enableWorker: !isAndroid,
         lowLatencyMode: false,
@@ -543,14 +545,14 @@ export class Html5Adapter {
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: isAndroid ? 950000 : 1600000,
-        abrBandWidthFactor: 0.85,
-        abrBandWidthUpFactor: 0.65,
+        abrEwmaDefaultEstimate: isMobileScreen ? 680000 : 1600000,
+        abrBandWidthFactor: isMobileScreen ? 0.78 : 0.85,
+        abrBandWidthUpFactor: isMobileScreen ? 0.55 : 0.65,
         autoLevelCapping: -1,
-        maxBufferLength: 35,
-        maxMaxBufferLength: 75,
-        backBufferLength: 45,
-        maxBufferSize: 45 * 1000 * 1000,
+        maxBufferLength: isMobileScreen ? 28 : 35,
+        maxMaxBufferLength: isMobileScreen ? 55 : 75,
+        backBufferLength: isMobileScreen ? 25 : 45,
+        maxBufferSize: (isMobileScreen ? 28 : 45) * 1000 * 1000,
         maxBufferHole: 0.8,
         maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
@@ -560,17 +562,18 @@ export class Html5Adapter {
         maxFragLookUpTolerance: 0.35,
         nudgeOffset: 0.25,
         nudgeMaxRetry: 10,
-        fragLoadingTimeOut: 25000,
+        fragLoadingTimeOut: 28000,
         fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 500,
-        manifestLoadingTimeOut: 15000,
+        fragLoadingRetryDelay: 600,
+        manifestLoadingTimeOut: 16000,
         manifestLoadingMaxRetry: 4,
-        levelLoadingTimeOut: 15000,
+        levelLoadingTimeOut: 16000,
         levelLoadingMaxRetry: 4,
       });
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
         if (data?.levels?.length > 1) {
           let maxAllowedIdx = -1;
+          let maxMobileHdIdx = -1;
           data.levels.forEach((l, idx) => {
             const w = l.width || 0;
             const h = l.height || 0;
@@ -579,9 +582,14 @@ export class Html5Adapter {
             if (!isOver1080p) {
               maxAllowedIdx = idx;
             }
+            const isMobileSafeHd = (w <= 1440 && h <= 820 && bw <= 4200000) || (w === 0 && h === 0 && bw <= 3400000);
+            if (isMobileSafeHd) {
+              maxMobileHdIdx = idx;
+            }
           });
-          if (maxAllowedIdx >= 0 && maxAllowedIdx < data.levels.length - 1) {
-            this.hls.autoLevelCapping = maxAllowedIdx;
+          const chosenCap = (isMobileScreen && maxMobileHdIdx >= 0) ? maxMobileHdIdx : maxAllowedIdx;
+          if (chosenCap >= 0 && chosenCap < data.levels.length - 1) {
+            this.hls.autoLevelCapping = chosenCap;
           }
         }
         this.events.onTracksChanged?.();
@@ -591,7 +599,7 @@ export class Html5Adapter {
         this.subs.mergeHlsAudioTracks(this.hls.audioTracks || data?.audioTracks || []);
         this.subs._applyHlsAudioSelection();
         if (this.wantPlaying) this.tryPlay();
-        if (v.readyState >= 1) {
+        if (v.readyState >= 2) {
           clearBuf();
           this.events.onReady?.();
           fireDoneOnce();
@@ -603,8 +611,11 @@ export class Html5Adapter {
       });
       let netRetries = 0;
       let mediaRetries = 0;
-      this.hls.on(window.Hls.Events.FRAG_BUFFERED, () => {
+      this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
+        if (data?.frag?.type === 'audio' && !this.isMusic && v.readyState < 3) {
+          return;
+        }
         clearBuf();
         this.events.onReady?.();
         fireDoneOnce();
@@ -630,11 +641,12 @@ export class Html5Adapter {
             }
             try {
               const cur = v.currentTime || 0;
-              if (!this.isBuffered(cur + 0.25)) {
+              if (!this.isBuffered(cur + 0.25) && Date.now() - (this._lastGapJumpAt || 0) > 8000) {
                 for (let i = 0; i < v.buffered.length; i += 1) {
                   const bStart = v.buffered.start(i);
                   const bEnd = v.buffered.end(i);
-                  if (bStart > cur + 0.04 && bStart - cur <= 2.5 && bEnd > bStart + 0.2) {
+                  if (bStart > cur + 0.08 && bStart - cur <= 2.2 && bEnd > bStart + 1.5) {
+                    this._lastGapJumpAt = Date.now();
                     v.currentTime = bStart + 0.05;
                     return;
                   }
@@ -756,7 +768,7 @@ export class Html5Adapter {
       v.addEventListener('loadeddata', onFrameReady);
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
-      this.loadReadyTimer = setTimeout(done, 2200);
+      this.loadReadyTimer = setTimeout(done, 3400);
       if (isHls && canHlsJs && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
@@ -765,7 +777,7 @@ export class Html5Adapter {
       }
     });
     if (this._destroyed || this.video !== v) return;
-    if (!this.hls && startAt >= 8) {
+    if (!this.hls && startAt >= 0.5) {
       const applyInitialNativeSeek = () => {
         if (this.video !== v || this.hls) return;
         if (startAt >= 0.5 && Math.abs((v.currentTime || 0) - startAt) > 1.2) {
@@ -780,7 +792,8 @@ export class Html5Adapter {
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
     let stallChecks = 0;
-    const stallWindowMs = this.isMusic ? 4500 : 10500;
+    const isMobViewport = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') || (typeof window !== 'undefined' && window.innerWidth <= 900);
+    const stallWindowMs = this.isMusic ? 4500 : (isMobViewport ? 16500 : 13000);
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
     const checkZeroDimAudioOnly = () => {
@@ -848,9 +861,10 @@ export class Html5Adapter {
       const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= 0.15 && v.readyState < 3);
       if (isStuck && stallChecks < 6) {
         stallChecks += 1;
-        if (this.hls && this.hls.levels?.length > 0 && stallChecks === 1) {
+        const activelyLoadingMedia = Boolean(v.networkState === 2 || (v.buffered && v.buffered.length > 0));
+        if (stallChecks === 1 && ((this.hls && this.hls.levels?.length > 0) || (!this.hls && activelyLoadingMedia))) {
           try {
-            if (this.hls.levels.length > 1) this.hls.nextAutoLevel = 0;
+            if (this.hls && this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
             if (v.readyState >= 2 && this.wantPlaying && v.paused) this.tryPlay();
           } catch (e) { /* ignore */ }
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
@@ -892,12 +906,13 @@ export class Html5Adapter {
         if (v.paused && v.readyState >= 2) {
           this.tryPlay();
         }
-        if (consecutiveMidStalls >= 2 && !this.isBuffered(curT + 0.25)) {
+        if (consecutiveMidStalls >= 3 && !this.isBuffered(curT + 0.25) && Date.now() - (this._lastGapJumpAt || 0) > 8000) {
           try {
             for (let i = 0; i < v.buffered.length; i += 1) {
               const bStart = v.buffered.start(i);
               const bEnd = v.buffered.end(i);
-              if (bStart > curT + 0.04 && bStart - curT <= 2.8 && bEnd > bStart + 0.2) {
+              if (bStart > curT + 0.08 && bStart - curT <= 2.2 && bEnd > bStart + 1.5) {
+                this._lastGapJumpAt = Date.now();
                 v.currentTime = bStart + 0.06;
                 consecutiveMidStalls = 0;
                 return;
@@ -1027,20 +1042,27 @@ export class Html5Adapter {
     }
   }
   getTime() {
-    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 6000) {
-      const cur = Number(this.video?.currentTime || 0);
-      if (!this.video || this.video.readyState < 1 || cur < Math.max(0.5, this.initialSeekPending - 2.5)) {
+    const v = this.video;
+    const nowMs = Date.now();
+    if (this.initialSeekPending && nowMs - (this.loadedAtMs || 0) < 16000) {
+      const cur = Number(v?.currentTime || 0);
+      if (!v || v.readyState < 2 || v.seeking || (v.readyState < 3 && cur < Math.max(0.5, this.initialSeekPending - 2.5))) {
         return this.initialSeekPending;
       }
-      this.initialSeekPending = 0;
+      if (cur >= Math.max(0.5, this.initialSeekPending - 2.5)) {
+        this.initialSeekPending = 0;
+      }
     }
-    if (!this.video || this.video.readyState < 1) {
-      return Number(this.video?.currentTime || 0);
+    if (!v || v.readyState < 1) {
+      return Number(v?.currentTime || 0);
     }
-    if (this.video?.seeking && this.lastSeekAt && Date.now() - this.lastSeekAt < 3500) {
-      return this.lastSeekTarget;
+    if (this.lastSeekAt && nowMs - this.lastSeekAt < 14000) {
+      const cur = Number(v.currentTime || 0);
+      if (v.seeking || (this.wantPlaying && v.readyState < 3 && Math.abs(cur - this.lastSeekTarget) > 2.5)) {
+        return this.lastSeekTarget;
+      }
     }
-    return Number(this.video?.currentTime || 0);
+    return Number(v.currentTime || 0);
   }
   getDuration() { const d = Number(this.video?.duration || 0); return Number.isFinite(d) ? d : 0; }
   getBuffered() {
@@ -1062,9 +1084,12 @@ export class Html5Adapter {
     return false;
   }
   isBuffering() {
-    if (!this.video) return true;
-    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 7500 && this.video.readyState < 2) return true;
-    return Boolean(this.video.seeking || this.bufferingReported || (this.video.readyState < 2 && (!this.video.paused || this.wantPlaying)));
+    const v = this.video;
+    if (!v) return true;
+    if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 16000 && v.readyState < 3) return true;
+    const activePlay = !v.paused || this.wantPlaying;
+    const starvedAhead = activePlay && v.readyState < 3 && !this.isBuffered(Number(v.currentTime || 0) + 0.3);
+    return Boolean(v.seeking || this.bufferingReported || (activePlay && v.readyState < 2) || starvedAhead);
   }
   setRate(r) { if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r; }
   getRate() { return Number(this.video?.playbackRate || 1); }

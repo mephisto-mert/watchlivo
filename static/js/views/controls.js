@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261102_v75';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261102_v75';
-import { getProvider } from '../providers.js?v=20261102_v75';
-import { expectedPosition } from '../sync.js?v=20261102_v75';
-import { thumbFor } from './lobby.js?v=20261102_v75';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261102_v75';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261102_v75';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261102_v75';
-import { avatar } from '../profile.js?v=20261102_v75';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261102_v76';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261102_v76';
+import { getProvider } from '../providers.js?v=20261102_v76';
+import { expectedPosition } from '../sync.js?v=20261102_v76';
+import { thumbFor } from './lobby.js?v=20261102_v76';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261102_v76';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261102_v76';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261102_v76';
+import { avatar } from '../profile.js?v=20261102_v76';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1024,10 +1024,26 @@ export function buildControls(frame, ctx) {
     );
   }
 
+  let smoothPos = 0;
+  let smoothMediaSig = '';
+
   function tick() {
-    const d = duration(), p = Math.min(position(), d || Infinity);
+    const d = duration();
+    const rawPos = Math.min(position(), d || Infinity);
     const vAct = host.adapter?.video;
-    if (vAct && !vAct.seeking && vAct.readyState >= 2 && !host.loading) {
+    const mSig = `${state.mesh?.media?.tmdbId || state.mesh?.media?.id || state.mesh?.media?.url || ''}:${state.mesh?.media?.season || 0}:${state.mesh?.media?.episode || 0}`;
+    if (mSig !== smoothMediaSig) {
+      smoothMediaSig = mSig;
+      smoothPos = rawPos;
+    }
+    const isStalledOrSeeking = Boolean(host.loading || vAct?.seeking || host.adapter?.isBuffering?.() || (vAct && vAct.readyState < 3 && !vAct.paused));
+    let p = rawPos;
+    if (!scrubbing && isStalledOrSeeking && rawPos < smoothPos && (smoothPos - rawPos) < 25) {
+      p = smoothPos;
+    } else {
+      smoothPos = rawPos;
+    }
+    if (vAct && !vAct.seeking && vAct.readyState >= 3 && !host.loading) {
       loading.classList.add('hidden');
     }
     stageBackdrop.classList.toggle('is-hero-cover', false);

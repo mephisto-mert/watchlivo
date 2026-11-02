@@ -2649,9 +2649,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         if not _stream_matches_title(raw_su, valid_titles):
                             continue
+                        is_vm_vault = any(d in raw_su.lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx."))
+                        if is_vm_vault and st_t == "hls":
+                            st_t = "hls_vm"
                         is_true_1080_vault = (
                             st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr")
-                            or (st_t == "hls" and any(d in raw_su.lower() for d in ("fuckme.dragonballzfans.xyz", "vidmoly.", "vmbox.", "vmnow.", "vmpx.")))
+                            or (st_t == "hls" and "fuckme.dragonballzfans.xyz" in raw_su.lower())
                             or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
                             or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
                             or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
@@ -2840,7 +2843,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                     m_vm_emb = re.search(r'https?://vidmoly\.[a-z]+/embed-[a-zA-Z0-9_-]+\.html', mhtml, re.I)
                     if m_vm_emb:
                         vm_emb_u = re.sub(r'vidmoly\.[a-z]+', 'vidmoly.biz', m_vm_emb.group(0))
-                        res.append((vm_emb_u, "hls"))
+                        res.append((vm_emb_u, "hls_vm"))
                 if res:
                     break
             except Exception:
@@ -3058,7 +3061,7 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = "", refresh: bool = False):
-    ckey = f"v34:{mtype}:{tid}:{s}:{e}"
+    ckey = f"v35:{mtype}:{tid}:{s}:{e}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -3471,7 +3474,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     fp_other = [x for x in tr_res if x[1].startswith("hls_fp:") and x not in fp_multi]
     dl_only = [x for x in tr_res if x[1] == "hls_dl"]
     dp_only = [] if IS_VERCEL else [x for x in tr_res if x[1] == "hls_dp"]
-    if ac_res or main_multi or main_single or pv_multi or fp_multi or pv_single or fp_other or dl_only or dp_only or ve_res or cj_res or hexa_res or vid_res or ar_res or vault_yt:
+    vm_only = [x for x in tr_res if x[1] == "hls_vm"]
+    if ac_res or main_multi or main_single or pv_multi or fp_multi or pv_single or fp_other or dl_only or dp_only or ve_res or cj_res or hexa_res or vid_res or ar_res or vm_only or vault_yt:
         if is_ja_or_anime:
             out_urls.extend(ac_1080)
             out_urls.extend(main_multi)
@@ -3488,6 +3492,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(fp_other)
             out_urls.extend(vid_res)
             out_urls.extend(ar_res)
+            out_urls.extend(vm_only)
             out_urls.extend(vault_yt)
         elif orig_lang == "tr":
             out_urls.extend(main_multi)
@@ -3505,6 +3510,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(fp_other)
             out_urls.extend(ac_720)
             out_urls.extend(vid_res)
+            out_urls.extend(vm_only)
             out_urls.extend(vault_yt)
         else:
             out_urls.extend(main_multi)
@@ -3522,6 +3528,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(ac_720)
             out_urls.extend(vid_res)
             out_urls.extend(ar_res)
+            out_urls.extend(vm_only)
             out_urls.extend(vault_yt)
 
     else:
@@ -3589,6 +3596,9 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
         return _proxy_u(u, "https://archive.org/", ".mp4")
     if str(stype).startswith("mp4_vl"):
         return _proxy_u(u, "" if "hakunaymatata.com" in u else "https://filmboom.top/", ".mp4")
+    if stype == "hls_vm" or any(d in u.lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+        sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
+        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=vm&proxy_segs=1&ext=.m3u8"
     if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi", "hls_cj"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ("&ref=cj" if stype == "hls_cj" else ("&ref=dl" if stype == "hls_dl" else ("&ref=hx" if "dragonballzfans" in u else "")))
@@ -4106,6 +4116,8 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             if st == "mp4_vl_720":
                 return 0.7
             return 0.6 if "%2fh265%2f" in str(u).lower() or "/h265/" in str(u).lower() else 1.2
+        if st == "hls_vm" or any(d in str(u).lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+            return 0.45 + (1.5 if has_tr else 0.0)
         w = _STREAM_RES_HINT.get(u, 0)
         if w > 0:
             if w >= 1880 and st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl"):
@@ -4140,7 +4152,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
-        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
+        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
             langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
@@ -4362,6 +4374,8 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
         return f"📡 Sunucu {idx} · FastPlay (1080p HD)"
     if st_s.startswith("mp4_vl"):
         return f"📡 Sunucu {idx} · VidLink MP4 ({'1080p' if '1080' in st_s else '720p'} HD)"
+    if st_s == "hls_vm" or any(d in u_l for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+        return f"📡 Sunucu {idx} · VidMoly Yedek (HD)"
     if st_s == "hls" or "dragonballzfans" in u_l:
         return f"📡 Sunucu {idx} · Flixer / Hexa (1080p HD)"
     return f"📡 Sunucu {idx} · Yüksek Hızlı Yayın (HD)"
@@ -4622,7 +4636,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v23|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v24|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     if not force_refresh:
@@ -5311,11 +5325,16 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                 else:
                     data = b""
                     ct = "video/mp2t"
+                    use_seg_rng = bool(rng and rng.startswith("bytes=") and rng != "bytes=0-1023" and not rng.startswith("bytes=0-"))
+                    req_hdrs = {**hdrs, "Range": rng} if use_seg_rng else hdrs
                     for _attempt in range(2):
                         try:
-                            req = urllib.request.Request(url, headers=hdrs)
-                            with _public_open(req, timeout=8) as r:
-                                data = r.read(15 * 1024 * 1024)
+                            req = urllib.request.Request(url, headers=req_hdrs)
+                            with _public_open(req, timeout=14) as r:
+                                data = r.read(28 * 1024 * 1024)
+                                if use_seg_rng and r.status == 206:
+                                    cr_up = r.headers.get("Content-Range") or ""
+                                    return data, 206, cr_up, "video/mp2t"
                                 raw_cl = (r.headers.get("Content-Length") or "").strip()
                                 if raw_cl.isdigit():
                                     up_total = int(raw_cl)
@@ -5500,7 +5519,7 @@ async def rave_stream_manifest(request: Request):
             elif "daioncdn.net/ntv" in target:
                 hdrs["Referer"] = "https://www.ntv.com.tr/"
                 hdrs["Origin"] = "https://www.ntv.com.tr"
-            elif any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+            elif ref_mode == "vm" or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
                 hdrs["Referer"] = "https://vidmoly.biz/"
                 hdrs["Origin"] = "https://vidmoly.biz"
             cur_target = "https://shrek.dragonballzfans.xyz/" + target.split("serve.dragonballzfans.xyz/", 1)[1] if "serve.dragonballzfans.xyz/" in target else target
@@ -5688,8 +5707,9 @@ async def rave_stream_manifest(request: Request):
             cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimg" in cur_target and not ("cdnimages" in cur_target and "/hls/" in cur_target)) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/", cur_target)) or (cur_target == target and is_fhd))
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
+            cur_is_vm = (ref_mode == "vm") or any(d in cur_target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")) or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx."))
             is_master = "#EXT-X-STREAM-INF" in raw
-            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl)
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
@@ -5719,6 +5739,8 @@ async def rave_stream_manifest(request: Request):
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=pv{ps_q}&ext=.m3u8"
                     if cur_is_dp:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=dp{ps_q}&ext=.m3u8"
+                    if cur_is_vm:
+                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=vm{ps_q}&ext=.m3u8"
                     if "dragonballzfans" in cur_target or ref_mode == "hx":
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
@@ -5733,6 +5755,8 @@ async def rave_stream_manifest(request: Request):
                 if cur_is_dp or "uk-traffic-" in u_str:
                     dp_ref = f"{urllib.parse.urlparse(cur_target).scheme}://{urllib.parse.urlparse(cur_target).netloc}/" if ("dplayer" in cur_target or ".com/f/" in u_str) else "https://x.ag2m5.cfd/"
                     return _proxy_u(u_str, dp_ref, ".ts")
+                if cur_is_vm:
+                    return _proxy_u(u_str, "https://vidmoly.biz/", ".ts")
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
                 if "dragonballzfans" in u_str or needs_seg_proxy:
@@ -5900,9 +5924,12 @@ async def rave_stream_manifest(request: Request):
                             if eff_w >= 3000 and bw > 20000000:
                                 bw = 12000000
                                 inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
-                            elif 1880 <= eff_w < 3000 and bw > 8500000:
-                                bw = 4500000
-                                inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
+                            elif 1880 <= eff_w < 3000 and (bw > 8500000 or bw < 4200000):
+                                bw = 4600000
+                                if re.search(r"BANDWIDTH=\d+", inf_l, re.I):
+                                    inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l, flags=re.I)
+                                else:
+                                    inf_l = f"{inf_l},BANDWIDTH={bw}"
                             elif 1150 <= eff_w < 1880 and bw > 5000000:
                                 bw = 2500000
                                 inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l)
@@ -6027,7 +6054,7 @@ async def stream_proxy(request: Request):
     rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
     ext_hint = (request.query_params.get("ext") or "").strip().lower()
     try:
-        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=12)
+        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)
         cache_ctl = (
             "private, max-age=300"
             if (rng or status == 206)
