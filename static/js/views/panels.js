@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v59';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v59';
-import { avatar } from '../profile.js?v=20261102_v59';
-import { clock } from '../sync.js?v=20261102_v59';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v59';
-import { copyInvite, inviteUrl } from './chat.js?v=20261102_v59';
-import { parseVideoUrl } from '../providers.js?v=20261102_v59';
-import { resolveMedia } from './selection.js?v=20261102_v59';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v60';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v60';
+import { avatar } from '../profile.js?v=20261102_v60';
+import { clock } from '../sync.js?v=20261102_v60';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v60';
+import { copyInvite, inviteUrl } from './chat.js?v=20261102_v60';
+import { parseVideoUrl } from '../providers.js?v=20261102_v60';
+import { resolveMedia } from './selection.js?v=20261102_v60';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -281,9 +281,10 @@ function Participants(ctx) {
         const friendAdded = isFriend(p);
         const peerVol = ctx.voice?.getPeerVolume?.(p.id) ?? 100;
         return h('div', { class: `raver ${p.speaking ? 'is-speaking' : ''}`, 'data-user': p.id },
-          avatar(p, 36, { speaking: p.speaking, online: true }),
-          h('div', { class: 'raver-name' },
+          h('div', { style: { cursor: 'pointer' }, title: 'Profili görüntüle', onclick: () => window.vortexOpenUserProfile?.(p) }, avatar(p, 36, { speaking: p.speaking, online: true })),
+          h('div', { class: 'raver-name', style: { cursor: 'pointer' }, onclick: () => window.vortexOpenUserProfile?.(p) },
             h('b', {}, p.name, isMe ? ' (sen)' : '', p.speaking ? h('span', { class: 'speaking-pill' }, '🎙️ Konuşuyor') : null),
+            p.statusText ? h('span', { style: { color: '#5eead4', fontSize: '.72rem' } }, `${p.statusEmoji || '🍿'} ${p.statusText}`) : null,
             h('span', {}, `${p.device || 'Web'}${p.muted ? ' · mikrofon kapalı' : ' · mikrofon açık'}${p.isCreator ? ' · 👑 Oda Kurucusu' : (p.isCoHost && !p.isHost ? ' · 🤝 Ortak Lider' : '')}`),
             !isMe && !isBot ? h('div', { class: 'peer-vol-row' },
               h('span', { class: 'peer-vol-lbl' }, `🔊 %${peerVol}`),

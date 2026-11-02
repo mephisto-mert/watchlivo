@@ -137,9 +137,29 @@ def _get_db() -> sqlite3.Connection:
                 auth_provider TEXT DEFAULT 'email',
                 verified INTEGER DEFAULT 1,
                 created_at REAL DEFAULT 0,
-                updated_at REAL DEFAULT 0
+                updated_at REAL DEFAULT 0,
+                bio TEXT DEFAULT '',
+                status_text TEXT DEFAULT '',
+                status_emoji TEXT DEFAULT '🍿',
+                avatar_url TEXT DEFAULT '',
+                hide_watching INTEGER DEFAULT 0,
+                hide_friends INTEGER DEFAULT 0,
+                hide_location INTEGER DEFAULT 0
             )
         """)
+        for col_def in [
+            "bio TEXT DEFAULT ''",
+            "status_text TEXT DEFAULT ''",
+            "status_emoji TEXT DEFAULT '🍿'",
+            "avatar_url TEXT DEFAULT ''",
+            "hide_watching INTEGER DEFAULT 0",
+            "hide_friends INTEGER DEFAULT 0",
+            "hide_location INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE watchlivo_users ADD COLUMN {col_def}")
+            except Exception:
+                pass
         conn.commit()
         _AUTH_DB_SCHEMA_READY = True
     return conn
@@ -338,15 +358,27 @@ def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 def _row_to_user(row: Any) -> Dict[str, Any]:
+    d = dict(row) if not isinstance(row, dict) else row
+    av_url = str(d.get("avatar_url") or d.get("avatarUrl") or "").strip()
+    raw_av = str(d.get("avatar") or "🎬").strip()
+    if not av_url and raw_av.startswith(("https://", "/static/", "/uploads/", "data:image/")):
+        av_url = raw_av
     return {
-        "uid": row["uid"],
-        "email": row["email"],
-        "handle": row["handle"],
-        "name": row["name"],
-        "color": row["color"] or "#00f5d4",
-        "avatar": row["avatar"] or "🎬",
-        "authProvider": row["auth_provider"] or "email",
-        "verified": bool(row["verified"]),
+        "uid": d.get("uid", ""),
+        "email": d.get("email", ""),
+        "handle": d.get("handle", ""),
+        "name": d.get("name", ""),
+        "color": d.get("color") or "#00f5d4",
+        "avatar": av_url or raw_av or "🎬",
+        "avatarUrl": av_url,
+        "bio": str(d.get("bio") or ""),
+        "statusText": str(d.get("status_text") or d.get("statusText") or ""),
+        "statusEmoji": str(d.get("status_emoji") or d.get("statusEmoji") or "🍿"),
+        "hideWatching": bool(d.get("hide_watching") or d.get("hideWatching")),
+        "hideFriends": bool(d.get("hide_friends") or d.get("hideFriends")),
+        "hideLocation": bool(d.get("hide_location") or d.get("hideLocation")),
+        "authProvider": d.get("auth_provider") or "email",
+        "verified": bool(d.get("verified", 1)),
         "isGuest": False,
     }
 
@@ -844,9 +876,23 @@ async def auth_profile(request: Request) -> JSONResponse:
     color = str(body.get("color") or "").strip()[:16]
     if re.match(r"^#[0-9a-fA-F]{3,8}$", color):
         fields["color"] = color
-    avatar = str(body.get("avatar") or "").strip()[:8]
-    if avatar:
-        fields["avatar"] = avatar
+    avatar_url = str(body.get("avatarUrl") or body.get("avatar") or "").strip()
+    if avatar_url and (avatar_url.startswith(("https://", "/static/", "/uploads/")) or (avatar_url.startswith("data:image/") and len(avatar_url) <= 45000)):
+        fields["avatar_url"] = avatar_url
+    elif "avatarUrl" in body and not avatar_url:
+        fields["avatar_url"] = ""
+    if "bio" in body:
+        fields["bio"] = str(body.get("bio") or "").strip()[:160]
+    if "statusText" in body:
+        fields["status_text"] = str(body.get("statusText") or "").strip()[:60]
+    if "statusEmoji" in body:
+        fields["status_emoji"] = str(body.get("statusEmoji") or "🍿").strip()[:12] or "🍿"
+    if "hideWatching" in body:
+        fields["hide_watching"] = 1 if bool(body.get("hideWatching")) else 0
+    if "hideFriends" in body:
+        fields["hide_friends"] = 1 if bool(body.get("hideFriends")) else 0
+    if "hideLocation" in body:
+        fields["hide_location"] = 1 if bool(body.get("hideLocation")) else 0
     try:
         row = _user_update(uid, fields)
     except Exception:
@@ -858,7 +904,14 @@ async def auth_profile(request: Request) -> JSONResponse:
             "handle": fields.get("handle") or claims.get("handle", "uye"),
             "name": fields.get("name") or claims.get("name", "Üye"),
             "color": fields.get("color") or claims.get("color", "#00f5d4"),
-            "avatar": fields.get("avatar") or claims.get("avatar", "🎬"),
+            "avatar": fields.get("avatar_url") or claims.get("avatar", "🎬"),
+            "avatarUrl": fields.get("avatar_url", ""),
+            "bio": fields.get("bio", ""),
+            "statusText": fields.get("status_text", ""),
+            "statusEmoji": fields.get("status_emoji", "🍿"),
+            "hideWatching": bool(fields.get("hide_watching", 0)),
+            "hideFriends": bool(fields.get("hide_friends", 0)),
+            "hideLocation": bool(fields.get("hide_location", 0)),
             "authProvider": claims.get("provider", "email"),
             "verified": True,
             "isGuest": False,

@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261102_v59';
-import { api } from './api.js?v=20261102_v59';
-import { state, set } from './store.js?v=20261102_v59';
+import { h, popup, toast } from './ui.js?v=20261102_v60';
+import { api } from './api.js?v=20261102_v60';
+import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261102_v60';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -65,9 +65,14 @@ export function saveGuestProfile(data = {}) {
     handle,
     email: '',
     color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    avatar: String(data.avatarUrl || data.avatar || prev.avatarUrl || '').trim(),
-    avatarUrl: String(data.avatarUrl || data.avatar || prev.avatarUrl || '').trim(),
+    avatar: String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? '').trim(),
+    avatarUrl: String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? '').trim(),
+    bio: String(data.bio ?? prev.bio ?? '').trim().slice(0, 160),
+    statusText: String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60),
+    statusEmoji: String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿',
     hideLocation: Boolean(data.hideLocation ?? prev.hideLocation ?? false),
+    hideWatching: Boolean(data.hideWatching ?? prev.hideWatching ?? false),
+    hideFriends: Boolean(data.hideFriends ?? prev.hideFriends ?? false),
     watchMinutes: Math.max(0, Number(prev.watchMinutes || 15)),
     medal: '🍿 Misafir İzleyici',
     authProvider: 'guest',
@@ -94,6 +99,11 @@ export function saveProfile(data = {}) {
   const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
   const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
   const hideLocation = Boolean(data.hideLocation ?? prev.hideLocation ?? false);
+  const hideWatching = Boolean(data.hideWatching ?? prev.hideWatching ?? false);
+  const hideFriends = Boolean(data.hideFriends ?? prev.hideFriends ?? false);
+  const bio = String(data.bio ?? prev.bio ?? '').trim().slice(0, 160);
+  const statusText = String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60);
+  const statusEmoji = String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿';
   const p = {
     id: resolvedId,
     uid: resolvedId,
@@ -103,7 +113,12 @@ export function saveProfile(data = {}) {
     color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
     avatar: avatarUrl,
     avatarUrl,
+    bio,
+    statusText,
+    statusEmoji,
     hideLocation,
+    hideWatching,
+    hideFriends,
     watchMinutes,
     medal: computedMedal,
     authProvider: data.authProvider || prev.authProvider || 'email',
@@ -401,83 +416,394 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
 
   const draw = () => {
     root.replaceChildren();
-    if (activeTab === 'account' && isLoggedMember) {
-      const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın', value: current.name || '' });
-      const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi', value: current.handle ? `@${current.handle}` : '' });
-      const avatarInp = h('input', { class: 'input', placeholder: 'Hareketli GIF veya Görsel Avatar URL (isteğe bağlı)', value: current.avatarUrl || current.avatar || '' });
-      let selectedAvatarUrl = current.avatarUrl || current.avatar || '';
-      let hideLocState = Boolean(current.hideLocation);
-      const userMins = Number(current.watchMinutes || 145);
-      const userMedal = current.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
+    const topNavTabs = isLoggedMember
+      ? [
+          ['account', '👤 Profilim & Gizlilik'],
+          ['login', '🔄 Başka Hesap'],
+        ]
+      : [
+          ['login', '🔑 Giriş Yap'],
+          ['register', '✨ Kayıt Ol'],
+          ['guest', '👤 Misafir Girişi'],
+          ['account', '🪪 Profil Kartım'],
+        ];
+    if (!topNavTabs.some(([id]) => id === activeTab)) {
+      activeTab = isLoggedMember ? 'account' : 'register';
+    }
+    const tabsBar = h('div', { class: 'wl-auth-tabs' },
+      topNavTabs.map(([id, lbl]) =>
+        h('button', {
+          type: 'button',
+          class: `wl-auth-tab ${activeTab === id ? 'on' : ''}`,
+          onclick: () => { activeTab = id; draw(); },
+        }, lbl)));
+    root.append(tabsBar);
+
+    if (activeTab === 'account') {
+      const profObj = current || state.self || loadProfile() || { name: 'Misafir İzleyici', handle: 'misafir', color: AVATAR_COLORS[0], isGuest: true };
+      const nameInp = h('input', { class: 'input', id: 'wl-profile-name-input', maxlength: '24', placeholder: 'İsim / Görünen Adın', value: profObj.name || '' });
+      const handleInp = h('input', { class: 'input', id: 'wl-profile-handle-input', maxlength: '24', placeholder: '@kullaniciadi', value: profObj.handle ? `@${String(profObj.handle).replace(/^@+/, '')}` : '' });
+      const bioInp = h('textarea', {
+        class: 'input',
+        id: 'wl-profile-bio-input',
+        maxlength: '160',
+        rows: '2',
+        placeholder: 'Biyografin (Örn: Bilim kurgu, gece sineması ve anime tutkunu 🍿🎬)',
+        style: { resize: 'vertical', minHeight: '54px', fontFamily: 'inherit', lineHeight: '1.4' },
+      }, profObj.bio || '');
+      let selectedStatusEmoji = profObj.statusEmoji || '🍿';
+      const statusInp = h('input', {
+        class: 'input',
+        id: 'wl-profile-status-input',
+        maxlength: '60',
+        placeholder: 'Anlık durum paylaş (Örn: Bu gece korku maratonu var!)',
+        value: profObj.statusText || '',
+      });
+      const avatarInp = h('input', { class: 'input', id: 'wl-profile-avatar-input', placeholder: 'Fotoğraf URL veya GIF bağlantısı (isteğe bağlı)', value: (profObj.avatarUrl || profObj.avatar || '').startsWith('data:image/') ? '' : (profObj.avatarUrl || profObj.avatar || '') });
+      let selectedAvatarUrl = profObj.avatarUrl || profObj.avatar || '';
+      let hideWatchingState = Boolean(profObj.hideWatching);
+      let hideFriendsState = Boolean(profObj.hideFriends);
+      let hideLocState = Boolean(profObj.hideLocation);
+      const userMins = Number(profObj.watchMinutes || 145);
+      const userMedal = profObj.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
       const errBox = h('div', { class: 'wl-auth-err' });
-      const weekBars = [
-        ['Pzt', 35], ['Sal', 60], ['Çar', 45], ['Per', 80], ['Cum', 95], ['Cmt', 100], ['Paz', 70],
+
+      // Live active media ("Şu An İzliyor")
+      const activeRoomMedia = state.mesh?.media?.title ? state.mesh.media : null;
+      const lastHistMedia = (getWatchHistory() || [])[0] || null;
+      const watchingMedia = activeRoomMedia || lastHistMedia;
+      const watchingTitle = watchingMedia?.title || 'Lobide içerik keşfediyor';
+      const watchingSub = activeRoomMedia
+        ? `🟢 Şu an odada canlı izliyor · ${state.mesh?.name || activeRoomMedia.title}`
+        : (lastHistMedia ? '🕘 Son izlenen yapım' : '🍿 Watchlivo Sinema & Dizi');
+
+      // Live Avatar DOM container for instant preview update
+      const liveAvatarWrap = h('div', { style: { position: 'relative', cursor: 'pointer', flexShrink: '0' }, title: 'Profil fotoğrafını değiştirmek için tıkla' });
+      const liveNameEl = h('strong', { id: 'wl-card-name' }, profObj.name || 'İzleyici');
+      const liveHandleEl = h('div', { class: 'wl-user-handle', id: 'wl-card-handle' }, `@${String(profObj.handle || 'uye').replace(/^@+/, '')} · ⏱️ ${userMins} dk birlikte izleme`);
+      const liveStatusPill = h('div', {
+        id: 'wl-card-status-pill',
+        style: {
+          display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '4px',
+          padding: '3px 9px', borderRadius: '99px', fontSize: '.75rem', fontWeight: '600',
+          background: 'rgba(39, 220, 200, 0.14)', border: '1px solid rgba(39, 220, 200, 0.35)', color: '#5eead4',
+        },
+      });
+      const liveBioBox = h('div', {
+        id: 'wl-card-bio-box',
+        style: {
+          fontSize: '.8rem', color: 'rgba(255,255,255,0.86)', lineHeight: '1.45',
+          background: 'rgba(255,255,255,0.035)', border: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: '10px', padding: '8px 10px', marginTop: '6px',
+        },
+      });
+      const liveWatchingBox = h('div', { id: 'wl-profile-watching-box', style: { marginTop: '6px' } });
+      const liveFriendsBox = h('div', { id: 'wl-profile-friends-box', style: { marginTop: '6px' } });
+
+      const refreshLiveCard = () => {
+        liveAvatarWrap.replaceChildren(
+          avatar({ ...profObj, name: nameInp.value.trim() || profObj.name, color, avatarUrl: selectedAvatarUrl }, 64, { online: true }),
+          h('span', {
+            style: {
+              position: 'absolute', right: '-2px', bottom: '-2px', width: '22px', height: '22px',
+              borderRadius: '50%', background: '#6366f1', color: '#fff', fontSize: '11px',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #0b0e17',
+            },
+          }, '📷')
+        );
+        liveNameEl.textContent = nameInp.value.trim() || profObj.name || 'İzleyici';
+        const cleanH = handleInp.value.trim().replace(/^@+/, '') || profObj.handle || 'uye';
+        liveHandleEl.textContent = `@${cleanH} · ⏱️ ${userMins} dk birlikte izleme`;
+        const stTxt = statusInp.value.trim() || 'Birlikte film & dizi izlemeye hazır';
+        liveStatusPill.textContent = `${selectedStatusEmoji} ${stTxt}`;
+        const bioTxt = bioInp.value.trim();
+        liveBioBox.textContent = bioTxt || 'Henüz biyografi eklenmedi. Aşağıdan biyografini yazabilirsin ✨';
+        liveBioBox.style.opacity = bioTxt ? '1' : '0.6';
+
+        // Refresh "Şu An İzliyor" box
+        liveWatchingBox.replaceChildren();
+        if (hideWatchingState) {
+          liveWatchingBox.append(
+            h('div', {
+              style: {
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+                padding: '8px 11px', borderRadius: '11px', background: 'rgba(255,255,255,0.03)',
+                border: '1px dashed rgba(255,255,255,0.14)', fontSize: '.78rem', color: 'rgba(255,255,255,0.6)',
+              },
+            },
+            h('span', {}, '👁️‍🗨️ Şu An İzliyor: Gizlendi (Diğer kullanıcılara görünmez)'),
+            h('span', { style: { fontSize: '.7rem', color: '#fbbf24' } }, '🔒 Gizli'))
+          );
+        } else {
+          liveWatchingBox.append(
+            h('div', {
+              style: {
+                display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px',
+                borderRadius: '12px', background: 'linear-gradient(135deg, rgba(39,220,200,0.1), rgba(99,102,241,0.1))',
+                border: '1px solid rgba(39,220,200,0.3)',
+              },
+            },
+            h('div', {
+              style: {
+                width: '36px', height: '36px', borderRadius: '9px', background: 'rgba(39,220,200,0.18)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.1rem', flexShrink: '0',
+              },
+            }, '🎬'),
+            h('div', { style: { flex: '1', minWidth: '0' } },
+              h('div', { style: { fontSize: '.68rem', fontWeight: '800', color: '#27dcc8', textTransform: 'uppercase', letterSpacing: '.04em' } }, watchingSub),
+              h('div', { id: 'wl-watching-media-title', style: { fontSize: '.84rem', fontWeight: '700', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, watchingTitle)))
+          );
+        }
+
+        // Refresh "Arkadaşlarım" box
+        liveFriendsBox.replaceChildren();
+        const myFriends = getFriends() || [];
+        if (hideFriendsState) {
+          liveFriendsBox.append(
+            h('div', {
+              style: {
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
+                padding: '8px 11px', borderRadius: '11px', background: 'rgba(255,255,255,0.03)',
+                border: '1px dashed rgba(255,255,255,0.14)', fontSize: '.78rem', color: 'rgba(255,255,255,0.6)',
+              },
+            },
+            h('span', {}, `👥 Arkadaşlar (${myFriends.length}): Gizlendi (Diğer kullanıcılara görünmez)`),
+            h('span', { style: { fontSize: '.7rem', color: '#fbbf24' } }, '🔒 Gizli'))
+          );
+        } else {
+          const addFrInp = h('input', {
+            class: 'input',
+            placeholder: '@kullaniciadi veya isim ile arkadaş ekle...',
+            style: { flex: '1', padding: '5px 9px', fontSize: '.76rem' },
+          });
+          const addFrBtn = h('button', {
+            type: 'button',
+            class: 'btn sm primary',
+            style: { padding: '5px 10px', fontSize: '.74rem' },
+            onclick: () => {
+              const v = addFrInp.value.trim().replace(/^@+/, '');
+              if (!v) return;
+              addFriendByName(v);
+              addFrInp.value = '';
+              toast(`👥 @${v} arkadaş listene eklendi!`);
+              refreshLiveCard();
+            },
+          }, '+ Ekle');
+          liveFriendsBox.append(
+            h('div', {
+              style: {
+                padding: '9px 11px', borderRadius: '12px', background: 'rgba(255,255,255,0.035)',
+                border: '1px solid rgba(255,255,255,0.09)', display: 'flex', flexDirection: 'column', gap: '7px',
+              },
+            },
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '.76rem', fontWeight: '700', color: 'rgba(255,255,255,0.85)' } },
+              h('span', {}, `👥 Arkadaşlarım (${myFriends.length})`),
+              h('span', { style: { fontSize: '.68rem', color: '#6ee7b7' } }, '🌐 Profilde Açık')),
+            myFriends.length
+              ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                  myFriends.slice(0, 10).map((fr) => h('span', {
+                    style: {
+                      display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px',
+                      borderRadius: '99px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+                      fontSize: '.74rem', color: '#f8fafc',
+                    },
+                  }, avatar(fr, 18), fr.name)))
+              : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Henüz arkadaş eklenmedi. Hemen aşağıdan ekleyebilirsin:'),
+            h('div', { style: { display: 'flex', gap: '6px' } }, addFrInp, addFrBtn))
+          );
+        }
+      };
+
+      // Hidden file input for device photo upload
+      const fileInp = h('input', {
+        type: 'file',
+        accept: 'image/*',
+        style: { display: 'none' },
+        onchange: (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              const sz = 160;
+              canvas.width = sz;
+              canvas.height = sz;
+              const cctx = canvas.getContext('2d');
+              const minSide = Math.min(img.width, img.height);
+              const sx = (img.width - minSide) / 2;
+              const sy = (img.height - minSide) / 2;
+              cctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, sz, sz);
+              selectedAvatarUrl = canvas.toDataURL('image/jpeg', 0.82);
+              avatarInp.value = '';
+              refreshLiveCard();
+              toast('📷 Profil fotoğrafın yüklendi!');
+            };
+            img.src = String(ev.target?.result || '');
+          };
+          reader.readAsDataURL(file);
+        },
+      });
+      liveAvatarWrap.onclick = () => fileInp.click();
+
+      nameInp.addEventListener('input', refreshLiveCard);
+      handleInp.addEventListener('input', refreshLiveCard);
+      bioInp.addEventListener('input', refreshLiveCard);
+      statusInp.addEventListener('input', refreshLiveCard);
+      avatarInp.addEventListener('input', () => {
+        if (avatarInp.value.trim()) {
+          selectedAvatarUrl = avatarInp.value.trim();
+          refreshLiveCard();
+        }
+      });
+
+      const STATUS_PRESETS = [
+        ['🍿', 'Film arıyor'],
+        ['🎬', 'Odada yayında'],
+        ['🎧', 'Müzik dinliyor'],
+        ['🔥', 'Sohbete açık'],
+        ['☕', 'Mola verdi'],
+        ['🌙', 'Rahatsız etmeyin'],
       ];
+
+      refreshLiveCard();
+
       root.append(
-        h('div', { class: 'wl-user-header' },
-          avatar({ ...current, color, avatarUrl: selectedAvatarUrl }, 54),
-          h('div', { class: 'wl-user-meta' },
-            h('div', { class: 'wl-user-title-row' },
-              h('strong', {}, current.name),
-              h('span', { class: 'wl-verified-pill' }, '✓ Doğrulanmış Hesap'),
-              h('span', { class: 'wl-verified-pill', style: { background: 'rgba(245,158,11,0.18)', color: '#fbbf24', borderColor: 'rgba(245,158,11,0.4)' } }, userMedal)),
-            h('div', { class: 'wl-user-handle' }, `@${current.handle || 'uye'} · ⏱️ ${userMins} dk birlikte izleme`))),
-        h('div', { class: 'rave-profile-stats-card', style: { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '10px 12px', marginBottom: '8px' } },
-          h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '.76rem', color: 'rgba(255,255,255,0.75)', marginBottom: '6px' } },
-            h('span', {}, '📊 Haftalık İzleme Grafiği (ProfileView)'),
-            h('strong', { style: { color: '#27dcc8' } }, `${userMins} dk · ${userMedal}`)),
-          h('div', { class: 'ProfileView__bar-chart', style: { display: 'flex', alignItems: 'flex-end', gap: '6px', height: '46px', paddingTop: '4px' } },
-            weekBars.map(([day, pct]) => h('div', { style: { flex: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' } },
-              h('div', { style: { width: '100%', height: `${Math.round(pct * 0.32)}px`, background: 'linear-gradient(180deg, #27dcc8, #6366f1)', borderRadius: '4px' } }),
-              h('span', { style: { fontSize: '.65rem', color: 'rgba(255,255,255,0.55)' } }, day))))),
-        h('label', { class: 'wl-field-label' }, 'Görünen Ad'),
-        nameInp,
-        h('label', { class: 'wl-field-label' }, 'Kullanıcı Adı (@handle)'),
-        handleInp,
-        h('label', { class: 'wl-field-label' }, '🎬 Hareketli GIF / Özel Avatar Seçici (AvatarSelectionPopUp)'),
-        h('div', { class: 'AvatarSelectionPopUp__avatar-selector-gif-picker-container', style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' } },
-          PRESET_GIF_AVATARS.map((pr) => h('button', {
+        fileInp,
+        // Live Profile Card Preview
+        h('div', { id: 'wl-profile-card-preview', style: { background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(99,102,241,0.28)', borderRadius: '16px', padding: '12px', marginBottom: '10px' } },
+          h('div', { class: 'wl-user-header', style: { marginBottom: '4px', border: 'none', padding: '0', background: 'transparent' } },
+            liveAvatarWrap,
+            h('div', { class: 'wl-user-meta', style: { flex: '1' } },
+              h('div', { class: 'wl-user-title-row' },
+                liveNameEl,
+                h('span', { class: 'wl-verified-pill' }, isLoggedMember ? '✓ Resmi Hesap' : '👤 Misafir Profil'),
+                h('span', { class: 'wl-verified-pill', style: { background: 'rgba(245,158,11,0.18)', color: '#fbbf24', borderColor: 'rgba(245,158,11,0.4)' } }, userMedal)),
+              liveHandleEl,
+              liveStatusPill)),
+          liveBioBox,
+          liveWatchingBox,
+          liveFriendsBox),
+
+        // Photo Upload & GIF Picker
+        h('label', { class: 'wl-field-label' }, '📷 Profil Fotoğrafı Seç / Yükle'),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '6px' } },
+          h('button', {
+            type: 'button',
+            id: 'wl-upload-photo-btn',
+            class: 'btn sm primary',
+            style: { fontSize: '.75rem', padding: '5px 10px' },
+            onclick: () => fileInp.click(),
+          }, '📷 Cihazdan Fotoğraf Yükle'),
+          ...PRESET_GIF_AVATARS.map((pr) => h('button', {
             type: 'button',
             class: 'btn sm',
-            style: { fontSize: '.74rem', padding: '4px 8px', background: selectedAvatarUrl === pr.url ? 'rgba(39,220,200,0.22)' : 'rgba(255,255,255,0.06)', border: selectedAvatarUrl === pr.url ? '1px solid #27dcc8' : '1px solid rgba(255,255,255,0.12)' },
+            style: { fontSize: '.73rem', padding: '4px 8px', background: selectedAvatarUrl === pr.url ? 'rgba(39,220,200,0.22)' : 'rgba(255,255,255,0.06)', border: selectedAvatarUrl === pr.url ? '1px solid #27dcc8' : '1px solid rgba(255,255,255,0.12)' },
             onclick: () => {
               selectedAvatarUrl = pr.url;
               avatarInp.value = pr.url;
+              refreshLiveCard();
             },
           }, pr.label))),
         avatarInp,
-        h('label', { class: 'wl-field-label', style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', marginTop: '6px' } },
-          h('input', {
-            type: 'checkbox',
-            checked: hideLocState ? 'checked' : null,
-            onchange: (e) => { hideLocState = e.target.checked; },
-          }),
-          h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle (PRIVACY - SET HIDE LOCATION)')),
-        h('label', { class: 'wl-field-label' }, 'Profil Neon Rengi'),
+
+        // Name & Handle side-by-side
+        h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' } },
+          h('div', {},
+            h('label', { class: 'wl-field-label' }, 'İsim (Görünen Ad)'),
+            nameInp),
+          h('div', {},
+            h('label', { class: 'wl-field-label' }, 'Kullanıcı Adı (@handle)'),
+            handleInp)),
+
+        // Bio
+        h('label', { class: 'wl-field-label' }, '📝 Biyografi'),
+        bioInp,
+
+        // Instant Status Share
+        h('label', { class: 'wl-field-label' }, '💬 Anlık Durum Paylaşımı'),
+        h('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', marginBottom: '5px' } },
+          STATUS_PRESETS.map(([emo, txt]) => h('button', {
+            type: 'button',
+            class: 'btn sm',
+            style: { fontSize: '.72rem', padding: '3px 8px', background: (selectedStatusEmoji === emo && statusInp.value === txt) ? 'rgba(39,220,200,0.2)' : 'rgba(255,255,255,0.05)' },
+            onclick: () => {
+              selectedStatusEmoji = emo;
+              statusInp.value = txt;
+              refreshLiveCard();
+            },
+          }, `${emo} ${txt}`))),
+        statusInp,
+
+        // Privacy Toggles ("İstenirse Gizlenebilsin")
+        h('label', { class: 'wl-field-label', style: { marginTop: '8px' } }, '🛡️ Gizlilik Ayarları (İstediğin Kısmı Gizle)'),
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '9px 11px' } },
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '.8rem', color: '#f8fafc' } },
+            h('input', {
+              type: 'checkbox',
+              id: 'wl-hide-watching-chk',
+              checked: hideWatchingState ? 'checked' : null,
+              onchange: (e) => { hideWatchingState = e.target.checked; refreshLiveCard(); },
+            }),
+            h('span', {}, '👁️ "Şu An İzliyor" Kısmını Gizle (Ne izlediğimi kimse görmesin)')),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '.8rem', color: '#f8fafc' } },
+            h('input', {
+              type: 'checkbox',
+              id: 'wl-hide-friends-chk',
+              checked: hideFriendsState ? 'checked' : null,
+              onchange: (e) => { hideFriendsState = e.target.checked; refreshLiveCard(); },
+            }),
+            h('span', {}, '👥 Arkadaşlarımı Gizle (Arkadaş listemi profilimde gizle)')),
+          h('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '.8rem', color: '#f8fafc' } },
+            h('input', {
+              type: 'checkbox',
+              id: 'wl-hide-location-chk',
+              checked: hideLocState ? 'checked' : null,
+              onchange: (e) => { hideLocState = e.target.checked; },
+            }),
+            h('span', {}, '🕵️ Dünya Haritasında Konumumu Gizle'))),
+
+        h('label', { class: 'wl-field-label' }, '🎨 Profil Neon Rengi'),
         renderColorPicker(),
         errBox,
         h('div', { class: 'wl-auth-actions' },
           h('button', {
             type: 'button',
+            id: 'wl-profile-save-btn',
             class: 'btn primary wl-btn-full wl-btn-primary-gradient',
             onclick: async () => {
-              const name = nameInp.value.trim() || current.name;
-              const handle = handleInp.value.trim().replace(/^@+/, '');
-              const avatarUrl = avatarInp.value.trim();
-              try {
-                const res = await api('/api/auth/profile', {
-                  method: 'POST',
-                  body: { name, handle, color, avatarUrl, hideLocation: hideLocState, authToken: current.authToken },
-                });
-                const updated = saveProfile({ ...(res?.user || current), name, handle, color, avatarUrl, hideLocation: hideLocState, authToken: res?.authToken || current.authToken, isGuest: false });
-                finish(updated, '✓ Profil bilgilerin güncellendi');
-              } catch (e) {
-                const updated = saveProfile({ ...current, name, handle, color, avatarUrl, hideLocation: hideLocState, isGuest: false });
-                finish(updated, '✓ Profil güncellendi');
+              const name = nameInp.value.trim() || profObj.name || 'İzleyici';
+              const handle = handleInp.value.trim().replace(/^@+/, '') || profObj.handle || 'uye';
+              const avatarUrl = selectedAvatarUrl || avatarInp.value.trim();
+              const bio = bioInp.value.trim();
+              const statusText = statusInp.value.trim();
+              const statusEmoji = selectedStatusEmoji || '🍿';
+              const payload = {
+                name, handle, color, avatarUrl, bio, statusText, statusEmoji,
+                hideWatching: hideWatchingState,
+                hideFriends: hideFriendsState,
+                hideLocation: hideLocState,
+              };
+              if (isLoggedMember && profObj.authToken) {
+                try {
+                  const res = await api('/api/auth/profile', {
+                    method: 'POST',
+                    body: { ...payload, authToken: profObj.authToken },
+                  });
+                  const updated = saveProfile({ ...(res?.user || profObj), ...payload, authToken: res?.authToken || profObj.authToken, isGuest: false });
+                  finish(updated, '✓ Profilin ve gizlilik ayarların kaydedildi!');
+                  return;
+                } catch (e) { /* fallback to local save */ }
+                const updated = saveProfile({ ...profObj, ...payload, isGuest: false });
+                finish(updated, '✓ Profil bilgilerin güncellendi!');
+              } else {
+                const updated = saveGuestProfile({ ...profObj, ...payload });
+                finish(updated, '✓ Profil kartın ve gizlilik ayarların kaydedildi!');
               }
             },
-          }, 'Değişiklikleri Kaydet'),
-          h('button', {
+          }, '💾 Profili & Gizlilik Ayarlarını Kaydet'),
+          isLoggedMember ? h('button', {
             type: 'button',
             class: 'btn wl-btn-logout',
             onclick: () => {
@@ -489,7 +815,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               toast('Oturum kapatıldı. Misafir olarak devam edebilir veya giriş yapabilirsiniz.');
               draw();
             },
-          }, '🚪 Çıkış Yap (Başka Hesaba Geç)'),
+          }, '🚪 Çıkış Yap (Başka Hesaba Geç)') : null,
           h('button', {
             type: 'button',
             class: 'btn wl-btn-full',
@@ -497,20 +823,6 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           }, 'Kapat')));
       return;
     }
-
-    if (!['login', 'register', 'guest'].includes(activeTab)) activeTab = 'register';
-    const tabsBar = h('div', { class: 'wl-auth-tabs' },
-      [
-        ['login', '🔑 Giriş Yap'],
-        ['register', '✨ Kayıt Ol'],
-        ['guest', '👤 Misafir Girişi'],
-      ].map(([id, lbl]) =>
-        h('button', {
-          type: 'button',
-          class: `wl-auth-tab ${activeTab === id ? 'on' : ''}`,
-          onclick: () => { activeTab = id; draw(); },
-        }, lbl)));
-    root.append(tabsBar);
 
     if (activeTab === 'guest') {
       const existingGuestName = (current && current.isGuest && current.name && current.name !== 'Misafir İzleyici') ? current.name : '';
@@ -998,4 +1310,117 @@ if (typeof window !== 'undefined') {
   window.vortexOpenDmModal = openDmModal;
   window.vortexOpenReportModal = openReportModal;
   window.vortexAttachFireShader = attachFireShader;
+}
+
+
+// ============================================================================
+// PUBLIC / ROOM PARTICIPANT PROFILE CARD VIEWER (Respects hideWatching & hideFriends)
+// ============================================================================
+export function openUserProfileModal(targetUser) {
+  if (!targetUser) return;
+  const me = state.self || loadProfile() || {};
+  const isMe = Boolean(
+    (targetUser.id && (targetUser.id === state.clientId || targetUser.id === me.id)) ||
+    (targetUser.uid && me.uid && targetUser.uid === me.uid)
+  );
+  if (isMe) {
+    profileSetup({ current: me, initialTab: 'account', dismissable: true });
+    return;
+  }
+  const uName = targetUser.name || 'İzleyici';
+  const uHandle = String(targetUser.handle || uName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'uye').replace(/^@+/, '');
+  const uBio = String(targetUser.bio || '').trim();
+  const uStatusEmoji = targetUser.statusEmoji || '🍿';
+  const uStatusText = String(targetUser.statusText || '').trim();
+  const uHideWatching = Boolean(targetUser.hideWatching);
+  const uHideFriends = Boolean(targetUser.hideFriends);
+  const uMedal = targetUser.medal || '🍿 İzleyici';
+  const uMins = Number(targetUser.watchMinutes || 45);
+  const activeMediaTitle = state.mesh?.media?.title || targetUser.nowWatching || '';
+  const friendList = Array.isArray(targetUser.friendsPreview) ? targetUser.friendsPreview : [];
+
+  const root = h('div', { class: 'wl-auth-modal', style: { minWidth: 'min(390px, 88vw)' } },
+    h('div', { class: 'wl-user-header' },
+      avatar(targetUser, 62, { online: true }),
+      h('div', { class: 'wl-user-meta', style: { flex: '1' } },
+        h('div', { class: 'wl-user-title-row' },
+          h('strong', {}, uName),
+          h('span', { class: 'wl-verified-pill', style: { background: 'rgba(245,158,11,0.18)', color: '#fbbf24', borderColor: 'rgba(245,158,11,0.4)' } }, uMedal)),
+        h('div', { class: 'wl-user-handle' }, `@${uHandle} · ⏱️ ${uMins} dk izleme`),
+        (uStatusText || uStatusEmoji) ? h('div', {
+          style: {
+            display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '4px',
+            padding: '3px 9px', borderRadius: '99px', fontSize: '.74rem', fontWeight: '600',
+            background: 'rgba(39,220,200,0.14)', border: '1px solid rgba(39,220,200,0.35)', color: '#5eead4',
+          },
+        }, `${uStatusEmoji} ${uStatusText || 'Odada aktif'}`) : null)),
+    h('div', {
+      style: {
+        fontSize: '.82rem', color: 'rgba(255,255,255,0.88)', lineHeight: '1.45',
+        background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: '11px', padding: '9px 11px',
+      },
+    }, uBio || 'Bu kullanıcı henüz biyografi eklemedi.'),
+    uHideWatching
+      ? h('div', {
+          style: {
+            padding: '8px 11px', borderRadius: '11px', background: 'rgba(255,255,255,0.03)',
+            border: '1px dashed rgba(255,255,255,0.14)', fontSize: '.78rem', color: 'rgba(255,255,255,0.58)',
+          },
+        }, '🔒 Kullanıcı "Şu An İzliyor" durumunu gizledi.')
+      : h('div', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 11px',
+            borderRadius: '12px', background: 'linear-gradient(135deg, rgba(39,220,200,0.1), rgba(99,102,241,0.1))',
+            border: '1px solid rgba(39,220,200,0.3)',
+          },
+        },
+        h('span', { style: { fontSize: '1.2rem' } }, '🎬'),
+        h('div', { style: { flex: '1', minWidth: '0' } },
+          h('div', { style: { fontSize: '.68rem', fontWeight: '800', color: '#27dcc8', textTransform: 'uppercase' } }, 'ŞU AN İZLİYOR'),
+          h('div', { style: { fontSize: '.84rem', fontWeight: '700', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, activeMediaTitle || 'Lobide geziyor'))),
+    uHideFriends
+      ? h('div', {
+          style: {
+            padding: '8px 11px', borderRadius: '11px', background: 'rgba(255,255,255,0.03)',
+            border: '1px dashed rgba(255,255,255,0.14)', fontSize: '.78rem', color: 'rgba(255,255,255,0.58)',
+          },
+        }, '🔒 Kullanıcı arkadaş listesini gizledi.')
+      : h('div', {
+          style: {
+            padding: '9px 11px', borderRadius: '12px', background: 'rgba(255,255,255,0.035)',
+            border: '1px solid rgba(255,255,255,0.08)',
+          },
+        },
+        h('div', { style: { fontSize: '.76rem', fontWeight: '700', color: 'rgba(255,255,255,0.85)', marginBottom: '6px' } }, `👥 Arkadaşları (${friendList.length})`),
+        friendList.length
+          ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+              friendList.map((f) => h('span', {
+                style: {
+                  display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px',
+                  borderRadius: '99px', background: 'rgba(255,255,255,0.06)', fontSize: '.74rem',
+                },
+              }, avatar(f, 18), f.name)))
+          : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Açık arkadaş listesi boş.')),
+    h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' } },
+      h('button', {
+        type: 'button',
+        class: 'btn primary',
+        style: { flex: '1', justifyContent: 'center' },
+        onclick: (e) => {
+          const added = toggleFriend(targetUser);
+          e.currentTarget.textContent = added ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle';
+          toast(added ? `👥 ${uName} arkadaşlarına eklendi!` : `${uName} arkadaşlardan çıkarıldı`);
+        },
+      }, isFriend(targetUser) ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle')));
+
+  popup({
+    title: `${uName} (@${uHandle})`,
+    dismissable: true,
+    content: root,
+    options: [{ label: 'Kapat' }],
+  });
+}
+if (typeof window !== 'undefined') {
+  window.vortexOpenUserProfile = openUserProfileModal;
 }

@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261102_v59';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261102_v59';
-import { resolveMusicItem } from './selection-kinds.js?v=20261102_v59';
-import { MeshConnection } from '../realtime.js?v=20261102_v59';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261102_v59';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261102_v59';
-import { buildLayout } from './mesh-layout.js?v=20261102_v59';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261102_v59';
-import { Voice } from '../voice.js?v=20261102_v59';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261102_v59';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261102_v60';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261102_v60';
+import { resolveMusicItem } from './selection-kinds.js?v=20261102_v60';
+import { MeshConnection } from '../realtime.js?v=20261102_v60';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261102_v60';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261102_v60';
+import { buildLayout } from './mesh-layout.js?v=20261102_v60';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261102_v60';
+import { Voice } from '../voice.js?v=20261102_v60';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261102_v60';
 
 let ctx = null;
 
@@ -71,6 +71,9 @@ const deviceLabel = () => (/iPhone|iPad|Android|Mobile/i.test(navigator.userAgen
 
 function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (!room) return;
+  if (!room.curated && room.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(room.media.title))) {
+    room = { ...room, name: String(room.media.title).trim().slice(0, 80) };
+  }
   const curRoom = state.mesh;
   const prevKey = mediaKey(curRoom?.media);
   let nextKey = mediaKey(room.media);

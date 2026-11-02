@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261102_v59';
-import { api } from './api.js?v=20261102_v59';
-import { state } from './store.js?v=20261102_v59';
+import { clock } from './sync.js?v=20261102_v60';
+import { api } from './api.js?v=20261102_v60';
+import { state } from './store.js?v=20261102_v60';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -294,6 +294,16 @@ export class MeshConnection {
         clientId: this.clientId,
         clientToken: this.clientToken,
         username: this.profile.name,
+        handle: this.profile.handle || '',
+        avatarUrl: this.profile.avatarUrl || this.profile.avatar || '',
+        bio: this.profile.bio || '',
+        statusText: this.profile.statusText || '',
+        statusEmoji: this.profile.statusEmoji || '🍿',
+        hideWatching: Boolean(this.profile.hideWatching),
+        hideFriends: Boolean(this.profile.hideFriends),
+        hideLocation: Boolean(this.profile.hideLocation),
+        medal: this.profile.medal || '',
+        watchMinutes: this.profile.watchMinutes || 0,
         color: this.profile.color,
         device: this.device,
         pwd: this.password,

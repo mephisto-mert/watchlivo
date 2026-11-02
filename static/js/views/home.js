@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v59';
-import { state, set, getFriends } from '../store.js?v=20261102_v59';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v59';
-import { api } from '../api.js?v=20261102_v59';
-import { createSelection } from './selection.js?v=20261102_v59';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v59';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v60';
+import { state, set, getFriends } from '../store.js?v=20261102_v60';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v60';
+import { api } from '../api.js?v=20261102_v60';
+import { createSelection } from './selection.js?v=20261102_v60';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v60';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v59', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v60', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -51,20 +51,30 @@ export async function createRoomWithMedia(media) {
     cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
     sessionStorage.setItem('vortex_cid', cid);
   } catch (e) { /* ignore */ }
+  const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
+    ? String(cleanMedia.title).trim().slice(0, 80)
+    : `${self.name || 'İzleyici'} odası`;
   const res = await api('/api/rooms/create', {
     method: 'POST',
     body: {
-      name: `${self.name || 'İzleyici'} odası`,
+      name: initialRoomName,
       privacy: 'public',
       playMode: 'leader',
       creator: self.name || 'İzleyici',
       creatorId: self.id || '',
       clientId: cid,
       color: self.color || '#27DCC8',
-      avatarUrl: self.avatarUrl || '',
+      handle: self.handle || '',
+      avatarUrl: self.avatarUrl || self.avatar || '',
+      bio: self.bio || '',
+      statusText: self.statusText || '',
+      statusEmoji: self.statusEmoji || '🍿',
       medal: self.medal || '',
       watchMinutes: self.watchMinutes || 0,
       hideLocation: Boolean(self.hideLocation),
+      hideWatching: Boolean(self.hideWatching),
+      hideFriends: Boolean(self.hideFriends),
+      friendsPreview: Boolean(self.hideFriends) ? [] : (getFriends() || []).slice(0, 10),
       device: /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent || '') ? 'Mobil' : 'Web',
       media: cleanMedia,
     },

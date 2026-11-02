@@ -3205,7 +3205,7 @@ body.theater-mode .resize-handle {
   }
   #mesh-root > .navbar .privacy-chip.sync-live-chip,
   #mesh-root > .navbar .sync-live-chip,
-  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar .mesh-title .mesh-title-code,
   .room-header-sep,
   #mesh-root > .navbar .nav-icon.room-nav-pill#nav-toggle-chat,
   #mesh-root > .navbar .nav-icon.room-nav-pill#nav-vote,
@@ -4177,5 +4177,19 @@ body.vortex-fs #mesh-root .resize-handle {
   body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .chat-list {
     min-height: 54px !important;
     padding: 4px 6px !important;
+  }
+}
+
+
+@media (max-width: 960px) {
+  #mesh-root > .navbar .mesh-title {
+    display: inline-block !important;
+    max-width: clamp(92px, 28vw, 175px) !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    font-size: 11.5px !important;
+    font-weight: 700 !important;
+    color: #f8fafc !important;
   }
 }

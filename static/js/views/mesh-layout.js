@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261102_v59';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261102_v59';
-import { navIcon, logo } from './home.js?v=20261102_v59';
-import { createSelection } from './selection.js?v=20261102_v59';
-import { buildControls } from './controls.js?v=20261102_v59';
-import { buildChat } from './chat.js?v=20261102_v59';
-import { PANELS } from './panels.js?v=20261102_v59';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261102_v60';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261102_v60';
+import { navIcon, logo } from './home.js?v=20261102_v60';
+import { createSelection } from './selection.js?v=20261102_v60';
+import { buildControls } from './controls.js?v=20261102_v60';
+import { buildChat } from './chat.js?v=20261102_v60';
+import { PANELS } from './panels.js?v=20261102_v60';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -137,10 +137,15 @@ export function buildLayout(app, ctx) {
         h('div', { class: 'room-brand-capsule' },
           logo(),
           h('span', { class: 'room-header-sep' }),
-          m ? h('span', { class: 'mesh-title', title: `${m.name} (#${String(m.id || '').split('-').pop()})` },
-            m.name,
-            !m.curated && m.id ? h('span', { style: { opacity: '0.55', fontSize: '11px', marginLeft: '5px', fontWeight: '600' } }, `#${String(m.id).split('-').pop()}`) : null
-          ) : null,
+          m ? (() => {
+            const activeRoomTitle = (!m.curated && m.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(m.media.title)))
+              ? String(m.media.title).trim()
+              : (m.name || 'Watchlivo Odası');
+            return h('span', { class: 'mesh-title', id: 'room-header-title', title: `${activeRoomTitle} (#${String(m.id || '').split('-').pop()})` },
+              activeRoomTitle,
+              !m.curated && m.id ? h('span', { class: 'mesh-title-code', style: { opacity: '0.55', fontSize: '11px', marginLeft: '5px', fontWeight: '600' } }, `#${String(m.id).split('-').pop()}`) : null
+            );
+          })() : null,
           m ? h('span', {
             class: `privacy-chip is-${m.privacy || 'public'} ${L === 'Settings' ? 'selected' : ''}`.trim(),
             'data-privacy': m.privacy || 'public',

@@ -920,7 +920,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     else:
         recent_signals = []
     return {
-        "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
+        "id": room["id"], "name": _effective_room_name(room), "privacy": room["privacy"], "playMode": room["playMode"],
         "voipMode": room["voipMode"], "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room["creator"],
         "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set),
         "curated": bool(room.get("curated")), "polls": (room.get("polls") or [])[-10:],
@@ -958,7 +958,7 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
         cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode
         parts_preview.append(cp)
     return {
-        "id": room["id"], "name": room["name"], "privacy": room["privacy"], "playMode": room["playMode"],
+        "id": room["id"], "name": _effective_room_name(room), "privacy": room["privacy"], "playMode": room["playMode"],
         "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room.get("creator", ""),
         "creatorCid": creator_cid, "host_id": host_id, "rev": int(room.get("rev") or 1),
         "curated": bool(room.get("curated")), "media": m_summary,
@@ -1407,9 +1407,25 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         "uid": clean_str(data.get("uid") or data.get("userId"), 64),
         "handle": clean_str(data.get("handle"), 24),
         "medal": clean_str(data.get("medal"), 32),
+        "bio": clean_str(data.get("bio"), 160),
+        "statusText": clean_str(data.get("statusText"), 60),
+        "statusEmoji": clean_str(data.get("statusEmoji"), 12),
     }
     p.update({k: v for k, v in fields.items() if v})
+    if "bio" in data and not data.get("bio"):
+        p["bio"] = ""
+    if "statusText" in data and not data.get("statusText"):
+        p["statusText"] = ""
     p["hideLocation"] = hide_loc
+    if "hideWatching" in data:
+        p["hideWatching"] = bool(data.get("hideWatching"))
+    if "hideFriends" in data:
+        p["hideFriends"] = bool(data.get("hideFriends"))
+    if isinstance(data.get("friendsPreview"), list):
+        p["friendsPreview"] = [
+            {"name": clean_str(f.get("name"), 24), "handle": clean_str(f.get("handle"), 24), "color": clean_str(f.get("color"), 16)}
+            for f in data["friendsPreview"][:12] if isinstance(f, dict) and f.get("name")
+        ]
     if raw_avatar:
         p["avatarUrl"] = raw_avatar
     if "watchMinutes" in data:
