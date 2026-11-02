@@ -460,9 +460,55 @@ _STAR_WARS_CURATED = [
     {"id": "115036", "tmdbId": "115036", "mediaType": "tv", "title": "The Book of Boba Fett (Star Wars)", "originalTitle": "The Book of Boba Fett", "year": "2021", "rating": 7.4, "voteCount": 2400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Efsanevi ödül avcısı Boba Fett ve paralı asker Fennec Shand, Jabba the Hutt'ın Tatooine'deki suç imparatorluğunu ele geçirir.", "poster": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg"},
     {"id": "60554", "tmdbId": "60554", "mediaType": "tv", "title": "Star Wars Asiler (Rebels)", "originalTitle": "Star Wars Rebels", "year": "2014", "rating": 7.8, "voteCount": 950, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Hayalet gemisinin cesur mürettebatı, galaktik İmparatorluk'a karşı ilk isyan kıvılcımlarını ateşler.", "poster": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg"},
     {"id": "105971", "tmdbId": "105971", "mediaType": "tv", "title": "Star Wars: Kötüler Timi (The Bad Batch)", "originalTitle": "Star Wars: The Bad Batch", "year": "2021", "rating": 8.2, "voteCount": 980, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Klon Savaşları'nın hemen ardından genetik mutasyonlu seçkin klon birliği Kuvvet 99, hızla değişen galakside paralı asker olarak hayatta kalmaya çalışır.", "poster": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg"},
-    {"id": "114479", "tmdbId": "114479", "mediaType": "tv", "title": "Star Wars: The Acolyte", "originalTitle": "The Acolyte", "year": "2024", "rating": 6.4, "voteCount": 780, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Yüksek Cumhuriyet döneminin son günlerinde saygın bir Jedi Ustası, eski Padawan'ı ile birlikte şok edici bir suç dalgasını araştırır.", "poster": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg"},
-    {"id": "202879", "tmdbId": "202879", "mediaType": "tv", "title": "Star Wars: Skeleton Crew", "originalTitle": "Star Wars: Skeleton Crew", "year": "2024", "rating": 7.3, "voteCount": 520, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Kendi gezegenlerinde gizemli bir keşif yapan dört çocuk, tehlikeli galakside kaybolur ve eve dönüş yolunda Jod Na Nawood ile karşılaşır.", "poster": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg"},
-    {"id": "203085", "tmdbId": "203085", "mediaType": "tv", "title": "Star Wars: Jedi Hikayeleri (Tales of the Jedi)", "originalTitle": "Star Wars: Tales of the Jedi", "year": "2022", "rating": 8.1, "voteCount": 610, "origLang": "en", "categories": ["scifi", "animation"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Öncül üçleme dönemindeki Jedi Şövalyeleri Ahsoka Tano ve Kont Dooku'nun kaderlerini belirleyen dönüm noktalarını anlatan antoloji dizisi.", "poster": "https://image.tmdb.org/t/p/w500/l6p2e4B1A7bbF68Tx3jB2E2N3vO.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/l6p2e4B1A7bbF68Tx3jB2E2N3vO.jpg"},
+    {"id": "114479", "tmdbId": "114479", "mediaType": "tv", "title": "Star Wars: The Acolyte", "originalTitle": "The Acolyte", "year": "2024", "rating": 6.4, "voteCount": 780, "origLang": "en", "categories": ["scifi", "action", "series"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Yüksek Cumhuriyet döneminin son günlerinde saygın bir Jedi Ustası, eski Padawan'ı ile birlikte şok edici bir suç dalgasını araştırır.", "poster": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg"},
+    {"id": "202879", "tmdbId": "202879", "mediaType": "tv", "title": "Star Wars: Skeleton Crew", "originalTitle": "Star Wars: Skeleton Crew", "year": "2024", "rating": 7.3, "voteCount": 520, "origLang": "en", "categories": ["scifi", "action", "series"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Kendi gezegenlerinde gizemli bir keşif yapan dört çocuk, tehlikeli galakside kaybolur ve eve dönüş yolunda Jod Na Nawood ile karşılaşır.", "poster": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg"},
+    {"id": "203085", "tmdbId": "203085", "mediaType": "tv", "title": "Star Wars: Jedi Hikayeleri (Tales of the Jedi)", "originalTitle": "Star Wars: Tales of the Jedi", "year": "2022", "rating": 8.1, "voteCount": 610, "origLang": "en", "categories": ["scifi", "animation", "series"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Öncül üçleme dönemindeki Jedi Şövalyeleri Ahsoka Tano ve Kont Dooku'nun kaderlerini belirleyen dönüm noktalarını anlatan antoloji dizisi.", "poster": "https://image.tmdb.org/t/p/w500/k3nWQb0E8mLSR8acSkJP78VRVMv.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/vp52Er9JebGn49GG37jFTwx15Lw.jpg"},
+    {"id": "251091", "tmdbId": "251091", "mediaType": "tv", "title": "Star Wars: İmparatorluk Hikayeleri (Tales of the Empire)", "originalTitle": "Star Wars: Tales of the Empire", "year": "2024", "rating": 7.6, "voteCount": 420, "origLang": "en", "categories": ["scifi", "animation", "series"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Galaktik İmparatorluk'un yükseliş döneminde Morgan Elsbeth ve eski Jedi Barriss Offee'nin karanlık yolculuğu.", "poster": "https://image.tmdb.org/t/p/w500/qA28nLteurVboSSzltuyYt1lvlC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/sMxOqjwaHHXuBnHkvVyzqcOPMVF.jpg"},
+    {"id": "114478", "tmdbId": "114478", "mediaType": "tv", "title": "Star Wars: Visions", "originalTitle": "Star Wars: Visions", "year": "2021", "rating": 7.2, "voteCount": 710, "origLang": "ja", "categories": ["scifi", "animation", "anime", "series"], "genreLabel": "Bilim Kurgu • Anime Antoloji", "overview": "Dünyanın önde gelen anime stüdyolarının Star Wars evrenine getirdiği özgün hikaye anlatımları.", "poster": "https://image.tmdb.org/t/p/w500/lG9ltUP4FwvsQBcwOJYceDbP48E.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/m2QTmJhe36uKrkQjC1MsNV7Dcqp.jpg"},
+    {"id": "79093", "tmdbId": "79093", "mediaType": "tv", "title": "Star Wars: Direniş (Resistance)", "originalTitle": "Star Wars Resistance", "year": "2018", "rating": 6.6, "voteCount": 390, "origLang": "en", "categories": ["scifi", "animation", "series"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Genç pilot Kazuda Xiono, yükselen İlk Düzen tehdidini gözetlemek için Direniş adına gizli göreve katılır.", "poster": "https://image.tmdb.org/t/p/w500/xul6SG8rar3wkHPY8YusUtxcdlZ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/Ad2y46YKP2u81bsR4axajbbJKwS.jpg"},
+    {"id": "3122", "tmdbId": "3122", "mediaType": "tv", "title": "Star Wars: Klon Savaşları (2003 Klasik Seri)", "originalTitle": "Star Wars: Clone Wars", "year": "2003", "rating": 7.9, "voteCount": 890, "origLang": "en", "categories": ["scifi", "animation", "action", "series"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Genndy Tartakovsky imzalı, Klonların Saldırısı ile Sith'in İntikamı arasındaki destansı savaşları anlatan kült animasyon dizisi.", "poster": "https://image.tmdb.org/t/p/w500/jKfAVTGkf9qpGPZ4E1pNKdW6vra.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6Bsfr4QipqfAMlv9DCk8zNACvUG.jpg"},
+]
+
+_EXTRA_CURATED_CATALOG = [
+    # Harry Potter & Fantastic Beasts
+    {"id": "671", "tmdbId": "671", "mediaType": "movie", "title": "Harry Potter ve Felsefe Taşı", "originalTitle": "Harry Potter and the Philosopher's Stone", "year": "2001", "rating": 7.9, "voteCount": 27000, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/wuMc08IPKEatf9rnMNXvIDxqP4W.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/bfh9Z3Ghz4FOJAfLOAhmc3ccnHU.jpg"},
+    {"id": "672", "tmdbId": "672", "mediaType": "movie", "title": "Harry Potter ve Sırlar Odası", "originalTitle": "Harry Potter and the Chamber of Secrets", "year": "2002", "rating": 7.7, "voteCount": 21800, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/sdEOH0992YZ0QSxgXNIGLq1ToUi.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/zuYEvft5fuzBDOeq4ClYpiu9LlO.jpg"},
+    {"id": "673", "tmdbId": "673", "mediaType": "movie", "title": "Harry Potter ve Azkaban Tutsağı", "originalTitle": "Harry Potter and the Prisoner of Azkaban", "year": "2004", "rating": 8.0, "voteCount": 21500, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/aWxwnYoe8p2d2fcxOqtvAtJ72Rw.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/htmYEfH7TQgzsXHCnNXxmoYKQtL.jpg"},
+    {"id": "674", "tmdbId": "674", "mediaType": "movie", "title": "Harry Potter ve Ateş Kadehi", "originalTitle": "Harry Potter and the Goblet of Fire", "year": "2005", "rating": 7.8, "voteCount": 20500, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/fECBtHlr0RB3foNHDiCBXeg9Bv9.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/cClWTo3ftVXvV1sF8vlLuWfnlph.jpg"},
+    {"id": "675", "tmdbId": "675", "mediaType": "movie", "title": "Harry Potter ve Zümrüdüanka Yoldaşlığı", "originalTitle": "Harry Potter and the Order of the Phoenix", "year": "2007", "rating": 7.7, "voteCount": 19300, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/5aOyriWkPec0zUDxmHFP9qMmBaj.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/9svsJni0pNROt53QBEj9JqZMuEK.jpg"},
+    {"id": "767", "tmdbId": "767", "mediaType": "movie", "title": "Harry Potter ve Melez Prens", "originalTitle": "Harry Potter and the Half-Blood Prince", "year": "2009", "rating": 7.7, "voteCount": 19100, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/z7uo9zmQdQwU5ZJHFpv2Upl30i1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/mITJS77BV4TSqdFB5FPGBc7JKXj.jpg"},
+    {"id": "12444", "tmdbId": "12444", "mediaType": "movie", "title": "Harry Potter ve Ölüm Yadigarları: Bölüm 1", "originalTitle": "Harry Potter and the Deathly Hallows: Part 1", "year": "2010", "rating": 7.8, "voteCount": 18900, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/iGoXIpQb7Pot00EEdwpwPajheZ5.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/5i2QAYnbN5vOZUUolLPYHTb9spe.jpg"},
+    {"id": "12445", "tmdbId": "12445", "mediaType": "movie", "title": "Harry Potter ve Ölüm Yadigarları: Bölüm 2", "originalTitle": "Harry Potter and the Deathly Hallows: Part 2", "year": "2011", "rating": 8.1, "voteCount": 20400, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/c54HpQmuwXjHq2C9wmoACjxoom3.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/eKUk4oN4ucwnLJml7wRnjuB9AQH.jpg"},
+    # Lord of the Rings & Hobbit
+    {"id": "120", "tmdbId": "120", "mediaType": "movie", "title": "Yüzüklerin Efendisi: Yüzük Kardeşliği", "originalTitle": "The Lord of the Rings: The Fellowship of the Ring", "year": "2001", "rating": 8.4, "voteCount": 24800, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Destansı Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/6oom5QYQ2yQTMJIbnvbkBL9cHo6.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/oiwc338EoBgS4sEI2ixAny4KQKg.jpg"},
+    {"id": "121", "tmdbId": "121", "mediaType": "movie", "title": "Yüzüklerin Efendisi: İki Kule", "originalTitle": "The Lord of the Rings: The Two Towers", "year": "2002", "rating": 8.4, "voteCount": 21600, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Destansı Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/5VTN0pR8gcqV3EPUHHfMGnJYN9L.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6G73mNyooWAEQTpckPSnFxFoNmc.jpg"},
+    {"id": "122", "tmdbId": "122", "mediaType": "movie", "title": "Yüzüklerin Efendisi: Kralın Dönüşü", "originalTitle": "The Lord of the Rings: The Return of the King", "year": "2003", "rating": 8.5, "voteCount": 23900, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Destansı Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/rCzpDGLbOoPwLjy3OAm5NUPOTrC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/ctiw6FZK4N36LmkjSklWEbuvlq9.jpg"},
+    {"id": "49051", "tmdbId": "49051", "mediaType": "movie", "title": "Hobbit: Beklenmedik Yolculuk", "originalTitle": "The Hobbit: An Unexpected Journey", "year": "2012", "rating": 7.4, "voteCount": 18200, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/yHA9Fc37VmpUA5UncTxxo3rTGVA.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xyXmtuvsoM5J3yNad0nvcetpBdY.jpg"},
+    {"id": "57158", "tmdbId": "57158", "mediaType": "movie", "title": "Hobbit: Smaug'un Çorak Toprakları", "originalTitle": "The Hobbit: The Desolation of Smaug", "year": "2013", "rating": 7.6, "voteCount": 13100, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/xQYiXsheRCDBA39DOrmaw1aSpbk.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/5ZYxL6k4ZHrEmrFvmY4HZVzerxG.jpg"},
+    {"id": "122917", "tmdbId": "122917", "mediaType": "movie", "title": "Hobbit: Beş Ordunun Savaşı", "originalTitle": "The Hobbit: The Battle of the Five Armies", "year": "2014", "rating": 7.3, "voteCount": 14100, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Fantastik • Macera", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/xT98tLqatZPQApyRmlPL12LtiWp.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/3UbaCMmqOd7mca4Y5DOzY2ZVTyX.jpg"},
+    {"id": "84773", "tmdbId": "84773", "mediaType": "tv", "title": "Yüzüklerin Efendisi: Güç Yüzükleri", "originalTitle": "The Lord of the Rings: The Rings of Power", "year": "2022", "rating": 7.3, "voteCount": 2900, "origLang": "en", "categories": ["series", "scifi", "action", "trend"], "genreLabel": "Fantastik • Dizi", "sourceBadge": "📺 Prime 4K", "poster": "https://image.tmdb.org/t/p/w500/mYLOqiStMxDK3fYZFirgrMt8z5d.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/achmETPRJZc9QVXsMPgHwYEyNar.jpg"},
+    # Marvel, Dark Knight, Matrix, John Wick, Dune
+    {"id": "299536", "tmdbId": "299536", "mediaType": "movie", "title": "Avengers: Sonsuzluk Savaşı (Infinity War)", "originalTitle": "Avengers: Infinity War", "year": "2018", "rating": 8.3, "voteCount": 29500, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Marvel • Bilim Kurgu & Aksiyon", "sourceBadge": "🎬 Marvel 4K", "poster": "https://image.tmdb.org/t/p/w500/7WsyChQLEftFiDOVTGkv3hFpyyt.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/mDfJG3LC3Dqb67AZ52x3Z0jU0uB.jpg"},
+    {"id": "299534", "tmdbId": "299534", "mediaType": "movie", "title": "Avengers: Endgame", "originalTitle": "Avengers: Endgame", "year": "2019", "rating": 8.3, "voteCount": 25600, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Marvel • Bilim Kurgu & Aksiyon", "sourceBadge": "🎬 Marvel 4K", "poster": "https://image.tmdb.org/t/p/w500/or06FN3Dka5tukK1e9sl16pB3iy.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7RyHsO4yDXtBv1zUU3mTpHeQ0d5.jpg"},
+    {"id": "634649", "tmdbId": "634649", "mediaType": "movie", "title": "Örümcek-Adam: Eve Dönüş Yok (Spider-Man: No Way Home)", "originalTitle": "Spider-Man: No Way Home", "year": "2021", "rating": 8.0, "voteCount": 20100, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Marvel • Aksiyon", "sourceBadge": "🎬 Marvel 4K", "poster": "https://image.tmdb.org/t/p/w500/1g0dhYtq4irTY1GPXvft6k4YLjm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/iQFcwSGbZXMkeyKrxbPnwnRo5fl.jpg"},
+    {"id": "533535", "tmdbId": "533535", "mediaType": "movie", "title": "Deadpool & Wolverine", "originalTitle": "Deadpool & Wolverine", "year": "2024", "rating": 7.7, "voteCount": 6200, "origLang": "en", "categories": ["movies", "scifi", "action", "comedy", "trend"], "genreLabel": "Marvel • Aksiyon & Komedi", "sourceBadge": "🎬 Marvel 4K", "poster": "https://image.tmdb.org/t/p/w500/8cdWjvZQUExUUTzyp4t6EDMubfO.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/by8z9Fe8y7p4jo2YlW2SZDnptyT.jpg"},
+    {"id": "155", "tmdbId": "155", "mediaType": "movie", "title": "Kara Şövalye (The Dark Knight)", "originalTitle": "The Dark Knight", "year": "2008", "rating": 8.5, "voteCount": 32800, "origLang": "en", "categories": ["movies", "action", "drama", "trend"], "genreLabel": "DC • Aksiyon & Suç", "sourceBadge": "🎬 IMAX 4K", "poster": "https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/9FE5eD92WfVCiivM9Pq9GVSrlWk.jpg"},
+    {"id": "603", "tmdbId": "603", "mediaType": "movie", "title": "Matrix", "originalTitle": "The Matrix", "year": "1999", "rating": 8.2, "voteCount": 25400, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Bilim Kurgu • Aksiyon", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/tlm8UkiQsitc8rSuIAscQDCnP8d.jpg"},
+    {"id": "603692", "tmdbId": "603692", "mediaType": "movie", "title": "John Wick 4", "originalTitle": "John Wick: Chapter 4", "year": "2023", "rating": 7.8, "voteCount": 6500, "origLang": "en", "categories": ["movies", "action", "trend"], "genreLabel": "Aksiyon • Gerilim", "sourceBadge": "🎬 4K Seri Arşivi", "poster": "https://image.tmdb.org/t/p/w500/vZloFAK7NmvMGKE7VkF5UHaz0I.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7I6VUdPj6tQECNHdviJkUHD2u89.jpg"},
+    {"id": "693134", "tmdbId": "693134", "mediaType": "movie", "title": "Dune: Çöl Gezegeni Bölüm İki", "originalTitle": "Dune: Part Two", "year": "2024", "rating": 8.3, "voteCount": 5900, "origLang": "en", "categories": ["movies", "scifi", "action", "trend"], "genreLabel": "Bilim Kurgu • Macera", "sourceBadge": "🎬 IMAX 4K", "poster": "https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/eZ239CUp1d6OryZEBPnO2n87gMG.jpg"},
+    # Yeşilçam & Türk Sineması Klasikleri (Verified TMDB IDs & Posters)
+    {"id": "83651", "tmdbId": "83651", "mediaType": "movie", "title": "Hababam Sınıfı", "originalTitle": "Hababam Sınıfı", "year": "1975", "rating": 9.2, "voteCount": 1850, "origLang": "tr", "categories": ["movies", "comedy", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/n58QmaMaw7kN3sg2EEV9HMq0jkR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/9u9XcPaeOvPcelm8RmMarEgvIAk.jpg"},
+    {"id": "31534", "tmdbId": "31534", "mediaType": "movie", "title": "Hababam Sınıfı Sınıfta Kaldı", "originalTitle": "Hababam Sınıfı Sınıfta Kaldı", "year": "1976", "rating": 8.9, "voteCount": 1400, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/uw0Tu1xjWiSSiVGaZe2EYZ48ItQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/9sVMciEvGTc6wOTD0hi5regoyxZ.jpg"},
+    {"id": "31408", "tmdbId": "31408", "mediaType": "movie", "title": "Hababam Sınıfı Uyanıyor", "originalTitle": "Hababam Sınıfı Uyanıyor", "year": "1976", "rating": 8.8, "voteCount": 1300, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/qiy8MEB2idHMz4hk2OrEurzgKQN.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/hMvW0SzAXCTQcrtAZCiW8mHsBlW.jpg"},
+    {"id": "31402", "tmdbId": "31402", "mediaType": "movie", "title": "Hababam Sınıfı Tatilde", "originalTitle": "Hababam Sınıfı Tatilde", "year": "1977", "rating": 8.7, "voteCount": 1250, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/fJCB6RL59Jx0opaRfNaLmdSUAHp.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/mV351zRmHJVXJFqyAZXNnB1BzCh.jpg"},
+    {"id": "38794", "tmdbId": "38794", "mediaType": "movie", "title": "Tosun Paşa", "originalTitle": "Tosun Paşa", "year": "1976", "rating": 9.0, "voteCount": 1600, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/aE8cMuRNYltzzW36N2hC3zyZQm2.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/kiu0xIcu9Rju9HTWSJOo8Svg9aW.jpg"},
+    {"id": "31405", "tmdbId": "31405", "mediaType": "movie", "title": "Süt Kardeşler", "originalTitle": "Süt Kardeşler", "year": "1976", "rating": 8.9, "voteCount": 1500, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/vGW4S5CBTiIdkFE0nX6wljMDLjo.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7p9jc9Tt4xkoWtdNUReyLPnYOJ9.jpg"},
+    {"id": "31547", "tmdbId": "31547", "mediaType": "movie", "title": "Şaban Oğlu Şaban", "originalTitle": "Şaban Oğlu Şaban", "year": "1977", "rating": 8.9, "voteCount": 1480, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/iPYrBGUaNTsrMjxcPoNvo4quEeL.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/afqmjyqyZjfzRo1oVIRW1U5gPPN.jpg"},
+    {"id": "27211", "tmdbId": "27211", "mediaType": "movie", "title": "Kibar Feyzo", "originalTitle": "Kibar Feyzo", "year": "1978", "rating": 8.8, "voteCount": 1420, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/nfgnDKDUS5AryFRh4xI1zLLvdoR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/9t376elDJnO9QwZJd5z7LOz5Z0S.jpg"},
+    {"id": "80961", "tmdbId": "80961", "mediaType": "movie", "title": "Çöpçüler Kralı", "originalTitle": "Çöpçüler Kralı", "year": "1977", "rating": 8.8, "voteCount": 1390, "origLang": "tr", "categories": ["movies", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/fjmT1EEBBkUSZ9CwZ13UCVzPKdL.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/viJjUhzkxwttDaLIGxE78urG3Ej.jpg"},
+    {"id": "31401", "tmdbId": "31401", "mediaType": "movie", "title": "Züğürt Ağa", "originalTitle": "Züğürt Ağa", "year": "1985", "rating": 8.8, "voteCount": 1350, "origLang": "tr", "categories": ["movies", "comedy", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Türk Sineması • Dram & Komedi", "sourceBadge": "🇹🇷 Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/yJjrLFc2ean5CKbwO1LI7B8xecN.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/dYxbhzBvhviKRz9kzTK83xZvAnF.jpg"},
+    {"id": "53206", "tmdbId": "53206", "mediaType": "movie", "title": "Neşeli Günler", "originalTitle": "Neşeli Günler", "year": "1978", "rating": 8.9, "voteCount": 1520, "origLang": "tr", "categories": ["movies", "comedy", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yeşilçam Efsanesi • Aile & Komedi", "sourceBadge": "🇹🇷 Yeşilçam Restorasyon HD", "poster": "https://image.tmdb.org/t/p/w500/vNSJTFNaDj8L0r1iPkfSXxEy2yI.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/gyqswEuRgrYPsrArrrOxC5Px09Y.jpg"},
+    {"id": "27275", "tmdbId": "27275", "mediaType": "movie", "title": "G.O.R.A.", "originalTitle": "G.O.R.A.", "year": "2004", "rating": 8.1, "voteCount": 2400, "origLang": "tr", "categories": ["movies", "comedy", "scifi", "tr", "trend"], "genreLabel": "🇹🇷 Türk Sineması • Komedi & Bilim Kurgu", "sourceBadge": "🇹🇷 Yerli Sinema 4K", "poster": "https://image.tmdb.org/t/p/w500/bxHULJqeW1GlPWr7uvRoWQWsDIe.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/g90Hlbaj8OofowG9hDg9ScD5fqG.jpg"},
 ]
 
 
@@ -470,13 +516,27 @@ def _match_star_wars_curated(q: str) -> list:
     ql = (q or "").strip().lower()
     if not ql:
         return []
-    sw_triggers = ("star wars", "starwars", "yıldız savaş", "yildiz savas", "clone wars", "klon savaş", "klon savas", "mandalorian", "obi-wan", "obi wan", "ahsoka", "andor", "boba fett", "skywalker", "darth vader", "jedi", "sith", "rogue one", "bad batch", "acolyte", "skeleton crew")
-    if not any(t in ql for t in sw_triggers):
-        return []
-    if any(t in ql for t in ("star wars", "starwars", "yıldız savaş", "yildiz savas")):
-        return [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED]
-    matched = [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if ql in x["title"].lower() or ql in x["originalTitle"].lower()]
-    return matched + [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if x not in matched]
+    out = []
+    sw_triggers = ("star wars", "starwars", "yıldız savaş", "yildiz savas", "clone wars", "klon savaş", "klon savas", "mandalorian", "obi-wan", "obi wan", "ahsoka", "andor", "boba fett", "skywalker", "darth vader", "jedi", "sith", "rogue one", "bad batch", "acolyte", "skeleton crew", "visions", "tales of the empire")
+    if any(t in ql for t in sw_triggers):
+        if any(t in ql for t in ("star wars", "starwars", "yıldız savaş", "yildiz savas")):
+            out.extend([dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED])
+        else:
+            matched = [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if ql in x["title"].lower() or ql in x["originalTitle"].lower()]
+            out.extend(matched + [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if x not in matched])
+    nq = _norm_title(ql)
+    for item_c in _EXTRA_CURATED_CATALOG:
+        nt_c = _norm_title(item_c.get("title") or "")
+        no_c = _norm_title(item_c.get("originalTitle") or "")
+        if nq and (nq in nt_c or nq in no_c or nt_c in nq or (ql in ("yeşilçam", "yesilcam", "kemal sunal", "şener şen", "sener sen") and item_c.get("origLang") == "tr")):
+            out.append(dict(item_c, curatedFranchise=True))
+    for _dom_p, _dom_items in globals().get("_DOMESTIC_TR_ORIGINALS", {}).items():
+        for item_d in _dom_items:
+            nt_d = _norm_title(item_d.get("title") or "")
+            if nq and (nq in nt_d or nt_d in nq):
+                if not any(x.get("tmdbId") == item_d.get("tmdbId") for x in out):
+                    out.append(dict(item_d, curatedFranchise=True))
+    return out
 
 
 def _tmdb_sync(q: str):
@@ -843,29 +903,43 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
 
 _DOMESTIC_TR_ORIGINALS = {
     "exxen": [
-        {"id": "115678", "tmdbId": "115678", "mediaType": "tv", "title": "Gibi", "originalTitle": "Gibi", "origLang": "tr", "year": "2021", "rating": 8.9, "voteCount": 4200, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg"},
-        {"id": "40417", "tmdbId": "40417", "mediaType": "tv", "title": "Leyla ile Mecnun", "originalTitle": "Leyla ile Mecnun", "origLang": "tr", "year": "2011", "rating": 9.1, "voteCount": 5800, "categories": ["series", "comedy", "drama", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Absürt Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/3jPLJJXbFabb29mOxZOK0xctcy6.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aEQEIXDmjd9otezUu64VFmpO51K.jpg"},
+        {"id": "115678", "tmdbId": "115678", "mediaType": "tv", "title": "Gibi", "originalTitle": "Gibi", "origLang": "tr", "year": "2021", "rating": 8.9, "voteCount": 4200, "categories": ["series", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg"},
+        {"id": "40417", "tmdbId": "40417", "mediaType": "tv", "title": "Leyla ile Mecnun", "originalTitle": "Leyla ile Mecnun", "origLang": "tr", "year": "2011", "rating": 9.1, "voteCount": 5800, "categories": ["series", "comedy", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Exxen Orijinal · Absürt Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/3jPLJJXbFabb29mOxZOK0xctcy6.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aEQEIXDmjd9otezUu64VFmpO51K.jpg"},
+        {"id": "61516", "tmdbId": "61516", "mediaType": "tv", "title": "Kardeş Payı", "originalTitle": "Kardeş Payı", "origLang": "tr", "year": "2014", "rating": 8.7, "voteCount": 3400, "categories": ["series", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Komedi", "sourceBadge": "🟡 Exxen 4K", "poster": "https://image.tmdb.org/t/p/w500/5rsZr16V6yT4jyGB0QLkXi5yC5M.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/uoFnDLca6zbVCPmvzJ6s5gGwVhA.jpg"},
+        {"id": "59", "tmdbId": "59", "mediaType": "tv", "title": "Avrupa Yakası", "originalTitle": "Avrupa Yakası", "origLang": "tr", "year": "2004", "rating": 8.9, "voteCount": 4100, "categories": ["series", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Sitcom", "sourceBadge": "🟡 Exxen HD", "poster": "https://image.tmdb.org/t/p/w500/p73Sua1a2AO6nwNpwhDrkKjBP8q.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/g2U2bgj2Of9HprnxbNGNZ7o83Po.jpg"},
     ],
     "blutv": [
-        {"id": "228853", "tmdbId": "228853", "mediaType": "tv", "title": "Prens", "originalTitle": "Prens", "origLang": "tr", "year": "2023", "rating": 8.6, "voteCount": 3100, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Komedi", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg"},
-        {"id": "39176", "tmdbId": "39176", "mediaType": "tv", "title": "Behzat Ç.: Bir Ankara Polisiyesi", "originalTitle": "Behzat Ç.", "origLang": "tr", "year": "2010", "rating": 8.8, "voteCount": 4900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Polisiye & Suç", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/aRqNQ5v2tvZ9ZRAXpYik0JamHkm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/pF1OQe4zaXX9vOwxbxjZzws0CAe.jpg"},
-        {"id": "131906", "tmdbId": "131906", "mediaType": "tv", "title": "İlk ve Son", "originalTitle": "İlk ve Son", "origLang": "tr", "year": "2021", "rating": 8.4, "voteCount": 1900, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Romantik Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/epARLyo8ctJr4xVdS2DObuRiie8.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2UA95tbHkDuNtLjfkychP8Zv4gK.jpg"},
-        {"id": "231254", "tmdbId": "231254", "mediaType": "tv", "title": "Magarsus", "originalTitle": "Magarsus", "origLang": "tr", "year": "2023", "rating": 8.2, "voteCount": 1600, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/mDAVOY91MSq7CzQlhxfqqA8Xa9Y.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6UjnbGUjXEUrETYHbfkf0jQwAYR.jpg"},
+        {"id": "228853", "tmdbId": "228853", "mediaType": "tv", "title": "Prens", "originalTitle": "Prens", "origLang": "tr", "year": "2023", "rating": 8.6, "voteCount": 3100, "categories": ["series", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Komedi", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg"},
+        {"id": "39176", "tmdbId": "39176", "mediaType": "tv", "title": "Behzat Ç.: Bir Ankara Polisiyesi", "originalTitle": "Behzat Ç.", "origLang": "tr", "year": "2010", "rating": 8.8, "voteCount": 4900, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Polisiye & Suç", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/aRqNQ5v2tvZ9ZRAXpYik0JamHkm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/pF1OQe4zaXX9vOwxbxjZzws0CAe.jpg"},
+        {"id": "131906", "tmdbId": "131906", "mediaType": "tv", "title": "İlk ve Son", "originalTitle": "İlk ve Son", "origLang": "tr", "year": "2021", "rating": 8.4, "voteCount": 1900, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Romantik Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/epARLyo8ctJr4xVdS2DObuRiie8.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2UA95tbHkDuNtLjfkychP8Zv4gK.jpg"},
+        {"id": "231254", "tmdbId": "231254", "mediaType": "tv", "title": "Magarsus", "originalTitle": "Magarsus", "origLang": "tr", "year": "2023", "rating": 8.2, "voteCount": 1600, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 BluTV Orijinal · Dram", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/mDAVOY91MSq7CzQlhxfqqA8Xa9Y.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6UjnbGUjXEUrETYHbfkf0jQwAYR.jpg"},
+        {"id": "34587", "tmdbId": "34587", "mediaType": "tv", "title": "Kurtlar Vadisi", "originalTitle": "Kurtlar Vadisi", "origLang": "tr", "year": "2003", "rating": 8.9, "voteCount": 5200, "categories": ["series", "action", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Suç & Aksiyon", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/yX6JEIijuH6KNCgO8I2yLKu2Psb.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/sjLv7xpBCP7DZiYS41hMFPRyLQl.jpg"},
+        {"id": "17635", "tmdbId": "17635", "mediaType": "tv", "title": "Aşk-ı Memnu", "originalTitle": "Aşk-ı Memnu", "origLang": "tr", "year": "2008", "rating": 8.1, "voteCount": 2900, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Dram & Romantik", "sourceBadge": "🔵 BluTV HD", "poster": "https://image.tmdb.org/t/p/w500/xHulNzEqtgkTuwrRorBRXdGzHML.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/zcEKO2vdfXAJoAnlgARyhGthLvK.jpg"},
     ],
     "gain": [
-        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Suç & Gerilim", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
-        {"id": "115597", "tmdbId": "115597", "mediaType": "tv", "title": "10 Bin Adım", "originalTitle": "10 Bin Adım", "origLang": "tr", "year": "2020", "rating": 8.1, "voteCount": 1400, "categories": ["series", "comedy", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/s3qr2K8LjVCTIBoWOnkFd6bQqcM.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/cZBzydoCzbZr0lCK72oMkZTAtgq.jpg"},
-        {"id": "125412", "tmdbId": "125412", "mediaType": "tv", "title": "Ayak İşleri", "originalTitle": "Ayak İşleri", "origLang": "tr", "year": "2021", "rating": 8.5, "voteCount": 2600, "categories": ["series", "comedy", "action", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Aksiyon Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/w7Ye1LMhPlST5nvEcmOMJsQcCFf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7MSFsfEY4z9VAczH9flrY10vCzb.jpg"},
+        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Suç & Gerilim", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "115597", "tmdbId": "115597", "mediaType": "tv", "title": "10 Bin Adım", "originalTitle": "10 Bin Adım", "origLang": "tr", "year": "2020", "rating": 8.1, "voteCount": 1400, "categories": ["series", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/s3qr2K8LjVCTIBoWOnkFd6bQqcM.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/cZBzydoCzbZr0lCK72oMkZTAtgq.jpg"},
+        {"id": "125412", "tmdbId": "125412", "mediaType": "tv", "title": "Ayak İşleri", "originalTitle": "Ayak İşleri", "origLang": "tr", "year": "2021", "rating": 8.5, "voteCount": 2600, "categories": ["series", "comedy", "action", "tr", "trend"], "genreLabel": "🇹🇷 GAİN Orijinal · Aksiyon Komedi", "sourceBadge": "🟣 GAİN 4K", "poster": "https://image.tmdb.org/t/p/w500/w7Ye1LMhPlST5nvEcmOMJsQcCFf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/7MSFsfEY4z9VAczH9flrY10vCzb.jpg"},
+        {"id": "243832", "tmdbId": "243832", "mediaType": "tv", "title": "İnci Taneleri", "originalTitle": "İnci Taneleri", "origLang": "tr", "year": "2024", "rating": 8.0, "voteCount": 1800, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Dizi · Dram", "sourceBadge": "🟣 GAİN HD", "poster": "https://image.tmdb.org/t/p/w500/4lVO7SDv4OcbdelTvSB1Onw8cEN.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/3S9aMvpi91nUTLtyvQ6vjEyz5Xu.jpg"},
     ],
     "tabii": [
-        {"id": "280030", "tmdbId": "280030", "mediaType": "tv", "title": "Gassal", "originalTitle": "Gassal", "origLang": "tr", "year": "2024", "rating": 8.7, "voteCount": 2900, "categories": ["series", "drama", "comedy", "trend"], "genreLabel": "🇹🇷 tabii Orijinal · Kara Komedi & Dram", "sourceBadge": "🟢 tabii 4K", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg"},
+        {"id": "280030", "tmdbId": "280030", "mediaType": "tv", "title": "Gassal", "originalTitle": "Gassal", "origLang": "tr", "year": "2024", "rating": 8.7, "voteCount": 2900, "categories": ["series", "drama", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 tabii Orijinal · Kara Komedi & Dram", "sourceBadge": "🟢 tabii 4K", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg"},
+        {"id": "65163", "tmdbId": "65163", "mediaType": "tv", "title": "Poyraz Karayel", "originalTitle": "Poyraz Karayel", "origLang": "tr", "year": "2015", "rating": 8.6, "voteCount": 3100, "categories": ["series", "drama", "action", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Dram & Aksiyon", "sourceBadge": "🟢 tabii HD", "poster": "https://image.tmdb.org/t/p/w500/pY8GMqiB35LY6TbWsDSGAsRvcR3.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/78h2cOdj4s4duFVzvfaf1B9pNDe.jpg"},
     ],
     "tod": [
-        {"id": "271596", "tmdbId": "271596", "mediaType": "tv", "title": "Sorgu", "originalTitle": "Sorgu", "origLang": "tr", "year": "2024", "rating": 8.0, "voteCount": 1100, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 TOD Orijinal · Polisiye Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/5jhorUhgbIU9JajEqdzLVXwDyUC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/22cBQLvwhnLujGLzeOSJa9Tflih.jpg"},
+        {"id": "271596", "tmdbId": "271596", "mediaType": "tv", "title": "Sorgu", "originalTitle": "Sorgu", "origLang": "tr", "year": "2024", "rating": 8.0, "voteCount": 1100, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 TOD Orijinal · Polisiye Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/5jhorUhgbIU9JajEqdzLVXwDyUC.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/22cBQLvwhnLujGLzeOSJa9Tflih.jpg"},
+        {"id": "213194", "tmdbId": "213194", "mediaType": "tv", "title": "Kızılcık Şerbeti", "originalTitle": "Kızılcık Şerbeti", "origLang": "tr", "year": "2022", "rating": 7.8, "voteCount": 2100, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Popüler Yerli · Aile & Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/lSywl799a9yLED1tPJCjobckjxQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/a4FHdQfPGT1T2w4DYUEGgRMxSgZ.jpg"},
+        {"id": "245914", "tmdbId": "245914", "mediaType": "tv", "title": "Bahar", "originalTitle": "Bahar", "origLang": "tr", "year": "2024", "rating": 8.1, "voteCount": 1950, "categories": ["series", "drama", "comedy", "tr", "trend"], "genreLabel": "🇹🇷 Popüler Yerli · Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/Adjn7rsb1picDMUcYNjEDobhvAk.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6dXyUXZ4HsY6M3Tae9e0KZsFCo1.jpg"},
+        {"id": "256400", "tmdbId": "256400", "mediaType": "tv", "title": "Deha", "originalTitle": "Deha", "origLang": "tr", "year": "2024", "rating": 8.2, "voteCount": 1750, "categories": ["series", "drama", "action", "tr", "trend"], "genreLabel": "🇹🇷 Popüler Yerli · Suç & Dram", "sourceBadge": "🟠 TOD HD", "poster": "https://image.tmdb.org/t/p/w500/icPHnFkJBBds6rw4IHf5qR93FJt.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/kt7JCtDy5bfCW0z8zxMF7lHeUG3.jpg"},
     ],
     "puhutv": [
-        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Suç & Gerilim", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
-        {"id": "84404", "tmdbId": "84404", "mediaType": "tv", "title": "Bozkır", "originalTitle": "Bozkır", "origLang": "tr", "year": "2018", "rating": 8.2, "voteCount": 1800, "categories": ["series", "drama", "trend"], "genreLabel": "🇹🇷 Polisiye & Suç · HD", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/7vE2fH9w7x1G9nJ0Q7yW5mK3L1p.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Suç & Gerilim", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "84404", "tmdbId": "84404", "mediaType": "tv", "title": "Bozkır", "originalTitle": "Bozkır", "origLang": "tr", "year": "2018", "rating": 8.2, "voteCount": 1800, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Polisiye & Suç · HD", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
+        {"id": "32519", "tmdbId": "32519", "mediaType": "tv", "title": "Ezel", "originalTitle": "Ezel", "origLang": "tr", "year": "2009", "rating": 8.9, "voteCount": 4800, "categories": ["series", "drama", "action", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Suç & İntikam", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/pHSjh4MINU2JnK7qQvjogQaX3wr.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/3IJPtnlFoY8bjllHxnEw21qlK2p.jpg"},
+        {"id": "42099", "tmdbId": "42099", "mediaType": "tv", "title": "Kuzey Güney", "originalTitle": "Kuzey Güney", "origLang": "tr", "year": "2011", "rating": 8.3, "voteCount": 2700, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Dram", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/eG35U9iYp6cWigQxIpzwlPEPY0l.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/tQprHjpB1Utq3QmPDdQRKwPDDRh.jpg"},
+        {"id": "74823", "tmdbId": "74823", "mediaType": "tv", "title": "Çukur", "originalTitle": "Çukur", "origLang": "tr", "year": "2017", "rating": 8.1, "voteCount": 3300, "categories": ["series", "action", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Aksiyon & Suç", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/7aL9P5NLSgBjdChcwp4cH1OLdKf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xtCzLQOocIajjQ5Mhwp834BQhVX.jpg"},
+        {"id": "68388", "tmdbId": "68388", "mediaType": "tv", "title": "İçerde", "originalTitle": "İçerde", "origLang": "tr", "year": "2016", "rating": 8.4, "voteCount": 3100, "categories": ["series", "action", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Polisiye & Aksiyon", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/63v7p8t5sShiCGRLzePlgCu6TNj.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/ex0PAmD0YpM36GKjJrEIMC3JdWD.jpg"},
+        {"id": "44878", "tmdbId": "44878", "mediaType": "tv", "title": "Suskunlar", "originalTitle": "Suskunlar", "origLang": "tr", "year": "2012", "rating": 8.6, "voteCount": 2500, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Dram & Suç", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/fn2EX9PpOoxiBfB5wypKs7vk1JH.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/h7vd0NQrmP3QjVfoL1zV7hqjikN.jpg"},
     ],
 }
 
@@ -1008,6 +1082,16 @@ def _has_vault_stream(it_obj: dict) -> int:
         return 2
     if nt_k.replace(" ", "") in ac_names or no_k.replace(" ", "") in ac_names:
         return 2
+    cur_tids = globals().get("_CURATED_ALL_TIDS")
+    if cur_tids is None:
+        cur_tids = {str(x.get("tmdbId")) for x in (_STAR_WARS_CURATED + _EXTRA_CURATED_CATALOG) if x.get("tmdbId")}
+        for _dl in _DOMESTIC_TR_ORIGINALS.values():
+            for _di in _dl:
+                if _di.get("tmdbId"):
+                    cur_tids.add(str(_di.get("tmdbId")))
+        globals()["_CURATED_ALL_TIDS"] = cur_tids
+    if tid_k and tid_k in cur_tids:
+        return 2
     c_keys = [f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"]
     if mt_k == "movie":
         c_keys.extend([f"id:{tid_k}", f"id:{cid_k}"])
@@ -1019,7 +1103,7 @@ def _has_vault_stream(it_obj: dict) -> int:
                 if not isinstance(s, (list, tuple)) or len(s) < 2:
                     continue
                 su, st_t = str(s[0]), str(s[1])
-                if st_t == "yt" or "youtube.com" in su or "goldenkite.top" in su:
+                if st_t == "yt" or "youtube.com" in su:
                     continue
                 if IS_VERCEL and (
                     st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
@@ -1321,6 +1405,23 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         dom_curated = [dict(x) for x in _DOMESTIC_TR_ORIGINALS[prov]]
         seen_dom = {str(x.get("tmdbId")) for x in dom_curated}
         items = dom_curated + [x for x in items if str(x.get("tmdbId")) not in seen_dom]
+    elif pg == 1 and not q.strip() and prov in ("cinema", "all", "disney", "max", "prime", "netflix"):
+        extra_pool = []
+        if prov == "disney" or cat in ("all", "scifi", "action", "animation"):
+            extra_pool.extend([dict(x, sourceBadge=x.get("sourceBadge") or "🎬 Star Wars 4K") for x in _STAR_WARS_CURATED[:8]])
+        for ex_it in _EXTRA_CURATED_CATALOG:
+            if cat in ("all", "trend") or cat in (ex_it.get("categories") or []):
+                extra_pool.append(dict(ex_it))
+        if cat == "tr":
+            for _dp_k, _dp_v in _DOMESTIC_TR_ORIGINALS.items():
+                extra_pool.extend([dict(x) for x in _dp_v])
+        if extra_pool:
+            seen_cur = {f"{x.get('mediaType')}:{x.get('tmdbId')}" for x in items}
+            for c_it in extra_pool:
+                ck_cur = f"{c_it.get('mediaType')}:{c_it.get('tmdbId')}"
+                if ck_cur not in seen_cur:
+                    seen_cur.add(ck_cur)
+                    items.append(c_it)
 
     # Supplement with non-overlapping vault slice only while within vault_pool bounds
     vault_pool = []
@@ -2016,7 +2117,7 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "") -
     u = stream_url.lower()
     if u.startswith("/api/rave/") or "youtube.com/" in u or "youtu.be/" in u:
         return True
-    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.")):
+    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.", "goldenkite.top", "cleartree.top", "workers.dev", "lightspeed.st", "archive.org")):
         return True
     parsed = urllib.parse.urlparse(stream_url)
     path = parsed.path
@@ -2530,7 +2631,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 for u_st in v_ent["streams"]:
                     if isinstance(u_st, (list, tuple)) and len(u_st) >= 2:
                         raw_su, st_t = str(u_st[0]), str(u_st[1])
-                        if not raw_su.startswith("http") or "ineedskin.cfd" in raw_su.lower() or "shrek.dragonballzfans.xyz" in raw_su.lower() or "goldenkite.top" in raw_su.lower() or ".asia/" in raw_su.lower():
+                        if not raw_su.startswith("http") or "ineedskin.cfd" in raw_su.lower() or "shrek.dragonballzfans.xyz" in raw_su.lower() or ".asia/" in raw_su.lower():
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
@@ -3022,6 +3123,44 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
 
     def _job_videasy():
         res = []
+        if str(tid or "").isdigit():
+            q_ve = urllib.parse.urlencode({
+                "title": orig_title or tr_title or title,
+                "mediaType": mtype,
+                "year": year or "",
+                "episodeId": e if mtype == "tv" else 1,
+                "seasonId": s if mtype == "tv" else 1,
+                "tmdbId": tid,
+                "imdbId": imdb_id or "",
+            })
+            for ve_srv in ("miami", "reno"):
+                try:
+                    ve_api = f"https://api.wecollege.net/{ve_srv}/sources?{q_ve}"
+                    ve_req = urllib.request.Request(ve_api, headers={"User-Agent": UA137, "Origin": "https://vidy.st", "Referer": "https://vidy.st/"})
+                    with urllib.request.urlopen(ve_req, timeout=3.2) as r_ve:
+                        enc_ve = r_ve.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore").strip()
+                    if enc_ve and len(enc_ve) > 30:
+                        dec_ve = (_raw_get_json("https://enc-dec.app/api/dec-videasy", headers={"Content-Type": "application/json"}, data=json.dumps({"text": enc_ve, "id": str(tid)}).encode("utf-8"), timeout=3.2) or {}).get("result") or {}
+                        if isinstance(dec_ve, dict):
+                            ve_subs = dec_ve.get("subtitles") or []
+                            if ve_subs:
+                                es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
+                                for vs in ve_subs:
+                                    su_v = str(vs.get("url") or "").strip()
+                                    sl_v = str(vs.get("language") or vs.get("lang") or "").lower().strip()
+                                    if su_v.startswith("https://") and not any(x.get("url") == su_v for x in es_list):
+                                        es_list.append({"lang": sl_v, "url": su_v, "source": "videasy_embed"})
+                            ve_srcs = [x for x in (dec_ve.get("sources") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
+                            ve_srcs.sort(key=lambda x: 0 if "1080" in str(x.get("quality") or "").lower() else (1 if "auto" in str(x.get("quality") or "").lower() or "master.m3u8" in str(x.get("url") or "") else (2 if "720" in str(x.get("quality") or "").lower() else 3)))
+                            for vs_item in ve_srcs:
+                                u_v = str(vs_item.get("url") or "").strip()
+                                if "finalsignal.top" not in u_v and "olivewave.top" not in u_v and not any(u_v == x[0] for x in res):
+                                    res.append((u_v, "hls_ve"))
+                                    break
+                        if res:
+                            break
+                except Exception:
+                    continue
         try:
             vf_u = f"https://vidfast.vc/tv/{tid}/{s}/{e}/" if mtype == "tv" else f"https://vidfast.vc/movie/{tid}/"
             with urllib.request.urlopen(urllib.request.Request(vf_u, headers={"User-Agent": UA137}), timeout=3.8) as r_vf:
@@ -3151,17 +3290,94 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             pass
         return res
 
+    def _job_cinejoy():
+        res = []
+        if not str(tid or "").isdigit():
+            return res
+        try:
+            cj_q = f"type=tv&id={tid}&season={s}&episode={e}" if mtype == "tv" else f"type=movie&id={tid}"
+            enc_cj = (_raw_get_json(f"https://enc-dec.app/api/enc-cinejoy?{cj_q}", timeout=3.4) or {}).get("result") or ""
+            if enc_cj:
+                cj_req = urllib.request.Request(f"https://api.wing.st/{enc_cj}", headers={"User-Agent": UA137, "Origin": "https://cinejoy.pk", "Referer": "https://cinejoy.pk/"})
+                with urllib.request.urlopen(cj_req, timeout=3.4) as r_cj:
+                    cj_enc_txt = r_cj.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore").strip()
+                if cj_enc_txt and len(cj_enc_txt) > 20:
+                    dec_cj = (_raw_get_json("https://enc-dec.app/api/dec-cinejoy", headers={"Content-Type": "application/json"}, data=json.dumps({"text": cj_enc_txt}).encode("utf-8"), timeout=3.4) or {}).get("result") or {}
+                    if isinstance(dec_cj, dict):
+                        cj_subs = dec_cj.get("tracks") or dec_cj.get("subtitles") or []
+                        if cj_subs:
+                            es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
+                            for cs in cj_subs:
+                                su_c = str(cs.get("file") or cs.get("url") or "").strip()
+                                sl_c = str(cs.get("label") or cs.get("lang") or "").lower().strip()
+                                if su_c.startswith("https://") and not any(x.get("url") == su_c for x in es_list):
+                                    es_list.append({"lang": sl_c, "url": su_c, "source": "cinejoy_embed"})
+                        st_cj = str(dec_cj.get("stream") or dec_cj.get("url") or "").strip()
+                        if st_cj.startswith("https://"):
+                            res.append((st_cj, "hls_cj"))
+        except Exception:
+            pass
+        return res
+
+    def _job_archive_org():
+        res = []
+        if mtype != "movie":
+            return res
+        yr_int = int(str(year)[:4]) if (year and str(year)[:4].isdigit()) else 2020
+        if orig_lang != "tr" and yr_int > 1995:
+            return res
+        try:
+            q_ar_t = (tr_title or orig_title or title or "").strip()
+            if not q_ar_t:
+                return res
+            valid_ar_norms = {_norm_title(x) for x in [q_ar_t, orig_title, tr_title] if _norm_title(x)}
+            ar_u = "https://archive.org/advancedsearch.php?" + urllib.parse.urlencode({
+                "q": f'title:("{q_ar_t}") AND mediatype:(movies)',
+                "fl[]": ["identifier", "title"],
+                "rows": 5, "page": 1, "output": "json",
+            }, doseq=True)
+            ar_docs = ((_raw_get_json(ar_u, timeout=3.5) or {}).get("response") or {}).get("docs") or []
+            for doc in ar_docs[:3]:
+                ident = str(doc.get("identifier") or "").strip()
+                doc_t = _norm_title(str(doc.get("title") or ""))
+                if not ident or not any(vn in doc_t or doc_t in vn for vn in valid_ar_norms if len(vn) >= 3):
+                    continue
+                md = _raw_get_json(f"https://archive.org/metadata/{urllib.parse.quote(ident)}", timeout=3.5) or {}
+                mp4_cands = []
+                for f_obj in (md.get("files") or []):
+                    fn = str(f_obj.get("name") or "")
+                    if not fn.lower().endswith(".mp4") or ".ia.mp4" in fn.lower():
+                        continue
+                    f_sz = int(f_obj.get("size") or 0) if str(f_obj.get("size") or "").isdigit() else 0
+                    if f_sz < 35_000_000:
+                        continue
+                    mp4_cands.append((f_sz, fn))
+                if mp4_cands:
+                    mp4_cands.sort(reverse=True)
+                    best_fn = mp4_cands[0][1]
+                    ar_mp4_u = f"https://archive.org/download/{urllib.parse.quote(ident)}/{urllib.parse.quote(best_fn)}"
+                    st_ar = "mp4_ar_tr" if orig_lang == "tr" else "mp4_ar"
+                    res.append((ar_mp4_u, st_ar))
+                    if orig_lang == "tr":
+                        _AUDIO_LANG_HINT[ar_mp4_u] = ["tr"]
+                    break
+        except Exception:
+            pass
+        return res
+
     out_urls = []
     orig_lang = str(meta.get("origLang") or "").lower()
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
     f_ac = pool.submit(_extract_animecix_sync, mtype, s, e, orig_title, tr_title, tid, extra_titles, source_url, orig_lang)
     f_pv = pool.submit(_extract_ddizimag_sync, mtype, s, e, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
     f_dl = pool.submit(_extract_dizilife_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
     f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
     f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid, refresh)
     f_ve = pool.submit(_job_videasy)
+    f_cj = pool.submit(_job_cinejoy)
     f_hexa = pool.submit(_job_hexa)
     f_vid = pool.submit(_job_vidlink)
+    f_ar = pool.submit(_job_archive_org)
     t_start = time.time()
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower()
@@ -3174,13 +3390,15 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         dl_ok = f_dl.done() and not f_dl.exception() and bool(f_dl.result())
         dp_ok = f_dp.done() and not f_dp.exception() and bool(f_dp.result())
         ve_ok = f_ve.done() and not f_ve.exception() and bool(f_ve.result())
+        cj_ok = f_cj.done() and not f_cj.exception() and bool(f_cj.result())
         hx_ok = f_hexa.done() and not f_hexa.exception() and bool(f_hexa.result())
         vl_ok = f_vid.done() and not f_vid.exception() and bool(f_vid.result())
-        has_glob_ready = ve_ok or (hx_ok and f_ve.done()) or (vl_ok and f_ve.done() and f_hexa.done())
+        ar_ok = f_ar.done() and not f_ar.exception() and bool(f_ar.result())
+        has_glob_ready = ve_ok or cj_ok or ar_ok or (hx_ok and f_ve.done()) or (vl_ok and f_ve.done() and f_hexa.done())
         if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.2):
             time.sleep(0.08)
             continue
-        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or ((dp_ok or dl_ok) if orig_lang == "tr" else False)
+        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or ((dp_ok or dl_ok or ar_ok) if orig_lang == "tr" else False)
         if primary_1080_ok and t_first_hf == 0.0:
             t_first_hf = time.time()
         if primary_1080_ok and (has_glob_ready or (time.time() - t_first_hf >= 0.45)):
@@ -3189,12 +3407,12 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             break
         if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or ac_ok or has_glob_ready or (time.time() - t_start >= 4.6)):
             break
-        if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_hexa, f_vid)):
+        if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
         time.sleep(0.10)
-    if not any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_hexa, f_vid)):
-        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_hexa, f_vid], timeout=3.2)
-    ac_res, tr_res, ve_res, hexa_res, vid_res = [], [], [], [], []
+    if not any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
+        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.2)
+    ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
     if f_ac.done():
         try:
             ac_res = f_ac.result() or []
@@ -3213,6 +3431,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             ve_res = f_ve.result() or []
         except Exception:
             ve_res = []
+    if f_cj.done():
+        try:
+            cj_res = f_cj.result() or []
+        except Exception:
+            cj_res = []
     if f_hexa.done():
         try:
             hexa_res = f_hexa.result() or []
@@ -3223,6 +3446,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             vid_res = f_vid.result() or []
         except Exception:
             vid_res = []
+    if f_ar.done():
+        try:
+            ar_res = f_ar.result() or []
+        except Exception:
+            ar_res = []
     for x in [x for x in tr_res if x[1] in ("mp4_ac_sub", "mp4_ac_dub")]:
         if x not in ac_res:
             ac_res.append(x)
@@ -3243,7 +3471,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     fp_other = [x for x in tr_res if x[1].startswith("hls_fp:") and x not in fp_multi]
     dl_only = [x for x in tr_res if x[1] == "hls_dl"]
     dp_only = [] if IS_VERCEL else [x for x in tr_res if x[1] == "hls_dp"]
-    if ac_res or main_multi or main_single or pv_multi or fp_multi or pv_single or fp_other or dl_only or dp_only or ve_res or hexa_res or vid_res or vault_yt:
+    if ac_res or main_multi or main_single or pv_multi or fp_multi or pv_single or fp_other or dl_only or dp_only or ve_res or cj_res or hexa_res or vid_res or ar_res or vault_yt:
         if is_ja_or_anime:
             out_urls.extend(ac_1080)
             out_urls.extend(main_multi)
@@ -3253,21 +3481,25 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
             out_urls.extend(ve_res)
+            out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(ac_720)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
             out_urls.extend(vid_res)
+            out_urls.extend(ar_res)
             out_urls.extend(vault_yt)
         elif orig_lang == "tr":
             out_urls.extend(main_multi)
             out_urls.extend(main_single)
+            out_urls.extend(ar_res)
             out_urls.extend(dl_only)
             out_urls.extend(dp_only)
             out_urls.extend(ac_1080)
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
             out_urls.extend(ve_res)
+            out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
@@ -3283,16 +3515,18 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
             out_urls.extend(ve_res)
+            out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
             out_urls.extend(ac_720)
             out_urls.extend(vid_res)
+            out_urls.extend(ar_res)
             out_urls.extend(vault_yt)
 
     else:
-        concurrent.futures.wait([f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_hexa, f_vid], timeout=4.0)
-        for fut in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_hexa, f_vid):
+        concurrent.futures.wait([f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=4.0)
+        for fut in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar):
             if fut.done():
                 try:
                     out_urls.extend(fut.result() or [])
@@ -3351,11 +3585,13 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}&ref=dp&proxy_segs=1&ext=.m3u8"
     if stype in ("mp4_ac_sub", "mp4_ac_dub"):
         return _proxy_u(u, "https://tau-video.xyz/", ".mp4")
+    if stype in ("mp4_ar_tr", "mp4_ar"):
+        return _proxy_u(u, "https://archive.org/", ".mp4")
     if str(stype).startswith("mp4_vl"):
         return _proxy_u(u, "" if "hakunaymatata.com" in u else "https://filmboom.top/", ".mp4")
-    if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi"):
+    if stype in ("hls", "hls_dl", "hls_ve", "hls_ve_multi", "hls_cj"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
-        ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ("&ref=dl" if stype == "hls_dl" else ("&ref=hx" if "dragonballzfans" in u else ""))
+        ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ("&ref=cj" if stype == "hls_cj" else ("&ref=dl" if stype == "hls_dl" else ("&ref=hx" if "dragonballzfans" in u else "")))
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}&sid={sid}{ref_q}&ext=.m3u8"
     return u
 
@@ -3805,7 +4041,7 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int)
         return None
     max_w = max((max(int(m.group(1)), int(int(m.group(2)) * 16 / 9)) for m in re.finditer(r"RESOLUTION=(\d+)x(\d+)", body, re.I)), default=0)
     if not max_w:
-        max_w = 1920 if st in ("hls_fhd", "hls_fhd_tr", "hls_fhd_multi", "hls_ve", "hls_ve_multi", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dp") else (1280 if st in ("hls_pv", "hls_pv_multi") else 1920)
+        max_w = 1920 if st in ("hls_fhd", "hls_fhd_tr", "hls_fhd_multi", "hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dp") else (1280 if st in ("hls_pv", "hls_pv_multi") else 1920)
     _STREAM_RES_HINT[raw_u] = max_w
     langs = []
     for ln in body.splitlines():
@@ -3859,10 +4095,10 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
     def _src_res_tier(pair):
         u, st = pair
         probed_l = lang_map.get(u) or _AUDIO_LANG_HINT.get(u) or []
-        has_tr = ("tr" in probed_l) or st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "hls_fhd_tr", "mp4_ac_dub") or str(st).startswith("hls_fp:multi:") or str(st).startswith("hls_fp:tr:")
+        has_tr = ("tr" in probed_l) or st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "hls_fhd_tr", "mp4_ac_dub", "mp4_ar_tr") or str(st).startswith("hls_fp:multi:") or str(st).startswith("hls_fp:tr:")
         live_bonus = 1.0 if (u in lang_map and lang_map.get(u)) else 0.0
         tr_boost = (3.0 if has_tr else 0.0) + live_bonus
-        if st in ("mp4_ac_sub", "mp4_ac_dub"):
+        if st in ("mp4_ac_sub", "mp4_ac_dub", "mp4_ar_tr", "mp4_ar"):
             return (3 if "_720p" not in str(u).lower() else 1) + tr_boost
         if str(st).startswith("mp4"):
             if st == "mp4_vl_sd":
@@ -3881,7 +4117,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             return 4 + tr_boost
         if st == "hls_dp":
             return 1.2 + tr_boost
-        return (2 if st in ("hls_ve", "hls_ve_multi", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dl") else 1.5) + tr_boost
+        return (2 if st in ("hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dl") else 1.5) + tr_boost
     srcs.sort(key=_src_res_tier, reverse=True)
     by_lang: dict[str, list] = {}
     unknown: list = []
@@ -3900,11 +4136,11 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = ["tr"]
         if not langs and str(st).startswith("hls_fp:orig:") and orig_lang:
             langs = [orig_lang]
-        if not langs and st in ("hls_fhd_tr", "hls_pv_tr"):
+        if not langs and st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr"):
             langs = ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
-        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "mp4", "mp4_vl") or str(st).startswith("mp4_vl")):
+        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
             langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
@@ -4105,7 +4341,11 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
     if st_s == "mp4_ac_dub":
         return f"📡 Sunucu {idx} · AnimeciX (TR Dublaj · {'720p' if '_720p' in u_l else '1080p'} HD)"
     if st_s in ("hls_ve", "hls_ve_multi"):
-        return f"📡 Sunucu {idx} · VidFast Global (1080p HD)"
+        return f"📡 Sunucu {idx} · Videasy Global (1080p HD)"
+    if st_s == "hls_cj" or "lightspeed.st" in u_l:
+        return f"📡 Sunucu {idx} · CineJoy Global (1080p HD)"
+    if st_s in ("mp4_ar_tr", "mp4_ar") or "archive.org" in u_l:
+        return f"📡 Sunucu {idx} · Sinema Arşiv (Restorasyon HD)"
     if st_s == "hls_dl" or "makesomthingup" in u_l:
         return f"📡 Sunucu {idx} · DiziLife (1080p HD)"
     if st_s == "hls_dp" or "dplayer" in u_l or "ag2m5" in u_l:
@@ -4480,6 +4720,10 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     for dom_k, dom_list in _DOMESTIC_TR_ORIGINALS.items():
         for d_it in dom_list:
             _add_cand(d_it, "🇹🇷 Yerli Orijinal 4K")
+    for sw_it in _STAR_WARS_CURATED:
+        _add_cand(sw_it, "🎬 Star Wars 4K")
+    for ex_it in _EXTRA_CURATED_CATALOG:
+        _add_cand(ex_it, ex_it.get("sourceBadge") or "🎬 4K Seri Arşivi")
 
     for src_key, badge in (("fhd", "🎬 FullHDFilm 4K"), ("hfnl", "🎬 HDFilmCehennemi+"), ("dbx", "📺 Dizibox HD"), ("ac", "⛩️ Animetrix Fansub")):
         src_list = list(v_cat.get(src_key) or [])
@@ -4995,8 +5239,12 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     if not eff_ref and not is_hakuna:
         if "filmboom" in url:
             eff_ref = "https://filmboom.top/"
-        elif any(d in url for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")):
-            eff_ref = "https://player.videasy.to/"
+        elif any(d in url for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev")):
+            eff_ref = "https://vidy.st/"
+        elif "lightspeed.st" in url:
+            eff_ref = "https://cinejoy.pk/"
+        elif "archive.org" in url:
+            eff_ref = "https://archive.org/"
         elif "tau-video" in url:
             eff_ref = "https://tau-video.xyz/"
         elif "fastplay." in url or ".cfd/" in url:
@@ -5189,7 +5437,8 @@ async def rave_stream_manifest(request: Request):
     if not target or not public_http_url(target):
         return JSONResponse({"error": "Geçersiz akış"}, status_code=400)
     is_live_tv = any(d in target for d in ("ercdn.net", "daioncdn.net", "radyotvonline.", "trt.com.tr", "ensonhaber.com", "powerapp.com.tr"))
-    is_ve = ref_mode == "ve" or any(d in target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top"))
+    is_ve = ref_mode == "ve" or any(d in target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev"))
+    is_cj = ref_mode == "cj" or "lightspeed.st" in target
     is_fp = ref_mode == "fp" or "fastplay." in target
     is_dp = ref_mode == "dp" or "ag2m5.cfd" in target or "uk-traffic-" in target
     is_pv = ref_mode == "pv" or "pilavyer" in target
@@ -5214,8 +5463,11 @@ async def rave_stream_manifest(request: Request):
             cur_sp = sp
             cur_spt = spt
             if is_ve:
-                hdrs["Referer"] = "https://player.videasy.to/"
-                hdrs["Origin"] = "https://player.videasy.to"
+                hdrs["Referer"] = "https://vidy.st/"
+                hdrs["Origin"] = "https://vidy.st"
+            elif is_cj:
+                hdrs["Referer"] = "https://cinejoy.pk/"
+                hdrs["Origin"] = "https://cinejoy.pk"
             elif is_hfnl:
                 hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
                 hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
@@ -5396,9 +5648,12 @@ async def rave_stream_manifest(request: Request):
                         continue
                     try:
                         c_hdrs = {"User-Agent": UA137}
-                        if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")):
-                            c_hdrs["Referer"] = "https://player.videasy.to/"
-                            c_hdrs["Origin"] = "https://player.videasy.to"
+                        if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev")):
+                            c_hdrs["Referer"] = "https://vidy.st/"
+                            c_hdrs["Origin"] = "https://vidy.st"
+                        elif "cj" in str(cand_k) or "lightspeed.st" in cand_u:
+                            c_hdrs["Referer"] = "https://cinejoy.pk/"
+                            c_hdrs["Origin"] = "https://cinejoy.pk"
                         elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimg" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/", cand_u):
                             c_hdrs["Referer"] = "https://rapidvid.org/"
                             c_hdrs["Origin"] = "https://rapidvid.org"
@@ -5424,7 +5679,8 @@ async def rave_stream_manifest(request: Request):
             if not raw:
                 raise ValueError("Seçilen içerik için oynatılabilir manifest bulunamadı") from last_err
             base_u = cur_target
-            cur_is_ve = any(d in cur_target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")) or ("ve" in cur_k) or (cur_target == target and is_ve)
+            cur_is_ve = any(d in cur_target for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev")) or ("ve" in cur_k) or (cur_target == target and is_ve)
+            cur_is_cj = ("lightspeed.st" in cur_target) or ("cj" in cur_k) or (cur_target == target and is_cj)
             cur_is_fp = ("fastplay." in cur_target) or (cur_target == target and is_fp)
             cur_is_pv = ("pilavyer" in cur_target) or (cur_target == target and is_pv)
             cur_is_dp = ("uk-traffic-" in cur_target) or ("ag2m5.cfd" in cur_target) or ("dplayer" in cur_target) or is_dp
@@ -5433,7 +5689,7 @@ async def rave_stream_manifest(request: Request):
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             is_master = "#EXT-X-STREAM-INF" in raw
-            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl)
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
@@ -5455,6 +5711,8 @@ async def rave_stream_manifest(request: Request):
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=dl{ps_q}&ext=.m3u8"
                     if cur_is_ve:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=ve{ps_q}&ext=.m3u8"
+                    if cur_is_cj:
+                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=cj{ps_q}&ext=.m3u8"
                     if cur_is_fp:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=fp&fp_id={fp_id}&sp={cur_sp}&spt={cur_spt}{ps_q}&ext=.m3u8"
                     if cur_is_pv:
@@ -5467,7 +5725,9 @@ async def rave_stream_manifest(request: Request):
                 if "key.php" in u_str:
                     return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
                 if cur_is_ve:
-                    return _proxy_u(u_str, "https://player.videasy.to/", ".ts")
+                    return _proxy_u(u_str, "https://vidy.st/", ".ts")
+                if cur_is_cj:
+                    return _proxy_u(u_str, "https://cinejoy.pk/", ".ts")
                 if cur_is_dbx or "molystream" in u_str or "/sheila_" in u_str:
                     return _proxy_u(u_str, "https://dbx.molystream.org/", ".ts")
                 if cur_is_dp or "uk-traffic-" in u_str:
