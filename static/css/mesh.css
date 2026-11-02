@@ -160,12 +160,12 @@ body.vortex-fs .panel-video {
   pointer-events: none !important;
 }
 @media (hover: hover) and (pointer: fine) {
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls { opacity: 1; }
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls > * { pointer-events: auto; }
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls .ctl-top,
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls .ctl-top *,
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls .ctl-bottom,
-  .video-frame:not(.fullscreen):not(:fullscreen):not(.idle-cursor):hover .controls .ctl-bottom * {
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls { opacity: 1; }
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls > * { pointer-events: auto; }
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-top,
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-top *,
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-bottom,
+  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-bottom * {
     pointer-events: auto !important;
   }
 }
@@ -270,7 +270,7 @@ body.vortex-fs .panel-video {
   }
 }
 @media (hover: hover) and (pointer: fine) {
-  .video-frame:not(.fullscreen):not(:fullscreen):hover .rave-subtitle-overlay {
+  .video-frame:not(.fullscreen):hover .rave-subtitle-overlay {
     bottom: calc(var(--margin) + var(--mesh-action-width) + 12px);
   }
 }
@@ -496,8 +496,8 @@ video::cue {
 
 /* Mobile: stack video over chat (Rave layout-direction column), side panels become sheets */
 @media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
-  :root { --vvh: 100vh; }{ --vvh: 100dvh; }
-  .mesh { width: 100%; height: var(--vvh, 100vh); }{ width: 100%; height: var(--vvh, 100dvh); }
+  :root { --vvh: 100%; }
+  .mesh { width: 100%; height: 100%; }
   .ctl-mid { touch-action: none; }
   .timeline { height: 34px !important; padding: 12px 0 !important; cursor: pointer; }
   .ctl-action, .ctl-btn { min-width: 38px !important; min-height: 38px !important; }
@@ -1958,7 +1958,7 @@ body.theater-mode .resize-handle {
   width: 100% !important;
   height: 100% !important;
   object-fit: contain !important;
-  background: #000 !important;
+  background: transparent !important;
 }
 
 .panel-side {
@@ -3172,23 +3172,22 @@ body.theater-mode .resize-handle {
     top: 0 !important;
     bottom: 0 !important;
     width: 100% !important;
-    height: var(--vvh, 100vh) !important;
-    height: var(--vvh, 100dvh) !important;
-    max-height: var(--vvh, 100vh) !important;
-    max-height: var(--vvh, 100dvh) !important;
+    height: 100% !important;
+    max-height: 100% !important;
     overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
     z-index: 20 !important;
   }
+  body.kb-open:not(.mesh-minimized) #mesh-root:not(.hidden) {
+    bottom: auto !important;
+    height: var(--vvh, 100%) !important;
+    max-height: var(--vvh, 100%) !important;
+  }
   body.kb-open #mesh-root:not(.hidden) .panel-video {
     aspect-ratio: auto !important;
-    height: min(24vh, 150px) !important;
-    max-height: min(24vh, 150px) !important;
-  }
-  body.kb-open #mesh-root:not(.hidden) .discord-call-bar,
-  body.kb-open #mesh-root:not(.hidden) .reaction-bar {
-    display: none !important;
+    height: min(26vh, 168px) !important;
+    max-height: min(26vh, 168px) !important;
   }
   #mesh-root > .navbar {
     height: 44px !important;
@@ -3232,10 +3231,8 @@ body.theater-mode .resize-handle {
   .mesh {
     flex: 1 1 0% !important;
     min-height: 0 !important;
-    height: calc(var(--vvh, 100vh) - 44px) !important;
-    height: calc(var(--vvh, 100dvh) - 44px) !important;
-    max-height: calc(var(--vvh, 100vh) - 44px) !important;
-    max-height: calc(var(--vvh, 100dvh) - 44px) !important;
+    height: calc(100% - 44px) !important;
+    max-height: calc(100% - 44px) !important;
     overflow: hidden !important;
   }
   .mesh-layout {
@@ -3603,14 +3600,17 @@ body.theater-mode .resize-handle {
   -webkit-overflow-scrolling: touch !important;
 }
 
-.panel-video:has(.video-frame.menu-open),
 .video-frame.menu-open {
+  z-index: 9999 !important;
+  overflow: visible !important;
+}
+.panel-video:has(.video-frame.menu-open) {
   z-index: 9999 !important;
   overflow: visible !important;
 }
 
 @media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
-  .video-frame:not(.fullscreen):not(:fullscreen) .ctl-menu.acrylic {
+  .video-frame:not(.fullscreen) .ctl-menu.acrylic {
     position: fixed !important;
     left: 10px !important;
     right: 10px !important;
@@ -3619,7 +3619,6 @@ body.theater-mode .resize-handle {
     width: auto !important;
     max-width: none !important;
     max-height: 62vh !important;
-    max-height: 62dvh !important;
     z-index: 99999 !important;
     border-radius: 18px !important;
     background: rgba(10, 13, 22, 0.98) !important;
@@ -3628,14 +3627,21 @@ body.theater-mode .resize-handle {
     padding: 12px 14px !important;
     overflow-y: auto !important;
   }
-  .video-frame.fullscreen .ctl-menu.acrylic,
+  .video-frame.fullscreen .ctl-menu.acrylic {
+    position: fixed !important;
+    right: max(14px, env(safe-area-inset-right, 14px)) !important;
+    bottom: max(54px, calc(44px + env(safe-area-inset-bottom, 0px))) !important;
+    max-height: calc(100vh - 76px) !important;
+    width: min(360px, 88vw) !important;
+    z-index: 99999 !important;
+    overflow-y: auto !important;
+  }
   .video-frame:fullscreen .ctl-menu.acrylic,
   .video-frame:-webkit-full-screen .ctl-menu.acrylic {
     position: fixed !important;
     right: max(14px, env(safe-area-inset-right, 14px)) !important;
     bottom: max(54px, calc(44px + env(safe-area-inset-bottom, 0px))) !important;
     max-height: calc(100vh - 76px) !important;
-    max-height: calc(100dvh - 76px) !important;
     width: min(360px, 88vw) !important;
     z-index: 99999 !important;
     overflow-y: auto !important;
@@ -3976,7 +3982,7 @@ body.theater-mode .resize-handle {
 .panel-video {
   position: relative !important;
 }
-.panel-video > .video-frame:not(.fullscreen):not(:fullscreen) {
+.panel-video > .video-frame:not(.fullscreen) {
   position: absolute !important;
   inset: 0 !important;
   top: 0 !important;
@@ -4023,8 +4029,7 @@ body.vortex-fs #mesh-root .mesh-layout,
 body.vortex-fs #mesh-root .video-chat,
 body.vortex-fs #mesh-root .panel-video,
 body.vortex-fs #mesh-root .video-frame,
-.video-frame.fullscreen,
-.video-frame:fullscreen {
+.video-frame.fullscreen {
   position: fixed !important;
   inset: 0 !important;
   top: 0 !important;
@@ -4032,11 +4037,11 @@ body.vortex-fs #mesh-root .video-frame,
   right: 0 !important;
   bottom: 0 !important;
   width: 100vw !important;
-  height: var(--vvh, 100vh) !important;
-  height: var(--vvh, 100dvh) !important;
+  height: 100vh !important;
+  height: 100% !important;
   max-width: 100vw !important;
-  max-height: var(--vvh, 100vh) !important;
-  max-height: var(--vvh, 100dvh) !important;
+  max-height: 100vh !important;
+  max-height: 100% !important;
   min-width: 0 !important;
   min-height: 0 !important;
   aspect-ratio: auto !important;
@@ -4049,13 +4054,23 @@ body.vortex-fs #mesh-root .video-frame,
   background: #000 !important;
   overflow: hidden !important;
 }
+.video-frame:fullscreen {
+  position: fixed !important;
+  top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100% !important;
+  z-index: 99999 !important;
+  background: #000 !important;
+}
 .video-frame:-webkit-full-screen {
   position: fixed !important;
   top: 0 !important; right: 0 !important; bottom: 0 !important; left: 0 !important;
   inset: 0 !important;
   width: 100vw !important;
-  height: var(--vvh, 100vh) !important;
-  height: var(--vvh, 100dvh) !important;
+  height: 100vh !important;
+  height: 100% !important;
   z-index: 99999 !important;
   background: #000 !important;
 }
@@ -4160,10 +4175,8 @@ body.vortex-fs #mesh-root .resize-handle {
     min-height: 36px !important;
   }
   .mesh {
-    height: calc(var(--vvh, 100vh) - 36px) !important;
-    height: calc(var(--vvh, 100dvh) - 36px) !important;
-    max-height: calc(var(--vvh, 100vh) - 36px) !important;
-    max-height: calc(var(--vvh, 100dvh) - 36px) !important;
+    height: calc(100% - 36px) !important;
+    max-height: calc(100% - 36px) !important;
   }
   body:not(.vortex-fs):not(.mesh-minimized) .panel-chat {
     flex: 0 0 clamp(210px, 36vw, 275px) !important;
@@ -4234,5 +4247,45 @@ body.vortex-fs #mesh-root .resize-handle {
   body.mesh-minimized #mesh-root .pip-mini-actions button {
     padding: 3px 7px !important;
     font-size: 0.64rem !important;
+  }
+}
+
+/* v67: Fix Room Search Drawer (.panel-body) Provider Grid Overlap & Android MIUI Video Compositing */
+@media (max-width: 960px) {
+  .panel-body .provider-grid,
+  .panel-body .provider-grid.compact,
+  .panel-left .provider-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    padding: 8px 10px 12px !important;
+  }
+  .panel-body .provider-tile,
+  .panel-left .provider-tile {
+    grid-column: span 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    height: 70px !important;
+    min-height: 70px !important;
+    max-height: 70px !important;
+    padding: 7px 5px 5px !important;
+    box-sizing: border-box !important;
+  }
+  .panel-body .provider-tile.hero-provider-tile,
+  .panel-left .provider-tile.hero-provider-tile {
+    grid-column: span 1 !important;
+    height: 70px !important;
+    min-height: 70px !important;
+    max-height: 70px !important;
+  }
+  .video-frame .ctl-top,
+  .video-frame .ctl-bottom,
+  .video-frame .ctl-pill,
+  .video-frame .ctl-time,
+  .video-frame .ctl-center-play,
+  .video-frame .ctl-loading {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }

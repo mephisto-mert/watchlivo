@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v65';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v65';
-import { avatar } from '../profile.js?v=20261102_v65';
-import { clock } from '../sync.js?v=20261102_v65';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v65';
-import { copyInvite, inviteUrl } from './chat.js?v=20261102_v65';
-import { parseVideoUrl } from '../providers.js?v=20261102_v65';
-import { resolveMedia } from './selection.js?v=20261102_v65';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261102_v67';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261102_v67';
+import { avatar } from '../profile.js?v=20261102_v67';
+import { clock } from '../sync.js?v=20261102_v67';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261102_v67';
+import { copyInvite, inviteUrl } from './chat.js?v=20261102_v67';
+import { parseVideoUrl } from '../providers.js?v=20261102_v67';
+import { resolveMedia } from './selection.js?v=20261102_v67';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));

@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261102_v65';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261102_v65';
-import { getProvider } from '../providers.js?v=20261102_v65';
-import { expectedPosition } from '../sync.js?v=20261102_v65';
-import { thumbFor } from './lobby.js?v=20261102_v65';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261102_v65';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261102_v65';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261102_v65';
-import { avatar } from '../profile.js?v=20261102_v65';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261102_v67';
+import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261102_v67';
+import { getProvider } from '../providers.js?v=20261102_v67';
+import { expectedPosition } from '../sync.js?v=20261102_v67';
+import { thumbFor } from './lobby.js?v=20261102_v67';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261102_v67';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261102_v67';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261102_v67';
+import { avatar } from '../profile.js?v=20261102_v67';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1662,56 +1662,31 @@ export function buildControls(frame, ctx) {
   let lastStageW = 0;
   let lastStageH = 0;
 
-  function syncVideoStageBounds(forceReflow = false) {
+  function syncVideoStageBounds(_forceReflow = false) {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
-    const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
-    const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
-    const vv = window.visualViewport;
-    const vvH = vv ? vv.height : rawH;
-    const isLand = rawW > rawH * 1.08;
-    const effH = isLand ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
-    if (effH > 100 && !document.body.classList.contains('kb-open')) {
-      document.documentElement.style.setProperty('--vvh', `${Math.round(effH)}px`);
+    const ae = document.activeElement;
+    const isInputFocused = Boolean(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
+    if (!isInputFocused) {
+      document.body.classList.remove('kb-open');
+      document.documentElement.style.setProperty('--vvh', '100%');
       document.documentElement.style.setProperty('--vv-top', '0px');
     }
-    const inFs = isFullscreenActive();
-    const panelEl = frame.parentElement;
-    const refEl = (inFs || !panelEl) ? frame : panelEl;
-    const rect = refEl.getBoundingClientRect();
-    let w = Math.round(rect.width || (inFs ? rawW : 0));
-    let h = Math.round(rect.height || (inFs ? effH : 0));
-    if (inFs) {
-      w = Math.round(rawW || w);
-      h = Math.round(effH || h);
-    } else if (isLand && effH <= 560 && h > effH) {
-      h = Math.max(120, Math.round(effH - 50));
-    }
-    if (w <= 40 || h <= 40) return;
-    const sizeChanged = Math.abs(w - lastStageW) > 2 || Math.abs(h - lastStageH) > 2;
-    lastStageW = w;
-    lastStageH = h;
     if (host.container) {
-      host.container.style.width = `${w}px`;
-      host.container.style.height = `${h}px`;
-      host.container.style.maxHeight = `${h}px`;
+      host.container.style.width = '100%';
+      host.container.style.height = '100%';
+      host.container.style.maxHeight = '100%';
     }
     const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
     if (v) {
-      v.style.width = `${w}px`;
-      v.style.height = `${h}px`;
-      v.style.maxHeight = `${h}px`;
+      v.style.width = '100%';
+      v.style.height = '100%';
+      v.style.maxHeight = '100%';
       v.style.top = '0px';
       v.style.left = '0px';
-      v.setAttribute('width', String(w));
-      v.setAttribute('height', String(h));
-      if (forceReflow || sizeChanged) {
-        v.style.objectFit = 'fill';
-        void v.offsetHeight;
-        requestAnimationFrame(() => {
-          v.style.objectFit = 'contain';
-          v.style.objectPosition = 'center center';
-        });
-      }
+      v.style.objectFit = 'contain';
+      v.style.objectPosition = 'center center';
+      v.removeAttribute('width');
+      v.removeAttribute('height');
     }
   }
 
@@ -2185,12 +2160,14 @@ export function buildControls(frame, ctx) {
       }
       if (ev === 'loading' || (ev === 'buffering' && arg)) {
         loading.classList.remove('hidden');
+        if (ev === 'loading') revealControls(6500);
       } else if (ev === 'ready' || ev === 'play' || (ev === 'buffering' && !arg) || ev === 'loaded') {
         loading.classList.add('hidden');
         errorBox.classList.add('hidden');
         applyVideoFilter();
         syncVideoStageBounds(true);
         host.adapter?.subs?.onTimeUpdate?.(position(), true);
+        if (ev === 'ready' || ev === 'loaded') revealControls(5500);
       }
       if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isHostOnly()) {
         triggerNextEpisode();

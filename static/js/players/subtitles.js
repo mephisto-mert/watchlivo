@@ -85,18 +85,18 @@ export function parseVtt(vttText) {
           .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$/g, '')
           .trim())
         .filter((l) => l && !/^(?:müzik|şarkı|music|song|alkış|applause|gülüşmeler|kahkaha|laughter|sessizlik|silence|iç çeker|sighs|inler|groans|nefes alır|gasps)$/i.test(l));
+      const normSubLine = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9çğıöşüа-яё]+/gi, ' ').trim();
       const dedupLines = [];
+      const seenLineNorms = new Set();
       for (const rl of rawLines) {
-        if (!dedupLines.length || dedupLines[dedupLines.length - 1] !== rl) {
-          dedupLines.push(rl);
-        }
-      }
-      if (dedupLines.length === 4 && dedupLines[0] === dedupLines[2] && dedupLines[1] === dedupLines[3]) {
-        dedupLines.splice(2, 2);
+        const nl = normSubLine(rl);
+        if (!nl || seenLineNorms.has(nl)) continue;
+        seenLineNorms.add(nl);
+        dedupLines.push(rl);
       }
       const clean = dedupLines.join('\n').trim();
       if (clean && end > start && !/(?:opensubtitles|osdb\.link|advertise your product|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|subscene\.com|turkcealtyazi\.org|altyazi\.org|yutukluklar|çeviri\s*:|senkron\s*:|iyi seyirler dileriz)/i.test(clean)) {
-        rawCues.push({ start, end, text: clean });
+        rawCues.push({ start, end, text: clean, norm: normSubLine(clean) });
       }
     } else {
       i += 1;
@@ -107,15 +107,20 @@ export function parseVtt(vttText) {
   let runningMaxEnd = 0;
   for (let k = 0; k < rawCues.length; k += 1) {
     const c = rawCues[k];
-    const prev = cues.length ? cues[cues.length - 1] : null;
-    if (prev && (Math.abs(prev.start - c.start) < 0.35 || c.start < prev.end) && prev.text === c.text) {
-      prev.end = Math.max(prev.end, c.end);
-      runningMaxEnd = Math.max(runningMaxEnd, prev.end);
-      prev.maxEnd = runningMaxEnd;
-      continue;
+    let merged = false;
+    for (let j = cues.length - 1; j >= Math.max(0, cues.length - 6); j -= 1) {
+      const prev = cues[j];
+      if ((Math.abs(prev.start - c.start) < 0.6 || c.start <= prev.end + 0.35) && (prev.norm === c.norm || prev.text === c.text)) {
+        prev.end = Math.max(prev.end, c.end);
+        runningMaxEnd = Math.max(runningMaxEnd, prev.end);
+        prev.maxEnd = runningMaxEnd;
+        merged = true;
+        break;
+      }
     }
+    if (merged) continue;
     runningMaxEnd = Math.max(runningMaxEnd, c.end);
-    cues.push({ idx: cues.length, start: c.start, end: c.end, maxEnd: runningMaxEnd, text: c.text });
+    cues.push({ idx: cues.length, start: c.start, end: c.end, maxEnd: runningMaxEnd, text: c.text, norm: c.norm });
   }
   return cues;
 }
@@ -496,18 +501,16 @@ export class SubtitleDubController {
     if (!track?.url || !this.subCues.length) return;
     try {
       const vttBlobUrl = this._buildSyncedVttBlob();
-      const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       const trEl = document.createElement('track');
       trEl.kind = 'subtitles';
       trEl.label = track.label || 'Altyazı';
       trEl.srclang = track.lang || 'tr';
-      const isLocalSub = String(track.url || '').startsWith('local://');
-      trEl.src = (isAppleMobile && !isLocalSub) ? (track.url || vttBlobUrl) : (vttBlobUrl || track.url);
+      trEl.src = vttBlobUrl || track.url;
       v.appendChild(trEl);
       try {
         if (trEl.track) {
-          const isFsOrPip = Boolean(v.webkitDisplayingFullscreen || document.fullscreenElement === v || document.webkitFullscreenElement === v || document.pictureInPictureElement === v);
-          trEl.track.mode = isFsOrPip ? 'showing' : 'hidden';
+          const isIosOrPip = Boolean(v.webkitDisplayingFullscreen || document.pictureInPictureElement === v);
+          trEl.track.mode = isIosOrPip ? 'showing' : 'disabled';
         }
       } catch (e) { /* ignore */ }
       let srcSettled = false;
@@ -519,12 +522,19 @@ export class SubtitleDubController {
           const c = tt.cues[i];
           const rawTxt = String(c.text || '').trim();
           const lines = rawTxt.split('\n').map((l) => l.trim()).filter(Boolean);
-          if (lines.length === 4 && lines[0] === lines[2] && lines[1] === lines[3]) {
-            try { c.text = `${lines[0]}\n${lines[1]}`; } catch (e) { /* ignore */ }
-          } else if (lines.length === 2 && lines[0] === lines[1]) {
-            try { c.text = lines[0]; } catch (e) { /* ignore */ }
+          const uniqueCueLines = [];
+          const seenNorm = new Set();
+          for (const ln of lines) {
+            const k = ln.toLowerCase().replace(/[^a-z0-9çğıöşü]+/gi, ' ').trim();
+            if (k && !seenNorm.has(k)) {
+              seenNorm.add(k);
+              uniqueCueLines.push(ln);
+            }
           }
-          const key = `${Math.round((c.startTime || 0) * 4)}|${(c.text || '').trim()}`;
+          if (uniqueCueLines.length !== lines.length) {
+            try { c.text = uniqueCueLines.join('\n'); } catch (e) { /* ignore */ }
+          }
+          const key = `${Math.round((c.startTime || 0) * 4)}|${(c.text || '').trim().toLowerCase()}`;
           if (seen.has(key)) toRemove.push(c);
           else seen.add(key);
         }
@@ -551,8 +561,6 @@ export class SubtitleDubController {
       const setMode = () => {
         const nativeVideoFs = Boolean(
           v.webkitDisplayingFullscreen ||
-          document.fullscreenElement === v ||
-          document.webkitFullscreenElement === v ||
           document.pictureInPictureElement === v
         );
         if (v.textTracks) {
@@ -562,9 +570,14 @@ export class SubtitleDubController {
           }
         }
         if (trEl.track) {
-          ensureNativeCues();
-          dedupTrackCues(trEl.track);
-          trEl.track.mode = nativeVideoFs ? 'showing' : 'hidden';
+          if (nativeVideoFs) {
+            if (trEl.track.mode === 'disabled') trEl.track.mode = 'hidden';
+            ensureNativeCues();
+            dedupTrackCues(trEl.track);
+            trEl.track.mode = 'showing';
+          } else {
+            trEl.track.mode = 'disabled';
+          }
         }
         this.onTimeUpdate(this.adapter.getTime(), true);
       };
@@ -783,9 +796,18 @@ export class SubtitleDubController {
       }
     }
     if (!active.length) return null;
-    if (active.length === 1) return active[0];
     active.reverse();
-    const uniqueLines = [...new Set(active.map((x) => x.text.trim()).filter(Boolean))];
+    const uniqueLines = [];
+    const seenNorm = new Set();
+    for (const item of active) {
+      const parts = String(item.text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+      for (const ln of parts) {
+        const normKey = ln.toLowerCase().replace(/[^a-z0-9çğıöşü]+/gi, ' ').trim();
+        if (!normKey || seenNorm.has(normKey)) continue;
+        seenNorm.add(normKey);
+        uniqueLines.push(ln);
+      }
+    }
     return { start: active[0].start, end: active[active.length - 1].end, text: uniqueLines.join('\n') };
   }
 

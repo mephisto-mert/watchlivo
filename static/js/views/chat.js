@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v65';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v65';
-import { avatar } from '../profile.js?v=20261102_v65';
-import { api, qs } from '../api.js?v=20261102_v65';
-import { resolveMusicItem } from './selection-kinds.js?v=20261102_v65';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v67';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v67';
+import { avatar } from '../profile.js?v=20261102_v67';
+import { api, qs } from '../api.js?v=20261102_v67';
+import { resolveMusicItem } from './selection-kinds.js?v=20261102_v67';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1150,17 +1150,17 @@ export function buildChat(ctx) {
     const vv = window.visualViewport;
     const vvH = vv ? vv.height : rawH;
     const isLandscape = rawW > rawH * 1.08;
-    const baseH = isLandscape ? Math.min(rawW, rawH) : rawH;
-    const kbOpen = Boolean(vv && ((baseH - vvH > 110) || document.activeElement === input));
-    if (!kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0)) {
-      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
-    } else if (kbOpen && (window.scrollY > 0 || document.documentElement.scrollTop > 0)) {
+    const baseH = isLandscape ? Math.min(rawW, rawH) : Math.max(rawH, vvH || 0);
+    const isChatFocused = document.activeElement === input;
+    const kbOpen = Boolean(isChatFocused && vv && (baseH - vvH > 130));
+    if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     }
-    const rawEffH = isLandscape ? Math.min(rawW, rawH, vvH || rawH) : (vvH || rawH);
-    const effH = Math.max(320, Math.round(rawH * 0.45), Math.round(rawEffH));
-    if (effH > 100) {
-      document.documentElement.style.setProperty('--vvh', `${Math.round(effH)}px`);
+    if (kbOpen) {
+      const effH = Math.max(280, Math.round(vvH || rawH));
+      document.documentElement.style.setProperty('--vvh', `${effH}px`);
+    } else {
+      document.documentElement.style.setProperty('--vvh', '100%');
     }
     document.documentElement.style.setProperty('--vv-top', '0px');
     document.body.classList.toggle('kb-open', kbOpen);
@@ -1172,6 +1172,15 @@ export function buildChat(ctx) {
     onVisualViewportResize();
     [60, 200, 500].forEach((ms) => setTimeout(onVisualViewportResize, ms));
   };
+  input.addEventListener('focus', () => {
+    setTimeout(onVisualViewportResize, 80);
+    setTimeout(onVisualViewportResize, 260);
+  });
+  input.addEventListener('blur', () => {
+    document.body.classList.remove('kb-open');
+    document.documentElement.style.setProperty('--vvh', '100%');
+    setTimeout(onVisualViewportResize, 80);
+  });
   window.addEventListener('resize', onWindowOrientationOrResize);
   window.addEventListener('orientationchange', onWindowOrientationOrResize);
   if (window.visualViewport) {

@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261102_v65';
-import { expectedPosition } from '../sync.js?v=20261102_v65';
-import { state } from '../store.js?v=20261102_v65';
+import { SubtitleDubController } from './subtitles.js?v=20261102_v67';
+import { expectedPosition } from '../sync.js?v=20261102_v67';
+import { state } from '../store.js?v=20261102_v67';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -535,14 +535,15 @@ export class Html5Adapter {
         doneCb?.();
       };
       const effStart = Number(customStart ?? startAt) || 0;
+      const isAndroid = /Android/i.test(navigator.userAgent || '');
       this.hls = new window.Hls({
-        enableWorker: true,
+        enableWorker: !isAndroid,
         lowLatencyMode: false,
         subtitleDisplay: false,
         enableWebVTT: false,
         startFragPrefetch: true,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: 1600000,
+        abrEwmaDefaultEstimate: isAndroid ? 950000 : 1600000,
         abrBandWidthFactor: 0.85,
         abrBandWidthUpFactor: 0.65,
         autoLevelCapping: -1,
@@ -781,13 +782,44 @@ export class Html5Adapter {
     let stallChecks = 0;
     const stallWindowMs = this.isMusic ? 4500 : 10500;
     let lastZeroDimSwitchAt = 0;
+    let zeroDimDowngraded = false;
     const checkZeroDimAudioOnly = () => {
       if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) return;
-      if (v.readyState >= 2 && !v.paused && v.currentTime > (startAt || 0) + 0.45 && v.videoWidth === 0) {
+      const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
+      const decFrames = q && typeof q.totalVideoFrames === 'number'
+        ? q.totalVideoFrames
+        : (typeof v.webkitDecodedFrameCount === 'number' ? v.webkitDecodedFrameCount : -1);
+      const elapsedAfterStart = (v.currentTime || 0) - (startAt || 0);
+      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > 0.45;
+      const hasZeroDecodedFrames = decFrames === 0 && elapsedAfterStart > 2.2;
+      if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
         const nowMs = Date.now();
-        if (nowMs - lastZeroDimSwitchAt > 1200 && nativeAltIdx < alts.length) {
+        if (this.hls && !zeroDimDowngraded) {
+          zeroDimDowngraded = true;
           lastZeroDimSwitchAt = nowMs;
-          loadCandidateUrl(alts[nativeAltIdx++]);
+          try {
+            if (this.hls.levels?.length > 1) this.hls.currentLevel = 0;
+            if (hasZeroDecodedFrames) this.hls.recoverMediaError();
+          } catch (e) { /* ignore */ }
+          return;
+        }
+        if (nowMs - lastZeroDimSwitchAt > 1500) {
+          lastZeroDimSwitchAt = nowMs;
+          if (nativeAltIdx < alts.length) {
+            zeroDimDowngraded = false;
+            loadCandidateUrl(alts[nativeAltIdx++]);
+          } else if (isHls && canNativeHls && this.hls && !triedHlsFallback) {
+            triedHlsFallback = true;
+            const resumeAt = Math.max(v.currentTime || 0, startAt || 0);
+            try { this.hls.destroy(); } catch (e) { /* ignore */ }
+            this.hls = null;
+            v.src = withProxySegs(this.currentUrl || url);
+            v.load();
+            if (resumeAt >= 1) {
+              v.addEventListener('loadedmetadata', () => { try { v.currentTime = resumeAt; } catch (e) {} }, { once: true });
+            }
+            if (this.wantPlaying) this.tryPlay();
+          }
         }
       }
     };

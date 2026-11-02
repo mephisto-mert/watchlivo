@@ -439,9 +439,50 @@ def _tmdb_item(r: dict, default_type: str = "movie") -> dict:
     }
 
 
-def _tmdb_sync(q: str):
-    if not TMDB_API_KEY:
+_STAR_WARS_CURATED = [
+    {"id": "11", "tmdbId": "11", "mediaType": "movie", "title": "Star Wars: Bölüm IV - Yeni Bir Umut", "originalTitle": "Star Wars", "year": "1977", "rating": 8.2, "voteCount": 20500, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Prenses Leia, İmparatorluk güçleri tarafından rehin alınır. Luke Skywalker ve Han Solo galaksiyi kurtarmak için direnişe katılır.", "poster": "https://image.tmdb.org/t/p/w500/6FfCtAuVAW8XJjZ7eWeLibRLWTw.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/6FfCtAuVAW8XJjZ7eWeLibRLWTw.jpg"},
+    {"id": "1891", "tmdbId": "1891", "mediaType": "movie", "title": "Star Wars: Bölüm V - İmparator", "originalTitle": "The Empire Strikes Back", "year": "1980", "rating": 8.4, "voteCount": 16800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Luke Skywalker, Jedi ustası Yoda'dan eğitim alırken Darth Vader, Asi İttifakı'nı galaksi boyunca amansızca takip eder.", "poster": "https://image.tmdb.org/t/p/w500/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg"},
+    {"id": "1892", "tmdbId": "1892", "mediaType": "movie", "title": "Star Wars: Bölüm VI - Jedi'ın Dönüşü", "originalTitle": "Return of the Jedi", "year": "1983", "rating": 7.9, "voteCount": 15400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluk ikinci Ölüm Yıldızı'nı inşa ederken Luke Skywalker, babası Darth Vader'ı karanlık taraftan döndürmeye çalışır.", "poster": "https://image.tmdb.org/t/p/w500/jQYlydvHm3kUix1f8prMucrplhm.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/jQYlydvHm3kUix1f8prMucrplhm.jpg"},
+    {"id": "1893", "tmdbId": "1893", "mediaType": "movie", "title": "Star Wars: Bölüm I - Gizli Tehlike", "originalTitle": "Star Wars: Episode I - The Phantom Menace", "year": "1999", "rating": 6.6, "voteCount": 14500, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Jedi Şövalyeleri Qui-Gon Jinn ve Obi-Wan Kenobi, Tatooine gezegeninde Güç'te olağanüstü yetenekli genç Anakin Skywalker'ı keşfeder.", "poster": "https://image.tmdb.org/t/p/w500/6wkfovpn7Eq8dYNKaG5PY3q2oq6.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/6wkfovpn7Eq8dYNKaG5PY3q2oq6.jpg"},
+    {"id": "1894", "tmdbId": "1894", "mediaType": "movie", "title": "Star Wars: Bölüm II - Klonların Saldırısı", "originalTitle": "Star Wars: Episode II - Attack of the Clones", "year": "2002", "rating": 6.6, "voteCount": 13200, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Galaktik Cumhuriyet parçalanmanın eşiğindeyken Anakin Skywalker, Senatör Padmé Amidala'yı korumakla görevlendirilir.", "poster": "https://image.tmdb.org/t/p/w500/oZNPzxqM2s5DyVWab09NTQScDQt.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/oZNPzxqM2s5DyVWab09NTQScDQt.jpg"},
+    {"id": "1895", "tmdbId": "1895", "mediaType": "movie", "title": "Star Wars: Bölüm III - Sith'in İntikamı", "originalTitle": "Star Wars: Episode III - Revenge of the Sith", "year": "2005", "rating": 7.4, "voteCount": 13800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Klon Savaşları'nın üçüncü yılında Anakin Skywalker, Darth Sidious'un etkisiyle karanlık tarafa çekilerek Darth Vader'a dönüşür.", "poster": "https://image.tmdb.org/t/p/w500/xfSAoBEm9MNBjmlNcDYLvLSMlnq.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/xfSAoBEm9MNBjmlNcDYLvLSMlnq.jpg"},
+    {"id": "140607", "tmdbId": "140607", "mediaType": "movie", "title": "Star Wars: Güç Uyanıyor (Bölüm VII)", "originalTitle": "Star Wars: The Force Awakens", "year": "2015", "rating": 7.3, "voteCount": 19200, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluğun küllerinden doğan İlk Düzen galaksiyi tehdit ederken Rey ve Finn, Luke Skywalker'ı bulmak için direnişe katılır.", "poster": "https://image.tmdb.org/t/p/w500/wqnLdwVXoBjKibFRR5U3y0aDUhs.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/wqnLdwVXoBjKibFRR5U3y0aDUhs.jpg"},
+    {"id": "330459", "tmdbId": "330459", "mediaType": "movie", "title": "Rogue One: Bir Star Wars Hikayesi", "originalTitle": "Rogue One: A Star Wars Story", "year": "2016", "rating": 7.5, "voteCount": 15100, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Bir grup cesur direniş savaşçısı, İmparatorluk'un kitle imha silahı Ölüm Yıldızı'nın planlarını çalmak için imkansız bir göreve çıkar.", "poster": "https://image.tmdb.org/t/p/w500/i0yw1mFbB7sNGHCs7EXZPzFkdA1.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/i0yw1mFbB7sNGHCs7EXZPzFkdA1.jpg"},
+    {"id": "181808", "tmdbId": "181808", "mediaType": "movie", "title": "Star Wars: Son Jedi (Bölüm VIII)", "originalTitle": "Star Wars: The Last Jedi", "year": "2017", "rating": 6.8, "voteCount": 15000, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Rey, Güç'ün sırlarını öğrenmek için sürgündeki Luke Skywalker'a ulaşırken Direniş, İlk Düzen'e karşı hayatta kalma savaşı verir.", "poster": "https://image.tmdb.org/t/p/w500/kOVEVeg59E0wsnXmF9nrh6OmWII.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/kOVEVeg59E0wsnXmF9nrh6OmWII.jpg"},
+    {"id": "348350", "tmdbId": "348350", "mediaType": "movie", "title": "Han Solo: Bir Star Wars Hikayesi", "originalTitle": "Solo: A Star Wars Story", "year": "2018", "rating": 6.6, "voteCount": 8400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Genç Han Solo'nun Chewbacca ve Lando Calrissian ile tanışması ve Millennium Falcon'un kaptanı olma serüveni.", "poster": "https://image.tmdb.org/t/p/w500/4oD6VEccFkorEBTEDXtpLAaz0Rl.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/4oD6VEccFkorEBTEDXtpLAaz0Rl.jpg"},
+    {"id": "181812", "tmdbId": "181812", "mediaType": "movie", "title": "Star Wars: Skywalker'ın Yükselişi (Bölüm IX)", "originalTitle": "Star Wars: The Rise of Skywalker", "year": "2019", "rating": 6.3, "voteCount": 9800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Skywalker destanının büyük finalinde Direniş'in kalan üyeleri, geri dönen İmparator Palpatine ve Son Düzen ile son kez yüzleşir.", "poster": "https://image.tmdb.org/t/p/w500/db32LaOibwEliAmSL2jjDF6oDdj.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/db32LaOibwEliAmSL2jjDF6oDdj.jpg"},
+    {"id": "12180", "tmdbId": "12180", "mediaType": "movie", "title": "Star Wars: Klon Savaşları (Film)", "originalTitle": "Star Wars: The Clone Wars", "year": "2008", "rating": 6.1, "voteCount": 1950, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Anakin Skywalker ve yeni Padawan öğrencisi Ahsoka Tano, Jabba the Hutt'ın kaçırılan oğlunu kurtarmak için tehlikeli bir göreve atılır.", "poster": "https://image.tmdb.org/t/p/w500/iJQfixW818LUdSXlCDL3JZm0S0g.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/iJQfixW818LUdSXlCDL3JZm0S0g.jpg"},
+    {"id": "82856", "tmdbId": "82856", "mediaType": "tv", "title": "The Mandalorian (Star Wars)", "originalTitle": "The Mandalorian", "year": "2019", "rating": 8.4, "voteCount": 10200, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluğun çöküşünden sonra galaksinin dış halkalarında yalnız bir ödül avcısı olan Din Djarin, Grogu'yu korumak için yola çıkar.", "poster": "https://image.tmdb.org/t/p/w500/eU1i6eHXlzMOlEq0ku1Rzq7Y4wA.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/eU1i6eHXlzMOlEq0ku1Rzq7Y4wA.jpg"},
+    {"id": "4194", "tmdbId": "4194", "mediaType": "tv", "title": "Star Wars: Klon Savaşları (The Clone Wars)", "originalTitle": "Star Wars: The Clone Wars", "year": "2008", "rating": 8.5, "voteCount": 2100, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Jedi Şövalyeleri Anakin Skywalker, Obi-Wan Kenobi ve Ahsoka Tano, Ayrılıkçı Droid Ordusu'na karşı galaksi çapında Klon Savaşları'na liderlik eder.", "poster": "https://image.tmdb.org/t/p/w500/e1nWfnnCVqxS2LeTO3dwGyAsG2V.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/e1nWfnnCVqxS2LeTO3dwGyAsG2V.jpg"},
+    {"id": "83867", "tmdbId": "83867", "mediaType": "tv", "title": "Star Wars: Andor", "originalTitle": "Andor", "year": "2022", "rating": 8.2, "voteCount": 1400, "origLang": "en", "categories": ["scifi", "action", "drama"], "genreLabel": "Bilim Kurgu • Dram", "overview": "Rogue One olaylarından beş yıl önce, Cassian Andor'un acımasız İmparatorluk rejimine karşı Asi İttifakı'nın doğuşundaki casusluk mücadelesi.", "poster": "https://image.tmdb.org/t/p/w500/59SVNwLfoMnZPPB6ukW6dlPxAdI.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/59SVNwLfoMnZPPB6ukW6dlPxAdI.jpg"},
+    {"id": "92830", "tmdbId": "92830", "mediaType": "tv", "title": "Obi-Wan Kenobi (Star Wars)", "originalTitle": "Obi-Wan Kenobi", "year": "2022", "rating": 7.1, "voteCount": 1650, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Sith'in İntikamı'ndan on yıl sonra Tatooine'de genç Luke'u uzaktan koruyan Obi-Wan Kenobi, Engizisyoncular ve Darth Vader ile karşı karşıya gelir.", "poster": "https://image.tmdb.org/t/p/w500/qJRB789ceLryrLvOKrZqLKr2CGf.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/qJRB789ceLryrLvOKrZqLKr2CGf.jpg"},
+    {"id": "114461", "tmdbId": "114461", "mediaType": "tv", "title": "Star Wars: Ahsoka", "originalTitle": "Ahsoka", "year": "2023", "rating": 7.6, "voteCount": 1100, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluğun düşüşünden sonra eski Jedi Şövalyesi Ahsoka Tano, Büyük Amiral Thrawn'ın geri dönüş tehdidini araştırır.", "poster": "https://image.tmdb.org/t/p/w500/laCJxobHoPVaLQTKxc14Y2zV64J.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/laCJxobHoPVaLQTKxc14Y2zV64J.jpg"},
+    {"id": "115036", "tmdbId": "115036", "mediaType": "tv", "title": "The Book of Boba Fett (Star Wars)", "originalTitle": "The Book of Boba Fett", "year": "2021", "rating": 7.4, "voteCount": 2400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Efsanevi ödül avcısı Boba Fett ve paralı asker Fennec Shand, Jabba the Hutt'ın Tatooine'deki suç imparatorluğunu ele geçirir.", "poster": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg"},
+    {"id": "60554", "tmdbId": "60554", "mediaType": "tv", "title": "Star Wars Asiler (Rebels)", "originalTitle": "Star Wars Rebels", "year": "2014", "rating": 7.8, "voteCount": 950, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Hayalet gemisinin cesur mürettebatı, galaktik İmparatorluk'a karşı ilk isyan kıvılcımlarını ateşler.", "poster": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg"},
+    {"id": "105971", "tmdbId": "105971", "mediaType": "tv", "title": "Star Wars: Kötüler Timi (The Bad Batch)", "originalTitle": "Star Wars: The Bad Batch", "year": "2021", "rating": 8.2, "voteCount": 980, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Klon Savaşları'nın hemen ardından genetik mutasyonlu seçkin klon birliği Kuvvet 99, hızla değişen galakside paralı asker olarak hayatta kalmaya çalışır.", "poster": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg"},
+    {"id": "114479", "tmdbId": "114479", "mediaType": "tv", "title": "Star Wars: The Acolyte", "originalTitle": "The Acolyte", "year": "2024", "rating": 6.4, "voteCount": 780, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Yüksek Cumhuriyet döneminin son günlerinde saygın bir Jedi Ustası, eski Padawan'ı ile birlikte şok edici bir suç dalgasını araştırır.", "poster": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg"},
+    {"id": "202879", "tmdbId": "202879", "mediaType": "tv", "title": "Star Wars: Skeleton Crew", "originalTitle": "Star Wars: Skeleton Crew", "year": "2024", "rating": 7.3, "voteCount": 520, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Kendi gezegenlerinde gizemli bir keşif yapan dört çocuk, tehlikeli galakside kaybolur ve eve dönüş yolunda Jod Na Nawood ile karşılaşır.", "poster": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg"},
+    {"id": "203085", "tmdbId": "203085", "mediaType": "tv", "title": "Star Wars: Jedi Hikayeleri (Tales of the Jedi)", "originalTitle": "Star Wars: Tales of the Jedi", "year": "2022", "rating": 8.1, "voteCount": 610, "origLang": "en", "categories": ["scifi", "animation"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Öncül üçleme dönemindeki Jedi Şövalyeleri Ahsoka Tano ve Kont Dooku'nun kaderlerini belirleyen dönüm noktalarını anlatan antoloji dizisi.", "poster": "https://image.tmdb.org/t/p/w500/l6p2e4B1A7bbF68Tx3jB2E2N3vO.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/l6p2e4B1A7bbF68Tx3jB2E2N3vO.jpg"},
+]
+
+
+def _match_star_wars_curated(q: str) -> list:
+    ql = (q or "").strip().lower()
+    if not ql:
         return []
+    sw_triggers = ("star wars", "starwars", "yıldız savaş", "yildiz savas", "clone wars", "klon savaş", "klon savas", "mandalorian", "obi-wan", "obi wan", "ahsoka", "andor", "boba fett", "skywalker", "darth vader", "jedi", "sith", "rogue one", "bad batch", "acolyte", "skeleton crew")
+    if not any(t in ql for t in sw_triggers):
+        return []
+    if any(t in ql for t in ("star wars", "starwars", "yıldız savaş", "yildiz savas")):
+        return [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED]
+    matched = [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if ql in x["title"].lower() or ql in x["originalTitle"].lower()]
+    return matched + [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if x not in matched]
+
+
+def _tmdb_sync(q: str):
+    curated_sw = _match_star_wars_curated(q)
+    if not TMDB_API_KEY:
+        return curated_sw[:40]
     import concurrent.futures
     def _fetch_p(pg):
         try:
@@ -453,7 +494,16 @@ def _tmdb_sync(q: str):
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         for batch in pool.map(_fetch_p, [1, 2]):
             raw.extend(batch)
-    return [_tmdb_item(r) for r in raw][:40]
+    api_items = [_tmdb_item(r) for r in raw]
+    seen_k = set()
+    combined = []
+    for it in curated_sw + api_items:
+        k = f"{it.get('mediaType')}:{it.get('tmdbId') or it.get('id')}"
+        if k in seen_k:
+            continue
+        seen_k.add(k)
+        combined.append(it)
+    return combined[:45]
 
 
 FREE_TR_PROVIDERS = {"cinema", "hdfilmcehennemi", "dizibox", "dizilife", "fullhdfilm", "yabancidizi", "plex", "pluto", "tubi", "dizipal"}
@@ -1059,12 +1109,13 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             no = _norm_title(it.get("originalTitle") or "")
             vc = int(it.get("voteCount") or 0)
             yr = str(it.get("year") or "")
+            is_curated_fr = 1 if it.get("curatedFranchise") else 0
             is_tr_exact = 1 if ((nt == nq or no == nq) and (it.get("origLang") == "tr" or str(it.get("tmdbId")) in ("228853", "115678", "40417", "39176", "131906", "231254", "77994", "115597", "125412", "280030", "271596", "71036"))) else 0
             is_scr = 1 if str(it.get("id") or "").startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "ac-", "dp-")) else 0
             released = 1 if (yr and yr <= "2026" and (vc >= 5 or "voteCount" not in it)) else 0
             exact = 2 if ((nt == nq or no == nq) and released) else (1 if (nq and (nq in nt or nq in no)) else 0)
             pop_tier = 2 if vc >= 1000 else (1 if vc >= 50 else 0)
-            return (is_tr_exact, exact, is_scr, released, pop_tier, vc, float(it.get("rating") or 0))
+            return (is_tr_exact, is_curated_fr, exact, is_scr, released, pop_tier, vc, float(it.get("rating") or 0))
         merged.sort(key=_rank, reverse=True)
         if mt_flt in ("tv", "movie"):
             merged = [x for x in merged if x.get("mediaType") == mt_flt]
@@ -4958,7 +5009,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             eff_ref = "https://flixer.su/"
         elif ("cdnimages" in url and "/hls/" in url) or "playmix.uno" in url or "hdfilmcehennemi.mobi" in url:
             eff_ref = "https://hdfilmcehennemi.mobi/"
-        elif "cdnimgs" in url or ("cdnimage" in url and not ("cdnimages" in url and "/hls/" in url)) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/m", url):
+        elif "cdnimgs" in url or ("cdnimg" in url and not ("cdnimages" in url and "/hls/" in url)) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/", url):
             eff_ref = "https://rapidvid.org/"
         elif "molystream" in url or "/sheila_" in url:
             eff_ref = "https://dbx.molystream.org/"
@@ -5027,7 +5078,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                                     ct = "application/octet-stream"
                                 elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url)):
                                     ct = "video/mp4"
-                                elif is_mpegts or ".ts" in url or ".png" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
+                                elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
                                     ct = "video/mp2t"
                                 elif "video/" in raw_ct or "audio/" in raw_ct or "mpegurl" in raw_ct:
                                     ct = r.headers.get("Content-Type")
@@ -5143,10 +5194,10 @@ async def rave_stream_manifest(request: Request):
     is_dp = ref_mode == "dp" or "ag2m5.cfd" in target or "uk-traffic-" in target
     is_pv = ref_mode == "pv" or "pilavyer" in target
     is_hfnl = ref_mode == "hfnl" or ("cdnimages" in target and "/hls/" in target) or "playmix.uno" in target or "hdfilmcehennemi.mobi" in target
-    is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimage" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", target)))
+    is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimg" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
-    m3u8_ckey = f"v4|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}"
+    m3u8_ckey = f"v5|{target}|{aud_pref}|{prov}|{tid}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
@@ -5348,7 +5399,7 @@ async def rave_stream_manifest(request: Request):
                         if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")):
                             c_hdrs["Referer"] = "https://player.videasy.to/"
                             c_hdrs["Origin"] = "https://player.videasy.to"
-                        elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimage" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/m", cand_u):
+                        elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimg" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/", cand_u):
                             c_hdrs["Referer"] = "https://rapidvid.org/"
                             c_hdrs["Origin"] = "https://rapidvid.org"
                         elif "dl" in str(cand_k) or "makesomthingup" in cand_u:
@@ -5378,11 +5429,11 @@ async def rave_stream_manifest(request: Request):
             cur_is_pv = ("pilavyer" in cur_target) or (cur_target == target and is_pv)
             cur_is_dp = ("uk-traffic-" in cur_target) or ("ag2m5.cfd" in cur_target) or ("dplayer" in cur_target) or is_dp
             cur_is_hfnl = ("cdnimages" in cur_target and "/hls/" in cur_target) or ("playmix.uno" in cur_target) or (cur_target == target and is_hfnl)
-            cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimage" in cur_target and not ("cdnimages" in cur_target and "/hls/" in cur_target)) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/m", cur_target)) or (cur_target == target and is_fhd))
+            cur_is_fhd = (not cur_is_hfnl) and (("cdnimgs" in cur_target) or ("cdnimg" in cur_target and not ("cdnimages" in cur_target and "/hls/" in cur_target)) or ("rapidvid" in cur_target) or bool(re.search(r"https://s\d+\.[^/]+\.shop/", cur_target)) or (cur_target == target and is_fhd))
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             is_master = "#EXT-X-STREAM-INF" in raw
-            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_fp)
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "")
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
@@ -5424,7 +5475,7 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, dp_ref, ".ts")
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
-                if "dragonballzfans" in u_str or proxy_segs:
+                if "dragonballzfans" in u_str or needs_seg_proxy:
                     ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
                         "https://rapidvid.org/" if cur_is_fhd else (
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (
@@ -5807,9 +5858,42 @@ def _srt_to_vtt(raw_bytes) -> str:
     )
     txt = re.sub(r"[♪♫♬♩]+", " ", txt)
     txt = re.sub(r"(?im)^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$\n?", "", txt)
-    if not txt.startswith("WEBVTT"):
-        txt = "WEBVTT\n\n" + txt
-    return txt + "\n"
+    raw_blocks = re.split(r"\n{2,}", txt.strip())
+    cleaned_blocks = []
+    prev_ts_norm = ("", "")
+    for blk in raw_blocks:
+        b_lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
+        if not b_lines:
+            continue
+        if b_lines[0].startswith("WEBVTT") or b_lines[0].startswith("NOTE") or b_lines[0].startswith("STYLE"):
+            continue
+        ts_idx = -1
+        for i_ln, ln in enumerate(b_lines):
+            if "-->" in ln:
+                ts_idx = i_ln
+                break
+        if ts_idx < 0:
+            continue
+        ts_line = b_lines[ts_idx]
+        payload_lines = b_lines[ts_idx + 1:]
+        dedup_payload = []
+        seen_ln = set()
+        for pl in payload_lines:
+            pl_clean = re.sub(r"<[^>]+>", "", pl).strip()
+            norm_k = re.sub(r"\W+", " ", pl_clean.lower()).strip()
+            if not norm_k or norm_k in seen_ln:
+                continue
+            seen_ln.add(norm_k)
+            dedup_payload.append(pl_clean)
+        if not dedup_payload:
+            continue
+        joined_payload = "\n".join(dedup_payload)
+        cur_sig = (ts_line.split("-->")[0].strip()[:8], joined_payload.lower())
+        if cur_sig == prev_ts_norm:
+            continue
+        prev_ts_norm = cur_sig
+        cleaned_blocks.append(f"{ts_line}\n{joined_payload}")
+    return "WEBVTT\n\n" + "\n\n".join(cleaned_blocks) + "\n"
 
 
 _VTT_CACHE_LOCK = threading.Lock()

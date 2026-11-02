@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v65';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v65';
-import { api, qs } from '../api.js?v=20261102_v65';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v65';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v65';
-import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v65';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v67';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v67';
+import { api, qs } from '../api.js?v=20261102_v67';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v67';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v67';
+import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v67';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -653,8 +653,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};
     try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
-    const tmdb = (data.tmdb || []).slice(0, 12);
-    const titles = tmdb.length ? [] : (data.justwatch || []).filter((t) => t.title).slice(0, 12);
+    const tmdb = (data.tmdb || []).slice(0, 40);
+    const titles = tmdb.length ? [] : (data.justwatch || []).filter((t) => t.title).slice(0, 24);
     const yt = (data.youtube || []).slice(0, 12).map(ytToMedia);
     fill(box,
       tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
