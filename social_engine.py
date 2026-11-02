@@ -626,8 +626,19 @@ async def youtube_playlist(request: Request) -> JSONResponse:
 def _resolve_mashup_track(query_or_url: str, fallback_query: str, fallback_title: str, fallback_artist: str) -> Dict[str, Any]:
     import music_engine
     q = _clean(query_or_url, 200) or fallback_query
+    is_url = q.startswith(("http://", "https://"))
     try:
-        res = music_engine._resolve_music_sync(q, "", "", "", "", "clip")
+        res = music_engine._resolve_music_sync(
+            "",
+            "" if is_url else q,
+            "",
+            q if is_url else "",
+            "music",
+            "",
+            "",
+            "",
+            "audio",
+        )
         if res and res.get("url"):
             bpm_val = 118 + (sum(ord(c) for c in q) % 18)
             return {
@@ -647,7 +658,7 @@ def _resolve_mashup_track(query_or_url: str, fallback_query: str, fallback_title
         pass
     # Guaranteed fallback via iTunes / SoundCloud resolver
     try:
-        res_fb = music_engine._resolve_music_sync(fallback_query, fallback_title, fallback_artist, "", "", "clip")
+        res_fb = music_engine._resolve_music_sync(fallback_artist, fallback_title, "", "", "music", "", "", "", "audio")
         if res_fb and res_fb.get("url"):
             return {
                 "videoId": res_fb.get("videoId") or res_fb.get("clipVideoId") or "",

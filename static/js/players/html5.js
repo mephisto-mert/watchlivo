@@ -149,15 +149,28 @@ export class Html5Adapter {
       frameParent.append(toggleBtn);
       if (media?.isRaveDJ && Array.isArray(media.mashupTracks) && media.mashupTracks.length >= 2) {
         const trB = media.mashupTracks[1];
-        const bSrc = trB?.url || trB?.audioPreviewUrl || (Array.isArray(trB?.altUrls) && trB.altUrls[0]) || '';
+        const bAlts = Array.isArray(trB?.altUrls) ? trB.altUrls : [];
+        const bProg = bAlts.find((u) => /\.(m4a|mp3|ogg|wav)(\?|$)/i.test(String(u || '')));
+        const bSrc = bProg || trB?.url || trB?.audioPreviewUrl || bAlts[0] || '';
         if (bSrc && bSrc !== media.url) {
           const deckB = document.createElement('audio');
           deckB.preload = 'auto';
           deckB.loop = true;
-          deckB.src = bSrc;
           deckB.volume = 0.28;
           this.mashupDeckB = deckB;
           this.container.append(deckB);
+          if (/\.m3u8(\?|$)|soundcloud\.cloud|sndcdn\.com/i.test(String(bSrc)) && window.Hls && window.Hls.isSupported()) {
+            try {
+              const hlsB = new window.Hls({ enableWorker: true });
+              this.mashupHlsB = hlsB;
+              hlsB.loadSource(bSrc);
+              hlsB.attachMedia(deckB);
+            } catch (e) {
+              deckB.src = bSrc;
+            }
+          } else {
+            deckB.src = bSrc;
+          }
           const syncDeckB = () => {
             if (!this.mashupDeckB || this.video !== v) return;
             const ct = Number(v.currentTime || 0);
@@ -369,7 +382,7 @@ export class Html5Adapter {
     const pushAlt = (u) => {
       const s = String(u || '').trim();
       const k = normDedupeKey(s);
-      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || seenUrls.has(k)) return;
+      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
       if (this.isMusic && is30sPreviewUrl(s) && primaryIsPlayableFull) return;
       seenUrls.add(k);
       alts.push(s);
@@ -1218,6 +1231,7 @@ export class Html5Adapter {
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }
     if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.bgYtEl) { try { this.bgYtEl.removeAttribute('src'); this.bgYtEl.remove(); } catch (e) { /* ignore */ } this.bgYtEl = null; }
+    if (this.mashupHlsB) { try { this.mashupHlsB.detachMedia(); this.mashupHlsB.destroy(); } catch (e) { /* ignore */ } this.mashupHlsB = null; }
     if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); this.mashupDeckB.remove(); } catch (e) { /* ignore */ } this.mashupDeckB = null; }
     if (this.video) {
       try {
