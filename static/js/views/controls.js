@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v78';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v78';
-import { getProvider } from '../providers.js?v=20261103_v78';
-import { expectedPosition } from '../sync.js?v=20261103_v78';
-import { thumbFor } from './lobby.js?v=20261103_v78';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v78';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v78';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v78';
-import { avatar } from '../profile.js?v=20261103_v78';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v79';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v79';
+import { getProvider } from '../providers.js?v=20261103_v79';
+import { expectedPosition } from '../sync.js?v=20261103_v79';
+import { thumbFor } from './lobby.js?v=20261103_v79';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v79';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v79';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v79';
+import { avatar } from '../profile.js?v=20261103_v79';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -356,7 +356,28 @@ export function buildControls(frame, ctx) {
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...tapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...tapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
+  const menuBackdrop = h('div', { class: 'ctl-menu-backdrop hidden', 'aria-hidden': 'true' });
   const menu = h('div', { class: 'ctl-menu acrylic hidden' });
+  const dismissViaBackdrop = (e) => {
+    e.stopPropagation();
+    const pt = e.changedTouches?.[0] || e;
+    const cx = typeof pt?.clientX === 'number' ? pt.clientX : -1;
+    const cy = typeof pt?.clientY === 'number' ? pt.clientY : -1;
+    closeMenu();
+    if (cx >= 0 && cy >= 0 && typeof document !== 'undefined') {
+      const under = document.elementFromPoint(cx, cy);
+      const chatInp = under?.closest?.('#chat-input, .chatbar input[type="text"], .chatbar input:not([type])');
+      if (chatInp && typeof chatInp.focus === 'function') {
+        try { chatInp.focus(); } catch (err) { /* ignore */ }
+        return;
+      }
+    }
+    if (e.cancelable && e.type === 'touchend') e.preventDefault();
+  };
+  menuBackdrop.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+  menuBackdrop.addEventListener('touchstart', (e) => { e.stopPropagation(); }, { passive: true });
+  menuBackdrop.addEventListener('touchend', dismissViaBackdrop, { passive: false });
+  menuBackdrop.addEventListener('click', dismissViaBackdrop);
   let menuTouchStartX = 0;
   let menuTouchStartY = 0;
   let menuTouchStartAt = 0;
@@ -602,8 +623,21 @@ export function buildControls(frame, ctx) {
   }
   const closeMenu = () => {
     menu.classList.add('hidden');
+    menuBackdrop.classList.add('hidden');
     frame.classList.remove('menu-open');
+    if (typeof document !== 'undefined') document.body?.classList.remove('ctl-menu-open');
   };
+  const onDocMenuOutside = (e) => {
+    if (menu.classList.contains('hidden')) return;
+    const t = e.target;
+    if (t && (menu.contains(t) || menuBackdrop.contains(t) || t.closest?.('#ctl-sub-btn, #ctl-gear, #ctl-speed-btn, #ctl-quality-badge, #ctl-sub-pill'))) {
+      return;
+    }
+    closeMenu();
+  };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('pointerdown', onDocMenuOutside, { passive: true });
+  }
 
   const rippleLeft = h('div', { class: 'ctl-seek-ripple left hidden' },
     h('div', { class: 'seek-ripple-body' },
@@ -1268,6 +1302,47 @@ export function buildControls(frame, ctx) {
   }
 
   let currentMenuView = 'list';
+  const shouldPortalMenuToBody = () => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl && fsEl !== document.documentElement && fsEl !== document.body) {
+      return false;
+    }
+    if (frame.classList.contains('fullscreen') || document.body.classList.contains('vortex-fs')) {
+      return true;
+    }
+    return window.innerWidth <= 960 || window.innerHeight <= 560;
+  };
+  const syncMenuPortal = () => {
+    if (typeof document === 'undefined') return;
+    const isOpen = !menu.classList.contains('hidden');
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (fsEl && fsEl !== document.documentElement && fsEl !== document.body) {
+      menu.classList.remove('is-body-portal');
+      menu.classList.add('is-fs-portal');
+      menuBackdrop.classList.remove('is-body-portal');
+      menuBackdrop.classList.add('is-fs-portal');
+      if (menuBackdrop.parentElement !== fsEl) fsEl.appendChild(menuBackdrop);
+      if (menu.parentElement !== fsEl) fsEl.appendChild(menu);
+      menuBackdrop.classList.toggle('hidden', !isOpen);
+      return;
+    }
+    menu.classList.remove('is-fs-portal');
+    menuBackdrop.classList.remove('is-fs-portal');
+    if (shouldPortalMenuToBody()) {
+      menu.classList.add('is-body-portal');
+      menuBackdrop.classList.add('is-body-portal');
+      if (menuBackdrop.parentElement !== document.body) document.body.appendChild(menuBackdrop);
+      if (menu.parentElement !== document.body) document.body.appendChild(menu);
+      menuBackdrop.classList.toggle('hidden', !isOpen);
+    } else {
+      menu.classList.remove('is-body-portal');
+      menuBackdrop.classList.remove('is-body-portal');
+      menuBackdrop.classList.add('hidden');
+      if (menuBackdrop.parentElement) menuBackdrop.remove();
+      if (menu.parentElement !== controls) controls.appendChild(menu);
+    }
+  };
   function toggleMenu(view = 'list') {
     if (!menu.classList.contains('hidden') && currentMenuView === view) {
       closeMenu();
@@ -1276,6 +1351,8 @@ export function buildControls(frame, ctx) {
     renderMenuView(view);
     menu.classList.remove('hidden');
     frame.classList.add('menu-open');
+    if (typeof document !== 'undefined') document.body?.classList.add('ctl-menu-open');
+    syncMenuPortal();
   }
 
   const cleanSrvUrl = (u) => String(u || '').replace(/&aud=[^&]+/g, '').replace(/&proxy_segs=1/g, '').trim();
@@ -1784,6 +1861,7 @@ export function buildControls(frame, ctx) {
       }
       lastMobileLandscape = isLandscape;
     }
+    syncMenuPortal();
     syncVideoStageBounds(true);
     applySubPrefsStyle();
     host.adapter?.subs?.onTimeUpdate?.(position(), true);
@@ -2182,7 +2260,13 @@ export function buildControls(frame, ctx) {
       clearInterval(tickTimer);
       clearTimeout(uiTimer);
       clearTimeout(breakBannerTimer);
+      closeMenu();
       try { stageResizeObs?.disconnect?.(); } catch (e) { /* ignore */ }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('pointerdown', onDocMenuOutside);
+      }
+      menuBackdrop.remove();
+      menu.remove();
       window.removeEventListener('keydown', onKeyDown);
       document.removeEventListener('fullscreenchange', onNativeFsChange);
       document.removeEventListener('webkitfullscreenchange', onNativeFsChange);
