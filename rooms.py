@@ -818,10 +818,24 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     return room
 
 
+def _effective_room_name(room: Dict[str, Any]) -> str:
+    if room.get("curated"):
+        return str(room.get("name") or "7/24 Canlı")
+    m = room.get("media") or {}
+    m_title = clean_str(m.get("title"), 80)
+    if m_title and m_title.lower() not in ("içerik seçilmedi", "medya seçilmedi", "hazır", "video", "oda", "boş oda"):
+        return m_title
+    return str(room.get("name") or "Watchlivo Odası")
+
+
 def set_media(room: Dict[str, Any], media: Dict[str, Any], by: str, start: float = 0.0) -> None:
     m = clean_media(media)
     m.update({"playing": True, "currentTime": max(0.0, float(start or 0)), "rate": 1.0, "updatedAt": now(), "lastActionBy": by})
     room["media"] = m
+    if not room.get("curated"):
+        m_title = clean_str(m.get("title"), 80)
+        if m_title and m_title.lower() not in ("içerik seçilmedi", "medya seçilmedi", "hazır", "video", "oda", "boş oda"):
+            room["name"] = m_title
     room["skip_votes"] = []
     room["voteEndsAt"] = 0.0
     room["endedKey"] = ""
