@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v72';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v73';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -109,8 +109,21 @@ export const icon = (name) => h('span', { html: icons[name] || '', style: { disp
 // replaceChildren() stringifies null/false ("null" text); fill() drops them like h() does.
 export const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
 
-export function toast(text, ms = 2600) {
-  const t = h('div', { class: 'toast acrylic' }, text);
+export function toast(text, ms = 2800, opts = null) {
+  const orb = h('span', { class: 'wl-toast-orb', 'aria-hidden': 'true' });
+  const label = h('span', { class: 'wl-toast-text' }, text);
+  const actionBtn = (opts && opts.actionLabel && typeof opts.onAction === 'function')
+    ? h('button', {
+        type: 'button',
+        class: 'wl-toast-action-btn',
+        onclick: (e) => {
+          e.stopPropagation();
+          try { opts.onAction(); } catch (_) {}
+          t.remove();
+        },
+      }, opts.actionLabel)
+    : null;
+  const t = h('div', { class: 'toast acrylic wl-dynamic-toast' }, orb, label, actionBtn);
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   let host = document.getElementById('toast-root');
   if (fsEl && host && !fsEl.contains(host)) {
@@ -120,6 +133,20 @@ export function toast(text, ms = 2600) {
   }
   (host || document.body).append(t);
   setTimeout(() => t.remove(), ms);
+}
+
+if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
+  window.__wlCmdKBound = true;
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      const inp = document.querySelector('.home-search input');
+      if (inp && inp.offsetParent !== null) {
+        e.preventDefault();
+        inp.focus();
+        inp.select?.();
+      }
+    }
+  });
 }
 
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable }
@@ -145,6 +172,11 @@ export function popup({ title, message, options = [], content = null, dismissabl
     back.remove();
   };
   if (dismissable) window.addEventListener('keydown', onKey);
+  const drawerHandle = h('div', {
+    class: 'wl-drawer-handle',
+    title: dismissable ? 'Kapatmak için dokun' : '',
+    onclick: () => { if (dismissable) close(); },
+  }, h('span', { class: 'wl-drawer-pill' }));
   const closeBtn = dismissable
     ? h('button', {
         type: 'button',
@@ -155,7 +187,8 @@ export function popup({ title, message, options = [], content = null, dismissabl
         html: icons.close,
       })
     : null;
-  const card = h('div', { class: 'popup acrylic', role: 'dialog', 'aria-modal': 'true' },
+  const card = h('div', { class: 'popup acrylic wl-vaul-sheet', role: 'dialog', 'aria-modal': 'true' },
+    drawerHandle,
     closeBtn,
     title ? h('h3', { class: dismissable ? 'popup-title-pad' : '' }, title) : null,
     message ? h('p', {}, message) : null,

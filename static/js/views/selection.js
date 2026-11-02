@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v72';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v72';
-import { api, qs } from '../api.js?v=20261102_v72';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v72';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v72';
-import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v72';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v73';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v73';
+import { api, qs } from '../api.js?v=20261102_v73';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v73';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v73';
+import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v73';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -355,11 +355,123 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     'vk', 'rutube', 'pluto', 'tubi',
   ];
 
+  function buildShimmerGrid(cnt = 6) {
+    return h('div', { class: 'wl-shimmer-grid' },
+      ...Array.from({ length: cnt }, () => h('div', { class: 'wl-shimmer-card' },
+        h('div', { class: 'wl-shimmer-thumb' }),
+        h('div', { class: 'wl-shimmer-line lg' }),
+        h('div', { class: 'wl-shimmer-line sm' }))));
+  }
+
+  function openMoviePreviewModal(t, defProv, onAction) {
+    const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
+    const banner = t.backdrop || t.poster || '/static/watchlivo-poster.svg';
+    const poster = t.poster || t.backdrop || '/static/watchlivo-poster.svg';
+    let modalRef = null;
+    const body = h('div', { class: 'wl-preview-modal' },
+      h('div', { class: 'wl-preview-backdrop', style: { backgroundImage: `url("${banner}")` } },
+        h('div', { class: 'wl-preview-blur-mask' })),
+      h('div', { class: 'wl-preview-content' },
+        h('img', { class: 'wl-preview-poster', src: poster, alt: t.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('div', { class: 'wl-preview-info' },
+          h('div', { class: 'wl-preview-badges' },
+            h('span', { class: 'wl-preview-tag type' }, isTv ? '📺 DİZİ / ANİME' : '🎬 SİNEMA FİLMİ'),
+            t.year ? h('span', { class: 'wl-preview-tag' }, String(t.year)) : null,
+            h('span', { class: 'wl-preview-tag rating' }, `⭐ IMDb ${t.rating || '8.2'}`),
+            h('span', { class: 'wl-preview-tag tr' }, '🇹🇷 Dublaj & Altyazı')),
+          h('h3', { class: 'wl-preview-title' }, t.title),
+          h('p', { class: 'wl-preview-desc' }, t.overview || '85.000+ Watchlivo arşivinde 1080p/4K kalitesinde Türkçe dublaj ve altyazı seçenekleriyle arkadaşlarınla senkronize izle.'),
+          h('div', { class: 'wl-preview-actions' },
+            h('button', {
+              type: 'button',
+              class: 'btn primary wl-preview-play-btn',
+              onclick: async () => {
+                modalRef?.close?.();
+                if (onAction) await onAction();
+              },
+            }, isTv ? '📺 Sezon & Bölüm Seç' : '▶ Şimdi Odada Başlat'),
+            h('button', {
+              type: 'button',
+              class: 'btn ghost',
+              onclick: () => modalRef?.close?.(),
+            }, 'Kapat')))));
+    modalRef = popup({ title: '', content: body, options: [] });
+  }
+
   function renderGrid() {
     const input = h('input', { placeholder: '85.000+ film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
-    const run = () => { superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+    const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
+    let cmdkTimer = null;
+    const hideCmdk = () => { cmdkDropdown.style.display = 'none'; };
+    const run = () => { hideCmdk(); superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') run();
+      else if (e.key === 'Escape') hideCmdk();
+    });
+    input.addEventListener('input', () => {
+      clearTimeout(cmdkTimer);
+      const q = input.value.trim();
+      if (q.length < 2 || parseVideoUrl(q)) {
+        hideCmdk();
+        return;
+      }
+      cmdkDropdown.style.display = 'block';
+      cmdkDropdown.replaceChildren(
+        h('div', { class: 'wl-cmdk-head' }, h('span', {}, `⚡ "${q}" aranıyor...`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
+        h('div', { class: 'wl-cmdk-skeleton-list' },
+          ...Array.from({ length: 4 }, () => h('div', { class: 'wl-cmdk-skel-row' })))
+      );
+      cmdkTimer = setTimeout(async () => {
+        try {
+          const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000 });
+          if (input.value.trim() !== q) return;
+          const items = [...(data.tmdb || []), ...(data.justwatch || [])].filter((x) => x && x.title).slice(0, 7);
+          if (!items.length) {
+            cmdkDropdown.replaceChildren(
+              h('div', { class: 'wl-cmdk-head' }, h('span', {}, `Sonuç bulunamadı: "${q}"`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×'))
+            );
+            return;
+          }
+          cmdkDropdown.replaceChildren(
+            h('div', { class: 'wl-cmdk-head' },
+              h('span', {}, `⚡ 21st.dev Hızlı Sonuçlar (${items.length})`),
+              h('button', { type: 'button', class: 'wl-cmdk-all-btn', onclick: run }, 'Tüm Sonuçları Gör →'),
+              h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
+            h('div', { class: 'wl-cmdk-list' },
+              ...items.map((it) => {
+                const isTv = it.mediaType === 'tv' || it.type === 'SHOW';
+                const defProv = getProvider(it.provider || 'cinema') || getProvider('cinema');
+                const normalized = { ...it, tmdbId: String(it.tmdbId || it.id || '') };
+                const triggerPlay = async () => {
+                  hideCmdk();
+                  if (isTv) {
+                    openTvSeriesModal(normalized, defProv);
+                  } else {
+                    toast(`🎬 ${it.title} hazırlanıyor...`);
+                    const media = await resolveCatalogItem(normalized, defProv, 1, 1);
+                    if (media) await pickSafe(media);
+                  }
+                };
+                return h('div', { class: 'wl-cmdk-item', onclick: triggerPlay },
+                  h('img', { class: 'wl-cmdk-poster', src: it.poster || '/static/watchlivo-poster.svg', alt: it.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+                  h('div', { class: 'wl-cmdk-meta' },
+                    h('div', { class: 'wl-cmdk-title' }, it.title),
+                    h('div', { class: 'wl-cmdk-sub' }, `${it.year || '2025'} · ${isTv ? '📺 Dizi / Anime' : '🎬 Sinema Filmi'} · 🇹🇷 TR Dublaj & Altyazı`)),
+                  h('button', {
+                    type: 'button',
+                    class: 'wl-cmdk-preview-btn',
+                    title: 'Sinematik Önizleme',
+                    onclick: (ev) => { ev.stopPropagation(); hideCmdk(); openMoviePreviewModal(normalized, defProv, triggerPlay); },
+                  }, '✨ Detay'),
+                  h('span', { class: 'wl-cmdk-action' }, isTv ? '📺 Bölüm Seç' : '▶ Başlat'));
+              }))
+          );
+        } catch (err) {
+          hideCmdk();
+        }
+      }, 240);
+    });
     const filteredProviders = catFilter === 'all' ? PROVIDERS : PROVIDERS.filter((p) => p.cat === catFilter);
     const orderedAll = catFilter === 'all'
       ? [
@@ -486,11 +598,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         },
       }, 'Temizle ×')) : null;
 
-    const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search' },
+    const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search wl-cmdk-host' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
       !compact ? h('kbd', { class: 'wl-search-kbd', title: '21st.dev Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
-      h('button', { class: 'btn primary', onclick: run }, 'Ara'));
+      h('button', { class: 'btn primary', onclick: run }, 'Ara'),
+      !compact ? cmdkDropdown : null);
 
     const topBar = compact
       ? h('div', {}, searchEl, catBar)
@@ -724,7 +837,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   async function runSuperSearch(q, box) {
-    box.replaceChildren(h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1em' } }, h('div', { class: 'spinner' })));
+    box.replaceChildren(buildShimmerGrid(6));
     const pasted = parseVideoUrl(q);
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};

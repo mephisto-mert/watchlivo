@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v72';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v72';
-import { avatar } from '../profile.js?v=20261102_v72';
-import { api, qs } from '../api.js?v=20261102_v72';
-import { resolveMusicItem } from './selection-kinds.js?v=20261102_v72';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261102_v73';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261102_v73';
+import { avatar } from '../profile.js?v=20261102_v73';
+import { api, qs } from '../api.js?v=20261102_v73';
+import { resolveMusicItem } from './selection-kinds.js?v=20261102_v73';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -262,7 +262,17 @@ export function buildChat(ctx) {
   }, '☕ Mola Zamanı');
   const reactions = h('div', { class: 'reaction-bar' },
     h('div', { class: 'reaction-emoji-grid' },
-      ...REACTIONS.map((e) => h('button', { type: 'button', class: 'react-emoji-btn', onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}`, title: `Sahneye ${e} gönder` }, e)),
+      ...REACTIONS.map((e) => h('button', {
+        type: 'button',
+        class: 'react-emoji-btn',
+        onclick: (ev) => {
+          spawnReactionBurst(ev.currentTarget, e);
+          spawnEmojiFountain(ev.currentTarget, e);
+          actions.reaction(e);
+        },
+        'aria-label': `Tepki ${e}`,
+        title: `Sahneye ${e} gönder`,
+      }, e)),
       breakBarBtn));
 
   toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
@@ -706,6 +716,32 @@ export function buildChat(ctx) {
   }
 
   const MSG_QUICK_EMOJIS = ['❤️', '😂', '🔥', '👍', '😮'];
+
+  function spawnEmojiFountain(anchorEl, emoji) {
+    try {
+      const rect = anchorEl?.getBoundingClientRect?.();
+      if (!rect || (!rect.width && !rect.height)) return;
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top;
+      for (let i = 0; i < 4; i += 1) {
+        const sway = `${Math.round((Math.random() - 0.5) * 68)}px`;
+        const rise = `${-Math.round(95 + Math.random() * 75)}px`;
+        const delay = `${i * 55}ms`;
+        const f = h('div', {
+          class: 'wl-fountain-emoji',
+          style: {
+            left: `${Math.round(cx - 12)}px`,
+            top: `${Math.round(cy - 10)}px`,
+            '--sway': sway,
+            '--rise': rise,
+            animationDelay: delay,
+          },
+        }, emoji);
+        document.body.appendChild(f);
+        setTimeout(() => f.remove(), 1150 + i * 60);
+      }
+    } catch (_) {}
+  }
 
   function spawnReactionBurst(anchorEl, emoji) {
     try {
