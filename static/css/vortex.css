@@ -2560,30 +2560,26 @@ html.is-apk .wl-btn-apk {
    WATCHLIVO CINEMA NOIR & ROYAL INDIGO STUDIO DESIGN SYSTEM (v5.0)
    Zero-Lag 60FPS GPU Pipeline + Full-Width Streaming Architecture
    ========================================================================== */
-:root, :root[data-theme="obsidian"] {
-  --bg-0: #080A0F;
+:root {
   color-scheme: dark !important;
-  --bg-1: #10141D;
-  --bg-2: #171D28;
-  --bg-dark: #080A0F;
-  --surface: rgba(15, 19, 32, 0.94);
-  --surface-2: rgba(22, 28, 45, 0.96);
-  --glass-panel: #10141D;
-  --glass-border: rgba(255, 255, 255, 0.08);
+  --bg-0: var(--bg-base);
+  --bg-1: var(--bg-elevated);
+  --bg-2: var(--card-surface);
+  --bg-dark: var(--bg-base);
+  --surface: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  --surface-2: color-mix(in srgb, var(--card-surface) 96%, transparent);
+  --glass-panel: var(--bg-elevated);
+  --glass-border: color-mix(in srgb, var(--accent) 18%, rgba(255, 255, 255, 0.08));
   --stroke: rgba(255, 255, 255, 0.08);
-  --stroke-strong: rgba(255, 255, 255, 0.15);
+  --stroke-strong: color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.15));
   --fg-0: #F5F7FA;
   --fg-1: #A0A9B8;
   --fg-2: #94a3b8;
   --fg-3: #64748b;
   --text-main: #f8fafc;
-  --accent: #27DCC8;
-  --accent-2: #17B8A6;
-  --accent-3: #0D9488;
-  --accent-glow: rgba(39, 220, 200, 0.28);
-  --neon-cyan: #27DCC8;
-  --neon-cyan-glow: rgba(39, 220, 200, 0.28);
-  --neon-green: #27DCC8;
+  --neon-cyan: var(--accent);
+  --neon-cyan-glow: var(--accent-glow);
+  --neon-green: var(--accent);
   --radius-xl: 20px;
   --radius-lg: 14px;
   --radius-md: 10px;
@@ -2591,12 +2587,16 @@ html.is-apk .wl-btn-apk {
 }
 
 body {
-  background-color: #080A0F !important;
-  background-image: radial-gradient(ellipse 85% 45% at 50% -10%, rgba(39, 220, 200, 0.15), transparent 70%) !important;
+  background-color: var(--bg-base) !important;
+  background-image:
+    radial-gradient(ellipse 90% 52% at 50% -8%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 72%),
+    radial-gradient(circle 680px at 88% 18%, color-mix(in srgb, var(--accent-2) 18%, transparent), transparent 68%),
+    radial-gradient(circle 640px at 12% 65%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%) !important;
   background-attachment: scroll !important;
   color: #f8fafc;
   margin: 0;
   overflow-x: hidden;
+  transition: background-color 0.25s ease;
 }
 
 .bg-ambient-glow {
@@ -2619,18 +2619,18 @@ body {
   -webkit-backdrop-filter: none !important;
 }
 
-/* --- Primary Buttons Override (Eliminate Hot-Pink & Neon-Cyan) --- */
+/* --- Primary Buttons Override (21st.dev Liquid Glass + Theme Accent) --- */
 .btn.primary {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
-  color: #080A0F !important;
-  border: 1px solid rgba(255, 255, 255, 0.16) !important;
-  box-shadow: 0 6px 18px rgba(39, 220, 200, 0.28) !important;
-  font-weight: 700 !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
+  color: #06080f !important;
+  border: 1px solid rgba(255, 255, 255, 0.24) !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 32%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  font-weight: 800 !important;
 }
 .btn.primary:hover {
   filter: brightness(1.08);
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(39, 220, 200, 0.42) !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 48%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.45) !important;
 }
 
 /* --- Full-Bleed Sticky Studio Navbar --- */
@@ -2642,10 +2642,10 @@ header.navbar.top-nav-capsule {
   padding: 0 clamp(14px, 2.8vw, 36px) !important;
   height: 60px !important;
   border-radius: 0 !important;
-  background: rgba(8, 10, 18, 0.96) !important;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, rgba(0, 0, 0, 0.88)) !important;
   border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5) !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.08)) !important;
+  box-shadow: 0 4px 22px rgba(0, 0, 0, 0.55) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
@@ -2672,18 +2672,18 @@ header.navbar.top-nav-capsule {
 }
 
 .btn-create-room {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   color: #080A0F !important;
   font-weight: 700 !important;
   padding: 8px 16px !important;
   border-radius: 10px !important;
   border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  box-shadow: 0 4px 16px rgba(39, 220, 200, 0.35) !important;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 35%, transparent) !important;
   transition: transform 0.18s ease, box-shadow 0.18s ease !important;
 }
 .btn-create-room:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 22px rgba(39, 220, 200, 0.5) !important;
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--accent) 50%, transparent) !important;
 }
 
 .apk-badge,
@@ -2699,8 +2699,8 @@ header.navbar.top-nav-capsule {
 }
 .apk-badge:hover,
 .btn.wl-btn-apk:hover {
-  background: rgba(39, 220, 200, 0.15) !important;
-  border-color: rgba(39, 220, 200, 0.45) !important;
+  background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent) !important;
   color: #ffffff !important;
 }
 
@@ -2784,10 +2784,10 @@ header.navbar.top-nav-capsule {
   background: rgba(255, 255, 255, 0.06) !important;
 }
 .dock-btn.active {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   color: #080A0F !important;
   border-color: rgba(255, 255, 255, 0.18) !important;
-  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.35) !important;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
   transform: none !important;
 }
 
@@ -2810,17 +2810,17 @@ header.navbar.top-nav-capsule {
   padding: 9px 14px !important;
   margin: 0 0 14px 0 !important;
   border-radius: 12px !important;
-  background: linear-gradient(90deg, rgba(39, 220, 200, 0.13) 0%, rgba(13, 17, 29, 0.95) 100%) !important;
-  border: 1px solid rgba(39, 220, 200, 0.26) !important;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 13%, transparent) 0%, rgba(13, 17, 29, 0.95) 100%) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent) !important;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32) !important;
 }
 .wl-app-banner-icon {
   width: 34px !important;
   height: 34px !important;
   border-radius: 9px !important;
-  background: rgba(39, 220, 200, 0.18) !important;
-  border: 1px solid rgba(39, 220, 200, 0.38) !important;
-  color: #27DCC8 !important;
+  background: color-mix(in srgb, var(--accent) 18%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, transparent) !important;
+  color: var(--accent) !important;
   display: flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -2848,7 +2848,7 @@ header.navbar.top-nav-capsule {
 .wl-app-banner-badge {
   padding: 2px 7px !important;
   border-radius: 6px !important;
-  background: rgba(39, 220, 200, 0.24) !important;
+  background: color-mix(in srgb, var(--accent) 24%, transparent) !important;
   color: #5EEAD4 !important;
   font-size: 0.65rem !important;
   font-weight: 800 !important;
@@ -2865,14 +2865,14 @@ header.navbar.top-nav-capsule {
   flex-shrink: 0;
 }
 .wl-banner-apk-btn {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   color: #080A0F !important;
   border: none !important;
   font-weight: 700 !important;
   padding: 6px 12px !important;
   border-radius: 8px !important;
   font-size: 0.76rem !important;
-  box-shadow: 0 4px 12px rgba(39, 220, 200, 0.3) !important;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 30%, transparent) !important;
 }
 .wl-banner-info-btn {
   background: rgba(255, 255, 255, 0.05) !important;
@@ -2892,8 +2892,8 @@ header.navbar.top-nav-capsule {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
 }
 .global-search-pill:focus-within {
-  border-color: rgba(39, 220, 200, 0.65) !important;
-  box-shadow: 0 0 0 3px rgba(39, 220, 200, 0.18) !important;
+  border-color: color-mix(in srgb, var(--accent) 65%, transparent) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent) !important;
 }
 
 .provider-cat-bar,
@@ -2929,10 +2929,10 @@ header.navbar.top-nav-capsule {
 .provider-cat-pill.active,
 .cat-tab-pill.active,
 .lobby-tab.on {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: rgba(255, 255, 255, 0.2) !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.32) !important;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 32%, transparent) !important;
 }
 
 /* --- Cinema Noir Hero Stage (.gazestream-hero) --- */
@@ -2979,8 +2979,8 @@ header.navbar.top-nav-capsule {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  background: rgba(39, 220, 200, 0.16) !important;
-  border: 1px solid rgba(39, 220, 200, 0.42) !important;
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent) !important;
   color: #99F6E4 !important;
   padding: 5px 12px !important;
   border-radius: 8px !important;
@@ -2991,9 +2991,9 @@ header.navbar.top-nav-capsule {
 .pulse-dot {
   width: 7px;
   height: 7px;
-  background: #27DCC8 !important;
+  background: var(--accent) !important;
   border-radius: 50%;
-  box-shadow: 0 0 8px #27DCC8 !important;
+  box-shadow: 0 0 8px var(--accent) !important;
 }
 .hero-meta-row {
   display: flex;
@@ -3041,14 +3041,14 @@ header.navbar.top-nav-capsule {
   gap: 10px;
 }
 .btn-watch-cyan {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   color: #080A0F !important;
   font-weight: 700 !important;
   padding: 10px 20px !important;
   border-radius: 11px !important;
   border: 1px solid rgba(255, 255, 255, 0.2) !important;
   cursor: pointer;
-  box-shadow: 0 8px 24px rgba(39, 220, 200, 0.38) !important;
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 38%, transparent) !important;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -3057,7 +3057,7 @@ header.navbar.top-nav-capsule {
 }
 .btn-watch-cyan:hover {
   transform: translateY(-1px);
-  box-shadow: 0 12px 28px rgba(39, 220, 200, 0.52) !important;
+  box-shadow: 0 12px 28px color-mix(in srgb, var(--accent) 52%, transparent) !important;
 }
 .btn-trailer-glass {
   background: rgba(255, 255, 255, 0.07) !important;
@@ -3114,8 +3114,8 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-nav-btn:hover,
 .hero-mini-all-btn:hover {
-  border-color: rgba(39, 220, 200, 0.55);
-  background: rgba(39, 220, 200, 0.18);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: #ffffff;
 }
 .hero-mini-strip {
@@ -3140,11 +3140,11 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-card:hover {
   transform: translateY(-3px);
-  border-color: rgba(39, 220, 200, 0.55) !important;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent) !important;
 }
 .hero-mini-card.is-active {
-  border-color: #27DCC8 !important;
-  box-shadow: 0 6px 18px rgba(39, 220, 200, 0.28) !important;
+  border-color: var(--accent) !important;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent) !important;
 }
 .hero-mini-poster {
   width: 100%;
@@ -3176,8 +3176,8 @@ header.navbar.top-nav-capsule {
   width: 100%;
   padding: 5px 6px !important;
   border-radius: 7px !important;
-  border: 1px solid rgba(39, 220, 200, 0.32) !important;
-  background: rgba(39, 220, 200, 0.14) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent) !important;
+  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
   color: #99F6E4 !important;
   font-size: 0.67rem !important;
   font-weight: 700 !important;
@@ -3186,7 +3186,7 @@ header.navbar.top-nav-capsule {
 }
 .hero-mini-play:hover,
 .hero-mini-card:hover .hero-mini-play {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: transparent !important;
   color: #ffffff !important;
 }
@@ -3201,13 +3201,13 @@ header.navbar.top-nav-capsule {
 }
 .poster.catalog-card:hover {
   transform: translateY(-4px) !important;
-  border-color: rgba(39, 220, 200, 0.55) !important;
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent) !important;
   box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55) !important;
 }
 .poster-cta,
 .btn.primary.poster-cta {
-  background: rgba(39, 220, 200, 0.14) !important;
-  border: 1px solid rgba(39, 220, 200, 0.3) !important;
+  background: color-mix(in srgb, var(--accent) 14%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent) !important;
   color: #CCFBF1 !important;
   box-shadow: none !important;
   border-radius: 8px !important;
@@ -3217,10 +3217,10 @@ header.navbar.top-nav-capsule {
 }
 .poster.catalog-card:hover .poster-cta,
 .poster-cta:hover {
-  background: linear-gradient(135deg, #27DCC8 0%, #17B8A6 100%) !important;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
   border-color: transparent !important;
   color: #ffffff !important;
-  box-shadow: 0 4px 14px rgba(39, 220, 200, 0.35) !important;
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 35%, transparent) !important;
 }
 
 /* --- Platform Bento Grid --- */
@@ -3246,16 +3246,16 @@ header.navbar.top-nav-capsule {
 }
 .platform-card:hover {
   transform: translateY(-3px) !important;
-  border-color: rgba(39, 220, 200, 0.5) !important;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent) !important;
   box-shadow: 0 12px 26px rgba(0, 0, 0, 0.48) !important;
 }
 .p-badge-live {
   font-size: 0.65rem;
-  background: rgba(39, 220, 200, 0.16) !important;
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
   color: #5EEAD4 !important;
   padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(39, 220, 200, 0.32) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent) !important;
   font-weight: 700;
 }
 
@@ -3361,8 +3361,8 @@ header.navbar.top-nav-capsule {
   z-index: 2 !important;
 }
 .hero-trending-tag {
-  background: rgba(39, 220, 200, 0.16) !important;
-  border: 1px solid rgba(39, 220, 200, 0.42) !important;
+  background: color-mix(in srgb, var(--accent) 16%, transparent) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent) !important;
   color: #99F6E4 !important;
 }
 .hero-art-stage {
@@ -3492,7 +3492,7 @@ header.navbar.top-nav-capsule {
   box-shadow: 0 10px 28px rgba(99, 102, 241, 0.18) !important;
 }
 .meshthumb-live-badge.is-friends {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), rgba(39, 220, 200, 0.9)) !important;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.95), color-mix(in srgb, var(--accent) 90%, transparent)) !important;
   color: #ffffff !important;
   border: 1px solid rgba(255, 255, 255, 0.28) !important;
   font-weight: 800 !important;
@@ -3506,7 +3506,7 @@ header.navbar.top-nav-capsule {
   margin-bottom: 14px !important;
   border-radius: 14px !important;
   background: rgba(16, 20, 29, 0.88) !important;
-  border: 1px solid rgba(39, 220, 200, 0.22) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent) !important;
 }
 .friends-strip #btn-lobby-add-friend {
   margin-left: auto !important;
@@ -3808,8 +3808,8 @@ header.navbar.top-nav-capsule {
   grid-column: span 1 !important;
 }
 .provider-tile.rave-icon-tile.hero-provider-tile {
-  background: linear-gradient(135deg, rgba(39, 220, 200, 0.16), rgba(99, 102, 241, 0.16)) !important;
-  border-color: rgba(39, 220, 200, 0.45) !important;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, transparent), rgba(99, 102, 241, 0.16)) !important;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent) !important;
 }
 .provider-tile.rave-icon-tile .provider-logo-wrap {
   height: 24px !important;
@@ -3906,7 +3906,7 @@ header.navbar.top-nav-capsule {
   overflow: hidden !important;
 }
 .meshthumb-join-hint {
-  color: #27DCC8 !important;
+  color: var(--accent) !important;
   font-weight: 700 !important;
   font-size: 0.72rem !important;
   margin-left: 4px !important;
@@ -4036,7 +4036,7 @@ header.navbar.top-nav-capsule {
 .provider-tile.rave-icon-tile.rave-more-tile .rave-more-count {
   font-size: 0.92rem !important;
   font-weight: 800 !important;
-  color: #27dcc8 !important;
+  color: var(--accent) !important;
   line-height: 1.1 !important;
 }
 
@@ -4059,7 +4059,7 @@ header.navbar.top-nav-capsule {
 .provider-tile.extend-tile .extend-plus {
   font-size: 0.92rem !important;
   font-weight: 800 !important;
-  color: #27dcc8 !important;
+  color: var(--accent) !important;
   line-height: 1 !important;
   margin: 0 !important;
 }
@@ -4657,4 +4657,171 @@ header.navbar.top-nav-capsule {
   border: 1px solid color-mix(in srgb, var(--badge-c, var(--accent)) 45%, transparent) !important;
   color: #f8fafc !important;
   white-space: nowrap !important;
+}
+
+
+/* ==========================================================================
+   v72: 21st.dev INLINE 8-THEME STUDIO STRIP & 8 COMPONENT EFFECTS
+   ========================================================================== */
+.wl-studio-theme-strip {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px !important;
+  width: min(94vw, 1580px) !important;
+  max-width: 1580px !important;
+  margin: 0 auto !important;
+  padding: 8px 14px !important;
+  border-radius: 15px !important;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 14%, var(--bg-elevated)) 0%, color-mix(in srgb, var(--card-surface) 94%, #000) 50%, color-mix(in srgb, var(--accent-2) 12%, var(--bg-elevated)) 100%) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, rgba(255, 255, 255, 0.1)) !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+  box-sizing: border-box !important;
+}
+
+.wl-theme-strip-label {
+  font-size: 0.78rem !important;
+  font-weight: 800 !important;
+  color: #f8fafc !important;
+  white-space: nowrap !important;
+  letter-spacing: 0.01em !important;
+  padding-right: 4px !important;
+}
+
+.wl-theme-strip-pills {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 5px !important;
+  flex: 1 1 auto !important;
+  overflow-x: auto !important;
+  scrollbar-width: none !important;
+}
+.wl-theme-strip-pills::-webkit-scrollbar { display: none !important; }
+
+.wl-theme-pill {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  padding: 5px 9px !important;
+  border-radius: 999px !important;
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #cbd5e1 !important;
+  font-size: 0.72rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+  transition: all 0.18s ease !important;
+}
+
+.wl-theme-pill:hover {
+  background: color-mix(in srgb, var(--pill-accent, var(--accent)) 18%, rgba(255, 255, 255, 0.06)) !important;
+  border-color: color-mix(in srgb, var(--pill-accent, var(--accent)) 55%, rgba(255, 255, 255, 0.2)) !important;
+  color: #ffffff !important;
+  transform: translateY(-1px) !important;
+}
+
+.wl-theme-pill.active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pill-accent, var(--accent)) 32%, rgba(15, 23, 42, 0.9)), color-mix(in srgb, var(--pill-accent-2, var(--accent-2)) 22%, rgba(15, 23, 42, 0.95))) !important;
+  border-color: var(--pill-accent, var(--accent)) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--pill-accent, var(--accent)) 45%, transparent), 0 4px 14px color-mix(in srgb, var(--pill-accent, var(--accent)) 35%, transparent) !important;
+}
+
+.wl-theme-pill-dot {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 50% !important;
+  box-shadow: 0 0 8px currentColor !important;
+  flex-shrink: 0 !important;
+}
+
+.wl-theme-pill-score {
+  font-size: 0.65rem !important;
+  font-weight: 800 !important;
+  padding: 1px 5px !important;
+  border-radius: 999px !important;
+  background: rgba(0, 0, 0, 0.45) !important;
+  color: var(--pill-accent, var(--accent)) !important;
+}
+
+.wl-theme-strip-more {
+  padding: 6px 11px !important;
+  border-radius: 10px !important;
+  background: color-mix(in srgb, var(--accent) 16%, rgba(255, 255, 255, 0.05)) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent) !important;
+  color: #f8fafc !important;
+  font-size: 0.75rem !important;
+  font-weight: 800 !important;
+  cursor: pointer !important;
+  white-space: nowrap !important;
+}
+
+/* 21st.dev Tubelight Active Dock Indicator */
+.floating-dock .dock-btn.active {
+  position: relative !important;
+  overflow: visible !important;
+}
+.floating-dock .dock-btn.active::before {
+  content: "" !important;
+  position: absolute !important;
+  top: -5px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: 54% !important;
+  height: 3px !important;
+  border-radius: 999px !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 12px 2px var(--accent), 0 4px 16px var(--accent) !important;
+  pointer-events: none !important;
+}
+
+/* 21st.dev Command-K Shortcut Keycap */
+.wl-search-kbd {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 3px 8px !important;
+  margin-right: 4px !important;
+  border-radius: 7px !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+  font-size: 0.72rem !important;
+  font-weight: 800 !important;
+  color: var(--accent) !important;
+  background: color-mix(in srgb, var(--accent) 14%, rgba(0, 0, 0, 0.55)) !important;
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, rgba(255, 255, 255, 0.14)) !important;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.45) !important;
+  cursor: pointer !important;
+  user-select: none !important;
+}
+
+/* 21st.dev Ruixen Interactive Spotlight & Amber VIP Hero Card */
+@media (min-width: 901px) {
+  .provider-tile.rave-icon-tile {
+    background:
+      radial-gradient(220px circle at var(--mx, 85%) var(--my, 18%), color-mix(in srgb, var(--brand, var(--accent)) 28%, transparent) 0%, transparent 72%),
+      linear-gradient(165deg, color-mix(in srgb, var(--accent) 10%, var(--card-surface-hover)) 0%, color-mix(in srgb, var(--bg-elevated) 96%, #000) 100%) !important;
+    border: 1px solid color-mix(in srgb, var(--brand, var(--accent)) 32%, color-mix(in srgb, var(--accent) 22%, rgba(255, 255, 255, 0.08))) !important;
+  }
+
+  .provider-tile.rave-icon-tile[data-provider="cinema"] {
+    background:
+      radial-gradient(260px circle at var(--mx, 85%) var(--my, 18%), rgba(245, 158, 11, 0.36) 0%, color-mix(in srgb, var(--accent) 22%, transparent) 55%, transparent 82%),
+      linear-gradient(165deg, color-mix(in srgb, #f59e0b 18%, var(--card-surface-hover)) 0%, color-mix(in srgb, var(--bg-elevated) 96%, #000) 100%) !important;
+    border-color: rgba(245, 158, 11, 0.65) !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.48), 0 0 24px rgba(245, 158, 11, 0.22) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .wl-studio-theme-strip {
+    width: 100% !important;
+    padding: 6px 10px !important;
+    border-radius: 12px !important;
+  }
+  .wl-theme-strip-label,
+  .wl-theme-strip-more {
+    display: none !important;
+  }
 }

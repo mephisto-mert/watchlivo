@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v71';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v71';
-import { api, qs } from '../api.js?v=20261102_v71';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v71';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v71';
-import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v71';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v72';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v72';
+import { api, qs } from '../api.js?v=20261102_v72';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v72';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v72';
+import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v72';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -101,7 +101,12 @@ export function providerTile(p, onClick) {
     'data-brand': p.id,
     'data-category': p.cat || 'global',
     title: `${p.name} — ${subText}`,
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#27DCC8' },
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--brand': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8') },
+    onmousemove: (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      e.currentTarget.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`);
+      e.currentTarget.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`);
+    },
     onclick: () => onClick(p),
     onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
   },
@@ -484,6 +489,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
+      !compact ? h('kbd', { class: 'wl-search-kbd', title: '21st.dev Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
       h('button', { class: 'btn primary', onclick: run }, 'Ara'));
 
     const topBar = compact

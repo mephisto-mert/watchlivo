@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v71';
-import { state, set, getFriends } from '../store.js?v=20261102_v71';
-import { avatar, profileSetup } from '../profile.js?v=20261102_v71';
-import { api } from '../api.js?v=20261102_v71';
-import { createSelection } from './selection.js?v=20261102_v71';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v71';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261102_v72';
+import { state, set, getFriends, THEME_SCHEMAS, setUiPref } from '../store.js?v=20261102_v72';
+import { avatar, profileSetup } from '../profile.js?v=20261102_v72';
+import { api } from '../api.js?v=20261102_v72';
+import { createSelection } from './selection.js?v=20261102_v72';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261102_v72';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v71', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261102_v72', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -294,6 +294,33 @@ export function renderHome(app) {
       }, '🎨 8 Tema'))
   );
 
+  const themeStripEl = h('div', { class: 'wl-studio-theme-strip', id: 'wl-studio-theme-strip' },
+    h('span', { class: 'wl-theme-strip-label' }, '🎨 21st.dev 8 Tema:'),
+    h('div', { class: 'wl-theme-strip-pills' },
+      ...THEME_SCHEMAS.map((t) => h('button', {
+        type: 'button',
+        class: `wl-theme-pill ${(state.uiPrefs?.theme || 'indigo') === t.id ? 'active' : ''}`,
+        'data-theme-pill': t.id,
+        title: `${t.name} (${t.badge}) — ${t.desc}`,
+        style: { '--pill-accent': t.accent, '--pill-accent-2': t.accent2 || t.accent },
+        onclick: (e) => {
+          setUiPref({ theme: t.id });
+          const parent = e.currentTarget.parentElement;
+          if (parent) {
+            parent.querySelectorAll('.wl-theme-pill').forEach((b) => b.classList.toggle('active', b.dataset.themePill === t.id));
+          }
+          toast(`🎨 ${t.name} (${t.badge}) uygulandı!`);
+        },
+      },
+        h('span', { class: 'wl-theme-pill-dot', style: { background: t.accent } }),
+        h('span', { class: 'wl-theme-pill-name' }, t.name),
+        h('span', { class: 'wl-theme-pill-score' }, (t.badge || '').split('·')[0].trim())))),
+    h('button', {
+      type: 'button',
+      class: 'wl-theme-strip-more',
+      onclick: () => openThemeModal(),
+    }, '✨ Ambiyans'));
+
   const glassWindow = h('div', { class: 'glass-main-window' },
     selection,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },
@@ -312,7 +339,7 @@ export function renderHome(app) {
     lobbyBox);
 
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
-    h('div', { class: 'app-layout' }, dockEl, glassWindow));
+    h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
   const home = h('main', { class: 'home' }, homeScroll);
 

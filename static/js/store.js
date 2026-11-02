@@ -14,7 +14,7 @@ export const THEME_SCHEMAS = [
 ];
 
 const LEGACY_THEME_MAP = {
-  obsidian: 'supabase',
+  obsidian: 'indigo',
   oled: 'vercel',
   crimson: 't3chat',
   midnight: 'indigo',
@@ -22,15 +22,15 @@ const LEGACY_THEME_MAP = {
 };
 
 function normalizeThemeId(id) {
-  if (!id) return 'supabase';
+  if (!id) return 'indigo';
   const mapped = LEGACY_THEME_MAP[id] || id;
-  return THEME_SCHEMAS.some((t) => t.id === mapped) ? mapped : 'supabase';
+  return THEME_SCHEMAS.some((t) => t.id === mapped) ? mapped : 'indigo';
 }
 
 function loadUiPrefs() {
   const defaults = {
-    theme: 'supabase',
-    ambient: 'low',
+    theme: 'indigo',
+    ambient: 'medium',
     density: 'comfortable',
     cardStyle: 'glass',
     subSize: 'md',
