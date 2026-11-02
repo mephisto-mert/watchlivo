@@ -19,6 +19,7 @@
           "auth_engine.py",
           "security.py",
           "music_engine.py",
+          "social_engine.py",
           "animecix_tau_map.json",
           "hidden_titles.json",
           "main_sites_vault.json"
@@ -35,6 +36,7 @@
           "auth_engine.py",
           "security.py",
           "music_engine.py",
+          "social_engine.py",
           "static/index.html",
           "static/Watchlivo-v1.1.apk",
           "animecix_tau_map.json",
@@ -82,11 +84,11 @@
       }
     },
     {
-      "src": "/download/apk",
+      "src": "/download/(apk|Watchlivo.*\\.apk)",
       "dest": "/static/Watchlivo-v1.1.apk",
       "headers": {
         "Content-Type": "application/vnd.android.package-archive",
-        "Content-Disposition": "attachment; filename=\"Watchlivo-v1.1.apk\""
+        "Content-Disposition": "attachment; filename=\"Watchlivo-v1.1.0.apk\""
       }
     },
     {
