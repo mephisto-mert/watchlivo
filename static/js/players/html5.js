@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261102_v67';
-import { expectedPosition } from '../sync.js?v=20261102_v67';
-import { state } from '../store.js?v=20261102_v67';
+import { SubtitleDubController } from './subtitles.js?v=20261102_v68';
+import { expectedPosition } from '../sync.js?v=20261102_v68';
+import { state } from '../store.js?v=20261102_v68';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -791,7 +791,7 @@ export class Html5Adapter {
         : (typeof v.webkitDecodedFrameCount === 'number' ? v.webkitDecodedFrameCount : -1);
       const elapsedAfterStart = (v.currentTime || 0) - (startAt || 0);
       const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > 0.45;
-      const hasZeroDecodedFrames = decFrames === 0 && elapsedAfterStart > 2.2;
+      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.2;
       if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
         const nowMs = Date.now();
         if (this.hls && !zeroDimDowngraded) {

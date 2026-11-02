@@ -4289,3 +4289,37 @@ body.vortex-fs #mesh-root .resize-handle {
     -webkit-backdrop-filter: none !important;
   }
 }
+
+/* v68: Compact Landscape (568x320 - 760px) & 320px Portrait Video Controls Fit */
+@media (max-width: 360px), ((orientation: landscape) and (max-width: 760px)) {
+  .ctl-bottom {
+    padding: 6px 6px 5px !important;
+  }
+  .ctl-bar-row {
+    gap: 2px !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+  }
+  .ctl-cluster-left,
+  .ctl-cluster-right {
+    gap: 2px !important;
+    min-width: 0 !important;
+  }
+  .ctl-action,
+  .ctl-action.ctl-labeled-pill,
+  .ctl-speed-btn {
+    width: 24px !important;
+    height: 24px !important;
+    min-width: 24px !important;
+    min-height: 24px !important;
+    flex: 0 0 24px !important;
+    padding: 0 !important;
+    font-size: 0.58rem !important;
+  }
+  .ctl-bar-row .ctl-time {
+    font-size: 0.56rem !important;
+    padding: 2px 4px !important;
+    white-space: nowrap !important;
+  }
+}

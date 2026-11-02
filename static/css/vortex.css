@@ -4014,3 +4014,42 @@ header.navbar.top-nav-capsule {
   line-height: 1 !important;
   margin: 0 !important;
 }
+
+/* v68: Zero-Overlap Home Top Navbar Across All Mobile Widths (320px - 720px) */
+@media (max-width: 720px) {
+  .top-nav-capsule .navbar-center {
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+  }
+  .top-nav-capsule .logo {
+    padding: 2px 4px !important;
+  }
+  .top-nav-capsule .navbar-left,
+  .top-nav-capsule .navbar-right {
+    gap: 4px !important;
+    min-width: 0 !important;
+  }
+}
+@media (max-width: 420px) {
+  .top-nav-capsule #nav-theme-btn {
+    display: none !important;
+  }
+  .top-nav-capsule .nav-icon {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+  }
+  .top-nav-capsule #btn-create-room {
+    padding: 0 9px !important;
+    height: 30px !important;
+    font-size: 0.7rem !important;
+  }
+}
+@media (max-width: 350px) {
+  .top-nav-capsule #btn-create-room .create-room-lbl {
+    max-width: 64px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+}
