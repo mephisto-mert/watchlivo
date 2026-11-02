@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v62';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v62';
-import { api, qs } from '../api.js?v=20261102_v62';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v62';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v62';
-import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v62';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261102_v63';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261102_v63';
+import { api, qs } from '../api.js?v=20261102_v63';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261102_v63';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261102_v63';
+import { getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261102_v63';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -303,7 +303,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           ...filteredProviders.filter((p) => !RAVE_TOP_IDS.includes(p.id)),
         ]
       : filteredProviders;
-    const defaultCap = 11;
+    const defaultCap = 7;
     const isCollapsedGrid = !compact && catFilter === 'all' && !showAllProviders && orderedAll.length > defaultCap;
     const visibleProviders = isCollapsedGrid ? orderedAll.slice(0, defaultCap) : orderedAll;
     const hiddenCount = orderedAll.length - visibleProviders.length;
@@ -395,7 +395,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
         }))) : null;
 
-    const historyList = !compact ? getWatchHistory().slice(0, 4) : [];
+    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
     const historyRail = historyList.length ? h('div', { class: 'continue-strip' },
       h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar:'),
       ...historyList.map((item) => {
@@ -435,10 +435,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const topBar = compact
       ? h('div', {}, searchEl, catBar)
-      : h('div', { class: 'rave-top-bar' }, searchEl, catBar);
+      : h('div', { class: 'rave-top-bar' }, searchEl, ...(showAllProviders ? [catBar] : []));
 
     const moreTile = isCollapsedGrid ? h('div', {
-      class: 'provider-tile extend-tile',
+      class: 'provider-tile rave-icon-tile extend-tile',
       role: 'button',
       tabindex: '0',
       title: 'Tüm platformları göster',
@@ -447,8 +447,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     },
       h('div', { class: 'extend-plus' }, `+${hiddenCount}`),
       h('div', { class: 'provider-meta' },
-        h('span', { class: 'ptitle' }, 'Tüm Platformlar'),
-        h('span', { class: 'psub' }, `${PROVIDERS.length} Platform`))) : null;
+        h('span', { class: 'ptitle' }, 'Tümü'))) : null;
 
     const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
     const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;

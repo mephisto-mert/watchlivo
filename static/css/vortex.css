@@ -3989,3 +3989,27 @@ header.navbar.top-nav-capsule {
   color: #27dcc8 !important;
   line-height: 1.1 !important;
 }
+
+/* v63: Make .extend-tile fit exact 1-col slot in 2-row 8-tile Rave.io strip */
+.provider-tile.extend-tile,
+.provider-tile.rave-icon-tile.extend-tile {
+  grid-column: span 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  height: 54px !important;
+  min-height: 54px !important;
+  max-height: 54px !important;
+  padding: 5px 4px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 2px !important;
+}
+.provider-tile.extend-tile .extend-plus {
+  font-size: 0.92rem !important;
+  font-weight: 800 !important;
+  color: #27dcc8 !important;
+  line-height: 1 !important;
+  margin: 0 !important;
+}
