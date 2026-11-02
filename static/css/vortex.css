@@ -5243,3 +5243,16 @@ header.navbar.top-nav-capsule {
   border-color: color-mix(in srgb, var(--room-accent, var(--accent)) 62%, #ffffff) !important;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.56), 0 0 24px color-mix(in srgb, var(--room-accent, var(--accent)) 28%, transparent) !important;
 }
+
+.wl-preview-actions {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  margin-top: 14px !important;
+  flex-wrap: wrap !important;
+}
+@media (max-width: 900px) {
+  .wl-preview-actions {
+    justify-content: center !important;
+  }
+}

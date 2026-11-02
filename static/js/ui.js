@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v73';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261102_v74';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -131,7 +131,9 @@ export function toast(text, ms = 2800, opts = null) {
   } else if (!fsEl && host && host.parentElement !== document.body) {
     document.body.appendChild(host);
   }
-  (host || document.body).append(t);
+  const targetHost = host || document.body;
+  targetHost.querySelectorAll('.wl-dynamic-toast').forEach((old) => old.remove());
+  targetHost.append(t);
   setTimeout(() => t.remove(), ms);
 }
 
