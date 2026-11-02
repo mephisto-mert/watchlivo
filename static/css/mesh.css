@@ -4217,3 +4217,22 @@ body.vortex-fs #mesh-root .resize-handle {
     white-space: nowrap !important;
   }
 }
+
+/* v62: Compact Mobile Minimized Room PiP Above Floating Dock */
+@media (max-width: 720px) {
+  body.mesh-minimized #mesh-root {
+    width: 168px !important;
+    height: 96px !important;
+    right: 10px !important;
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px)) !important;
+    border-radius: 12px !important;
+  }
+  body.mesh-minimized #mesh-root .pip-mini-title {
+    font-size: 0.65rem !important;
+    padding: 3px 6px !important;
+  }
+  body.mesh-minimized #mesh-root .pip-mini-actions button {
+    padding: 3px 7px !important;
+    font-size: 0.64rem !important;
+  }
+}

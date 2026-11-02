@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261102_v61';
-import { avatar } from '../profile.js?v=20261102_v61';
-import { getProvider } from '../providers.js?v=20261102_v61';
-import { api, qs } from '../api.js?v=20261102_v61';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261102_v61';
-import { expectedPosition } from '../sync.js?v=20261102_v61';
+import { h, icons, popup, toast } from '../ui.js?v=20261102_v62';
+import { avatar } from '../profile.js?v=20261102_v62';
+import { getProvider } from '../providers.js?v=20261102_v62';
+import { api, qs } from '../api.js?v=20261102_v62';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261102_v62';
+import { expectedPosition } from '../sync.js?v=20261102_v62';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -70,9 +70,9 @@ export function tvGlassCard(room, onOpen) {
     onclick: () => onOpen(room),
     onkeydown: (e) => { if (e.key === 'Enter') onOpen(room); },
   },
-    h('div', { class: 'tv-badge' }, isRadio ? '7/24 RADYO' : '7/24 CANLI', eq),
     h('div', { class: 'tv-logo-box', style: { background: `linear-gradient(135deg, ${brand.c1}, ${brand.c2})` } }, brand.label),
     h('div', { class: 'tv-info' },
+      h('div', { class: 'tv-badge' }, isRadio ? '7/24 RADYO' : '7/24 CANLI', eq),
       h('div', { class: 'tv-name meshthumb-title' }, room.media?.title || room.name || brand.label),
       h('div', { class: 'tv-desc' }, `${brand.sub} · Herkese Açık`)));
   card.addEventListener('mousemove', (e) => {
