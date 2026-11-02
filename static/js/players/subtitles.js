@@ -998,7 +998,8 @@ export class SubtitleDubController {
 
   syncVideoVolume() {
     const duckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
-    const voiceDuck = (duckOn && typeof window !== 'undefined' && typeof window.__kinoxVoiceDuckFactor === 'number')
+    const hostManagesDuck = typeof window !== 'undefined' && Boolean(window.__kinoxHost);
+    const voiceDuck = (!hostManagesDuck && duckOn && typeof window !== 'undefined' && typeof window.__kinoxVoiceDuckFactor === 'number')
       ? window.__kinoxVoiceDuckFactor
       : 1.0;
     const ttsDuck = (this.ttsDubActive && this._ttsSpeaking) ? 0.22 : 1.0;

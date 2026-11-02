@@ -25,7 +25,7 @@ SYNC_SECRET = server_secret("VORTEX_SECRET")
 
 VALID_PRIVACY = ("public", "nearby", "friends", "private")
 VALID_PLAY_MODES = ("leader", "cohost", "autoplay", "quickplay", "vote")
-VALID_VOIP = ("off", "leader", "all")
+VALID_VOIP = ("off", "leader", "stage", "all")
 HTTP_PARTICIPANT_TTL = 60.0
 EMPTY_ROOM_TTL = 14400.0
 VOTE_WINDOW = 8.0
@@ -36,7 +36,7 @@ MEDIA_FIELDS = ("provider", "videoId", "url", "title", "thumbnail", "channel", "
 SAFE_MERGE_KEYS = (
     "name", "privacy", "playMode", "voipMode", "queue", "skip_votes",
     "voteEndsAt", "endedKey", "rev", "polls", "curated", "isMature",
-    "creatorId", "creatorCid", "host_id", "co_hosts", "host_transferred",
+    "creatorId", "creatorCid", "host_id", "co_hosts", "stage_speakers", "host_transferred",
 )
 _CLOSED_ROOMS: Dict[str, float] = {}
 SYNC_TOKEN_TTL = 86400.0
@@ -554,7 +554,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
         key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
     )[:24]
     snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "isMature", "creator",
-                                     "creatorId", "creatorCid", "host_id", "co_hosts", "host_transferred",
+                                     "creatorId", "creatorCid", "host_id", "co_hosts", "stage_speakers", "host_transferred",
                                      "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
                                      "endedKey", "kicked", "left", "rev", "curated", "chatClearedAt")}
     # Secrets never leave the server: no password hash, no creator identity.
@@ -928,6 +928,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         cp["isCreator"] = p_is_creator
         cp["isHost"] = p["id"] == host_id
         cp["isCoHost"] = ((p["id"] in co_set) and (p["id"] != creator_cid or p["id"] == host_id or p_is_creator)) or is_cohost_mode
+        cp["isStageSpeaker"] = bool(p["id"] == host_id or cp["isCoHost"] or p["id"] in (room.get("stage_speakers") or []))
         ser_parts.append(cp)
     if for_cid and for_cid in p_map and not any(x["id"] == for_cid for x in ser_parts):
         me_p = p_map[for_cid]
@@ -945,7 +946,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     return {
         "id": room["id"], "name": _effective_room_name(room), "privacy": room["privacy"], "playMode": room["playMode"],
         "voipMode": room["voipMode"], "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room["creator"],
-        "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set),
+        "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set), "stage_speakers": list(room.get("stage_speakers") or []),
         "curated": bool(room.get("curated")), "polls": (room.get("polls") or [])[-10:],
         "voteEndsAt": room["voteEndsAt"], "media": m, "queue": room["queue"],
         "skip_votes": room["skip_votes"], "participants": ser_parts,
@@ -2166,10 +2167,21 @@ def _handle_social(room, cid, data, out, name, is_host):
         out["broadcast"].append((ev, None))
         out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "voice_state":
+        stage_set = set(room.get("stage_speakers") or [])
+        can_stage_speak = bool(is_host or cid in (room.get("co_hosts") or []) or cid in stage_set)
+        if "handRaised" in data:
+            me["handRaised"] = bool(data["handRaised"])
         if room["voipMode"] == "off" or (room["voipMode"] == "leader" and not is_host):
             me["muted"], me["speaking"] = True, False
             if data.get("muted") is False:
                 out["reply"].append({"type": "error", "message": "Bu odada sesli iletişim kısıtlı."})
+        elif room["voipMode"] == "stage" and not can_stage_speak:
+            for k in ("inCall", "deafened"):
+                if k in data:
+                    me[k] = bool(data[k])
+            me["muted"], me["speaking"], me["cam"], me["screen"] = True, False, False, False
+            if (data.get("muted") is False) or data.get("cam") or data.get("screen"):
+                out["reply"].append({"type": "error", "message": "🎤 Sahne Modu açık — konuşmak için '✋ Söz İste' butonunu kullanın."})
         else:
             want_active = (data.get("muted") is False) or bool(data.get("cam")) or bool(data.get("screen"))
             was_active = (not me.get("muted", True)) or bool(me.get("cam")) or bool(me.get("screen"))
@@ -2181,8 +2193,20 @@ def _handle_social(room, cid, data, out, name, is_host):
                 for k in ("muted", "speaking", "cam", "screen", "inCall", "deafened"):
                     if k in data:
                         me[k] = bool(data[k])
+                if not me.get("muted", True):
+                    me["handRaised"] = False
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
+        out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
+    elif mtype == "hand_raise":
+        next_hr = bool(data["raised"]) if "raised" in data else (not bool(me.get("handRaised")))
+        me["handRaised"] = next_hr
+        room["_parts_list"] = None
+        room["rev"] = int(room.get("rev") or 1) + 1
+        if next_hr:
+            ev_hr = {"id": uuid.uuid4().hex[:10], "ts": t_now, "type": "hand_raised", "user": name, "cid": cid}
+            room["events"] = (room.get("events") or [])[-34:] + [ev_hr]
+            out["broadcast"].append((ev_hr, cid))
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
     elif mtype == "host_action":
         if room.get("curated"):
@@ -2214,6 +2238,39 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["host_id"] = data["targetId"]
             room["host_transferred"] = True
             sys_msg(room, "artık oda lideri", room["participants"][data["targetId"]]["name"])
+        elif act == "toggle_stage_mode":
+            next_v = "all" if room.get("voipMode") == "stage" else "stage"
+            room["voipMode"] = next_v
+            if next_v == "stage":
+                allowed_sp = {room.get("host_id")} | set(room.get("co_hosts") or []) | set(room.get("stage_speakers") or [])
+                for pcid, pp in (room.get("participants") or {}).items():
+                    if pcid not in allowed_sp and isinstance(pp, dict):
+                        pp["muted"] = True
+                        pp["speaking"] = False
+                        pp["cam"] = False
+                        pp["screen"] = False
+                sys_msg(room, "🎤 Sahne Modu açıldı — dinleyiciler '✋ Söz İste' ile söz alabilir", name)
+            else:
+                for pp in (room.get("participants") or {}).values():
+                    if isinstance(pp, dict):
+                        pp["handRaised"] = False
+                sys_msg(room, "🎙️ Serbest Ses Modu açıldı — herkes konuşabilir", name)
+        elif act == "toggle_stage_speaker" and data.get("targetId") in room["participants"]:
+            tid = data["targetId"]
+            sp_list = list(room.get("stage_speakers") or [])
+            target_p = room["participants"][tid]
+            target_p["handRaised"] = False
+            if tid in sp_list:
+                sp_list.remove(tid)
+                target_p["muted"] = True
+                target_p["speaking"] = False
+                target_p["cam"] = False
+                target_p["screen"] = False
+                sys_msg(room, "sahneden dinleyiciye alındı", target_p["name"])
+            else:
+                sp_list.append(tid)
+                sys_msg(room, "🎤 sahneye konuşmacı olarak davet edildi", target_p["name"])
+            room["stage_speakers"] = sp_list
         elif act == "toggle_cohost" and (is_host or is_creator_match) and data.get("targetId") in room["participants"] and data["targetId"] != cid:
             tid = data["targetId"]
             co_list = list(room.get("co_hosts") or [])

@@ -4642,7 +4642,7 @@ async def resolve_catalog(request: Request):
     if not force_refresh:
         cached = _RESOLVE_RESP_CACHE.get(ckey)
         if cached and now_t - cached[0] < 120:
-            return JSONResponse(cached[1], headers=cc_hdrs)
+            return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
     if len(_RESOLVE_LOCKS) >= 400:
         _RESOLVE_LOCKS.pop(next(iter(_RESOLVE_LOCKS)), None)
     lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
@@ -4650,7 +4650,7 @@ async def resolve_catalog(request: Request):
         if not force_refresh:
             cached = _RESOLVE_RESP_CACHE.get(ckey)
             if cached and time.time() - cached[0] < 120:
-                return JSONResponse(cached[1], headers=cc_hdrs)
+                return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh), timeout=18)
         except Exception:
@@ -4661,7 +4661,7 @@ async def resolve_catalog(request: Request):
             _RESOLVE_RESP_CACHE[ckey] = (time.time(), res)
     if not res:
         return JSONResponse({"error": "Oynatılabilir tam içerik bulunamadı"}, status_code=404)
-    return JSONResponse(res, headers=cc_hdrs)
+    return JSONResponse(social_engine.rank_servers_by_health(res), headers=cc_hdrs)
 
 
 def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 40) -> dict:
@@ -7132,9 +7132,82 @@ import auth_engine
 import music_engine
 import social_engine
 
+
+async def room_share_landing(request: Request) -> HTMLResponse:
+    import html as _html
+    raw_id = str(request.path_params.get("room_id") or "").strip()[:80]
+    safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_id)
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "watchlivo.online"
+    origin = f"{scheme}://{host}"
+    room = await rooms.STORE.get(safe_id) if safe_id else None
+    is_locked = bool(room and rooms.has_password(room))
+    p_count = len((room or {}).get("participants") or {})
+    r_name = str((room or {}).get("name") or safe_id or "Watchlivo Sinema Odası").strip()
+    media = ((room or {}).get("media") or {}) if (room and not is_locked) else {}
+    m_title = str(media.get("title") or "").strip()
+    raw_img = str(media.get("backdrop") or media.get("poster") or media.get("thumbnail") or "").strip()
+    if raw_img.startswith("/"):
+        og_img = f"{origin}{raw_img}"
+    elif raw_img.startswith("https://"):
+        og_img = raw_img
+    else:
+        og_img = f"{origin}/static/watchlivo-og.svg"
+
+    if is_locked:
+        og_title = f"🔒 {r_name} — Şifreli Watchlivo Odası"
+        og_desc = f"Şu an odada {max(1, p_count)} kişi var. Davet bağlantısına tıklayarak şifreyle katıl!"
+    elif m_title:
+        v_txt = f"{p_count} kişi birlikte izliyor" if p_count > 1 else "Canlı izleme odası açık"
+        og_title = f"🎬 {m_title} · {r_name} | Watchlivo"
+        og_desc = f"{v_txt} — Tek tıkla senkronize sinema odasına katıl, sesli ve yazılı sohbetle izle!"
+    elif room:
+        og_title = f"🍿 {r_name} — Canlı Watchlivo Odası"
+        og_desc = f"Odada {max(1, p_count)} kişi seni bekliyor — Tek tıkla birlikte izlemeye katıl!"
+    else:
+        og_title = "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları"
+        og_desc = "Arkadaşlarınla aynı anda, tek kare gecikmesiz 85.000+ film, dizi ve anime izle."
+
+    esc_title = _html.escape(og_title, quote=True)
+    esc_desc = _html.escape(og_desc, quote=True)
+    esc_img = _html.escape(og_img, quote=True)
+    target_hash = f"/#/mesh/{urllib.parse.quote(safe_id)}" if safe_id else "/#/"
+    esc_url = _html.escape(f"{origin}/r/{urllib.parse.quote(safe_id)}", quote=True)
+    html_doc = f"""<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{esc_title}</title>
+  <meta name="description" content="{esc_desc}" />
+  <meta property="og:type" content="video.other" />
+  <meta property="og:site_name" content="Watchlivo" />
+  <meta property="og:title" content="{esc_title}" />
+  <meta property="og:description" content="{esc_desc}" />
+  <meta property="og:image" content="{esc_img}" />
+  <meta property="og:url" content="{esc_url}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{esc_title}" />
+  <meta name="twitter:description" content="{esc_desc}" />
+  <meta name="twitter:image" content="{esc_img}" />
+  <script>window.location.replace({json.dumps(target_hash)});</script>
+</head>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#06090e;color:#f8fafc;font-family:system-ui,sans-serif;text-align:center;padding:24px;">
+  <div style="max-width:440px;padding:28px;border-radius:20px;background:#0e1522;border:1px solid rgba(39,220,200,.3);">
+    <div style="font-size:1.15rem;font-weight:800;margin-bottom:8px;">{esc_title}</div>
+    <p style="font-size:.9rem;color:#94a3b8;margin:0 0 18px;">{esc_desc}</p>
+    <a href="{_html.escape(target_hash, quote=True)}" style="display:inline-block;padding:12px 24px;border-radius:12px;background:linear-gradient(135deg,#27dcc8,#10b981);color:#041014;font-weight:800;text-decoration:none;">🎬 Odaya Hemen Katıl</a>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html_doc, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
 app = Starlette(
     routes=[
         Route("/", index),
+        Route("/r/{room_id}", room_share_landing),
+        Route("/join/{room_id}", room_share_landing),
         Route("/manifest.json", manifest_json),
         Route("/sw.js", service_worker),
         Route("/api/health", health),
@@ -7169,6 +7242,12 @@ app = Starlette(
         Route("/api/rave/notifications/subscribe", social_engine.notifications_subscribe, methods=["POST"]),
         Route("/api/rave/notifications/send", social_engine.notifications_send, methods=["POST"]),
         Route("/api/rave/notifications/poll", social_engine.notifications_poll, methods=["GET"]),
+        Route("/api/user/progress", social_engine.user_progress_get, methods=["GET"]),
+        Route("/api/user/progress", social_engine.user_progress_save, methods=["POST"]),
+        Route("/api/user/watchlist", social_engine.user_watchlist_get, methods=["GET"]),
+        Route("/api/user/watchlist", social_engine.user_watchlist_toggle, methods=["POST"]),
+        Route("/api/rave/server-health", social_engine.server_health_get, methods=["GET"]),
+        Route("/api/rave/server-health", social_engine.server_health_report, methods=["POST"]),
         Route("/api/rave/ai-status", rave_ai_status),
         Route("/api/rave/ai-chat", rave_ai_chat, methods=["GET", "POST"]),
         Route("/api/rave/suno-generate", rave_suno_generate, methods=["POST"]),

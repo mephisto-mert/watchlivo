@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261103_v77';
-import { state, set, getFriends, THEME_SCHEMAS, setUiPref } from '../store.js?v=20261103_v77';
-import { avatar, profileSetup } from '../profile.js?v=20261103_v77';
-import { api } from '../api.js?v=20261103_v77';
-import { createSelection } from './selection.js?v=20261103_v77';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v77';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261103_v78';
+import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia } from '../store.js?v=20261103_v78';
+import { avatar, profileSetup } from '../profile.js?v=20261103_v78';
+import { api } from '../api.js?v=20261103_v78';
+import { createSelection } from './selection.js?v=20261103_v78';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v78';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v77', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v78', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -171,6 +171,9 @@ export function renderHome(app) {
   } });
   selection.id = 'home-selection';
   selection.render();
+  syncCloudUserMedia().then((chg) => {
+    if ((chg?.historyChanged || chg?.favsChanged) && selection.isConnected) selection.render();
+  }).catch(() => {});
 
   let filter = 'all';
   let query = '';
@@ -376,7 +379,7 @@ function joinByCode() {
   const input = h('input', { class: 'input', placeholder: 'Oda kodu veya davet bağlantısı' });
   popup({ title: 'Odaya Katıl', content: input, options: [{ label: 'Katıl', primary: true, onClick: () => {
     const v = input.value.trim();
-    const m = v.match(/mesh\/([^/?#]+)/) || v.match(/[?&]room=([^&#]+)/);
+    const m = v.match(/\/(?:r|join)\/([^/?#]+)/i) || v.match(/mesh\/([^/?#]+)/i) || v.match(/[?&]room=([^&#]+)/i);
     const id = m ? decodeURIComponent(m[1]) : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
     if (!id) {
       toast('Lütfen geçerli bir oda kodu veya davet bağlantısı girin');

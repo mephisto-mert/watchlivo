@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v77';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v77';
-import { avatar } from '../profile.js?v=20261103_v77';
-import { api, qs } from '../api.js?v=20261103_v77';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v77';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v78';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v78';
+import { avatar } from '../profile.js?v=20261103_v78';
+import { api, qs } from '../api.js?v=20261103_v78';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v78';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -172,7 +172,7 @@ const PRIVACY = [
 
 export const inviteUrl = () => {
   const rid = state.mesh?.id || state.route.params.id || '';
-  return `${location.origin}/#/mesh/${encodeURIComponent(rid)}`;
+  return `${location.origin}/r/${encodeURIComponent(rid)}`;
 };
 
 export async function copyInvite() {
@@ -383,6 +383,15 @@ export function buildChat(ctx) {
   const dDeafPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-deafen', onclick: () => toggleDeafen() }, '🎧 Ses Açık');
   const dCamPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-cam', onclick: () => toggleCam() }, '📷 Kamera');
   const dScreenPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-screen', onclick: () => toggleScreen() }, '🖥️ Ekran Yansıt');
+  const dStageMicPill = h('button', {
+    type: 'button',
+    class: 'discord-ctl-pill stage-mic-pill',
+    id: 'btn-discord-stage-mic',
+    onclick: () => {
+      if (isLeader()) actions.toggleStageMode?.();
+      else actions.raiseHand?.();
+    },
+  }, '🎤 Sahne');
 
   const discordCallBar = h('div', { class: 'discord-call-bar', id: 'discord-call-bar' },
     h('div', { class: 'discord-call-head' },
@@ -394,7 +403,7 @@ export function buildChat(ctx) {
       h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dShareQuickBtn, dHeadCamBtn, dJoinBtn)),
     discordCallPeers,
     h('div', { class: 'discord-call-controls', id: 'discord-call-controls' },
-      dMicPill, dDeafPill, dCamPill, dScreenPill));
+      dMicPill, dDeafPill, dCamPill, dScreenPill, dStageMicPill));
 
   let musicTab = 'similar';
   let lastSimKey = '';
@@ -457,7 +466,17 @@ export function buildChat(ctx) {
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
   const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
-  const bar = h('div', { class: 'chatbar' }, h('div', { class: 'chat-input' }, toolsBtn, input, gifBtn, sendBtn), toolsPopover, gifPanel);
+  let voiceRecState = null;
+  const voiceRecOverlay = h('div', { class: 'voice-rec-overlay hidden', id: 'chat-voice-rec-overlay' });
+  const voiceRecBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action voice-note-btn',
+    id: 'btn-chat-voice-rec',
+    'aria-label': 'Sesli Mesaj Gönder',
+    title: 'Sesli Mesaj Kaydet (Tıkla Başlat / Gönder)',
+    onclick: () => toggleVoiceNoteRecording(),
+  }, h('span', { html: icons.mic, style: { display: 'contents' } }));
+  const bar = h('div', { class: 'chatbar' }, h('div', { class: 'chat-input' }, toolsBtn, input, voiceRecOverlay, voiceRecBtn, gifBtn, sendBtn), toolsPopover, gifPanel);
   const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
@@ -470,9 +489,109 @@ export function buildChat(ctx) {
     replyDraftBar.replaceChildren();
   }
 
+  function stopVoiceRecorder(sendIt = false) {
+    const st = voiceRecState;
+    if (!st) return;
+    voiceRecState = null;
+    clearInterval(st.timer);
+    voiceRecBtn.classList.remove('recording');
+    voiceRecOverlay.classList.add('hidden');
+    input.classList.remove('hidden');
+    st.shouldSend = Boolean(sendIt);
+    try { if (st.rec && st.rec.state !== 'inactive') st.rec.stop(); } catch (e) { /* ignore */ }
+    try { st.stream?.getTracks?.().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+    try { st.ac?.close?.(); } catch (e) { /* ignore */ }
+  }
+
+  async function toggleVoiceNoteRecording() {
+    if (voiceRecState) {
+      stopVoiceRecorder(true);
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      toast('Tarayıcınız sesli mesaj kaydını desteklemiyor');
+      return;
+    }
+    let stream = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    } catch (e) {
+      toast('Sesli mesaj için mikrofon izni gerekli');
+      return;
+    }
+    const mimeCandidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', ''];
+    const mimeType = mimeCandidates.find((m) => !m || MediaRecorder.isTypeSupported?.(m)) || '';
+    const chunks = [];
+    const peaks = [];
+    const startedAt = Date.now();
+    let ac = null;
+    let analyser = null;
+    let freqBuf = null;
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        ac = new Ctx();
+        const srcNode = ac.createMediaStreamSource(stream);
+        analyser = ac.createAnalyser();
+        analyser.fftSize = 64;
+        srcNode.connect(analyser);
+        freqBuf = new Uint8Array(analyser.frequencyBinCount);
+      }
+    } catch (e) { /* ignore */ }
+    const recOpts = mimeType ? { mimeType, audioBitsPerSecond: 24000 } : { audioBitsPerSecond: 24000 };
+    const rec = new MediaRecorder(stream, recOpts);
+    const stObj = { rec, stream, ac, timer: null, shouldSend: false };
+    voiceRecState = stObj;
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+    rec.onstop = () => {
+      try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
+      if (!stObj.shouldSend || !chunks.length) return;
+      const durSec = Math.max(0.8, Math.min(25, (Date.now() - startedAt) / 1000));
+      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
+      if (blob.size > 102000) {
+        toast('Ses kaydı çok uzun — en fazla 25 saniye gönderilebilir');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = String(reader.result || '');
+        if (!dataUrl.startsWith('data:audio/')) return;
+        const normPeaks = peaks.length >= 6 ? peaks.slice(-24) : [0.28, 0.62, 0.84, 0.46, 0.72, 0.54, 0.88, 0.4, 0.66, 0.5];
+        const extra = { audioNote: { dataUrl, duration: Number(durSec.toFixed(1)), peaks: normPeaks } };
+        if (activeReply) extra.replyTo = activeReply;
+        actions.sendChat('', extra);
+        clearReply();
+      };
+      reader.readAsDataURL(blob);
+    };
+    const timerLbl = h('span', { class: 'voice-rec-timer' }, '🔴 0:00');
+    const cancelBtn = h('button', { type: 'button', class: 'voice-rec-cancel', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(false); } }, 'İptal');
+    const doneBtn = h('button', { type: 'button', class: 'voice-rec-send', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(true); } }, 'Gönder ➤');
+    voiceRecOverlay.replaceChildren(timerLbl, cancelBtn, doneBtn);
+    input.classList.add('hidden');
+    voiceRecOverlay.classList.remove('hidden');
+    voiceRecBtn.classList.add('recording');
+    rec.start(250);
+    stObj.timer = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      timerLbl.textContent = `🔴 0:${String(elapsed).padStart(2, '0')}`;
+      if (analyser && freqBuf) {
+        analyser.getByteFrequencyData(freqBuf);
+        const avg = freqBuf.reduce((a, b) => a + b, 0) / Math.max(1, freqBuf.length);
+        peaks.push(Number(Math.max(0.1, Math.min(1, avg / 140)).toFixed(2)));
+      } else {
+        peaks.push(Number((0.25 + Math.random() * 0.6).toFixed(2)));
+      }
+      if (elapsed >= 24) stopVoiceRecorder(true);
+    }, 350);
+  }
+
   function setReplyTo(m) {
     if (!m || m.system) return;
-    const snippet = (m.text || (m.gif ? 'GIF Gönderdi' : m.pollId ? '📊 Anket' : '')).slice(0, 110);
+    const fallbackKind = m.audioNote
+      ? `🎙️ Sesli Mesaj (${Math.max(1, Math.round(Number(m.audioNote.duration || 1)))}sn)`
+      : m.snapshot ? '📸 Sahne Karesi' : m.gif ? 'GIF Gönderdi' : m.pollId ? '📊 Anket' : '';
+    const snippet = (m.text || fallbackKind).slice(0, 110);
     activeReply = { id: m.id, user: m.user, text: snippet, color: m.color || '#6366f1' };
     replyDraftBar.replaceChildren(
       h('div', { class: 'reply-draft-info', style: { '--quote-color': activeReply.color } },
@@ -587,12 +706,30 @@ export function buildChat(ctx) {
       const nk = (p.name || 'Misafir').trim().toLowerCase();
       nameTotals.set(nk, (nameTotals.get(nk) || 0) + 1);
     }
+    const isStageVoip = state.mesh?.voipMode === 'stage';
+    const mePeerObj = peerById.get(selfId);
+    const canSpeakInStage = Boolean(isLeader() || mePeerObj?.isHost || mePeerObj?.isCoHost || mePeerObj?.isStageSpeaker);
+    if (isLeader()) {
+      dStageMicPill.classList.remove('hidden');
+      dStageMicPill.classList.toggle('on', isStageVoip);
+      dStageMicPill.textContent = isStageVoip ? '🎤 Sahne Açık' : '🎤 Sahne Modu';
+      dStageMicPill.title = '20+ kişilik odalar için Sahne (Söz İstemeli) Modunu aç/kapat';
+    } else if (isStageVoip && !canSpeakInStage) {
+      dStageMicPill.classList.remove('hidden');
+      dStageMicPill.classList.toggle('on', Boolean(mePeerObj?.handRaised));
+      dStageMicPill.textContent = mePeerObj?.handRaised ? '✋ El İndir' : '✋ Söz İste';
+      dStageMicPill.title = 'Konuşmak için oda liderinden söz iste';
+    } else {
+      dStageMicPill.classList.add('hidden');
+    }
     const activeVoiceCount = callPeers.filter((p) => p.inCall || !p.muted || p.cam || p.screen || p.speaking).length;
-    dCallStatusBadge.textContent = activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`;
-    dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0);
+    dCallStatusBadge.textContent = isStageVoip
+      ? `🎤 Sahne · ${activeVoiceCount > 0 ? `${activeVoiceCount} Konuşmacı` : `${callPeers.length || 1} Dinleyici`}`
+      : (activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`);
+    dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0 || isStageVoip);
 
     const shownPeers = callPeers.slice(0, 12);
-    const sig = shownPeers.map((p) => `${p.id}:${p.name}:${p.device}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}`).join('|');
+    const sig = `${isStageVoip}:${isLeader()}|` + shownPeers.map((p) => `${p.id}:${p.name}:${p.device}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}:${!!p.handRaised}:${!!p.isStageSpeaker}`).join('|');
     if (discordCallPeers.dataset.sig !== sig) {
       discordCallPeers.dataset.sig = sig;
       const seenNameIdx = new Map();
@@ -606,6 +743,13 @@ export function buildChat(ctx) {
           : (p.name || 'Misafir');
         const isAct = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
         const badges = [];
+        if (p.handRaised) {
+          badges.push(h('span', {
+            class: 'd-peer-badge hand-raised',
+            title: isLeader() ? `${labelText} söz istiyor — mikrofon vermek için tıkla` : `${labelText} söz istiyor`,
+            onclick: isLeader() ? (ev) => { ev.stopPropagation(); actions.toggleStageSpeaker?.(p.id); } : null,
+          }, '✋'));
+        }
         if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, 'YAYINDA'));
         if (p.cam) badges.push(h('span', { class: 'd-peer-badge cam', html: icons.camera }));
         if (p.deafened) badges.push(h('span', { class: 'd-peer-badge deaf', html: icons.headphonesOff }));
@@ -649,6 +793,15 @@ export function buildChat(ctx) {
   }
 
   async function toggleMic() {
+    if (state.mesh?.voipMode === 'stage' && !isLeader()) {
+      const selfId = ctx.voice?.getSelfId?.() || state.clientId;
+      const meP = (state.mesh?.participants || []).find((x) => x.id === selfId);
+      if (!meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
+        if (!meP?.handRaised) actions.raiseHand?.();
+        else toast('🎤 Sahne Modu açık — oda liderinin söz vermesi bekleniyor ✋');
+        return;
+      }
+    }
     await ctx.voice?.toggleMic();
     syncVoiceUi();
   }
@@ -931,6 +1084,92 @@ export function buildChat(ctx) {
     return out;
   }
 
+  let activeVoiceAudio = null;
+  function buildAudioNoteWidget(m) {
+    const an = m?.audioNote;
+    if (!an || !an.dataUrl || !String(an.dataUrl).startsWith('data:audio/')) return null;
+    const totalDur = Math.max(1, Number(an.duration || 2));
+    const rawPeaks = Array.isArray(an.peaks) && an.peaks.length ? an.peaks : [0.3, 0.65, 0.85, 0.45, 0.75, 0.55, 0.9, 0.4, 0.7, 0.5];
+    const barsData = Array.from({ length: 22 }, (_, i) => Number(rawPeaks[i % rawPeaks.length] || 0.45));
+    let audioEl = null;
+    let rateIdx = 0;
+    const rates = [1, 1.5, 2];
+    const playBtn = h('button', { type: 'button', class: 'vn-play-btn', 'aria-label': 'Sesli Mesajı Oynat' }, '▶');
+    const timeEl = h('span', { class: 'vn-time' }, `0:${String(Math.round(totalDur)).padStart(2, '0')}`);
+    const rateBtn = h('button', {
+      type: 'button',
+      class: 'vn-rate-btn',
+      onclick: (e) => {
+        e.stopPropagation();
+        rateIdx = (rateIdx + 1) % rates.length;
+        const r = rates[rateIdx];
+        rateBtn.textContent = `${r}x`;
+        if (audioEl) audioEl.playbackRate = r;
+      },
+    }, '1x');
+    const barEls = barsData.map((pk, idx) => h('span', {
+      class: 'vn-bar',
+      style: { height: `${Math.min(100, Math.max(22, Math.round((pk > 1 ? pk / 100 : pk) * 100)))}%` },
+      onclick: (e) => {
+        e.stopPropagation();
+        if (audioEl && Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
+          audioEl.currentTime = (idx / barEls.length) * audioEl.duration;
+        }
+      },
+    }));
+    const syncBars = (ratio) => {
+      const activeCount = Math.round(Math.max(0, Math.min(1, ratio)) * barEls.length);
+      barEls.forEach((b, i) => b.classList.toggle('played', i < activeCount));
+    };
+    playBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (!audioEl) {
+        audioEl = new Audio(an.dataUrl);
+        audioEl.preload = 'metadata';
+        audioEl.playbackRate = rates[rateIdx];
+        audioEl.ontimeupdate = () => {
+          const d = (Number.isFinite(audioEl.duration) && audioEl.duration > 0) ? audioEl.duration : totalDur;
+          syncBars(audioEl.currentTime / d);
+          const rem = Math.max(0, Math.ceil(d - audioEl.currentTime));
+          timeEl.textContent = `0:${String(rem).padStart(2, '0')}`;
+        };
+        const onStop = () => {
+          playBtn.textContent = '▶';
+          syncBars(0);
+          timeEl.textContent = `0:${String(Math.round(totalDur)).padStart(2, '0')}`;
+          if (activeVoiceAudio === audioEl) {
+            activeVoiceAudio = null;
+            window.vortexSetVoiceNotePlaying?.(false);
+          }
+        };
+        audioEl.onended = onStop;
+        audioEl.onpause = () => {
+          playBtn.textContent = '▶';
+          if (activeVoiceAudio === audioEl) {
+            activeVoiceAudio = null;
+            window.vortexSetVoiceNotePlaying?.(false);
+          }
+        };
+      }
+      if (audioEl.paused) {
+        if (activeVoiceAudio && activeVoiceAudio !== audioEl) {
+          try { activeVoiceAudio.pause(); } catch (err) { /* ignore */ }
+        }
+        activeVoiceAudio = audioEl;
+        window.vortexSetVoiceNotePlaying?.(true);
+        playBtn.textContent = '⏸';
+        audioEl.play().catch(() => { playBtn.textContent = '▶'; window.vortexSetVoiceNotePlaying?.(false); });
+      } else {
+        audioEl.pause();
+      }
+    };
+    return h('div', { class: 'chat-voice-note', onclick: (e) => e.stopPropagation() },
+      playBtn,
+      h('div', { class: 'vn-wave' }, ...barEls),
+      timeEl,
+      rateBtn);
+  }
+
   function buildSnapshotWidget(m) {
     if (!m?.snapshot) return null;
     const hasTime = Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
@@ -991,8 +1230,8 @@ export function buildChat(ctx) {
         dispTime ? h('time', { class: 'sysmsg-time' }, dispTime) : null);
       return t;
     }
-    const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot;
-    lastUser = (m.pollId || m.snapshot) ? null : m.user;
+    const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote;
+    lastUser = (m.pollId || m.snapshot || m.audioNote) ? null : m.user;
     const reactWrap = h('div', { class: 'msg-reactions empty', 'data-react-for': m.id });
     fillReactionBadges(reactWrap, m.id);
     let row = null;
@@ -1029,8 +1268,12 @@ export function buildChat(ctx) {
       'data-id': m.id,
       'data-ts': String(m.ts || (Date.now() / 1000)),
       onmouseleave: () => row.classList.remove('msg-closing'),
+      ondblclick: (e) => {
+        if (e.target.closest('button, a, .chat-voice-note, .chat-poll-card')) return;
+        setReplyTo(m);
+      },
       onclick: (e) => {
-        if (e.target.closest('button, a, .chat-poll-card, .chat-snapshot-card, .msg-actions, .msg-reactions')) return;
+        if (e.target.closest('button, a, .chat-poll-card, .chat-snapshot-card, .chat-voice-note, .msg-actions, .msg-reactions')) return;
         const wasOpen = row.classList.contains('msg-active');
         list.querySelectorAll('.msg.msg-active').forEach((n) => n.classList.remove('msg-active'));
         row.classList.remove('msg-closing');
@@ -1047,9 +1290,24 @@ export function buildChat(ctx) {
           ? buildPollWidget(m.pollId)
           : h('div', { class: 'msg-text' },
               ...renderRichMessageText(m.text || ''),
+              buildAudioNoteWidget(m),
               buildSnapshotWidget(m),
               m.gif ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
         reactWrap));
+    let swX = 0;
+    let swY = 0;
+    row.addEventListener('touchstart', (ev) => {
+      const t = ev.touches?.[0];
+      if (t) { swX = t.clientX; swY = t.clientY; }
+    }, { passive: true });
+    row.addEventListener('touchend', (ev) => {
+      const t = ev.changedTouches?.[0];
+      if (!t || !swX) return;
+      const dx = t.clientX - swX;
+      const dy = Math.abs(t.clientY - swY);
+      swX = 0;
+      if (dx > 52 && dy < 28) setReplyTo(m);
+    }, { passive: true });
     return row;
   }
 
@@ -1322,6 +1580,9 @@ export function buildChat(ctx) {
       dMicPill.style.setProperty('--mic-lvl', n.toFixed(2));
     },
     destroy() {
+      stopVoiceRecorder(false);
+      if (activeVoiceAudio) { try { activeVoiceAudio.pause(); } catch (e) { /* ignore */ } activeVoiceAudio = null; }
+      window.vortexSetVoiceNotePlaying?.(false);
       clearTimeout(typingTimer);
       document.body.classList.remove('kb-open');
       document.removeEventListener('pointerdown', onDocOutsideTap);

@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v77';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v77';
-import { avatar } from '../profile.js?v=20261103_v77';
-import { clock } from '../sync.js?v=20261103_v77';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v77';
-import { copyInvite, inviteUrl } from './chat.js?v=20261103_v77';
-import { parseVideoUrl } from '../providers.js?v=20261103_v77';
-import { resolveMedia } from './selection.js?v=20261103_v77';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v78';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v78';
+import { avatar } from '../profile.js?v=20261103_v78';
+import { clock } from '../sync.js?v=20261103_v78';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v78';
+import { copyInvite, inviteUrl } from './chat.js?v=20261103_v78';
+import { parseVideoUrl } from '../providers.js?v=20261103_v78';
+import { resolveMedia } from './selection.js?v=20261103_v78';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -51,7 +51,10 @@ function Settings(ctx) {
         ['quickplay', 'Hemen Oynat', 'Tek seçimle video oynar'],
         ['vote', 'Oylayalım', 'Video sırası oylamayla belirlenir']], m.playMode, (k) => act('set_privacy', { playMode: k }), !lead)),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Ses'), seg([
-        ['off', 'Kapalı', 'Sesli sohbet yok'], ['leader', 'Yalnızca Lider', 'Yalnızca lider konuşabilir'], ['all', 'Herkes', 'Herkes sesli sohbet yapabilir']],
+        ['off', 'Kapalı', 'Sesli sohbet yok'],
+        ['leader', 'Yalnızca Lider', 'Yalnızca lider konuşabilir'],
+        ['stage', 'Sahne Modu (20+ Kişi)', 'Dinleyiciler ✋ Söz İste ile mikrofon alır'],
+        ['all', 'Herkes', 'Herkes sesli sohbet yapabilir']],
         m.voipMode === 'on' ? 'all' : m.voipMode, (k) => act('set_privacy', { voipMode: k }), !lead)),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Oda şifresi'), pwInput,
         (m.hasPassword && lead) ? h('button', { type: 'button', class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: () => act('set_privacy', { password: '' }) }, '🔓 Şifreyi Kaldır') : null),
@@ -288,7 +291,7 @@ function Participants(ctx) {
         return h('div', { class: `raver ${p.speaking ? 'is-speaking' : ''}`, 'data-user': p.id },
           h('div', { style: { cursor: 'pointer' }, title: 'Profili görüntüle', onclick: () => window.vortexOpenUserProfile?.(p) }, avatar(p, 36, { speaking: p.speaking, online: true })),
           h('div', { class: 'raver-name', style: { cursor: 'pointer' }, onclick: () => window.vortexOpenUserProfile?.(p) },
-            h('b', {}, p.name, isMe ? ' (sen)' : '', p.speaking ? h('span', { class: 'speaking-pill' }, '🎙️ Konuşuyor') : null),
+            h('b', {}, p.name, isMe ? ' (sen)' : '', p.speaking ? h('span', { class: 'speaking-pill' }, '🎙️ Konuşuyor') : null, p.handRaised ? h('span', { class: 'speaking-pill hand-pill' }, '✋ Söz İstiyor') : null),
             p.statusText ? h('span', { style: { color: '#5eead4', fontSize: '.72rem' } }, `${p.statusEmoji || '🍿'} ${p.statusText}`) : null,
             h('span', {}, `${p.device || 'Web'}${p.muted ? ' · mikrofon kapalı' : ' · mikrofon açık'}${p.isCreator ? ' · 👑 Oda Kurucusu' : (p.isCoHost && !p.isHost ? ' · 🤝 Ortak Lider' : '')}`),
             !isMe && !isBot ? h('div', { class: 'peer-vol-row' },
@@ -317,6 +320,7 @@ function Participants(ctx) {
             },
           }, friendAdded ? '✓ Arkadaş' : '+ Arkadaş') : null,
           hostOnly && !isMe && !isBot ? h('div', { class: 'raver-actions' },
+            m?.voipMode === 'stage' ? h('button', { 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
             h('button', { 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
             h('button', { 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }),
             h('button', { 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick })) : null);

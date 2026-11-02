@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v77';
-import { expectedPosition } from '../sync.js?v=20261103_v77';
-import { state } from '../store.js?v=20261103_v77';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v78';
+import { expectedPosition } from '../sync.js?v=20261103_v78';
+import { state } from '../store.js?v=20261103_v78';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -42,7 +42,10 @@ export class Html5Adapter {
     v.playsInline = true;
     v.setAttribute('playsinline', '');
     v.setAttribute('webkit-playsinline', '');
+    v.setAttribute('x-webkit-airplay', 'allow');
+    try { v.disableRemotePlayback = false; } catch (e) { /* ignore */ }
     v.disablePictureInPicture = false;
+    this._healthSentSet = new Set();
     v.preload = 'auto';
     v.preservesPitch = true;
     try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
@@ -221,6 +224,7 @@ export class Html5Adapter {
       }
       if (!v.muted && v.volume > 0) this.events.onUnmuted?.();
       this._requestWakeLock?.();
+      this._reportStreamHealth?.(this.currentUrl, true, { latencyMs: Math.max(0, Date.now() - (this.loadedAtMs || Date.now())) });
       reportPlay(wasPausedWant);
     });
     const onPipChange = () => {
@@ -685,6 +689,7 @@ export class Html5Adapter {
                 }
                 if (singleLevelStalls >= 2) {
                   singleLevelStalls = 0;
+                  this._reportStreamHealth?.(srcUrl, false, { stalled: true });
                   loadCandidateUrl(alts[nativeAltIdx++], doneCb);
                   return;
                 }
@@ -715,6 +720,7 @@ export class Html5Adapter {
               }, 350 * netRetries);
             } else if (nativeAltIdx < alts.length) {
               netRetries = 0;
+              this._reportStreamHealth?.(srcUrl, false, { stalled: false });
               loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             } else if (canNativeHls && !triedHlsFallback) {
               triedHlsFallback = true;
@@ -755,6 +761,7 @@ export class Html5Adapter {
     v.addEventListener('error', () => {
       if (this._destroyed || this.video !== v || this.hls) return;
       if (nativeAltIdx < alts.length) {
+        this._reportStreamHealth?.(this.currentUrl, false, { stalled: false });
         loadCandidateUrl(alts[nativeAltIdx++]);
         return;
       }
@@ -1258,6 +1265,45 @@ export class Html5Adapter {
     if (n >= 0) this.hls.autoLevelCapping = -1;
     this.hls.currentLevel = n;
     this.events.onTracksChanged?.();
+  }
+  _reportStreamHealth(rawUrl, ok, extra = {}) {
+    try {
+      const u = String(rawUrl || '').trim();
+      if (!u || this.isMusic || /^(blob:|data:)/i.test(u) || /itunes\.apple\.com|scdn\.co/i.test(u)) return;
+      if (!this._healthSentSet) this._healthSentSet = new Set();
+      const key = `${ok ? 'ok' : 'err'}:${u.slice(0, 180)}`;
+      if (this._healthSentSet.has(key)) return;
+      this._healthSentSet.add(key);
+      fetch('/api/rave/server-health', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: u, ok: Boolean(ok), ...extra }),
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
+  }
+  canCast() {
+    const v = this.video;
+    if (!v) return false;
+    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv/i.test(navigator.userAgent || '')));
+    if (isNativeApk) return false;
+    return Boolean(typeof v.webkitShowPlaybackTargetPicker === 'function' || (v.remote && typeof v.remote.prompt === 'function'));
+  }
+  async promptCast() {
+    const v = this.video;
+    if (!v) return false;
+    try {
+      if (typeof v.webkitShowPlaybackTargetPicker === 'function') {
+        v.webkitShowPlaybackTargetPicker();
+        return 'airplay';
+      }
+      if (v.remote && typeof v.remote.prompt === 'function') {
+        await v.remote.prompt();
+        return 'cast';
+      }
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') return 'not-found';
+    }
+    return false;
   }
   canPiP() {
     const v = this.video;

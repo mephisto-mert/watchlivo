@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v77';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v77';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v77';
-import { MeshConnection } from '../realtime.js?v=20261103_v77';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v77';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v77';
-import { buildLayout } from './mesh-layout.js?v=20261103_v77';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v77';
-import { Voice } from '../voice.js?v=20261103_v77';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v77';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v78';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v78';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v78';
+import { MeshConnection } from '../realtime.js?v=20261103_v78';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v78';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v78';
+import { buildLayout } from './mesh-layout.js?v=20261103_v78';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v78';
+import { Voice } from '../voice.js?v=20261103_v78';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v78';
 
 let ctx = null;
 
@@ -551,7 +551,30 @@ function onMessage(data) {
     }
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
-    case 'participants_updated': if (room) { set({ mesh: { ...room, participants: data.participants } }); ctx.layout.update(); ctx.voice?.syncPeers(data.participants); } break;
+    case 'hand_raised': {
+      if (data.cid && data.cid !== state.clientId && (isLeader() || isHostOnly())) {
+        const uName = data.user || 'Bir izleyici';
+        toast(`✋ ${uName} konuşmak için söz istiyor!`, 6000, {
+          actionLabel: '🎤 Söz Ver',
+          onAction: () => actions.toggleStageSpeaker(data.cid),
+        });
+      }
+      break;
+    }
+    case 'participants_updated':
+      if (room) {
+        const nextRoom = { ...room, participants: data.participants };
+        set({ mesh: nextRoom });
+        if (nextRoom.voipMode === 'stage' && ctx?.voice?.micOn) {
+          const meP = (data.participants || []).find((x) => x.id === state.clientId);
+          if (meP && !meP.isHost && !meP.isCoHost && !meP.isStageSpeaker) {
+            ctx.voice.toggleMic();
+          }
+        }
+        ctx.layout.update();
+        ctx.voice?.syncPeers(data.participants);
+      }
+      break;
     case 'room_closed': {
       document.body.classList.remove('mesh-minimized');
       const closedId = data.roomId || room?.id || state.route?.params?.id;
@@ -727,7 +750,7 @@ const actions = {
   removeQueueItem(index) { ctx.conn.send('queue_remove', { index }); },
   sendChat(text, extra = {}) {
     const cleanText = String(text || '').trim().slice(0, 1000);
-    if (!cleanText && !extra.gif && !extra.snapshot) return;
+    if (!cleanText && !extra.gif && !extra.snapshot && !extra.audioNote) return;
     const msgId = extra.id || ('m_' + Math.random().toString(36).slice(2, 10));
     const nowDate = new Date();
     const hh = String(nowDate.getHours()).padStart(2, '0');
@@ -741,6 +764,7 @@ const actions = {
       text: cleanText,
       gif: extra.gif || '',
       snapshot: extra.snapshot || null,
+      audioNote: extra.audioNote || null,
       videoTime: extra.videoTime ?? null,
       replyTo: extra.replyTo || null,
       reactions: {},
@@ -757,7 +781,11 @@ const actions = {
       ctx?.layout?.chatAppended?.(optimisticMsg);
       ctx?.layout?.danmaku?.(optimisticMsg);
     }
-    const recentChat = (state.mesh?.chat || []).slice(-25);
+    const recentChat = (state.mesh?.chat || []).slice(-20).map((c) => {
+      if (!c || typeof c !== 'object') return c;
+      const { audioNote, snapshot, ...lite } = c;
+      return lite;
+    });
     ctx.conn.send('chat', { id: msgId, clientMsgId: msgId, text: cleanText, ...extra, recentChat });
   },
   clearChat() {
@@ -851,6 +879,36 @@ const actions = {
       }
     }
     ctx.conn.send('host_action', { action, ...extra });
+  },
+  toggleStageMode() {
+    if (!isLeader() && !isHostOnly()) {
+      toast('Sahne Modunu yalnızca oda lideri açıp kapatabilir');
+      return;
+    }
+    const nextMode = state.mesh?.voipMode === 'stage' ? 'all' : 'stage';
+    if (state.mesh) {
+      set({ mesh: { ...state.mesh, voipMode: nextMode } });
+      ctx?.layout?.update();
+    }
+    ctx?.conn?.send('host_action', { action: 'toggle_stage_mode' });
+    toast(nextMode === 'stage' ? "🎤 Sahne Modu açıldı — dinleyiciler '✋ Söz İste' ile mikrofon alabilir" : '🎙️ Serbest Ses Modu açıldı');
+  },
+  raiseHand() {
+    if (!ctx?.conn) return;
+    const myId = state.clientId;
+    const meP = (state.mesh?.participants || []).find((p) => p.id === myId);
+    const nextRaised = !Boolean(meP?.handRaised);
+    if (state.mesh) {
+      const nextParts = (state.mesh.participants || []).map((p) => (p.id === myId ? { ...p, handRaised: nextRaised } : p));
+      set({ mesh: { ...state.mesh, participants: nextParts } });
+      ctx?.layout?.update();
+    }
+    ctx.conn.send('hand_raise', { raised: nextRaised });
+    toast(nextRaised ? '✋ Söz isteğin oda liderine gönderildi!' : '✋ Söz isteğin geri çekildi');
+  },
+  toggleStageSpeaker(targetId) {
+    if (!targetId || (!isLeader() && !isHostOnly())) return;
+    ctx?.conn?.send('host_action', { action: 'toggle_stage_speaker', targetId });
   },
   async ended() {
     const m = state.mesh?.media;

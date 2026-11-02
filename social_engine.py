@@ -45,6 +45,52 @@ _NOTIFICATION_QUEUES: Dict[str, List[Dict[str, Any]]] = {}
 _PUSH_SUBSCRIPTIONS: Dict[str, Dict[str, Any]] = {}
 
 
+_KV_MEM: Dict[str, Any] = {}
+_KV_READ_TS: Dict[str, float] = {}
+_USER_PROGRESS: Dict[str, List[Dict[str, Any]]] = {}
+_USER_WATCHLIST: Dict[str, List[Dict[str, Any]]] = {}
+_SERVER_HEALTH: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_redis_store():
+    try:
+        import rooms
+        st = getattr(rooms, "STORE", None)
+        return st if getattr(st, "shared", False) else None
+    except Exception:
+        return None
+
+
+def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
+    now_t = time.time()
+    if key in _KV_MEM and (now_t - _KV_READ_TS.get(key, 0.0) < max_age):
+        return _KV_MEM[key]
+    st = _get_redis_store()
+    if st is not None:
+        try:
+            raw = st._call(["GET", key])
+            if raw:
+                val = json.loads(raw)
+                _KV_MEM[key] = val
+                _KV_READ_TS[key] = now_t
+                return val
+        except Exception:
+            pass
+    return _KV_MEM.get(key, default)
+
+
+def _kv_set(key: str, val: Any, ttl_sec: int = 604800) -> None:
+    _KV_MEM[key] = val
+    _KV_READ_TS[key] = time.time()
+    st = _get_redis_store()
+    if st is not None:
+        try:
+            payload = json.dumps(val, separators=(",", ":"), ensure_ascii=False)
+            st._call(["SET", key, payload, "EX", str(ttl_sec)])
+        except Exception:
+            pass
+
+
 def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     key = str(target_key or "*").strip().lower() or "*"
     item = {
@@ -58,9 +104,12 @@ def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, A
         "url": _clean(payload.get("url"), 240),
         "ts": float(payload.get("ts") or time.time()),
     }
-    q = _NOTIFICATION_QUEUES.setdefault(key, [])
+    existing_q = _kv_get(f"wl:soc:ntf:{key}", None, max_age=2.0)
+    q = list(existing_q) if isinstance(existing_q, list) else list(_NOTIFICATION_QUEUES.get(key, []))
     q.append(item)
     del q[:-50]
+    _NOTIFICATION_QUEUES[key] = q
+    _kv_set(f"wl:soc:ntf:{key}", q, ttl_sec=86400)
     return item
 
 COMMUNITY_PEERS = [
@@ -138,6 +187,10 @@ def _thread_key(u1: str, u2: str) -> str:
 def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str, Any]:
     uid_clean = _clean(uid, 64) or "guest_default"
     if uid_clean not in _SOCIAL_USERS:
+        persisted_u = _kv_get(f"wl:soc:u:{uid_clean}", None, max_age=15.0)
+        if isinstance(persisted_u, dict) and persisted_u.get("uid"):
+            _SOCIAL_USERS[uid_clean] = persisted_u
+    if uid_clean not in _SOCIAL_USERS:
         friends = [dict(p) for p in COMMUNITY_PEERS]
         _SOCIAL_USERS[uid_clean] = {
             "uid": uid_clean,
@@ -178,6 +231,7 @@ def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str,
             _SOCIAL_USERS[uid_clean]["name"] = _clean(name, 32)
         if handle:
             _SOCIAL_USERS[uid_clean]["handle"] = _clean(handle, 32)
+    _kv_set(f"wl:soc:u:{uid_clean}", _SOCIAL_USERS[uid_clean], ttl_sec=2592000)
     return _SOCIAL_USERS[uid_clean]
 
 
@@ -195,6 +249,9 @@ async def social_state(request: Request) -> JSONResponse:
     for fr in u.get("friends", []):
         p_uid = fr.get("uid") or fr.get("handle") or fr.get("name")
         tk = _thread_key(uid, p_uid)
+        persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=4.0)
+        if isinstance(persisted_dm, list):
+            _DM_THREADS[tk] = persisted_dm
         msgs = _DM_THREADS.get(tk) or []
         last_m = msgs[-1] if msgs else None
         unr = int((u.get("unread") or {}).get(p_uid) or 0)
@@ -267,6 +324,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
                     "medal": "🥉 Bronz İzleyici",
                     "ts": _now(),
                 })
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
         return JSONResponse({"ok": True, "friend": new_friend, "friends": u["friends"]})
 
     elif action in ("accept", "decline"):
@@ -292,11 +350,13 @@ async def social_friends_action(request: Request) -> JSONResponse:
                 }
                 if not any(f.get("uid") == new_fr["uid"] for f in u["friends"]):
                     u["friends"].insert(0, new_fr)
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
         return JSONResponse({"ok": True, "friends": u["friends"], "requests": u["requests"]})
 
     elif action == "remove":
         target_uid = _clean(body.get("targetUid"), 64)
         u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid and f.get("name") != target_uid]
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
         return JSONResponse({"ok": True, "friends": u["friends"]})
 
     elif action == "add_minutes":
@@ -309,6 +369,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
             if f.get("uid") == target_uid or not target_uid:
                 f["watchMinutes"] = int(f.get("watchMinutes") or 0) + delta
                 f["medal"] = _compute_medal(f["watchMinutes"])
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
         return JSONResponse({"ok": True, "friends": u["friends"]})
 
     return JSONResponse({"ok": True, "friends": u.get("friends", []), "requests": u.get("requests", [])})
@@ -322,6 +383,9 @@ async def social_dm_get(request: Request) -> JSONResponse:
     if isinstance(u.get("unread"), dict):
         u["unread"].pop(peer_id, None)
     tk = _thread_key(uid, peer_id)
+    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=3.0)
+    if isinstance(persisted_dm, list):
+        _DM_THREADS[tk] = persisted_dm
     msgs = _DM_THREADS.get(tk) or []
     return JSONResponse({"ok": True, "peerId": peer_id, "messages": msgs[-80:]})
 
@@ -365,6 +429,9 @@ async def social_dm_send(request: Request) -> JSONResponse:
     if audio_note:
         msg["audioNote"] = audio_note
     tk = _thread_key(uid, peer_id)
+    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=2.0)
+    if isinstance(persisted_dm, list):
+        _DM_THREADS[tk] = list(persisted_dm)
     thread = _DM_THREADS.setdefault(tk, [])
     thread.append(msg)
 
@@ -404,6 +471,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
             "reactions": {},
         })
     _DM_THREADS[tk] = thread[-100:]
+    _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
     return JSONResponse({"ok": True, "message": msg, "messages": _DM_THREADS[tk][-80:]})
 
 
@@ -978,6 +1046,7 @@ async def notifications_subscribe(request: Request) -> JSONResponse:
         "subscription": sub,
         "updatedAt": _now(),
     }
+    _kv_set(f"wl:soc:push:{uid}", _PUSH_SUBSCRIPTIONS[uid], ttl_sec=2592000)
     return JSONResponse({"ok": True, "subscribed": True, "uid": uid})
 
 
@@ -1019,6 +1088,9 @@ async def notifications_poll(request: Request) -> JSONResponse:
     for key in (uid, name, "*"):
         if not key:
             continue
+        q_items = _kv_get(f"wl:soc:ntf:{key}", None, max_age=2.0)
+        if isinstance(q_items, list):
+            _NOTIFICATION_QUEUES[key] = q_items
         for item in _NOTIFICATION_QUEUES.get(key, []):
             if item["id"] in seen_ids:
                 continue
@@ -1033,3 +1105,235 @@ async def notifications_poll(request: Request) -> JSONResponse:
     out.sort(key=lambda x: float(x.get("ts") or 0))
     return JSONResponse({"ok": True, "notifications": out[-10:], "serverTs": _now()})
 
+
+# ---------------------------------------------------------------------------
+# 10. Cloud Cross-Device Continue Watching & Watchlist (v78)
+# ---------------------------------------------------------------------------
+def _resolve_user_key(request: Request, body: Optional[Dict[str, Any]] = None) -> str:
+    q = request.query_params
+    b = body or {}
+    raw = (
+        request.scope.get("wl_uid")
+        or b.get("uid")
+        or q.get("uid")
+        or b.get("handle")
+        or q.get("handle")
+        or ""
+    )
+    key = re.sub(r"[^a-zA-Z0-9_.@-]", "", str(raw).strip().lower())[:64]
+    return key or "guest_local"
+
+
+async def user_progress_get(request: Request) -> JSONResponse:
+    ukey = _resolve_user_key(request)
+    items = _kv_get(f"wl:user:prog:{ukey}", None, max_age=3.0)
+    if not isinstance(items, list):
+        items = _USER_PROGRESS.get(ukey, [])
+    items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:24]
+    return JSONResponse({"ok": True, "uid": ukey, "items": items})
+
+
+async def user_progress_save(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ukey = _resolve_user_key(request, body)
+    cur = _kv_get(f"wl:user:prog:{ukey}", None, max_age=1.5)
+    items: List[Dict[str, Any]] = list(cur) if isinstance(cur, list) else list(_USER_PROGRESS.get(ukey, []))
+    action = _clean(body.get("action") or "upsert", 20).lower()
+    if action == "clear":
+        items = []
+    elif action == "remove":
+        rm_key = _clean(body.get("key") or body.get("tmdbId") or body.get("title"), 120)
+        items = [it for it in items if str(it.get("key") or "") != rm_key and str(it.get("tmdbId") or "") != rm_key]
+    else:
+        mtype = "tv" if _clean(body.get("mediaType"), 12).lower() == "tv" else "movie"
+        tid = _clean(body.get("tmdbId") or body.get("id"), 40)
+        title = _clean(body.get("title"), 160)
+        if not title and not tid:
+            return JSONResponse({"ok": False, "error": "title or tmdbId required"}, status_code=400)
+        season = max(1, int(body.get("season") or 1)) if mtype == "tv" else 0
+        episode = max(1, int(body.get("episode") or 1)) if mtype == "tv" else 0
+        pos = max(0.0, float(body.get("position") or 0.0))
+        dur = max(0.0, float(body.get("duration") or 0.0))
+        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else max(0.0, min(99.0, float(body.get("percent") or 5.0)))
+        ikey = _clean(body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+        items = [it for it in items if str(it.get("key") or "") != ikey]
+        if not (mtype == "movie" and dur > 300 and pct >= 96.0):
+            entry = {
+                "key": ikey,
+                "tmdbId": tid,
+                "imdbId": _clean(body.get("imdbId"), 32),
+                "mediaType": mtype,
+                "provider": _clean(body.get("provider") or "cinema", 32),
+                "title": title or "Sinema",
+                "poster": _clean(body.get("poster") or body.get("thumbnail"), 800),
+                "backdrop": _clean(body.get("backdrop"), 800),
+                "year": _clean(body.get("year"), 10),
+                "season": season,
+                "episode": episode,
+                "position": round(pos, 1),
+                "duration": round(dur, 1),
+                "percent": pct,
+                "sourceUrl": _clean(body.get("sourceUrl"), 600),
+                "updatedAt": _now(),
+            }
+            items.insert(0, entry)
+        items = items[:30]
+    _USER_PROGRESS[ukey] = items
+    _kv_set(f"wl:user:prog:{ukey}", items, ttl_sec=2592000)
+    return JSONResponse({"ok": True, "uid": ukey, "items": items[:24]})
+
+
+async def user_watchlist_get(request: Request) -> JSONResponse:
+    ukey = _resolve_user_key(request)
+    items = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=3.0)
+    if not isinstance(items, list):
+        items = _USER_WATCHLIST.get(ukey, [])
+    return JSONResponse({"ok": True, "uid": ukey, "items": items[:80]})
+
+
+async def user_watchlist_toggle(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    ukey = _resolve_user_key(request, body)
+    cur = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=1.5)
+    items: List[Dict[str, Any]] = list(cur) if isinstance(cur, list) else list(_USER_WATCHLIST.get(ukey, []))
+    action = _clean(body.get("action") or "toggle", 16).lower()
+    mtype = "tv" if _clean(body.get("mediaType"), 12).lower() == "tv" else "movie"
+    tid = _clean(body.get("tmdbId") or body.get("id"), 40)
+    title = _clean(body.get("title"), 160)
+    ikey = _clean(body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+    existed = any(str(it.get("key") or "") == ikey for it in items)
+    if action == "remove" or (action == "toggle" and existed):
+        items = [it for it in items if str(it.get("key") or "") != ikey]
+        added = False
+    else:
+        items = [it for it in items if str(it.get("key") or "") != ikey]
+        items.insert(0, {
+            "key": ikey,
+            "tmdbId": tid,
+            "imdbId": _clean(body.get("imdbId"), 32),
+            "mediaType": mtype,
+            "provider": _clean(body.get("provider") or "cinema", 32),
+            "title": title or "Sinema",
+            "poster": _clean(body.get("poster") or body.get("thumbnail"), 800),
+            "year": _clean(body.get("year"), 10),
+            "rating": float(body.get("rating") or 0.0),
+            "sourceUrl": _clean(body.get("sourceUrl"), 600),
+            "addedAt": _now(),
+        })
+        items = items[:80]
+        added = True
+    _USER_WATCHLIST[ukey] = items
+    _kv_set(f"wl:user:wlist:{ukey}", items, ttl_sec=7776000)
+    return JSONResponse({"ok": True, "uid": ukey, "added": added, "key": ikey, "items": items})
+
+
+# ---------------------------------------------------------------------------
+# 11. Automatic Stream Server Health Telemetry & Smart Ranking (v78)
+# ---------------------------------------------------------------------------
+def _extract_srv_bucket(url_or_host: str, label: str = "") -> str:
+    raw = str(url_or_host or "").strip()
+    if "u=" in raw:
+        try:
+            qs_map = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query)
+            if qs_map.get("u"):
+                raw = urllib.parse.unquote(qs_map["u"][0])
+        except Exception:
+            pass
+    host = (urllib.parse.urlparse(raw).hostname or "").lower()
+    if host and host not in ("127.0.0.1", "localhost", "watchlivo.online"):
+        parts = host.split(".")
+        return ".".join(parts[-2:]) if len(parts) >= 2 else host
+    slug = re.sub(r"[^a-z0-9]+", "-", str(label or "primary").lower()).strip("-")[:32]
+    return slug or "default"
+
+
+def _load_health_map() -> Dict[str, Dict[str, Any]]:
+    persisted = _kv_get("wl:srv:health:v1", None, max_age=20.0)
+    if isinstance(persisted, dict):
+        _SERVER_HEALTH.update(persisted)
+    return _SERVER_HEALTH
+
+
+def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(res, dict):
+        return res
+    srvs = res.get("servers")
+    if not isinstance(srvs, list) or len(srvs) < 2:
+        return res
+    hmap = _load_health_map()
+    scored = []
+    for idx, srv in enumerate(srvs):
+        if not isinstance(srv, dict) or not srv.get("url"):
+            continue
+        bkt = _extract_srv_bucket(srv.get("url", ""), srv.get("label", ""))
+        rec = hmap.get(bkt) or {}
+        ok_n = int(rec.get("ok") or 0)
+        fail_n = int(rec.get("fail") or 0)
+        lat_ms = float(rec.get("avgMs") or 650.0)
+        total = ok_n + fail_n
+        rel_score = ((ok_n + 2.0) / (total + 3.0)) - (min(lat_ms, 4000.0) / 20000.0)
+        # Preserve original priority order unless reliability differs meaningfully
+        tie_bonus = max(0.0, (10 - idx) * 0.025)
+        final_score = round(rel_score + tie_bonus, 4)
+        srv_copy = dict(srv)
+        srv_copy["healthBucket"] = bkt
+        srv_copy["healthScore"] = round(rel_score * 100, 1)
+        if ok_n >= 2 and fail_n == 0 and "⚡" not in str(srv_copy.get("label") or ""):
+            srv_copy["healthyVerified"] = True
+        scored.append((final_score, idx, srv_copy))
+    if len(scored) < 2:
+        return res
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    ordered = [x[2] for x in scored]
+    out = dict(res)
+    out["servers"] = ordered
+    out["url"] = ordered[0]["url"]
+    out["altUrls"] = [s["url"] for s in ordered[1:7] if s.get("url")]
+    return out
+
+
+async def server_health_report(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    url_raw = _clean(body.get("url") or body.get("host"), 1200)
+    label = _clean(body.get("label"), 80)
+    if not url_raw and not label:
+        return JSONResponse({"ok": False}, status_code=400)
+    ok = bool(body.get("ok", True)) and not bool(body.get("stalled", False))
+    try:
+        lat_ms = max(20.0, min(15000.0, float(body.get("latencyMs") or (550.0 if ok else 4500.0))))
+    except (TypeError, ValueError):
+        lat_ms = 600.0
+    bkt = _extract_srv_bucket(url_raw, label)
+    hmap = _load_health_map()
+    rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0})
+    if ok:
+        rec["ok"] = min(500, int(rec.get("ok") or 0) + 1)
+        # Decay old failures gradually on fresh recovery
+        if rec.get("fail", 0) > 0 and rec["ok"] % 2 == 0:
+            rec["fail"] = max(0, int(rec["fail"]) - 1)
+    else:
+        rec["fail"] = min(200, int(rec.get("fail") or 0) + 2)
+    prev_ms = float(rec.get("avgMs") or lat_ms)
+    rec["avgMs"] = round(prev_ms * 0.65 + lat_ms * 0.35, 1)
+    rec["label"] = label or rec.get("label") or bkt
+    rec["updatedAt"] = _now()
+    hmap[bkt] = rec
+    if len(hmap) > 160:
+        oldest_k = min(hmap, key=lambda k: float(hmap[k].get("updatedAt") or 0))
+        hmap.pop(oldest_k, None)
+    _kv_set("wl:srv:health:v1", hmap, ttl_sec=604800)
+    return JSONResponse({"ok": True, "bucket": bkt, "stats": rec})
+
+
+async def server_health_get(request: Request) -> JSONResponse:
+    hmap = _load_health_map()
+    return JSONResponse({"ok": True, "servers": hmap, "count": len(hmap)})

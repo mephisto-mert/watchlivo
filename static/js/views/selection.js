@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v77';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v77';
-import { api, qs } from '../api.js?v=20261103_v77';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v77';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v77';
-import { state, getWatchHistory, clearWatchHistory, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v77';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v78';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v78';
+import { api, qs } from '../api.js?v=20261103_v78';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v78';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v78';
+import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v78';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -392,6 +392,18 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             }, isTv ? '📺 Sezon & Bölüm Seç' : '▶ Şimdi Odada Başlat'),
             h('button', {
               type: 'button',
+              class: `btn wl-preview-fav-btn ${isFavoriteMedia(t) ? 'primary' : 'ghost'}`,
+              onclick: (ev) => {
+                const added = toggleFavoriteMedia({ ...t, provider: defProv?.id || t.provider || 'cinema' });
+                ev.currentTarget.className = `btn wl-preview-fav-btn ${added ? 'primary' : 'ghost'}`;
+                ev.currentTarget.textContent = added ? '✓ İzleme Listemde' : '🔖 Listeme Ekle';
+                const pillCnt = root.querySelector('#btn-watchlist-pill .cat-count');
+                if (pillCnt) pillCnt.textContent = String(getFavorites().length);
+                toast(added ? `🔖 ${t.title} İzleme Listene eklendi` : `${t.title} listeden çıkarıldı`);
+              },
+            }, isFavoriteMedia(t) ? '✓ İzleme Listemde' : '🔖 Listeme Ekle'),
+            h('button', {
+              type: 'button',
               class: 'btn ghost',
               onclick: () => modalRef?.close?.(),
             }, 'Kapat')))));
@@ -496,6 +508,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       }),
       !compact ? h('button', {
         type: 'button',
+        id: 'btn-watchlist-pill',
+        class: 'provider-cat-pill wl-watchlist-pill',
+        title: 'Bulut Senkron İzleme Listem',
+        onclick: () => root.openFavorites(),
+      }, h('span', {}, '🔖 İzleme Listem'), h('span', { class: 'cat-count' }, String(getFavorites().length))) : null,
+      !compact ? h('button', {
+        type: 'button',
         id: 'btn-trending-toggle',
         class: `provider-cat-pill trend-pill ${showTrending ? 'active' : ''}`,
         onclick: async () => {
@@ -565,38 +584,65 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
         }))) : null;
 
-    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 4) : [];
-    const historyRail = historyList.length ? h('div', { class: 'continue-strip' },
-      h('span', { class: 'continue-strip-label' }, '🕘 Son Açılanlar:'),
-      ...historyList.map((item) => {
-        const prov = getProvider(item.catalogProvider || item.provider || 'netflix');
-        const resumeSec = Number(item.currentTime) > 5 ? Math.floor(Number(item.currentTime)) : 0;
-        return h('button', {
+    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 8) : [];
+    const historyRail = historyList.length ? h('section', { class: 'wl-continue-section', id: 'wl-continue-section' },
+      h('div', { class: 'wl-continue-head' },
+        h('div', { class: 'wl-continue-title-group' },
+          h('span', { class: 'wl-continue-heading' }, '▶ Kaldığın Yerden Devam Et'),
+          h('span', { class: 'wl-continue-cloud-pill' }, '☁️ Cihazlar Arası Senkron')),
+        h('button', {
           type: 'button',
-          class: 'continue-chip',
-          onclick: async () => {
-            if (item.tmdbId) {
-              const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: item.title.split(' — ')[0], backdrop: item.thumbnail }, prov || { id: 'netflix', name: 'Netflix' }, item.season || 1, item.episode || 1);
-              if (resolved) { resolved.currentTime = resumeSec; await pickSafe(resolved); return; }
-            }
-            await pickSafe({ ...item, currentTime: resumeSec });
+          class: 'btn sm ghost continue-clear-btn',
+          title: 'İzleme geçmişini temizle',
+          onclick: () => {
+            clearWatchHistory();
+            renderGrid();
+            toast('🧹 Kaldığın yer geçmişi temizlendi');
           },
-        },
-          prov?.logo ? h('img', { src: prov.logo, alt: '' }) : null,
-          h('span', { class: 'c-title' }, item.title),
-          h('span', { class: 'c-pct' }, resumeSec > 0 ? fmtDur(resumeSec) : '0:00'));
-      }),
-      h('button', {
-        type: 'button',
-        class: 'btn sm ghost continue-clear-btn',
-        title: 'İzleme geçmişini temizle',
-        style: { marginLeft: 'auto', fontSize: '.74rem', opacity: '.78' },
-        onclick: () => {
-          clearWatchHistory();
-          renderGrid();
-          toast('🧹 Son açılanlar geçmişi temizlendi');
-        },
-      }, 'Temizle ×')) : null;
+        }, 'Temizle ×')),
+      h('div', { class: 'wl-continue-strip' },
+        ...historyList.map((item) => {
+          const prov = getProvider(item.catalogProvider || item.provider || 'cinema');
+          const resumeSec = Number(item.currentTime) > 5 ? Math.floor(Number(item.currentTime)) : 0;
+          const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
+          const pct = durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(95, Math.round(Number(item.percent || 8))));
+          const remMin = durSec > resumeSec + 60 ? Math.ceil((durSec - resumeSec) / 60) : 0;
+          const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
+          const subTxt = `${epTag}${resumeSec > 0 ? fmtDur(resumeSec) : '0:00'}${remMin > 0 ? ` · ${remMin} dk kaldı` : ''}`;
+          const itemKey = item.historyId || item.key || item.tmdbId || item.title;
+          return h('div', {
+            class: 'wl-continue-card',
+            role: 'button',
+            tabindex: '0',
+            onclick: async () => {
+              if (item.tmdbId) {
+                const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: String(item.title || '').split(' — ')[0], backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail }, prov || { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
+                if (resolved) { resolved.currentTime = resumeSec; await pickSafe(resolved); return; }
+              }
+              await pickSafe({ ...item, currentTime: resumeSec });
+            },
+          },
+            h('div', { class: 'wl-continue-thumb' },
+              h('img', { src: item.poster || item.thumbnail || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title || '', loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+              prov?.logo ? h('span', { class: 'wl-continue-prov' }, h('img', { src: prov.logo, alt: '' })) : null,
+              h('span', { class: 'wl-continue-play-ico' }, '▶'),
+              h('button', {
+                type: 'button',
+                class: 'wl-continue-rm',
+                title: 'Listeden kaldır',
+                'aria-label': 'Listeden kaldır',
+                onclick: (ev) => {
+                  ev.stopPropagation();
+                  removeWatchProgress(itemKey);
+                  renderGrid();
+                },
+              }, '✕')),
+            h('div', { class: 'wl-continue-body' },
+              h('div', { class: 'wl-continue-title' }, item.title || 'Sinema'),
+              h('div', { class: 'wl-continue-sub' }, subTxt),
+              h('div', { class: 'wl-continue-prog' },
+                h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))));
+        }))) : null;
 
     const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search wl-cmdk-host' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),

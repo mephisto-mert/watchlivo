@@ -168,6 +168,133 @@ export const canSelectVideo = () => {
 
 const HISTORY_KEY = 'vortex_watch_history_v1';
 const FAV_KEY = 'vortex_favorites_v1';
+const CLOUD_UID_KEY = 'vortex_cloud_uid_v1';
+let _lastCloudSyncAt = 0;
+const _lastCloudProgPush = new Map();
+
+const _normTs = (v) => {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n < 1e11 ? Math.round(n * 1000) : Math.round(n);
+};
+
+export function getCloudUid() {
+  const s = state.self;
+  const isRealAccount = Boolean(s && !s.isGuest && (s.email || s.authToken || (s.id && !String(s.id).startsWith('guest_'))));
+  const raw = isRealAccount ? (s.uid || s.id || s.handle || s.email || '') : '';
+  const clean = String(raw || '').trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, '').slice(0, 64);
+  if (clean) return clean;
+  try {
+    let dev = localStorage.getItem(CLOUD_UID_KEY);
+    if (!dev) {
+      dev = `u_dev_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(CLOUD_UID_KEY, dev);
+    }
+    return dev;
+  } catch (e) {
+    return 'guest_local';
+  }
+}
+
+export async function syncCloudUserMedia(force = false) {
+  if (typeof fetch !== 'function') return { historyChanged: false, favsChanged: false };
+  const now = Date.now();
+  if (!force && now - _lastCloudSyncAt < 8000) return { historyChanged: false, favsChanged: false };
+  _lastCloudSyncAt = now;
+  const uid = getCloudUid();
+  let historyChanged = false;
+  let favsChanged = false;
+  try {
+    const [pRes, wRes] = await Promise.allSettled([
+      fetch(`/api/user/progress?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/user/watchlist?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)),
+    ]);
+    const cloudProg = pRes.status === 'fulfilled' && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
+    if (cloudProg && cloudProg.length) {
+      const localList = getWatchHistory();
+      const byKey = new Map();
+      for (const loc of localList) {
+        const k = String(loc.historyId || loc.key || '');
+        if (k) byKey.set(k, loc);
+      }
+      for (const c of cloudProg) {
+        const mtype = c.mediaType === 'tv' ? 'tv' : 'movie';
+        const k = String(c.key || (c.tmdbId ? `${mtype}:${c.tmdbId}` : c.title || ''));
+        if (!k) continue;
+        const cTs = _normTs(c.updatedAt);
+        const prev = byKey.get(k);
+        if (!prev || cTs >= _normTs(prev.updatedAt)) {
+          byKey.set(k, {
+            ...(prev || {}),
+            historyId: k,
+            key: k,
+            title: c.title || prev?.title || 'Sinema',
+            thumbnail: c.poster || c.backdrop || prev?.thumbnail || '',
+            poster: c.poster || prev?.poster || prev?.thumbnail || '',
+            backdrop: c.backdrop || prev?.backdrop || '',
+            provider: c.provider || prev?.provider || 'cinema',
+            catalogProvider: c.provider || prev?.catalogProvider || 'cinema',
+            tmdbId: c.tmdbId || prev?.tmdbId || '',
+            imdbId: c.imdbId || prev?.imdbId || '',
+            mediaType: mtype,
+            season: Number(c.season || prev?.season || 1),
+            episode: Number(c.episode || prev?.episode || 1),
+            url: c.sourceUrl || prev?.url || '',
+            currentTime: Math.max(0, Math.floor(Number(c.position ?? prev?.currentTime ?? 0))),
+            duration: Math.max(0, Math.floor(Number(c.duration ?? prev?.duration ?? 0))),
+            percent: Number(c.percent ?? prev?.percent ?? 0),
+            year: c.year || prev?.year || '',
+            updatedAt: cTs || now,
+          });
+          historyChanged = true;
+        }
+      }
+      if (historyChanged) {
+        const merged = [...byKey.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 40);
+        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch (e) { /* ignore */ }
+      }
+    }
+    const cloudWlist = wRes.status === 'fulfilled' && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
+    if (cloudWlist && cloudWlist.length) {
+      const localFavs = getFavorites();
+      const byFav = new Map();
+      for (const f of localFavs) {
+        const fk = String(f.key || (f.tmdbId ? `${f.mediaType || 'movie'}:${f.tmdbId}` : f.favId || ''));
+        if (fk) byFav.set(fk, f);
+      }
+      for (const cw of cloudWlist) {
+        const mtype = cw.mediaType === 'tv' ? 'tv' : 'movie';
+        const fk = String(cw.key || (cw.tmdbId ? `${mtype}:${cw.tmdbId}` : cw.title || ''));
+        if (!fk) continue;
+        if (!byFav.has(fk)) {
+          const favId = String(cw.tmdbId || fk.split(':')[1] || fk);
+          byFav.set(fk, {
+            favId,
+            key: fk,
+            tmdbId: cw.tmdbId || '',
+            imdbId: cw.imdbId || '',
+            mediaType: mtype,
+            title: cw.title || 'Yapım',
+            originalTitle: cw.title || '',
+            year: cw.year || '',
+            rating: Number(cw.rating || 8.0) || 8.0,
+            poster: cw.poster || '',
+            backdrop: cw.poster || '',
+            provider: cw.provider || 'cinema',
+            addedAt: _normTs(cw.addedAt) || now,
+          });
+          favsChanged = true;
+        }
+      }
+      if (favsChanged) {
+        const mergedFavs = [...byFav.values()].sort((a, b) => _normTs(b.addedAt) - _normTs(a.addedAt)).slice(0, 60);
+        try { localStorage.setItem(FAV_KEY, JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
+      }
+    }
+    if (historyChanged || favsChanged) set({ cloudSyncedAt: Date.now() });
+  } catch (e) { /* ignore */ }
+  return { historyChanged, favsChanged };
+}
 
 export function getWatchHistory() {
   try {
@@ -183,35 +310,97 @@ export function clearWatchHistory() {
     localStorage.setItem(HISTORY_KEY, '[]');
     set({});
   } catch (e) { /* ignore */ }
+  if (typeof fetch === 'function') {
+    fetch('/api/user/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: getCloudUid(), action: 'clear' }),
+      keepalive: true,
+    }).catch(() => {});
+  }
 }
 
-export function saveWatchProgress(media, currentTime, duration) {
+export function removeWatchProgress(itemKey) {
+  const k = String(itemKey || '').trim();
+  if (!k) return;
+  try {
+    const next = getWatchHistory().filter((it) => String(it.historyId || it.key || '') !== k && String(it.tmdbId || '') !== k);
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    set({});
+  } catch (e) { /* ignore */ }
+  if (typeof fetch === 'function') {
+    fetch('/api/user/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: getCloudUid(), action: 'remove', key: k }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+}
+
+export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   if (!media || (!media.url && !media.videoId && !media.tmdbId)) return;
   const dur = Math.floor(Number(duration || media.duration || 0));
   const resumeTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 5 ? Math.floor(Number(currentTime)) : 0;
+  const mtype = media.mediaType === 'tv' ? 'tv' : 'movie';
+  const id = media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || '');
+  const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? 8 : 4);
   try {
-    const id = media.tmdbId ? `${media.mediaType || 'movie'}:${media.tmdbId}` : (media.videoId || media.url || media.title);
-    const list = getWatchHistory().filter((item) => item.historyId !== id);
+    const list = getWatchHistory().filter((item) => String(item.historyId || item.key || '') !== id);
     list.unshift({
       historyId: id,
+      key: id,
       title: media.title || 'Video',
       channel: media.channel || media.artist || '',
-      thumbnail: media.thumbnail || '',
+      thumbnail: media.poster || media.thumbnail || '',
+      poster: media.poster || media.thumbnail || '',
+      backdrop: media.backdrop || '',
       provider: media.catalogProvider || media.provider || 'netflix',
       catalogProvider: media.catalogProvider || media.provider || 'netflix',
       tmdbId: media.tmdbId || '',
       imdbId: media.imdbId || '',
-      mediaType: media.mediaType || 'movie',
+      mediaType: mtype,
       season: media.season || 1,
       episode: media.episode || 1,
+      year: media.year || '',
       url: media.url || '',
       videoId: media.videoId || '',
       currentTime: resumeTime,
       duration: dur,
+      percent: pct,
       updatedAt: Date.now(),
     });
     localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 40)));
   } catch (e) { /* ignore */ }
+  const now = Date.now();
+  const prevPush = _lastCloudProgPush.get(id) || 0;
+  if (typeof fetch === 'function' && (opts?.forceCloud || now - prevPush >= 12000)) {
+    _lastCloudProgPush.set(id, now);
+    fetch('/api/user/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: getCloudUid(),
+        action: 'upsert',
+        key: id,
+        tmdbId: String(media.tmdbId || ''),
+        imdbId: String(media.imdbId || ''),
+        mediaType: mtype,
+        provider: media.catalogProvider || media.provider || 'cinema',
+        title: media.title || 'Video',
+        poster: media.poster || media.thumbnail || '',
+        backdrop: media.backdrop || '',
+        year: String(media.year || ''),
+        season: Number(media.season || 1),
+        episode: Number(media.episode || 1),
+        position: resumeTime,
+        duration: dur,
+        percent: pct,
+        sourceUrl: media.officialUrl || media.url || '',
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  }
 }
 
 export function getFavorites() {
@@ -220,23 +409,28 @@ export function getFavorites() {
 
 export function isFavoriteMedia(item) {
   if (!item) return false;
+  const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
   const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '');
-  return getFavorites().some((f) => String(f.favId) === id);
+  const ikey = item.key || (item.tmdbId || item.id ? `${mtype}:${item.tmdbId || item.id}` : '');
+  return getFavorites().some((f) => String(f.favId) === id || (ikey && String(f.key || '') === ikey));
 }
 
 export function toggleFavoriteMedia(item) {
   if (!item) return false;
+  const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
   const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '');
   if (!id) return false;
+  const ikey = item.key || `${mtype}:${id}`;
   const list = getFavorites();
-  const exists = list.some((f) => String(f.favId) === id);
+  const exists = list.some((f) => String(f.favId) === id || String(f.key || '') === ikey);
   const next = exists
-    ? list.filter((f) => String(f.favId) !== id)
+    ? list.filter((f) => String(f.favId) !== id && String(f.key || '') !== ikey)
     : [{
         favId: id,
+        key: ikey,
         tmdbId: item.tmdbId || item.id || '',
         imdbId: item.imdbId || '',
-        mediaType: item.mediaType || 'movie',
+        mediaType: mtype,
         title: item.title || 'Yapım',
         originalTitle: item.originalTitle || item.title || '',
         year: item.year || '',
@@ -244,8 +438,29 @@ export function toggleFavoriteMedia(item) {
         poster: item.poster || item.thumbnail || '',
         backdrop: item.backdrop || item.poster || item.thumbnail || '',
         provider: item.catalogProvider || item.provider || 'netflix',
-      }, ...list].slice(0, 30);
+        addedAt: Date.now(),
+      }, ...list].slice(0, 60);
   try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
+  if (typeof fetch === 'function') {
+    fetch('/api/user/watchlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: getCloudUid(),
+        action: exists ? 'remove' : 'add',
+        key: ikey,
+        tmdbId: String(item.tmdbId || item.id || ''),
+        imdbId: String(item.imdbId || ''),
+        mediaType: mtype,
+        provider: item.catalogProvider || item.provider || 'cinema',
+        title: item.title || 'Yapım',
+        poster: item.poster || item.thumbnail || '',
+        year: String(item.year || ''),
+        rating: Number(item.rating || 8.0) || 8.0,
+      }),
+      keepalive: true,
+    }).catch(() => {});
+  }
   return !exists;
 }
 

@@ -137,6 +137,10 @@
       "dest": "server.py"
     },
     {
+      "src": "/(r|join)/(.*)",
+      "dest": "server.py"
+    },
+    {
       "src": "/(manifest\\.json|sw\\.js)",
       "dest": "server.py"
     },

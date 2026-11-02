@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v77';
-import { state, isLeader, isHostOnly, canSelectVideo, setView } from '../store.js?v=20261103_v77';
-import { getProvider } from '../providers.js?v=20261103_v77';
-import { expectedPosition } from '../sync.js?v=20261103_v77';
-import { thumbFor } from './lobby.js?v=20261103_v77';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v77';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v77';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v77';
-import { avatar } from '../profile.js?v=20261103_v77';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v78';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v78';
+import { getProvider } from '../providers.js?v=20261103_v78';
+import { expectedPosition } from '../sync.js?v=20261103_v78';
+import { thumbFor } from './lobby.js?v=20261103_v78';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v78';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v78';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v78';
+import { avatar } from '../profile.js?v=20261103_v78';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -339,6 +339,20 @@ export function buildControls(frame, ctx) {
     }
     toast('Bu cihazda Pencere İçinde Pencere (PiP) desteklenmiyor.');
   };
+  const triggerCast = async () => {
+    closeMenu();
+    const res = await host.promptCast?.();
+    if (res === 'airplay' || res === 'cast') {
+      showOverlay("📺 TV'ye Yansıtma Seçicisi Açıldı", 2200);
+      return;
+    }
+    if (res === 'not-found') {
+      toast('Aynı Wi-Fi ağında uyumlu bir Smart TV / Chromecast / AirPlay cihazı bulunamadı.');
+      return;
+    }
+    toast('Tarayıcı menüsünden "Yansıt / Cast" veya AirPlay seçeneğini kullanabilirsiniz.');
+  };
+  const castBtn = h('button', { class: 'ctl-action hidden', id: 'ctl-cast', 'data-tip': "TV'ye Yansıt (AirPlay / Cast)", 'aria-label': "TV'ye Yansıt", ...tapProps(() => triggerCast()) }, ico('cast'));
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...tapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...tapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
@@ -807,7 +821,7 @@ export function buildControls(frame, ctx) {
   const barRow = h('div', { class: 'ctl-bar-row' },
     h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time),
     h('div', { class: 'ctl-spacer' }),
-    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, pipBtn, theaterBtn, fsBtn));
+    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, castBtn, pipBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
@@ -1042,6 +1056,7 @@ export function buildControls(frame, ctx) {
 
   let smoothPos = 0;
   let smoothMediaSig = '';
+  let lastProgressSavedAt = 0;
 
   function tick() {
     const d = duration();
@@ -1073,6 +1088,10 @@ export function buildControls(frame, ctx) {
     updateUnmuteVisibility();
     renderCinemaSeats();
     const m = state.mesh?.media;
+    if (m && !state.mesh?.curated && !m.isMusic && !m.live && !host.adapter?.caps?.live && p > 12 && d > 45 && Date.now() - lastProgressSavedAt > 15000) {
+      lastProgressSavedAt = Date.now();
+      saveWatchProgress({ ...m, poster: m.poster || thumbFor(m) || m.thumbnail || '' }, p, d);
+    }
     skipIntroBtn.classList.add('hidden');
     const rem = d > 300 ? d - p : 9999;
     const curEpKey = m ? `${m.tmdbId || m.id || m.title}:${m.season || 1}:${m.episode || 1}` : '';
@@ -1663,6 +1682,28 @@ export function buildControls(frame, ctx) {
     items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('effects'); } },
       optIconLbl('sparkle', 'Sinema Efektleri & Araçlar'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${(VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal).label.replace(/^[^\s]+\s/, '').split(' ')[0]} ›`)));
+    const autoDuckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
+    items.push(h('div', {
+      class: `opt ${autoDuckOn ? 'on' : ''}`,
+      id: 'ctl-opt-autoduck',
+      onclick: (e) => {
+        e.stopPropagation();
+        const nextDuck = !autoDuckOn;
+        if (typeof host.setAutoDuckEnabled === 'function') host.setAutoDuckEnabled(nextDuck);
+        else { try { localStorage.setItem('vortex_voice_duck', nextDuck ? 'on' : 'off'); } catch (_) {} }
+        showOverlay(nextDuck ? '🔉 Akıllı Ses Kısma: Açık' : '🔉 Akıllı Ses Kısma: Kapalı', 1800);
+        renderMenuView('list');
+      },
+    },
+      optIconLbl('volume', 'Akıllı Ses Kısma (Konuşmada)'),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, autoDuckOn ? 'Açık ✓' : 'Kapalı')));
+    items.push(h('div', {
+      class: 'opt',
+      id: 'ctl-opt-cast',
+      onclick: (e) => { e.stopPropagation(); triggerCast(); },
+    },
+      optIconLbl('cast', "TV'ye Yansıt (AirPlay / Cast)"),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, host.canCast?.() ? 'Hazır ›' : 'Seç ›')));
     items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); togglePiP(); } },
       optIconLbl('pip', 'Pencere İçinde Pencere (PiP)'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, (host.isPiP?.() || document.body.classList.contains('mesh-minimized')) ? 'Açık' : 'Aç ›')));
@@ -1949,6 +1990,8 @@ export function buildControls(frame, ctx) {
       errorBox.classList.add('hidden');
       unmute.classList.add('hidden');
       subOverlay.classList.add('hidden');
+      castBtn.classList.add('hidden');
+      castBtn.style.display = 'none';
       return;
     }
     updateUnmuteVisibility();
@@ -2064,6 +2107,9 @@ export function buildControls(frame, ctx) {
       : (typeof document !== 'undefined'
         && !document.documentElement.classList.contains('is-native-apk')
         && Boolean(document.pictureInPictureEnabled || typeof HTMLVideoElement?.prototype?.webkitSetPresentationMode === 'function'));
+    const canShowCast = Boolean(host.adapter && host.canCast?.());
+    castBtn.classList.toggle('hidden', !canShowCast);
+    castBtn.style.display = canShowCast ? '' : 'none';
     pipBtn.classList.toggle('on', Boolean(host.isPiP?.()));
     pipBtn.classList.toggle('hidden', !canShowPip);
     pipBtn.style.display = canShowPip ? '' : 'none';
@@ -2130,6 +2176,9 @@ export function buildControls(frame, ctx) {
       }, 12000);
     },
     destroy: () => {
+      if (state.mesh?.media && !state.mesh?.curated && !state.mesh.media.isMusic && !state.mesh.media.live && smoothPos > 12) {
+        saveWatchProgress({ ...state.mesh.media, poster: state.mesh.media.poster || thumbFor(state.mesh.media) || state.mesh.media.thumbnail || '' }, smoothPos, duration(), { forceCloud: true });
+      }
       clearInterval(tickTimer);
       clearTimeout(uiTimer);
       clearTimeout(breakBannerTimer);

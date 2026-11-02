@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v77';
-import { Html5Adapter } from './html5.js?v=20261103_v77';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v77';
-import { EmbedAdapter } from './embed.js?v=20261103_v77';
-import { WebviewAdapter } from './webview.js?v=20261103_v77';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v78';
+import { Html5Adapter } from './html5.js?v=20261103_v78';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v78';
+import { EmbedAdapter } from './embed.js?v=20261103_v78';
+import { WebviewAdapter } from './webview.js?v=20261103_v78';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -68,6 +68,16 @@ export class PlayerHost {
     this.error = null;
     this.autoplayBlocked = false;
     this.userUnlocked = false;
+    this.voiceSpeaking = false;
+    this.voiceNotePlaying = false;
+    this.ducked = false;
+    this.duckGain = 1.0;
+    this._duckTimer = null;
+    if (typeof window !== 'undefined') {
+      window.vortexSetVoiceNotePlaying = (playing) => this.setVoiceNotePlaying(playing);
+      window.vortexSetAutoDuck = (enabled) => this.setAutoDuckEnabled(enabled);
+      window.__kinoxSyncDuckVolume = () => this._syncDuckRamp();
+    }
     this._gestureHandler = (e) => {
       if (e?.type === 'keydown') {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -89,10 +99,51 @@ export class PlayerHost {
     return Boolean(this.muted || this.autoplayBlocked || this.adapter?.isMuted?.() || this.volume === 0);
   }
 
+  isAutoDuckEnabled() {
+    return localStorage.getItem('vortex_voice_duck') !== 'off';
+  }
+
   _effectiveVolume() {
-    return this.ducked && localStorage.getItem('vortex_voice_duck') !== 'off'
-      ? Math.max(12, Math.round(this.volume * 0.35))
-      : this.volume;
+    if (!this.isAutoDuckEnabled()) return this.volume;
+    const g = Number.isFinite(this.duckGain) ? this.duckGain : 1.0;
+    return g < 0.995 ? Math.max(10, Math.round(this.volume * g)) : this.volume;
+  }
+
+  _syncDuckRamp() {
+    const wantDuck = this.isAutoDuckEnabled() && Boolean(this.voiceSpeaking || this.voiceNotePlaying);
+    this.ducked = wantDuck;
+    const target = wantDuck ? 0.32 : 1.0;
+    clearInterval(this._duckTimer);
+    if (Math.abs(this.duckGain - target) < 0.015) {
+      this.duckGain = target;
+      this.adapter?.setVolume(this._effectiveVolume());
+      return;
+    }
+    this._duckTimer = setInterval(() => {
+      const curTarget = (this.isAutoDuckEnabled() && Boolean(this.voiceSpeaking || this.voiceNotePlaying)) ? 0.32 : 1.0;
+      const step = curTarget < this.duckGain ? -0.14 : 0.06;
+      const next = this.duckGain + step;
+      if ((step < 0 && next <= curTarget) || (step > 0 && next >= curTarget)) {
+        this.duckGain = curTarget;
+        clearInterval(this._duckTimer);
+        this._duckTimer = null;
+      } else {
+        this.duckGain = Number(next.toFixed(3));
+      }
+      this.adapter?.setVolume(this._effectiveVolume());
+    }, 30);
+  }
+
+  setVoiceNotePlaying(playing) {
+    const next = Boolean(playing);
+    if (this.voiceNotePlaying === next) return;
+    this.voiceNotePlaying = next;
+    this._syncDuckRamp();
+  }
+
+  setAutoDuckEnabled(enabled) {
+    try { localStorage.setItem('vortex_voice_duck', enabled ? 'on' : 'off'); } catch (e) { /* ignore */ }
+    this._syncDuckRamp();
   }
 
   async setMedia(media, startAt = 0, shouldPlay = true) {
@@ -202,10 +253,10 @@ export class PlayerHost {
   }
 
   setDucked(ducked) {
-    const next = Boolean(ducked) && localStorage.getItem('vortex_voice_duck') !== 'off';
-    if (this.ducked === next) return;
-    this.ducked = next;
-    this.adapter?.setVolume(this._effectiveVolume());
+    const next = Boolean(ducked);
+    if (this.voiceSpeaking === next && this.ducked === (next && this.isAutoDuckEnabled())) return;
+    this.voiceSpeaking = next;
+    this._syncDuckRamp();
   }
 
   setMuted(m, explicitUser = false) {
@@ -257,6 +308,17 @@ export class PlayerHost {
     return false;
   }
 
+  canCast() {
+    return Boolean(this.adapter?.canCast?.());
+  }
+
+  async promptCast() {
+    if (typeof this.adapter?.promptCast === 'function') {
+      return await this.adapter.promptCast();
+    }
+    return false;
+  }
+
   destroyAdapterOnly() {
     try { this.adapter?.destroy(); } catch (e) { /* ignore */ }
     this.adapter = null;
@@ -264,6 +326,7 @@ export class PlayerHost {
   }
 
   destroy() {
+    clearInterval(this._duckTimer);
     if (typeof window !== 'undefined' && this._gestureHandler) {
       ['touchend', 'click', 'keydown'].forEach((ev) => {
         window.removeEventListener(ev, this._gestureHandler, { capture: true });
