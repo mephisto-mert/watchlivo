@@ -1,6 +1,6 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v83';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v83';
+import { toast } from './ui.js?v=20261103_v84';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v84';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -439,10 +439,13 @@ export class Voice {
           this._resolveBubbleOverlap(wrap);
         }
       } else {
-        wrap.classList.toggle('controls-visible');
-        clearTimeout(wrap._ctlTimer);
-        if (wrap.classList.contains('controls-visible')) {
-          wrap._ctlTimer = setTimeout(() => wrap.classList.remove('controls-visible'), 4000);
+        const nowTap = Date.now();
+        if (wrap._lastTapAt && nowTap - wrap._lastTapAt < 320) {
+          wrap._lastTapAt = 0;
+          wrap.classList.toggle('expanded');
+          this._layoutCameraBubbles();
+        } else {
+          wrap._lastTapAt = nowTap;
         }
       }
       swapCandidate = null;
@@ -475,55 +478,7 @@ export class Voice {
       const tag = document.createElement('span');
       tag.className = 'cam-bubble-tag';
       tag.textContent = label;
-      const swapBtn = document.createElement('button');
-      swapBtn.type = 'button';
-      swapBtn.className = 'cam-bubble-btn swap-btn';
-      swapBtn.title = 'Kamera Yerini Değiştir (Sürükle veya Tıkla)';
-      swapBtn.textContent = '⇄';
-      swapBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.swapCameraPositions(wrap);
-      };
-      const spotBtn = document.createElement('button');
-      spotBtn.type = 'button';
-      spotBtn.className = 'cam-bubble-btn spot-btn';
-      spotBtn.title = 'Sahneye Büyüt (Spotlight)';
-      spotBtn.textContent = '🖥️';
-      spotBtn.onclick = (e) => {
-        e.stopPropagation();
-        const nextSpot = !wrap.classList.contains('spotlight');
-        dock.querySelectorAll('.cam-bubble.spotlight').forEach((n) => n.classList.remove('spotlight'));
-        wrap.classList.toggle('spotlight', nextSpot);
-        dock.classList.toggle('has-spotlight', nextSpot);
-        this._layoutCameraBubbles();
-      };
-      const sizeBtn = document.createElement('button');
-      sizeBtn.type = 'button';
-      sizeBtn.className = 'cam-bubble-btn size-btn';
-      sizeBtn.title = 'Büyüt / Küçült';
-      sizeBtn.textContent = '⤢';
-      sizeBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (wrap.classList.contains('spotlight')) {
-          wrap.classList.remove('spotlight');
-          dock.classList.remove('has-spotlight');
-        } else {
-          wrap.classList.toggle('expanded');
-        }
-        this._layoutCameraBubbles();
-      };
-      const shapeBtn = document.createElement('button');
-      shapeBtn.type = 'button';
-      shapeBtn.className = 'cam-bubble-btn shape-btn';
-      shapeBtn.title = 'Yuvarlak / Dikdörtgen Kamera';
-      shapeBtn.textContent = '▭';
-      shapeBtn.onclick = (e) => {
-        e.stopPropagation();
-        const isRect = wrap.classList.toggle('rect-mode');
-        shapeBtn.textContent = isRect ? '◯' : '▭';
-        this._layoutCameraBubbles();
-      };
-      wrap.append(vid, tag, shapeBtn, swapBtn, spotBtn, sizeBtn);
+      wrap.append(vid, tag);
       this._makeBubbleInteractive(wrap, dock);
       dock.appendChild(wrap);
       requestAnimationFrame(() => this._layoutCameraBubbles());

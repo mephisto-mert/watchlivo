@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v83';
-import { Html5Adapter } from './html5.js?v=20261103_v83';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v83';
-import { EmbedAdapter } from './embed.js?v=20261103_v83';
-import { WebviewAdapter } from './webview.js?v=20261103_v83';
-import { resumeSharedAudioContext, canControlElementVolume } from './audio-gain.js?v=20261103_v83';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v84';
+import { Html5Adapter } from './html5.js?v=20261103_v84';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v84';
+import { EmbedAdapter } from './embed.js?v=20261103_v84';
+import { WebviewAdapter } from './webview.js?v=20261103_v84';
+import { resumeSharedAudioContext, canControlElementVolume } from './audio-gain.js?v=20261103_v84';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -63,11 +63,11 @@ export class PlayerHost {
     this.key = '';
     const rawVol = localStorage.getItem('vortex_volume');
     const parsedVol = (rawVol !== null && rawVol !== '') ? Number(rawVol) : NaN;
-    this.volume = Number.isFinite(parsedVol) ? Math.max(0, Math.min(150, Math.round(parsedVol))) : 80;
+    this.volume = Number.isFinite(parsedVol) ? Math.max(0, Math.min(100, Math.round(parsedVol))) : 80;
     this._lastNonZeroVol = this.volume > 0 ? this.volume : 80;
     this._docPipWin = null;
-    this.muted = false;
-    this.userMuted = false;
+    this.muted = this.volume === 0;
+    this.userMuted = this.volume === 0;
     this.loading = false;
     this.error = null;
     this.autoplayBlocked = false;
@@ -93,7 +93,7 @@ export class PlayerHost {
         if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift' || k === ' ' || k === 'k') return;
       } else {
         if (this._gDown && (Math.hypot((e.clientX ?? 0) - this._gDown.x, (e.clientY ?? 0) - this._gDown.y) > 14)) return;
-        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn')) return;
+        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn, #ctl-pip, #ctl-cast, input[type="range"], #ctl-sliders-card, .ctl-slider-row, .vol-wrap')) return;
       }
       resumeSharedAudioContext();
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
@@ -132,7 +132,8 @@ export class PlayerHost {
   }
 
   _effectiveVolume() {
-    const base = Math.max(0, Math.min(150, Number(this.volume) || 0));
+    const rawNum = Number(this.volume);
+    const base = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 0));
     if (base === 0) return 0;
     if (!this.isAutoDuckEnabled()) return base;
     const g = Number.isFinite(this.duckGain) ? this.duckGain : 1.0;
@@ -268,13 +269,30 @@ export class PlayerHost {
 
   setVolume(v) {
     resumeSharedAudioContext();
-    this.volume = Math.max(0, Math.min(150, Math.round(Number(v) || 0)));
-    if (this.volume > 0) this._lastNonZeroVol = this.volume;
+    const rawNum = Number(v);
+    this.volume = Math.max(0, Math.min(100, Math.round(Number.isFinite(rawNum) ? rawNum : 0)));
     try { localStorage.setItem('vortex_volume', String(this.volume)); } catch (e) { /* ignore */ }
-    this.adapter?.setVolume(this._effectiveVolume());
-    if (this.volume > 0 && (this.muted || this.autoplayBlocked || this.adapter?.isMuted?.())) {
+    if (this.volume === 0) {
+      this.muted = true;
+      this.userMuted = true;
+      this.adapter?.setVolume(0);
+      this.adapter?.setMuted(true);
+      this.onEvent('volume', 0);
+      return;
+    }
+    this._lastNonZeroVol = this.volume;
+    const wasMuted = Boolean(this.muted || this.autoplayBlocked || this.adapter?.isMuted?.());
+    if (wasMuted) {
+      this.muted = false;
       this.userMuted = false;
-      this.setMuted(false);
+      this.userUnlocked = true;
+      this.autoplayBlocked = false;
+      if (this.adapter) this.adapter.autoplayHardBlocked = false;
+    }
+    this.adapter?.setVolume(this._effectiveVolume());
+    if (wasMuted) {
+      this.adapter?.setMuted(false);
+      this.onEvent('unmuted');
     }
     this.onEvent('volume', this.volume);
   }
@@ -294,7 +312,7 @@ export class PlayerHost {
       this.userUnlocked = true;
       this.autoplayBlocked = false;
       resumeSharedAudioContext();
-      if (this.volume <= 0) this.volume = this._lastNonZeroVol || 80;
+      if (this.volume <= 0) this.volume = Math.min(100, this._lastNonZeroVol || 50);
       this.adapter?.setVolume(this._effectiveVolume());
       this.onEvent('unmuted');
     }
@@ -308,9 +326,9 @@ export class PlayerHost {
     this.autoplayBlocked = false;
     if (this.adapter) this.adapter.autoplayHardBlocked = false;
     this.muted = false;
-    if (this.volume <= 0) this.volume = this._lastNonZeroVol || 80;
-    this.adapter?.setMuted(false);
+    if (this.volume <= 0) this.volume = Math.min(100, this._lastNonZeroVol || 50);
     this.adapter?.setVolume(this._effectiveVolume());
+    this.adapter?.setMuted(false);
     if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying === true) this.adapter?.play?.();
     this.onEvent('unmuted');
   }
@@ -329,7 +347,7 @@ export class PlayerHost {
     const v = this.adapter?.video;
     if (v && (
       (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function')
-      || (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+      || typeof v.webkitSetPresentationMode === 'function'
     )) return true;
     if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.adapter) return true;
     return false;

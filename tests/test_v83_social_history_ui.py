@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v83", index_txt)
+        self.assertIn("20261103_v84", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -163,3 +163,38 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         self.assertTrue(inv["ok"])
         inv_notifs = self.client.get("/api/rave/notifications/poll", params={"uid": u_b["uid"]}, headers=h_b).json()["notifications"]
         self.assertTrue(any(n["type"] == "room_invite" and n["roomId"] == cr["id"] for n in inv_notifs))
+
+    def test_06_v84_iphone13_pip_volume_brightness_and_camera_icons(self):
+        root = pathlib.Path(__file__).resolve().parent.parent / "static"
+        ctl_js = (root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        html5_js = (root / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        gain_js = (root / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
+        host_js = (root / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        voice_js = (root / "js" / "voice.js").read_text(encoding="utf-8")
+        mesh_css = (root / "css" / "mesh.css").read_text(encoding="utf-8")
+
+        # 1. iPhone 13 PiP: no 'desteklenmiyor' error toast, trustedTapProps + vortexMinimizeRoom fallback
+        self.assertNotIn("Bu cihazda Pencere İçinde Pencere (PiP) desteklenmiyor.", ctl_js)
+        self.assertIn("trustedTapProps", ctl_js)
+        self.assertIn("window.vortexMinimizeRoom", ctl_js)
+        self.assertIn("webkitSetPresentationMode", html5_js)
+
+        # 2. Volume 0..100 smooth scaling without 0 -> 100 jump
+        self.assertNotIn("if (!controllable && nv > 0 && nv !== 100)", ctl_js)
+        self.assertIn("ManagedMediaSource", html5_js)
+        self.assertIn("initialGain", gain_js)
+        self.assertIn("this.userMuted = true;", host_js)
+
+        # 3. Brightness strictly 0..100 (zero >100 boost distortion)
+        self.assertNotIn("min: '15'", ctl_js)
+        self.assertNotIn("max: '160'", ctl_js)
+        self.assertNotIn("brightnessVeil.classList.add('is-boost')", ctl_js)
+        self.assertNotIn(".wl-brightness-veil.is-boost", mesh_css)
+
+        # 4. Zero camera bubble overlay icons inside .cam-bubble
+        self.assertNotIn("swapBtn", voice_js)
+        self.assertNotIn("spotBtn", voice_js)
+        self.assertNotIn("sizeBtn", voice_js)
+        self.assertNotIn("shapeBtn", voice_js)
+        self.assertIn("wrap.append(vid, tag);", voice_js)
+        self.assertIn(".cam-bubble-btn {\n  display: none !important;\n}", mesh_css)

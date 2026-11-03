@@ -61,20 +61,17 @@ export function canControlElementVolume(el, opts = {}) {
   return isCorsSafeMediaElement(el, opts);
 }
 
-function _attachElementGraph(el, opts = {}) {
+function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   if (!el) return null;
   const existing = _mediaNodes.get(el);
   if (existing) return existing;
   if (!isCorsSafeMediaElement(el, opts)) return null;
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
-  if (ctx.state === 'suspended') {
-    ctx.resume().catch(() => {});
-    if (ctx.state !== 'running') return null;
-  }
   try {
     const source = ctx.createMediaElementSource(el);
     const gain = ctx.createGain();
+    gain.gain.value = Math.max(0, Math.min(1, Number.isFinite(initialGain) ? initialGain : 1.0));
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -2.5;
     limiter.knee.value = 10;
@@ -84,6 +81,9 @@ function _attachElementGraph(el, opts = {}) {
     source.connect(gain);
     gain.connect(limiter);
     limiter.connect(ctx.destination);
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
     const entry = { ctx, source, gain, limiter };
     _mediaNodes.set(el, entry);
     return entry;
@@ -94,34 +94,35 @@ function _attachElementGraph(el, opts = {}) {
 
 export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   if (!el) return false;
-  const pct = Math.max(0, Math.min(150, Number.isFinite(Number(effectivePct)) ? Number(effectivePct) : 80));
+  const rawNum = Number(effectivePct);
+  const pct = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 80));
   const isMuted = Boolean(muted || pct <= 0);
-  el.muted = isMuted;
+  const targetGain = isMuted ? 0 : Math.max(0, Math.min(1, pct / 100));
 
-  const needWebAudio = _mediaNodes.has(el) || pct > 100 || (isIosWebKit() && pct < 100 && !isMuted);
-  let graph = needWebAudio ? _attachElementGraph(el, opts) : _mediaNodes.get(el);
-  if (needWebAudio && !graph && isCorsSafeMediaElement(el, opts)) {
-    const ctx = getSharedAudioContext(true);
-    if (ctx && ctx.state === 'suspended') {
-      ctx.resume().then(() => {
-        if (ctx.state === 'running') applyElementVolume(el, pct, isMuted, opts);
-      }).catch(() => {});
+  const needWebAudio = _mediaNodes.has(el) || isIosWebKit();
+  const graph = needWebAudio ? _attachElementGraph(el, opts, targetGain) : _mediaNodes.get(el);
+
+  if (graph) {
+    if (graph.ctx.state === 'suspended' && !isMuted) {
+      graph.ctx.resume().catch(() => {});
     }
-  }
-
-  if (graph && graph.ctx.state === 'running') {
+    el.muted = isMuted;
     try { el.volume = 1.0; } catch (e) { /* iOS read-only 1.0 */ }
-    const targetGain = isMuted ? 0 : Math.max(0, Math.min(1.6, pct / 100));
-    try {
-      graph.gain.gain.setTargetAtTime(targetGain, graph.ctx.currentTime, 0.015);
-    } catch (e) {
+    if (graph.ctx.state === 'running') {
+      try {
+        graph.gain.gain.setTargetAtTime(targetGain, graph.ctx.currentTime, 0.015);
+      } catch (e) {
+        graph.gain.gain.value = targetGain;
+      }
+    } else {
       graph.gain.gain.value = targetGain;
     }
     return true;
   }
 
+  el.muted = isMuted;
   try {
-    el.volume = isMuted ? 0 : Math.max(0, Math.min(1, pct / 100));
+    el.volume = targetGain;
     return !isIosWebKit();
   } catch (e) {
     return false;

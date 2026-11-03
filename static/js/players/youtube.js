@@ -1,6 +1,6 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v83';
-import { applyElementVolume } from './audio-gain.js?v=20261103_v83';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v84';
+import { applyElementVolume } from './audio-gain.js?v=20261103_v84';
 
 let apiPromise = null;
 function loadYouTubeApi() {

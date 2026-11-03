@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v83';
-import { expectedPosition } from '../sync.js?v=20261103_v83';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v83';
-import { applyElementVolume } from './audio-gain.js?v=20261103_v83';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v84';
+import { expectedPosition } from '../sync.js?v=20261103_v84';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v84';
+import { applyElementVolume } from './audio-gain.js?v=20261103_v84';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -523,11 +523,14 @@ export class Html5Adapter {
 
     let triedHlsFallback = false;
     const isUrlHls = (u) => /\.m3u8(\?|$)/i.test(String(u || '')) || /\/proxy\?data=|\/api\/rave\/stream\?|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(u || ''));
+    const isRaveProxiedHls = (u) => /\/api\/rave\/stream\?/i.test(String(u || ''));
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';
     const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
+    const hasManagedMse = typeof window !== 'undefined' && typeof window.ManagedMediaSource === 'function';
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
     const isApple = /Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-    let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
+    const canAppleMseHls = isApple && hasManagedMse && canHlsJs && isRaveProxiedHls(url);
+    let useNativeHls = isHls && canNativeHls && ((isApple && !canAppleMseHls) || !canHlsJs);
     this.useNativeHls = useNativeHls;
     const withProxySegs = (u) => {
       const s = String(u || '');
@@ -625,8 +628,9 @@ export class Html5Adapter {
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
-        if (canHlsJs && !useNativeHls) {
-          attachHlsJs(nextUrl, doneCb, resumePos);
+        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || (hasManagedMse && isRaveProxiedHls(nextUrl)));
+        if (allowHlsJsHere) {
+          attachHlsJs(isApple ? withProxySegs(nextUrl) : nextUrl, doneCb, resumePos);
           return;
         }
         if (!canNativeHls) {
@@ -858,6 +862,19 @@ export class Html5Adapter {
             mediaRetries += 1;
             if (mediaRetries <= 1) {
               try { this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
+            } else if (canNativeHls && !triedHlsFallback) {
+              triedHlsFallback = true;
+              useNativeHls = true;
+              this.useNativeHls = true;
+              try { this.hls.destroy(); } catch (err) { /* ignore */ }
+              this.hls = null;
+              v.src = withProxySegs(srcUrl);
+              v.load();
+              v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
+              if (curResume >= 5) {
+                v.addEventListener('loadedmetadata', () => { try { v.currentTime = curResume; } catch (e) {} }, { once: true });
+              }
+              if (this.wantPlaying) this.tryPlay();
             } else if (nativeAltIdx < alts.length) {
               loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             } else {
@@ -952,7 +969,7 @@ export class Html5Adapter {
       }
       syncVideoCors(url);
       if (isHls && canHlsJs && !useNativeHls) {
-        attachHlsJs(url, onFrameReady);
+        attachHlsJs(isApple ? withProxySegs(url) : url, onFrameReady);
       } else {
         v.src = useNativeHls ? withProxySegs(url) : url;
         if (autoplay) this.tryPlay();
@@ -1281,7 +1298,8 @@ export class Html5Adapter {
   setRate(r) { if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r; }
   getRate() { return Number(this.video?.playbackRate || 1); }
   setVolume(v) {
-    this.baseVolume = Math.max(0, Math.min(150, Number(v)));
+    const rawNum = Number(v);
+    this.baseVolume = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 80));
     this.subs.syncVideoVolume();
     this._syncDeckBVolume?.();
   }
@@ -1460,7 +1478,7 @@ export class Html5Adapter {
     if (typeof window !== 'undefined' && (window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function')) return true;
     return Boolean(
       (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function') ||
-      (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+      typeof v.webkitSetPresentationMode === 'function'
     );
   }
   isPiP() {
@@ -1474,16 +1492,32 @@ export class Html5Adapter {
   async togglePiP() {
     const v = this.video;
     if (!v) return false;
+    v.disablePictureInPicture = false;
+    try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
+    if (typeof v.webkitSetPresentationMode === 'function') {
+      try {
+        if (v.webkitPresentationMode === 'picture-in-picture') {
+          this._lastPipExitAt = Date.now();
+          v.webkitSetPresentationMode('inline');
+          this.subs?._disableAllNativeTextTracks?.();
+          this.events.onPipChange?.(false);
+          return 'exited';
+        }
+        if (v.readyState >= 1 && (!v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode('picture-in-picture'))) {
+          if (v.paused && this.wantPlaying !== false) {
+            try { v.play()?.catch?.(() => {}); } catch (_) {}
+          }
+          this.subs?._disableAllNativeTextTracks?.();
+          v.webkitSetPresentationMode('picture-in-picture');
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+        if (v.readyState < 1) {
+          try { v.play()?.catch?.(() => {}); } catch (_) {}
+        }
+      } catch (e) { /* try standard PiP API below */ }
+    }
     try {
-      if (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture')) {
-        const nextMode = v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
-        if (nextMode === 'inline') this._lastPipExitAt = Date.now();
-        v.webkitSetPresentationMode(nextMode);
-        const active = nextMode === 'picture-in-picture';
-        this.subs?._disableAllNativeTextTracks?.();
-        this.events.onPipChange?.(active);
-        return active ? 'entered' : 'exited';
-      }
       if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
         this._lastPipExitAt = Date.now();
         await document.exitPictureInPicture();
@@ -1492,10 +1526,12 @@ export class Html5Adapter {
         return 'exited';
       }
       if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
-        this.subs?._disableAllNativeTextTracks?.();
-        await v.requestPictureInPicture();
-        this.events.onPipChange?.(true);
-        return 'entered';
+        if (v.readyState >= 1) {
+          this.subs?._disableAllNativeTextTracks?.();
+          await v.requestPictureInPicture();
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
       }
     } catch (e) { /* fallback handled by caller */ }
     return false;

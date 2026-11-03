@@ -434,10 +434,6 @@ video::cue {
   opacity: 0;
   transition: opacity .08s linear;
 }
-.wl-brightness-veil.is-boost {
-  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.68) 100%);
-  mix-blend-mode: screen;
-}
 .ctl-seek-ripple {
   position: absolute;
   top: 0;
@@ -657,31 +653,8 @@ video::cue {
   border-color: var(--accent, #ff3b5c) !important;
 }
 .cam-bubble-btn {
-  position: absolute;
-  top: 4px;
-  right: 5px;
-  width: 21px;
-  height: 21px;
-  border-radius: 50%;
-  background: rgba(6, 9, 18, .78);
-  border: 1px solid rgba(255, 255, 255, .22);
-  color: #fff;
-  font-size: 10.5px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity .2s ease, transform .15s ease, background .15s ease;
-  z-index: 5;
-  cursor: pointer;
+  display: none !important;
 }
-.cam-bubble:hover .cam-bubble-btn,
-.cam-bubble.controls-visible .cam-bubble-btn { opacity: 1; }
-@media (pointer: coarse), (max-width: 960px) {
-  .cam-bubble .cam-bubble-btn { opacity: .9; }
-}
-.cam-bubble-btn:hover, .cam-bubble-btn:active { transform: scale(1.12); background: var(--accent, #ff3b5c); }
 .mic-btn.on.speaking {
   box-shadow: 0 0 0 calc(2px + var(--mic-lvl, 0.3) * 7px) rgba(99, 102, 241, .42), 0 0 16px rgba(99, 102, 241, .75);
 }
