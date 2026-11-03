@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v80';
-import { expectedPosition } from '../sync.js?v=20261103_v80';
-import { state } from '../store.js?v=20261103_v80';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v81';
+import { expectedPosition } from '../sync.js?v=20261103_v81';
+import { state } from '../store.js?v=20261103_v81';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -22,6 +22,7 @@ export class Html5Adapter {
     this.wantPlaying = true;
     this.bufferingReported = false;
     this.playingReported = false;
+    this.readyReported = false;
     this.baseVolume = 80;
     this.currentUrl = '';
     this.subs = new SubtitleDubController(this);
@@ -37,6 +38,7 @@ export class Html5Adapter {
     this.wantPlaying = Boolean(autoplay);
     this.bufferingReported = false;
     this.playingReported = false;
+    this.readyReported = false;
     clearTimeout(this.watchdogTimer);
     const v = document.createElement('video');
     v.playsInline = true;
@@ -260,10 +262,17 @@ export class Html5Adapter {
     }
     v.addEventListener('noop', () => {
     });
+    const reportReadyOnce = () => {
+      clearBuf();
+      if (!this.readyReported) {
+        this.readyReported = true;
+        this.events.onReady?.();
+      }
+    };
     v.addEventListener('volumechange', () => { if (!v.paused && !v.muted && v.volume > 0) { this.audioUnlocked = true; this.events.onUnmuted?.(); } });
-    v.addEventListener('loadeddata', () => { if (v.readyState >= 2) { clearBuf(); this.events.onReady?.(); } });
-    v.addEventListener('canplay', () => { clearBuf(); this.events.onReady?.(); });
-    v.addEventListener('canplaythrough', () => { clearBuf(); this.events.onReady?.(); });
+    v.addEventListener('loadeddata', () => { if (v.readyState >= 2) reportReadyOnce(); });
+    v.addEventListener('canplay', reportReadyOnce);
+    v.addEventListener('canplaythrough', reportReadyOnce);
     v.addEventListener('seeking', () => {
       this.subs?.clearActiveCue?.();
     });
@@ -332,9 +341,14 @@ export class Html5Adapter {
       this.subs.stopDubAudio();
       this.events.onEnded?.();
     };
-    const onFsChangeMark = () => { this._lastFsChangeAt = Date.now(); };
-    v.addEventListener('webkitbeginfullscreen', onFsChangeMark);
-    v.addEventListener('webkitendfullscreen', onFsChangeMark);
+    v.addEventListener('webkitbeginfullscreen', () => {
+      this._lastFsChangeAt = Date.now();
+      this._lastFsEnterAt = Date.now();
+    });
+    v.addEventListener('webkitendfullscreen', () => {
+      this._lastFsChangeAt = Date.now();
+      this._lastFsExitAt = Date.now();
+    });
     v.addEventListener('pause', () => {
       if (this._destroyed || this.video !== v) return;
       this.playingReported = false;
@@ -345,9 +359,21 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
+      const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
+      const exitingWebkitFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 900);
+      const inNativePlayerUi = Boolean(
+        v.webkitDisplayingFullscreen
+        || this.isPiP()
+        || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
+      );
+      if (inNativePlayerUi && !exitingWebkitFs && !v.seeking && !recentSeek && v.readyState >= 2) {
+        this.wantPlaying = false;
+        clearTimeout(this.resumeTimer);
+        this.events.onPause?.({ userFullscreenPause: true });
+        return;
+      }
       if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
-        const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
         const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 350 : 200;
         this.resumeTimer = setTimeout(() => {
           if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {

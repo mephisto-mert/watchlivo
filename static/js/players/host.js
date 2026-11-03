@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v80';
-import { Html5Adapter } from './html5.js?v=20261103_v80';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v80';
-import { EmbedAdapter } from './embed.js?v=20261103_v80';
-import { WebviewAdapter } from './webview.js?v=20261103_v80';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v81';
+import { Html5Adapter } from './html5.js?v=20261103_v81';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v81';
+import { EmbedAdapter } from './embed.js?v=20261103_v81';
+import { WebviewAdapter } from './webview.js?v=20261103_v81';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -82,7 +82,9 @@ export class PlayerHost {
       if (e?.type === 'keydown') {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const k = String(e.key || '').toLowerCase();
-        if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift') return;
+        if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift' || k === ' ' || k === 'k') return;
+      } else if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol')) {
+        return;
       }
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
         this.unlockAudio();
@@ -173,7 +175,7 @@ export class PlayerHost {
     let settledReady = false;
     const guard = (fn) => (...args) => { if (this.adapter === ad) fn(...args); };
     const events = {
-      onReady: guard(() => { settledReady = true; this.loading = false; this.onEvent('ready'); }),
+      onReady: guard(() => { if (settledReady) return; settledReady = true; this.loading = false; this.onEvent('ready'); }),
       onPlay: (arg) => { if (this.adapter === ad) { settledReady = true; this.loading = false; } this.onEvent('play', arg); },
       onPause: (arg) => this.onEvent('pause', arg),
       onEnded: guard(() => this.onEvent('ended')),
@@ -284,7 +286,7 @@ export class PlayerHost {
     if (this.volume <= 0) this.volume = 80;
     this.adapter?.setMuted(false);
     this.adapter?.setVolume(this._effectiveVolume());
-    if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying !== false) this.adapter?.play?.();
+    if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying === true) this.adapter?.play?.();
     this.onEvent('unmuted');
   }
 

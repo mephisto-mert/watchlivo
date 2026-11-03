@@ -885,7 +885,14 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     same_m_key = bool(s_has_media and r_has_media and media_key(s_media) == media_key(r_media))
     s_unresolved = str(s_media.get("url") or "").startswith("/api/rave/resolve-catalog")
     r_unresolved = str(r_media.get("url") or "").startswith("/api/rave/resolve-catalog")
-    if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
+    pause_protected = bool(
+        same_m_key
+        and not r_media.get("playing", True)
+        and s_media.get("playing")
+        and (t - float(r_media.get("lastExplicitPauseAt") or 0.0) < 15.0)
+        and s_m_time <= float(r_media.get("lastExplicitPauseAt") or 0.0) + 2.0
+    )
+    if (s_has_media and not r_has_media) or (s_has_media and not pause_protected and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
         if same_m_key and s_unresolved and not r_unresolved:
             merged_m = dict(s_media)
             for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
@@ -1663,7 +1670,11 @@ def _apply_time(room, data):
         room["media"]["currentTime"] = _finite_float(data["currentTime"], float(room["media"].get("currentTime") or 0.0), 0.0, 864000.0)
     at_f = _finite_float(data.get("atTime"), -1.0)
     t = now()
-    room["media"]["updatedAt"] = at_f if (at_f > 0.0 and abs(at_f - t) < 2.0) else t
+    prev_upd = float(room["media"].get("updatedAt") or 0.0)
+    cand = at_f if (at_f > 0.0 and abs(at_f - t) < 2.0) else t
+    if prev_upd > 0.0 and abs(prev_upd - t) < 5.0 and cand <= prev_upd:
+        cand = prev_upd + 0.001
+    room["media"]["updatedAt"] = cand
 
 
 def _play_next(room, by):
@@ -1843,6 +1854,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         elif mtype == "pause":
             room["media"]["playing"] = False
             room["media"]["lastExplicitPauseAt"] = t_now
+            room["media"]["updatedAt"] = max(t_now, float(room["media"].get("updatedAt") or 0.0) + 0.001)
         elif mtype == "seek":
             room["endedKey"] = ""
         elif mtype == "rate":

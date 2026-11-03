@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261103_v80 with zero stale v79 references
+        # 1. Cache-bust bumped cleanly to 20261103_v81 with zero stale v79 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v80", index_html)
+        self.assertIn("20261103_v81", index_html)
         self.assertNotIn("20261103_v79", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
@@ -993,6 +993,83 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("const shouldCloseRoom = Boolean(closeRoomForAll);", realtime_js)
         self.assertIn("280000", chat_js)
         self.assertIn("font-size: 16px !important;", vortex_css)
+
+    def test_v81_fullscreen_pause_and_no_ghost_controls(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Server pause protection: client clock skew (-1.2s atTime) + stale viewer syncToken poll must NEVER unpause room
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Tam Ekran Duraklatma Odasi",
+            "privacy": "public",
+            "playMode": "leader",
+            "creator": "Mert Can",
+            "creatorId": "u_mert_v81",
+            "clientId": "h_mert_v81",
+            "media": {
+                "title": "Arcane — 1. Sezon 9. Bölüm",
+                "tmdbId": "94605",
+                "mediaType": "tv",
+                "season": 1,
+                "episode": 9,
+                "url": "https://cdn.example.com/arcane-s1e9.m3u8",
+                "provider": "hls",
+                "currentTime": 1358.0,
+            },
+        }).json()
+        rid = cr["room"]["id"]
+        stale_playing_token = cr["room"]["syncToken"]
+        self.assertTrue(cr["room"]["media"]["playing"])
+
+        # Viewer joins with stale_playing_token
+        self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_ayse_v81",
+            "username": "Ayse Nur",
+            "syncToken": stale_playing_token,
+        })
+
+        # Leader pauses with slightly clock-skewed client atTime (-1.2s behind server now())
+        r_pause = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "pause",
+            "clientId": "h_mert_v81",
+            "clientToken": cr["clientToken"],
+            "username": "Mert Can",
+            "currentTime": 1362.4,
+            "atTime": rooms.now() - 1.2,
+        })
+        self.assertEqual(r_pause.status_code, 200)
+        self.assertFalse(r_pause.json()["room"]["media"]["playing"])
+        self.assertEqual(r_pause.json()["room"]["media"]["meshStateStatus"], "PAUSED")
+
+        # Viewer immediately polls carrying the old PLAYING syncToken -> room MUST stay PAUSED!
+        r_viewer_poll = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "poll",
+            "clientId": "h_ayse_v81",
+            "username": "Ayse Nur",
+            "syncToken": stale_playing_token,
+        })
+        self.assertEqual(r_viewer_poll.status_code, 200)
+        self.assertFalse(r_viewer_poll.json()["room"]["media"]["playing"])
+        self.assertEqual(r_viewer_poll.json()["room"]["media"]["meshStateStatus"], "PAUSED")
+
+        # 2. Static invariants for fullscreen pause & zero unsolicited HUD popups
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+
+        self.assertIn("reportReadyOnce", html5_js)
+        self.assertIn("userFullscreenPause: true", html5_js)
+        self.assertIn("if (settledReady) return;", host_js)
+        self.assertIn("togglePlayPause", controls_js)
+        self.assertIn("Date.now() - lastTouchAt < 950", controls_js)
+        self.assertIn("lastRevealedMediaKey", controls_js)
+        self.assertIn("arg?.userFullscreenPause", mesh_js)
+        self.assertIn("leader && ad.wantPlaying === false", sync_js)
+        self.assertNotIn(".video-frame:not(.fullscreen):not(.idle-cursor):hover .controls", mesh_css)
 
 
 if __name__ == '__main__':

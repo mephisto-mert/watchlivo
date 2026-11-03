@@ -188,6 +188,11 @@ export class SyncEngine {
     if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
 
     if (ad.isPaused()) {
+      if (leader && ad.wantPlaying === false) {
+        this.mode = 'paused';
+        this.onStatus({ mode: 'paused', delta: 0, curr, expected: curr, rate: ad.getRate() });
+        return timeout;
+      }
       if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
         ad.play();

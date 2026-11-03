@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v80';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v80';
-import { getProvider } from '../providers.js?v=20261103_v80';
-import { expectedPosition } from '../sync.js?v=20261103_v80';
-import { thumbFor } from './lobby.js?v=20261103_v80';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v80';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v80';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v80';
-import { avatar } from '../profile.js?v=20261103_v80';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v81';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v81';
+import { getProvider } from '../providers.js?v=20261103_v81';
+import { expectedPosition } from '../sync.js?v=20261103_v81';
+import { thumbFor } from './lobby.js?v=20261103_v81';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v81';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v81';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v81';
+import { avatar } from '../profile.js?v=20261103_v81';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -91,6 +91,9 @@ export function buildControls(frame, ctx) {
   let lastUiRevealAt = 0;
   let lastMouseX = -1;
   let lastMouseY = -1;
+  let lastLayoutShiftAt = 0;
+  let lastRevealedMediaKey = '';
+  let lastPlayToggleAt = 0;
   const hideControlsNow = () => {
     clearTimeout(uiTimer);
     controls.classList.remove('ui-active');
@@ -121,8 +124,9 @@ export function buildControls(frame, ctx) {
     revealControls();
     update();
   };
-  const tapProps = (fn) => {
+  const tapProps = (fn, opts = {}) => {
     let lastFire = 0;
+    let lastTouchAt = 0;
     let startX = 0;
     let startY = 0;
     const run = (e) => {
@@ -130,7 +134,7 @@ export function buildControls(frame, ctx) {
       const now = Date.now();
       if (now - lastFire < 320) return;
       lastFire = now;
-      revealControls(6500);
+      if (!opts.noAutoReveal) revealControls(3600);
       fn(e);
     };
     return {
@@ -138,22 +142,30 @@ export function buildControls(frame, ctx) {
         e.stopPropagation();
         startX = e.clientX || 0;
         startY = e.clientY || 0;
-        revealControls(6500);
+        if (!opts.noAutoReveal) revealControls(3600);
       },
       ontouchstart: (e) => {
         e.stopPropagation();
         const t = e.touches?.[0];
         if (t) { startX = t.clientX; startY = t.clientY; }
-        revealControls(6500);
+        if (!opts.noAutoReveal) revealControls(3600);
       },
       ontouchend: (e) => {
         e.stopPropagation();
         const t = e.changedTouches?.[0];
         if (t && (Math.abs(t.clientX - startX) > 24 || Math.abs(t.clientY - startY) > 24)) return;
+        lastTouchAt = Date.now();
         if (e.cancelable) e.preventDefault();
         run(e);
       },
-      onclick: (e) => run(e),
+      onclick: (e) => {
+        if (Date.now() - lastTouchAt < 950) {
+          e.preventDefault?.();
+          e.stopPropagation();
+          return;
+        }
+        run(e);
+      },
     };
   };
   const unmute = h('button', {
@@ -255,30 +267,40 @@ export function buildControls(frame, ctx) {
     showOverlay(`${delta > 0 ? '⏩ +' : '⏪ '}${delta} sn (${fmtTime(target)})`, 1200);
     revealControls();
   };
-  const playBtn = h('button', { type: 'button', class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', ...tapProps(() => {
-    if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
+  const togglePlayPause = () => {
+    const now = Date.now();
+    if (now - lastPlayToggleAt < 260) return;
+    lastPlayToggleAt = now;
     const roomPlaying = (state.mesh?.media?.meshStateStatus || (state.mesh?.media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
     const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
     if (!isLeader()) {
       if (roomPlaying && adapterPaused) {
+        if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
         host.adapter?.play?.();
         ctx.sync?.kick();
-        revealControls(5200);
+        revealControls(2400);
         update();
         return;
       }
+      showOverlay('⏸ Yalnızca oda başkanı duraklatabilir · ☕ Mola Zamanı isteyebilirsiniz', 2800);
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
+      revealControls(3200);
       return;
     }
-    if (!adapterPaused || (roomPlaying && !ctx.userPaused)) {
+    const shouldPause = !adapterPaused || (roomPlaying && !ctx.userPaused);
+    if (shouldPause) {
       actions.pause();
+      host.adapter?.pause?.();
+      revealControls(3600);
     } else {
+      if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
       host.adapter?.play?.();
       actions.play();
+      revealControls(2200);
     }
-    revealControls(5200);
     update();
-  }) });
+  };
+  const playBtn = h('button', { type: 'button', class: 'ctl-action', 'aria-label': 'Oynat/Duraklat', id: 'ctl-play', ...tapProps(togglePlayPause, { noAutoReveal: true }) });
   const back10Btn = h('button', {
     class: 'ctl-action',
     'data-tip': '10 sn geri',
@@ -726,14 +748,17 @@ export function buildControls(frame, ctx) {
     id: 'ctl-center-back10',
     'aria-label': '10 saniye geri',
     title: '10 saniye geri',
-    ...tapProps(() => back10Btn.click()),
+    ...tapProps(() => {
+      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      seekStep(-10);
+    }),
   }, ico('rewind10'));
   const centerPlayBtn = h('button', {
     type: 'button',
     class: 'ctl-center-play',
     id: 'ctl-center-play',
     'aria-label': 'Oynat / Duraklat',
-    ...tapProps(() => playBtn.click()),
+    ...tapProps(togglePlayPause, { noAutoReveal: true }),
   }, ico('play'));
   const centerFwd10Btn = h('button', {
     type: 'button',
@@ -741,7 +766,10 @@ export function buildControls(frame, ctx) {
     id: 'ctl-center-fwd10',
     'aria-label': '10 saniye ileri',
     title: '10 saniye ileri',
-    ...tapProps(() => fwd10Btn.click()),
+    ...tapProps(() => {
+      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      seekStep(10);
+    }),
   }, ico('forward10'));
   const centerHud = h('div', { class: 'ctl-center-hud', id: 'ctl-center-hud' }, centerBack10Btn, centerPlayBtn, centerFwd10Btn);
   const mid = h('div', { class: 'ctl-mid' }, centerHud);
@@ -848,13 +876,12 @@ export function buildControls(frame, ctx) {
   let desktopClickTimer = null;
   mid.addEventListener('click', (e) => {
     if (e.target?.closest?.('button, input')) return;
-    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 900) return;
+    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 1200 || window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches) return;
     if (!menu.classList.contains('hidden')) { closeMenu(); return; }
     if ((isActuallyMuted() && !host.userMuted) || !unmute.classList.contains('hidden')) { doUnlockAudio(); return; }
     clearTimeout(desktopClickTimer);
     desktopClickTimer = setTimeout(() => {
-      playBtn.click();
-      revealControls(3000);
+      togglePlayPause();
     }, 200);
   });
   mid.addEventListener('dblclick', (e) => {
@@ -906,11 +933,21 @@ export function buildControls(frame, ctx) {
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
   frame.addEventListener('pointermove', (e) => {
-    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 1000) return;
-    if (lastMouseX >= 0 && Math.abs(e.clientX - lastMouseX) < 4 && Math.abs(e.clientY - lastMouseY) < 4) return;
+    if (e.pointerType === 'touch' || Date.now() - touchStartTime < 1400 || Date.now() - lastLayoutShiftAt < 700) return;
+    if (window.matchMedia?.('(hover: none) and (pointer: coarse)')?.matches) return;
+    if (lastMouseX < 0) {
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      return;
+    }
+    if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) < 8) return;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
-    revealControls(3000);
+    revealControls(2600);
+  }, { passive: true });
+  frame.addEventListener('pointerleave', () => {
+    lastMouseX = -1;
+    lastMouseY = -1;
   }, { passive: true });
   controls.addEventListener('pointerdown', (e) => {
     if (e.target?.closest?.('.ctl-top, .ctl-bottom, .ctl-menu, .ctl-center-play, .ctl-center-side')) {
@@ -1921,6 +1958,7 @@ export function buildControls(frame, ctx) {
   }
 
   function onViewportChange() {
+    lastLayoutShiftAt = Date.now();
     const ae = typeof document !== 'undefined' ? document.activeElement : null;
     const isInputFocused = Boolean(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
     if (!isInputFocused) {
@@ -2270,9 +2308,11 @@ export function buildControls(frame, ctx) {
       }
     }
     const roomPlaying = (m.meshStateStatus || (m.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+    const startupGrace = Boolean(host.adapter?.loadedAtMs && Date.now() - host.adapter.loadedAtMs < 3200 && !ctx.userPaused && !host.autoplayBlocked);
     const localPaused = Boolean(
       host.adapter
       && !host.loading
+      && !startupGrace
       && host.adapter.isPaused?.()
       && !host.adapter.isBuffering?.()
       && !host.adapter.video?.seeking
@@ -2454,16 +2494,24 @@ export function buildControls(frame, ctx) {
         update();
         return;
       }
+      const mCur = state.mesh?.media;
+      const mRevealKey = mCur ? `${mCur.tmdbId || mCur.id || mCur.videoId || mCur.title || ''}:${mCur.season || 0}:${mCur.episode || 0}` : '';
       if (ev === 'loading' || (ev === 'buffering' && arg)) {
         loading.classList.remove('hidden');
-        if (ev === 'loading') revealControls(6500);
+        if (ev === 'loading' && mRevealKey && mRevealKey !== lastRevealedMediaKey) {
+          lastRevealedMediaKey = mRevealKey;
+          revealControls(3200);
+        }
       } else if (ev === 'ready' || ev === 'play' || (ev === 'buffering' && !arg) || ev === 'loaded') {
         loading.classList.add('hidden');
         errorBox.classList.add('hidden');
         applyVideoFilter();
         syncVideoStageBounds(true);
         host.adapter?.subs?.onTimeUpdate?.(position(), true);
-        if (ev === 'ready' || ev === 'loaded') revealControls(5500);
+        if ((ev === 'ready' || ev === 'loaded') && mRevealKey && mRevealKey !== lastRevealedMediaKey) {
+          lastRevealedMediaKey = mRevealKey;
+          revealControls(3000);
+        }
       }
       if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isHostOnly()) {
         triggerNextEpisode();

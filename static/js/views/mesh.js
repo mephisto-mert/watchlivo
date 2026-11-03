@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v80';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v80';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v80';
-import { MeshConnection } from '../realtime.js?v=20261103_v80';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v80';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v80';
-import { buildLayout } from './mesh-layout.js?v=20261103_v80';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v80';
-import { Voice } from '../voice.js?v=20261103_v80';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v80';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v81';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v81';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v81';
+import { MeshConnection } from '../realtime.js?v=20261103_v81';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v81';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v81';
+import { buildLayout } from './mesh-layout.js?v=20261103_v81';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v81';
+import { Voice } from '../voice.js?v=20261103_v81';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v81';
 
 let ctx = null;
 
@@ -439,7 +439,7 @@ function onMessage(data) {
       break;
     case 'sync':
       if (data.cid && data.cid === state.clientId) break;
-      if (isTimeKeeper() && ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 4500 && (data.action === 'poll_sync' || data.action === 'heartbeat')) break;
+      if (isTimeKeeper() && (data.action === 'poll_sync' || data.action === 'heartbeat') && (ctx?.userPaused || (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 6500))) break;
       if (room && data.media) {
         const incTime = Number(data.media.meshStateTime || data.media.updatedAt || 0);
         const curTime = Number(room.media?.meshStateTime || room.media?.updatedAt || 0);
@@ -1158,6 +1158,9 @@ function onPlayerEvent(ev, arg) {
         actions.heartbeat(t, true);
       }
     }
+  }
+  if (ev === 'pause' && arg?.userFullscreenPause && isLeader() && !ctx.host.loading && !ctx.userPaused) {
+    actions.pause();
   }
   if (ev === 'play' && arg?.native && isLeader() && !ctx.host.loading && ctx.userPaused) {
     actions.play();

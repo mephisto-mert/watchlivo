@@ -159,16 +159,7 @@ body.vortex-fs .panel-video {
 .controls:not(.ui-active):not(.show) .ctl-center-hud:not(.is-paused) * {
   pointer-events: none !important;
 }
-@media (hover: hover) and (pointer: fine) {
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls { opacity: 1; }
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls > * { pointer-events: auto; }
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-top,
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-top *,
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-bottom,
-  .video-frame:not(.fullscreen):not(.idle-cursor):hover .controls .ctl-bottom * {
-    pointer-events: auto !important;
-  }
-}
+
 .controls.show, .controls.ui-active, .video-frame.menu-open .controls { opacity: 1; }
 .controls.show > *, .controls.ui-active > *, .video-frame.menu-open .controls > * { pointer-events: auto; }
 .video-frame.idle-cursor, .video-frame.idle-cursor * { cursor: none !important; }
@@ -269,11 +260,7 @@ body.vortex-fs .panel-video {
     bottom: 64px !important;
   }
 }
-@media (hover: hover) and (pointer: fine) {
-  .video-frame:not(.fullscreen):hover .rave-subtitle-overlay {
-    bottom: calc(var(--margin) + var(--mesh-action-width) + 12px);
-  }
-}
+
 .rave-subtitle-cue {
   display: inline-block;
   padding: .24em .68em;
