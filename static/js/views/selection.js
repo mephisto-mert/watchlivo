@@ -1,15 +1,18 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v90';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v90';
-import { api, qs } from '../api.js?v=20261103_v90';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v90';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v90';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v91';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v91';
+import { api, qs } from '../api.js?v=20261103_v91';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v91';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v91';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261103_v91';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
-  getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress,
+  getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
   getFavorites, isFavoriteMedia, toggleFavoriteMedia,
-  getMusicHistory, clearMusicHistory,
-} from '../store.js?v=20261103_v90';
+  getMusicHistory, clearMusicHistory, getAccountStorageScope,
+  getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
+  dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
+} from '../store.js?v=20261103_v91';
 
 let _activeHomePick = null;
 
@@ -21,9 +24,23 @@ export const parseDuration = (s) => {
 };
 
 export const ytToMedia = (it) => ({
-  provider: 'youtube', videoId: it.videoId, url: it.url || `https://www.youtube.com/watch?v=${it.videoId}`,
-  title: it.title, thumbnail: it.thumbnail || `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg`,
-  channel: it.channel || 'YouTube', duration: parseDuration(it.duration), live: !!it.live,
+  provider: 'youtube',
+  videoId: it.videoId || '',
+  url: it.url || `https://www.youtube.com/watch?v=${it.videoId}`,
+  title: it.title || 'YouTube Videosu',
+  thumbnail: it.thumbnail || `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg`,
+  channel: it.channel || 'YouTube',
+  channelId: it.channelId || '',
+  channelAvatar: it.channelAvatar || '',
+  views: it.views || '',
+  published: it.published || '',
+  reason: it.reason || '',
+  durationText: typeof it.duration === 'string' ? it.duration : '',
+  duration: parseDuration(it.duration),
+  watchedPercent: Number(it.watchedPercent || 0),
+  isLiked: Boolean(it.isLiked),
+  isFollowedChannel: Boolean(it.isFollowedChannel),
+  live: !!it.live,
 });
 
 // JustWatch package names → registry ids (Rave SuperSearch offerUrls → videoProvider)
@@ -149,14 +166,73 @@ export function providerTile(p, onClick) {
   return card;
 }
 
-export function videoCard(media, onPick) {
+const YT_CH_COLORS = ['#ef4444', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6'];
+function _chanColor(name) {
+  let hash = 0;
+  const s = String(name || 'YT');
+  for (let i = 0; i < s.length; i += 1) hash = ((hash << 5) - hash) + s.charCodeAt(i);
+  return YT_CH_COLORS[Math.abs(hash) % YT_CH_COLORS.length];
+}
+
+export function videoCard(media, onPick, opts = {}) {
   const prov = getProvider(media.provider);
+  const isYt = media.provider === 'youtube' || Boolean(media.videoId);
   const inRoom = Boolean(window.vortexActions?.queueMusic && location.hash.startsWith('#/mesh/'));
-  const card = h('div', { class: 'vcard', role: 'button', tabindex: '0' },
+  const durBadge = media.live ? '🔴 CANLI' : (media.durationText || (media.duration ? fmtDur(media.duration) : ''));
+  const chName = media.channel || prov?.name || 'YouTube';
+  const chInitials = chName.replace(/^@/, '').trim().slice(0, 2).toUpperCase() || 'YT';
+  let liked = isYt ? isYtVideoLiked(media.videoId) : false;
+  let followed = isYt ? isYtChannelFollowed(media.channelId, chName) : false;
+
+  const followBtn = isYt && chName !== 'YouTube' ? h('button', {
+    type: 'button',
+    class: `yt-card-follow-btn ${followed ? 'active' : ''}`,
+    title: followed ? 'Takipten çıkar' : `${chName} kanalını takip et`,
+    onclick: (e) => {
+      e.stopPropagation();
+      followed = toggleYtChannelFollow({ channelId: media.channelId, name: chName, avatar: media.channelAvatar });
+      followBtn.classList.toggle('active', followed);
+      followBtn.textContent = followed ? '✓ Takipte' : '+ Takip';
+      toast(followed ? `🔔 ${chName} takip edilen kanallarına eklendi` : `${chName} takipten çıkarıldı`);
+      opts.onFollowChange?.(followed, media);
+    },
+  }, followed ? '✓ Takipte' : '+ Takip') : null;
+
+  const likeBtn = isYt && media.videoId ? h('button', {
+    type: 'button',
+    class: `yt-card-act-btn ${liked ? 'liked' : ''}`,
+    title: liked ? 'Beğenilenlerden çıkar' : 'Beğen (Önerilerini güçlendirir)',
+    onclick: (e) => {
+      e.stopPropagation();
+      liked = toggleYtVideoLike(media);
+      toggleFavoriteMedia({ ...media, provider: 'youtube' });
+      likeBtn.classList.toggle('liked', liked);
+      likeBtn.textContent = liked ? '❤️' : '🤍';
+      toast(liked ? '❤️ Beğenilen videolara eklendi — önerilerin güncellenecek' : 'Beğeni kaldırıldı');
+      opts.onLikeChange?.(liked, media);
+    },
+  }, liked ? '❤️' : '🤍') : null;
+
+  const card = h('div', { class: `vcard ${isYt ? 'yt-rich-card' : ''}`, role: 'button', tabindex: '0', 'data-channel': chName.toLowerCase() },
     h('div', { class: 'vcard-thumb' },
-      media.thumbnail ? h('img', { src: media.thumbnail, alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }) : null,
-      prov?.logo ? h('img', { class: 'vcard-prov', src: prov.logo, alt: '' }) : null,
-      media.duration ? h('span', { class: 'vcard-dur' }, fmtDur(media.duration)) : null,
+      media.thumbnail ? h('img', { src: media.thumbnail, alt: media.title || '', loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }) : null,
+      media.reason ? h('span', { class: 'yt-reason-pill' }, media.reason) : (prov?.logo && !isYt ? h('img', { class: 'vcard-prov', src: prov.logo, alt: '' }) : null),
+      durBadge ? h('span', { class: `vcard-dur ${media.live ? 'is-live' : ''}` }, durBadge) : null,
+      Number(media.watchedPercent || 0) > 2 ? h('div', { class: 'yt-watched-bar' }, h('div', { class: 'yt-watched-fill', style: { width: `${Math.min(100, Math.max(5, Math.round(media.watchedPercent)))}%` } })) : null,
+      opts.allowDismiss && media.videoId ? h('button', {
+        type: 'button',
+        class: 'yt-dismiss-btn',
+        title: 'İlgilenmiyorum (Akıştan gizle)',
+        onclick: (e) => {
+          e.stopPropagation();
+          dismissYtVideo(media.videoId);
+          card.style.opacity = '0';
+          card.style.transform = 'scale(0.94)';
+          setTimeout(() => card.remove(), 180);
+          toast('✕ Video akışından gizlendi ("İlgilenmiyorum")');
+          opts.onDismiss?.(media);
+        },
+      }, '✕') : null,
       inRoom ? h('button', {
         type: 'button',
         class: 'vcard-queue-btn',
@@ -166,12 +242,57 @@ export function videoCard(media, onPick) {
           window.vortexActions?.queueMusic?.(media);
         },
       }, '+ Sıraya Ekle') : null),
-    h('div', { class: 'vcard-info' }, h('div', { class: 'vcard-title' }, media.title), h('div', { class: 'vcard-sub' }, media.channel || prov?.name || '')));
+    isYt ? h('div', { class: 'vcard-info yt-card-meta-row' },
+      h('div', {
+        class: 'yt-chan-avatar',
+        style: { background: _chanColor(chName) },
+        title: `${chName} videolarını gör`,
+        onclick: opts.onChannelFilter ? (e) => { e.stopPropagation(); opts.onChannelFilter(media); } : null,
+      }, media.channelAvatar ? h('img', {
+        src: media.channelAvatar,
+        alt: chName,
+        loading: 'lazy',
+        onerror: (e) => { e.currentTarget.replaceWith(document.createTextNode(chInitials)); },
+      }) : chInitials),
+      h('div', { class: 'yt-card-text-col' },
+        h('div', { class: 'vcard-title', title: media.title }, media.title),
+        h('div', { class: 'yt-card-channel-line' },
+          h('span', {
+            class: 'yt-card-channel-name',
+            onclick: opts.onChannelFilter ? (e) => { e.stopPropagation(); opts.onChannelFilter(media); } : null,
+          }, chName),
+          followBtn),
+        (media.views || media.published) ? h('div', { class: 'yt-card-stats-line' },
+          `${media.views || ''}${media.views && media.published ? ' • ' : ''}${media.published || ''}`) : null),
+      h('div', { class: 'yt-card-actions' },
+        likeBtn,
+        opts.allowDismiss && chName !== 'YouTube' ? h('button', {
+          type: 'button',
+          class: 'yt-card-act-btn mute-ch',
+          title: `${chName} kanalını bir daha önerme`,
+          onclick: (e) => {
+            e.stopPropagation();
+            blockYtChannel(media.channelId || chName);
+            const gridParent = card.parentElement;
+            if (gridParent) {
+              gridParent.querySelectorAll(`[data-channel="${CSS.escape(chName.toLowerCase())}"]`).forEach((el) => el.remove());
+            } else {
+              card.remove();
+            }
+            toast(`🚫 ${chName} kanalı önerilerden çıkarıldı`);
+          },
+        }, '🚫') : null))
+      : h('div', { class: 'vcard-info' }, h('div', { class: 'vcard-title' }, media.title), h('div', { class: 'vcard-sub' }, chName)));
   const go = async () => {
     if (card.querySelector('.loading')) return;
     const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));
     card.append(l);
-    try { await onPick(media); } finally { l.remove(); }
+    try {
+      if (isYt) {
+        try { saveWatchProgress({ ...media, provider: 'youtube' }, 0, media.duration || 0); } catch (e) { /* ignore */ }
+      }
+      await onPick(media);
+    } finally { l.remove(); }
   };
   card.addEventListener('click', go);
   card.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
@@ -214,6 +335,111 @@ function shuffleArray(arr) {
   return copy;
 }
 
+
+const QUICK_TR_CHANNELS = [
+  'Barış Özcan', 'Evrim Ağacı', 'Socrates Dergi',
+  'netd müzik', 'Filmler ve Filimler', 'Ruhi Çenet',
+];
+
+export function openYtPersonalizeModal(onUpdated) {
+  if (!state.self || state.self.isGuest) {
+    profileSetup({
+      current: state.self,
+      initialTab: 'login',
+      onDone: () => { invalidateYtFeedCache(); onUpdated?.(); },
+    });
+    return;
+  }
+  const chInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'Takip etmek istediğin YouTube kanal adı veya @handle yaz (örn. Barış Özcan)',
+  });
+  const subsWrap = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' } });
+  const renderSubsList = () => {
+    const subs = getYtPrefs().subscriptions;
+    subsWrap.replaceChildren(
+      ...(subs.length ? subs.map((s) => h('span', {
+        class: 'yt-sub-chip',
+      },
+        h('span', {}, `🔔 ${s.name}`),
+        h('button', {
+          type: 'button',
+          class: 'yt-sub-rm',
+          onclick: () => {
+            toggleYtChannelFollow(s);
+            renderSubsList();
+            onUpdated?.();
+          },
+        }, '×'))) : [h('span', { class: 'dim', style: { fontSize: '.78rem' } }, 'Henüz takip edilen kanal yok — aşağıdan veya kartlardaki + Takip butonuyla ekleyebilirsin.')])
+    );
+  };
+  renderSubsList();
+
+  const addCustomCh = () => {
+    const val = chInp.value.trim();
+    if (!val) return;
+    toggleYtChannelFollow({ channelId: '', name: val.replace(/^@+/, '') });
+    chInp.value = '';
+    renderSubsList();
+    toast(`🔔 ${val} takip edilen kanallara eklendi!`);
+    onUpdated?.();
+  };
+  chInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustomCh(); });
+
+  const modalRef = popup({
+    title: '🔴 Kişiselleştirilmiş YouTube Akışı & Kanal Eşitleme',
+    content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+      h('div', { class: 'yt-oauth-banner' },
+        h('div', { style: { fontSize: '.82rem', lineHeight: '1.45', color: '#e2e8f0' } },
+          `Hesabın (@${state.self.handle || state.self.name}) ile izlediğin videolar, beğenilerin, aramaların ve takip ettiğin kanallar otomatik olarak bulutta saklanır ve akışını şekillendirir.`),
+        h('button', {
+          type: 'button',
+          class: 'btn primary',
+          style: { width: '100%', justifyContent: 'center', marginTop: '8px', background: '#ff0033', borderColor: '#ff0033', color: '#fff' },
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            btn.disabled = true;
+            btn.textContent = '⏳ Google YouTube Hesabın Eşitleniyor...';
+            try {
+              const res = await syncGoogleYoutubeOAuth();
+              toast(`🔴 Google YouTube eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
+              renderSubsList();
+              onUpdated?.();
+              modalRef?.close?.();
+            } catch (err) {
+              toast('Google penceresi kapatıldı veya izin verilmedi — aşağıdan dilediğin kanalı tek tıkla ekleyebilirsin.');
+            } finally {
+              btn.disabled = false;
+              btn.textContent = '🔴 Google Hesabından YouTube Abonelik & Beğenileri Eşitle';
+            }
+          },
+        }, '🔴 Google Hesabından YouTube Abonelik & Beğenileri Eşitle')),
+      h('div', { style: { display: 'flex', gap: '8px' } },
+        chInp,
+        h('button', { type: 'button', class: 'btn primary', onclick: addCustomCh }, '+ Takip Et')),
+      h('div', {},
+        h('div', { style: { fontSize: '.76rem', fontWeight: '700', color: '#94a3b8', marginBottom: '6px' } }, 'Hızlı Kanal Ekle:'),
+        h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
+          ...QUICK_TR_CHANNELS.map((qcName) => h('button', {
+            type: 'button',
+            class: 'btn sm ghost',
+            onclick: () => {
+              if (!isYtChannelFollowed('', qcName)) {
+                toggleYtChannelFollow({ channelId: '', name: qcName });
+                renderSubsList();
+                toast(`🔔 ${qcName} eklendi`);
+                onUpdated?.();
+              }
+            },
+          }, `+ ${qcName}`)))),
+      h('div', {},
+        h('div', { style: { fontSize: '.76rem', fontWeight: '700', color: '#94a3b8', marginBottom: '4px' } }, 'Takip Ettiğin Kanallar:'),
+        subsWrap)),
+    options: [{ label: 'Tamam', primary: true }],
+  });
+}
+
 export function createSelection({ onPick, compact = false, initialProvider = null } = {}) {
   const root = h('div', { class: 'selection fade-in' });
   let provider = initialProvider ? getProvider(initialProvider) : null;
@@ -230,6 +456,142 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let autoRotateTicks = 0;
   let autoRotateTimer = null;
   let superSearchSeq = 0;
+  let ytHomeChip = 'all';
+  let ytHomeExpanded = false;
+  let ytHomeData = null;
+  let ytHomeSeq = 0;
+  let ytLastScope = '';
+  const ytHomeMount = h('div', { id: 'wl-yt-home-mount' });
+
+  function renderYtHomeDOM(loading = false) {
+    if (compact || state.mesh) { ytHomeMount.replaceChildren(); return; }
+    const signedIn = Boolean(state.self && !state.self.isGuest);
+    if (!signedIn) {
+      ytHomeMount.replaceChildren(
+        h('section', { class: 'wl-yt-guest-cta' },
+          h('div', { class: 'wl-yt-guest-left' },
+            h('span', { class: 'wl-yt-play-pill' }, '▶'),
+            h('div', {},
+              h('div', { class: 'wl-yt-guest-title' }, 'Senin İçin Kişiselleştirilmiş YouTube Akışı'),
+              h('div', { class: 'wl-yt-guest-sub' }, 'Hesabınla giriş yaptığında aynı YouTube gibi izleme geçmişine, beğenilerine ve takip ettiğin kanallara özel videolar burada otomatik açılır.'))),
+          h('button', {
+            type: 'button',
+            class: 'btn primary sm',
+            onclick: () => profileSetup({ current: state.self, initialTab: 'login', onDone: () => refreshYtHomeSection(true) }),
+          }, '🔑 Giriş Yap & Aç'))
+      );
+      return;
+    }
+    const uHandle = state.self.handle ? `@${state.self.handle}` : (state.self.name || 'Hesabın');
+    const chips = ytHomeData?.chips?.length ? ytHomeData.chips : [
+      { id: 'all', label: 'Tümü' },
+      { id: 'for_you', label: '✨ Sana Özel' },
+      { id: 'subscriptions', label: '🔔 Takip Edilenler' },
+      { id: 'recent', label: '🆕 Yeni Yüklenenler' },
+      { id: 'music', label: '🎵 Müzik' },
+      { id: 'cinema', label: '🎬 Sinema & Fragman' },
+      { id: 'gaming', label: '🎮 Oyun' },
+    ];
+    const allItems = (ytHomeData?.items || []).map(ytToMedia);
+    const visibleItems = ytHomeExpanded ? allItems.slice(0, 24) : allItems.slice(0, 8);
+    ytHomeMount.replaceChildren(
+      h('section', { class: 'wl-yt-home-section', id: 'wl-yt-home-section' },
+        h('div', { class: 'wl-yt-home-head' },
+          h('div', { class: 'wl-yt-home-title-wrap' },
+            h('span', { class: 'wl-yt-play-pill' }, '▶'),
+            h('div', {},
+              h('div', { class: 'wl-yt-home-heading' },
+                h('span', {}, 'Senin İçin Önerilenler'),
+                h('span', { class: 'wl-yt-user-badge' }, uHandle),
+                h('span', { class: 'wl-yt-adfree-badge' }, '🛡️ Reklamsız 1080p')),
+              h('div', { class: 'wl-yt-home-sub' },
+                ytHomeData?.personalized
+                  ? 'İzleme geçmişin, beğenilerin ve takip ettiğin kanallara göre canlı güncellenir'
+                  : 'İzledikçe, beğendikçe ve kanal takip ettikçe akışın tamamen sana özel şekillenir'))),
+          h('div', { class: 'wl-yt-home-actions' },
+            h('button', {
+              type: 'button',
+              class: 'btn sm ghost',
+              onclick: () => openYtPersonalizeModal(() => refreshYtHomeSection(true)),
+            }, '🔗 Kanal & Google Eşitle'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm ghost',
+              title: 'Önerileri yenile',
+              onclick: () => refreshYtHomeSection(true),
+            }, '🔄 Yenile'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              onclick: () => { provider = getProvider('youtube'); render(); },
+            }, 'Tüm YouTube →'))),
+        h('div', { class: 'yt-chip-bar' },
+          ...chips.map((ch) => h('button', {
+            type: 'button',
+            class: `yt-filter-chip ${ytHomeChip === ch.id ? 'active' : ''}`,
+            onclick: () => {
+              ytHomeChip = ch.id;
+              refreshYtHomeSection(false, true);
+            },
+          }, ch.label))),
+        loading && !visibleItems.length
+          ? buildShimmerGrid(4)
+          : (visibleItems.length
+              ? h('div', { class: 'card-grid yt-feed-grid' },
+                  ...visibleItems.map((m) => videoCard(m, pickSafe, {
+                    allowDismiss: true,
+                    onChannelFilter: (med) => {
+                      ytHomeChip = `ch:${med.channelId || ''}:${med.channel || ''}`;
+                      refreshYtHomeSection(false, true);
+                    },
+                  })))
+              : h('div', { class: 'lobby-empty' }, 'Bu filtrede henüz video bulunamadı — başka bir kategori seçebilir veya kanal ekleyebilirsin.')),
+        allItems.length > 8 ? h('div', { class: 'wl-yt-more-row' },
+          h('button', {
+            type: 'button',
+            class: 'btn sm ghost',
+            onclick: () => { ytHomeExpanded = !ytHomeExpanded; renderYtHomeDOM(false); },
+          }, ytHomeExpanded ? '▲ Daha Az Göster' : `▼ Daha Fazla Sana Özel Video Göster (${Math.min(24, allItems.length)})`)) : null)
+    );
+  }
+
+  async function refreshYtHomeSection(force = false, chipChanged = false) {
+    if (compact || state.mesh) { ytHomeMount.replaceChildren(); return; }
+    const signedIn = Boolean(state.self && !state.self.isGuest);
+    if (!signedIn) {
+      ytHomeData = null;
+      ytLastScope = '';
+      renderYtHomeDOM(false);
+      return;
+    }
+    const curScope = `${getAccountStorageScope()}|${ytHomeChip}`;
+    if (!force && !chipChanged && ytHomeData && ytLastScope === curScope) {
+      renderYtHomeDOM(false);
+      return;
+    }
+    const seqId = ++ytHomeSeq;
+    if (chipChanged) ytHomeData = { ...(ytHomeData || {}), items: [] };
+    renderYtHomeDOM(true);
+    try {
+      const data = await fetchPersonalizedYtFeed(ytHomeChip, force);
+      if (seqId !== ytHomeSeq) return;
+      ytHomeData = data;
+      ytLastScope = curScope;
+      renderYtHomeDOM(false);
+    } catch (e) {
+      if (seqId === ytHomeSeq) renderYtHomeDOM(false);
+    }
+  }
+
+  let _lastAuthWatchSig = `${Boolean(state.self && !state.self.isGuest)}|${getAccountStorageScope()}|${state.cloudSyncedAt || 0}`;
+  const _unsubHomeYt = subscribe((st) => {
+    if (!root.isConnected) { _unsubHomeYt(); return; }
+    const nextSig = `${Boolean(st.self && !st.self.isGuest)}|${getAccountStorageScope()}|${st.cloudSyncedAt || 0}`;
+    if (nextSig !== _lastAuthWatchSig) {
+      _lastAuthWatchSig = nextSig;
+      if (!provider && !superQuery && !compact) refreshYtHomeSection(true);
+    }
+  });
   const _onDocPointerDown = (ev) => {
     if (!root.isConnected) {
       document.removeEventListener('pointerdown', _onDocPointerDown, true);
@@ -1008,13 +1370,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
         ...(moreTile ? [moreTile] : [])));
 
+    const showYtHome = !compact && !state.mesh && !superQuery && (catFilter === 'all' || catFilter === 'social');
     root.replaceChildren(
       topBar,
       results,
       ...(heroBanner ? [heroBanner] : []),
       ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
+      ...(showYtHome ? [ytHomeMount] : []),
       gridSection);
+    if (showYtHome) refreshYtHomeSection(false);
     if (superQuery) runSuperSearch(superQuery, results);
   }
 

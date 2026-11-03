@@ -172,7 +172,7 @@ class SecurityHeaders:
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
                 req_path = str(scope.get("path") or "")
-                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image")) or (req_path.startswith("/api/rooms/") and req_path != "/api/rooms"):
+                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed")) or (req_path.startswith("/api/rooms/") and req_path != "/api/rooms"):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
                     hdrs.append((b"cdn-cache-control", b"no-store"))
@@ -318,11 +318,24 @@ def _yt_search_sync(q: str):
                         continue
                     vid = vr["videoId"]
                     title = "".join(r.get("text", "") for r in vr.get("title", {}).get("runs", [])) or "Video"
-                    channel = "".join(r.get("text", "") for r in vr.get("ownerText", {}).get("runs", [])) or "YouTube"
+                    owner_runs = vr.get("ownerText", {}).get("runs", []) or vr.get("longBylineText", {}).get("runs", [])
+                    channel = "".join(r.get("text", "") for r in owner_runs) or "YouTube"
+                    ch_id = ""
+                    if owner_runs and isinstance(owner_runs[0], dict):
+                        ch_id = (((owner_runs[0].get("navigationEndpoint") or {}).get("browseEndpoint") or {}).get("browseId") or "")
+                    ch_thumbs = ((((vr.get("channelThumbnailSupportedRenderers") or {}).get("channelThumbnailWithLinkRenderer") or {}).get("thumbnail") or {}).get("thumbnails") or [])
+                    ch_avatar = ch_thumbs[-1].get("url", "") if ch_thumbs and isinstance(ch_thumbs[-1], dict) else ""
+                    views = (vr.get("shortViewCountText") or {}).get("simpleText") or (vr.get("viewCountText") or {}).get("simpleText") or ""
+                    published = (vr.get("publishedTimeText") or {}).get("simpleText") or ""
                     dur = vr.get("lengthText", {}).get("simpleText", "")
                     live = any("LIVE" in json.dumps(b) for b in vr.get("badges", [])) or not dur
-                    items.append({"videoId": vid, "title": title, "channel": channel, "duration": dur, "live": live,
-                                  "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg", "url": f"https://www.youtube.com/watch?v={vid}"})
+                    items.append({
+                        "videoId": vid, "title": title, "channel": channel, "channelId": ch_id,
+                        "channelAvatar": ch_avatar, "views": views, "published": published,
+                        "duration": dur, "live": live,
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                        "url": f"https://www.youtube.com/watch?v={vid}",
+                    })
                     if len(items) >= 24:
                         return items
     except Exception:
@@ -359,6 +372,451 @@ async def search_youtube(request: Request):
         return JSONResponse({"items": items})
     except Exception as e:
         return JSONResponse({"items": [], "error": f"YouTube araması başarısız: {type(e).__name__}"}, status_code=502)
+
+import concurrent.futures
+import xml.etree.ElementTree as ET
+
+_YT_NEXT_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_YT_CHAN_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_YT_FEED_POOL = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+_YT_VID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+
+
+def _extract_yt_vid(raw_val: str) -> str:
+    s = str(raw_val or "").strip()
+    if _YT_VID_RE.match(s):
+        return s
+    m = re.search(r"(?:v=|youtu\.be/|shorts/|embed/)([A-Za-z0-9_-]{11})", s)
+    return m.group(1) if m else ""
+
+
+def _fmt_views_tr(n_str: str) -> str:
+    try:
+        v = int(str(n_str or "0").strip())
+    except Exception:
+        return ""
+    if v <= 0:
+        return ""
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}".replace(".0", "") + " Mn görüntüleme"
+    if v >= 1_000:
+        return f"{v // 1_000} B görüntüleme"
+    return f"{v} görüntüleme"
+
+
+def _parse_lockup_view_model(lvm: dict, exclude_vid: str = "") -> dict | None:
+    if not isinstance(lvm, dict):
+        return None
+    vid = str(lvm.get("contentId") or "").strip()
+    if not _YT_VID_RE.match(vid) or vid == exclude_vid:
+        return None
+    ctype = str(lvm.get("contentType") or "")
+    if ctype and "VIDEO" not in ctype and "SHORT" not in ctype:
+        return None
+    meta = (lvm.get("metadata") or {}).get("lockupMetadataViewModel") or {}
+    title = str(((meta.get("title") or {}).get("content") or "")).strip()
+    if not title:
+        return None
+    av_vm = (meta.get("image") or {}).get("decoratedAvatarViewModel") or {}
+    av_srcs = ((((av_vm.get("avatar") or {}).get("avatarViewModel") or {}).get("image") or {}).get("sources")) or []
+    ch_avatar = str(av_srcs[-1].get("url") or "") if av_srcs and isinstance(av_srcs[-1], dict) else ""
+    ch_id = str(((((((av_vm.get("rendererContext") or {}).get("commandContext") or {}).get("onTap") or {}).get("innertubeCommand") or {}).get("browseEndpoint") or {}).get("browseId") or "")).strip()
+    rows = (((meta.get("metadata") or {}).get("contentMetadataViewModel") or {}).get("metadataRows")) or []
+    channel = "YouTube"
+    views = ""
+    published = ""
+    if len(rows) >= 1 and isinstance(rows[0], dict):
+        p0 = rows[0].get("metadataParts") or []
+        if p0 and isinstance(p0[0], dict):
+            channel = str(((p0[0].get("text") or {}).get("content") or channel)).strip() or "YouTube"
+    if len(rows) >= 2 and isinstance(rows[1], dict):
+        p1 = rows[1].get("metadataParts") or []
+        if len(p1) >= 1 and isinstance(p1[0], dict):
+            views = str(((p1[0].get("text") or {}).get("content") or p1[0].get("accessibilityLabel") or "")).strip()
+        if len(p1) >= 2 and isinstance(p1[1], dict):
+            published = str(((p1[1].get("text") or {}).get("content") or "")).strip()
+    dur = ""
+    overlays = (((lvm.get("contentImage") or {}).get("thumbnailViewModel") or {}).get("overlays")) or []
+    for ov in overlays:
+        if not isinstance(ov, dict):
+            continue
+        badges = ((ov.get("thumbnailBottomOverlayViewModel") or {}).get("badges")) or []
+        for b in badges:
+            txt = str((((b or {}).get("thumbnailBadgeViewModel") or {}).get("text") or "")).strip()
+            if txt and (":" in txt or "CANLI" in txt.upper() or "LIVE" in txt.upper()):
+                dur = txt
+                break
+    live = ("CANLI" in dur.upper() or "LIVE" in dur.upper())
+    return {
+        "videoId": vid, "title": title, "channel": channel, "channelId": ch_id,
+        "channelAvatar": ch_avatar, "views": views, "published": published,
+        "duration": "" if live else dur, "live": live,
+        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+        "url": f"https://www.youtube.com/watch?v={vid}",
+    }
+
+
+def _yt_next_related_sync(video_id: str, reason: str = "") -> list:
+    vid = _extract_yt_vid(video_id)
+    if not vid:
+        return []
+    now_ts = time.time()
+    cached = _YT_NEXT_CACHE.get(vid)
+    base_items = None
+    if cached and now_ts - cached[1] < 900.0:
+        base_items = cached[0]
+    if base_items is None:
+        base_items = []
+        seen = {vid}
+        try:
+            payload = json.dumps({
+                "context": {
+                    "client": {"clientName": "WEB", "clientVersion": "2.20250201.01.00", "hl": "tr", "gl": "TR"}
+                },
+                "videoId": vid,
+            }).encode("utf-8")
+            req = urllib.request.Request(
+                "https://www.youtube.com/youtubei/v1/next?prettyPrint=false",
+                data=payload,
+                headers={"Content-Type": "application/json", "User-Agent": UA, "Accept-Language": "tr-TR,tr;q=0.9"},
+            )
+            with urllib.request.urlopen(req, timeout=5.5) as r:
+                data = json.loads(r.read().decode("utf-8", errors="ignore"))
+
+            def _walk(node):
+                if len(base_items) >= 20:
+                    return
+                if isinstance(node, dict):
+                    if "lockupViewModel" in node:
+                        parsed = _parse_lockup_view_model(node["lockupViewModel"], exclude_vid=vid)
+                        if parsed and parsed["videoId"] not in seen:
+                            seen.add(parsed["videoId"])
+                            base_items.append(parsed)
+                    elif "compactVideoRenderer" in node:
+                        cvr = node["compactVideoRenderer"]
+                        cvid = str(cvr.get("videoId") or "")
+                        if _YT_VID_RE.match(cvid) and cvid not in seen:
+                            seen.add(cvid)
+                            ctitle = (cvr.get("title") or {}).get("simpleText") or "".join(x.get("text", "") for x in (cvr.get("title") or {}).get("runs", []))
+                            cchan = "".join(x.get("text", "") for x in (cvr.get("longBylineText") or {}).get("runs", [])) or "YouTube"
+                            cdur = (cvr.get("lengthText") or {}).get("simpleText") or ""
+                            cviews = (cvr.get("shortViewCountText") or {}).get("simpleText") or ""
+                            cpub = (cvr.get("publishedTimeText") or {}).get("simpleText") or ""
+                            if ctitle:
+                                base_items.append({
+                                    "videoId": cvid, "title": ctitle, "channel": cchan, "channelId": "",
+                                    "channelAvatar": "", "views": cviews, "published": cpub,
+                                    "duration": cdur, "live": not bool(cdur),
+                                    "thumbnail": f"https://i.ytimg.com/vi/{cvid}/hqdefault.jpg",
+                                    "url": f"https://www.youtube.com/watch?v={cvid}",
+                                })
+                    for v in node.values():
+                        if isinstance(v, (dict, list)):
+                            _walk(v)
+                elif isinstance(node, list):
+                    for x in node:
+                        if isinstance(x, (dict, list)):
+                            _walk(x)
+
+            _walk(data)
+            if base_items:
+                _YT_NEXT_CACHE[vid] = (base_items, now_ts)
+                _YT_NEXT_CACHE.move_to_end(vid)
+                while len(_YT_NEXT_CACHE) > 250:
+                    _YT_NEXT_CACHE.popitem(last=False)
+        except Exception:
+            pass
+    out = []
+    for it in base_items:
+        c = dict(it)
+        if reason:
+            c["reason"] = reason
+        c["sourceKind"] = "collaborative"
+        out.append(c)
+    return out
+
+
+def _yt_channel_feed_sync(channel_id: str, channel_name: str = "", channel_avatar: str = "") -> list:
+    cid = str(channel_id or "").strip()
+    cname = str(channel_name or "").strip()
+    ck = f"{cid}|{cname.lower()}"
+    now_ts = time.time()
+    cached = _YT_CHAN_CACHE.get(ck)
+    if cached and now_ts - cached[1] < 720.0:
+        return [dict(x) for x in cached[0]]
+    items = []
+    if cid.startswith("UC") and len(cid) >= 20:
+        try:
+            feed_url = "https://www.youtube.com/feeds/videos.xml?" + urllib.parse.urlencode({"channel_id": cid})
+            xml_bytes = _http(feed_url, timeout=4.5)
+            root = ET.fromstring(xml_bytes)
+            ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015", "media": "http://search.yahoo.com/mrss/"}
+            author_el = root.find("atom:author/atom:name", ns)
+            resolved_ch = (author_el.text.strip() if author_el is not None and author_el.text else cname) or "YouTube"
+            for entry in root.findall("atom:entry", ns)[:12]:
+                vid_el = entry.find("yt:videoId", ns)
+                tit_el = entry.find("atom:title", ns)
+                pub_el = entry.find("atom:published", ns)
+                stat_el = entry.find("media:group/media:community/media:statistics", ns)
+                vid = vid_el.text.strip() if vid_el is not None and vid_el.text else ""
+                tit = tit_el.text.strip() if tit_el is not None and tit_el.text else ""
+                if not _YT_VID_RE.match(vid) or not tit:
+                    continue
+                pub_str = (pub_el.text[:10] if pub_el is not None and pub_el.text else "")
+                v_cnt = _fmt_views_tr(stat_el.attrib.get("views", "") if stat_el is not None else "")
+                items.append({
+                    "videoId": vid, "title": tit, "channel": resolved_ch, "channelId": cid,
+                    "channelAvatar": channel_avatar, "views": v_cnt, "published": pub_str,
+                    "duration": "", "live": False,
+                    "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "url": f"https://www.youtube.com/watch?v={vid}",
+                    "reason": f"🔔 {resolved_ch}",
+                    "sourceKind": "subscription",
+                })
+        except Exception:
+            pass
+    if not items and cname:
+        clean_handle = cname.lstrip("@").strip()
+        for r in _yt_search_sync(f"{clean_handle} yeni video")[:10]:
+            c = dict(r)
+            if channel_avatar and not c.get("channelAvatar"):
+                c["channelAvatar"] = channel_avatar
+            if cid and not c.get("channelId"):
+                c["channelId"] = cid
+            c["reason"] = f"🔔 {cname}"
+            c["sourceKind"] = "subscription"
+            items.append(c)
+    if items:
+        _YT_CHAN_CACHE[ck] = (items, now_ts)
+        while len(_YT_CHAN_CACHE) > 200:
+            _YT_CHAN_CACHE.popitem(last=False)
+    return [dict(x) for x in items]
+
+
+def _build_yt_personalized_feed_sync(ukey: str, params: dict) -> dict:
+    bundle = social_engine.get_user_yt_taste_bundle(ukey) if ukey else {
+        "authenticated": False, "progress": [], "watchlist": [], "musicHistory": [], "ytPrefs": social_engine._default_yt_prefs()
+    }
+    prefs = bundle.get("ytPrefs") or {}
+    prog_list = bundle.get("progress") or []
+    wlist = bundle.get("watchlist") or []
+    mhist = bundle.get("musicHistory") or []
+
+    chip = str(params.get("chip") or "all").strip()[:80]
+    dismissed_set = {str(x) for x in (prefs.get("dismissedVideoIds") or [])} | {str(x) for x in (params.get("dismissedVideoIds") or []) if x}
+    blocked_ch = {str(x).lower() for x in (prefs.get("blockedChannels") or [])} | {str(x).lower() for x in (params.get("blockedChannels") or []) if x}
+
+    followed = list(prefs.get("subscriptions") or [])
+    seen_fch = {(str(c.get("channelId") or "") or str(c.get("name") or "").lower()) for c in followed}
+    for c_in in (params.get("seedChannels") or []):
+        if isinstance(c_in, dict):
+            ck = str(c_in.get("channelId") or "") or str(c_in.get("name") or "").lower()
+            if ck and ck not in seen_fch:
+                seen_fch.add(ck)
+                followed.append({"channelId": str(c_in.get("channelId") or ""), "name": str(c_in.get("name") or ""), "avatar": str(c_in.get("avatar") or "")})
+
+    liked_vids = [x for x in (prefs.get("likedVideos") or []) if isinstance(x, dict) and _extract_yt_vid(x.get("videoId"))]
+    liked_set = {_extract_yt_vid(x.get("videoId")) for x in liked_vids}
+    prog_pct_map = {}
+    seed_vids = []
+    seen_sv = set()
+
+    def _push_seed(vid_raw, label_raw):
+        v = _extract_yt_vid(vid_raw)
+        if v and v not in seen_sv and v not in dismissed_set:
+            seen_sv.add(v)
+            seed_vids.append((v, label_raw))
+
+    for lv in liked_vids[:3]:
+        short_t = str(lv.get("title") or "")[:28].strip()
+        _push_seed(lv.get("videoId"), f"❤️ Beğendiğin: {short_t}" if short_t else "❤️ Beğenilerine göre")
+    for p in prog_list:
+        pv = _extract_yt_vid(p.get("videoId") or p.get("url") or p.get("sourceUrl"))
+        if pv:
+            prog_pct_map[pv] = float(p.get("percent") or 0.0)
+            short_t = str(p.get("title") or "")[:28].strip()
+            _push_seed(pv, f"✨ İzlediğin: {short_t}" if short_t else "✨ İzleme geçmişine göre")
+    for w in wlist:
+        wv = _extract_yt_vid(w.get("videoId") or w.get("url") or w.get("sourceUrl"))
+        if wv:
+            liked_set.add(wv)
+            _push_seed(wv, "🔖 Listendeki videoya göre")
+    for m in mhist[:4]:
+        mv = _extract_yt_vid(m.get("videoId"))
+        if mv:
+            _push_seed(mv, f"🎵 Dinlediğin: {str(m.get('artist') or '')[:24]}".strip())
+    for cv in (params.get("seedVideoIds") or [])[:6]:
+        if isinstance(cv, dict):
+            _push_seed(cv.get("videoId"), f"✨ İzlediğin: {str(cv.get('title') or '')[:26]}".strip() or "✨ Sana Özel")
+        else:
+            _push_seed(cv, "✨ İzleme geçmişine göre")
+
+    freq_channels = list(followed[:5])
+    seen_fc_names = {str(c.get("name") or "").lower() for c in freq_channels if c.get("name")}
+    for p in prog_list:
+        ch_n = str(p.get("channel") or "").strip()
+        if ch_n and ch_n.lower() not in ("youtube", "sinema", "video") and ch_n.lower() not in seen_fc_names:
+            seen_fc_names.add(ch_n.lower())
+            freq_channels.append({"channelId": str(p.get("channelId") or ""), "name": ch_n, "avatar": str(p.get("channelAvatar") or "")})
+
+    affinity_queries = []
+    for sq in list(prefs.get("searchHistory") or [])[:3] + list(params.get("seedQueries") or [])[:3]:
+        sq_s = str(sq or "").strip()[:80]
+        if sq_s and sq_s.lower() not in {q[0].lower() for q in affinity_queries}:
+            affinity_queries.append((sq_s, f"🔍 Araman: {sq_s[:24]}"))
+    for m in mhist[:2]:
+        art = str(m.get("artist") or "").strip()
+        if art and art.lower() != "sanatçı" and len(affinity_queries) < 5:
+            affinity_queries.append((f"{art} resmi klip canlı", f"🎵 {art}"))
+    for p in prog_list[:3]:
+        if str(p.get("provider") or "") != "youtube" and p.get("title") and len(affinity_queries) < 5:
+            mt = str(p.get("seriesTitle") or p.get("title") or "").split("—")[0].strip()[:36]
+            if mt:
+                affinity_queries.append((f"{mt} fragman inceleme sahne", f"🎬 İzlediğin: {mt[:22]}"))
+
+    chips = [
+        {"id": "all", "label": "Tümü"},
+        {"id": "for_you", "label": "✨ Sana Özel"},
+        {"id": "subscriptions", "label": f"🔔 Takip Edilenler ({len(followed)})" if followed else "🔔 Takip Edilenler"},
+        {"id": "recent", "label": "🆕 Yeni Yüklenenler"},
+    ]
+    for fc in freq_channels[:3]:
+        fc_name = str(fc.get("name") or "").strip()
+        fc_id = str(fc.get("channelId") or "").strip()
+        if fc_name:
+            chips.append({"id": f"ch:{fc_id}:{fc_name[:32]}", "label": f"📺 {fc_name[:20]}"})
+    for aq, _ in affinity_queries[:2]:
+        short_q = aq.replace("fragman inceleme sahne", "").replace("resmi klip canlı", "").strip()[:20]
+        if short_q:
+            chips.append({"id": f"q:{aq[:48]}", "label": f"🎯 {short_q}"})
+    chips.extend([
+        {"id": "music", "label": "🎵 Müzik"},
+        {"id": "cinema", "label": "🎬 Sinema & Fragman"},
+        {"id": "gaming", "label": "🎮 Oyun"},
+        {"id": "live", "label": "🔴 Canlı"},
+    ])
+
+    futures = []
+    if chip == "subscriptions":
+        targets = followed[:5] or freq_channels[:4]
+        for fc in targets:
+            futures.append(_YT_FEED_POOL.submit(_yt_channel_feed_sync, fc.get("channelId", ""), fc.get("name", ""), fc.get("avatar", "")))
+        if not futures:
+            futures.append(_YT_FEED_POOL.submit(_yt_search_sync, "Türkiye popüler içerik üreticileri son video 2026"))
+    elif chip.startswith("ch:"):
+        parts = chip.split(":", 2)
+        cid_p = parts[1] if len(parts) > 1 else ""
+        cn_p = parts[2] if len(parts) > 2 else ""
+        futures.append(_YT_FEED_POOL.submit(_yt_channel_feed_sync, cid_p, cn_p, ""))
+        if cn_p:
+            futures.append(_YT_FEED_POOL.submit(_yt_search_sync, f"{cn_p} popüler videolar"))
+    elif chip.startswith("q:"):
+        q_val = chip[2:].strip()
+        futures.append(_YT_FEED_POOL.submit(_yt_search_sync, q_val))
+    elif chip in ("music", "cinema", "gaming", "live", "recent"):
+        cat_map = {
+            "music": "Türkçe pop alternatif rap hit video klip 2026",
+            "cinema": "yeni film dizi resmi fragman inceleme Türkçe 2026",
+            "gaming": "Türkçe oyun inceleme gameplay eğlence 2026",
+            "live": "Türkiye canlı yayın haber müzik spor live",
+            "recent": "Türkiye bu hafta yeni yüklenen popüler videolar 2026",
+        }
+        if chip == "recent" and freq_channels:
+            for fc in freq_channels[:2]:
+                futures.append(_YT_FEED_POOL.submit(_yt_channel_feed_sync, fc.get("channelId", ""), fc.get("name", ""), fc.get("avatar", "")))
+        futures.append(_YT_FEED_POOL.submit(_yt_search_sync, cat_map[chip]))
+        if seed_vids and chip in ("music", "cinema", "for_you"):
+            futures.append(_YT_FEED_POOL.submit(_yt_next_related_sync, seed_vids[0][0], seed_vids[0][1]))
+    else:
+        for sv_id, sv_lbl in seed_vids[:3]:
+            futures.append(_YT_FEED_POOL.submit(_yt_next_related_sync, sv_id, sv_lbl))
+        if chip != "for_you":
+            for fc in freq_channels[:2]:
+                futures.append(_YT_FEED_POOL.submit(_yt_channel_feed_sync, fc.get("channelId", ""), fc.get("name", ""), fc.get("avatar", "")))
+        for aq_q, aq_lbl in affinity_queries[:2]:
+            def _run_aff(q_str=aq_q, lbl_str=aq_lbl):
+                return [{**x, "reason": lbl_str, "sourceKind": "affinity"} for x in _yt_search_sync(q_str)[:10]]
+            futures.append(_YT_FEED_POOL.submit(_run_aff))
+        if len(futures) < 2:
+            futures.append(_YT_FEED_POOL.submit(_yt_search_sync, "Türkiye popüler müzik sinema teknoloji eğlence 2026"))
+
+    buckets = []
+    done, _ = concurrent.futures.wait(futures, timeout=6.5)
+    for fut in futures:
+        if fut in done:
+            try:
+                res_list = fut.result()
+                if isinstance(res_list, list) and res_list:
+                    buckets.append(res_list)
+            except Exception:
+                pass
+
+    followed_ids = {str(c.get("channelId") or "") for c in followed if c.get("channelId")}
+    followed_names = {str(c.get("name") or "").lower() for c in followed if c.get("name")}
+    merged = []
+    seen_out = set()
+    max_len = max((len(b) for b in buckets), default=0)
+    for idx in range(max_len):
+        for b in buckets:
+            if idx >= len(b):
+                continue
+            it = b[idx]
+            vid = _extract_yt_vid(it.get("videoId"))
+            if not vid or vid in seen_out or vid in dismissed_set:
+                continue
+            ch_low = str(it.get("channel") or "").lower()
+            ch_id = str(it.get("channelId") or "")
+            if (ch_low and ch_low in blocked_ch) or (ch_id and ch_id.lower() in blocked_ch):
+                continue
+            if prog_pct_map.get(vid, 0.0) >= 95.0 and chip in ("all", "for_you"):
+                continue
+            seen_out.add(vid)
+            item_out = dict(it)
+            item_out["isLiked"] = vid in liked_set
+            item_out["isFollowedChannel"] = bool((ch_id and ch_id in followed_ids) or (ch_low and ch_low in followed_names))
+            item_out["watchedPercent"] = round(prog_pct_map.get(vid, 0.0), 1)
+            if not item_out.get("reason"):
+                item_out["reason"] = "✨ Sana Özel" if (seed_vids or affinity_queries) else "🔥 Önerilen"
+            merged.append(item_out)
+            if len(merged) >= 32:
+                break
+        if len(merged) >= 32:
+            break
+
+    has_signals = bool(seed_vids or followed or affinity_queries)
+    return {
+        "ok": True,
+        "authenticated": bool(ukey),
+        "personalized": has_signals,
+        "chip": chip,
+        "chips": chips,
+        "followedChannels": followed[:30],
+        "signalSummary": {
+            "seedVideos": len(seed_vids),
+            "followedChannels": len(followed),
+            "affinityTopics": len(affinity_queries),
+        },
+        "items": merged,
+    }
+
+
+async def yt_personalized_feed(request: Request):
+    ukey = social_engine._verified_account_key(request)
+    params: dict = dict(request.query_params)
+    if request.method == "POST":
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                params.update(body)
+        except Exception:
+            pass
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(_build_yt_personalized_feed_sync, ukey, params), timeout=8.5)
+        return JSONResponse(data, headers=social_engine._PRIVATE_HEADERS)
+    except Exception as e:
+        return JSONResponse({"ok": False, "items": [], "chips": [], "error": f"Akış yüklenemedi: {type(e).__name__}"}, status_code=502, headers=social_engine._PRIVATE_HEADERS)
+
+
 
 
 PROVIDER_WATCH_IDS = {
@@ -7461,6 +7919,9 @@ app = Starlette(
         Route("/api/user/watchlist", social_engine.user_watchlist_toggle, methods=["POST"]),
         Route("/api/user/music-history", social_engine.user_music_history_get, methods=["GET"]),
         Route("/api/user/music-history", social_engine.user_music_history_save, methods=["POST"]),
+        Route("/api/user/yt-preferences", social_engine.user_yt_prefs_get, methods=["GET"]),
+        Route("/api/user/yt-preferences", social_engine.user_yt_prefs_save, methods=["POST"]),
+        Route("/api/rave/yt-personalized-feed", yt_personalized_feed, methods=["GET", "POST"]),
         Route("/api/rave/server-health", social_engine.server_health_get, methods=["GET"]),
         Route("/api/rave/server-health", social_engine.server_health_report, methods=["POST"]),
         Route("/api/rave/ai-status", rave_ai_status),

@@ -27,6 +27,9 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         social_engine._PRESENCE_MAP.clear()
         social_engine._SOCIAL_DIR.clear()
         social_engine._DM_TYPING.clear()
+        social_engine._USER_PROGRESS.clear()
+        social_engine._USER_WATCHLIST.clear()
+        social_engine._USER_YT_PREFS.clear()
         self._kv_get_p = patch.object(social_engine, "_kv_get", side_effect=lambda k, default=None, **kw: default)
         self._kv_set_p = patch.object(social_engine, "_kv_set", return_value=None)
         self._kv_get_p.start()
@@ -199,6 +202,116 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
             r_mux = self.client.get("/api/rave/yt-music-stream?v=dQw4w9WgXcQ&kind=muxed")
             self.assertEqual(r_mux.status_code, 404)
+
+
+
+    def test_07_personalized_youtube_feed_account_isolation_and_lockup_parser(self):
+        # 1. Unauthenticated /api/user/yt-preferences must be rejected with 401
+        r_unauth = self.client.get("/api/user/yt-preferences")
+        self.assertEqual(r_unauth.status_code, 401)
+        self.assertIn("no-store", r_unauth.headers.get("cache-control", "").lower())
+
+        # 2. Register two independent accounts and verify strict isolation
+        u1, h1 = self._register("yt_u1@watchlivo.test", "ytuser1", "YT User One")
+        u2, h2 = self._register("yt_u2@watchlivo.test", "ytuser2", "YT User Two")
+
+        # Save YouTube watch progress with videoId/channel/channelId/channelAvatar for u1
+        pr = self.client.post("/api/user/progress", headers=h1, json={
+            "action": "upsert",
+            "key": "yt:kJQP7kiw5Fk",
+            "provider": "youtube",
+            "videoId": "kJQP7kiw5Fk",
+            "title": "Luis Fonsi - Despacito",
+            "channel": "LuisFonsiVEVO",
+            "channelId": "UCxoq-PAQeAdk_zyg8YS0JqA",
+            "channelAvatar": "https://yt3.ggpht.com/avatar_test.jpg",
+            "position": 45,
+            "duration": 280,
+        })
+        self.assertEqual(pr.status_code, 200)
+        saved_item = pr.json()["items"][0]
+        self.assertEqual(saved_item["videoId"], "kJQP7kiw5Fk")
+        self.assertEqual(saved_item["channel"], "LuisFonsiVEVO")
+        self.assertEqual(saved_item["channelId"], "UCxoq-PAQeAdk_zyg8YS0JqA")
+
+        # Save channel follow, like, search, dismiss & block for u1
+        self.client.post("/api/user/yt-preferences", headers=h1, json={
+            "action": "follow_channel",
+            "channel": {"channelId": "UCq-Fj5jknLsUf-MWSy4_brA", "name": "Evrim Ağacı"},
+        })
+        self.client.post("/api/user/yt-preferences", headers=h1, json={
+            "action": "like_video",
+            "video": {"videoId": "7RW8n4iXZbA", "title": "mor ve ötesi - Bir Derdim Var", "channel": "mor ve ötesi"},
+        })
+        self.client.post("/api/user/yt-preferences", headers=h1, json={"action": "add_search", "query": "bilim kurgu analiz"})
+        self.client.post("/api/user/yt-preferences", headers=h1, json={"action": "dismiss_video", "videoId": "HIDE_ME_123"})
+        self.client.post("/api/user/yt-preferences", headers=h1, json={"action": "block_channel", "channel": "MutedSpamChannel"})
+
+        # Verify u2 sees ZERO of u1's YouTube preferences or history
+        prefs_u2 = self.client.get("/api/user/yt-preferences", headers=h2).json()["prefs"]
+        self.assertEqual(prefs_u2["subscriptions"], [])
+        self.assertEqual(prefs_u2["likedVideos"], [])
+        self.assertEqual(prefs_u2["searchHistory"], [])
+
+        # 3. Verify 2026 YouTube lockupViewModel parser
+        sample_lvm = {
+            "contentId": "AbCdEfGh123",
+            "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
+            "contentImage": {
+                "thumbnailViewModel": {
+                    "overlays": [{"thumbnailBottomOverlayViewModel": {"badges": [{"thumbnailBadgeViewModel": {"text": "12:45"}}]}}]
+                }
+            },
+            "metadata": {
+                "lockupMetadataViewModel": {
+                    "title": {"content": "Derin Uzay Belgeseli 4K"},
+                    "image": {
+                        "decoratedAvatarViewModel": {
+                            "avatar": {"avatarViewModel": {"image": {"sources": [{"url": "https://yt3.ggpht.com/ch1.jpg"}]}}},
+                            "rendererContext": {"commandContext": {"onTap": {"innertubeCommand": {"browseEndpoint": {"browseId": "UC1234567890123456789012"}}}}},
+                        }
+                    },
+                    "metadata": {
+                        "contentMetadataViewModel": {
+                            "metadataRows": [
+                                {"metadataParts": [{"text": {"content": "Evrim Ağacı"}}]},
+                                {"metadataParts": [{"text": {"content": "420 B görüntüleme"}}, {"text": {"content": "2 gün önce"}}]},
+                            ]
+                        }
+                    },
+                }
+            },
+        }
+        parsed_lvm = server._parse_lockup_view_model(sample_lvm)
+        self.assertIsNotNone(parsed_lvm)
+        self.assertEqual(parsed_lvm["videoId"], "AbCdEfGh123")
+        self.assertEqual(parsed_lvm["channel"], "Evrim Ağacı")
+        self.assertEqual(parsed_lvm["channelId"], "UC1234567890123456789012")
+        self.assertEqual(parsed_lvm["views"], "420 B görüntüleme")
+        self.assertEqual(parsed_lvm["duration"], "12:45")
+
+        # 4. Verify /api/rave/yt-personalized-feed interleaves & filters dismissed/blocked items with private no-store headers
+        mock_next = [
+            {"videoId": "AbCdEfGh123", "title": "Derin Uzay Belgeseli 4K", "channel": "Evrim Ağacı", "channelId": "UCq-Fj5jknLsUf-MWSy4_brA", "views": "420 B", "published": "2 gün önce", "duration": "12:45", "live": False, "thumbnail": "https://i.ytimg.com/vi/AbCdEfGh123/hqdefault.jpg", "url": "https://www.youtube.com/watch?v=AbCdEfGh123", "reason": "✨ İzlediğin videoya göre"},
+            {"videoId": "HIDE_ME_123", "title": "Gizlenen Video", "channel": "Other", "channelId": "", "views": "10 B", "published": "1 gün önce", "duration": "3:10", "live": False, "thumbnail": "", "url": ""},
+            {"videoId": "SPAM_VID_99", "title": "Spam Video", "channel": "MutedSpamChannel", "channelId": "", "views": "1 B", "published": "1 saat önce", "duration": "1:00", "live": False, "thumbnail": "", "url": ""},
+        ]
+        with patch.object(server, "_yt_next_related_sync", return_value=mock_next), \
+             patch.object(server, "_yt_channel_feed_sync", return_value=[]), \
+             patch.object(server, "_yt_search_sync", return_value=[]):
+            feed_r = self.client.post("/api/rave/yt-personalized-feed", headers=h1, json={"chip": "all"})
+            self.assertEqual(feed_r.status_code, 200)
+            self.assertIn("no-store", feed_r.headers.get("cache-control", "").lower())
+            self.assertIn("authorization", feed_r.headers.get("vary", "").lower())
+            fd = feed_r.json()
+            self.assertTrue(fd["ok"])
+            self.assertTrue(fd["authenticated"])
+            self.assertTrue(fd["personalized"])
+            vids = [it["videoId"] for it in fd["items"]]
+            self.assertIn("AbCdEfGh123", vids)
+            self.assertNotIn("HIDE_ME_123", vids)
+            self.assertNotIn("SPAM_VID_99", vids)
+            self.assertTrue(fd["items"][0]["isFollowedChannel"])
 
 
 if __name__ == "__main__":

@@ -1872,8 +1872,9 @@ async def user_progress_save(request: Request) -> JSONResponse:
     else:
         mtype = "tv" if _clean(body.get("mediaType"), 12).lower() == "tv" else "movie"
         tid = _clean(body.get("tmdbId") or body.get("id"), 40)
+        vid = _clean(body.get("videoId"), 32)
         title = _clean(body.get("title"), 160)
-        if not title and not tid:
+        if not title and not tid and not vid:
             return JSONResponse({"ok": False, "error": "title or tmdbId required"}, status_code=400)
         season = _safe_int(body.get("season"), 1, lo=1, hi=999) if mtype == "tv" else 0
         episode = _safe_int(body.get("episode"), 1, lo=1, hi=9999) if mtype == "tv" else 0
@@ -1899,6 +1900,7 @@ async def user_progress_save(request: Request) -> JSONResponse:
         entry = {
             "key": ikey,
             "tmdbId": tid,
+            "videoId": vid or _clean((prev_entry or {}).get("videoId"), 32),
             "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
             "mediaType": mtype,
             "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
@@ -1907,6 +1909,10 @@ async def user_progress_save(request: Request) -> JSONResponse:
             "title": title or "Sinema",
             "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
             "seriesTitle": _clean(body.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
+            "channel": _clean(body.get("channel") or (prev_entry or {}).get("channel"), 120),
+            "channelId": _clean(body.get("channelId") or (prev_entry or {}).get("channelId"), 48),
+            "channelAvatar": _clean(body.get("channelAvatar") or (prev_entry or {}).get("channelAvatar"), 800),
+            "thumbnail": _clean(body.get("thumbnail") or body.get("poster") or (prev_entry or {}).get("thumbnail") or (prev_entry or {}).get("poster"), 800),
             "poster": _clean(body.get("poster") or body.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
             "backdrop": _clean(body.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
             "year": _clean(body.get("year") or (prev_entry or {}).get("year"), 10),
@@ -1966,14 +1972,21 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
         items.insert(0, {
             "key": ikey,
             "tmdbId": tid,
+            "videoId": _clean(src.get("videoId"), 32),
             "imdbId": _clean(src.get("imdbId"), 32),
             "mediaType": mtype,
             "provider": _clean(src.get("provider") or "cinema", 32),
             "title": title or "Sinema",
+            "channel": _clean(src.get("channel"), 120),
+            "channelId": _clean(src.get("channelId"), 48),
+            "channelAvatar": _clean(src.get("channelAvatar"), 800),
+            "thumbnail": _clean(src.get("thumbnail") or src.get("poster"), 800),
             "poster": _clean(src.get("poster") or src.get("thumbnail"), 800),
+            "duration": _safe_int(src.get("duration"), 0, lo=0, hi=86400),
+            "url": _clean(src.get("url") or src.get("sourceUrl"), 600),
             "year": _clean(src.get("year"), 10),
             "rating": _finite_float(src.get("rating"), 0.0, lo=0.0, hi=10.0),
-            "sourceUrl": _clean(src.get("sourceUrl"), 600),
+            "sourceUrl": _clean(src.get("sourceUrl") or src.get("url"), 600),
             "addedAt": _now(),
         })
         items = items[:80]
@@ -2143,3 +2156,293 @@ async def server_health_report(request: Request) -> JSONResponse:
 async def server_health_get(request: Request) -> JSONResponse:
     hmap = _load_health_map()
     return JSONResponse({"ok": True, "servers": hmap, "count": len(hmap)})
+# ---------------------------------------------------------------------------
+# 12. Account-Bound YouTube Personalization Graph & OAuth Sync (v91)
+# ---------------------------------------------------------------------------
+_USER_YT_PREFS: Dict[str, Dict[str, Any]] = {}
+
+
+def _default_yt_prefs() -> Dict[str, Any]:
+    return {
+        "subscriptions": [],
+        "likedVideos": [],
+        "searchHistory": [],
+        "dismissedVideoIds": [],
+        "blockedChannels": [],
+        "topics": [],
+        "googleConnected": False,
+        "googleEmail": "",
+        "googleChannelTitle": "",
+        "updatedAt": 0.0,
+    }
+
+
+def _norm_yt_prefs(raw: Any) -> Dict[str, Any]:
+    base = _default_yt_prefs()
+    if not isinstance(raw, dict):
+        return base
+    subs = []
+    seen_ch = set()
+    for ch in (raw.get("subscriptions") if isinstance(raw.get("subscriptions"), list) else []):
+        if not isinstance(ch, dict):
+            continue
+        cid = _clean(ch.get("channelId"), 48)
+        cname = _clean(ch.get("name") or ch.get("title"), 100)
+        ck = (cid or cname.lower()).strip()
+        if not ck or ck in seen_ch:
+            continue
+        seen_ch.add(ck)
+        subs.append({
+            "channelId": cid,
+            "name": cname or "YouTube Kanalı",
+            "avatar": _clean(ch.get("avatar") or ch.get("thumbnail"), 800),
+            "handle": _clean(ch.get("handle"), 64),
+            "addedAt": _finite_float(ch.get("addedAt"), _now()),
+        })
+    liked = []
+    seen_vid = set()
+    for lv in (raw.get("likedVideos") if isinstance(raw.get("likedVideos"), list) else []):
+        if not isinstance(lv, dict):
+            continue
+        vid = _clean(lv.get("videoId"), 20)
+        if not vid or len(vid) < 6 or vid in seen_vid:
+            continue
+        seen_vid.add(vid)
+        liked.append({
+            "videoId": vid,
+            "title": _clean(lv.get("title"), 160) or "YouTube Videosu",
+            "channel": _clean(lv.get("channel"), 100) or "YouTube",
+            "channelId": _clean(lv.get("channelId"), 48),
+            "channelAvatar": _clean(lv.get("channelAvatar"), 800),
+            "thumbnail": _clean(lv.get("thumbnail"), 800) or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+            "duration": _safe_int(lv.get("duration"), 0, lo=0, hi=86400),
+            "likedAt": _finite_float(lv.get("likedAt"), _now()),
+        })
+    searches = []
+    for sq in (raw.get("searchHistory") if isinstance(raw.get("searchHistory"), list) else []):
+        sq_c = _clean(sq, 100)
+        if sq_c and sq_c.lower() not in {x.lower() for x in searches}:
+            searches.append(sq_c)
+    dismissed = []
+    for dv in (raw.get("dismissedVideoIds") if isinstance(raw.get("dismissedVideoIds"), list) else []):
+        dv_c = _clean(dv, 24)
+        if dv_c and dv_c not in dismissed:
+            dismissed.append(dv_c)
+    blocked = []
+    for bc in (raw.get("blockedChannels") if isinstance(raw.get("blockedChannels"), list) else []):
+        bc_c = _clean(bc, 100)
+        if bc_c and bc_c.lower() not in {x.lower() for x in blocked}:
+            blocked.append(bc_c)
+    topics = []
+    for tp in (raw.get("topics") if isinstance(raw.get("topics"), list) else []):
+        tp_c = _clean(tp, 48)
+        if tp_c and tp_c.lower() not in {x.lower() for x in topics}:
+            topics.append(tp_c)
+    base.update({
+        "subscriptions": subs[:60],
+        "likedVideos": liked[:80],
+        "searchHistory": searches[:25],
+        "dismissedVideoIds": dismissed[:200],
+        "blockedChannels": blocked[:80],
+        "topics": topics[:20],
+        "googleConnected": bool(raw.get("googleConnected")),
+        "googleEmail": _clean(raw.get("googleEmail"), 120),
+        "googleChannelTitle": _clean(raw.get("googleChannelTitle"), 100),
+        "updatedAt": _finite_float(raw.get("updatedAt"), _now()),
+    })
+    return base
+def _load_user_yt_prefs(ukey: str) -> Dict[str, Any]:
+    if not ukey:
+        return _default_yt_prefs()
+    kv_val = _kv_get(f"wl:user:ytprefs:{ukey}", None, max_age=2.0)
+    if isinstance(kv_val, dict):
+        norm = _norm_yt_prefs(kv_val)
+        _USER_YT_PREFS[ukey] = norm
+        return norm
+    return _norm_yt_prefs(_USER_YT_PREFS.get(ukey))
+
+
+def _save_user_yt_prefs(ukey: str, prefs: Dict[str, Any]) -> Dict[str, Any]:
+    norm = _norm_yt_prefs({**prefs, "updatedAt": _now()})
+    _USER_YT_PREFS[ukey] = norm
+    _kv_set(f"wl:user:ytprefs:{ukey}", norm, ttl_sec=7776000)
+    return norm
+
+
+def _fetch_google_yt_oauth_data(access_token: str) -> Dict[str, Any]:
+    tok = _clean(access_token, 2048)
+    out: Dict[str, Any] = {"subs": [], "likes": [], "channelTitle": "", "ok": False}
+    if not tok or len(tok) < 16:
+        return out
+    hdrs = {"Authorization": f"Bearer {tok}", "Accept": "application/json", "User-Agent": "Watchlivo/2.0"}
+    try:
+        req_me = urllib.request.Request("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", headers=hdrs)
+        with urllib.request.urlopen(req_me, timeout=5) as r:
+            me_data = json.loads(r.read().decode("utf-8", errors="ignore"))
+            ch_items = me_data.get("items") or []
+            if ch_items:
+                out["channelTitle"] = _clean(((ch_items[0].get("snippet") or {}).get("title") or ""), 100)
+                out["ok"] = True
+    except Exception:
+        pass
+    try:
+        req_sub = urllib.request.Request("https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&maxResults=35", headers=hdrs)
+        with urllib.request.urlopen(req_sub, timeout=6) as r:
+            sub_data = json.loads(r.read().decode("utf-8", errors="ignore"))
+            out["ok"] = True
+            for it in (sub_data.get("items") or []):
+                sn = it.get("snippet") or {}
+                cid = _clean(((sn.get("resourceId") or {}).get("channelId") or ""), 48)
+                cname = _clean(sn.get("title"), 100)
+                thumbs = sn.get("thumbnails") or {}
+                av = _clean(((thumbs.get("default") or thumbs.get("medium") or {}).get("url") or ""), 800)
+                if cid or cname:
+                    out["subs"].append({"channelId": cid, "name": cname, "avatar": av, "addedAt": _now()})
+    except Exception:
+        pass
+    try:
+        req_lk = urllib.request.Request("https://www.googleapis.com/youtube/v3/videos?part=snippet&myRating=like&maxResults=25", headers=hdrs)
+        with urllib.request.urlopen(req_lk, timeout=6) as r:
+            lk_data = json.loads(r.read().decode("utf-8", errors="ignore"))
+            out["ok"] = True
+            for it in (lk_data.get("items") or []):
+                vid = _clean(it.get("id"), 20)
+                sn = it.get("snippet") or {}
+                if vid:
+                    out["likes"].append({
+                        "videoId": vid,
+                        "title": _clean(sn.get("title"), 160),
+                        "channel": _clean(sn.get("channelTitle"), 100),
+                        "channelId": _clean(sn.get("channelId"), 48),
+                        "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                        "likedAt": _now(),
+                    })
+    except Exception:
+        pass
+    return out
+
+
+def get_user_yt_taste_bundle(ukey: str) -> Dict[str, Any]:
+    if not ukey:
+        return {"authenticated": False, "progress": [], "watchlist": [], "musicHistory": [], "ytPrefs": _default_yt_prefs()}
+    prog = _kv_get(f"wl:user:prog:{ukey}", None, max_age=2.0)
+    if not isinstance(prog, list):
+        prog = _USER_PROGRESS.get(ukey, [])
+    wlist = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=2.0)
+    if not isinstance(wlist, list):
+        wlist = _USER_WATCHLIST.get(ukey, [])
+    mhist = _kv_get(f"wl:user:mhist:{ukey}", None, max_age=2.0)
+    if not isinstance(mhist, list):
+        mhist = _USER_MUSIC_HISTORY.get(ukey, [])
+    prefs = _load_user_yt_prefs(ukey)
+    return {"authenticated": True, "uid": ukey, "progress": prog[:40], "watchlist": wlist[:50], "musicHistory": mhist[:20], "ytPrefs": prefs}
+async def user_yt_prefs_get(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "prefs": _default_yt_prefs()}, status_code=401, headers=_PRIVATE_HEADERS)
+    prefs = _load_user_yt_prefs(ukey)
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "prefs": prefs}, headers=_PRIVATE_HEADERS)
+
+
+async def user_yt_prefs_save(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "prefs": _default_yt_prefs()}, status_code=401, headers=_PRIVATE_HEADERS)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    prefs = _load_user_yt_prefs(ukey)
+    action = _clean(body.get("action") or "sync", 32).lower()
+    imported_stats: Dict[str, Any] = {}
+
+    if action == "reset":
+        prefs = _default_yt_prefs()
+    elif action in ("follow_channel", "unfollow_channel", "toggle_channel"):
+        ch = body.get("channel") if isinstance(body.get("channel"), dict) else body
+        cid = _clean(ch.get("channelId"), 48)
+        cname = _clean(ch.get("name") or ch.get("channel"), 100)
+        ck = (cid or cname.lower()).strip()
+        if ck:
+            subs = list(prefs.get("subscriptions") or [])
+            existed = any((str(s.get("channelId") or "") == cid and cid) or (str(s.get("name") or "").lower() == cname.lower() and cname) for s in subs)
+            subs = [s for s in subs if not ((cid and str(s.get("channelId") or "") == cid) or (cname and str(s.get("name") or "").lower() == cname.lower()))]
+            if action == "follow_channel" or (action == "toggle_channel" and not existed):
+                subs.insert(0, {
+                    "channelId": cid,
+                    "name": cname or cid,
+                    "avatar": _clean(ch.get("avatar") or ch.get("channelAvatar"), 800),
+                    "handle": _clean(ch.get("handle"), 64),
+                    "addedAt": _now(),
+                })
+            prefs["subscriptions"] = subs[:60]
+    elif action in ("like_video", "unlike_video", "toggle_like"):
+        lv = body.get("video") if isinstance(body.get("video"), dict) else body
+        vid = _clean(lv.get("videoId"), 20)
+        if vid:
+            likes = list(prefs.get("likedVideos") or [])
+            existed = any(str(x.get("videoId") or "") == vid for x in likes)
+            likes = [x for x in likes if str(x.get("videoId") or "") != vid]
+            if action == "like_video" or (action == "toggle_like" and not existed):
+                likes.insert(0, {
+                    "videoId": vid,
+                    "title": _clean(lv.get("title"), 160) or "YouTube Videosu",
+                    "channel": _clean(lv.get("channel"), 100) or "YouTube",
+                    "channelId": _clean(lv.get("channelId"), 48),
+                    "channelAvatar": _clean(lv.get("channelAvatar"), 800),
+                    "thumbnail": _clean(lv.get("thumbnail"), 800) or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "duration": _safe_int(lv.get("duration"), 0, lo=0, hi=86400),
+                    "likedAt": _now(),
+                })
+            prefs["likedVideos"] = likes[:80]
+    elif action == "dismiss_video":
+        vid = _clean(body.get("videoId"), 24)
+        if vid:
+            dlist = [x for x in (prefs.get("dismissedVideoIds") or []) if x != vid]
+            dlist.insert(0, vid)
+            prefs["dismissedVideoIds"] = dlist[:200]
+    elif action == "undo_dismiss":
+        vid = _clean(body.get("videoId"), 24)
+        prefs["dismissedVideoIds"] = [x for x in (prefs.get("dismissedVideoIds") or []) if x != vid]
+    elif action == "block_channel":
+        bch = _clean(body.get("channelId") or body.get("channel") or body.get("name"), 100)
+        if bch:
+            blist = [x for x in (prefs.get("blockedChannels") or []) if x.lower() != bch.lower()]
+            blist.insert(0, bch)
+            prefs["blockedChannels"] = blist[:80]
+    elif action == "unblock_channel":
+        bch = _clean(body.get("channelId") or body.get("channel") or body.get("name"), 100)
+        prefs["blockedChannels"] = [x for x in (prefs.get("blockedChannels") or []) if x.lower() != bch.lower()]
+    elif action == "add_search":
+        q = _clean(body.get("query") or body.get("q"), 100)
+        if q and len(q) >= 2:
+            sh = [x for x in (prefs.get("searchHistory") or []) if x.lower() != q.lower()]
+            sh.insert(0, q)
+            prefs["searchHistory"] = sh[:25]
+    elif action == "import_oauth":
+        tok = _clean(body.get("ytAccessToken"), 2048)
+        oauth_res = await asyncio.to_thread(_fetch_google_yt_oauth_data, tok) if tok else {"ok": False, "subs": [], "likes": [], "channelTitle": ""}
+        if oauth_res.get("subs"):
+            prefs["subscriptions"] = oauth_res["subs"] + list(prefs.get("subscriptions") or [])
+        if oauth_res.get("likes"):
+            prefs["likedVideos"] = oauth_res["likes"] + list(prefs.get("likedVideos") or [])
+        prefs["googleConnected"] = bool(oauth_res.get("ok") or body.get("googleConnected", True))
+        prefs["googleEmail"] = _clean(body.get("googleEmail") or prefs.get("googleEmail"), 120)
+        prefs["googleChannelTitle"] = _clean(oauth_res.get("channelTitle") or body.get("googleChannelTitle") or prefs.get("googleChannelTitle"), 100)
+        imported_stats = {"importedSubs": len(oauth_res.get("subs") or []), "importedLikes": len(oauth_res.get("likes") or []), "oauthOk": bool(oauth_res.get("ok"))}
+    else:
+        incoming = body.get("prefs") if isinstance(body.get("prefs"), dict) else body
+        for k in ("subscriptions", "likedVideos", "searchHistory", "dismissedVideoIds", "blockedChannels", "topics"):
+            if isinstance(incoming.get(k), list):
+                prefs[k] = incoming[k] + list(prefs.get(k) or [])
+        if "googleConnected" in incoming:
+            prefs["googleConnected"] = bool(incoming.get("googleConnected"))
+        if incoming.get("googleEmail"):
+            prefs["googleEmail"] = _clean(incoming.get("googleEmail"), 120)
+        if incoming.get("googleChannelTitle"):
+            prefs["googleChannelTitle"] = _clean(incoming.get("googleChannelTitle"), 100)
+
+    saved = _save_user_yt_prefs(ukey, prefs)
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "prefs": saved, **imported_stats}, headers=_PRIVATE_HEADERS)

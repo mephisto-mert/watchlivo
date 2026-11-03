@@ -299,10 +299,14 @@ const _friendsKey = (scope = getAccountStorageScope()) => `vortex_friends_v2:${s
 export const getRecentRoomsKey = () => `vortex_recent_rooms_v2:${getAccountStorageScope()}`;
 export const getRoomSnapshotsKey = () => `vortex_room_snapshots_v2:${getAccountStorageScope()}`;
 export const getYtAccountKey = () => `vortex_yt_account_v2:${getAccountStorageScope()}`;
+const _ytPrefsKey = (scope = getAccountStorageScope()) => `vortex_yt_prefs_v2:${scope}`;
+const _ytFeedCache = new Map();
+export function invalidateYtFeedCache() { _ytFeedCache.clear(); }
 
 export function resetCloudSyncState() {
   _lastCloudSyncAt = 0;
   _lastCloudProgPush.clear();
+  _ytFeedCache.clear();
 }
 
 const _normTs = (v) => {
@@ -349,10 +353,11 @@ export async function syncCloudUserMedia(force = false) {
   let musicChanged = false;
   try {
     const reqOpts = { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() };
-    const [pRes, wRes, mRes] = await Promise.allSettled([
+    const [pRes, wRes, mRes, yRes] = await Promise.allSettled([
       fetch('/api/user/progress', reqOpts).then((r) => (r.ok ? r.json() : null)),
       fetch('/api/user/watchlist', reqOpts).then((r) => (r.ok ? r.json() : null)),
       fetch('/api/user/music-history', reqOpts).then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/user/yt-preferences', reqOpts).then((r) => (r.ok ? r.json() : null)),
     ]);
     if (getAccountStorageScope() !== startScope || !isCloudAuthenticated()) {
       return { historyChanged: false, favsChanged: false, musicChanged: false };
@@ -392,8 +397,12 @@ export async function syncCloudUserMedia(force = false) {
             title: c.title || prev?.title || 'Sinema',
             originalTitle: c.originalTitle || prev?.originalTitle || '',
             seriesTitle: c.seriesTitle || prev?.seriesTitle || '',
-            thumbnail: c.poster || c.backdrop || prev?.thumbnail || '',
-            poster: c.poster || prev?.poster || prev?.thumbnail || '',
+            videoId: c.videoId || prev?.videoId || '',
+            channel: c.channel || prev?.channel || '',
+            channelId: c.channelId || prev?.channelId || '',
+            channelAvatar: c.channelAvatar || prev?.channelAvatar || '',
+            thumbnail: c.thumbnail || c.poster || c.backdrop || prev?.thumbnail || '',
+            poster: c.poster || c.thumbnail || prev?.poster || prev?.thumbnail || '',
             backdrop: c.backdrop || prev?.backdrop || '',
             provider: c.provider || prev?.provider || 'cinema',
             catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || 'cinema',
@@ -441,14 +450,21 @@ export async function syncCloudUserMedia(force = false) {
             favId,
             key: fk,
             tmdbId: cw.tmdbId || '',
+            videoId: cw.videoId || '',
             imdbId: cw.imdbId || '',
             mediaType: mtype,
             title: cw.title || 'Yapım',
             originalTitle: cw.title || '',
+            channel: cw.channel || '',
+            channelId: cw.channelId || '',
+            channelAvatar: cw.channelAvatar || '',
+            duration: Number(cw.duration || 0) || 0,
+            url: cw.url || cw.sourceUrl || '',
             year: cw.year || '',
             rating: Number(cw.rating || 8.0) || 8.0,
-            poster: cw.poster || '',
-            backdrop: cw.poster || '',
+            thumbnail: cw.thumbnail || cw.poster || '',
+            poster: cw.poster || cw.thumbnail || '',
+            backdrop: cw.poster || cw.thumbnail || '',
             provider: cw.provider || 'cinema',
             addedAt: _normTs(cw.addedAt) || now,
           });
@@ -481,7 +497,19 @@ export async function syncCloudUserMedia(force = false) {
         try { localStorage.setItem(_musicKey(effScope), JSON.stringify(mergedMus)); } catch (e) { /* ignore */ }
       }
     }
-    if (historyChanged || favsChanged || musicChanged) set({ cloudSyncedAt: Date.now() });
+    let ytPrefsChanged = false;
+    const validY = yRes?.status === 'fulfilled' && yRes.value?.authenticated === true && yRes.value?.prefs ? yRes.value.prefs : null;
+    if (validY) {
+      const localY = getYtPrefs();
+      if (Number(validY.updatedAt || 0) >= Number(localY.updatedAt || 0) || !(localY.subscriptions?.length || localY.likedVideos?.length)) {
+        try {
+          localStorage.setItem(_ytPrefsKey(effScope), JSON.stringify(validY));
+          _ytFeedCache.clear();
+          ytPrefsChanged = true;
+        } catch (e) { /* ignore */ }
+      }
+    }
+    if (historyChanged || favsChanged || musicChanged || ytPrefsChanged) set({ cloudSyncedAt: Date.now(), ytPrefsUpdated: Date.now() });
   } catch (e) { /* ignore */ }
   return { historyChanged, favsChanged, musicChanged };
 }
@@ -617,6 +645,8 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       originalTitle: origTitle,
       seriesTitle: serTitle,
       channel: media.channel || media.artist || prev?.channel || '',
+      channelId: media.channelId || prev?.channelId || '',
+      channelAvatar: media.channelAvatar || prev?.channelAvatar || '',
       thumbnail: media.poster || media.thumbnail || prev?.thumbnail || '',
       poster: media.poster || media.thumbnail || prev?.poster || '',
       backdrop: media.backdrop || prev?.backdrop || '',
@@ -658,9 +688,14 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
         provider: catProv,
         catalogProvider: catProv,
         streamType: sType,
+        videoId: String(media.videoId || prev?.videoId || ''),
         title: media.title || 'Video',
         originalTitle: origTitle,
         seriesTitle: serTitle,
+        channel: String(media.channel || media.artist || prev?.channel || ''),
+        channelId: String(media.channelId || prev?.channelId || ''),
+        channelAvatar: String(media.channelAvatar || prev?.channelAvatar || ''),
+        thumbnail: media.thumbnail || media.poster || '',
         poster: media.poster || media.thumbnail || '',
         backdrop: media.backdrop || '',
         year: String(media.year || ''),
@@ -707,6 +742,13 @@ export function toggleFavoriteMedia(item) {
         favId: id,
         key: ikey,
         tmdbId: item.tmdbId || item.id || '',
+        videoId: item.videoId || '',
+        channel: item.channel || '',
+        channelId: item.channelId || '',
+        channelAvatar: item.channelAvatar || '',
+        duration: Number(item.duration || 0) || 0,
+        url: item.url || '',
+        thumbnail: item.thumbnail || item.poster || '',
         imdbId: item.imdbId || '',
         mediaType: mtype,
         title: item.title || 'Yapım',
@@ -727,10 +769,17 @@ export function toggleFavoriteMedia(item) {
         action: exists ? 'remove' : 'add',
         key: ikey,
         tmdbId: String(item.tmdbId || item.id || ''),
+        videoId: String(item.videoId || ''),
         imdbId: String(item.imdbId || ''),
         mediaType: mtype,
         provider: item.catalogProvider || item.provider || 'cinema',
         title: item.title || 'Yapım',
+        channel: String(item.channel || ''),
+        channelId: String(item.channelId || ''),
+        channelAvatar: String(item.channelAvatar || ''),
+        duration: Number(item.duration || 0) || 0,
+        url: String(item.url || ''),
+        thumbnail: item.thumbnail || item.poster || '',
         poster: item.poster || item.thumbnail || '',
         year: String(item.year || ''),
         rating: Number(item.rating || 8.0) || 8.0,
@@ -1035,4 +1084,207 @@ export function saveMusicHistory(item) {
       }).catch(() => {});
     }
   } catch (e) { /* ignore */ }
+}
+// ---------------------------------------------------------------------------
+// Account-Bound YouTube Personalization Graph & Feed Client (v91)
+// ---------------------------------------------------------------------------
+export function getYtPrefs() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(_ytPrefsKey()) || 'null');
+    if (raw && typeof raw === 'object') {
+      return {
+        subscriptions: Array.isArray(raw.subscriptions) ? raw.subscriptions : [],
+        likedVideos: Array.isArray(raw.likedVideos) ? raw.likedVideos : [],
+        searchHistory: Array.isArray(raw.searchHistory) ? raw.searchHistory : [],
+        dismissedVideoIds: Array.isArray(raw.dismissedVideoIds) ? raw.dismissedVideoIds : [],
+        blockedChannels: Array.isArray(raw.blockedChannels) ? raw.blockedChannels : [],
+        topics: Array.isArray(raw.topics) ? raw.topics : [],
+        googleConnected: Boolean(raw.googleConnected),
+        googleEmail: String(raw.googleEmail || ''),
+        googleChannelTitle: String(raw.googleChannelTitle || ''),
+        updatedAt: Number(raw.updatedAt || 0),
+      };
+    }
+  } catch (e) { /* ignore */ }
+  return {
+    subscriptions: [], likedVideos: [], searchHistory: [],
+    dismissedVideoIds: [], blockedChannels: [], topics: [],
+    googleConnected: false, googleEmail: '', googleChannelTitle: '', updatedAt: 0,
+  };
+}
+
+function _saveLocalYtPrefs(nextPrefs) {
+  const merged = { ...getYtPrefs(), ...nextPrefs, updatedAt: Date.now() };
+  try { localStorage.setItem(_ytPrefsKey(), JSON.stringify(merged)); } catch (e) { /* ignore */ }
+  _ytFeedCache.clear();
+  set({ ytPrefsUpdated: Date.now() });
+  return merged;
+}
+
+export async function pushYtPrefsAction(payload) {
+  if (typeof fetch !== 'function' || !isCloudAuthenticated()) return null;
+  try {
+    const r = await fetch('/api/user/yt-preferences', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data?.ok && data.prefs) {
+      try { localStorage.setItem(_ytPrefsKey(), JSON.stringify(data.prefs)); } catch (e) { /* ignore */ }
+      _ytFeedCache.clear();
+      set({ ytPrefsUpdated: Date.now() });
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function isYtChannelFollowed(channelId, channelName) {
+  const subs = getYtPrefs().subscriptions;
+  const cid = String(channelId || '').trim();
+  const cn = String(channelName || '').trim().toLowerCase();
+  return subs.some((s) => (cid && String(s.channelId || '') === cid) || (cn && String(s.name || '').toLowerCase() === cn));
+}
+
+export function toggleYtChannelFollow(ch) {
+  const cid = String(ch?.channelId || '').trim();
+  const cname = String(ch?.name || ch?.channel || '').trim();
+  if (!cid && !cname) return false;
+  const cur = getYtPrefs();
+  const existed = isYtChannelFollowed(cid, cname);
+  const subs = cur.subscriptions.filter((s) => !((cid && String(s.channelId || '') === cid) || (cname && String(s.name || '').toLowerCase() === cname.toLowerCase())));
+  if (!existed) {
+    subs.unshift({
+      channelId: cid,
+      name: cname || cid,
+      avatar: String(ch?.avatar || ch?.channelAvatar || ''),
+      handle: String(ch?.handle || ''),
+      addedAt: Date.now(),
+    });
+  }
+  _saveLocalYtPrefs({ subscriptions: subs.slice(0, 60) });
+  pushYtPrefsAction({ action: existed ? 'unfollow_channel' : 'follow_channel', channel: { channelId: cid, name: cname, avatar: ch?.avatar || ch?.channelAvatar || '' } });
+  return !existed;
+}
+
+export function isYtVideoLiked(videoId) {
+  const vid = String(videoId || '').trim();
+  if (!vid) return false;
+  return getYtPrefs().likedVideos.some((x) => String(x.videoId || '') === vid)
+    || getFavorites().some((f) => String(f.videoId || f.favId || '') === vid);
+}
+
+export function toggleYtVideoLike(media) {
+  const vid = String(media?.videoId || '').trim();
+  if (!vid) return false;
+  const cur = getYtPrefs();
+  const existed = cur.likedVideos.some((x) => String(x.videoId || '') === vid);
+  const likes = cur.likedVideos.filter((x) => String(x.videoId || '') !== vid);
+  if (!existed) {
+    likes.unshift({
+      videoId: vid,
+      title: String(media.title || 'YouTube Videosu'),
+      channel: String(media.channel || 'YouTube'),
+      channelId: String(media.channelId || ''),
+      channelAvatar: String(media.channelAvatar || ''),
+      thumbnail: String(media.thumbnail || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`),
+      duration: Number(media.duration || 0) || 0,
+      likedAt: Date.now(),
+    });
+  }
+  _saveLocalYtPrefs({ likedVideos: likes.slice(0, 80) });
+  pushYtPrefsAction({ action: existed ? 'unlike_video' : 'like_video', video: media });
+  return !existed;
+}
+
+export function dismissYtVideo(videoId) {
+  const vid = String(videoId || '').trim();
+  if (!vid) return;
+  const cur = getYtPrefs();
+  const next = [vid, ...cur.dismissedVideoIds.filter((x) => x !== vid)].slice(0, 200);
+  _saveLocalYtPrefs({ dismissedVideoIds: next });
+  pushYtPrefsAction({ action: 'dismiss_video', videoId: vid });
+}
+
+export function undoDismissYtVideo(videoId) {
+  const vid = String(videoId || '').trim();
+  if (!vid) return;
+  const cur = getYtPrefs();
+  _saveLocalYtPrefs({ dismissedVideoIds: cur.dismissedVideoIds.filter((x) => x !== vid) });
+  pushYtPrefsAction({ action: 'undo_dismiss', videoId: vid });
+}
+
+export function blockYtChannel(channelIdent) {
+  const bch = String(channelIdent || '').trim();
+  if (!bch) return;
+  const cur = getYtPrefs();
+  const next = [bch, ...cur.blockedChannels.filter((x) => x.toLowerCase() !== bch.toLowerCase())].slice(0, 80);
+  _saveLocalYtPrefs({ blockedChannels: next });
+  pushYtPrefsAction({ action: 'block_channel', channel: bch });
+}
+
+export function recordYtSearchQuery(query) {
+  const q = String(query || '').trim();
+  if (!q || q.length < 2 || /^https?:\/\//i.test(q)) return;
+  const cur = getYtPrefs();
+  const next = [q, ...cur.searchHistory.filter((x) => x.toLowerCase() !== q.toLowerCase())].slice(0, 25);
+  _saveLocalYtPrefs({ searchHistory: next });
+  pushYtPrefsAction({ action: 'add_search', query: q });
+}
+
+export async function fetchPersonalizedYtFeed(chip = 'all', forceRefresh = false) {
+  const scope = getAccountStorageScope();
+  const ck = `${scope}|${chip}`;
+  const now = Date.now();
+  if (!forceRefresh && _ytFeedCache.has(ck)) {
+    const hit = _ytFeedCache.get(ck);
+    if (now - hit.ts < 45000) return hit.data;
+  }
+  const prefs = getYtPrefs();
+  const watchHist = getWatchHistory();
+  const musicHist = getMusicHistory();
+  const seedVideoIds = [];
+  const seenV = new Set();
+  for (const lv of prefs.likedVideos.slice(0, 4)) {
+    if (lv?.videoId && !seenV.has(lv.videoId)) { seenV.add(lv.videoId); seedVideoIds.push({ videoId: lv.videoId, title: lv.title || '' }); }
+  }
+  for (const w of watchHist) {
+    const vid = String(w?.videoId || '').trim();
+    if (vid && vid.length === 11 && !seenV.has(vid)) { seenV.add(vid); seedVideoIds.push({ videoId: vid, title: w.title || '' }); }
+    if (seedVideoIds.length >= 6) break;
+  }
+  for (const m of musicHist.slice(0, 3)) {
+    const vid = String(m?.videoId || '').trim();
+    if (vid && vid.length === 11 && !seenV.has(vid)) { seenV.add(vid); seedVideoIds.push({ videoId: vid, title: m.title || '' }); }
+  }
+  const seedQueries = [...prefs.searchHistory.slice(0, 3)];
+  for (const w of watchHist.slice(0, 2)) {
+    if (w?.provider !== 'youtube' && w?.title && seedQueries.length < 4) {
+      seedQueries.push(`${String(w.seriesTitle || w.title).split('—')[0].trim()} fragman inceleme`);
+    }
+  }
+  const r = await fetch('/api/rave/yt-personalized-feed', {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+    body: JSON.stringify({
+      chip,
+      refresh: Boolean(forceRefresh),
+      seedVideoIds: seedVideoIds.slice(0, 6),
+      seedChannels: prefs.subscriptions.slice(0, 8),
+      seedQueries: seedQueries.slice(0, 4),
+      dismissedVideoIds: prefs.dismissedVideoIds.slice(0, 120),
+      blockedChannels: prefs.blockedChannels.slice(0, 50),
+    }),
+  });
+  const data = await r.json();
+  if (data?.ok && Array.isArray(data.items) && data.items.length) {
+    _ytFeedCache.set(ck, { ts: now, data });
+  }
+  return data;
 }

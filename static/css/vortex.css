@@ -6059,3 +6059,139 @@ html.is-native-apk .wl-btn-apk-dl,
 .rave-notif-timer { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.08); }
 .rave-notif-timer-bar { height: 100%; width: 100%; background: var(--accent, #27dcc8); transform-origin: left center; animation: wlNotifTimer 12s linear forwards; }
 @keyframes wlNotifTimer { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+/* YouTube-Authentic Personalized Home & Feed UI (v91) */
+.wl-yt-home-section {
+  margin: 14px 0 18px;
+  padding: 16px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(18, 22, 34, 0.92), rgba(10, 13, 22, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.32);
+}
+.wl-yt-guest-cta {
+  margin: 12px 0 16px;
+  padding: 12px 16px;
+  border-radius: 16px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  background: linear-gradient(135deg, rgba(255, 0, 51, 0.11), rgba(15, 23, 42, 0.86));
+  border: 1px solid rgba(255, 0, 51, 0.28);
+}
+.wl-yt-guest-left, .wl-yt-home-title-wrap { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.wl-yt-play-pill {
+  width: 36px; height: 26px; border-radius: 8px; background: #ff0033; color: #fff;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; font-weight: 900; flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(255, 0, 51, 0.35);
+}
+.wl-yt-guest-title { font-size: 0.88rem; font-weight: 800; color: #f8fafc; }
+.wl-yt-guest-sub, .wl-yt-home-sub { font-size: 0.75rem; color: #94a3b8; margin-top: 2px; line-height: 1.35; }
+.wl-yt-home-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.wl-yt-home-heading {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 7px; font-size: 1rem; font-weight: 800; color: #f8fafc;
+}
+.wl-yt-user-badge {
+  font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: rgba(255, 0, 51, 0.16); color: #fda4af; border: 1px solid rgba(255, 0, 51, 0.32);
+}
+.wl-yt-adfree-badge {
+  font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+  background: rgba(34, 197, 94, 0.15); color: #86efac; border: 1px solid rgba(34, 197, 94, 0.28);
+}
+.wl-yt-home-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.wl-yt-more-row { display: flex; justify-content: center; margin-top: 12px; }
+
+.yt-chip-bar {
+  display: flex; align-items: center; gap: 8px; overflow-x: auto; padding: 2px 2px 10px;
+  scrollbar-width: none; -ms-overflow-style: none;
+}
+.yt-chip-bar::-webkit-scrollbar { display: none; }
+.yt-filter-chip {
+  flex-shrink: 0; border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.07); color: #e2e8f0;
+  font-size: 0.78rem; font-weight: 600; padding: 6px 12px; border-radius: 9px;
+  cursor: pointer; transition: background 0.16s ease, color 0.16s ease, transform 0.12s ease;
+  display: inline-flex; align-items: center; white-space: nowrap;
+}
+.yt-filter-chip:hover { background: rgba(255, 255, 255, 0.14); }
+.yt-filter-chip.active {
+  background: #f8fafc; color: #0f172a; border-color: #f8fafc; font-weight: 800;
+}
+
+.card-grid.yt-feed-grid {
+  grid-template-columns: repeat(auto-fill, minmax(262px, 1fr));
+  gap: 16px; padding: 4px 0;
+}
+.vcard.yt-rich-card {
+  display: flex; flex-direction: column; border-radius: 14px;
+  background: rgba(15, 20, 32, 0.76); border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: transform 0.18s ease, border-color 0.18s ease, opacity 0.18s ease;
+}
+.vcard.yt-rich-card .vcard-thumb { border-radius: 12px 12px 0 0; overflow: hidden; }
+.yt-reason-pill {
+  position: absolute; left: 7px; top: 7px; max-width: calc(100% - 44px);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding: 2px 8px; border-radius: 6px; font-size: 0.67rem; font-weight: 700;
+  background: rgba(10, 14, 24, 0.84); color: #e2e8f0; backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12); pointer-events: none;
+}
+.vcard-dur.is-live { background: #dc2626; color: #fff; font-weight: 800; }
+.yt-watched-bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3.5px; background: rgba(255, 255, 255, 0.24);
+}
+.yt-watched-fill { height: 100%; background: #ff0033; }
+.yt-dismiss-btn {
+  position: absolute; right: 7px; top: 7px; width: 25px; height: 25px; border-radius: 50%;
+  border: none; background: rgba(0, 0, 0, 0.72); color: #cbd5e1; font-size: 0.72rem;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.vcard.yt-rich-card:hover .yt-dismiss-btn { opacity: 1; }
+.yt-dismiss-btn:hover { background: #dc2626; color: #fff; }
+
+.yt-card-meta-row {
+  display: flex; align-items: flex-start; gap: 10px; padding: 10px 11px 11px; flex: 1;
+}
+.yt-chan-avatar {
+  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.74rem; font-weight: 800; color: #fff; cursor: pointer;
+}
+.yt-chan-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.yt-card-text-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.yt-card-channel-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+.yt-card-channel-name {
+  font-size: 0.76rem; color: #94a3b8; font-weight: 600;
+  max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.yt-card-channel-name:hover { color: #f8fafc; text-decoration: underline; }
+.yt-card-follow-btn {
+  border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.06);
+  color: #cbd5e1; font-size: 0.65rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; cursor: pointer;
+}
+.yt-card-follow-btn.active { background: rgba(39, 220, 200, 0.16); border-color: rgba(39, 220, 200, 0.4); color: #5eead4; }
+.yt-card-stats-line { font-size: 0.72rem; color: #64748b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.yt-card-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.yt-card-act-btn {
+  width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04); font-size: 0.74rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.yt-card-act-btn:hover { background: rgba(255, 255, 255, 0.14); }
+.yt-card-act-btn.liked { border-color: rgba(244, 63, 94, 0.45); background: rgba(244, 63, 94, 0.14); }
+.yt-oauth-banner {
+  padding: 11px 13px; border-radius: 12px;
+  background: rgba(255, 0, 51, 0.09); border: 1px solid rgba(255, 0, 51, 0.28);
+}
+.yt-sub-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px;
+  font-size: 0.75rem; background: rgba(255, 255, 255, 0.08); color: #f1f5f9;
+}
+.yt-sub-rm {
+  border: none; background: transparent; color: #94a3b8; cursor: pointer; font-size: 0.85rem; padding: 0 2px;
+}
+@media (max-width: 620px) {
+  .card-grid.yt-feed-grid { grid-template-columns: 1fr; gap: 14px; padding: 4px 0; }
+  .yt-dismiss-btn { opacity: 0.88; }
+  .wl-yt-home-section { padding: 12px; border-radius: 14px; }
+}

@@ -1,11 +1,11 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v90';
-import { api } from './api.js?v=20261103_v90';
+import { h, popup, toast } from './ui.js?v=20261103_v91';
+import { api } from './api.js?v=20261103_v91';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
-  syncCloudUserMedia, resetCloudSyncState,
+  syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261103_v90';
+} from './store.js?v=20261103_v91';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -1867,4 +1867,44 @@ export function openUserProfileModal(targetUser) {
 }
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
+}
+export async function syncGoogleYoutubeOAuth() {
+  const fb = await getFirebaseAuth();
+  if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {
+    throw new Error('Google kimlik doğrulama modülü yüklenemedi.');
+  }
+  const gProv = new fb.GoogleAuthProvider();
+  gProv.addScope('https://www.googleapis.com/auth/youtube.readonly');
+  gProv.setCustomParameters({ prompt: 'select_account' });
+  const cred = await fb.signInWithPopup(fb.auth, gProv);
+  const oauthCred = fb.GoogleAuthProvider.credentialFromResult(cred);
+  const ytAccessToken = oauthCred?.accessToken || '';
+  const fbEmail = cred?.user?.email || '';
+  const fbName = cred?.user?.displayName || '';
+  if (!state.self || state.self.isGuest || !state.self.authToken) {
+    const idToken = await cred.user.getIdToken();
+    const authRes = await api('/api/auth/oauth', {
+      method: 'POST',
+      body: { provider: 'google', idToken, email: fbEmail, name: fbName },
+    });
+    if (authRes?.ok && authRes.user) {
+      saveProfile({ ...authRes.user, authToken: authRes.authToken, isGuest: false, verified: true });
+      await syncCloudUserMedia(true);
+    }
+  }
+  const syncRes = await pushYtPrefsAction({
+    action: 'import_oauth',
+    ytAccessToken,
+    googleConnected: true,
+    googleEmail: fbEmail,
+    googleChannelTitle: fbName,
+  });
+  invalidateYtFeedCache();
+  return {
+    ok: true,
+    email: fbEmail,
+    name: fbName,
+    importedSubs: Number(syncRes?.importedSubs || 0),
+    importedLikes: Number(syncRes?.importedLikes || 0),
+  };
 }
