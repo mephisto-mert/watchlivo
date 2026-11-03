@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v84';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v84';
-import { renderHome, destroyHome } from './views/home.js?v=20261103_v84';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v84';
-import { api } from './api.js?v=20261103_v84';
-import { h, toast } from './ui.js?v=20261103_v84';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v85';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v85';
+import { renderHome, destroyHome } from './views/home.js?v=20261103_v85';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v85';
+import { api } from './api.js?v=20261103_v85';
+import { h, toast } from './ui.js?v=20261103_v85';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -125,7 +125,7 @@ export function navigate(path) {
 window.vortexNavigate = navigate;
 
 async function boot() {
-  if (navigator.userAgent.includes('WatchlivoApp') || window.Android || window.matchMedia('(display-mode: standalone)').matches) {
+  if (navigator.userAgent.includes('WatchlivoApp') || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP || window.Android || window.matchMedia('(display-mode: standalone)').matches) {
     document.documentElement.classList.add('is-apk', 'is-native-apk');
   }
   window.__onWatchlivoAndroidPiP = (active) => {
@@ -275,7 +275,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261103_v84').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261103_v85').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

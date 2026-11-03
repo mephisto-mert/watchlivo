@@ -7374,6 +7374,8 @@ app = Starlette(
         Route("/api/rave/music-lyrics.vtt", music_engine.music_lyrics_vtt),
         Route("/api/rave/lyrics", music_engine.music_lyrics_vtt),
         Route("/api/rave/yt-music-stream", music_engine.yt_music_stream, methods=["GET", "HEAD", "OPTIONS"]),
+        Route("/api/rave/yt-pip-hls.m3u8", music_engine.yt_pip_hls_master, methods=["GET", "HEAD", "OPTIONS"]),
+        Route("/api/rave/yt-pip-track.m3u8", music_engine.yt_pip_hls_track, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream-manifest", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream_manifest", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),

@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume } from './audio-gain.js?v=20261103_v84';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v85';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -532,6 +532,43 @@ export class SubtitleDubController {
     }
   }
 
+  syncNativeTrackToElement(targetVideo, forceShowing = false) {
+    if (!targetVideo) return;
+    const isPrimary = targetVideo === this.adapter?.video;
+    if (isPrimary && this._activeTrackEl?.track) {
+      try {
+        if ((!this._activeTrackEl.track.cues || this._activeTrackEl.track.cues.length === 0) && this.subCues?.length) {
+          this._rebuildNativeTrackCues();
+        }
+        const showNow = (forceShowing || this._isNativeSubView(targetVideo)) && this.selectedSubId !== 'off' && Boolean(this.subCues?.length);
+        this._activeTrackEl.track.mode = showNow ? 'showing' : 'hidden';
+      } catch (e) { /* ignore */ }
+      return;
+    }
+    targetVideo.querySelectorAll('track').forEach((t) => t.remove());
+    if (!this.subCues?.length || this.selectedSubId === 'off') return;
+    const CueCtor = (typeof window !== 'undefined') ? (window.VTTCue || window.TextTrackCue) : null;
+    if (!CueCtor) return;
+    const trEl = document.createElement('track');
+    trEl.kind = 'subtitles';
+    trEl.label = 'Altyazı';
+    trEl.srclang = 'tr';
+    trEl.dataset.watchlivoPip = '1';
+    targetVideo.appendChild(trEl);
+    const tt = trEl.track;
+    if (!tt) return;
+    tt.mode = forceShowing ? 'showing' : 'hidden';
+    const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
+    const off = this.offsetSec || 0;
+    for (const c of this.subCues) {
+      const st = Math.max(0, (c.start + off) / scale);
+      const en = (c.end + off) / scale;
+      if (en > st) {
+        try { tt.addCue(new CueCtor(st, en, c.text)); } catch (e) { /* ignore */ }
+      }
+    }
+  }
+
   _buildSyncedVttBlob() {
     if (this.blobUrl) {
       try { URL.revokeObjectURL(this.blobUrl); } catch (e) { /* ignore */ }
@@ -974,13 +1011,18 @@ export class SubtitleDubController {
       : 1.0;
     const ttsDuck = (this.ttsDubActive && this._ttsSpeaking) ? 0.22 : 1.0;
     const duckFactor = Math.min(voiceDuck, ttsDuck);
-    const basePct = Number.isFinite(Number(this.adapter?.baseVolume)) ? Number(this.adapter.baseVolume) : 80;
+    const defaultPct = isIosWebKit() ? 100 : 80;
+    const basePct = Number.isFinite(Number(this.adapter?.baseVolume)) ? Number(this.adapter.baseVolume) : defaultPct;
     const v = this.adapter?.video;
     if (v) {
       applyElementVolume(v, basePct * duckFactor, Boolean(v.muted || this.adapter?.userExplicitMuted), {
         useNativeHls: Boolean(this.adapter?.useNativeHls),
         retriedNoCors: Boolean(v._retriedNoCors),
+        inPip: Boolean(this.adapter?.isPiP?.()),
       });
+    }
+    if (this.adapter?.iosPipVideo) {
+      this.adapter.iosPipVideo.muted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);
     }
     if (this._ttsAudio) {
       const isMuted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);

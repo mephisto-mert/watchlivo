@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v84';
-import { Html5Adapter } from './html5.js?v=20261103_v84';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v84';
-import { EmbedAdapter } from './embed.js?v=20261103_v84';
-import { WebviewAdapter } from './webview.js?v=20261103_v84';
-import { resumeSharedAudioContext, canControlElementVolume } from './audio-gain.js?v=20261103_v84';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v85';
+import { Html5Adapter } from './html5.js?v=20261103_v85';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v85';
+import { EmbedAdapter } from './embed.js?v=20261103_v85';
+import { WebviewAdapter } from './webview.js?v=20261103_v85';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v85';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -63,9 +63,11 @@ export class PlayerHost {
     this.key = '';
     const rawVol = localStorage.getItem('vortex_volume');
     const parsedVol = (rawVol !== null && rawVol !== '') ? Number(rawVol) : NaN;
-    this.volume = Number.isFinite(parsedVol) ? Math.max(0, Math.min(100, Math.round(parsedVol))) : 80;
-    this._lastNonZeroVol = this.volume > 0 ? this.volume : 80;
+    const defaultVol = isIosWebKit() ? 100 : 80;
+    this.volume = Number.isFinite(parsedVol) ? Math.max(0, Math.min(100, Math.round(parsedVol))) : defaultVol;
+    this._lastNonZeroVol = this.volume > 0 ? this.volume : defaultVol;
     this._docPipWin = null;
+    this._nativeIosPipActive = false;
     this.muted = this.volume === 0;
     this.userMuted = this.volume === 0;
     this.loading = false;
@@ -81,6 +83,24 @@ export class PlayerHost {
       window.vortexSetVoiceNotePlaying = (playing) => this.setVoiceNotePlaying(playing);
       window.vortexSetAutoDuck = (enabled) => this.setAutoDuckEnabled(enabled);
       window.__kinoxSyncDuckVolume = () => this._syncDuckRamp();
+      window.__onWatchlivoNativePiP = (ev) => {
+        if (!ev || typeof ev !== 'object') return;
+        if (ev.state === 'started') {
+          this._nativeIosPipActive = true;
+          try { this.adapter?.video?.pause?.(); } catch (_) {}
+          try { this.adapter?.player?.pauseVideo?.(); } catch (_) {}
+          this.onEvent('pip-change', true);
+        } else if (ev.state === 'stopped') {
+          this._nativeIosPipActive = false;
+          if (Number.isFinite(ev.time) && ev.time > 0.5) {
+            try { this.adapter?.seek?.(ev.time); } catch (_) {}
+          }
+          if (ev.playing !== false) {
+            try { this.adapter?.play?.(); } catch (_) {}
+          }
+          this.onEvent('pip-change', false);
+        }
+      };
     }
     this._gDown = null;
     this._onPointerDown = (e) => {
@@ -93,7 +113,7 @@ export class PlayerHost {
         if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift' || k === ' ' || k === 'k') return;
       } else {
         if (this._gDown && (Math.hypot((e.clientX ?? 0) - this._gDown.x, (e.clientY ?? 0) - this._gDown.y) > 14)) return;
-        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn, #ctl-pip, #ctl-cast, input[type="range"], #ctl-sliders-card, .ctl-slider-row, .vol-wrap')) return;
+        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn, #ctl-pip, #ctl-fs, #ctl-cast, input[type="range"], #ctl-sliders-card, .ctl-slider-row, .vol-wrap')) return;
       }
       resumeSharedAudioContext();
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
@@ -121,6 +141,7 @@ export class PlayerHost {
   }
 
   canControlVolume() {
+    if (typeof this.adapter?.canControlVolume === 'function') return Boolean(this.adapter.canControlVolume());
     if (this.adapter?.video) {
       return canControlElementVolume(this.adapter.video, {
         useNativeHls: Boolean(this.adapter.useNativeHls),
@@ -335,14 +356,15 @@ export class PlayerHost {
 
   isPiP() {
     return Boolean(
-      this.adapter?.isPiP?.()
+      this._nativeIosPipActive
+      || this.adapter?.isPiP?.()
       || (this._docPipWin && !this._docPipWin.closed)
       || (typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-android-pip'))
     );
   }
 
   canPiP() {
-    if (typeof window !== 'undefined' && (window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function')) return true;
+    if (typeof window !== 'undefined' && (window.isWatchlivoNativeIOS || window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function')) return true;
     if (typeof this.adapter?.canPiP === 'function' && this.adapter.canPiP()) return true;
     const v = this.adapter?.video;
     if (v && (
@@ -354,6 +376,12 @@ export class PlayerHost {
   }
 
   async togglePiP() {
+    if (this._nativeIosPipActive && typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function') {
+      this._nativeIosPipActive = false;
+      window.watchlivoNativePiP('stop', {});
+      this.onEvent('pip-change', false);
+      return 'exited';
+    }
     if (this._docPipWin && !this._docPipWin.closed) {
       try { this._docPipWin.close(); } catch (e) { /* ignore */ }
       this._docPipWin = null;

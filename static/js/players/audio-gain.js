@@ -10,6 +10,19 @@ export function isIosWebKit() {
   return /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
+export function ensureIosPlaybackAudioSession() {
+  if (typeof navigator === 'undefined' || !navigator.audioSession) return;
+  try {
+    if (navigator.audioSession.type !== 'playback') {
+      navigator.audioSession.type = 'playback';
+    }
+  } catch (e) { /* ignore */ }
+}
+
+export function hasWebAudioGraph(el) {
+  return Boolean(el && _mediaNodes.has(el));
+}
+
 export function getSharedAudioContext(createIfMissing = false) {
   if (_audioCtx) return _audioCtx;
   if (!createIfMissing || typeof window === 'undefined') return null;
@@ -62,12 +75,17 @@ export function canControlElementVolume(el, opts = {}) {
 }
 
 function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
-  if (!el) return null;
+  if (!el || opts.forbidWebAudio || opts.inPip) return null;
   const existing = _mediaNodes.get(el);
   if (existing) return existing;
   if (!isCorsSafeMediaElement(el, opts)) return null;
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
+  if (ctx.state === 'suspended') {
+    try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
+  }
+  // On iOS WebKit, never hijack <video> into a suspended AudioContext (preserves native AVPlayer OS PiP & background audio).
+  if (isIosWebKit() && el.tagName === 'VIDEO' && ctx.state !== 'running') return null;
   try {
     const source = ctx.createMediaElementSource(el);
     const gain = ctx.createGain();
@@ -81,9 +99,6 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
     source.connect(gain);
     gain.connect(limiter);
     limiter.connect(ctx.destination);
-    if (ctx.state === 'suspended') {
-      ctx.resume().catch(() => {});
-    }
     const entry = { ctx, source, gain, limiter };
     _mediaNodes.set(el, entry);
     return entry;
@@ -94,12 +109,21 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
 
 export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   if (!el) return false;
+  ensureIosPlaybackAudioSession();
   const rawNum = Number(effectivePct);
-  const pct = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 80));
+  const pct = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
   const isMuted = Boolean(muted || pct <= 0);
   const targetGain = isMuted ? 0 : Math.max(0, Math.min(1, pct / 100));
 
-  const needWebAudio = _mediaNodes.has(el) || isIosWebKit();
+  if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume?.postMessage) {
+    el.muted = isMuted;
+    try { window.webkit.messageHandlers.watchlivoVolume.postMessage({ volume: targetGain, muted: isMuted }); } catch (e) { /* ignore */ }
+    return true;
+  }
+
+  // On iOS WebKit, 100% and 0% work natively via el.muted without WebAudio, keeping AVPlayer OS Home-Screen PiP 100% intact.
+  const wantIosAttenuation = isIosWebKit() && !isMuted && pct > 0 && pct < 99.5 && !opts.forbidWebAudio && !opts.inPip;
+  const needWebAudio = _mediaNodes.has(el) || wantIosAttenuation;
   const graph = needWebAudio ? _attachElementGraph(el, opts, targetGain) : _mediaNodes.get(el);
 
   if (graph) {
@@ -123,7 +147,7 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   el.muted = isMuted;
   try {
     el.volume = targetGain;
-    return !isIosWebKit();
+    return !isIosWebKit() || isMuted || pct >= 99.5;
   } catch (e) {
     return false;
   }

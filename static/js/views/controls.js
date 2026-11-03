@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v84';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v84';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v84';
-import { getProvider } from '../providers.js?v=20261103_v84';
-import { expectedPosition } from '../sync.js?v=20261103_v84';
-import { thumbFor } from './lobby.js?v=20261103_v84';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v84';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v84';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v84';
-import { avatar } from '../profile.js?v=20261103_v84';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v85';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v85';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v85';
+import { getProvider } from '../providers.js?v=20261103_v85';
+import { expectedPosition } from '../sync.js?v=20261103_v85';
+import { thumbFor } from './lobby.js?v=20261103_v85';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v85';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v85';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v85';
+import { avatar } from '../profile.js?v=20261103_v85';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -390,14 +390,20 @@ export function buildControls(frame, ctx) {
       return;
     }
     const ok = await host.togglePiP?.();
+    if (ok === 'loading') {
+      toast('⏳ Video hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
+      return;
+    }
     if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video) {
+      const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
       update();
-      showOverlay(host.isPiP?.() ? '⧉ Mini Pencere (PiP) Açık — Diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2200);
+      showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
       return;
     }
     if (ok === 'entered' || ok === 'exited' || ok === true) {
+      const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
       update();
-      showOverlay(host.isPiP?.() ? '⧉ Mini Pencere (PiP) Açık' : '⧉ PiP Kapatıldı', 2000);
+      showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
       return;
     }
     if (typeof window !== 'undefined' && typeof window.vortexMinimizeRoom === 'function') {
@@ -425,7 +431,7 @@ export function buildControls(frame, ctx) {
   const castBtn = h('button', { class: 'ctl-action hidden', id: 'ctl-cast', 'data-tip': "TV'ye Yansıt (AirPlay / Cast)", 'aria-label': "TV'ye Yansıt", ...trustedTapProps(() => triggerCast()) }, ico('cast'));
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...trustedTapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
-  const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...tapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
+  const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...trustedTapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
   const menuBackdrop = h('div', { class: 'ctl-menu-backdrop hidden', 'aria-hidden': 'true' });
   const menu = h('div', { class: 'ctl-menu acrylic hidden' });
   const dismissViaBackdrop = (e) => {
@@ -524,7 +530,7 @@ export function buildControls(frame, ctx) {
     currentBrightness = b;
     frame.style.setProperty('--video-brightness', `${b}%`);
     frame.dataset.brightness = String(b);
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     const spec = VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal;
     const useVeilOnlyDim = Boolean(isIosFixedVol || (host.adapter && !host.adapter.caps?.overlayClicks));
     const fVal = (b === 100 || useVeilOnlyDim)
@@ -589,7 +595,7 @@ export function buildControls(frame, ctx) {
   applyVideoFilter();
 
   function takeVideoSnapshot(opts = {}) {
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     if (!v || !v.videoWidth) { toast('Yalnızca aktif video oynatılırken kare yakalanabilir.'); return null; }
     try {
       const flash = h('div', { class: 'snap-flash' });
@@ -1190,7 +1196,7 @@ export function buildControls(frame, ctx) {
     const adjTarget = subsObj ? ((target * (subsObj.fpsScale || 1.0)) - (subsObj.offsetSec || 0)) : target;
     const cueAt = subsObj?.findCueAt?.(subsObj.subCues || [], adjTarget);
     seekPreviewSub.textContent = cueAt?.text ? `"${cueAt.text.slice(0, 48)}"` : '';
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     if (v && v.videoWidth > 0) {
       try {
         const ctx2d = seekPreviewCanvas.getContext('2d');
@@ -1356,7 +1362,7 @@ export function buildControls(frame, ctx) {
     }
     if (ambilightEnabled) {
       ambilightCanvas.classList.add('on');
-      const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+      const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
       if (v && v.videoWidth > 0 && !v.paused) {
         try {
           const c2d = ambilightCanvas.getContext('2d');
@@ -2017,6 +2023,36 @@ export function buildControls(frame, ctx) {
     );
     const scrollItems = [buildSlidersPanel()];
     const items = scrollItems;
+    items.push(h('div', {
+      class: 'opt',
+      id: 'ctl-opt-pip',
+      'data-native-gesture': '1',
+      onclick: (e) => { e.stopPropagation(); togglePiP(); },
+    },
+      optIconLbl('pip', 'Pencere İçinde Pencere (PiP)'),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, (host.isPiP?.() || document.body.classList.contains('mesh-minimized')) ? 'Açık' : 'Aç ›')));
+    const vMenuEl = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
+    const iosAvFs = vMenuEl && (vMenuEl.webkitEnterFullscreen || vMenuEl.webkitEnterFullScreen);
+    if (typeof iosAvFs === 'function') {
+      items.push(h('div', {
+        class: 'opt',
+        id: 'ctl-opt-ios-avfs',
+        'data-native-gesture': '1',
+        onclick: (e) => {
+          e.stopPropagation();
+          closeMenu();
+          try {
+            host.adapter?.subs?.syncNativeTrackToElement?.(vMenuEl, true);
+            vMenuEl.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
+            iosAvFs.call(vMenuEl);
+          } catch (_) {
+            toast('Yerel tam ekran için videonun yüklenmesini bekleyin');
+          }
+        },
+      },
+        optIconLbl('fullscreen', '📱 iOS Yerel Tam Ekran (AVPlayer)'),
+        h('span', { class: 'dim', style: { fontSize: '.85em' } }, 'Aç ›')));
+    }
     if (host.adapter?.caps.subtitles || subTracks.length) {
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('subtitle'); } },
         optIconLbl('subtitles', 'Altyazı (Subtitles)'),
@@ -2074,27 +2110,6 @@ export function buildControls(frame, ctx) {
         optIconLbl(mutedNow ? 'mute' : 'volume', mutedNow ? 'Sesi Aç (iOS Ses Kontrolü)' : 'Sesi Kapat / Sessize Al'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, mutedNow ? 'Sessiz' : 'Açık ✓')));
     }
-    const vMenuEl = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
-    const iosAvFs = vMenuEl && (vMenuEl.webkitEnterFullscreen || vMenuEl.webkitEnterFullScreen);
-    if (typeof iosAvFs === 'function') {
-      items.push(h('div', {
-        class: 'opt',
-        id: 'ctl-opt-ios-avfs',
-        'data-native-gesture': '1',
-        onclick: (e) => {
-          e.stopPropagation();
-          closeMenu();
-          try {
-            vMenuEl.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
-            iosAvFs.call(vMenuEl);
-          } catch (_) {
-            toast('Yerel tam ekran için videonun yüklenmesini bekleyin');
-          }
-        },
-      },
-        optIconLbl('fullscreen', '📱 iOS Yerel Tam Ekran (AVPlayer)'),
-        h('span', { class: 'dim', style: { fontSize: '.85em' } }, 'Aç ›')));
-    }
     items.push(h('div', {
       class: 'opt',
       id: 'ctl-opt-cast',
@@ -2103,14 +2118,6 @@ export function buildControls(frame, ctx) {
     },
       optIconLbl('cast', "TV'ye Yansıt (AirPlay / Cast)"),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, host.canCast?.() ? 'Hazır ›' : 'Seç ›')));
-    items.push(h('div', {
-      class: 'opt',
-      id: 'ctl-opt-pip',
-      'data-native-gesture': '1',
-      onclick: (e) => { e.stopPropagation(); togglePiP(); },
-    },
-      optIconLbl('pip', 'Pencere İçinde Pencere (PiP)'),
-      h('span', { class: 'dim', style: { fontSize: '.85em' } }, (host.isPiP?.() || document.body.classList.contains('mesh-minimized')) ? 'Açık' : 'Aç ›')));
     if (m.tmdbId) {
       const s = m.season || 1, e = m.episode || 1, isTv = m.mediaType === 'tv';
       if (isTv) {
@@ -2125,7 +2132,7 @@ export function buildControls(frame, ctx) {
   }
 
   function isFullscreenActive() {
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     return Boolean(
       document.fullscreenElement ||
       document.webkitFullscreenElement ||
@@ -2153,7 +2160,7 @@ export function buildControls(frame, ctx) {
       host.container.style.height = '100%';
       host.container.style.maxHeight = '100%';
     }
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     if (v) {
       v.style.width = '100%';
       v.style.height = '100%';
@@ -2216,7 +2223,7 @@ export function buildControls(frame, ctx) {
   }
 
   function onNativeFsChange() {
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     const nativeFs = Boolean(document.fullscreenElement || document.webkitFullscreenElement || v?.webkitDisplayingFullscreen);
     if (!nativeFs && frame.dataset.fsMode === 'native') {
       frame.classList.remove('fullscreen');
@@ -2233,7 +2240,7 @@ export function buildControls(frame, ctx) {
 
   function toggleFullscreen() {
     closeMenu();
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
     if (isFullscreenActive() || v?.webkitDisplayingFullscreen) {
       frame.classList.remove('fullscreen');
       document.body.classList.remove('vortex-fs');
@@ -2267,6 +2274,16 @@ export function buildControls(frame, ctx) {
         onViewportChange();
       });
       return;
+    }
+    const iosNativeFs = v && (v.webkitEnterFullscreen || v.webkitEnterFullScreen);
+    if (typeof iosNativeFs === 'function' && v.readyState >= 1 && v.videoWidth > 0) {
+      try {
+        host.adapter?.subs?.syncNativeTrackToElement?.(v, true);
+        frame.dataset.fsMode = 'native';
+        v.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
+        iosNativeFs.call(v);
+        return;
+      } catch (e) { /* fallback to CSS fullscreen */ }
     }
     frame.classList.add('fullscreen');
     document.body.classList.add('vortex-fs');

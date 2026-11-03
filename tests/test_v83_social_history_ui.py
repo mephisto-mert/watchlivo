@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v84", index_txt)
+        self.assertIn("20261103_v85", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -198,3 +198,55 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         self.assertNotIn("shapeBtn", voice_js)
         self.assertIn("wrap.append(vid, tag);", voice_js)
         self.assertIn(".cam-bubble-btn {\n  display: none !important;\n}", mesh_css)
+
+    def test_07_v85_ios_system_pip_across_apps_and_home_screen(self):
+        import zipfile
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        static_root = repo_root / "static"
+        html5_js = (static_root / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        gain_js = (static_root / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
+        subs_js = (static_root / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
+        yt_js = (static_root / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        host_js = (static_root / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        ctl_js = (static_root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+
+        # 1. HTML5 adapter preserves untouched Native AVPlayer HLS on iOS + pre-warmed iosPipVideo standby + canvas Music PiP
+        self.assertIn("wantInitialIosMse", html5_js)
+        self.assertIn("_ensureIosPipStandby", html5_js)
+        self.assertIn("_switchIosNativeToInlineMse", html5_js)
+        self.assertIn("watchlivoNativePiP", html5_js)
+        self.assertIn("captureStream", html5_js)
+
+        # 2. Audio gain never hijacks iOS <video> at 100%/0% or during PiP, and sets playback audioSession
+        self.assertIn("ensureIosPlaybackAudioSession", gain_js)
+        self.assertIn("hasWebAudioGraph", gain_js)
+        self.assertIn("navigator.audioSession.type = 'playback'", gain_js)
+        self.assertIn("syncNativeTrackToElement", subs_js)
+
+        # 3. YouTube adapter has 1-tap synchronous iOS native <video> PiP bridge + backend HLS mux endpoint
+        self.assertIn("_ensureIosPipBridge", yt_js)
+        self.assertIn("/api/rave/yt-pip-hls.m3u8", yt_js)
+        self.assertIn("watchlivoResolveYouTube", yt_js)
+        self.assertIn("__onWatchlivoNativePiP", host_js)
+        self.assertIn(":not(.wl-ios-pip-standby)", ctl_js)
+
+        # 4. Backend /api/rave/yt-pip-hls.m3u8 route exists and kind=video on invalid ID returns 404 (never Semicenk fallback)
+        r_bad_vid = self.client.get("/api/rave/yt-music-stream?v=bad id!&kind=video")
+        self.assertEqual(r_bad_vid.status_code, 404)
+        r_bad_hls = self.client.get("/api/rave/yt-pip-hls.m3u8?v=bad id!")
+        self.assertEqual(r_bad_hls.status_code, 404)
+
+        # 5. Rebuilt Watchlivo.ipa binary has PK\x03\x04 header, Unix 0o755 executable bits, and AVPictureInPictureController
+        ipa_path = static_root / "Watchlivo.ipa"
+        self.assertTrue(ipa_path.exists(), "Watchlivo.ipa missing from static/")
+        raw_ipa = ipa_path.read_bytes()
+        self.assertTrue(raw_ipa.startswith(b"PK\x03\x04"))
+        with zipfile.ZipFile(ipa_path, "r") as zf:
+            bin_info = zf.getinfo("Payload/Watchlivo.app/Watchlivo")
+            unix_mode = (bin_info.external_attr >> 16) & 0o777
+            self.assertEqual(unix_mode, 0o755)
+            macho = zf.read("Payload/Watchlivo.app/Watchlivo")
+            self.assertIn(b"AVPictureInPictureController", macho)
+            self.assertIn(b"setCanStartPictureInPictureAutomaticallyFromInline:", macho)
+            self.assertIn(b"watchlivoPiP", macho)
+

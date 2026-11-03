@@ -4,6 +4,7 @@ import asyncio
 import concurrent.futures
 import json
 import re
+import struct
 import time
 import urllib.parse
 import urllib.request
@@ -746,15 +747,65 @@ def _sc_resolve_full_track_sync(artist: str, song_title: str, expected_dur_sec: 
 
 
 UA_YT_IOS = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
+UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
+_YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = {}
 
 
-def _yt_ios_extract_sync(video_id: str) -> dict | None:
+def _yt_piped_fallback_sync(vid: str) -> dict | None:
+    for host in ("https://pipedapi.kavin.rocks", "https://api.piped.private.coffee"):
+        try:
+            req = urllib.request.Request(f"{host}/streams/{vid}", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=4.2) as r:
+                d = json.loads(r.read(512 * 1024).decode("utf-8", errors="ignore"))
+            hls_u = str(d.get("hls") or "").strip()
+            mux_u = ""
+            aud_u = ""
+            for vs in (d.get("videoStreams") or []):
+                if not vs.get("videoOnly") and vs.get("url") and "mp4" in str(vs.get("mimeType") or vs.get("format") or "").lower():
+                    mux_u = vs["url"]
+                    break
+            for aus in (d.get("audioStreams") or []):
+                if aus.get("url") and "mp4" in str(aus.get("mimeType") or aus.get("format") or "").lower():
+                    aud_u = aus["url"]
+                    break
+            if hls_u or mux_u or aud_u:
+                return {
+                    "hlsUrl": hls_u,
+                    "muxedUrl": mux_u,
+                    "audioUrl": aud_u or mux_u,
+                    "videoUrl": mux_u,
+                    "duration": int(d.get("duration") or 0),
+                    "external": True,
+                }
+        except Exception:
+            continue
+    return None
+
+
+def _yt_mobile_live_hls_sync(vid: str) -> str:
+    try:
+        req = urllib.request.Request(
+            f"https://m.youtube.com/watch?v={vid}&hl=tr",
+            headers={"User-Agent": UA_SAFARI_IOS, "Accept-Language": "tr-TR,tr;q=0.9"},
+        )
+        with urllib.request.urlopen(req, timeout=4.5) as r:
+            html = r.read(900 * 1024).decode("utf-8", errors="ignore")
+        m = re.search(r'"hlsManifestUrl"\s*:\s*"([^"]+)"', html)
+        if m:
+            return m.group(1).encode("utf-8").decode("unicode_escape").replace("\\/", "/")
+    except Exception:
+        pass
+    return ""
+
+
+def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     vid = (video_id or "").strip()
     if not re.match(r"^[A-Za-z0-9_-]{11}$", vid):
         return None
     cached = _YT_IOS_STREAM_CACHE.get(vid)
     if cached and time.time() - cached[0] < 1200:
-        return cached[1]
+        if not (want_live and not cached[1].get("hlsUrl")):
+            return cached[1]
     payload = {
         "videoId": vid,
         "context": {
@@ -780,30 +831,73 @@ def _yt_ios_extract_sync(video_id: str) -> dict | None:
         with urllib.request.urlopen(req, timeout=5.0) as r:
             data = json.loads(r.read(1024 * 900).decode("utf-8", errors="ignore"))
         sd = data.get("streamingData") or {}
+        hls_url = str(sd.get("hlsManifestUrl") or "").strip()
         fmts = (sd.get("adaptiveFormats") or []) + (sd.get("formats") or [])
         audio_url = ""
         video_url = ""
+        muxed_url = ""
+        video_fmt = None
+        audio_fmt = None
+        for m_itag in (22, 18):
+            for f in (sd.get("formats") or []):
+                if f.get("itag") == m_itag and f.get("url"):
+                    muxed_url = f["url"]
+                    break
+            if muxed_url:
+                break
         for pref_itag in (140, 139, 251, 250):
             for f in fmts:
                 if f.get("itag") == pref_itag and f.get("url"):
                     audio_url = f["url"]
+                    if pref_itag in (140, 139) and f.get("initRange") and f.get("indexRange") and not audio_fmt:
+                        audio_fmt = {
+                            "url": f["url"],
+                            "initRange": f["initRange"],
+                            "indexRange": f["indexRange"],
+                            "bandwidth": int(f.get("bitrate") or 132000),
+                        }
                     break
             if audio_url:
                 break
-        for pref_vitag in (18, 22, 136, 135, 134):
+        for pref_vitag in (136, 135, 134, 22, 18):
             for f in fmts:
                 if f.get("itag") == pref_vitag and f.get("url"):
-                    video_url = f["url"]
+                    if not video_url:
+                        video_url = f["url"]
+                    if pref_vitag in (136, 135, 134) and f.get("initRange") and f.get("indexRange") and not video_fmt:
+                        video_fmt = {
+                            "url": f["url"],
+                            "initRange": f["initRange"],
+                            "indexRange": f["indexRange"],
+                            "width": int(f.get("width") or 1280),
+                            "height": int(f.get("height") or 720),
+                            "bandwidth": int(f.get("bitrate") or 1500000),
+                            "codecs": str(f.get("mimeType") or ""),
+                        }
                     break
-            if video_url:
+            if video_fmt:
                 break
+        if (want_live or (data.get("videoDetails") or {}).get("isLiveContent")) and not hls_url:
+            hls_url = _yt_mobile_live_hls_sync(vid)
         dur_s = int((data.get("videoDetails") or {}).get("lengthSeconds") or 0)
-        if audio_url or video_url:
-            out = {"audioUrl": audio_url, "videoUrl": video_url, "duration": dur_s}
+        if hls_url or muxed_url or audio_url or video_url:
+            out = {
+                "hlsUrl": hls_url,
+                "muxedUrl": muxed_url,
+                "audioUrl": audio_url,
+                "videoUrl": muxed_url or video_url,
+                "videoFmt": video_fmt,
+                "audioFmt": audio_fmt,
+                "duration": dur_s,
+            }
             _YT_IOS_STREAM_CACHE[vid] = (time.time(), out)
             return out
     except Exception:
         pass
+    ext_fb = _yt_piped_fallback_sync(vid)
+    if ext_fb:
+        _YT_IOS_STREAM_CACHE[vid] = (time.time(), ext_fb)
+        return ext_fb
     return None
 
 
@@ -868,6 +962,128 @@ def _yt_fallback_audio_url_sync(vid: str) -> str:
     return ""
 
 
+def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int, int, float]]:
+    ckey = f"{vid}:{kind}"
+    cached = _YT_SIDX_CACHE.get(ckey)
+    if cached and time.time() - cached[0] < 1200:
+        return cached[1]
+    idx_rng = fmt.get("indexRange") or {}
+    i_start = int(idx_rng.get("start") or 0)
+    i_end = int(idx_rng.get("end") or 2047)
+    req = urllib.request.Request(
+        fmt["url"],
+        headers={"User-Agent": UA_YT_IOS, "Range": f"bytes={i_start}-{i_end}"},
+    )
+    with urllib.request.urlopen(req, timeout=5.5) as r:
+        buf = r.read(65536)
+    pos = buf.find(b"sidx")
+    if pos < 4 or len(buf) < pos + 20:
+        return []
+    box_start = pos - 4
+    ver = buf[pos + 4]
+    p = pos + 8 + 4  # skip version/flags + reference_ID
+    timescale = struct.unpack(">I", buf[p:p + 4])[0] or 1000
+    p += 4
+    if ver == 0:
+        _, first_offset = struct.unpack(">II", buf[p:p + 8])
+        p += 8
+    else:
+        _, first_offset = struct.unpack(">QQ", buf[p:p + 16])
+        p += 16
+    p += 2  # reserved
+    ref_cnt = struct.unpack(">H", buf[p:p + 2])[0]
+    p += 2
+    box_sz = struct.unpack(">I", buf[box_start:box_start + 4])[0]
+    cur_off = i_start + box_start + box_sz + first_offset
+    segs: list[tuple[int, int, float]] = []
+    for _ in range(ref_cnt):
+        if p + 12 > len(buf):
+            break
+        w1, sub_dur, _ = struct.unpack(">III", buf[p:p + 12])
+        p += 12
+        sz = w1 & 0x7FFFFFFF
+        dur = max(0.2, float(sub_dur) / float(timescale))
+        segs.append((sz, cur_off, dur))
+        cur_off += sz
+    if segs:
+        _YT_SIDX_CACHE[ckey] = (time.time(), segs)
+    return segs
+
+
+async def yt_pip_hls_master(request: Request):
+    cors_hdrs = {"Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
+    vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
+    want_live = request.query_params.get("live") == "1"
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid, want_live), timeout=6.5)
+    except Exception:
+        info = None
+    if not info:
+        return JSONResponse({"error": "PiP akışı bulunamadı"}, status_code=404, headers=cors_hdrs)
+    hls_u = str(info.get("hlsUrl") or "").strip()
+    if hls_u:
+        prox = f"/api/rave/stream?u={urllib.parse.quote(hls_u, safe='')}&proxy_segs=1&ext=.m3u8"
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:6",
+            f"#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720",
+            prox,
+        ]
+        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+    v_fmt = info.get("videoFmt")
+    a_fmt = info.get("audioFmt")
+    if v_fmt and a_fmt:
+        w = int(v_fmt.get("width") or 1280)
+        h = int(v_fmt.get("height") or 720)
+        bw = int(v_fmt.get("bandwidth") or 1500000) + int(a_fmt.get("bandwidth") or 132000)
+        q_vid = urllib.parse.quote(vid, safe="")
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:7",
+            "#EXT-X-INDEPENDENT-SEGMENTS",
+            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Orijinal",DEFAULT=YES,AUTOSELECT=YES,URI="/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=audio"',
+            f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="avc1.4d401f,mp4a.40.2",RESOLUTION={w}x{h},AUDIO="aud"',
+            f"/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=video",
+        ]
+        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+    return JSONResponse({"error": "Uyumlu HLS PiP katmanı yok"}, status_code=404, headers=cors_hdrs)
+
+
+async def yt_pip_hls_track(request: Request):
+    cors_hdrs = {"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=600"}
+    vid = (request.query_params.get("v") or "").strip()[:20]
+    kind = "video" if (request.query_params.get("kind") or "").lower() == "video" else "audio"
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid, False), timeout=6.5)
+    except Exception:
+        info = None
+    fmt = (info or {}).get("videoFmt" if kind == "video" else "audioFmt")
+    if not fmt:
+        return JSONResponse({"error": "Katman bulunamadı"}, status_code=404, headers=cors_hdrs)
+    segs = await asyncio.wait_for(asyncio.to_thread(_fetch_sidx_segments_sync, vid, kind, fmt), timeout=6.5)
+    if not segs:
+        return JSONResponse({"error": "Segment dizini okunamadı"}, status_code=502, headers=cors_hdrs)
+    init_rng = fmt.get("initRange") or {}
+    init_s = int(init_rng.get("start") or 0)
+    init_len = max(1, int(init_rng.get("end") or 739) - init_s + 1)
+    max_d = max(1, int(max(s[2] for s in segs) + 0.999))
+    base_uri = f"/api/rave/yt-music-stream?v={urllib.parse.quote(vid, safe='')}&kind={'video_fmp4' if kind == 'video' else 'audio'}"
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:7",
+        f"#EXT-X-TARGETDURATION:{max_d}",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        f'#EXT-X-MAP:URI="{base_uri}",BYTERANGE="{init_len}@{init_s}"',
+    ]
+    for sz, off, dur in segs:
+        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"#EXT-X-BYTERANGE:{sz}@{off}")
+        lines.append(base_uri)
+    lines.append("#EXT-X-ENDLIST")
+    return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+
+
 async def yt_music_stream(request: Request):
     cors_hdrs = {
         "Access-Control-Allow-Origin": "*",
@@ -879,12 +1095,18 @@ async def yt_music_stream(request: Request):
         return Response(b"", status_code=204, headers=cors_hdrs)
     vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
     kind = (request.query_params.get("kind") or "audio").strip().lower()
+    is_video_req = kind in ("video", "video_fmp4")
     try:
         info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
     except Exception:
         info = None
-    target = (info or {}).get("videoUrl" if kind == "video" else "audioUrl") or (info or {}).get("audioUrl") or ""
-    if not target:
+    if kind == "video_fmp4":
+        target = ((info or {}).get("videoFmt") or {}).get("url") or (info or {}).get("videoUrl") or ""
+    elif kind == "video":
+        target = (info or {}).get("muxedUrl") or (info or {}).get("videoUrl") or ""
+    else:
+        target = (info or {}).get("audioUrl") or ""
+    if not target and not is_video_req:
         try:
             target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
         except Exception:
@@ -893,12 +1115,14 @@ async def yt_music_stream(request: Request):
         return JSONResponse({"error": "Akış bulunamadı"}, status_code=404, headers=cors_hdrs)
     rng = request.headers.get("range") or ""
     is_head = request.method == "HEAD"
-    def_ct = "video/mp4" if kind == "video" else "audio/mp4"
+    def_ct = "video/mp4" if is_video_req else "audio/mp4"
     try:
         try:
             data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head), timeout=11.0)
         except Exception:
             _YT_IOS_STREAM_CACHE.pop(vid, None)
+            if is_video_req:
+                raise
             target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
             if not target:
                 raise

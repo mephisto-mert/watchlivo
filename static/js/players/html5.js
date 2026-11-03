@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v84';
-import { expectedPosition } from '../sync.js?v=20261103_v84';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v84';
-import { applyElementVolume } from './audio-gain.js?v=20261103_v84';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v85';
+import { expectedPosition } from '../sync.js?v=20261103_v85';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v85';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261103_v85';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -27,11 +27,15 @@ export class Html5Adapter {
     this._lastVisChangeAt = 0;
     this._pipPauseTimer = null;
     this._wasInPip = false;
+    this.iosPipVideo = null;
+    this._iosPipActive = false;
+    this._iosPipIsCanvasOnly = false;
+    this._musicPipTimer = null;
     this.wantPlaying = true;
     this.bufferingReported = false;
     this.playingReported = false;
     this.readyReported = false;
-    this.baseVolume = 80;
+    this.baseVolume = isIosWebKit() ? 100 : 80;
     this.currentUrl = '';
     this.subs = new SubtitleDubController(this);
     this.caps = { seek: true, rate: true, overlayClicks: true, subtitles: true, audioTracks: true };
@@ -43,6 +47,8 @@ export class Html5Adapter {
       this.caps = { ...this.caps, seek: false, live: true };
     }
     setReferrerMeta('no-referrer');
+    ensureIosPlaybackAudioSession();
+    this.media = media || {};
     this.wantPlaying = Boolean(autoplay);
     this.autoplayHardBlocked = false;
     this._autoResumeCount = 0;
@@ -63,7 +69,13 @@ export class Html5Adapter {
     try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
     if (media?.thumbnail || media?.poster) v.poster = media.thumbnail || media.poster;
     this.video = v;
-    const syncVideoCors = (targetUrl) => {
+    const syncVideoCors = (targetUrl, forNativeHls = false) => {
+      if ((forNativeHls || this.useNativeHls) && isIosWebKit()) {
+        v.removeAttribute('crossorigin');
+        v.setAttribute('x-webkit-airplay', 'allow');
+        try { v.disableRemotePlayback = false; } catch (_) {}
+        return;
+      }
       const s = String(targetUrl || '');
       const isFirstPartyRave = s.startsWith('/api/rave/') || (typeof window !== 'undefined' && s.startsWith(`${window.location.origin}/api/rave/`));
       if (isFirstPartyRave && !v._retriedNoCors) v.crossOrigin = 'anonymous';
@@ -262,7 +274,8 @@ export class Html5Adapter {
         this._lastPipExitAt = Date.now();
       }
       this._wasInPip = nowPip;
-      this.subs?._disableAllNativeTextTracks?.();
+      if (nowPip) this.subs?.syncNativeTrackToElement?.(v, true);
+      else this.subs?._disableAllNativeTextTracks?.();
       this.events.onPipChange?.(nowPip);
     };
     v.addEventListener('enterpictureinpicture', onPipChange);
@@ -529,8 +542,12 @@ export class Html5Adapter {
     const hasManagedMse = typeof window !== 'undefined' && typeof window.ManagedMediaSource === 'function';
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
     const isApple = /Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-    const canAppleMseHls = isApple && hasManagedMse && canHlsJs && isRaveProxiedHls(url);
-    let useNativeHls = isHls && canNativeHls && ((isApple && !canAppleMseHls) || !canHlsJs);
+    const hasNativeVolBridge = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.watchlivoVolume);
+    const canAppleMseHls = isApple && !hasNativeVolBridge && hasManagedMse && canHlsJs && isRaveProxiedHls(url);
+    const wantInitialIosMse = canAppleMseHls && this.baseVolume > 0 && this.baseVolume < 99.5;
+    let useNativeHls = isHls && canNativeHls && ((isApple && !wantInitialIosMse) || !canHlsJs);
+    this._isApple = isApple;
+    this._canAppleMseHls = canAppleMseHls;
     this.useNativeHls = useNativeHls;
     const withProxySegs = (u) => {
       const s = String(u || '');
@@ -539,6 +556,7 @@ export class Html5Adapter {
         ? s.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
         : `${s}&proxy_segs=1`;
     };
+    this._withProxySegs = withProxySegs;
 
     let triedLiveRefresh = false;
     const handleExhaustedCandidates = async (srcUrl, doneCb) => {
@@ -601,9 +619,12 @@ export class Html5Adapter {
         this.loadedAtMs = Date.now();
       }
       this.currentUrl = nextUrl;
-      syncVideoCors(nextUrl);
+      syncVideoCors(nextUrl, useNativeHls && isUrlHls(nextUrl));
       if (this.isMusic) {
         this._setMusicVisualMode?.(isAudioOnlyUrl(nextUrl) ? 'vinyl' : 'clip');
+        if (isIosWebKit() && isAudioOnlyUrl(nextUrl)) {
+          this._ensureIosPipStandby?.(nextUrl);
+        }
       }
       const enforceInitialSeek = () => {
         if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking) return;
@@ -628,8 +649,9 @@ export class Html5Adapter {
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
-        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || (hasManagedMse && isRaveProxiedHls(nextUrl)));
+        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || wantInitialIosMse || this._forceIosMseInline);
         if (allowHlsJsHere) {
+          if (isApple) this._ensureIosPipStandby?.(nextUrl);
           attachHlsJs(isApple ? withProxySegs(nextUrl) : nextUrl, doneCb, resumePos);
           return;
         }
@@ -643,6 +665,7 @@ export class Html5Adapter {
         }
         useNativeHls = true;
         this.useNativeHls = true;
+        syncVideoCors(nextUrl, true);
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
         v.src = withProxySegs(nextUrl);
@@ -656,6 +679,9 @@ export class Html5Adapter {
       }
       try { this.hls?.destroy(); } catch (err) { /* ignore */ }
       this.hls = null;
+      if (isApple && this.baseVolume > 0 && this.baseVolume < 99.5) {
+        this._ensureIosPipStandby?.(nextUrl);
+      }
       v.src = nextUrl;
       v.load();
       v.addEventListener('loadedmetadata', restorePosOnLoad, { once: true });
@@ -665,6 +691,10 @@ export class Html5Adapter {
 
     const attachHlsJs = (srcUrl, doneCb, customStart = null) => {
       try { this.hls?.destroy(); } catch (e) { /* ignore */ }
+      if (isApple) {
+        v.removeAttribute('x-webkit-airplay');
+        try { v.disableRemotePlayback = true; } catch (_) {}
+      }
       let doneFired = false;
       const fireDoneOnce = () => {
         if (doneFired) return;
@@ -846,6 +876,7 @@ export class Html5Adapter {
               triedHlsFallback = true;
               useNativeHls = true;
               this.useNativeHls = true;
+              syncVideoCors(srcUrl, true);
               try { this.hls.destroy(); } catch (err) { /* ignore */ }
               this.hls = null;
               v.src = withProxySegs(srcUrl);
@@ -866,6 +897,7 @@ export class Html5Adapter {
               triedHlsFallback = true;
               useNativeHls = true;
               this.useNativeHls = true;
+              syncVideoCors(srcUrl, true);
               try { this.hls.destroy(); } catch (err) { /* ignore */ }
               this.hls = null;
               v.src = withProxySegs(srcUrl);
@@ -890,6 +922,7 @@ export class Html5Adapter {
       this.hls.loadSource(srcUrl);
       this.hls.attachMedia(v);
     };
+    this._attachHlsJsInline = attachHlsJs;
 
     v.addEventListener('error', () => {
       if (this._destroyed || this.video !== v || this.hls) return;
@@ -1203,16 +1236,40 @@ export class Html5Adapter {
     }
   }
 
-  play() { if (this.hasEnded || this.video?.ended) return; if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) this.autoplayHardBlocked = false; this.wantPlaying = true; this.tryPlay(); }
-  pause() { this.wantPlaying = false; clearTimeout(this.resumeTimer); this.video?.pause(); }
-  isEnded() { return Boolean(this.hasEnded || this.video?.ended); }
+  _activeMediaEl() {
+    return (this._iosPipActive && this.iosPipVideo && !this._iosPipIsCanvasOnly) ? this.iosPipVideo : this.video;
+  }
+
+  canControlVolume() {
+    if (!isIosWebKit()) return true;
+    if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume) return true;
+    if (this._canAppleMseHls) return true;
+    if (this.video && !this.useNativeHls) return true;
+    return true;
+  }
+
+  play() {
+    const av = this._activeMediaEl();
+    if (this.hasEnded || av?.ended) return;
+    if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) this.autoplayHardBlocked = false;
+    this.wantPlaying = true;
+    if (av && av === this.iosPipVideo) { av.play()?.catch?.(() => {}); return; }
+    this.tryPlay();
+  }
+  pause() {
+    this.wantPlaying = false;
+    clearTimeout(this.resumeTimer);
+    this._activeMediaEl()?.pause();
+    if (this._iosPipIsCanvasOnly) this.video?.pause();
+  }
+  isEnded() { return Boolean(this.hasEnded || this._activeMediaEl()?.ended); }
   seek(t) {
     const target = Math.max(0, Number(t) || 0);
     const dur = this.getDuration();
     if (!dur || target < dur - 2) {
       this.hasEnded = false;
     }
-    const v = this.video;
+    const v = this._activeMediaEl();
     if (v && (v.seeking || Math.abs((Number(v.currentTime) || 0) - this.lastSeekTarget) < 1.5) && this.lastSeekAt && Date.now() - this.lastSeekAt < 1000 && Math.abs(target - this.lastSeekTarget) < 1.2) {
       return;
     }
@@ -1246,7 +1303,7 @@ export class Html5Adapter {
     }
   }
   getTime() {
-    const v = this.video;
+    const v = this._activeMediaEl();
     const nowMs = Date.now();
     if (this.initialSeekPending && nowMs - (this.loadedAtMs || 0) < 16000) {
       const cur = Number(v?.currentTime || 0);
@@ -1268,9 +1325,9 @@ export class Html5Adapter {
     }
     return Number(v.currentTime || 0);
   }
-  getDuration() { const d = Number(this.video?.duration || 0); return Number.isFinite(d) ? d : 0; }
+  getDuration() { const d = Number(this._activeMediaEl()?.duration || this.video?.duration || 0); return Number.isFinite(d) ? d : 0; }
   getBuffered() {
-    const v = this.video;
+    const v = this._activeMediaEl();
     if (!v || !v.buffered.length) return 0;
     const ct = Number(v.currentTime || 0);
     for (let i = 0; i < v.buffered.length; i += 1) {
@@ -1280,27 +1337,41 @@ export class Html5Adapter {
     }
     return v.buffered.end(v.buffered.length - 1);
   }
-  isPaused() { return !this.video || this.video.paused; }
+  isPaused() { const av = this._activeMediaEl(); return !av || av.paused; }
   isBuffered(t) {
-    const b = this.video?.buffered;
+    const b = this._activeMediaEl()?.buffered;
     if (!b) return false;
     for (let i = 0; i < b.length; i += 1) if (t >= b.start(i) - 0.5 && t <= b.end(i) - 0.2) return true;
     return false;
   }
   isBuffering() {
-    const v = this.video;
+    const v = this._activeMediaEl();
     if (!v) return true;
     if (this.initialSeekPending && Date.now() - (this.loadedAtMs || 0) < 16000 && v.readyState < 3) return true;
     const activePlay = !v.paused || this.wantPlaying;
     const starvedAhead = activePlay && v.readyState < 3 && !this.isBuffered(Number(v.currentTime || 0) + 0.3);
     return Boolean(v.seeking || this.bufferingReported || (activePlay && v.readyState < 2) || starvedAhead);
   }
-  setRate(r) { if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r; }
-  getRate() { return Number(this.video?.playbackRate || 1); }
+  setRate(r) {
+    if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r;
+    if (this.iosPipVideo && Math.abs(this.iosPipVideo.playbackRate - r) > 0.001) this.iosPipVideo.playbackRate = r;
+  }
+  getRate() { return Number(this._activeMediaEl()?.playbackRate || 1); }
   setVolume(v) {
     const rawNum = Number(v);
-    this.baseVolume = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 80));
+    this.baseVolume = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
+    if (isIosWebKit() && this.baseVolume > 0 && this.baseVolume < 99.5 && !this.isPiP()) {
+      resumeSharedAudioContext();
+      if (this.useNativeHls && this._canAppleMseHls) {
+        this._switchIosNativeToInlineMse();
+        return;
+      }
+      this._ensureIosPipStandby?.(this.currentUrl);
+    }
     this.subs.syncVideoVolume();
+    if (this.video && (this.hls || hasWebAudioGraph(this.video)) && isIosWebKit()) {
+      this._ensureIosPipStandby?.(this.currentUrl);
+    }
     this._syncDeckBVolume?.();
   }
   setMuted(m) {
@@ -1472,6 +1543,162 @@ export class Html5Adapter {
     }
     return false;
   }
+  _buildMusicPipCanvasStream(pv) {
+    if (typeof document === 'undefined') return false;
+    const cv = document.createElement('canvas');
+    cv.width = 480;
+    cv.height = 270;
+    const ctx = cv.getContext('2d');
+    if (!ctx || typeof cv.captureStream !== 'function') return false;
+    const title = String(this.media?.songTitle || this.media?.title || 'Watchlivo Müzik').replace(/^🎵\s*/, '').slice(0, 42);
+    const artist = String(this.media?.artist || this.media?.channel || 'Canlı Ses & Müzik').slice(0, 38);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    const drawFrame = () => {
+      const grad = ctx.createLinearGradient(0, 0, 480, 270);
+      grad.addColorStop(0, '#090b16');
+      grad.addColorStop(1, '#191334');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 480, 270);
+      if (img.complete && img.naturalWidth > 0) {
+        try { ctx.drawImage(img, 28, 45, 180, 180); } catch (_) {}
+      }
+      ctx.fillStyle = '#a78bfa';
+      ctx.font = '700 13px system-ui, -apple-system, sans-serif';
+      ctx.fillText('🎵 WATCHLIVO · PENCERE İÇİNDE PENCERE', 226, 98);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 20px system-ui, -apple-system, sans-serif';
+      ctx.fillText(title, 226, 136, 232);
+      ctx.fillStyle = 'rgba(226,232,240,0.82)';
+      ctx.font = '600 15px system-ui, -apple-system, sans-serif';
+      ctx.fillText(artist, 226, 166, 232);
+    };
+    drawFrame();
+    const rawPoster = String(this.media?.poster || this.media?.thumbnail || '');
+    if (rawPoster) {
+      img.onload = drawFrame;
+      img.src = rawPoster.startsWith('http') ? `/api/rave/poster?u=${encodeURIComponent(rawPoster)}` : rawPoster;
+    }
+    clearInterval(this._musicPipTimer);
+    this._musicPipTimer = setInterval(drawFrame, 1000);
+    pv.srcObject = cv.captureStream(4);
+    pv.muted = true;
+    this._iosPipIsCanvasOnly = true;
+    return true;
+  }
+
+  _ensureIosPipStandby(rawUrl = this.currentUrl) {
+    if (!isIosWebKit() || this._destroyed || !this.container) return null;
+    let pv = this.iosPipVideo;
+    if (!pv) {
+      pv = document.createElement('video');
+      pv.className = 'wl-ios-pip-standby';
+      pv.playsInline = true;
+      pv.setAttribute('playsinline', '');
+      pv.setAttribute('webkit-playsinline', '');
+      pv.setAttribute('x-webkit-airplay', 'allow');
+      pv.disablePictureInPicture = false;
+      pv.preload = 'metadata';
+      pv.muted = true;
+      pv.preservesPitch = true;
+      pv.style.cssText = 'position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.001;pointer-events:none;z-index:-1;';
+      pv.addEventListener('webkitpresentationmodechanged', () => {
+        if (this._destroyed || this.iosPipVideo !== pv) return;
+        const inPipNow = pv.webkitPresentationMode === 'picture-in-picture';
+        if (inPipNow) {
+          this._iosPipActive = true;
+          this._wasInPip = true;
+          if (!this._iosPipIsCanvasOnly) this.subs?.syncNativeTrackToElement?.(pv, true);
+          this.events.onPipChange?.(true);
+        } else if (this._iosPipActive) {
+          const exitT = Number(pv.currentTime || 0);
+          const keepPlaying = this._iosPipIsCanvasOnly ? !this.video?.paused : (!pv.paused || this.wantPlaying);
+          const wasCanvas = this._iosPipIsCanvasOnly;
+          this._iosPipActive = false;
+          this._wasInPip = false;
+          this._lastPipExitAt = Date.now();
+          if (!wasCanvas) {
+            try { pv.pause(); } catch (_) {}
+            pv.muted = true;
+            if (this.video) {
+              if (exitT > 0.5) { try { this.video.currentTime = exitT; } catch (_) {} }
+              try { this.hls?.startLoad?.(exitT >= 0.5 ? exitT : -1); } catch (_) {}
+              this.subs?.syncVideoVolume?.();
+              if (keepPlaying) { this.wantPlaying = true; this.tryPlay(); }
+            }
+          }
+          this.events.onPipChange?.(false);
+        }
+      });
+      pv.addEventListener('timeupdate', () => {
+        if (!this._iosPipActive || this._iosPipIsCanvasOnly || pv.seeking) return;
+        if (pv.currentTime > 2) this.highestPlayedPos = Math.max(this.highestPlayedPos || 0, pv.currentTime);
+        this.subs?.onTimeUpdate?.(pv.currentTime);
+        if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined') {
+          window.__watchlivoBgSyncTick?.();
+        }
+      });
+      this.container.appendChild(pv);
+      this.iosPipVideo = pv;
+    }
+    if (this.isMusic) {
+      const clipVid = String(this.media?.clipVideoId || this.media?.videoId || '');
+      if (/^[A-Za-z0-9_-]{11}$/.test(clipVid) && !this.media?.live) {
+        const ytHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(clipVid)}`;
+        this._iosPipIsCanvasOnly = false;
+        if (pv.getAttribute('data-standby-src') !== ytHls) {
+          pv.srcObject = null;
+          pv.setAttribute('data-standby-src', ytHls);
+          pv.removeAttribute('crossorigin');
+          pv.src = ytHls;
+          try { pv.load(); } catch (_) {}
+        }
+        return pv;
+      }
+      if (!pv.srcObject) {
+        this._buildMusicPipCanvasStream(pv);
+        try { pv.play()?.catch?.(() => {}); } catch (_) {}
+      }
+      return pv;
+    }
+    this._iosPipIsCanvasOnly = false;
+    const targetSrc = (this._withProxySegs && /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(rawUrl || '')))
+      ? this._withProxySegs(rawUrl)
+      : String(rawUrl || '');
+    if (!targetSrc || targetSrc.startsWith('blob:')) return null;
+    if (pv.getAttribute('data-standby-src') !== targetSrc) {
+      pv.srcObject = null;
+      pv.setAttribute('data-standby-src', targetSrc);
+      pv.removeAttribute('crossorigin');
+      pv.src = targetSrc;
+      try { pv.load(); } catch (_) {}
+    }
+    return pv;
+  }
+
+  _switchIosNativeToInlineMse() {
+    if (!this._canAppleMseHls || !this.useNativeHls || !this.video || this.isPiP() || !window.Hls?.isSupported?.()) return;
+    const v = this.video;
+    const srcUrl = this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
+    if (!srcUrl) return;
+    const curT = this.getTime();
+    const wasPlaying = this.wantPlaying || !v.paused;
+    this._ensureIosPipStandby(this.currentUrl);
+    this._forceIosMseInline = true;
+    this.useNativeHls = false;
+    v.removeAttribute('x-webkit-airplay');
+    try { v.disableRemotePlayback = true; } catch (_) {}
+    v.crossOrigin = 'anonymous';
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
+    if (typeof this._attachHlsJsInline === 'function') {
+      this._attachHlsJsInline(srcUrl, () => {
+        resumeSharedAudioContext();
+        this.subs?.syncVideoVolume?.();
+        if (wasPlaying) this.tryPlay();
+      }, curT);
+    }
+  }
+
   canPiP() {
     const v = this.video;
     if (!v) return false;
@@ -1483,17 +1710,70 @@ export class Html5Adapter {
   }
   isPiP() {
     const v = this.video;
-    if (!v) return false;
+    const pv = this.iosPipVideo;
     return Boolean(
-      (typeof document !== 'undefined' && document.pictureInPictureElement === v) ||
-      v.webkitPresentationMode === 'picture-in-picture'
+      this._iosPipActive ||
+      (v && ((typeof document !== 'undefined' && document.pictureInPictureElement === v) || v.webkitPresentationMode === 'picture-in-picture')) ||
+      (pv && ((typeof document !== 'undefined' && document.pictureInPictureElement === pv) || pv.webkitPresentationMode === 'picture-in-picture'))
     );
   }
   async togglePiP() {
     const v = this.video;
     if (!v) return false;
+    ensureIosPlaybackAudioSession();
     v.disablePictureInPicture = false;
     try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
+
+    if (this.iosPipVideo && (this._iosPipActive || this.iosPipVideo.webkitPresentationMode === 'picture-in-picture')) {
+      this._lastPipExitAt = Date.now();
+      try { this.iosPipVideo.webkitSetPresentationMode('inline'); } catch (_) {}
+      return 'exited';
+    }
+
+    const audioOnlyMusic = Boolean(this.isMusic && !(v.videoWidth > 0));
+    const needsIosStandbyPip = isIosWebKit() && typeof v.webkitSetPresentationMode === 'function' && (Boolean(this.hls) || hasWebAudioGraph(v) || audioOnlyMusic);
+    if (needsIosStandbyPip && v.webkitPresentationMode !== 'picture-in-picture') {
+      const pv = this._ensureIosPipStandby(this.currentUrl);
+      if (pv) {
+        if (pv.readyState >= 1 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
+          if (!this._iosPipIsCanvasOnly) {
+            const curT = this.getTime();
+            if (curT > 0.5 && Math.abs((pv.currentTime || 0) - curT) > 0.8) {
+              try { pv.currentTime = curT; } catch (_) {}
+            }
+            pv.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
+            pv.playbackRate = v.playbackRate || 1;
+            this.subs?.syncNativeTrackToElement?.(pv, true);
+            try { v.pause(); } catch (_) {}
+            try { this.hls?.stopLoad?.(); } catch (_) {}
+          } else if (v.paused && this.wantPlaying !== false) {
+            try { v.play()?.catch?.(() => {}); } catch (_) {}
+          }
+          this._iosPipActive = true;
+          try { pv.play()?.catch?.(() => {}); } catch (_) {}
+          try {
+            pv.webkitSetPresentationMode('picture-in-picture');
+            this.events.onPipChange?.(true);
+            return 'entered';
+          } catch (err) {
+            this._iosPipActive = false;
+            if (!this._iosPipIsCanvasOnly) {
+              try { pv.pause(); } catch (_) {}
+              try { this.hls?.startLoad?.(-1); } catch (_) {}
+              if (this.wantPlaying) this.tryPlay();
+            }
+          }
+        } else {
+          try { pv.load(); } catch (_) {}
+          if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
+            const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
+            if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
+          }
+          return 'loading';
+        }
+      }
+    }
+
     if (typeof v.webkitSetPresentationMode === 'function') {
       try {
         if (v.webkitPresentationMode === 'picture-in-picture') {
@@ -1507,15 +1787,24 @@ export class Html5Adapter {
           if (v.paused && this.wantPlaying !== false) {
             try { v.play()?.catch?.(() => {}); } catch (_) {}
           }
-          this.subs?._disableAllNativeTextTracks?.();
+          this.subs?.syncNativeTrackToElement?.(v, true);
           v.webkitSetPresentationMode('picture-in-picture');
           this.events.onPipChange?.(true);
           return 'entered';
         }
         if (v.readyState < 1) {
           try { v.play()?.catch?.(() => {}); } catch (_) {}
+          if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
+            const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
+            if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
+          }
+          return 'loading';
         }
-      } catch (e) { /* try standard PiP API below */ }
+      } catch (e) { /* try native bridge / standard PiP API below */ }
+    }
+    if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
+      const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
+      if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
     }
     try {
       if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
@@ -1527,11 +1816,12 @@ export class Html5Adapter {
       }
       if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
         if (v.readyState >= 1) {
-          this.subs?._disableAllNativeTextTracks?.();
+          this.subs?.syncNativeTrackToElement?.(v, true);
           await v.requestPictureInPicture();
           this.events.onPipChange?.(true);
           return 'entered';
         }
+        return 'loading';
       }
     } catch (e) { /* fallback handled by caller */ }
     return false;
@@ -1575,6 +1865,16 @@ export class Html5Adapter {
     if (this.bgYtEl) { try { this.bgYtEl.removeAttribute('src'); this.bgYtEl.remove(); } catch (e) { /* ignore */ } this.bgYtEl = null; }
     if (this.mashupHlsB) { try { this.mashupHlsB.detachMedia(); this.mashupHlsB.destroy(); } catch (e) { /* ignore */ } this.mashupHlsB = null; }
     if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); this.mashupDeckB.remove(); } catch (e) { /* ignore */ } this.mashupDeckB = null; }
+    clearInterval(this._musicPipTimer);
+    if (this.iosPipVideo) {
+      try {
+        this.iosPipVideo.pause();
+        this.iosPipVideo.srcObject = null;
+        this.iosPipVideo.removeAttribute('src');
+        this.iosPipVideo.remove();
+      } catch (e) { /* ignore */ }
+      this.iosPipVideo = null;
+    }
     if (this.video) {
       try {
         this.video.pause();
