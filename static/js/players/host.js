@@ -1,9 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v81';
-import { Html5Adapter } from './html5.js?v=20261103_v81';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v81';
-import { EmbedAdapter } from './embed.js?v=20261103_v81';
-import { WebviewAdapter } from './webview.js?v=20261103_v81';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v82';
+import { Html5Adapter } from './html5.js?v=20261103_v82';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v82';
+import { EmbedAdapter } from './embed.js?v=20261103_v82';
+import { WebviewAdapter } from './webview.js?v=20261103_v82';
+import { resumeSharedAudioContext, canControlElementVolume } from './audio-gain.js?v=20261103_v82';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -60,8 +61,11 @@ export class PlayerHost {
     if (typeof window !== 'undefined') window.__kinoxHost = this;
     this.adapter = null;
     this.key = '';
-    const savedVol = Number(localStorage.getItem('vortex_volume'));
-    this.volume = Number.isFinite(savedVol) && savedVol > 0 ? Math.min(100, savedVol) : 80;
+    const rawVol = localStorage.getItem('vortex_volume');
+    const parsedVol = (rawVol !== null && rawVol !== '') ? Number(rawVol) : NaN;
+    this.volume = Number.isFinite(parsedVol) ? Math.max(0, Math.min(150, Math.round(parsedVol))) : 80;
+    this._lastNonZeroVol = this.volume > 0 ? this.volume : 80;
+    this._docPipWin = null;
     this.muted = false;
     this.userMuted = false;
     this.loading = false;
@@ -78,20 +82,27 @@ export class PlayerHost {
       window.vortexSetAutoDuck = (enabled) => this.setAutoDuckEnabled(enabled);
       window.__kinoxSyncDuckVolume = () => this._syncDuckRamp();
     }
+    this._gDown = null;
+    this._onPointerDown = (e) => {
+      this._gDown = { x: e.clientX ?? 0, y: e.clientY ?? 0, t: Date.now() };
+    };
     this._gestureHandler = (e) => {
       if (e?.type === 'keydown') {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const k = String(e.key || '').toLowerCase();
         if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift' || k === ' ' || k === 'k') return;
-      } else if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol')) {
-        return;
+      } else {
+        if (this._gDown && (Math.hypot((e.clientX ?? 0) - this._gDown.x, (e.clientY ?? 0) - this._gDown.y) > 14)) return;
+        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn')) return;
       }
+      resumeSharedAudioContext();
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
         this.unlockAudio();
       }
     };
     if (typeof window !== 'undefined') {
-      ['touchend', 'click', 'keydown'].forEach((ev) => {
+      window.addEventListener('pointerdown', this._onPointerDown, { capture: true, passive: true });
+      ['click', 'keydown'].forEach((ev) => {
         window.addEventListener(ev, this._gestureHandler, { capture: true, passive: true });
       });
     }
@@ -105,8 +116,23 @@ export class PlayerHost {
     return localStorage.getItem('vortex_voice_duck') !== 'off';
   }
 
+  getVolume() {
+    return this.volume;
+  }
+
+  canControlVolume() {
+    if (this.adapter?.video) {
+      return canControlElementVolume(this.adapter.video, {
+        useNativeHls: Boolean(this.adapter.useNativeHls),
+        retriedNoCors: Boolean(this.adapter.video._retriedNoCors),
+      });
+    }
+    if (this.adapter?.audioEl) return canControlElementVolume(this.adapter.audioEl);
+    return true;
+  }
+
   _effectiveVolume() {
-    const base = Math.max(0, Math.min(100, Number(this.volume) || 0));
+    const base = Math.max(0, Math.min(150, Number(this.volume) || 0));
     if (base === 0) return 0;
     if (!this.isAutoDuckEnabled()) return base;
     const g = Number.isFinite(this.duckGain) ? this.duckGain : 1.0;
@@ -194,16 +220,9 @@ export class PlayerHost {
         this.onEvent('unmuted');
       }),
       onAutoplayBlocked: guard(() => {
-        const hasActiveGesture = Boolean(navigator.userActivation?.isActive);
-        if (this.userUnlocked && hasActiveGesture && !this.userMuted) {
-          this.autoplayBlocked = false;
-          this.muted = false;
-          this.adapter?.setMuted?.(false);
-          this.onEvent('unmuted');
-          return;
-        }
         this.autoplayBlocked = true;
         this.muted = true;
+        this.userUnlocked = false;
         this.onEvent('autoplay-blocked');
       }),
     };
@@ -248,13 +267,16 @@ export class PlayerHost {
   }
 
   setVolume(v) {
-    this.volume = Math.max(0, Math.min(100, Number(v)));
-    localStorage.setItem('vortex_volume', String(this.volume));
+    resumeSharedAudioContext();
+    this.volume = Math.max(0, Math.min(150, Math.round(Number(v) || 0)));
+    if (this.volume > 0) this._lastNonZeroVol = this.volume;
+    try { localStorage.setItem('vortex_volume', String(this.volume)); } catch (e) { /* ignore */ }
     this.adapter?.setVolume(this._effectiveVolume());
     if (this.volume > 0 && (this.muted || this.autoplayBlocked || this.adapter?.isMuted?.())) {
       this.userMuted = false;
       this.setMuted(false);
     }
+    this.onEvent('volume', this.volume);
   }
 
   setDucked(ducked) {
@@ -271,7 +293,8 @@ export class PlayerHost {
       this.userMuted = false;
       this.userUnlocked = true;
       this.autoplayBlocked = false;
-      if (this.volume <= 0) this.volume = 80;
+      resumeSharedAudioContext();
+      if (this.volume <= 0) this.volume = this._lastNonZeroVol || 80;
       this.adapter?.setVolume(this._effectiveVolume());
       this.onEvent('unmuted');
     }
@@ -279,11 +302,13 @@ export class PlayerHost {
   }
 
   unlockAudio() {
+    resumeSharedAudioContext();
     this.userMuted = false;
     this.userUnlocked = true;
     this.autoplayBlocked = false;
+    if (this.adapter) this.adapter.autoplayHardBlocked = false;
     this.muted = false;
-    if (this.volume <= 0) this.volume = 80;
+    if (this.volume <= 0) this.volume = this._lastNonZeroVol || 80;
     this.adapter?.setMuted(false);
     this.adapter?.setVolume(this._effectiveVolume());
     if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying === true) this.adapter?.play?.();
@@ -291,24 +316,68 @@ export class PlayerHost {
   }
 
   isPiP() {
-    return Boolean(this.adapter?.isPiP?.());
-  }
-
-  canPiP() {
-    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv\b/i.test(navigator.userAgent || '')) || (typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-native-apk')));
-    if (isNativeApk) return false;
-    if (typeof this.adapter?.canPiP === 'function') return Boolean(this.adapter.canPiP());
-    const v = this.adapter?.video;
-    if (!v) return false;
     return Boolean(
-      (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function') ||
-      (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+      this.adapter?.isPiP?.()
+      || (this._docPipWin && !this._docPipWin.closed)
+      || (typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-android-pip'))
     );
   }
 
+  canPiP() {
+    if (typeof window !== 'undefined' && (window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function')) return true;
+    if (typeof this.adapter?.canPiP === 'function' && this.adapter.canPiP()) return true;
+    const v = this.adapter?.video;
+    if (v && (
+      (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function')
+      || (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
+    )) return true;
+    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.adapter) return true;
+    return false;
+  }
+
   async togglePiP() {
+    if (this._docPipWin && !this._docPipWin.closed) {
+      try { this._docPipWin.close(); } catch (e) { /* ignore */ }
+      this._docPipWin = null;
+      this.onEvent('pip-change', false);
+      return 'exited';
+    }
     if (typeof this.adapter?.togglePiP === 'function') {
-      return await this.adapter.togglePiP();
+      const p = this.adapter.togglePiP();
+      const res = await p;
+      if (res) return res;
+    }
+    if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
+      const v = this.adapter?.video;
+      const ok = window.Android.enterPiP(v?.videoWidth || 16, v?.videoHeight || 9);
+      if (ok !== false) {
+        this.onEvent('pip-change', true);
+        return 'entered';
+      }
+    }
+    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.container && this.adapter) {
+      try {
+        const pipWin = await window.documentPictureInPicture.requestWindow({ width: 480, height: 270 });
+        this._docPipWin = pipWin;
+        const st = pipWin.document.createElement('style');
+        st.textContent = 'html,body{margin:0;width:100%;height:100%;background:#05060b;overflow:hidden;display:flex;align-items:center;justify-content:center}#player-host,.player-host{position:relative;width:100%!important;height:100%!important}video,iframe{width:100%!important;height:100%!important;object-fit:contain;border:0}';
+        pipWin.document.head.appendChild(st);
+        const parent = this.container.parentElement;
+        const nextSib = this.container.nextSibling;
+        pipWin.document.body.appendChild(this.container);
+        this.adapter?.video?.play?.().catch?.(() => {});
+        this.onEvent('pip-change', true);
+        pipWin.addEventListener('pagehide', () => {
+          if (parent && this.container.ownerDocument !== document) {
+            if (nextSib && nextSib.parentNode === parent) parent.insertBefore(this.container, nextSib);
+            else parent.prepend(this.container);
+            if (this.adapter?.wantPlaying) this.adapter?.video?.play?.().catch?.(() => {});
+          }
+          this._docPipWin = null;
+          this.onEvent('pip-change', false);
+        }, { once: true });
+        return 'entered';
+      } catch (e) { /* fallback handled by caller */ }
     }
     return false;
   }
@@ -333,10 +402,17 @@ export class PlayerHost {
 
   destroy() {
     clearInterval(this._duckTimer);
-    if (typeof window !== 'undefined' && this._gestureHandler) {
-      ['touchend', 'click', 'keydown'].forEach((ev) => {
-        window.removeEventListener(ev, this._gestureHandler, { capture: true });
-      });
+    if (this._docPipWin && !this._docPipWin.closed) {
+      try { this._docPipWin.close(); } catch (e) { /* ignore */ }
+      this._docPipWin = null;
+    }
+    if (typeof window !== 'undefined') {
+      if (this._onPointerDown) window.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
+      if (this._gestureHandler) {
+        ['click', 'keydown'].forEach((ev) => {
+          window.removeEventListener(ev, this._gestureHandler, { capture: true });
+        });
+      }
     }
     this.destroyAdapterOnly();
   }

@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v81';
-import { api } from './api.js?v=20261103_v81';
-import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261103_v81';
+import { h, popup, toast } from './ui.js?v=20261103_v82';
+import { api } from './api.js?v=20261103_v82';
+import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory, syncCloudUserMedia, resetCloudSyncState } from './store.js?v=20261103_v82';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -144,8 +144,9 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
   } catch (e) { /* ignore */ }
-  const guest = loadProfile() || {
-    id: 'g_' + Math.random().toString(36).slice(2, 10),
+  resetCloudSyncState();
+  const guest = {
+    id: 'guest_' + Math.random().toString(36).slice(2, 10),
     uid: '',
     name: 'Misafir İzleyici',
     handle: 'misafir',
@@ -156,6 +157,56 @@ export function logoutProfile() {
   };
   try { set({ self: guest }); } catch (_) {}
   return guest;
+}
+
+export async function verifyAndRefreshSession() {
+  const s = state.self;
+  if (!s || s.isGuest) return null;
+  if (s.authToken) {
+    try {
+      const r = await fetch('/api/auth/me', {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Authorization: `Bearer ${s.authToken}` },
+      });
+      if (r.ok) {
+        const d = await r.json().catch(() => null);
+        if (d?.authenticated && d?.user) {
+          const refreshed = saveProfile({
+            ...s,
+            ...d.user,
+            authToken: d.authToken || s.authToken,
+            isGuest: false,
+            verified: true,
+          });
+          syncCloudUserMedia(true).catch(() => {});
+          return refreshed;
+        }
+      }
+    } catch (e) { /* offline */ }
+  }
+  try {
+    const fb = await getFirebaseAuth();
+    const fbUser = fb?.auth?.currentUser;
+    if (fbUser) {
+      const idToken = await fbUser.getIdToken();
+      const res = await api('/api/auth/oauth', {
+        method: 'POST',
+        body: {
+          provider: s.authProvider || 'google',
+          idToken,
+          email: fbUser.email || s.email || '',
+          name: fbUser.displayName || s.name || '',
+        },
+      });
+      if (res?.ok && res.user && res.authToken) {
+        const recovered = saveProfile({ ...s, ...res.user, authToken: res.authToken, isGuest: false, verified: true });
+        syncCloudUserMedia(true).catch(() => {});
+        return recovered;
+      }
+    }
+  } catch (e) { /* ignore */ }
+  return null;
 }
 
 export function initials(name) {

@@ -5435,7 +5435,6 @@ html.is-native-apk #nav-btn-apk,
 html.is-native-apk #nav-download-btn,
 html.is-native-apk #home-app-banner,
 html.is-native-apk .wl-btn-apk-dl,
-html.is-native-apk #ctl-pip,
 #ctl-pip.hidden {
   display: none !important;
 }

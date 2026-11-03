@@ -91,8 +91,23 @@ export const state = {
 
 applyUiPrefs(state.uiPrefs);
 
+let _activeAccountScope = '';
+
 export function set(patch) {
-  Object.assign(state, typeof patch === 'function' ? patch(state) : patch);
+  const resolvedPatch = typeof patch === 'function' ? patch(state) : patch;
+  Object.assign(state, resolvedPatch);
+  if (resolvedPatch && Object.prototype.hasOwnProperty.call(resolvedPatch, 'self')) {
+    const nextScope = getAccountStorageScope();
+    if (nextScope !== _activeAccountScope) {
+      _activeAccountScope = nextScope;
+      _lastCloudSyncAt = 0;
+      _lastCloudProgPush.clear();
+      purgeLegacySharedHistoryKeys();
+      if (isCloudAuthenticated()) {
+        Promise.resolve().then(() => syncCloudUserMedia(true).catch(() => {}));
+      }
+    }
+  }
   for (const fn of listeners) {
     try { fn(state); } catch (e) { console.error('[store listener]', e); }
   }
@@ -159,6 +174,29 @@ export const isLeader = () => {
   if (meCoP?.isCoHost) return true;
   return false;
 };
+export function isRoomMediaPlaying(media) {
+  if (!media) return false;
+  if (media.meshStateStatus === 'PAUSED') return false;
+  if (media.meshStateStatus === 'PLAYING') return true;
+  return Boolean(media.playing);
+}
+
+export function normalizeRoomMediaState(prev, patch) {
+  const merged = { ...(prev || {}), ...(patch || {}) };
+  if (patch && typeof patch.meshStateStatus === 'string' && patch.meshStateStatus) {
+    merged.meshStateStatus = patch.meshStateStatus;
+    merged.playing = patch.meshStateStatus === 'PLAYING';
+  } else if (patch && typeof patch.playing === 'boolean') {
+    merged.playing = patch.playing;
+    merged.meshStateStatus = patch.playing ? 'PLAYING' : 'PAUSED';
+  } else if (merged.meshStateStatus === 'PLAYING' || merged.meshStateStatus === 'PAUSED') {
+    merged.playing = merged.meshStateStatus === 'PLAYING';
+  } else if (typeof merged.playing === 'boolean') {
+    merged.meshStateStatus = merged.playing ? 'PLAYING' : 'PAUSED';
+  }
+  return merged;
+}
+
 export const canSelectVideo = () => {
   if (!state.mesh) return true;
   if (state.mesh.curated) return false;
@@ -166,11 +204,65 @@ export const canSelectVideo = () => {
   return isLeader();
 };
 
-const HISTORY_KEY = 'vortex_watch_history_v1';
-const FAV_KEY = 'vortex_favorites_v1';
 const CLOUD_UID_KEY = 'vortex_cloud_uid_v1';
 let _lastCloudSyncAt = 0;
 const _lastCloudProgPush = new Map();
+
+export function purgeLegacySharedHistoryKeys() {
+  try {
+    for (const k of [
+      'vortex_watch_history_v1',
+      'vortex_favorites_v1',
+      'kinox_music_recent_v3',
+      'kinox_friends_v1',
+      'vortex_recent_rooms',
+      'vortex_room_snapshots_v1',
+      'vortex_yt_account_v1',
+    ]) {
+      localStorage.removeItem(k);
+    }
+  } catch (e) { /* ignore */ }
+}
+purgeLegacySharedHistoryKeys();
+
+export function isCloudAuthenticated() {
+  const s = state.self;
+  return Boolean(s && !s.isGuest && s.authToken && (s.uid || s.id || s.email));
+}
+
+export function getAccountStorageScope() {
+  const s = state.self;
+  if (s && !s.isGuest) {
+    const raw = s.uid || s.id || s.email || s.handle || '';
+    const clean = String(raw).trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, '').slice(0, 64);
+    if (clean && !clean.startsWith('guest_')) return `acct_${clean}`;
+  }
+  const gId = String((s && (s.id || s.uid)) || '').trim().toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 48);
+  if (gId) return `guest_${gId}`;
+  try {
+    let dev = localStorage.getItem(CLOUD_UID_KEY);
+    if (!dev) {
+      dev = `u_dev_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(CLOUD_UID_KEY, dev);
+    }
+    return `guest_${dev}`;
+  } catch (e) {
+    return 'guest_anon';
+  }
+}
+
+const _historyKey = (scope = getAccountStorageScope()) => `vortex_watch_history_v2:${scope}`;
+const _favKey = (scope = getAccountStorageScope()) => `vortex_favorites_v2:${scope}`;
+const _musicKey = (scope = getAccountStorageScope()) => `vortex_music_recent_v4:${scope}`;
+const _friendsKey = (scope = getAccountStorageScope()) => `vortex_friends_v2:${scope}`;
+export const getRecentRoomsKey = () => `vortex_recent_rooms_v2:${getAccountStorageScope()}`;
+export const getRoomSnapshotsKey = () => `vortex_room_snapshots_v2:${getAccountStorageScope()}`;
+export const getYtAccountKey = () => `vortex_yt_account_v2:${getAccountStorageScope()}`;
+
+export function resetCloudSyncState() {
+  _lastCloudSyncAt = 0;
+  _lastCloudProgPush.clear();
+}
 
 const _normTs = (v) => {
   const n = Number(v || 0);
@@ -185,37 +277,48 @@ const _authHdrs = () => {
 
 export function getCloudUid() {
   const s = state.self;
-  const isRealAccount = Boolean(s && !s.isGuest && (s.email || s.authToken || (s.id && !String(s.id).startsWith('guest_'))));
-  const raw = isRealAccount ? (s.uid || s.id || s.handle || s.email || '') : '';
-  const clean = String(raw || '').trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, '').slice(0, 64);
-  if (clean) return clean;
-  try {
-    let dev = localStorage.getItem(CLOUD_UID_KEY);
-    if (!dev) {
-      dev = `u_dev_${Math.random().toString(36).slice(2, 10)}`;
-      localStorage.setItem(CLOUD_UID_KEY, dev);
-    }
-    return dev;
-  } catch (e) {
-    return 'guest_local';
-  }
+  if (!isCloudAuthenticated()) return '';
+  const raw = s.uid || s.id || s.email || s.handle || '';
+  return String(raw || '').trim().toLowerCase().replace(/[^a-z0-9_.@-]/g, '').slice(0, 64);
 }
 
+const _normEpMap = (epObj) => {
+  if (!epObj || typeof epObj !== 'object') return {};
+  const out = {};
+  for (const [ek, ev] of Object.entries(epObj)) {
+    if (!ev || typeof ev !== 'object') continue;
+    const sec = Math.max(0, Math.floor(Number(ev.currentTime ?? ev.position ?? ev.pos ?? 0)));
+    const dur = Math.max(0, Math.floor(Number(ev.duration ?? ev.dur ?? 0)));
+    const pct = Number(ev.percent ?? ev.pct ?? 0);
+    out[ek] = { currentTime: sec, position: sec, pos: sec, duration: dur, dur, percent: pct, pct, updatedAt: _normTs(ev.updatedAt) };
+  }
+  return out;
+};
+
 export async function syncCloudUserMedia(force = false) {
-  if (typeof fetch !== 'function') return { historyChanged: false, favsChanged: false };
+  if (typeof fetch !== 'function' || !isCloudAuthenticated()) return { historyChanged: false, favsChanged: false, musicChanged: false };
   const now = Date.now();
-  if (!force && now - _lastCloudSyncAt < 8000) return { historyChanged: false, favsChanged: false };
+  if (!force && now - _lastCloudSyncAt < 8000) return { historyChanged: false, favsChanged: false, musicChanged: false };
   _lastCloudSyncAt = now;
-  const uid = getCloudUid();
+  const startScope = getAccountStorageScope();
+  const startUid = getCloudUid();
+  if (!startUid) return { historyChanged: false, favsChanged: false, musicChanged: false };
   let historyChanged = false;
   let favsChanged = false;
+  let musicChanged = false;
   try {
-    const [pRes, wRes] = await Promise.allSettled([
-      fetch(`/api/user/progress?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin', headers: _authHdrs() }).then((r) => (r.ok ? r.json() : null)),
-      fetch(`/api/user/watchlist?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin', headers: _authHdrs() }).then((r) => (r.ok ? r.json() : null)),
+    const reqOpts = { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() };
+    const [pRes, wRes, mRes] = await Promise.allSettled([
+      fetch('/api/user/progress', reqOpts).then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/user/watchlist', reqOpts).then((r) => (r.ok ? r.json() : null)),
+      fetch('/api/user/music-history', reqOpts).then((r) => (r.ok ? r.json() : null)),
     ]);
-    const cloudProg = pRes.status === 'fulfilled' && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
-    if (cloudProg && cloudProg.length) {
+    if (getAccountStorageScope() !== startScope || !isCloudAuthenticated()) {
+      return { historyChanged: false, favsChanged: false, musicChanged: false };
+    }
+    const validP = pRes.status === 'fulfilled' && pRes.value?.authenticated === true && pRes.value?.uid === startUid && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
+    if (validP && validP.length) {
+      const cloudProg = validP;
       const localList = getWatchHistory();
       const byKey = new Map();
       for (const loc of localList) {
@@ -231,8 +334,8 @@ export async function syncCloudUserMedia(force = false) {
         if (!prev || cTs >= _normTs(prev.updatedAt)) {
           const syncedPos = Math.max(0, Math.floor(Number(c.currentTime ?? c.position ?? prev?.currentTime ?? 0)));
           const mergedEpProg = {
-            ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}),
-            ...(c.epProgress && typeof c.epProgress === 'object' ? c.epProgress : {}),
+            ..._normEpMap(prev?.epProgress),
+            ..._normEpMap(c.epProgress),
           };
           byKey.set(k, {
             ...(prev || {}),
@@ -267,11 +370,12 @@ export async function syncCloudUserMedia(force = false) {
       }
       if (historyChanged) {
         const merged = [...byKey.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 40);
-        try { localStorage.setItem(HISTORY_KEY, JSON.stringify(merged)); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(_historyKey(startScope), JSON.stringify(merged)); } catch (e) { /* ignore */ }
       }
     }
-    const cloudWlist = wRes.status === 'fulfilled' && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
-    if (cloudWlist && cloudWlist.length) {
+    const validW = wRes.status === 'fulfilled' && wRes.value?.authenticated === true && wRes.value?.uid === startUid && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
+    if (validW && validW.length) {
+      const cloudWlist = validW;
       const localFavs = getFavorites();
       const byFav = new Map();
       for (const f of localFavs) {
@@ -304,17 +408,38 @@ export async function syncCloudUserMedia(force = false) {
       }
       if (favsChanged) {
         const mergedFavs = [...byFav.values()].sort((a, b) => _normTs(b.addedAt) - _normTs(a.addedAt)).slice(0, 60);
-        try { localStorage.setItem(FAV_KEY, JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(_favKey(startScope), JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
       }
     }
-    if (historyChanged || favsChanged) set({ cloudSyncedAt: Date.now() });
+    const validM = mRes.status === 'fulfilled' && mRes.value?.authenticated === true && mRes.value?.uid === startUid && Array.isArray(mRes.value?.items) ? mRes.value.items : null;
+    if (validM && validM.length) {
+      const localMus = (() => { try { return JSON.parse(localStorage.getItem(_musicKey(startScope)) || '[]'); } catch (e) { return []; } })();
+      const byMus = new Map();
+      for (const lm of (Array.isArray(localMus) ? localMus : [])) {
+        const mk = `${(lm.artist || '').toLowerCase()}|${(lm.songTitle || '').toLowerCase()}`;
+        if (mk !== '|') byMus.set(mk, lm);
+      }
+      for (const cm of validM) {
+        const mk = `${(cm.artist || '').toLowerCase()}|${(cm.songTitle || '').toLowerCase()}`;
+        if (mk === '|') continue;
+        if (!byMus.has(mk)) {
+          byMus.set(mk, cm);
+          musicChanged = true;
+        }
+      }
+      if (musicChanged) {
+        const mergedMus = [...byMus.values()].sort((a, b) => _normTs(b.playedAt) - _normTs(a.playedAt)).slice(0, 20);
+        try { localStorage.setItem(_musicKey(startScope), JSON.stringify(mergedMus)); } catch (e) { /* ignore */ }
+      }
+    }
+    if (historyChanged || favsChanged || musicChanged) set({ cloudSyncedAt: Date.now() });
   } catch (e) { /* ignore */ }
-  return { historyChanged, favsChanged };
+  return { historyChanged, favsChanged, musicChanged };
 }
 
 export function getWatchHistory() {
   try {
-    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    const raw = JSON.parse(localStorage.getItem(_historyKey()) || '[]');
     return Array.isArray(raw) ? raw : [];
   } catch (e) {
     return [];
@@ -323,14 +448,14 @@ export function getWatchHistory() {
 
 export function clearWatchHistory() {
   try {
-    localStorage.setItem(HISTORY_KEY, '[]');
+    localStorage.setItem(_historyKey(), '[]');
     set({});
   } catch (e) { /* ignore */ }
-  if (typeof fetch === 'function') {
+  if (typeof fetch === 'function' && isCloudAuthenticated()) {
     fetch('/api/user/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-      body: JSON.stringify({ uid: getCloudUid(), action: 'clear' }),
+      body: JSON.stringify({ action: 'clear' }),
       keepalive: true,
     }).catch(() => {});
   }
@@ -341,14 +466,14 @@ export function removeWatchProgress(itemKey) {
   if (!k) return;
   try {
     const next = getWatchHistory().filter((it) => String(it.historyId || it.key || '') !== k && String(it.tmdbId || '') !== k);
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+    localStorage.setItem(_historyKey(), JSON.stringify(next));
     set({});
   } catch (e) { /* ignore */ }
-  if (typeof fetch === 'function') {
+  if (typeof fetch === 'function' && isCloudAuthenticated()) {
     fetch('/api/user/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-      body: JSON.stringify({ uid: getCloudUid(), action: 'remove', key: k }),
+      body: JSON.stringify({ action: 'remove', key: k }),
       keepalive: true,
     }).catch(() => {});
   }
@@ -379,7 +504,7 @@ export function findSavedProgress(mediaOrItem, season = null, episode = null) {
       return hit;
     }
     const epSaved = hit.epProgress && typeof hit.epProgress === 'object' ? hit.epProgress[`${sNum}:${eNum}`] : null;
-    const epSec = Math.floor(Number(epSaved?.currentTime ?? epSaved?.position ?? 0));
+    const epSec = Math.floor(Number(epSaved?.currentTime ?? epSaved?.position ?? epSaved?.pos ?? 0));
     if (epSaved && epSec > 3) {
       return {
         ...hit,
@@ -387,8 +512,8 @@ export function findSavedProgress(mediaOrItem, season = null, episode = null) {
         episode: eNum,
         currentTime: epSec,
         position: epSec,
-        duration: Math.max(0, Math.floor(Number(epSaved.duration || hit.duration || 0))),
-        percent: Number(epSaved.percent || 0),
+        duration: Math.max(0, Math.floor(Number(epSaved.duration || epSaved.dur || hit.duration || 0))),
+        percent: Number(epSaved.percent ?? epSaved.pct ?? 0),
       };
     }
     return null;
@@ -409,8 +534,8 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const sameEp = Boolean(prev && (mtype !== 'tv' || (Number(prev.season || 1) === sNum && Number(prev.episode || 1) === eNum)));
   const prevEpObj = (!sameEp && mtype === 'tv' && prev?.epProgress) ? prev.epProgress[`${sNum}:${eNum}`] : null;
   const prevTime = sameEp
-    ? Math.max(0, Math.floor(Number(prev.currentTime ?? prev.position ?? 0)))
-    : Math.max(0, Math.floor(Number(prevEpObj?.currentTime ?? prevEpObj?.position ?? 0)));
+    ? Math.max(0, Math.floor(Number(prev.currentTime ?? prev.position ?? prev.pos ?? 0)))
+    : Math.max(0, Math.floor(Number(prevEpObj?.currentTime ?? prevEpObj?.position ?? prevEpObj?.pos ?? 0)));
   const preserveExistingPos = !opts?.resetPosition && opts?.preserveExistingPos !== false;
   const resumeTime = (rawTime === 0 && prevTime > 3 && preserveExistingPos) ? prevTime : rawTime;
   const dur = rawDur > 0 ? rawDur : (sameEp ? Math.max(0, Math.floor(Number(prev?.duration || 0))) : Math.max(0, Math.floor(Number(prevEpObj?.duration || 0))));
@@ -463,17 +588,16 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       epProgress: epMap,
       updatedAt: Date.now(),
     });
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 40)));
+    localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 40)));
   } catch (e) { /* ignore */ }
   const now = Date.now();
   const prevPush = _lastCloudProgPush.get(id) || 0;
-  if (typeof fetch === 'function' && (opts?.forceCloud || now - prevPush >= 12000)) {
+  if (typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || now - prevPush >= 12000)) {
     _lastCloudProgPush.set(id, now);
     fetch('/api/user/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({
-        uid: getCloudUid(),
         action: 'upsert',
         key: id,
         tmdbId: String(media.tmdbId || ''),
@@ -504,7 +628,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
 }
 
 export function getFavorites() {
-  try { return JSON.parse(localStorage.getItem(FAV_KEY) || '[]'); } catch (e) { return []; }
+  try { return JSON.parse(localStorage.getItem(_favKey()) || '[]'); } catch (e) { return []; }
 }
 
 export function isFavoriteMedia(item) {
@@ -541,13 +665,12 @@ export function toggleFavoriteMedia(item) {
         provider: item.catalogProvider || item.provider || 'netflix',
         addedAt: Date.now(),
       }, ...list].slice(0, 60);
-  try { localStorage.setItem(FAV_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
-  if (typeof fetch === 'function') {
+  try { localStorage.setItem(_favKey(), JSON.stringify(next)); } catch (e) { /* ignore */ }
+  if (typeof fetch === 'function' && isCloudAuthenticated()) {
     fetch('/api/user/watchlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({
-        uid: getCloudUid(),
         action: exists ? 'remove' : 'add',
         key: ikey,
         tmdbId: String(item.tmdbId || item.id || ''),
@@ -565,10 +688,8 @@ export function toggleFavoriteMedia(item) {
   return !exists;
 }
 
-const FRIENDS_KEY = 'kinox_friends_v1';
-
 export function getFriends() {
-  try { return JSON.parse(localStorage.getItem(FRIENDS_KEY) || '[]'); } catch (e) { return []; }
+  try { return JSON.parse(localStorage.getItem(_friendsKey()) || '[]'); } catch (e) { return []; }
 }
 
 export function isFriend(userOrName) {
@@ -589,7 +710,7 @@ export function toggleFriend(user) {
   const next = exists
     ? list.filter((f) => f.id !== id && String(f.name || '').toLowerCase() !== name.toLowerCase())
     : [{ id, name, color, addedAt: Date.now() }, ...list].slice(0, 50);
-  try { localStorage.setItem(FRIENDS_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(_friendsKey(), JSON.stringify(next)); } catch (e) { /* ignore */ }
   set({ friendsUpdated: Date.now() });
   return !exists;
 }
@@ -601,7 +722,7 @@ export function addFriendByName(name, color = '#6366f1') {
   return toggleFriend({ id: `f_${clean.toLowerCase()}`, name: clean, color });
 }
 
-const MUSIC_HIST_KEY = 'kinox_music_recent_v3';
+// Account-scoped music history (v4)
 const DEFAULT_MUSIC_RECENT = [
   { id: 'seed_1', title: 'Semicenk — Çıkmaz Bir Sokakta', songTitle: 'Çıkmaz Bir Sokakta', artist: 'Semicenk', genre: 'Slow & Pop', sourceBadge: '🟢 Spotify', duration: 163, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/49/bf/7c/49bf7c3f-ba04-f425-2766-a0d310fb7182/cover.jpg/600x600bb.jpg', isMusic: true },
   { id: 'seed_2', title: 'Duman — Senden Daha Güzel', songTitle: 'Senden Daha Güzel', artist: 'Duman', genre: 'Türkçe Rock', sourceBadge: '🍎 Apple Music', duration: 238, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/e3/6a/03/e36a0347-7191-da04-7d53-32569e5904fd/884977122039.jpg/600x600bb.jpg', isMusic: true },
@@ -612,10 +733,27 @@ const DEFAULT_MUSIC_RECENT = [
 
 export function getMusicHistory() {
   try {
-    const parsed = JSON.parse(localStorage.getItem(MUSIC_HIST_KEY) || '[]');
+    const rawStr = localStorage.getItem(_musicKey());
+    if (rawStr === '[]') return [];
+    const parsed = JSON.parse(rawStr || '[]');
     return Array.isArray(parsed) && parsed.length ? parsed : DEFAULT_MUSIC_RECENT;
   } catch (e) {
     return DEFAULT_MUSIC_RECENT;
+  }
+}
+
+export function clearMusicHistory() {
+  try {
+    localStorage.setItem(_musicKey(), '[]');
+    set({ musicHistoryUpdated: Date.now() });
+  } catch (e) { /* ignore */ }
+  if (typeof fetch === 'function' && isCloudAuthenticated()) {
+    fetch('/api/user/music-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify({ action: 'clear' }),
+      keepalive: true,
+    }).catch(() => {});
   }
 }
 
@@ -641,7 +779,16 @@ export function saveMusicHistory(item) {
       isMusic: true,
       playedAt: Date.now(),
     });
-    localStorage.setItem(MUSIC_HIST_KEY, JSON.stringify(list.slice(0, 20)));
+    const entry = list[0];
+    localStorage.setItem(_musicKey(), JSON.stringify(list.slice(0, 20)));
     set({ musicHistoryUpdated: Date.now() });
+    if (typeof fetch === 'function' && isCloudAuthenticated() && entry) {
+      fetch('/api/user/music-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+        body: JSON.stringify({ action: 'upsert', ...entry }),
+        keepalive: true,
+      }).catch(() => {});
+    }
   } catch (e) { /* ignore */ }
 }

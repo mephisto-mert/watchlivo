@@ -414,13 +414,29 @@ video::cue {
 .share-box { display: flex; gap: .4em; margin: 0 .7em .8em; }
 .qr { display: block; margin: .3em auto 1em; width: 160px; height: 160px; border-radius: 12px; background: #fff; padding: 8px; }
 
-/* Video Brightness Filter & Mobile Gesture Ripple */
+/* Video Brightness Filter, Hardware Veil & Mobile Gesture Ripple */
 .video-frame {
   --video-brightness: 100%;
+  --wl-composed-filter: none;
 }
+.video-frame .player-host video,
 .video-frame iframe {
-  filter: brightness(var(--video-brightness, 100%));
-  transition: filter .12s ease-out;
+  filter: var(--wl-composed-filter, brightness(var(--video-brightness, 100%)));
+  -webkit-filter: var(--wl-composed-filter, brightness(var(--video-brightness, 100%)));
+  transition: filter .1s ease-out;
+}
+.wl-brightness-veil {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: #000000;
+  opacity: 0;
+  transition: opacity .08s linear;
+}
+.wl-brightness-veil.is-boost {
+  background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.92) 0%, rgba(255, 255, 255, 0.68) 100%);
+  mix-blend-mode: screen;
 }
 .ctl-seek-ripple {
   position: absolute;
@@ -4796,7 +4812,7 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
     padding: 1px 4px 1px 8px !important;
   }
   .panel-chat .chatbar .chat-input input {
-    font-size: 13.5px !important;
+    font-size: 16px !important;
   }
 }
 
@@ -4898,4 +4914,216 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
   body.kb-open.kb-chat-focus:not(.vortex-fs):not(.mesh-minimized) #mesh-root .discord-call-bar {
     display: none !important;
   }
+}
+
+/* ============================================================================
+   v82: Multi-Phone-Model Control Bar Fit, Real Volume/Brightness Sliders,
+        Viewer Center-HUD Lock, Portrait Keyboard Guard & Android OS PiP Mode
+   ============================================================================ */
+
+/* 1. Interactive Volume (0-150% Boost) & Brightness (15-160%) Sliders in Gear Menu */
+.ctl-sliders-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 6px 8px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: rgba(15, 20, 34, 0.78);
+  border: 1px solid color-mix(in srgb, var(--accent, #27DCC8) 28%, rgba(255, 255, 255, 0.1));
+}
+.ctl-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ctl-slider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.ctl-slider-lbl {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+.ctl-slider-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ctl-slider-val {
+  font-size: 0.73rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent, #27DCC8);
+}
+.ctl-slider-reset {
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #e2e8f0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ctl-menu-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+  cursor: pointer;
+  touch-action: pan-x;
+  margin: 3px 0;
+}
+.ctl-menu-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent, #27DCC8);
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+}
+.ctl-menu-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent, #27DCC8);
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+}
+
+/* 2. Hide Viewer Center Play Trap During Active Playback */
+.ctl-center-hud.viewer-playing-hidden {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* 3. Universal Multi-Phone-Model Control Bar Fit (Zero #ctl-pip / #ctl-fs Clipping on 20:9 Landscape & Foldables) */
+@container (max-width: 720px) {
+  .vol-wrap,
+  #ctl-cast,
+  #ctl-snap,
+  #ctl-theater,
+  #ctl-back10,
+  #ctl-fwd10 {
+    display: none !important;
+  }
+  .ctl-bar-row,
+  .ctl-cluster-left,
+  .ctl-cluster-right {
+    gap: 3px !important;
+  }
+}
+@media (orientation: landscape) and (max-height: 560px) {
+  .video-frame:not(.fullscreen) .vol-wrap,
+  .video-frame:not(.fullscreen) #ctl-cast,
+  .video-frame:not(.fullscreen) #ctl-snap,
+  .video-frame:not(.fullscreen) #ctl-theater,
+  .video-frame:not(.fullscreen) #ctl-back10,
+  .video-frame:not(.fullscreen) #ctl-fwd10 {
+    display: none !important;
+  }
+}
+@media (max-width: 960px), (pointer: coarse) {
+  .video-frame .timeline {
+    height: 24px !important;
+    min-height: 24px !important;
+  }
+}
+
+/* 4. Fullscreen Notch / Dynamic Island / Gesture Pill Safe-Area Clearance */
+.video-frame.fullscreen .ctl-top,
+.video-frame:fullscreen .ctl-top,
+.video-frame:-webkit-full-screen .ctl-top {
+  padding-top: max(10px, env(safe-area-inset-top, 10px)) !important;
+  padding-left: max(14px, env(safe-area-inset-left, 14px)) !important;
+  padding-right: max(14px, env(safe-area-inset-right, 14px)) !important;
+}
+.video-frame.fullscreen .ctl-bottom,
+.video-frame:fullscreen .ctl-bottom,
+.video-frame:-webkit-full-screen .ctl-bottom {
+  margin-left: max(10px, env(safe-area-inset-left, 10px)) !important;
+  margin-right: max(10px, env(safe-area-inset-right, 10px)) !important;
+  margin-bottom: max(8px, env(safe-area-inset-bottom, 8px)) !important;
+  width: calc(100% - max(20px, env(safe-area-inset-left, 10px) + env(safe-area-inset-right, 10px))) !important;
+  min-width: 0 !important;
+}
+.video-frame.fullscreen .rave-subtitle-overlay,
+.video-frame:fullscreen .rave-subtitle-overlay,
+.video-frame:-webkit-full-screen .rave-subtitle-overlay {
+  bottom: max(54px, calc(44px + env(safe-area-inset-bottom, 10px))) !important;
+}
+
+/* 5. Android Portrait Virtual Keyboard Guard: Never Flip Into Side-by-Side Landscape Split */
+body.kb-open.kb-portrait:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .video-chat {
+  flex-direction: column !important;
+}
+body.kb-open.kb-portrait:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .panel-video {
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  height: clamp(88px, 20dvh, 118px) !important;
+  min-height: 88px !important;
+  max-height: 118px !important;
+  border-right: 0 !important;
+}
+body.kb-open.kb-portrait:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .panel-chat {
+  flex: 1 1 0% !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  min-height: 0 !important;
+}
+body.kb-open.kb-portrait:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .ctl-top,
+body.kb-open.kb-portrait:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .ctl-bottom {
+  display: none !important;
+}
+
+/* 6. Native Android APK OS Picture-in-Picture Edge-to-Edge Floating Window Mode */
+html.is-android-pip #mesh-root > .navbar,
+html.is-android-pip #mesh-root .panel-chat,
+html.is-android-pip #mesh-root .panel-side,
+html.is-android-pip #mesh-root .resize-handle,
+html.is-android-pip .video-frame .controls,
+html.is-android-pip .video-frame .mini-player-bar,
+html.is-android-pip .video-frame .cinema-seats-bar,
+html.is-android-pip .video-frame .next-ep-banner,
+html.is-android-pip .video-frame .break-request-banner,
+html.is-android-pip .toast-root {
+  display: none !important;
+}
+html.is-android-pip #mesh-root,
+html.is-android-pip #mesh-root .mesh,
+html.is-android-pip #mesh-root .mesh-layout,
+html.is-android-pip #mesh-root .video-chat,
+html.is-android-pip #mesh-root .panel-video,
+html.is-android-pip #mesh-root .video-frame {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: #000 !important;
+  z-index: 99999 !important;
+}
+html.is-android-pip .rave-subtitle-overlay {
+  bottom: 6px !important;
+}
+html.is-android-pip .rave-subtitle-cue {
+  font-size: clamp(9px, 4.2vw, 14px) !important;
+  padding: 2px 6px !important;
 }

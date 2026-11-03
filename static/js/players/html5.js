@@ -1,7 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v81';
-import { expectedPosition } from '../sync.js?v=20261103_v81';
-import { state } from '../store.js?v=20261103_v81';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v82';
+import { expectedPosition } from '../sync.js?v=20261103_v82';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v82';
+import { applyElementVolume } from './audio-gain.js?v=20261103_v82';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -19,6 +20,13 @@ export class Html5Adapter {
     this.resumeTimer = null;
     this.watchdogTimer = null;
     this.audioUnlocked = false;
+    this.autoplayHardBlocked = false;
+    this._autoResumeCount = 0;
+    this._lastAutoResumeWindowAt = 0;
+    this._lastPipExitAt = 0;
+    this._lastVisChangeAt = 0;
+    this._pipPauseTimer = null;
+    this._wasInPip = false;
     this.wantPlaying = true;
     this.bufferingReported = false;
     this.playingReported = false;
@@ -36,6 +44,8 @@ export class Html5Adapter {
     }
     setReferrerMeta('no-referrer');
     this.wantPlaying = Boolean(autoplay);
+    this.autoplayHardBlocked = false;
+    this._autoResumeCount = 0;
     this.bufferingReported = false;
     this.playingReported = false;
     this.readyReported = false;
@@ -186,10 +196,12 @@ export class Html5Adapter {
             if (!this.mashupDeckB || this.video !== v) return;
             const ct = Number(v.currentTime || 0);
             const phase = (Math.sin(ct * (Math.PI / 22)) + 1) * 0.5;
-            const baseVol = Math.max(0, Math.min(1, (this.baseVolume || 80) / 100));
-            this.mashupDeckB.muted = Boolean(v.muted);
-            this.mashupDeckB.volume = Math.max(0.08, Math.min(0.65, baseVol * (0.22 + phase * 0.36)));
+            const rawBase = Number.isFinite(Number(this.baseVolume)) ? Number(this.baseVolume) : 80;
+            const isDeckMuted = Boolean(v.muted || this.userExplicitMuted || rawBase <= 0);
+            const targetPct = isDeckMuted ? 0 : Math.min(100, rawBase * (0.22 + phase * 0.36));
+            applyElementVolume(this.mashupDeckB, targetPct, isDeckMuted);
           };
+          this._syncDeckBVolume = syncDeckB;
           v.addEventListener('timeupdate', syncDeckB);
           v.addEventListener('playing', () => {
             if (this.mashupDeckB && !v.paused) {
@@ -225,18 +237,33 @@ export class Html5Adapter {
     };
     v.addEventListener('playing', () => {
       clearBuf();
+      clearTimeout(this._pipPauseTimer);
+      this.autoplayHardBlocked = false;
+      this._autoResumeCount = 0;
       const wasPausedWant = !this.wantPlaying;
-      this.wantPlaying = true;
+      const roomExplicitlyPaused = Boolean(state.mesh?.media && !isRoomMediaPlaying(state.mesh.media));
+      const inNativeUi = Boolean(v.webkitDisplayingFullscreen || this.isPiP() || (typeof document !== 'undefined' && document.fullscreenElement === v));
+      if (!roomExplicitlyPaused || inNativeUi) {
+        this.wantPlaying = true;
+      }
+      try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (_) {}
+      try { window.Android?.setVideoPlaying?.(true, v.videoWidth || 16, v.videoHeight || 9); } catch (_) {}
       if (this.bgMvEl && !this.vinylMode) {
         this.bgMvEl.play().catch(() => {});
       }
       if (!v.muted && v.volume > 0) this.events.onUnmuted?.();
       this._requestWakeLock?.();
       this._reportStreamHealth?.(this.currentUrl, true, { latencyMs: Math.max(0, Date.now() - (this.loadedAtMs || Date.now())) });
-      reportPlay(wasPausedWant);
+      reportPlay(wasPausedWant && inNativeUi);
     });
     const onPipChange = () => {
-      this.events.onPipChange?.(this.isPiP());
+      const nowPip = this.isPiP();
+      if (this._wasInPip && !nowPip) {
+        this._lastPipExitAt = Date.now();
+      }
+      this._wasInPip = nowPip;
+      this.subs?._disableAllNativeTextTracks?.();
+      this.events.onPipChange?.(nowPip);
     };
     v.addEventListener('enterpictureinpicture', onPipChange);
     v.addEventListener('leavepictureinpicture', onPipChange);
@@ -246,13 +273,15 @@ export class Html5Adapter {
     }
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
+      this._lastVisChangeAt = Date.now();
       if (document.visibilityState === 'visible') {
-        if (this.wantPlaying && !this.hasEnded) {
+        if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked) {
+          this._autoResumeCount = 0;
           this._requestWakeLock?.();
           if (v.paused && !v.ended) this.tryPlay();
         }
       } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded) {
-        if (v.paused && !v.ended) {
+        if ((this.isPiP() || this.isMusic) && v.paused && !v.ended) {
           v.play?.().catch(() => {});
         }
       }
@@ -312,6 +341,9 @@ export class Html5Adapter {
         }
       }
       if (v.currentTime > 0 && !v.paused && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) reportPlay();
+      if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined') {
+        window.__watchlivoBgSyncTick?.();
+      }
       if (v.seeking) return;
       if (v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) {
         this.subs.onTimeUpdate(v.currentTime);
@@ -359,24 +391,59 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
+      if (!this.isPiP()) {
+        try { window.Android?.setVideoPlaying?.(false, v.videoWidth || 16, v.videoHeight || 9); } catch (_) {}
+      }
       const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
-      const exitingWebkitFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 900);
+      const exitingWebkitFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 950);
+      const exitingPipNow = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 950);
+      const visJustChanged = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 950);
       const inNativePlayerUi = Boolean(
         v.webkitDisplayingFullscreen
         || this.isPiP()
         || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
       );
-      if (inNativePlayerUi && !exitingWebkitFs && !v.seeking && !recentSeek && v.readyState >= 2) {
-        this.wantPlaying = false;
-        clearTimeout(this.resumeTimer);
-        this.events.onPause?.({ userFullscreenPause: true });
+      if (inNativePlayerUi && !exitingWebkitFs && !exitingPipNow && !visJustChanged && !v.seeking && !recentSeek && v.readyState >= 2) {
+        clearTimeout(this._pipPauseTimer);
+        this._pipPauseTimer = setTimeout(() => {
+          if (this._destroyed || this.video !== v || !v.paused || v.ended || v.seeking) return;
+          const leftPip = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 1100);
+          const leftFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 1100);
+          const visFlip = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1100);
+          const stillNativeUi = Boolean(
+            v.webkitDisplayingFullscreen
+            || this.isPiP()
+            || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
+          );
+          if (leftPip || leftFs || visFlip || !stillNativeUi) {
+            if (this.wantPlaying && (typeof document === 'undefined' || document.visibilityState === 'visible') && !this.autoplayHardBlocked) {
+              this.tryPlay();
+            }
+            return;
+          }
+          this.wantPlaying = false;
+          clearTimeout(this.resumeTimer);
+          this.events.onPause?.({ userFullscreenPause: true });
+        }, 120);
         return;
       }
       if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
-        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 350 : 200;
+        const isHiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !this.isPiP() && !this.isMusic;
+        if (isHiddenNonPip || this.autoplayHardBlocked) return;
+        const nowMs = Date.now();
+        if (nowMs - (this._lastAutoResumeWindowAt || 0) > 4500) {
+          this._autoResumeCount = 0;
+          this._lastAutoResumeWindowAt = nowMs;
+        }
+        if (this._autoResumeCount >= 2 && !v.seeking && !recentSeek) {
+          this.events.onPause?.();
+          return;
+        }
+        this._autoResumeCount += 1;
+        const delayMs = (v.seeking || recentSeek || v.readyState < 3) ? 380 : (this._autoResumeCount > 1 ? 720 : 240);
         this.resumeTimer = setTimeout(() => {
-          if (this.video === v && this.wantPlaying && !this.hasEnded && v.paused && !v.ended && !v.seeking) {
+          if (this.video === v && this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked && v.paused && !v.ended && !v.seeking) {
             this.tryPlay();
           }
         }, delayMs);
@@ -1108,12 +1175,18 @@ export class Html5Adapter {
         v.muted = true;
         this.audioUnlocked = false;
         this.events.onAutoplayBlocked?.();
-        try { await v.play(); } catch (e2) { this.events.onPause?.(); }
+        try {
+          await v.play();
+        } catch (e2) {
+          this.autoplayHardBlocked = true;
+          this.wantPlaying = false;
+          this.events.onPause?.();
+        }
       }
     }
   }
 
-  play() { if (this.hasEnded || this.video?.ended) return; this.wantPlaying = true; this.tryPlay(); }
+  play() { if (this.hasEnded || this.video?.ended) return; if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) this.autoplayHardBlocked = false; this.wantPlaying = true; this.tryPlay(); }
   pause() { this.wantPlaying = false; clearTimeout(this.resumeTimer); this.video?.pause(); }
   isEnded() { return Boolean(this.hasEnded || this.video?.ended); }
   seek(t) {
@@ -1208,18 +1281,22 @@ export class Html5Adapter {
   setRate(r) { if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r; }
   getRate() { return Number(this.video?.playbackRate || 1); }
   setVolume(v) {
-    this.baseVolume = Math.max(0, Math.min(100, Number(v)));
+    this.baseVolume = Math.max(0, Math.min(150, Number(v)));
     this.subs.syncVideoVolume();
+    this._syncDeckBVolume?.();
   }
   setMuted(m) {
     this.userExplicitMuted = Boolean(m);
     if (!m) {
       this.audioUnlocked = true;
+      this.autoplayHardBlocked = false;
       this.subs.unlockDubAudio();
     } else {
       this.subs.stopDubAudio();
     }
     if (this.video) this.video.muted = Boolean(m);
+    this.subs.syncVideoVolume();
+    this._syncDeckBVolume?.();
     if (!m) this.events.onUnmuted?.();
   }
   isMuted() { return !!this.video?.muted; }
@@ -1380,8 +1457,7 @@ export class Html5Adapter {
   canPiP() {
     const v = this.video;
     if (!v) return false;
-    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv\b/i.test(navigator.userAgent || '')));
-    if (isNativeApk) return false;
+    if (typeof window !== 'undefined' && (window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function')) return true;
     return Boolean(
       (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function') ||
       (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture'))
@@ -1399,22 +1475,27 @@ export class Html5Adapter {
     const v = this.video;
     if (!v) return false;
     try {
-      if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
-        await document.exitPictureInPicture();
-        this.events.onPipChange?.(false);
-        return 'exited';
-      }
       if (typeof v.webkitSetPresentationMode === 'function' && v.webkitSupportsPresentationMode?.('picture-in-picture')) {
         const nextMode = v.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture';
+        if (nextMode === 'inline') this._lastPipExitAt = Date.now();
         v.webkitSetPresentationMode(nextMode);
         const active = nextMode === 'picture-in-picture';
+        this.subs?._disableAllNativeTextTracks?.();
         this.events.onPipChange?.(active);
         return active ? 'entered' : 'exited';
       }
-      if (typeof v.requestPictureInPicture === 'function') {
+      if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
+        this._lastPipExitAt = Date.now();
+        await document.exitPictureInPicture();
+        this.subs?._disableAllNativeTextTracks?.();
+        this.events.onPipChange?.(false);
+        return 'exited';
+      }
+      if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
+        this.subs?._disableAllNativeTextTracks?.();
         await v.requestPictureInPicture();
         this.events.onPipChange?.(true);
-        return true;
+        return 'entered';
       }
     } catch (e) { /* fallback handled by caller */ }
     return false;
@@ -1446,7 +1527,9 @@ export class Html5Adapter {
     clearInterval(this.subTickTimer);
     clearTimeout(this.waitTimer);
     clearTimeout(this.resumeTimer);
+    clearTimeout(this._pipPauseTimer);
     clearTimeout(this.watchdogTimer);
+    try { window.Android?.setVideoPlaying?.(false, 16, 9); } catch (_) {}
     clearInterval(this.playbackWatchdog);
     setReferrerMeta('strict-origin-when-cross-origin');
     this.subs.stopDubAudio();

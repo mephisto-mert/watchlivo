@@ -11,6 +11,8 @@ export class WebviewAdapter {
   }
 
   async load(media, startAt = 0, shouldPlay = true) {
+    this.loadedAtMs = Date.now();
+    this.wantPlaying = Boolean(shouldPlay);
     const wv = document.createElement('webview');
     wv.setAttribute('partition', window.vortexDesktop?.partition || 'persist:vortex-drm');
     wv.setAttribute('allowpopups', '');
@@ -43,8 +45,8 @@ export class WebviewAdapter {
   }
 
   exec(code) { try { this.wv?.executeJavaScript(`(() => { const v = document.querySelector('video'); if (v) { ${code} } })()`); } catch (e) { /* ignore */ } }
-  play() { this.exec('v.play().catch(()=>{})'); }
-  pause() { this.exec('v.pause()'); }
+  play() { this.wantPlaying = true; this.exec('v.play().catch(()=>{})'); }
+  pause() { this.wantPlaying = false; this.exec('v.pause()'); }
   seek(sec) { this.state.t = sec; this.exec(`v.currentTime = ${Number(sec) || 0}`); }
   getTime() { return this.state.t || 0; }
   getDuration() { return this.state.d || 0; }

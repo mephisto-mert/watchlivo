@@ -153,7 +153,7 @@ class SecurityHeaders:
                 hdrs.append((b"x-content-type-options", b"nosniff"))
                 hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
-                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self), fullscreen=(self)"))
+                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self), fullscreen=(self), picture-in-picture=(self *)"))
                 hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
                 if scope.get("path") == "/api/rave/browser-proxy":
@@ -172,6 +172,12 @@ class SecurityHeaders:
                         b"frame-src 'self' https:; "
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
+                req_path = str(scope.get("path") or "")
+                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image")):
+                    hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
+                    hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
+                    hdrs.append((b"cdn-cache-control", b"no-store"))
+                    hdrs.append((b"vary", b"Authorization"))
                 hdrs.append((b"alt-svc", b"clear"))
                 message = {**message, "headers": hdrs}
             await send(message)
@@ -6850,7 +6856,7 @@ async def health(request: Request):
 
 
 async def index(request: Request):
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
+    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
 
 
 async def download_apk_endpoint(request: Request):
@@ -7341,6 +7347,8 @@ app = Starlette(
         Route("/api/user/progress", social_engine.user_progress_save, methods=["POST"]),
         Route("/api/user/watchlist", social_engine.user_watchlist_get, methods=["GET"]),
         Route("/api/user/watchlist", social_engine.user_watchlist_toggle, methods=["POST"]),
+        Route("/api/user/music-history", social_engine.user_music_history_get, methods=["GET"]),
+        Route("/api/user/music-history", social_engine.user_music_history_save, methods=["POST"]),
         Route("/api/rave/server-health", social_engine.server_health_get, methods=["GET"]),
         Route("/api/rave/server-health", social_engine.server_health_report, methods=["POST"]),
         Route("/api/rave/ai-status", rave_ai_status),

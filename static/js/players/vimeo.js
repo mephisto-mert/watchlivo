@@ -24,6 +24,8 @@ export class VimeoAdapter {
   }
 
   async load(media, startAt = 0, autoplay = true) {
+    this.loadedAtMs = Date.now();
+    this.wantPlaying = Boolean(autoplay);
     await loadSdk();
     const mount = document.createElement('div');
     this.container.replaceChildren(mount);
@@ -56,8 +58,8 @@ export class VimeoAdapter {
     }
   }
 
-  play() { this.player?.play().catch(() => { this.events.onAutoplayBlocked?.(); this.setMuted(true); this.player?.play().catch(() => {}); }); }
-  pause() { this.player?.pause().catch(() => {}); }
+  play() { this.wantPlaying = true; this.player?.play().catch(() => { this.events.onAutoplayBlocked?.(); this.setMuted(true); this.player?.play().catch(() => {}); }); }
+  pause() { this.wantPlaying = false; this.player?.pause().catch(() => {}); }
   seek(t) { this.t = Math.max(0, t); this.tAt = performance.now(); this.player?.setCurrentTime(this.t).catch(() => {}); }
   getTime() { return this.paused ? this.t : this.t + ((performance.now() - this.tAt) / 1000) * this.rate; }
   getDuration() { return this.duration || 0; }

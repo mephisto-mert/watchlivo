@@ -1,5 +1,6 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v81';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v82';
+import { applyElementVolume } from './audio-gain.js?v=20261103_v82';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -38,6 +39,7 @@ export class YouTubeAdapter {
 
   async load(media, startAt = 0, autoplay = true) {
     this.media = media || {};
+    this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(autoplay);
     this.altQueue = Array.isArray(media?.altVideoIds) ? [...media.altVideoIds] : [];
     if (media?.live) { this.caps.live = true; this.caps.seek = false; }
@@ -276,8 +278,10 @@ export class YouTubeAdapter {
     const fbSrc = this.media?.audioPreviewUrl
       || (Array.isArray(this.media?.altUrls) && this.media.altUrls[0])
       || (this.media?.videoId ? `/api/rave/yt-music-stream?v=${encodeURIComponent(this.media.videoId)}` : '');
+    if (String(fbSrc || '').startsWith('/api/rave/')) a.crossOrigin = 'anonymous';
     if (fbSrc) a.src = fbSrc;
     a.currentTime = Math.max(0, startAt);
+    applyElementVolume(a, this.baseVolume ?? 80, Boolean(this._muted));
     a.addEventListener('playing', () => { this.ready = true; this.events.onBuffering?.(false); this.events.onPlay?.(); });
     a.addEventListener('pause', () => this.events.onPause?.());
     a.addEventListener('ended', () => this.events.onEnded?.());
@@ -337,12 +341,14 @@ export class YouTubeAdapter {
   }
   getRate() { return this.audioEl ? Number(this.audioEl.playbackRate || 1) : Number(this.player?.getPlaybackRate?.() || 1); }
   setVolume(v) {
-    this.baseVolume = Math.max(0, Math.min(100, Number(v ?? 80)));
-    if (this.audioEl) this.audioEl.volume = Math.max(0, Math.min(1, this.baseVolume / 100));
-    else this.subs?.syncVideoVolume ? this.subs.syncVideoVolume() : this.player?.setVolume?.(Math.round(this.baseVolume));
+    this.baseVolume = Math.max(0, Math.min(150, Number(v ?? 80)));
+    if (this.audioEl) applyElementVolume(this.audioEl, this.baseVolume, Boolean(this._muted));
+    else if (this.subs?.syncVideoVolume) this.subs.syncVideoVolume();
+    else this.player?.setVolume?.(Math.min(100, Math.round(this.baseVolume)));
   }
   setMuted(m) {
-    if (this.audioEl) this.audioEl.muted = !!m;
+    this._muted = Boolean(m);
+    if (this.audioEl) applyElementVolume(this.audioEl, this.baseVolume, this._muted);
     else if (m) this.player?.mute?.();
     else this.player?.unMute?.();
   }

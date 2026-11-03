@@ -53,7 +53,7 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
                 or os.environ.get("TMDB_API_KEY")
                 or ""
             )
-            seed = f"watchlivo-deterministic-secret-v2:{name}:{shared_entropy}:{os.environ.get('VERCEL_GIT_COMMIT_SHA', 'default')}"
+            seed = f"watchlivo-deterministic-secret-v3:{name}:{shared_entropy}"
             _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
             if name not in _WARNED:
                 _WARNED.add(name)

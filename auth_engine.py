@@ -337,12 +337,35 @@ def sign_auth_token(user: Dict[str, Any]) -> str:
     return f"{b64}.{sig}"
 
 
+def _candidate_auth_secrets() -> list[bytes]:
+    out = [AUTH_SECRET]
+    if not (os.environ.get("AUTH_SECRET") or "").strip() and not (os.environ.get("VORTEX_SECRET") or "").strip():
+        ent = (
+            os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+            or os.environ.get("KV_REST_API_TOKEN")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("OPENAI_CLOUD_FALLBACK_KEY")
+            or os.environ.get("TMDB_API_KEY")
+            or ""
+        )
+        for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
+            for tag in ("default",):
+                cand = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:{tag}".encode("utf-8")).digest()
+                if cand not in out:
+                    out.append(cand)
+    return out
+
+
 def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or "." not in token or len(token) > 4096:
         return None
     b64, sig = token.rsplit(".", 1)
-    expected = hmac.new(AUTH_SECRET, b64.encode("ascii"), hashlib.sha256).hexdigest()[:32]
-    if not hmac.compare_digest(expected, sig):
+    b64_bytes = b64.encode("ascii")
+    matched = any(
+        hmac.compare_digest(hmac.new(sec, b64_bytes, hashlib.sha256).hexdigest()[:32], sig)
+        for sec in _candidate_auth_secrets()
+    )
+    if not matched:
         return None
     try:
         pad = "=" * (-len(b64) % 4)
@@ -973,17 +996,19 @@ async def auth_profile(request: Request) -> JSONResponse:
 
 
 async def auth_me(request: Request) -> JSONResponse:
+    priv_hdrs = {"Cache-Control": "private, no-store, max-age=0", "Vary": "Authorization"}
     auth_hdr = request.headers.get("Authorization", "")
     token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
     claims = verify_auth_token(token)
     if not claims:
-        return JSONResponse({"ok": False, "authenticated": False}, status_code=200)
+        return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
     try:
         row = _user_get(claims["uid"])
     except Exception:
         row = None
     if row:
-        return JSONResponse({"ok": True, "authenticated": True, "user": _row_to_user(row)})
+        u_obj = _row_to_user(row)
+        return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj)}, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],
         "email": claims.get("email", ""),
@@ -995,4 +1020,4 @@ async def auth_me(request: Request) -> JSONResponse:
         "verified": bool(claims.get("verified", True)),
         "isGuest": False,
     }
-    return JSONResponse({"ok": True, "authenticated": True, "user": user})
+    return JSONResponse({"ok": True, "authenticated": True, "user": user, "authToken": sign_auth_token(user)}, headers=priv_hdrs)

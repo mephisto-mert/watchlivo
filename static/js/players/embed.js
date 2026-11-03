@@ -61,6 +61,8 @@ export class EmbedAdapter {
   }
 
   async load(media, startAt = 0, shouldPlay = true) {
+    this.loadedAtMs = Date.now();
+    this.wantPlaying = Boolean(shouldPlay);
     this.baseTime = Math.max(0, Number(startAt) || 0);
     this.anchorPerf = performance.now();
     this.paused = !shouldPlay;
@@ -99,8 +101,8 @@ export class EmbedAdapter {
   }
 
   _post(cmd) { try { this.frame?.contentWindow?.postMessage(cmd, '*'); } catch (e) { /* ignore */ } }
-  play() { if (this.paused) { this.anchorPerf = performance.now(); this.paused = false; } this._post({ command: 'play' }); }
-  pause() { if (!this.paused) { this.baseTime = this.getTime(); this.paused = true; } this._post({ command: 'pause' }); }
+  play() { this.wantPlaying = true; if (this.paused) { this.anchorPerf = performance.now(); this.paused = false; } this._post({ command: 'play' }); }
+  pause() { this.wantPlaying = false; if (!this.paused) { this.baseTime = this.getTime(); this.paused = true; } this._post({ command: 'pause' }); }
   seek(t) { this.baseTime = Math.max(0, Number(t) || 0); this.anchorPerf = performance.now(); this._post({ command: 'seek', time: this.baseTime }); }
   getTime() { return this.paused ? this.baseTime : this.baseTime + ((performance.now() - this.anchorPerf) / 1000) * this.rate; }
   getDuration() { return this.duration; }
@@ -109,8 +111,20 @@ export class EmbedAdapter {
   isBuffering() { return false; }
   setRate(r) { this.baseTime = this.getTime(); this.anchorPerf = performance.now(); this.rate = Number(r) || 1; }
   getRate() { return this.rate; }
-  setVolume() {}
-  setMuted() {}
-  isMuted() { return false; }
+  setVolume(v) {
+    this._volume = Math.max(0, Math.min(150, Number(v ?? 80)));
+    const c100 = Math.min(100, Math.round(this._volume));
+    const c01 = Math.min(1, c100 / 100);
+    this._post({ command: 'volume', volume: c01, value: c100 });
+    this._post({ event: 'command', func: 'setVolume', args: [c100] });
+    this._post({ method: 'setVolume', value: c01 });
+  }
+  setMuted(m) {
+    this._muted = Boolean(m);
+    this._post({ command: m ? 'mute' : 'unmute', muted: this._muted });
+    this._post({ event: 'command', func: m ? 'mute' : 'unMute', args: [] });
+    this._post({ method: 'setMuted', value: this._muted });
+  }
+  isMuted() { return Boolean(this._muted); }
   destroy() { window.removeEventListener('message', this._onMsg); this.container.replaceChildren(); this.frame = null; }
 }

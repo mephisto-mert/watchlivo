@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v81';
-import { api, qs } from '../api.js?v=20261103_v81';
-import { parseVideoUrl } from '../providers.js?v=20261103_v81';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v81';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v81';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, state } from '../store.js?v=20261103_v81';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v82';
+import { api, qs } from '../api.js?v=20261103_v82';
+import { parseVideoUrl } from '../providers.js?v=20261103_v82';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v82';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v82';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v82';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -65,10 +65,9 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
 
 const spinner = () => h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.2em' } }, h('div', { class: 'spinner' }));
 
-const YT_ACCT_KEY = 'vortex_yt_account_v1';
 function getYtProfile() {
   try {
-    const raw = JSON.parse(localStorage.getItem(YT_ACCT_KEY) || 'null');
+    const raw = JSON.parse(localStorage.getItem(getYtAccountKey()) || 'null');
     if (raw && raw.connected) return raw;
   } catch (e) { /* ignore */ }
   const g = getAccount('youtube');
@@ -85,8 +84,9 @@ function getYtProfile() {
 
 function saveYtProfile(prof) {
   try {
-    if (!prof) localStorage.removeItem(YT_ACCT_KEY);
-    else localStorage.setItem(YT_ACCT_KEY, JSON.stringify({ ...prof, connected: true, updatedAt: Date.now() }));
+    const k = getYtAccountKey();
+    if (!prof) localStorage.removeItem(k);
+    else localStorage.setItem(k, JSON.stringify({ ...prof, connected: true, updatedAt: Date.now() }));
   } catch (e) { /* ignore */ }
 }
 
@@ -328,6 +328,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           class: 'btn sm',
           onclick: () => {
             clearWatchHistory();
+            clearMusicHistory();
             toast('İzleme geçmişi temizlendi');
             loadTab('history');
           },

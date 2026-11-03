@@ -1,5 +1,6 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v81';
+import { toast } from './ui.js?v=20261103_v82';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v82';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -203,8 +204,8 @@ export class Voice {
     this.peerVolumes.set(id, val);
     const st = this.peers.get(id);
     if (st?.audio) {
-      st.audio.volume = Math.min(1, Math.max(0, val / 100));
-      st.audio.muted = this.deafened || val === 0;
+      applyStreamBoost(st.audio, st.audio.srcObject, this.deafened ? 0 : val);
+      if (val <= 100) st.audio.muted = this.deafened || val === 0;
     }
     return val;
   }

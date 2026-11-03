@@ -901,7 +901,7 @@ class RegressionTests(unittest.TestCase):
 
         # 1. Cache-bust bumped cleanly to 20261103_v81 with zero stale v79 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v81", index_html)
+        self.assertIn("20261103_v82", index_html)
         self.assertNotIn("20261103_v79", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
@@ -1070,6 +1070,116 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("arg?.userFullscreenPause", mesh_js)
         self.assertIn("leader && ad.wantPlaying === false", sync_js)
         self.assertNotIn(".video-frame:not(.fullscreen):not(.idle-cursor):hover .controls", mesh_css)
+
+
+    def test_v82_account_history_isolation_real_vol_brightness_pip_and_mobile_hud(self):
+        import uuid
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Unauthenticated endpoints MUST reject with 401 (zero shared guest_local history!)
+        for ep in ("/api/user/progress", "/api/user/watchlist", "/api/user/music-history"):
+            r_unauth = self.client.get(ep)
+            self.assertEqual(r_unauth.status_code, 401, f"Expected 401 on unauthenticated GET {ep}")
+            r_unauth_post = self.client.post(ep, json={"tmdbId": "94605", "title": "LeakTest"})
+            self.assertEqual(r_unauth_post.status_code, 401, f"Expected 401 on unauthenticated POST {ep}")
+
+        # 2. Register two independent accounts (Mert vs Ayse) and verify strict per-account isolation
+        suf = uuid.uuid4().hex[:8]
+        r_a = self.client.post("/api/auth/register", json={
+            "email": f"mert_{suf}@watchlivo.test",
+            "password": "StrongPassword!123",
+            "name": "Mert Hesap",
+        })
+        self.assertEqual(r_a.status_code, 200)
+        tok_a = r_a.json()["authToken"]
+        hdr_a = {"Authorization": f"Bearer {tok_a}"}
+
+        r_b = self.client.post("/api/auth/register", json={
+            "email": f"ayse_{suf}@watchlivo.test",
+            "password": "StrongPassword!456",
+            "name": "Ayse Hesap",
+        })
+        self.assertEqual(r_b.status_code, 200)
+        tok_b = r_b.json()["authToken"]
+        hdr_b = {"Authorization": f"Bearer {tok_b}"}
+
+        # Account A saves Arcane S1B9 & watchlist & music
+        self.assertEqual(self.client.post("/api/user/progress", headers=hdr_a, json={
+            "key": "tv:94605", "tmdbId": "94605", "title": "Arcane", "mediaType": "tv",
+            "season": 1, "episode": 9, "position": 1358, "duration": 2465,
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/user/watchlist", headers=hdr_a, json={
+            "action": "add", "item": {"key": "tv:94605", "tmdbId": "94605", "title": "Arcane", "mediaType": "tv"},
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/user/music-history", headers=hdr_a, json={
+            "videoId": "mertSong123", "title": "Mert Favori Parca", "artist": "Sanatci A",
+        }).status_code, 200)
+
+        # Account B saves Dune Part Two & watchlist & music
+        self.assertEqual(self.client.post("/api/user/progress", headers=hdr_b, json={
+            "key": "movie:693134", "tmdbId": "693134", "title": "Dune: Çöl Gezegeni Bölüm İki", "mediaType": "movie",
+            "position": 2410, "duration": 9960,
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/user/watchlist", headers=hdr_b, json={
+            "action": "add", "item": {"key": "movie:693134", "tmdbId": "693134", "title": "Dune: Çöl Gezegeni Bölüm İki", "mediaType": "movie"},
+        }).status_code, 200)
+        self.assertEqual(self.client.post("/api/user/music-history", headers=hdr_b, json={
+            "videoId": "ayseSong999", "title": "Ayse Favori Parca", "artist": "Sanatci B",
+        }).status_code, 200)
+
+        # Verify Account A ONLY sees Account A's history + private no-store headers
+        pa = self.client.get("/api/user/progress", headers=hdr_a)
+        self.assertEqual(pa.status_code, 200)
+        self.assertIn("no-store", pa.headers.get("cache-control", ""))
+        self.assertIn("private", pa.headers.get("cache-control", ""))
+        pa_titles = [x.get("title") for x in pa.json().get("items", [])]
+        self.assertEqual(pa_titles, ["Arcane"])
+
+        pb = self.client.get("/api/user/progress", headers=hdr_b)
+        pb_titles = [x.get("title") for x in pb.json().get("items", [])]
+        self.assertEqual(pb_titles, ["Dune: Çöl Gezegeni Bölüm İki"])
+
+        wa_titles = [x.get("title") for x in self.client.get("/api/user/watchlist", headers=hdr_a).json().get("items", [])]
+        wb_titles = [x.get("title") for x in self.client.get("/api/user/watchlist", headers=hdr_b).json().get("items", [])]
+        self.assertEqual(wa_titles, ["Arcane"])
+        self.assertEqual(wb_titles, ["Dune: Çöl Gezegeni Bölüm İki"])
+
+        ma_ids = [x.get("videoId") for x in self.client.get("/api/user/music-history", headers=hdr_a).json().get("items", [])]
+        mb_ids = [x.get("videoId") for x in self.client.get("/api/user/music-history", headers=hdr_b).json().get("items", [])]
+        self.assertEqual(ma_ids, ["mertSong123"])
+        self.assertEqual(mb_ids, ["ayseSong999"])
+
+        # 3. Verify Permissions-Policy picture-in-picture & index no-store
+        r_idx = self.client.get("/")
+        self.assertIn("picture-in-picture=(self *)", r_idx.headers.get("permissions-policy", ""))
+        self.assertIn("no-store", r_idx.headers.get("cache-control", ""))
+
+        # 4. Verify Real Volume/Brightness, Multi-Phone HUD Lock & OS PiP static invariants
+        gain_js = (root / "static" / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        subs_js = (root / "static" / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        manifest_xml = (root.parent / "watchlivo_android" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        main_java = (root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java").read_text(encoding="utf-8")
+
+        self.assertIn("createMediaElementSource", gain_js)
+        self.assertIn("createDynamicsCompressor", gain_js)
+        self.assertIn("wl-brightness-veil", ctl_js)
+        self.assertIn("setBrightness(", ctl_js)
+        self.assertIn("setRealVolume(", ctl_js)
+        self.assertIn("ctl-sliders-card", ctl_js)
+        self.assertIn("enterpictureinpicture", ctl_js)
+        self.assertIn("viewer-playing-hidden", ctl_js)
+        self.assertIn("localPauseSince", ctl_js)
+        self.assertIn("data-watchlivo-pip", subs_js)
+        self.assertIn("VTTCue", subs_js)
+        self.assertIn("--wl-composed-filter", mesh_css)
+        self.assertIn("html.is-android-pip", mesh_css)
+        self.assertIn("body.kb-open.kb-portrait", mesh_css)
+        self.assertIn('android:supportsPictureInPicture="true"', manifest_xml)
+        self.assertIn("WatchlivoBridge", main_java)
+        self.assertIn("enterPictureInPictureMode", main_java)
 
 
 if __name__ == '__main__':

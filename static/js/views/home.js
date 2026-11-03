@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v81';
-import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia } from '../store.js?v=20261103_v81';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v81';
-import { api } from '../api.js?v=20261103_v81';
-import { createSelection } from './selection.js?v=20261103_v81';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v81';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v82';
+import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia, getRecentRoomsKey, getRoomSnapshotsKey } from '../store.js?v=20261103_v82';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v82';
+import { api } from '../api.js?v=20261103_v82';
+import { createSelection } from './selection.js?v=20261103_v82';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v82';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v81', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v82', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -87,7 +87,7 @@ export async function createRoomWithMedia(media) {
   });
   if (!res.room?.id) throw new Error('Oda oluşturulamadı');
   try {
-    const prevRecents = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]');
+    const prevRecents = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]');
     for (const oldId of prevRecents) {
       if (oldId && oldId !== res.room.id && !String(oldId).startsWith('tv-') && !String(oldId).startsWith('radyo-')) {
         forgetRoom(oldId);
@@ -402,10 +402,10 @@ function updateMiniPip() {
   let activeId = '';
   let activeTitle = 'Watchlivo Odası';
   try {
-    const rec = JSON.parse(localStorage.getItem('vortex_recent_rooms') || '[]')[0];
+    const rec = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]')[0];
     if (rec) {
       activeId = rec;
-      const saved = JSON.parse(localStorage.getItem('vortex_room_snapshots_v1') || '{}')[rec];
+      const saved = JSON.parse(localStorage.getItem(getRoomSnapshotsKey()) || '{}')[rec];
       if (saved?.media?.title) activeTitle = saved.media.title;
       else if (saved?.name) activeTitle = saved.name;
     }

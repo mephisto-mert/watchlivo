@@ -42,6 +42,7 @@ _DM_THREADS: Dict[str, List[Dict[str, Any]]] = {}
 _LINK_PREVIEW_CACHE: Dict[str, Dict[str, Any]] = {}
 _TRANSLATE_CACHE: Dict[str, str] = {}
 _AI_IMAGE_HISTORY: List[Dict[str, Any]] = []
+_AI_IMAGE_BY_USER: Dict[str, List[Dict[str, Any]]] = {}
 _REPORTS_LOG: List[Dict[str, Any]] = []
 _NOTIFICATION_QUEUES: Dict[str, List[Dict[str, Any]]] = {}
 _PUSH_SUBSCRIPTIONS: Dict[str, Dict[str, Any]] = {}
@@ -51,6 +52,9 @@ _KV_MEM: Dict[str, Any] = {}
 _KV_READ_TS: Dict[str, float] = {}
 _USER_PROGRESS: Dict[str, List[Dict[str, Any]]] = {}
 _USER_WATCHLIST: Dict[str, List[Dict[str, Any]]] = {}
+_USER_MUSIC_HISTORY: Dict[str, List[Dict[str, Any]]] = {}
+_LEGACY_GUEST_PURGED = False
+_PRIVATE_HEADERS = {"Cache-Control": "private, no-store, no-cache, must-revalidate", "Vary": "Authorization"}
 _SERVER_HEALTH: Dict[str, Dict[str, Any]] = {}
 
 
@@ -207,8 +211,12 @@ def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_defa
         return verified
     cand = _clean(raw_uid, 64)
     if cand.lower().startswith("u_wl_"):
-        return fallback
-    return cand or fallback
+        return "unauth_" + hashlib.sha256(cand.lower().encode("utf-8")).hexdigest()[:12]
+    if cand:
+        return cand
+    ip_seed = str((request.client.host if request.client else "") or "anon")
+    ua_seed = str(request.headers.get("user-agent") or "")[:80]
+    return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}".encode("utf-8")).hexdigest()[:10]
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -971,13 +979,25 @@ async def ai_image_generate(request: Request) -> JSONResponse:
         "time": _hhmm(),
         "ts": _now(),
     }
-    _AI_IMAGE_HISTORY.insert(0, item)
-    del _AI_IMAGE_HISTORY[30:]
-    return JSONResponse({"ok": True, "item": item, "history": _AI_IMAGE_HISTORY[:16]})
+    ukey = _verified_account_key(request)
+    if ukey:
+        cur_ai = _kv_get(f"wl:user:aiimg:{ukey}", None, max_age=2.0)
+        u_hist = list(cur_ai) if isinstance(cur_ai, list) else list(_AI_IMAGE_BY_USER.get(ukey, []))
+        u_hist.insert(0, item)
+        u_hist = u_hist[:24]
+        _AI_IMAGE_BY_USER[ukey] = u_hist
+        _kv_set(f"wl:user:aiimg:{ukey}", u_hist, ttl_sec=2592000)
+        return JSONResponse({"ok": True, "item": item, "history": u_hist[:16]}, headers=_PRIVATE_HEADERS)
+    return JSONResponse({"ok": True, "item": item, "history": [item]}, headers=_PRIVATE_HEADERS)
 
 
 async def ai_image_history(request: Request) -> JSONResponse:
-    return JSONResponse({"ok": True, "history": _AI_IMAGE_HISTORY[:16]})
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": True, "history": []}, headers=_PRIVATE_HEADERS)
+    cur_ai = _kv_get(f"wl:user:aiimg:{ukey}", None, max_age=3.0)
+    u_hist = cur_ai if isinstance(cur_ai, list) else _AI_IMAGE_BY_USER.get(ukey, [])
+    return JSONResponse({"ok": True, "history": u_hist[:16]}, headers=_PRIVATE_HEADERS)
 
 
 # ---------------------------------------------------------------------------
@@ -1178,42 +1198,53 @@ async def notifications_poll(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # 10. Cloud Cross-Device Continue Watching & Watchlist (v78)
 # ---------------------------------------------------------------------------
-def _resolve_user_key(request: Request, body: Optional[Dict[str, Any]] = None) -> str:
-    q = request.query_params
-    b = body if isinstance(body, dict) else {}
+def _purge_legacy_shared_guest() -> None:
+    global _LEGACY_GUEST_PURGED
+    if _LEGACY_GUEST_PURGED:
+        return
+    _LEGACY_GUEST_PURGED = True
+    for bad_k in ("guest_local", "guest_default"):
+        _USER_PROGRESS.pop(bad_k, None)
+        _USER_WATCHLIST.pop(bad_k, None)
+        _KV_MEM.pop(f"wl:user:prog:{bad_k}", None)
+        _KV_MEM.pop(f"wl:user:wlist:{bad_k}", None)
+    st = _get_redis_store()
+    if st is not None:
+        try:
+            st._call(["DEL", "wl:user:prog:guest_local", "wl:user:wlist:guest_local", "wl:user:prog:guest_default", "wl:user:wlist:guest_default"])
+        except Exception:
+            pass
+
+
+def _verified_account_key(request: Request) -> str:
+    _purge_legacy_shared_guest()
     verified = _clean(request.scope.get("wl_uid"), 64)
-    if verified:
-        return re.sub(r"[^a-zA-Z0-9_.@-]", "", verified.lower())[:64] or "guest_local"
-    raw = (
-        b.get("uid")
-        or q.get("uid")
-        or b.get("handle")
-        or q.get("handle")
-        or ""
-    )
-    key = re.sub(r"[^a-zA-Z0-9_.@-]", "", str(raw).strip().lower())[:64]
-    if key.startswith("u_wl_"):
-        return "guest_local"
-    return key or "guest_local"
+    if not verified:
+        return ""
+    return re.sub(r"[^a-zA-Z0-9_.@-]", "", verified.lower())[:64]
 
 
 async def user_progress_get(request: Request) -> JSONResponse:
-    ukey = _resolve_user_key(request)
-    items = _kv_get(f"wl:user:prog:{ukey}", None, max_age=3.0)
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
+    items = _kv_get(f"wl:user:prog:{ukey}", None, max_age=2.0)
     if not isinstance(items, list):
         items = _USER_PROGRESS.get(ukey, [])
     items = sorted(items, key=lambda x: _finite_float(x.get("updatedAt"), 0.0), reverse=True)[:24]
-    return JSONResponse({"ok": True, "uid": ukey, "items": items})
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items}, headers=_PRIVATE_HEADERS)
 
 
 async def user_progress_save(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
     try:
         body = await request.json()
     except Exception:
         body = {}
     if not isinstance(body, dict):
         body = {}
-    ukey = _resolve_user_key(request, body)
     cur = _kv_get(f"wl:user:prog:{ukey}", None, max_age=1.5)
     items: List[Dict[str, Any]] = list(cur) if isinstance(cur, list) else list(_USER_PROGRESS.get(ukey, []))
     action = _clean(body.get("action") or "upsert", 20).lower()
@@ -1278,32 +1309,37 @@ async def user_progress_save(request: Request) -> JSONResponse:
         items = items[:30]
     _USER_PROGRESS[ukey] = items
     _kv_set(f"wl:user:prog:{ukey}", items, ttl_sec=2592000)
-    return JSONResponse({"ok": True, "uid": ukey, "items": items[:24]})
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items[:24]}, headers=_PRIVATE_HEADERS)
 
 
 async def user_watchlist_get(request: Request) -> JSONResponse:
-    ukey = _resolve_user_key(request)
-    items = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=3.0)
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
+    items = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=2.0)
     if not isinstance(items, list):
         items = _USER_WATCHLIST.get(ukey, [])
-    return JSONResponse({"ok": True, "uid": ukey, "items": items[:80]})
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items[:80]}, headers=_PRIVATE_HEADERS)
 
 
 async def user_watchlist_toggle(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
     try:
         body = await request.json()
     except Exception:
         body = {}
     if not isinstance(body, dict):
         body = {}
-    ukey = _resolve_user_key(request, body)
     cur = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=1.5)
     items: List[Dict[str, Any]] = list(cur) if isinstance(cur, list) else list(_USER_WATCHLIST.get(ukey, []))
     action = _clean(body.get("action") or "toggle", 16).lower()
-    mtype = "tv" if _clean(body.get("mediaType"), 12).lower() == "tv" else "movie"
-    tid = _clean(body.get("tmdbId") or body.get("id"), 40)
-    title = _clean(body.get("title"), 160)
-    ikey = _clean(body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+    src = body.get("item") if isinstance(body.get("item"), dict) else body
+    mtype = "tv" if _clean(src.get("mediaType"), 12).lower() == "tv" else "movie"
+    tid = _clean(src.get("tmdbId") or src.get("id"), 40)
+    title = _clean(src.get("title"), 160)
+    ikey = _clean(src.get("key") or body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
     existed = any(str(it.get("key") or "") == ikey for it in items)
     if action == "remove" or (action == "toggle" and existed):
         items = [it for it in items if str(it.get("key") or "") != ikey]
@@ -1313,21 +1349,73 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
         items.insert(0, {
             "key": ikey,
             "tmdbId": tid,
-            "imdbId": _clean(body.get("imdbId"), 32),
+            "imdbId": _clean(src.get("imdbId"), 32),
             "mediaType": mtype,
-            "provider": _clean(body.get("provider") or "cinema", 32),
+            "provider": _clean(src.get("provider") or "cinema", 32),
             "title": title or "Sinema",
-            "poster": _clean(body.get("poster") or body.get("thumbnail"), 800),
-            "year": _clean(body.get("year"), 10),
-            "rating": _finite_float(body.get("rating"), 0.0, lo=0.0, hi=10.0),
-            "sourceUrl": _clean(body.get("sourceUrl"), 600),
+            "poster": _clean(src.get("poster") or src.get("thumbnail"), 800),
+            "year": _clean(src.get("year"), 10),
+            "rating": _finite_float(src.get("rating"), 0.0, lo=0.0, hi=10.0),
+            "sourceUrl": _clean(src.get("sourceUrl"), 600),
             "addedAt": _now(),
         })
         items = items[:80]
         added = True
     _USER_WATCHLIST[ukey] = items
     _kv_set(f"wl:user:wlist:{ukey}", items, ttl_sec=7776000)
-    return JSONResponse({"ok": True, "uid": ukey, "added": added, "key": ikey, "items": items})
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "added": added, "key": ikey, "items": items}, headers=_PRIVATE_HEADERS)
+
+
+async def user_music_history_get(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
+    items = _kv_get(f"wl:user:mhist:{ukey}", None, max_age=2.0)
+    if not isinstance(items, list):
+        items = _USER_MUSIC_HISTORY.get(ukey, [])
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items[:24]}, headers=_PRIVATE_HEADERS)
+
+
+async def user_music_history_save(request: Request) -> JSONResponse:
+    ukey = _verified_account_key(request)
+    if not ukey:
+        return JSONResponse({"ok": False, "authenticated": False, "uid": "", "items": []}, status_code=401, headers=_PRIVATE_HEADERS)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    cur = _kv_get(f"wl:user:mhist:{ukey}", None, max_age=1.5)
+    items: List[Dict[str, Any]] = list(cur) if isinstance(cur, list) else list(_USER_MUSIC_HISTORY.get(ukey, []))
+    action = _clean(body.get("action") or "upsert", 16).lower()
+    if action == "clear":
+        items = []
+    else:
+        artist = _clean(body.get("artist") or "Sanatçı", 80)
+        song_title = _clean(body.get("songTitle") or body.get("title"), 120)
+        if not song_title:
+            return JSONResponse({"ok": False, "error": "songTitle required"}, status_code=400, headers=_PRIVATE_HEADERS)
+        mkey = f"{artist.lower()}|{song_title.lower()}"
+        items = [x for x in items if f"{str(x.get('artist') or '').lower()}|{str(x.get('songTitle') or '').lower()}" != mkey]
+        items.insert(0, {
+            "id": _clean(body.get("id") or body.get("videoId") or f"m_{int(_now()*1000)}", 64),
+            "videoId": _clean(body.get("videoId"), 32),
+            "title": f"{artist} — {song_title}",
+            "songTitle": song_title,
+            "artist": artist,
+            "genre": _clean(body.get("genre") or "Müzik & Klip", 48),
+            "duration": _safe_int(body.get("duration"), 200, lo=10, hi=14400),
+            "poster": _clean(body.get("poster") or body.get("thumbnail") or "/static/watchlivo-poster.svg", 800),
+            "thumbnail": _clean(body.get("thumbnail") or body.get("poster") or "/static/watchlivo-poster.svg", 800),
+            "audioPreviewUrl": _clean(body.get("audioPreviewUrl"), 1200),
+            "isMusic": True,
+            "playedAt": round(_now() * 1000),
+        })
+        items = items[:20]
+    _USER_MUSIC_HISTORY[ukey] = items
+    _kv_set(f"wl:user:mhist:{ukey}", items, ttl_sec=2592000)
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items}, headers=_PRIVATE_HEADERS)
 
 
 # ---------------------------------------------------------------------------

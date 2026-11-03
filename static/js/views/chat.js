@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v81';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v81';
-import { avatar } from '../profile.js?v=20261103_v81';
-import { api, qs } from '../api.js?v=20261103_v81';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v81';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v82';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v82';
+import { avatar } from '../profile.js?v=20261103_v82';
+import { api, qs } from '../api.js?v=20261103_v82';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v82';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -639,7 +639,7 @@ export function buildChat(ctx) {
     }, 60);
   });
   input.addEventListener('blur', () => {
-    document.body.classList.remove('kb-open');
+    document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
     setTimeout(() => {
       if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
       try {
@@ -1485,6 +1485,7 @@ export function buildChat(ctx) {
 
   let maxPortraitH = 0;
   let maxLandscapeH = 0;
+  let preKbPortrait = typeof window !== 'undefined' ? (window.innerHeight >= window.innerWidth) : true;
   const onVisualViewportResize = () => {
     const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
     const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
@@ -1494,7 +1495,12 @@ export function buildChat(ctx) {
     const isInputTag = Boolean(activeEl && /^(INPUT|TEXTAREA)$/i.test(activeEl.tagName) && activeEl.type !== 'range' && activeEl.type !== 'checkbox' && activeEl.type !== 'radio' && activeEl.type !== 'file');
     const isChatFocused = Boolean(activeEl && (activeEl === input || (el.contains(activeEl) && isInputTag)));
     const isRoomOrPopupInput = Boolean(isChatFocused || (isInputTag && activeEl.closest?.('#mesh-root, #popup-root')));
-    const isLandscape = rawW > rawH * 1.08;
+    const orientType = String(window.screen?.orientation?.type || '');
+    const physicalPortrait = orientType
+      ? orientType.startsWith('portrait')
+      : (!isRoomOrPopupInput ? rawH >= rawW : preKbPortrait);
+    if (!isRoomOrPopupInput) preKbPortrait = physicalPortrait;
+    const isLandscape = !physicalPortrait && (rawW > rawH * 1.08);
     if (!isRoomOrPopupInput) {
       if (isLandscape) maxLandscapeH = Math.max(maxLandscapeH, rawH, vvH || 0);
       else maxPortraitH = Math.max(maxPortraitH, rawH, vvH || 0);
@@ -1517,7 +1523,7 @@ export function buildChat(ctx) {
     }
     document.body.classList.toggle('kb-open', kbOpen);
     document.body.classList.toggle('kb-chat-focus', Boolean(kbOpen && isChatFocused));
-    document.body.classList.toggle('kb-portrait', Boolean(kbOpen && !isLandscape));
+    document.body.classList.toggle('kb-portrait', Boolean(kbOpen && physicalPortrait));
     if (kbOpen && isChatFocused) {
       list.scrollTop = list.scrollHeight;
     }

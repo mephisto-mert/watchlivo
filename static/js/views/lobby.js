@@ -1,10 +1,10 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261103_v81';
-import { avatar } from '../profile.js?v=20261103_v81';
-import { getProvider } from '../providers.js?v=20261103_v81';
-import { api, qs } from '../api.js?v=20261103_v81';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName } from '../store.js?v=20261103_v81';
-import { expectedPosition } from '../sync.js?v=20261103_v81';
+import { h, icons, popup, toast } from '../ui.js?v=20261103_v82';
+import { avatar } from '../profile.js?v=20261103_v82';
+import { getProvider } from '../providers.js?v=20261103_v82';
+import { api, qs } from '../api.js?v=20261103_v82';
+import { state, getFriends, isFriend, toggleFriend, addFriendByName, getRecentRoomsKey, getRoomSnapshotsKey } from '../store.js?v=20261103_v82';
+import { expectedPosition } from '../sync.js?v=20261103_v82';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -143,10 +143,11 @@ export function meshThumb(room, onOpen) {
     room.hasPassword ? h('span', { class: 'meshthumb-lock', html: icons.lock }) : null);
 }
 
-const RECENT_KEY = 'vortex_recent_rooms';
 export function rememberRoom(room) {
   try {
     if (!room?.id) return;
+    const recentKey = getRecentRoomsKey();
+    const snapsKey = getRoomSnapshotsKey();
     localStorage.removeItem(`vortex_st_${room.id}`);
     localStorage.removeItem(`vortex_room_${room.id}`);
     if (room.syncToken) {
@@ -162,10 +163,15 @@ export function rememberRoom(room) {
         media: room.media ? { ...room.media, currentTime: Number.isFinite(savedPos) && savedPos > 0 ? savedPos : 0, updatedAt: Date.now() / 1000 } : room.media,
       };
       sessionStorage.setItem(`vortex_room_${room.id}`, JSON.stringify(cleanSnap));
+      if (!room.curated) {
+        const snaps = JSON.parse(localStorage.getItem(snapsKey) || '{}');
+        snaps[room.id] = { id: room.id, name: room.name || '', media: cleanSnap.media ? { title: cleanSnap.media.title || '' } : null };
+        localStorage.setItem(snapsKey, JSON.stringify(snaps));
+      }
     }
-    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((r) => r !== room.id);
+    const list = JSON.parse(localStorage.getItem(recentKey) || '[]').filter((r) => r !== room.id);
     list.unshift(room.id);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list.slice(0, 12)));
+    localStorage.setItem(recentKey, JSON.stringify(list.slice(0, 12)));
   } catch (e) { /* ignore */ }
 }
 export function forgetRoom(roomId) {
@@ -178,12 +184,14 @@ export function forgetRoom(roomId) {
     localStorage.removeItem(`vortex_st_${roomId}`);
     localStorage.removeItem(`vortex_room_${roomId}`);
     localStorage.removeItem(`vortex_creator_flag_${roomId}`);
-    const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]').filter((r) => r !== roomId);
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
-    const snaps = JSON.parse(localStorage.getItem('vortex_room_snapshots_v1') || '{}');
+    const recentKey = getRecentRoomsKey();
+    const snapsKey = getRoomSnapshotsKey();
+    const list = JSON.parse(localStorage.getItem(recentKey) || '[]').filter((r) => r !== roomId);
+    localStorage.setItem(recentKey, JSON.stringify(list));
+    const snaps = JSON.parse(localStorage.getItem(snapsKey) || '{}');
     if (snaps && snaps[roomId]) {
       delete snaps[roomId];
-      localStorage.setItem('vortex_room_snapshots_v1', JSON.stringify(snaps));
+      localStorage.setItem(snapsKey, JSON.stringify(snaps));
     }
   } catch (e) { /* ignore */ }
 }

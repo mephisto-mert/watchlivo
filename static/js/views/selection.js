@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v81';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v81';
-import { api, qs } from '../api.js?v=20261103_v81';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v81';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v81';
-import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v81';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v82';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v82';
+import { api, qs } from '../api.js?v=20261103_v82';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v82';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v82';
+import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v82';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;

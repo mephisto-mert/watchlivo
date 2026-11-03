@@ -1,7 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261103_v81';
-import { api } from './api.js?v=20261103_v81';
-import { state } from './store.js?v=20261103_v81';
+import { clock } from './sync.js?v=20261103_v82';
+import { api } from './api.js?v=20261103_v82';
+import { state } from './store.js?v=20261103_v82';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261103_v82';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -147,6 +148,18 @@ export class MeshConnection {
     }
     const preferHttp = /(\.vercel\.app|watchlivo\.online)$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
     if (preferHttp) this.startHttp(); else this.startWs();
+  }
+
+  nudgeIfDisconnected() {
+    if (this.closed) return;
+    const now = Date.now();
+    if (now - (this._lastBgNudgeAt || 0) < 3500) return;
+    this._lastBgNudgeAt = now;
+    if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
+      this.startWs();
+    } else if (this.mode === 'http' && !this.pollInFlight) {
+      this.httpSend({ type: 'poll' }, false);
+    }
   }
 
   startWs() {
@@ -410,15 +423,16 @@ export class MeshConnection {
           }
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
           const nowSec = clock.now();
-          const prevPlaying = (prevMedia.meshStateStatus || (prevMedia.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
-          const nextPlaying = (res.media.meshStateStatus || (res.media.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
+          const normNext = normalizeRoomMediaState(prevMedia, res.media);
+          const prevPlaying = isRoomMediaPlaying(prevMedia);
+          const nextPlaying = isRoomMediaPlaying(normNext);
           const prevExp = Number(prevMedia.meshStatePosition ?? prevMedia.currentTime ?? 0) + (prevPlaying ? Math.max(0, nowSec - Number(prevMedia.meshStateTime ?? prevMedia.updatedAt ?? nowSec)) * Number(prevMedia.meshStatePlaybackSpeed ?? prevMedia.rate ?? 1) : 0);
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - Number(res.media.meshStateTime ?? res.media.updatedAt ?? nowSec)) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
           const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
-          this.lastRoom.media = { ...this.lastRoom.media, ...res.media };
+          this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
           if (statusChanged || significantJump || speedChanged) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           } else if (state.mesh?.media) {

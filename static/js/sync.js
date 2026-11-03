@@ -1,5 +1,7 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
+import { isRoomMediaPlaying } from './store.js?v=20261103_v82';
+
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
 const IN_SYNC = 3.5;
@@ -27,7 +29,7 @@ export const clock = {
 
 export function expectedPosition(media) {
   if (!media) return 0;
-  const status = media.meshStateStatus || (media.playing ? 'PLAYING' : 'PAUSED');
+  const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
   const pos = Number(media.meshStatePosition ?? media.currentTime ?? 0);
   const t0 = Number(media.meshStateTime ?? media.updatedAt ?? clock.now());
   const speed = Number(media.meshStatePlaybackSpeed ?? media.rate ?? 1);
@@ -53,6 +55,12 @@ export class SyncEngine {
 
   start() { this.stop(); this.loop(); }
   stop() { clearTimeout(this.timer); this.timer = null; }
+  tickFromMedia() {
+    const now = performance.now();
+    if (!this.enabled || now - (this._lastBgTick || 0) < 850) return;
+    this._lastBgTick = now;
+    try { this.step(); } catch (e) { /* ignore */ }
+  }
   kick(resetCooldown = false) {
     if (resetCooldown) {
       this.inSyncCount = 0;
@@ -95,7 +103,7 @@ export class SyncEngine {
     const media = this.getMedia();
     const ad = this.getAdapter();
     if (!this.enabled || !media || !ad) { this.mode = 'idle'; this.onStatus({ mode: 'idle' }); return CYCLE_MS; }
-    const status = media.meshStateStatus || (media.playing ? 'PLAYING' : 'PAUSED');
+    const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
     const base = Number(media.meshStatePlaybackSpeed ?? media.rate ?? 1);
     const expected = expectedPosition(media);
     if (!ad.caps.seek) { this.mode = ad.caps.live ? 'live' : 'embed'; this.onStatus({ mode: this.mode }); return CYCLE_MS; }
@@ -193,6 +201,10 @@ export class SyncEngine {
         this.onStatus({ mode: 'paused', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return timeout;
       }
+      const hiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !ad.isPiP?.() && !ad.isMusic;
+      if (hiddenNonPip || ad.autoplayHardBlocked) {
+        return timeout;
+      }
       if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
         ad.play();
@@ -271,7 +283,7 @@ export class SyncEngine {
       const behindAct = (delta > 0 && delta < STARVE_CEILING && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
         : 'jump';
-      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < Math.min(DEFER_MAX_MS, 6500))) {
+      if (behindAct === 'defer' && (!this.deferStartedAt || now - this.deferStartedAt < Math.min(DEFER_MAX_MS, 14000))) {
         if (!this.deferStartedAt) this.deferStartedAt = now;
         const showBuf = abs > 3.5;
         this.mode = showBuf ? 'buffering' : 'inSync';

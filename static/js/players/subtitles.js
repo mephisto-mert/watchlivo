@@ -1,4 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
+import { applyElementVolume } from './audio-gain.js?v=20261103_v82';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -206,40 +207,31 @@ export class SubtitleDubController {
   _rebuildNativeTrackCues() {
     try {
       const v = this.adapter?.video;
-      const trEl = v?.querySelector?.('track');
-      if (!trEl || !this.subCues.length) return;
-      const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
-      const off = this.offsetSec || 0;
-      if (String(trEl.getAttribute('src') || '').startsWith('blob:')) {
-        const fmt = (sec) => {
-          const s = Math.max(0, Number(sec) || 0);
-          const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-          const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-          const ss = (s % 60).toFixed(3).padStart(6, '0');
-          return `${hh}:${mm}:${ss}`;
-        };
-        const lines = ['WEBVTT', ''];
-        this.subCues.forEach((c, idx) => {
-          const st = Math.max(0, (c.start + off) / scale);
-          const en = Math.max(st + 0.1, (c.end + off) / scale);
-          lines.push(`${idx + 1}\n${fmt(st)} --> ${fmt(en)}\n${c.text}`);
-        });
-        const nextBlob = URL.createObjectURL(new Blob([lines.join('\n\n') + '\n'], { type: 'text/vtt;charset=utf-8' }));
-        if (this.blobUrl) {
-          try { URL.revokeObjectURL(this.blobUrl); } catch (_) {}
-        }
-        this.blobUrl = nextBlob;
-        trEl.src = nextBlob;
-      }
-      const tt = trEl.track;
-      const CueCls = window.VTTCue || window.TextTrackCue;
+      const trEl = this._activeTrackEl || v?.querySelector?.('track[data-watchlivo-pip="1"]') || v?.querySelector?.('track');
+      const tt = trEl?.track;
+      const CueCls = typeof window !== 'undefined' ? (window.VTTCue || window.TextTrackCue) : null;
       if (!tt || !CueCls) return;
+      const prevMode = tt.mode;
+      if (tt.mode === 'disabled') tt.mode = 'hidden';
       while (tt.cues && tt.cues.length > 0) {
         tt.removeCue(tt.cues[0]);
       }
-      for (const c of this.subCues) {
-        try { tt.addCue(new CueCls(Math.max(0, (c.start + off) / scale), Math.max(0.1, (c.end + off) / scale), c.text)); } catch (_) {}
+      if (!this.subCues.length || this.selectedSubId === 'off') {
+        tt.mode = 'hidden';
+        return;
       }
+      const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
+      const off = this.offsetSec || 0;
+      for (const c of this.subCues) {
+        try {
+          const st = Math.max(0, (c.start + off) / scale);
+          const en = Math.max(st + 0.15, (c.end + off) / scale);
+          const cue = new CueCls(st, en, c.text);
+          if ('line' in cue) { cue.line = -2; cue.snapToLines = true; }
+          tt.addCue(cue);
+        } catch (_) {}
+      }
+      tt.mode = this._isNativeSubView(v) ? 'showing' : (prevMode === 'showing' ? 'showing' : 'hidden');
     } catch (_) {}
   }
 
@@ -526,13 +518,13 @@ export class SubtitleDubController {
   _disableAllNativeTextTracks() {
     const v = this.adapter?.video;
     if (!v || !v.textTracks) return;
-    if (this._isNativeSubView(v)) return;
-    const isFirefox = typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent || '');
+    const inNativeView = this._isNativeSubView(v);
     for (let i = 0; i < v.textTracks.length; i += 1) {
       const tt = v.textTracks[i];
       try {
-        if (isFirefox && this._activeTrackEl?.track === tt && this.selectedSubId !== 'off') {
-          if (tt.mode !== 'hidden') tt.mode = 'hidden';
+        if (this._activeTrackEl?.track === tt) {
+          const want = (inNativeView && this.selectedSubId !== 'off' && this.subCues.length) ? 'showing' : 'hidden';
+          if (tt.mode !== want) tt.mode = want;
         } else if (tt.mode !== 'disabled') {
           tt.mode = 'disabled';
         }
@@ -578,20 +570,6 @@ export class SubtitleDubController {
   _attachNativeTrack(track) {
     const v = this.adapter.video;
     if (!v) return;
-    if (v.textTracks) {
-      for (let i = 0; i < v.textTracks.length; i += 1) {
-        const tt = v.textTracks[i];
-        try {
-          tt.mode = 'disabled';
-          while (tt.cues && tt.cues.length > 0) {
-            tt.removeCue(tt.cues[0]);
-          }
-        } catch (e) { /* ignore */ }
-      }
-    }
-    v.querySelectorAll('track').forEach((t) => t.remove());
-    this._disableAllNativeTextTracks();
-    this._activeTrackEl = null;
     if (this._fsHandler) {
       document.removeEventListener('fullscreenchange', this._fsHandler);
       document.removeEventListener('webkitfullscreenchange', this._fsHandler);
@@ -600,105 +578,54 @@ export class SubtitleDubController {
       v.removeEventListener('webkitpresentationmodechanged', this._fsHandler);
       v.removeEventListener('enterpictureinpicture', this._fsHandler);
       v.removeEventListener('leavepictureinpicture', this._fsHandler);
+      v.removeEventListener('loadedmetadata', this._fsHandler);
       this._fsHandler = null;
     }
-    if (!track?.url || !this.subCues.length) return;
+    v.querySelectorAll('track:not([data-watchlivo-pip="1"])').forEach((t) => t.remove());
+    let trEl = v.querySelector('track[data-watchlivo-pip="1"]');
+    if (!this.subCues.length || this.selectedSubId === 'off') {
+      if (trEl?.track) {
+        try {
+          while (trEl.track.cues && trEl.track.cues.length > 0) trEl.track.removeCue(trEl.track.cues[0]);
+          trEl.track.mode = 'hidden';
+        } catch (e) { /* ignore */ }
+      }
+      this._activeTrackEl = trEl || null;
+      this._disableAllNativeTextTracks();
+      return;
+    }
     try {
-      const isFirefox = typeof navigator !== 'undefined' && /Firefox\//i.test(navigator.userAgent || '');
-      const vttBlobUrl = this._buildSyncedVttBlob();
-      const trEl = document.createElement('track');
-      trEl.kind = 'subtitles';
-      trEl.label = track.label || 'Altyazı';
-      trEl.srclang = track.lang || 'tr';
-      trEl.src = vttBlobUrl || track.url;
-      v.appendChild(trEl);
+      if (!trEl) {
+        trEl = document.createElement('track');
+        trEl.kind = 'subtitles';
+        trEl.dataset.watchlivoPip = '1';
+        v.appendChild(trEl);
+      }
+      trEl.label = track?.label || 'Türkçe';
+      trEl.srclang = track?.lang || 'tr';
+      trEl.removeAttribute('src');
       this._activeTrackEl = trEl;
-      try {
-        if (trEl.track) {
-          const isIosOrPip = this._isNativeSubView(v);
-          trEl.track.mode = isIosOrPip ? 'showing' : (isFirefox ? 'hidden' : 'disabled');
-        }
-      } catch (e) { /* ignore */ }
-      let srcSettled = false;
-      const dedupTrackCues = (tt) => {
-        if (!tt || !tt.cues || tt.cues.length < 1) return;
-        const seen = new Set();
-        const toRemove = [];
-        for (let i = 0; i < tt.cues.length; i += 1) {
-          const c = tt.cues[i];
-          const rawTxt = String(c.text || '').trim();
-          const lines = rawTxt.split('\n').map((l) => l.trim()).filter(Boolean);
-          const uniqueCueLines = [];
-          const seenNorm = new Set();
-          for (const ln of lines) {
-            const k = ln.toLowerCase().replace(/[^a-z0-9çğıöşü]+/gi, ' ').trim();
-            if (k && !seenNorm.has(k)) {
-              seenNorm.add(k);
-              uniqueCueLines.push(ln);
-            }
-          }
-          if (uniqueCueLines.length !== lines.length) {
-            try { c.text = uniqueCueLines.join('\n'); } catch (e) { /* ignore */ }
-          }
-          const key = `${Math.round((c.startTime || 0) * 4)}|${(c.text || '').trim().toLowerCase()}`;
-          if (seen.has(key)) toRemove.push(c);
-          else seen.add(key);
-        }
-        for (const c of toRemove) {
-          try { tt.removeCue(c); } catch (e) { /* ignore */ }
-        }
-      };
-      const ensureNativeCues = () => {
-        const tt = trEl.track;
-        if (!tt) return;
-        dedupTrackCues(tt);
-        if (tt.cues && tt.cues.length > 0) return;
-        if (!srcSettled && trEl.readyState < 2) return;
-        const CueCls = window.VTTCue || window.TextTrackCue;
-        if (CueCls && (!tt.cues || tt.cues.length === 0)) {
-          try { trEl.removeAttribute('src'); } catch (e) { /* ignore */ }
-          const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
-          const off = this.offsetSec || 0;
-          for (const c of this.subCues) {
-            try { tt.addCue(new CueCls(Math.max(0, (c.start + off) / scale), Math.max(0.1, (c.end + off) / scale), c.text)); } catch (e) { /* ignore */ }
-          }
-        }
-      };
-      const setMode = () => {
-        const nativeVideoFs = this._isNativeSubView(v);
-        if (v.textTracks) {
-          for (let i = 0; i < v.textTracks.length; i += 1) {
-            const tt = v.textTracks[i];
-            if (tt !== trEl.track && tt.mode !== 'disabled') tt.mode = 'disabled';
-          }
+      this._rebuildNativeTrackCues();
+      const syncNativeMode = () => {
+        this._disableAllNativeTextTracks();
+        if (trEl.track && (!trEl.track.cues || trEl.track.cues.length === 0) && this.subCues.length) {
+          this._rebuildNativeTrackCues();
         }
         if (trEl.track) {
-          if (nativeVideoFs) {
-            if (trEl.track.mode === 'disabled') trEl.track.mode = 'hidden';
-            ensureNativeCues();
-            dedupTrackCues(trEl.track);
-            trEl.track.mode = 'showing';
-          } else if (isFirefox) {
-            if (trEl.track.mode !== 'hidden') trEl.track.mode = 'hidden';
-            ensureNativeCues();
-            dedupTrackCues(trEl.track);
-          } else {
-            trEl.track.mode = 'disabled';
-          }
+          trEl.track.mode = (this._isNativeSubView(v) && this.selectedSubId !== 'off' && this.subCues.length) ? 'showing' : 'hidden';
         }
         this.onTimeUpdate(this.adapter.getTime(), true);
       };
-      trEl.addEventListener('load', () => { srcSettled = true; dedupTrackCues(trEl.track); setMode(); }, { once: true });
-      trEl.addEventListener('error', () => { srcSettled = true; setMode(); }, { once: true });
-      setTimeout(() => { srcSettled = true; setMode(); }, 650);
-      v.addEventListener('webkitbeginfullscreen', setMode);
-      v.addEventListener('webkitendfullscreen', setMode);
-      v.addEventListener('webkitpresentationmodechanged', setMode);
-      v.addEventListener('enterpictureinpicture', setMode);
-      v.addEventListener('leavepictureinpicture', setMode);
-      this._fsHandler = setMode;
-      document.addEventListener('fullscreenchange', setMode);
-      document.addEventListener('webkitfullscreenchange', setMode);
+      syncNativeMode();
+      v.addEventListener('webkitbeginfullscreen', syncNativeMode);
+      v.addEventListener('webkitendfullscreen', syncNativeMode);
+      v.addEventListener('webkitpresentationmodechanged', syncNativeMode);
+      v.addEventListener('enterpictureinpicture', syncNativeMode);
+      v.addEventListener('leavepictureinpicture', syncNativeMode);
+      v.addEventListener('loadedmetadata', syncNativeMode);
+      this._fsHandler = syncNativeMode;
+      document.addEventListener('fullscreenchange', syncNativeMode);
+      document.addEventListener('webkitfullscreenchange', syncNativeMode);
     } catch (e) { /* ignore */ }
   }
   async setSubtitleTrack(id, isInit = false) {
@@ -1015,6 +942,7 @@ export class SubtitleDubController {
     try {
       if (!this._ttsAudio) {
         this._ttsAudio = new Audio();
+        this._ttsAudio.crossOrigin = 'anonymous';
         this._ttsAudio.addEventListener('ended', () => {
           this._ttsSpeaking = false;
           this.syncVideoVolume();
@@ -1046,15 +974,21 @@ export class SubtitleDubController {
       : 1.0;
     const ttsDuck = (this.ttsDubActive && this._ttsSpeaking) ? 0.22 : 1.0;
     const duckFactor = Math.min(voiceDuck, ttsDuck);
+    const basePct = Number.isFinite(Number(this.adapter?.baseVolume)) ? Number(this.adapter.baseVolume) : 80;
     const v = this.adapter?.video;
     if (v) {
-      try {
-        v.volume = Math.min(1, Math.max(0, ((this.adapter.baseVolume ?? 80) / 100) * duckFactor));
-      } catch (e) { /* iOS/iPadOS volume is read-only */ }
+      applyElementVolume(v, basePct * duckFactor, Boolean(v.muted || this.adapter?.userExplicitMuted), {
+        useNativeHls: Boolean(this.adapter?.useNativeHls),
+        retriedNoCors: Boolean(v._retriedNoCors),
+      });
+    }
+    if (this._ttsAudio) {
+      const isMuted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);
+      applyElementVolume(this._ttsAudio, basePct * voiceDuck, isMuted);
     }
     if (this.adapter?.player?.setVolume) {
       try {
-        this.adapter.player.setVolume(Math.round((this.adapter.baseVolume ?? 80) * duckFactor));
+        this.adapter.player.setVolume(Math.min(100, Math.max(0, Math.round(basePct * duckFactor))));
       } catch (e) { /* ignore */ }
     }
   }
