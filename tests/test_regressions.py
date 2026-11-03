@@ -899,11 +899,11 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261103_v87 with zero stale v79/v86 references
+        # 1. Cache-bust bumped cleanly to 20261103_v88 with zero stale v79/v87 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v87", index_html)
+        self.assertIn("20261103_v88", index_html)
         self.assertNotIn("20261103_v79", index_html)
-        self.assertNotIn("20261103_v86", index_html)
+        self.assertNotIn("20261103_v87", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
         cr = self.client.post("/api/rooms/create", json={
@@ -1282,6 +1282,24 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(v_sync.status_code, 200)
         synced_url = v_sync.json()["room"]["media"]["url"]
         self.assertTrue(synced_url.startswith("/api/rave/stream?"), synced_url)
+
+        # 5) Auto-PiP visibility, WebKit attributes, Android sourceRectHint & Swift/ObjC native parity
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        main_java = (root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java").read_text(encoding="utf-8")
+        swift_wv = (root.parent / "watchlivo_ios" / "Sources" / "Watchlivo" / "WatchlivoWebView.swift").read_text(encoding="utf-8")
+        self.assertIn("applyOptimalPipAttributes", html5_js)
+        self.assertIn("allowsPictureInPicture", html5_js)
+        self.assertIn("webkit-playsinline", html5_js)
+        self.assertIn("autopictureinpicture", html5_js)
+        self.assertIn("enterAutoPiP", html5_js)
+        self.assertIn("async enterPiP(", host_js)
+        self.assertIn("setSourceRectHint", main_java)
+        self.assertIn("setSeamlessResizeEnabled", main_java)
+        self.assertIn("setVideoPlayingBounds", main_java)
+        self.assertIn("canStartPictureInPictureAutomaticallyFromInline = true", swift_wv)
 
 
 if __name__ == '__main__':

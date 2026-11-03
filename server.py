@@ -6202,6 +6202,7 @@ async def stream_proxy(request: Request):
             else:
                 loop = asyncio.get_running_loop()
                 fut = loop.create_future()
+                fut.add_done_callback(lambda f: f.exception() if not f.cancelled() else None)
                 _ASYNC_SEG_INFLIGHT[url] = fut
                 try:
                     res_tup = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)

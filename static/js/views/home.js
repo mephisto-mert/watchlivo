@@ -1,15 +1,15 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v87';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v88';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261103_v87';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v87';
-import { api } from '../api.js?v=20261103_v87';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v87';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v87';
+} from '../store.js?v=20261103_v88';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v88';
+import { api } from '../api.js?v=20261103_v88';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v88';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v88';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -52,7 +52,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v87', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v88', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 

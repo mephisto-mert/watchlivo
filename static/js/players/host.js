@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v87';
-import { Html5Adapter } from './html5.js?v=20261103_v87';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v87';
-import { EmbedAdapter } from './embed.js?v=20261103_v87';
-import { WebviewAdapter } from './webview.js?v=20261103_v87';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v87';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v88';
+import { Html5Adapter } from './html5.js?v=20261103_v88';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v88';
+import { EmbedAdapter } from './embed.js?v=20261103_v88';
+import { WebviewAdapter } from './webview.js?v=20261103_v88';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v88';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -89,9 +89,13 @@ export class PlayerHost {
       window.vortexSetAutoDuck = (enabled) => this.setAutoDuckEnabled(enabled);
       window.__kinoxSyncDuckVolume = () => this._syncDuckRamp();
       window.__onWatchlivoAppState = (appState) => {
-        if (appState === 'willResignActive' && this.adapter && !this._nativeIosPipActive) {
+        if ((appState === 'willResignActive' || appState === 'userLeaveHint') && this.adapter && !this._nativeIosPipActive) {
           const shouldPlay = Boolean(this.adapter.wantPlaying !== false && !this.adapter.isPaused?.());
-          this.adapter._syncNativeIosPip?.(shouldPlay);
+          if (shouldPlay && typeof this.adapter.enterAutoPiP === 'function') {
+            this.adapter.enterAutoPiP(appState)?.catch?.(() => {});
+          } else {
+            this.adapter._syncNativeIosPip?.(shouldPlay);
+          }
         }
       };
       window.__onWatchlivoNativePiP = (ev) => {
@@ -460,6 +464,24 @@ export class PlayerHost {
       } catch (e) { /* fallback handled by caller */ }
     }
     return false;
+  }
+
+  _onAndroidPipModeChange(active) {
+    const isNow = Boolean(active);
+    if (isNow && this.adapter?.wantPlaying && this.adapter?.video?.paused && !this.adapter.video.ended) {
+      this.adapter.video.play?.().catch?.(() => {});
+    }
+    this.onEvent('pip-change', isNow);
+  }
+
+  async enterPiP(reason = 'mediaSession') {
+    if (this.isPiP()) return 'already-pip';
+    if (typeof this.adapter?.enterAutoPiP === 'function') {
+      const res = await this.adapter.enterAutoPiP(reason);
+      if (res) return res;
+    }
+    if (!this.isPiP()) return await this.togglePiP();
+    return 'already-pip';
   }
 
   canCast() {
