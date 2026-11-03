@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v79';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v79';
-import { api, qs } from '../api.js?v=20261103_v79';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v79';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v79';
-import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v79';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v80';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v80';
+import { api, qs } from '../api.js?v=20261103_v80';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v80';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v80';
+import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v80';
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -127,7 +127,7 @@ export function videoCard(media, onPick) {
   const inRoom = Boolean(window.vortexActions?.queueMusic && location.hash.startsWith('#/mesh/'));
   const card = h('div', { class: 'vcard', role: 'button', tabindex: '0' },
     h('div', { class: 'vcard-thumb' },
-      media.thumbnail ? h('img', { src: media.thumbnail, alt: '' }) : null,
+      media.thumbnail ? h('img', { src: media.thumbnail, alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }) : null,
       prov?.logo ? h('img', { class: 'vcard-prov', src: prov.logo, alt: '' }) : null,
       media.duration ? h('span', { class: 'vcard-dur' }, fmtDur(media.duration)) : null,
       inRoom ? h('button', {
@@ -202,7 +202,25 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let heroHovered = false;
   let autoRotateTicks = 0;
   let autoRotateTimer = null;
-  fetchAccounts().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
+  let superSearchSeq = 0;
+  const _onDocPointerDown = (ev) => {
+    if (!root.isConnected) {
+      document.removeEventListener('pointerdown', _onDocPointerDown, true);
+      return;
+    }
+    const dd = root.querySelector('#wl-cmdk-dropdown');
+    if (dd && dd.style.display !== 'none' && !ev.target.closest?.('.wl-cmdk-host')) {
+      dd.style.display = 'none';
+    }
+  };
+  document.addEventListener('pointerdown', _onDocPointerDown, true);
+  fetchAccounts().then(() => {
+    if (!provider && root.isConnected && !superQuery) {
+      const activeInp = root.querySelector('input');
+      if (activeInp && (document.activeElement === activeInp || activeInp.value.trim())) return;
+      renderGrid();
+    }
+  });
 
   function updateHeroBannerInPlace() {
     const heroEl = root.querySelector('.gazestream-hero');
@@ -415,6 +433,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const results = h('div', { class: 'super-results' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;
+    let cmdkSeq = 0;
     const hideCmdk = () => { cmdkDropdown.style.display = 'none'; };
     const run = () => { hideCmdk(); superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
     input.addEventListener('keydown', (e) => {
@@ -424,20 +443,23 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     input.addEventListener('input', () => {
       clearTimeout(cmdkTimer);
       const q = input.value.trim();
-      if (q.length < 2 || parseVideoUrl(q)) {
+      if (compact || q.length < 2 || parseVideoUrl(q)) {
         hideCmdk();
         return;
       }
+      const myCmdk = ++cmdkSeq;
       cmdkDropdown.style.display = 'block';
       cmdkDropdown.replaceChildren(
         h('div', { class: 'wl-cmdk-head' }, h('span', {}, `⚡ "${q}" aranıyor...`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
         h('div', { class: 'wl-cmdk-skeleton-list' },
-          ...Array.from({ length: 4 }, () => h('div', { class: 'wl-cmdk-skel-row' })))
+          ...Array.from({ length: 4 }, () => h('div', { class: 'wl-cmdk-skel-row' },
+            h('div', { class: 'wl-cmdk-skel-poster' }),
+            h('div', { class: 'wl-cmdk-skel-lines' }, h('span', {}), h('span', {})))))
       );
       cmdkTimer = setTimeout(async () => {
         try {
           const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000 });
-          if (input.value.trim() !== q) return;
+          if (myCmdk !== cmdkSeq || input.value.trim() !== q) return;
           const items = [...(data.tmdb || []), ...(data.justwatch || [])].filter((x) => x && x.title).slice(0, 7);
           if (!items.length) {
             cmdkDropdown.replaceChildren(
@@ -467,7 +489,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 };
                 return h('div', { class: 'wl-cmdk-item', onclick: triggerPlay },
                   h('img', { class: 'wl-cmdk-poster', src: it.poster || '/static/watchlivo-poster.svg', alt: it.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
-                  h('div', { class: 'wl-cmdk-meta' },
+                  h('div', { class: 'wl-cmdk-meta wl-cmdk-info' },
                     h('div', { class: 'wl-cmdk-title' }, it.title),
                     h('div', { class: 'wl-cmdk-sub' }, `${it.year || '2025'} · ${isTv ? '📺 Dizi / Anime' : '🎬 Sinema Filmi'} · 🇹🇷 TR Dublaj & Altyazı`)),
                   h('button', {
@@ -578,7 +600,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               }
             },
           },
-            h('img', { src: item.poster || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title, loading: 'lazy' }),
+            h('img', { src: item.poster || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title, loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
             h('div', { class: 'trending-mini-info' },
               h('div', { class: 't-title' }, item.title),
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
@@ -603,7 +625,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('div', { class: 'wl-continue-strip' },
         ...historyList.map((item) => {
           const prov = getProvider(item.catalogProvider || item.provider || 'cinema');
-          const resumeSec = Number(item.currentTime) > 5 ? Math.floor(Number(item.currentTime)) : 0;
+          const rawSavedSec = Number(item.currentTime ?? item.position ?? 0);
+          const resumeSec = Number.isFinite(rawSavedSec) && rawSavedSec > 3 ? Math.floor(rawSavedSec) : 0;
           const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
           const pct = durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(95, Math.round(Number(item.percent || 8))));
           const remMin = durSec > resumeSec + 60 ? Math.ceil((durSec - resumeSec) / 60) : 0;
@@ -614,12 +637,25 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             class: 'wl-continue-card',
             role: 'button',
             tabindex: '0',
-            onclick: async () => {
-              if (item.tmdbId) {
-                const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: String(item.title || '').split(' — ')[0], backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail }, prov || { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
-                if (resolved) { resolved.currentTime = resumeSec; await pickSafe(resolved); return; }
+            onclick: async (ev) => {
+              const cardEl = ev.currentTarget;
+              if (cardEl.classList.contains('busy')) return;
+              cardEl.classList.add('busy');
+              if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
+              try {
+                if (item.tmdbId) {
+                  const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: String(item.title || '').split(' — ')[0], backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail, year: item.year || '' }, prov || { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
+                  if (resolved) {
+                    resolved.currentTime = resumeSec;
+                    resolved.meshStatePosition = resumeSec;
+                    await pickSafe(resolved);
+                    return;
+                  }
+                }
+                await pickSafe({ ...item, currentTime: resumeSec, meshStatePosition: resumeSec });
+              } finally {
+                cardEl.classList.remove('busy');
               }
-              await pickSafe({ ...item, currentTime: resumeSec });
             },
           },
             h('div', { class: 'wl-continue-thumb' },
@@ -672,7 +708,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
     const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
     if (!trendingFetched && !trendingLoading && !compact) {
-      ensureTrending().then(() => { if (!provider && root.isConnected && !superQuery) renderGrid(); });
+      ensureTrending().then(() => {
+        if (!provider && root.isConnected && !superQuery) {
+          const activeInp = root.querySelector('input');
+          if (activeInp && (document.activeElement === activeInp || activeInp.value.trim())) {
+            updateHeroBannerInPlace();
+            return;
+          }
+          renderGrid();
+        }
+      });
     }
 
     const heroStripRow = h('div', { class: 'hero-showcase-row' },
@@ -883,19 +928,22 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   async function runSuperSearch(q, box) {
+    const mySearch = ++superSearchSeq;
     box.replaceChildren(buildShimmerGrid(6));
     const pasted = parseVideoUrl(q);
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};
-    try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
+    try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
+    if (mySearch !== superSearchSeq) return;
     const tmdb = (data.tmdb || []).slice(0, 40);
     const titles = tmdb.length ? [] : (data.justwatch || []).filter((t) => t.title).slice(0, 24);
     const yt = (data.youtube || []).slice(0, 12).map(ytToMedia);
+    const hasAny = Boolean(tmdb.length || titles.length || yt.length);
     fill(box,
       tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
       tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard({ ...t, tmdbId: String(t.id || ''), offers: [] }, box)), ...titles.map((t) => posterCard(t, box))]) : null,
       yt.length ? h('div', { class: 'section-head' }, h('h2', {}, 'YouTube'), h('span', { class: 'dim' }, `${yt.length} video`)) : null,
-      yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : h('div', { class: 'lobby-empty' }, 'Video bulunamadı.'));
+      yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : (!hasAny ? h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen içerik bulunamadı.') : null));
   }
 
   function posterCard(t, box) {

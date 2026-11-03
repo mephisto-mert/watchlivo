@@ -1,10 +1,10 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal } from '../ui.js?v=20261103_v79';
-import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia } from '../store.js?v=20261103_v79';
-import { avatar, profileSetup } from '../profile.js?v=20261103_v79';
-import { api } from '../api.js?v=20261103_v79';
-import { createSelection } from './selection.js?v=20261103_v79';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v79';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v80';
+import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia } from '../store.js?v=20261103_v80';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v80';
+import { api } from '../api.js?v=20261103_v80';
+import { createSelection } from './selection.js?v=20261103_v80';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v80';
 
 let refreshTimer = null;
 let rooms = [];
@@ -26,7 +26,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v79', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v80', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -71,10 +71,10 @@ export async function createRoomWithMedia(media) {
       statusEmoji: self.statusEmoji || '🍿',
       medal: self.medal || '',
       watchMinutes: self.watchMinutes || 0,
-      hideLocation: Boolean(self.hideLocation),
-      hideWatching: Boolean(self.hideWatching),
-      hideFriends: Boolean(self.hideFriends),
-      friendsPreview: Boolean(self.hideFriends) ? [] : (getFriends() || []).slice(0, 10),
+      hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
+      hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
+      hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
+      friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
       device: (() => {
         const ua = navigator.userAgent || '';
         if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
@@ -133,10 +133,11 @@ export function renderHome(app) {
         toast('🎬 Aktif izleme odaları listesi');
       }),
       navIcon('friends', 'Arkadaşlarım & Arkadaş Ekle', () => openFriendsManagerModal(() => draw(true)), { id: 'nav-friends-btn', badge: getFriends().length }),
+      navIcon('chat', 'Özel Mesajlar (DM)', () => openDmModal(), { id: 'nav-dm-btn' }),
       navIcon('settings', 'Ayarlar & Tema', () => openAppSettings(), { id: 'nav-theme-btn' })),
     h('div', { class: 'nav-center navbar-center' }, logo()),
     h('div', { class: 'nav-right navbar-right' },
-      h('a', {
+      !isNativeWatchlivoApp() ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
         href: '/download/Watchlivo-v1.1.0.apk',
@@ -145,7 +146,7 @@ export function renderHome(app) {
         onclick: () => toast('📱 Watchlivo Android APK indiriliyor...', 4000),
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
-      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir')),
+      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir')) : null,
       h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async () => {
         try {
           await createRoomWithMedia(null);

@@ -242,8 +242,8 @@ class RegressionTests(unittest.TestCase):
         rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
         self.assertIn("import { state } from './store.js", rt_js)
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        self.assertIn("fragLoadingTimeOut: 25000", html5_js)
-        self.assertIn("this.hls.autoLevelCapping = maxAllowedIdx", html5_js)
+        self.assertIn("fragLoadingTimeOut: 28000", html5_js)
+        self.assertIn("this.hls.autoLevelCapping = chosenCap", html5_js)
         self.assertNotIn("this.hls.loadLevel = bestIdx", html5_js)
         srv_py = (root / "server.py").read_text(encoding="utf-8")
         self.assertIn("non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]", srv_py)
@@ -375,7 +375,7 @@ class RegressionTests(unittest.TestCase):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
         host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
-        self.assertIn("onPlay: (arg) => this.onEvent('play', arg)", host_js)
+        self.assertIn("this.onEvent('play', arg)", host_js)
         self.assertIn("onPause: (arg) => this.onEvent('pause', arg)", host_js)
         room = rooms.new_room("test-v37-room", "Test V37", "public", "leader", "Mert Can Yıldız", "u_mert", "")
         rooms.add_participant(room, "h_mert", {"username": "Mert Can Yıldız", "userId": "u_mert", "_internalCreator": True}, "http")
@@ -435,7 +435,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_rng.headers.get("vary"), "Range")
         self.assertIn("private", r_rng.headers.get("cache-control", ""))
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
-        self.assertIn("const SEEK_SETTLE_MS = 8000;", sync_js)
+        self.assertIn("const SEEK_SETTLE_MS = 12000;", sync_js)
 
         # 2. Chat persistence on refresh (init merges recentChat) & dual storage
         r_init = self.client.post("/api/rooms/v43-chat-test-room/sync", json={
@@ -501,7 +501,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         self.assertIn("skipWaiting", sw_js)
         chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
-        self.assertIn("onpointerdown: (e) => { e.preventDefault(); actions.requestBreak?.(); }", chat_js)
+        self.assertIn("actions.requestBreak?.();", chat_js)
         # Guest name isolation: two different guests named 'Misafir İzleyici' must not share creator privilege
         test_room = rooms.new_room("misafir-izleyici-odasi-1234", creator="Misafir İzleyici", creator_id="h_guest_1")
         self.assertFalse(rooms._is_creator_of_room(test_room, "h_guest_2", {"id": "h_guest_2", "name": "Misafir İzleyici"}))
@@ -727,8 +727,8 @@ class RegressionTests(unittest.TestCase):
         # 1. Native <video> pause during buffering never emits native:true pause or triggers actions.pause()
         self.assertNotIn("this.events.onPause?.({ native: true })", html5_js)
         self.assertNotIn("if (ev === 'pause' && arg?.native", mesh_js)
-        # 2. Leader lag (>JUMP_DELTA behind expected) uses Rave wall-clock catchup instead of dragging room backwards
-        self.assertIn("if (delta <= JUMP_DELTA)", sync_js)
+        # 2. Leader lag (>JUMP_DELTA behind expected) re-anchors room smoothly without dragging backwards during buffering
+        self.assertIn("abs <= JUMP_DELTA", sync_js)
         room = rooms.new_room("v51-rave-sync-room", "Rave Sync", "public", "leader", "Kurucu", "u_k1", "")
         rooms.add_participant(room, "h_k1", {"username": "Kurucu", "userId": "u_k1", "_internalCreator": True}, "http")
         room["host_id"] = "h_k1"
@@ -831,6 +831,168 @@ class RegressionTests(unittest.TestCase):
         providers_js = (root / "static" / "js" / "providers.js").read_text(encoding="utf-8")
         self.assertIn("name: 'Watchlivo DJ'", providers_js)
         self.assertNotIn("name: 'RaveDJ'", providers_js)
+
+    def test_v80_continue_watching_exact_second_and_ios_kb_landscape(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        # 1. Creating a room with resume currentTime=1824 (30:24) preserves exact second across unresolved catalog + resolve_media
+        cr = self.client.post(
+            "/api/rooms/create",
+            json={
+                "name": "Arcane Devam Odasi",
+                "privacy": "public",
+                "playMode": "leader",
+                "creator": "Mert Can",
+                "creatorId": "h_mert_v80",
+                "clientId": "h_mert_v80",
+                "media": {
+                    "title": "Arcane — 1. Sezon 9. Bölüm",
+                    "tmdbId": "94605",
+                    "mediaType": "tv",
+                    "season": 1,
+                    "episode": 9,
+                    "url": "/api/rave/resolve-catalog?tmdbId=94605&type=tv&season=1&episode=9",
+                    "provider": "hls",
+                    "currentTime": 1824.0,
+                },
+            },
+        )
+        self.assertEqual(cr.status_code, 200)
+        cr_data = cr.json()
+        room_obj = cr_data["room"]
+        rid = room_obj["id"]
+        self.assertAlmostEqual(float(room_obj["media"]["currentTime"]), 1824.0, places=1)
+        self.assertAlmostEqual(float(room_obj["media"]["meshStatePosition"]), 1824.0, places=1)
+
+        # Simulate catalog resolution 5s later: position must still be 1824.0 (not reset to 0 and not drifted during resolve)
+        r_res = self.client.post(
+            f"/api/rooms/{rid}/sync",
+            json={
+                "type": "resolve_media",
+                "clientId": cr_data["clientId"],
+                "clientToken": cr_data["clientToken"],
+                "username": "Mert Can",
+                "tmdbId": "94605",
+                "mediaType": "tv",
+                "season": 1,
+                "episode": 9,
+                "title": "Arcane — 1. Sezon 9. Bölüm",
+                "url": "/api/rave/stream_manifest?sid=testarcane1824&ext=.m3u8",
+                "currentTime": 1824.0,
+            },
+        )
+        self.assertEqual(r_res.status_code, 200)
+        rm_after = r_res.json()["room"]["media"]
+        self.assertEqual(rm_after["url"], "/api/rave/stream_manifest?sid=testarcane1824&ext=.m3u8")
+        self.assertAlmostEqual(float(rm_after["currentTime"]), 1824.0, places=1)
+
+        # 2. Static checks for store.js non-zero progress preservation & mesh.css kb-open / theme accent sync
+        store_js = (root / "static" / "js" / "store.js").read_text(encoding="utf-8")
+        self.assertIn("export function findSavedProgress(", store_js)
+        self.assertIn("preserveExistingPos", store_js)
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .chatbar", mesh_css)
+        self.assertIn("var(--accent, #27DCC8)", mesh_css)
+
+    def test_v80_twenty_subagent_full_site_remediations(self):
+        import json
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Cache-bust bumped cleanly to 20261103_v80 with zero stale v79 references
+        index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("20261103_v80", index_html)
+        self.assertNotIn("20261103_v79", index_html)
+
+        # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Acik Kalan Oda",
+            "privacy": "public",
+            "playMode": "leader",
+            "creator": "KurucuMert",
+            "creatorId": "u_kurucu_v80",
+            "clientId": "h_kurucu_v80",
+            "media": {
+                "title": "Arcane — 1. Sezon 9. Bölüm",
+                "tmdbId": "94605",
+                "mediaType": "tv",
+                "season": 1,
+                "episode": 9,
+                "episodeCount": 9,
+                "totalSeasons": 2,
+                "url": "https://cdn.example.com/arcane-s1e9.m3u8",
+                "provider": "hls",
+                "currentTime": 1358.0,
+            },
+        }).json()
+        rid = cr["room"]["id"]
+        st = cr["room"]["syncToken"]
+        # Season metadata preserved in clean_media
+        self.assertEqual(cr["room"]["media"].get("episodeCount"), 9)
+        self.assertEqual(cr["room"]["media"].get("totalSeasons"), 2)
+
+        # Viewer joins
+        r_v = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_ayse_v80",
+            "username": "AyseNur",
+            "syncToken": st,
+        })
+        self.assertEqual(r_v.status_code, 200)
+        self.assertEqual(len(r_v.json()["room"]["participants"]), 2)
+
+        # Creator sends explicit 'leave' (NOT 'close_room')
+        r_leave = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "leave",
+            "clientId": "h_kurucu_v80",
+            "clientToken": cr["clientToken"],
+            "username": "KurucuMert",
+        })
+        self.assertEqual(r_leave.status_code, 200)
+        self.assertFalse(bool(r_leave.json().get("roomClosed")))
+
+        # Viewer polls -> room is STILL alive (200) and Viewer is now host!
+        r_poll = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "poll",
+            "clientId": "h_ayse_v80",
+            "username": "AyseNur",
+            "syncToken": st,
+        })
+        self.assertEqual(r_poll.status_code, 200)
+        self.assertEqual(r_poll.json()["room"]["host_id"], "h_ayse_v80")
+
+        # 3. Signed Drive proxy emits HMAC sig= and stream-proxy blocks unsigned Drive URLs (403)
+        r_unsigned = self.client.get("/api/rave/stream-proxy?u=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3D1AbCdEfGhIjKlMnOp")
+        self.assertEqual(r_unsigned.status_code, 403)
+        r_drv = self.client.get("/api/rave/gdrive-folder?url=https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrSt/view")
+        self.assertEqual(r_drv.status_code, 200)
+        self.assertIn("sig=", r_drv.json()["items"][0]["url"])
+
+        # 4. CSP allows data: in media-src in both server.py and vercel.json (for voice notes)
+        r_idx = self.client.get("/")
+        self.assertIn("media-src 'self' data:", r_idx.headers.get("content-security-policy", ""))
+        vercel_cfg = json.loads((root / "vercel.json").read_text(encoding="utf-8"))
+        csp_vals = [
+            rule.get("headers", {}).get("Content-Security-Policy", "")
+            for rule in vercel_cfg.get("routes", [])
+            if isinstance(rule.get("headers"), dict) and "media-src" in rule["headers"].get("Content-Security-Policy", "")
+        ]
+        self.assertTrue(len(csp_vals) >= 4 and all("media-src 'self' data:" in v for v in csp_vals))
+
+        # 5. Per-episode epProgress & season-finale S1:B9 -> S2:B1 static verification
+        store_js = (root / "static" / "js" / "store.js").read_text(encoding="utf-8")
+        accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        realtime_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
+        chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("epProgress", store_js)
+        self.assertIn("findSavedProgress(", accounts_js)
+        self.assertIn("epStartSec", accounts_js)
+        self.assertIn("computeNextEpSpec", controls_js)
+        self.assertIn("const shouldCloseRoom = Boolean(closeRoomForAll);", realtime_js)
+        self.assertIn("280000", chat_js)
+        self.assertIn("font-size: 16px !important;", vortex_css)
 
 
 if __name__ == '__main__':

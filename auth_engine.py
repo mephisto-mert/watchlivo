@@ -359,6 +359,16 @@ def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     return data
 
 
+def _as_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "0", "false", "no", "off", "null", "none")
+    return bool(v)
+
+
 def _row_to_user(row: Any) -> Dict[str, Any]:
     d = dict(row) if not isinstance(row, dict) else row
     av_url = str(d.get("avatar_url") or d.get("avatarUrl") or "").strip()
@@ -376,11 +386,11 @@ def _row_to_user(row: Any) -> Dict[str, Any]:
         "bio": str(d.get("bio") or ""),
         "statusText": str(d.get("status_text") or d.get("statusText") or ""),
         "statusEmoji": str(d.get("status_emoji") or d.get("statusEmoji") or "🍿"),
-        "hideWatching": bool(d.get("hide_watching") or d.get("hideWatching")),
-        "hideFriends": bool(d.get("hide_friends") or d.get("hideFriends")),
-        "hideLocation": bool(d.get("hide_location") or d.get("hideLocation")),
+        "hideWatching": _as_bool(d["hide_watching"] if "hide_watching" in d else d.get("hideWatching", False)),
+        "hideFriends": _as_bool(d["hide_friends"] if "hide_friends" in d else d.get("hideFriends", False)),
+        "hideLocation": _as_bool(d["hide_location"] if "hide_location" in d else d.get("hideLocation", False)),
         "authProvider": d.get("auth_provider") or "email",
-        "verified": bool(d.get("verified", 1)),
+        "verified": _as_bool(d.get("verified", 1)),
         "isGuest": False,
     }
 
@@ -392,6 +402,8 @@ async def auth_register(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
+    if not isinstance(body, dict):
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
     name = str(body.get("name") or "").strip()[:24]
     email = str(body.get("email") or "").strip().lower()[:120]
@@ -453,6 +465,8 @@ async def auth_login(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
+    if not isinstance(body, dict):
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
     identifier = str(body.get("identifier") or body.get("email") or body.get("handle") or "").strip().lower()[:120]
     password = str(body.get("password") or "")[:256]
@@ -553,6 +567,8 @@ async def auth_oauth(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     provider = str(body.get("provider") or "google").strip().lower()
     if provider not in PROVIDER_ICONS:
@@ -685,6 +701,8 @@ async def auth_phone_send_code(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
+    if not isinstance(body, dict):
+        body = {}
     phone = _clean_phone(str(body.get("phone") or ""))
     if not phone or len(phone) < 11:
         return JSONResponse({"ok": False, "error": "Geçerli bir telefon numarası girin (+90 5XX XXX XX XX)."}, status_code=400)
@@ -718,6 +736,8 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     phone = _clean_phone(str(body.get("phone") or ""))
     code = str(body.get("code") or "").strip()[:12]
@@ -796,6 +816,8 @@ async def auth_email_action(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz istek."}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Geçersiz istek."}, status_code=400)
     action = str(body.get("action") or "").strip().lower()
     email = str(body.get("email") or "").strip().lower()[:120]
     if not EMAIL_RE.match(email):
@@ -820,7 +842,7 @@ async def auth_email_action(request: Request) -> JSONResponse:
         if not allowed:
             return too_many_response(retry_after)
         raw_origin = str(body.get("origin") or "https://watchlivo.online").rstrip("/")
-        origin = raw_origin if raw_origin in ("https://watchlivo.online", "https://www.watchlivo.online", "http://localhost:8765", "http://127.0.0.1:8765") else "https://watchlivo.online"
+        origin = raw_origin if raw_origin in ("https://watchlivo.online", "https://www.watchlivo.online", "http://localhost:8765", "http://127.0.0.1:8765", "http://localhost:8787", "http://127.0.0.1:8787") else "https://watchlivo.online"
         cont_url = f"{origin}/?magic_email={urllib.parse.quote(email)}"
         res = _firebase_auth_req("accounts:sendOobCode", {
             "requestType": "EMAIL_SIGNIN",
@@ -863,6 +885,8 @@ async def auth_profile(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz veri."}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Geçersiz veri."}, status_code=400)
     auth_hdr = request.headers.get("Authorization", "")
     token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else str(body.get("authToken") or "")
     claims = verify_auth_token(token)
@@ -890,11 +914,11 @@ async def auth_profile(request: Request) -> JSONResponse:
     if "statusEmoji" in body:
         fields["status_emoji"] = str(body.get("statusEmoji") or "🍿").strip()[:12] or "🍿"
     if "hideWatching" in body:
-        fields["hide_watching"] = 1 if bool(body.get("hideWatching")) else 0
+        fields["hide_watching"] = 1 if _as_bool(body.get("hideWatching")) else 0
     if "hideFriends" in body:
-        fields["hide_friends"] = 1 if bool(body.get("hideFriends")) else 0
+        fields["hide_friends"] = 1 if _as_bool(body.get("hideFriends")) else 0
     if "hideLocation" in body:
-        fields["hide_location"] = 1 if bool(body.get("hideLocation")) else 0
+        fields["hide_location"] = 1 if _as_bool(body.get("hideLocation")) else 0
     try:
         row = _user_update(uid, fields)
     except Exception:

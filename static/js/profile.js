@@ -1,7 +1,7 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v79';
-import { api } from './api.js?v=20261103_v79';
-import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261103_v79';
+import { h, popup, toast } from './ui.js?v=20261103_v80';
+import { api } from './api.js?v=20261103_v80';
+import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory } from './store.js?v=20261103_v80';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -70,9 +70,9 @@ export function saveGuestProfile(data = {}) {
     bio: String(data.bio ?? prev.bio ?? '').trim().slice(0, 160),
     statusText: String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60),
     statusEmoji: String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿',
-    hideLocation: Boolean(data.hideLocation ?? prev.hideLocation ?? false),
-    hideWatching: Boolean(data.hideWatching ?? prev.hideWatching ?? false),
-    hideFriends: Boolean(data.hideFriends ?? prev.hideFriends ?? false),
+    hideLocation: asBool(data.hideLocation ?? prev.hideLocation ?? false),
+    hideWatching: asBool(data.hideWatching ?? prev.hideWatching ?? false),
+    hideFriends: asBool(data.hideFriends ?? prev.hideFriends ?? false),
     watchMinutes: Math.max(0, Number(prev.watchMinutes || 15)),
     medal: '🍿 Misafir İzleyici',
     authProvider: 'guest',
@@ -87,6 +87,8 @@ export function saveGuestProfile(data = {}) {
   return p;
 }
 
+function asBool(v) { return v === true || v === 1 || v === '1' || v === 'true'; }
+
 export function saveProfile(data = {}) {
   const prev = (() => {
     try { return JSON.parse(localStorage.getItem(KEY) || 'null') || {}; } catch (e) { return {}; }
@@ -98,9 +100,9 @@ export function saveProfile(data = {}) {
   const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 145) || 145);
   const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
   const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
-  const hideLocation = Boolean(data.hideLocation ?? prev.hideLocation ?? false);
-  const hideWatching = Boolean(data.hideWatching ?? prev.hideWatching ?? false);
-  const hideFriends = Boolean(data.hideFriends ?? prev.hideFriends ?? false);
+  const hideLocation = asBool(data.hideLocation ?? prev.hideLocation ?? false);
+  const hideWatching = asBool(data.hideWatching ?? prev.hideWatching ?? false);
+  const hideFriends = asBool(data.hideFriends ?? prev.hideFriends ?? false);
   const bio = String(data.bio ?? prev.bio ?? '').trim().slice(0, 160);
   const statusText = String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60);
   const statusEmoji = String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿';
@@ -461,9 +463,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       });
       const avatarInp = h('input', { class: 'input', id: 'wl-profile-avatar-input', placeholder: 'Fotoğraf URL veya GIF bağlantısı (isteğe bağlı)', value: (profObj.avatarUrl || profObj.avatar || '').startsWith('data:image/') ? '' : (profObj.avatarUrl || profObj.avatar || '') });
       let selectedAvatarUrl = profObj.avatarUrl || profObj.avatar || '';
-      let hideWatchingState = Boolean(profObj.hideWatching);
-      let hideFriendsState = Boolean(profObj.hideFriends);
-      let hideLocState = Boolean(profObj.hideLocation);
+      let hideWatchingState = asBool(profObj.hideWatching);
+      let hideFriendsState = asBool(profObj.hideFriends);
+      let hideLocState = asBool(profObj.hideLocation);
       const userMins = Number(profObj.watchMinutes || 145);
       const userMedal = profObj.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
       const errBox = h('div', { class: 'wl-auth-err' });
@@ -1075,7 +1077,8 @@ export async function openDmModal(initialPeerId = null) {
   let activePeerId = initialPeerId || 'u_ayla_cinema';
   let activeMessages = [];
 
-  const root = h('div', { class: 'DMThreads DirectMessageView', style: { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 'min(680px, 90vw)', maxHeight: '76vh' } });
+  let dmModal = null;
+  const root = h('div', { class: 'DMThreads DirectMessageView wl-dm-root', style: { display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', maxHeight: '76vh' } });
 
   const loadState = async () => {
     try {
@@ -1215,8 +1218,9 @@ export async function openDmModal(initialPeerId = null) {
         class: 'btn primary sm',
         style: { marginTop: '6px', width: '100%' },
         onclick: () => {
-          document.querySelector('.popup-backdrop')?.remove();
-          window.location.hash = `#/r/${m.roomInvite}`;
+          dmModal?.close?.();
+          if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(m.roomInvite)}`);
+          else window.location.href = `/r/${encodeURIComponent(m.roomInvite)}`;
         },
       }, `🎬 Odaya Katıl (#${m.roomInvite})`) : null);
     }) : [h('div', { style: { color: 'rgba(255,255,255,0.5)', fontSize: '.82rem', textAlign: 'center', margin: 'auto' } }, `${activePeer.name} ile özel mesajlaşmaya başla 💬`)]));
@@ -1273,17 +1277,18 @@ export async function openDmModal(initialPeerId = null) {
       dmInp,
       h('button', { type: 'button', class: 'btn primary', onclick: () => sendDmNow() }, 'Gönder ➤')));
 
-    root.append(h('div', { style: { display: 'flex', gap: '12px', flex: '1', minHeight: '0' } }, threadsCol, rightCol));
+    root.append(h('div', { class: 'wl-dm-split', style: { display: 'flex', gap: '12px', flex: '1', minHeight: '0' } }, threadsCol, rightCol));
     setTimeout(() => { msgListEl.scrollTop = msgListEl.scrollHeight; }, 20);
   };
 
   await loadState();
   await loadMessages(activePeerId);
 
-  popup({
+  dmModal = popup({
     title: '💬 Özel Mesajlar (DM) & Watchlivo Arkadaşlarım',
     content: root,
     dismissable: true,
+    wide: true,
     options: [{ label: 'Kapat', class: 'btn' }],
   });
 }
@@ -1403,14 +1408,14 @@ export function openUserProfileModal(targetUser) {
   const uBio = String(targetUser.bio || '').trim();
   const uStatusEmoji = targetUser.statusEmoji || '🍿';
   const uStatusText = String(targetUser.statusText || '').trim();
-  const uHideWatching = Boolean(targetUser.hideWatching);
-  const uHideFriends = Boolean(targetUser.hideFriends);
+  const uHideWatching = asBool(targetUser.hideWatching);
+  const uHideFriends = asBool(targetUser.hideFriends);
   const uMedal = targetUser.medal || '🍿 İzleyici';
   const uMins = Number(targetUser.watchMinutes || 45);
   const activeMediaTitle = state.mesh?.media?.title || targetUser.nowWatching || '';
   const friendList = Array.isArray(targetUser.friendsPreview) ? targetUser.friendsPreview : [];
 
-  const root = h('div', { class: 'wl-auth-modal', style: { minWidth: 'min(390px, 88vw)' } },
+  const root = h('div', { class: 'wl-auth-modal', style: { width: '100%' } },
     h('div', { class: 'wl-user-header' },
       avatar(targetUser, 62, { online: true }),
       h('div', { class: 'wl-user-meta', style: { flex: '1' } },
@@ -1473,7 +1478,7 @@ export function openUserProfileModal(targetUser) {
                 },
               }, avatar(f, 18), f.name)))
           : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Açık arkadaş listesi boş.')),
-    h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px' } },
+    h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' } },
       h('button', {
         type: 'button',
         class: 'btn primary',
@@ -1483,9 +1488,18 @@ export function openUserProfileModal(targetUser) {
           e.currentTarget.textContent = added ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle';
           toast(added ? `👥 ${uName} arkadaşlarına eklendi!` : `${uName} arkadaşlardan çıkarıldı`);
         },
-      }, isFriend(targetUser) ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle')));
+      }, isFriend(targetUser) ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle'),
+      h('button', {
+        type: 'button',
+        class: 'btn',
+        style: { flex: '1', justifyContent: 'center' },
+        onclick: () => {
+          userModal?.close?.();
+          openDmModal(targetUser.uid || targetUser.id || uHandle);
+        },
+      }, '💬 Özel Mesaj')));
 
-  popup({
+  const userModal = popup({
     title: `${uName} (@${uHandle})`,
     dismissable: true,
     content: root,

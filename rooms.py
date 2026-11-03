@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -57,6 +58,91 @@ def now_hhmm(ts: Optional[float] = None) -> str:
 
 def clean_str(v: Any, limit: int) -> str:
     return str(v or "").strip()[:limit]
+
+
+def _finite_float(
+    v: Any,
+    fallback: float = 0.0,
+    min_val: Optional[float] = None,
+    max_val: Optional[float] = None,
+) -> float:
+    try:
+        f = float(v)
+        if not math.isfinite(f):
+            return fallback
+        if min_val is not None and f < min_val:
+            f = min_val
+        if max_val is not None and f > max_val:
+            f = max_val
+        return f
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _safe_int(
+    v: Any,
+    fallback: int = 0,
+    min_val: Optional[int] = None,
+    max_val: Optional[int] = None,
+) -> int:
+    try:
+        f = float(v)
+        if not math.isfinite(f):
+            return fallback
+        iv = int(f)
+        if min_val is not None and iv < min_val:
+            iv = min_val
+        if max_val is not None and iv > max_val:
+            iv = max_val
+        return iv
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _as_bool(v: Any) -> bool:
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, (int, float)):
+        return v != 0 and math.isfinite(v)
+    if isinstance(v, str):
+        return v.strip().lower() not in ("", "0", "false", "no", "off", "null", "none")
+    return bool(v)
+
+
+def _encrypt_pw_hash(pw_hash: str, room_id: str) -> str:
+    if not pw_hash:
+        return ""
+    nonce = secrets.token_bytes(12)
+    pt = pw_hash.encode("utf-8")
+    ks = b""
+    blk = 0
+    while len(ks) < len(pt):
+        ks += hashlib.sha256(SYNC_SECRET + b"|pw|" + room_id.encode("utf-8") + nonce + blk.to_bytes(2, "big")).digest()
+        blk += 1
+    ct = bytes(a ^ b for a, b in zip(pt, ks[:len(pt)]))
+    mac = hmac.new(SYNC_SECRET, b"pwmac|" + room_id.encode("utf-8") + nonce + ct, hashlib.sha256).digest()[:12]
+    return base64.urlsafe_b64encode(nonce + mac + ct).decode("ascii").rstrip("=")
+
+
+def _decrypt_pw_hash(enc: str, room_id: str) -> str:
+    if not enc or not isinstance(enc, str):
+        return ""
+    try:
+        raw = base64.urlsafe_b64decode(enc + "=" * (-len(enc) % 4))
+        if len(raw) <= 24:
+            return ""
+        nonce, mac, ct = raw[:12], raw[12:24], raw[24:]
+        exp_mac = hmac.new(SYNC_SECRET, b"pwmac|" + room_id.encode("utf-8") + nonce + ct, hashlib.sha256).digest()[:12]
+        if not hmac.compare_digest(mac, exp_mac):
+            return ""
+        ks = b""
+        blk = 0
+        while len(ks) < len(ct):
+            ks += hashlib.sha256(SYNC_SECRET + b"|pw|" + room_id.encode("utf-8") + nonce + blk.to_bytes(2, "big")).digest()
+            blk += 1
+        return bytes(a ^ b for a, b in zip(ct, ks[:len(ct)])).decode("utf-8")
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -277,12 +363,13 @@ def _media_defaults(room: Dict[str, Any]) -> Dict[str, Any]:
         md = empty_media()
         room["media"] = md
     for key, fallback in (("playing", False), ("currentTime", 0.0), ("updatedAt", t), ("rate", 1.0), ("duration", 0.0)):
-        try:
-            value = float(md.get(key))
-        except (TypeError, ValueError):
-            value = fallback
-        md[key] = bool(md.get(key)) if key == "playing" else max(0.0, value) if key != "rate" else value
-    if md["rate"] <= 0 or md["rate"] > 8:
+        if key == "playing":
+            md[key] = _as_bool(md.get(key))
+        else:
+            raw_v = md.get(key)
+            value = _finite_float(raw_v, fallback) if raw_v is not None else fallback
+            md[key] = max(0.0, value) if key != "rate" else value
+    if not math.isfinite(md["rate"]) or md["rate"] <= 0 or md["rate"] > 8:
         md["rate"] = 1.0
     return md
 
@@ -295,19 +382,10 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
     thumb = clean_str(data.get("thumbnail"), 1000)
     if thumb and not thumb.startswith(("https://", "http://", "/")):
         thumb = ""
-    try:
-        duration = max(0.0, float(data.get("duration") or 0))
-    except (TypeError, ValueError):
-        duration = 0.0
+    duration = max(0.0, _finite_float(data.get("duration"), 0.0))
     is_tv = clean_str(data.get("mediaType"), 16) == "tv"
-    try:
-        season = max(1, int(data.get("season") or 1)) if is_tv else 0
-    except (TypeError, ValueError):
-        season = 1 if is_tv else 0
-    try:
-        episode = max(1, int(data.get("episode") or 1)) if is_tv else 0
-    except (TypeError, ValueError):
-        episode = 1 if is_tv else 0
+    season = max(1, _safe_int(data.get("season"), 1)) if is_tv else 0
+    episode = max(1, _safe_int(data.get("episode"), 1)) if is_tv else 0
     alt_urls = [clean_str(u, 1500) for u in (data.get("altUrls") or []) if isinstance(u, str) and u.startswith(("https://", "/api/rave/"))][:6]
     servers = []
     for srv in (data.get("servers") or [])[:8]:
@@ -347,13 +425,10 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
     raw_intro = data.get("intro")
     intro = None
     if isinstance(raw_intro, dict) and raw_intro.get("end"):
-        try:
-            i_start = max(0.0, float(raw_intro.get("start") or 0.0))
-            i_end = max(0.0, float(raw_intro.get("end") or 0.0))
-            if i_end > i_start + 3:
-                intro = {"start": round(i_start, 1), "end": round(i_end, 1), "label": clean_str(raw_intro.get("label"), 40) or "⏩ İntroyu Atla"}
-        except (TypeError, ValueError):
-            intro = None
+        i_start = max(0.0, _finite_float(raw_intro.get("start"), 0.0))
+        i_end = max(0.0, _finite_float(raw_intro.get("end"), 0.0))
+        if i_end > i_start + 3:
+            intro = {"start": round(i_start, 1), "end": round(i_end, 1), "label": clean_str(raw_intro.get("label"), 40) or "⏩ İntroyu Atla"}
     return {
         "provider": re.sub(r"[^a-z0-9\-]", "", clean_str(data.get("provider"), 20).lower()) or "web",
         "catalogProvider": re.sub(r"[^a-z0-9\-]", "", clean_str(data.get("catalogProvider"), 20).lower()),
@@ -398,7 +473,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
                 "songTitle": clean_str(s.get("songTitle") or s.get("title"), 100),
                 "title": clean_str(s.get("title") or s.get("songTitle"), 140),
                 "poster": clean_str(s.get("poster") or s.get("thumbnail"), 600),
-                "duration": max(90, int(float(s.get("duration") or 200))),
+                "duration": max(90, _safe_int(s.get("duration"), 200)),
                 "sourcePlatform": clean_str(s.get("sourcePlatform"), 30),
                 "sourceBadge": clean_str(s.get("sourceBadge"), 60),
             }
@@ -416,7 +491,19 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "mediaType": clean_str(data.get("mediaType"), 16),
         "season": season,
         "episode": episode,
+        "episodeCount": _safe_int(data.get("episodeCount"), 0, 0, 5000) if is_tv else 0,
+        "totalSeasons": _safe_int(data.get("totalSeasons"), 0, 0, 200) if is_tv else 0,
+        "seasonsMeta": [
+            {
+                "season": _safe_int(sm.get("season") or sm.get("season_number"), 0, 0, 200),
+                "episodeCount": _safe_int(sm.get("episodeCount") or sm.get("episode_count"), 0, 0, 5000),
+            }
+            for sm in (data.get("seasonsMeta") or [])[:40]
+            if is_tv and isinstance(sm, dict) and _safe_int(sm.get("season") or sm.get("season_number"), 0) > 0
+        ],
         "isRaveDJ": bool(data.get("isRaveDJ")),
+        "bpm": max(60, min(200, _safe_int(data.get("bpm"), 124))) if data.get("bpm") else 0,
+        "crossfadePoints": [round(max(0.0, _finite_float(x, 0.0)), 1) for x in (data.get("crossfadePoints") or [])[:12] if isinstance(x, (int, float)) and math.isfinite(x)],
         "mashupTracks": [
             {
                 "videoId": clean_str(t.get("videoId"), 40),
@@ -424,7 +511,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
                 "artist": clean_str(t.get("artist"), 80),
                 "url": clean_str(t.get("url"), 1500),
                 "thumbnail": clean_str(t.get("thumbnail"), 600),
-                "bpm": max(60, min(200, int(float(t.get("bpm") or 124)))),
+                "bpm": max(60, min(200, _safe_int(t.get("bpm"), 124))),
             }
             for t in (data.get("mashupTracks") or [])[:2]
             if isinstance(t, dict)
@@ -544,7 +631,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     m_obj = room.get("media") or {}
     m_upd = float(m_obj.get("updatedAt") or 0.0)
     m_url_sig = str(m_obj.get("url") or m_obj.get("videoId") or "")[:48]
-    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{m_url_sig}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{int(t // 4)}"
+    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{m_url_sig}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{str(room.get('passwordHash') or '')[:12]}:{int(t // 4)}"
     if room.get("_tok_sig") == tok_sig and room.get("_tok_val"):
         return room["_tok_val"]
     host_id = room.get("host_id")
@@ -557,7 +644,8 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
                                      "creatorId", "creatorCid", "host_id", "co_hosts", "stage_speakers", "host_transferred",
                                      "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
                                      "endedKey", "kicked", "left", "rev", "curated", "chatClearedAt")}
-    # Secrets never leave the server: no password hash, no creator identity.
+    if room.get("passwordHash"):
+        snap["pwEnc"] = _encrypt_pw_hash(str(room.get("passwordHash") or ""), str(room.get("id") or ""))
     snap["sigExp"] = t + SYNC_TOKEN_TTL
     snap["participants"] = dict(p_items)
     compact_chat = []
@@ -653,8 +741,13 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             fresh["createdAt"] = float(snap.get("createdAt") or now())
         except (TypeError, ValueError):
             fresh["createdAt"] = now()
+        if snap.get("pwEnc"):
+            dec_pw = _decrypt_pw_hash(str(snap.get("pwEnc") or ""), room_id)
+            if dec_pw:
+                fresh["passwordHash"] = dec_pw
         fresh["participants"] = {
-            cid: sp for cid, sp in (snap.get("participants") or {}).items() if isinstance(sp, dict)
+            cid: ({**sp, "lastSeen": min(_finite_float(sp.get("lastSeen"), t), t - (HTTP_PARTICIPANT_TTL - 18.0))} if sp.get("transport") != "bot" else sp)
+            for cid, sp in (snap.get("participants") or {}).items() if isinstance(sp, dict)
         }
         fresh["chat"] = [m for m in (snap.get("chat") or []) if isinstance(m, dict) and (not m.get("system") or (t - float(m.get("ts") or 0.0) <= 1800.0))][-MAX_CHAT:]
         fresh["polls"] = [p for p in (snap.get("polls") or []) if isinstance(p, dict)][-10:]
@@ -762,11 +855,16 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         for k in ("name", "privacy", "playMode", "voipMode", "queue", "skip_votes", "voteEndsAt", "endedKey", "curated", "host_transferred"):
             if k in snap:
                 room[k] = snap[k]
-    if not room.get("creatorId") and snap.get("creatorId"):
+    if not room.get("passwordHash") and snap.get("pwEnc") and s_rev >= r_rev:
+        dec_pw = _decrypt_pw_hash(str(snap.get("pwEnc") or ""), room_id)
+        if dec_pw:
+            room["passwordHash"] = dec_pw
+    prefer_snap_creator = (s_ct < r_ct - 0.05) or (s_has_media and not r_has_media)
+    if (not room.get("creatorId") or prefer_snap_creator) and snap.get("creatorId"):
         room["creatorId"] = snap["creatorId"]
-    if not room.get("creatorCid") and snap.get("creatorCid"):
+    if (not room.get("creatorCid") or prefer_snap_creator) and snap.get("creatorCid"):
         room["creatorCid"] = snap["creatorCid"]
-    if not room.get("creator") and snap.get("creator"):
+    if (not room.get("creator") or prefer_snap_creator) and snap.get("creator"):
         room["creator"] = snap["creator"]
     merged_co = list(dict.fromkeys(list(room.get("co_hosts") or []) + list(snap.get("co_hosts") or [])))
     c_cid_val = str(room.get("creatorCid") or "").strip()
@@ -790,14 +888,14 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     if (s_has_media and not r_has_media) or (s_has_media and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
         if same_m_key and s_unresolved and not r_unresolved:
             merged_m = dict(s_media)
-            for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
+            for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                 if r_media.get(k):
                     merged_m[k] = r_media[k]
             room["media"] = merged_m
         else:
             room["media"] = s_media
     elif same_m_key and r_unresolved and not s_unresolved:
-        for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
+        for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
             if s_media.get(k):
                 room["media"][k] = s_media[k]
         if s_m_time > r_m_time:
@@ -889,8 +987,11 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         room["media"]["updatedAt"] = t
         m["currentTime"] = 0.0
         m["updatedAt"] = t
-    elapsed_wall = max(0.0, t - float(m.get("updatedAt") or t))
-    elapsed = elapsed_wall * m["rate"] if (m["playing"] and has_humans) else 0.0
+    is_unresolved_catalog = str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+    if is_unresolved_catalog:
+        m["updatedAt"] = t
+    elapsed_wall = 0.0 if is_unresolved_catalog else max(0.0, t - float(m.get("updatedAt") or t))
+    elapsed = elapsed_wall * m["rate"] if (m["playing"] and has_humans and not is_unresolved_catalog) else 0.0
     raw_live = max(0.0, m["currentTime"] + elapsed)
     dur = float(m.get("duration") or 0.0)
     if room.get("curated") and dur > 300.0 and raw_live >= dur - 60.0:
@@ -920,7 +1021,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         )
     )
     dedup_parts = list(raw_parts)
-    total_p = len(dedup_parts)
+    total_p = sum(1 for p in dedup_parts if p.get("transport") != "bot")
     ser_parts = []
     for p in dedup_parts[:60]:
         cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
@@ -944,10 +1045,11 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     else:
         recent_signals = []
     return {
-        "id": room["id"], "name": _effective_room_name(room), "privacy": room["privacy"], "playMode": room["playMode"],
+        "id": room["id"], "name": _effective_room_name(room), "rawName": room.get("name", ""), "privacy": room["privacy"], "playMode": room["playMode"],
         "voipMode": room["voipMode"], "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room["creator"],
         "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set), "stage_speakers": list(room.get("stage_speakers") or []),
         "curated": bool(room.get("curated")), "polls": (room.get("polls") or [])[-10:],
+        "chatClearedAt": float(room.get("chatClearedAt") or 0.0),
         "voteEndsAt": room["voteEndsAt"], "media": m, "queue": room["queue"],
         "skip_votes": room["skip_votes"], "participants": ser_parts,
         "participantCount": total_p, "count": total_p,
@@ -962,32 +1064,37 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     raw_m = _media_defaults(room)
-    playing = bool(raw_m.get("playing")) and has_humans
+    is_unresolved_cat = str(raw_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+    playing = bool(raw_m.get("playing")) and has_humans and not is_unresolved_cat
     rate = float(raw_m.get("rate") or 1.0)
-    updated_at = float(raw_m.get("updatedAt") or t)
+    updated_at = t if is_unresolved_cat else float(raw_m.get("updatedAt") or t)
     cur_time = float(raw_m.get("currentTime") or 0.0) if has_humans else 0.0
     dur = float(raw_m.get("duration") or 0.0)
     raw_live = max(0.0, cur_time + ((t - updated_at) * rate if playing else 0.0)) if has_humans else 0.0
+    pw_locked = has_password(room)
     m_summary = dict(raw_m)
     m_summary["currentTime"] = cur_time
     m_summary["liveTime"] = round(raw_live, 1)
+    if pw_locked:
+        m_summary.update({"url": "", "altUrls": [], "servers": [], "subtitleTracks": [], "audioTracks": [], "videoId": "", "embedUrl": "", "title": "🔒 Şifreli Oda", "thumbnail": "/static/watchlivo-poster.svg", "poster": "/static/watchlivo-poster.svg"})
     host_id = room.get("host_id")
     creator_cid = str(room.get("creatorCid") or "").strip() or (str(host_id or "") if not room.get("host_transferred") and not room.get("curated") else "")
     co_set = set(room.get("co_hosts") or [])
     is_cohost_mode = room.get("playMode") == "cohost"
+    human_cnt = sum(1 for p in p_map.values() if p.get("transport") != "bot")
     parts_preview = []
-    for p in list(p_map.values())[:5]:
+    for p in [x for x in p_map.values() if x.get("transport") != "bot"][:5]:
         cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
         cp["isHost"] = p["id"] == host_id
         cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode
         parts_preview.append(cp)
     return {
-        "id": room["id"], "name": _effective_room_name(room), "privacy": room["privacy"], "playMode": room["playMode"],
-        "isMature": bool(room.get("isMature")), "hasPassword": has_password(room), "creator": room.get("creator", ""),
-        "creatorCid": creator_cid, "host_id": host_id, "rev": int(room.get("rev") or 1),
+        "id": room["id"], "name": (room.get("name") or "🔒 Şifreli Oda") if pw_locked else _effective_room_name(room), "rawName": room.get("name", ""), "privacy": room["privacy"], "playMode": room["playMode"],
+        "isMature": bool(room.get("isMature")), "hasPassword": pw_locked, "creator": room.get("creator", ""),
+        "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set), "rev": int(room.get("rev") or 1),
         "curated": bool(room.get("curated")), "media": m_summary,
-        "count": len(p_map), "participantCount": len(p_map), "participants": parts_preview,
-        "syncToken": pack_sync_token(room),
+        "count": human_cnt, "participantCount": human_cnt, "participants": parts_preview,
+        "syncToken": "" if pw_locked else pack_sync_token(room),
     }
 
 
@@ -1352,7 +1459,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
     if uid and creator_id and uid != creator_id and (creator_id.startswith(("u_", "uid_")) or uid.startswith(("u_", "uid_"))):
         return False
     cur_host_id = str(room.get("host_id") or "").strip()
-    if cur_host_id and not room.get("host_transferred"):
+    if not creator_id and not creator_cid and cur_host_id and not room.get("host_transferred"):
         if cid and cid == cur_host_id:
             return True
         cur_host_p = p_map.get(cur_host_id)
@@ -1366,7 +1473,7 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
     raw_name = str(p.get("name") or data.get("username") or "").strip()
     p_slug = _slugify_name(raw_name)
     creator_slug = _slugify_name(room.get("creator") or "")
-    if p_slug and len(p_slug) >= 2 and p_slug not in ("misafir", "misafir-izleyici", "izleyici"):
+    if not creator_id.startswith(("u_", "uid_")) and p_slug and len(p_slug) >= 2 and p_slug not in ("misafir", "misafir-izleyici", "izleyici"):
         if (creator_slug and p_slug == creator_slug) or rid_str.startswith(f"{p_slug}-odasi-") or rid_str.startswith(f"{p_slug}-"):
             return True
     if data.get("isCreator") and not any(hp.get("transport") != "bot" and hp.get("id") != cid for hp in p_map.values()):
@@ -1375,6 +1482,9 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
 
 
 def ensure_host(room: Dict[str, Any]) -> None:
+    if room.get("curated") and "kinox_bot" in room.get("participants", {}):
+        room["host_id"] = "kinox_bot"
+        return
     t_now = now()
     live_ws = SOCKETS.get(room.get("id", ""), {})
     humans = [cid for cid, p in room["participants"].items() if p.get("transport") != "bot"]
@@ -1389,7 +1499,9 @@ def ensure_host(room: Dict[str, Any]) -> None:
         room["host_transferred"] = False
     creator_candidates = [
         (cid, p) for cid, p in room["participants"].items()
-        if p.get("transport") != "bot" and _is_creator_of_room(room, cid, p)
+        if p.get("transport") != "bot"
+        and (cid in live_ws or (t_now - float(p.get("lastSeen") or 0.0) <= 15.0))
+        and _is_creator_of_room(room, cid, p)
     ]
     if creator_candidates and not room.get("host_transferred"):
         creator_candidates.sort(key=lambda kv: float(kv[1].get("lastSeen") or 0.0), reverse=True)
@@ -1419,9 +1531,9 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     if existing and existing_name and not existing_name.lower().startswith(("misafir", "izleyici")) and raw_uname.lower().startswith(("misafir", "izleyici")):
         raw_uname = existing_name
     raw_avatar = str(data.get("avatarUrl") or "").strip()
-    if raw_avatar and not (raw_avatar.startswith(("https://", "/static/", "/uploads/")) or (raw_avatar.startswith("data:image/") and len(raw_avatar) <= 35000)):
+    if raw_avatar and not (raw_avatar.startswith(("https://", "/static/", "/uploads/")) or (raw_avatar.startswith("data:image/") and len(raw_avatar) <= 45000)):
         raw_avatar = ""
-    hide_loc = bool(data.get("hideLocation")) if "hideLocation" in data else bool(p.get("hideLocation"))
+    hide_loc = _as_bool(data.get("hideLocation")) if "hideLocation" in data else _as_bool(p.get("hideLocation"))
     raw_country = re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper())
     fields = {
         "name": raw_uname,
@@ -1442,9 +1554,9 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         p["statusText"] = ""
     p["hideLocation"] = hide_loc
     if "hideWatching" in data:
-        p["hideWatching"] = bool(data.get("hideWatching"))
+        p["hideWatching"] = _as_bool(data.get("hideWatching"))
     if "hideFriends" in data:
-        p["hideFriends"] = bool(data.get("hideFriends"))
+        p["hideFriends"] = _as_bool(data.get("hideFriends"))
     if isinstance(data.get("friendsPreview"), list):
         p["friendsPreview"] = [
             {"name": clean_str(f.get("name"), 24), "handle": clean_str(f.get("handle"), 24), "color": clean_str(f.get("color"), 16)}
@@ -1453,10 +1565,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     if raw_avatar:
         p["avatarUrl"] = raw_avatar
     if "watchMinutes" in data:
-        try:
-            p["watchMinutes"] = max(0, int(float(data.get("watchMinutes") or 0)))
-        except (TypeError, ValueError):
-            pass
+        p["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
     t_now = now()
     p.update({"transport": transport, "lastSeen": t_now})
     replaced_precreated = False
@@ -1529,6 +1638,8 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
         if not cur_host_alive or not cur_host_is_creator:
             room["host_id"] = cid
+    elif room.get("curated") and "kinox_bot" in room.get("participants", {}):
+        room["host_id"] = "kinox_bot"
     elif not (cur_host and cur_host.get("transport") != "bot"):
         if not cur_host or (cur_host.get("transport") == "bot" and transport != "bot"):
             room["host_id"] = cid
@@ -1549,17 +1660,10 @@ def _room_event(room, kind="room_state", **extra):
 
 def _apply_time(room, data):
     if "currentTime" in data:
-        try:
-            room["media"]["currentTime"] = max(0.0, float(data["currentTime"]))
-        except (TypeError, ValueError):
-            pass
-    at = data.get("atTime")
+        room["media"]["currentTime"] = _finite_float(data["currentTime"], float(room["media"].get("currentTime") or 0.0), 0.0, 864000.0)
+    at_f = _finite_float(data.get("atTime"), -1.0)
     t = now()
-    try:
-        at = float(at)
-        room["media"]["updatedAt"] = at if abs(at - t) < 2.0 else t
-    except (TypeError, ValueError):
-        room["media"]["updatedAt"] = t
+    room["media"]["updatedAt"] = at_f if (at_f > 0.0 and abs(at_f - t) < 2.0) else t
 
 
 def _play_next(room, by):
@@ -1625,6 +1729,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     req_act_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(data.get("actionId") or ""))[:32]
 
     if mtype == "heartbeat":
+        if room.get("curated"):
+            return out
         cur_h_id = room.get("host_id")
         cur_host = room["participants"].get(cur_h_id or "")
         cur_host_alive = bool(
@@ -1648,11 +1754,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 room["rev"] = int(room.get("rev") or 1) + 5
                 out["broadcast"].append((_room_event(room, "media_changed", by=name), None))
             return out
-        try:
-            inc_t = float(data.get("currentTime") or 0.0)
-        except (TypeError, ValueError):
-            inc_t = 0.0
+        inc_t = _finite_float(data.get("currentTime"), 0.0, 0.0, 864000.0)
         cur_m = room["media"]
+        if str(cur_m.get("url") or "").startswith("/api/rave/resolve-catalog"):
+            return out
         cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if cur_m.get("playing") else 0.0)
         if cur_live > 30.0 and inc_t <= 0.15:
             return out
@@ -1692,12 +1797,15 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             same_key = (not media_key(cur_m)) or (media_key(cur_m) == media_key(incoming))
             if (cur_unresolved and (can_control or same_key)) or (can_control and same_key and incoming.get("url") != cur_url):
                 inc_ct = max(0.0, float(incoming.get("currentTime") or 0.0))
-                if (cur_unresolved and float(cur_m.get("currentTime") or 0.0) <= 12.0 and inc_ct <= 2.0) or (float(cur_m.get("currentTime") or 0.0) <= 5.0 and inc_ct <= 2.0):
+                cur_ct = max(0.0, float(cur_m.get("currentTime") or 0.0))
+                if cur_unresolved:
+                    cur_m["currentTime"] = max(cur_ct, inc_ct) if (cur_ct > 2.0 or inc_ct > 2.0) else inc_ct
+                elif cur_ct <= 5.0 and inc_ct <= 2.0:
                     cur_m["currentTime"] = inc_ct
                 elif cur_m.get("playing"):
                     elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
-                    cur_m["currentTime"] = max(float(cur_m.get("currentTime") or 0.0) + elapsed, inc_ct)
-                for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
+                    cur_m["currentTime"] = max(cur_ct + elapsed, inc_ct)
+                for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]
                 cur_m["updatedAt"] = t_now
@@ -1738,10 +1846,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         elif mtype == "seek":
             room["endedKey"] = ""
         elif mtype == "rate":
-            try:
-                room["media"]["rate"] = min(2.0, max(0.25, float(data.get("rate", 1.0))))
-            except (TypeError, ValueError):
-                pass
+            room["media"]["rate"] = _finite_float(data.get("rate", 1.0), 1.0, 0.25, 2.0)
         room["media"]["lastActionBy"] = name
         room["rev"] = int(room.get("rev") or 1) + 1
         ev = _sync_event(room, mtype, name)
@@ -1755,17 +1860,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if room.get("curated"):
             deny("7/24 canlı TV ve radyo odalarında yayın değiştirilemez.")
             return out
-        room_has_media = bool(room["media"].get("url") or room["media"].get("videoId"))
-        if mode in ("leader", "autoplay", "vote") and not can_control and room_has_media:
+        if mode in ("leader", "autoplay", "vote") and not can_control:
             deny("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.")
             return out
         if (is_creator and not room.get("host_transferred")) or not cur_host_alive:
             room["host_id"] = cid
             is_host = True
-        try:
-            start_pos = max(0.0, float(data.get("currentTime") or 0.0))
-        except (TypeError, ValueError):
-            start_pos = 0.0
+        start_pos = _finite_float(data.get("currentTime"), 0.0, 0.0, 864000.0)
         set_media(room, data, name, start_pos)
         room["rev"] = int(room.get("rev") or 1) + 5
         sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", name)
@@ -1955,7 +2056,7 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                     snap_val = ""
                 raw_an = rm.get("audioNote")
                 an_val = None
-                if isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 140000:
+                if isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000:
                     try:
                         an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
                     except (TypeError, ValueError):
@@ -2025,7 +2126,7 @@ def _handle_social(room, cid, data, out, name, is_host):
         audio_note = None
         if isinstance(raw_an, dict):
             an_du = str(raw_an.get("dataUrl") or "").strip()
-            if an_du.startswith("data:audio/") and len(an_du) <= 140000:
+            if an_du.startswith("data:audio/") and len(an_du) <= 420000:
                 try:
                     an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
                 except (TypeError, ValueError):
@@ -2091,6 +2192,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
     elif mtype == "clear_chat":
+        if room.get("curated"):
+            out["reply"].append({"type": "error", "message": "7/24 canlı yayın odalarında sohbet geçmişi silinemez."})
+            return out
         if not (is_host or cid in (room.get("co_hosts") or [])):
             out["reply"].append({"type": "error", "message": "Sohbeti yalnızca oda lideri temizleyebilir."})
             return out
@@ -2139,6 +2243,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["events"] = (room.get("events") or [])[-34:] + [ev]
             out["broadcast"].append(({"type": "soundfx", "sfx": sfx, "user": name}, cid))
     elif mtype == "break_request":
+        if room.get("curated"):
+            out["reply"].append({"type": "error", "message": "7/24 canlı yayın odalarında mola istenemez."})
+            return out
         ev_id = req_act_id or ("brk_" + uuid.uuid4().hex[:10])
         ev = {
             "id": ev_id,
@@ -2220,6 +2327,9 @@ def _handle_social(room, cid, data, out, name, is_host):
         if is_creator_match and room.get("host_id") not in room.get("participants", {}):
             room["host_id"] = cid
         if act == "set_privacy":
+            if not (is_host or is_creator_match):
+                out["reply"].append({"type": "error", "message": "Oda gizlilik ve mod ayarlarını yalnızca oda lideri değiştirebilir."})
+                return out
             if data.get("privacy") in VALID_PRIVACY:
                 room["privacy"] = data["privacy"]
             if data.get("playMode") in VALID_PLAY_MODES:
@@ -2239,6 +2349,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["host_transferred"] = True
             sys_msg(room, "artık oda lideri", room["participants"][data["targetId"]]["name"])
         elif act == "toggle_stage_mode":
+            if not (is_host or is_creator_match):
+                out["reply"].append({"type": "error", "message": "Sahne modunu yalnızca oda lideri değiştirebilir."})
+                return out
             next_v = "all" if room.get("voipMode") == "stage" else "stage"
             room["voipMode"] = next_v
             if next_v == "stage":
@@ -2271,7 +2384,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 sp_list.append(tid)
                 sys_msg(room, "🎤 sahneye konuşmacı olarak davet edildi", target_p["name"])
             room["stage_speakers"] = sp_list
-        elif act == "toggle_cohost" and (is_host or is_creator_match) and data.get("targetId") in room["participants"] and data["targetId"] != cid:
+        elif act in ("toggle_cohost", "promote_cohost") and (is_host or is_creator_match) and data.get("targetId") in room["participants"] and data["targetId"] != cid:
             tid = data["targetId"]
             co_list = list(room.get("co_hosts") or [])
             if tid in co_list:
@@ -2281,7 +2394,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 co_list.append(tid)
                 sys_msg(room, "ortak lider (Co-Host) yapıldı", room["participants"][tid]["name"])
             room["co_hosts"] = co_list
-        elif act == "kick" and data.get("targetId") in room["participants"] and data["targetId"] != cid:
+        elif act == "kick" and (is_host or is_creator_match) and data.get("targetId") in room["participants"] and data["targetId"] != cid:
             tid = data["targetId"]
             target_p = room["participants"].get(tid)
             if not is_creator_match and (tid == room.get("host_id") or _is_creator_of_room(room, tid, target_p)):
@@ -2326,10 +2439,10 @@ def _handle_social(room, cid, data, out, name, is_host):
             me["color"] = raw_col
         if "avatarUrl" in data:
             raw_av = str(data.get("avatarUrl") or "").strip()
-            if not raw_av or raw_av.startswith(("https://", "/static/", "/uploads/")) or (raw_av.startswith("data:image/") and len(raw_av) <= 35000):
+            if not raw_av or raw_av.startswith(("https://", "/static/", "/uploads/")) or (raw_av.startswith("data:image/") and len(raw_av) <= 45000):
                 me["avatarUrl"] = raw_av
         if "hideLocation" in data:
-            me["hideLocation"] = bool(data.get("hideLocation"))
+            me["hideLocation"] = _as_bool(data.get("hideLocation"))
             if me["hideLocation"]:
                 me["country"] = "XX"
             elif data.get("country"):
@@ -2337,10 +2450,7 @@ def _handle_social(room, cid, data, out, name, is_host):
         if "medal" in data:
             me["medal"] = clean_str(data.get("medal"), 32)
         if "watchMinutes" in data:
-            try:
-                me["watchMinutes"] = max(0, int(float(data.get("watchMinutes") or 0)))
-            except (TypeError, ValueError):
-                pass
+            me["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
@@ -2471,9 +2581,9 @@ _LIVE_RADIO = [
     ("radyo-metro-fm", "Metro FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/METRO_FM_SC", "direct"),
     ("radyo-power-fm", "Power FM", "https://listen.powerapp.com.tr/powerfm/256/chunks.m3u8", "hls"),
     ("radyo-joy-turk", "Joy Türk", "https://playerservices.streamtheworld.com/api/livestream-redirect/JOY_TURK_SC", "direct"),
-    ("radyo-slow-turk", "Slow Türk", "https://radyo.duhnet.tv/ak_dtvh_slowturk", "direct"),
+    ("radyo-slow-turk", "Slow Türk", "https://radyo1.radyo-dinle.tc/8062/stream", "direct"),
     ("radyo-best-fm", "Best FM", "https://ssldyg.radyotvonline.com/best/bestfm.stream/playlist.m3u8", "hls"),
-    ("radyo-alem-fm", "Alem FM", "https://turkmedya.radyotvonline.net/alemfmaac", "direct"),
+    ("radyo-alem-fm", "Alem FM", "https://dygedge2.radyotvonline.net/kralpop/playlist.m3u8", "hls"),
 ]
 
 
@@ -2569,7 +2679,7 @@ async def ws_endpoint(websocket: WebSocket):
     requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(q.get("clientId") or ""))[:24]
     signed_cid = verify_client_token(room_id, q.get("clientToken"))
     verified_uid = _ws_verified_uid(websocket.scope, q)
-    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid", "clientId", "clientToken")}
+    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid", "clientId", "clientToken", "syncToken")}
     join_data["uid"] = verified_uid
     async with STORE.lock(room_id):
         is_curated_ws = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
@@ -2577,7 +2687,10 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.send_json({"type": "room_closed", "roomId": room_id})
             await websocket.close()
             return
-        room = await STORE.get(room_id) or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
+        room = await STORE.get(room_id)
+        if q.get("syncToken"):
+            room = merge_sync_token(room, q.get("syncToken"), room_id)
+        room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
         cid = signed_cid or requested_cid
         if not signed_cid and cid and _cid_is_active(room, cid, verified_uid, join_data):
             cid = ""
@@ -2599,7 +2712,8 @@ async def ws_endpoint(websocket: WebSocket):
                 await websocket.close()
                 return
             if not verify_room_password(room, q.get("pwd", "")):
-                _JOIN_LIMITER.hit(ws_rl_key)
+                if str(q.get("pwd") or "").strip():
+                    _JOIN_LIMITER.hit(ws_rl_key)
                 await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
                 await websocket.close()
                 return
@@ -2673,21 +2787,28 @@ async def ws_endpoint(websocket: WebSocket):
                 if explicit_ws_leave:
                     room.get("participants", {}).pop(cid, None)
                     room.setdefault("left", {})[cid] = t_disc
-                    is_creator_leave = bool(
-                        not room.get("curated")
+                    is_creator_close = bool(
+                        explicit_ws_close
+                        and not room.get("curated")
                         and (
                             cid == room.get("creatorCid")
                             or _is_creator_of_room(room, cid, cur_p, join_data)
                             or (cid == prev_h and not room.get("host_transferred"))
                         )
-                        and (explicit_ws_close or not room.get("host_transferred"))
                     )
                     has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-                    if not room.get("curated") and (is_creator_leave or not has_humans):
+                    if not room.get("curated") and (is_creator_close or not has_humans):
                         await STORE.delete(room_id)
                         _LOBBY_CACHE["ts"] = 0.0
                         await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
                     else:
+                        if cid == room.get("creatorCid") or cid == prev_h:
+                            room["host_transferred"] = True
+                        if cur_p and cur_p.get("transport") != "bot":
+                            left_name_ws = cur_p.get("name", "Misafir")
+                            if not any(hp.get("transport") != "bot" and hp.get("name") == left_name_ws for hp in (room.get("participants") or {}).values()):
+                                leave_m_ws = sys_msg(room, "odadan ayrıldı", left_name_ws)
+                                await broadcast(room_id, {"type": "chat", "message": leave_m_ws}, cid)
                         ensure_host(room)
                         room["lastActiveAt"] = t_disc
                         room["rev"] = int(room.get("rev") or 1) + 1
@@ -2698,7 +2819,7 @@ async def ws_endpoint(websocket: WebSocket):
                         cur_p["transport"] = "http"
                         cur_p["lastSeen"] = min(float(cur_p.get("lastSeen") or 0.0), t_disc - 16.0)
                     ensure_host(room)
-                    if cur_p:
+                    if cur_p and room.get("host_id") == prev_h:
                         cur_p["lastSeen"] = t_disc
                     room["lastActiveAt"] = t_disc
                     if room.get("host_id") != prev_h:
@@ -2769,21 +2890,23 @@ async def http_sync(request: Request):
                         room.setdefault("left", {})[k_p] = now()
             if room:
                 room.setdefault("left", {})[cid] = now()
-                is_creator_leave = bool(
-                    not room.get("curated")
+                is_creator_close = bool(
+                    data.get("type") == "close_room"
+                    and not room.get("curated")
                     and (
                         cid == room.get("creatorCid")
                         or _is_creator_of_room(room, cid, left_p, {**data, "uid": verified_uid})
                         or (cid == prev_h and not room.get("host_transferred"))
                     )
-                    and (data.get("type") == "close_room" or not room.get("host_transferred"))
                 )
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-                if not room.get("curated") and (is_creator_leave or not has_humans):
+                if not room.get("curated") and (is_creator_close or not has_humans):
                     await STORE.delete(room_id)
                     _LOBBY_CACHE["ts"] = 0.0
                     await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
                     return JSONResponse({"ok": True, "roomClosed": True})
+                if cid == room.get("creatorCid") or cid == prev_h:
+                    room["host_transferred"] = True
                 if left_p:
                     if left_p.get("transport") != "bot":
                         left_name = left_p.get("name", "Misafir")
@@ -2814,9 +2937,10 @@ async def http_sync(request: Request):
             if not allowed:
                 return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_after)}, status_code=429)
             if not verify_room_password(room, data.get("pwd", "")):
-                allowed_hit, retry_hit = _JOIN_LIMITER.hit(http_rl_key)
-                if not allowed_hit:
-                    return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_hit)}, status_code=429)
+                if str(data.get("pwd") or "").strip():
+                    allowed_hit, retry_hit = _JOIN_LIMITER.hit(http_rl_key)
+                    if not allowed_hit:
+                        return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_hit)}, status_code=429)
                 return JSONResponse({"error": "password_required"}, status_code=403)
         prev_host = pre_merge_host if pre_merge_host is not None else room.get("host_id")
         prev_seen = pre_merge_seen or float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
@@ -2903,7 +3027,7 @@ async def http_sync(request: Request):
         client_chat_cnt = int(data.get("chatCount")) if isinstance(data.get("chatCount"), int) else server_chat_cnt
         server_last_chat_id = str(chat_list[-1].get("id") or "") if chat_list else ""
         client_last_chat_id = str(data.get("lastChatId") or "") if "lastChatId" in data else server_last_chat_id
-        server_part_cnt = len(room["participants"])
+        server_part_cnt = sum(1 for p in room["participants"].values() if p.get("transport") != "bot")
         client_part_cnt = int(data.get("participantCount")) if isinstance(data.get("participantCount"), int) else server_part_cnt
         if (
             not is_action and not mutated and not is_new and since_rev > 0 and since_rev == cur_rev
@@ -2940,6 +3064,8 @@ async def create_room(request: Request):
     try:
         payload = await request.json()
     except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
         payload = {}
     name = clean_str(payload.get("name"), 45) or "Watchlivo Odası"
     slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
@@ -2993,8 +3119,8 @@ async def create_room(request: Request):
             "username": payload.get("creator") or "Lider",
             "color": payload.get("color") or "#27DCC8",
             "device": payload.get("device") or "Web",
-            "country": "XX" if payload.get("hideLocation") else (payload.get("country") or "TR"),
-            "hideLocation": bool(payload.get("hideLocation")),
+            "country": "XX" if _as_bool(payload.get("hideLocation")) else (payload.get("country") or "TR"),
+            "hideLocation": _as_bool(payload.get("hideLocation")),
             "avatarUrl": payload.get("avatarUrl") or "",
             "medal": payload.get("medal") or "",
             "watchMinutes": payload.get("watchMinutes") or 0,
@@ -3011,7 +3137,11 @@ async def create_room(request: Request):
     sys_msg(room, "odaya katıldı", creator_label)
     media = payload.get("media")
     if isinstance(media, dict) and (media.get("url") or media.get("videoId")):
-        set_media(room, media, creator_label, start=0.0)
+        try:
+            init_start = max(0.0, float(media.get("currentTime") or media.get("meshStatePosition") or 0.0))
+        except (TypeError, ValueError):
+            init_start = 0.0
+        set_media(room, media, creator_label, start=init_start)
         room["media"]["playing"] = True
         if room["media"].get("title"):
             sys_msg(room, f"Şu an oynatılıyor: {room['media']['title']}", creator_label)
@@ -3022,14 +3152,45 @@ async def create_room(request: Request):
     return JSONResponse({"ok": True, "clientId": creator_cid, "clientToken": client_token, "room": serialize(room, for_cid=creator_cid)})
 
 
+def _is_friend_of_creator(room: Dict[str, Any], caller_uid: str) -> bool:
+    c_uid = str(room.get("creatorId") or "").strip()
+    if not c_uid.startswith("u_wl_"):
+        return True
+    if not caller_uid:
+        return False
+    if caller_uid == c_uid:
+        return True
+    for p in (room.get("participants") or {}).values():
+        if isinstance(p, dict) and p.get("uid") == caller_uid:
+            return True
+    try:
+        import social_engine
+        su = social_engine._SOCIAL_USERS.get(c_uid) or social_engine._kv_get(f"wl:soc:u:{c_uid}", None, max_age=30.0)
+        if isinstance(su, dict):
+            for f in (su.get("friends") or []):
+                if isinstance(f, dict) and f.get("uid") == caller_uid:
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def _render_lobby_for_caller(request: Request, raw_rooms: List[Dict[str, Any]]) -> JSONResponse:
+    caller_uid = str(request.scope.get("wl_uid") or "").strip()
+    filtered = [r for r in raw_rooms if r.get("privacy") != "friends" or _is_friend_of_creator(r, caller_uid)]
+    visible = [lobby_entry(r) for r in filtered[:60]]
+    cc = "private, no-store" if caller_uid else "public, max-age=1, s-maxage=2, stale-while-revalidate=5"
+    return JSONResponse({"rooms": visible, "shared": STORE.shared}, headers={"Cache-Control": cc})
+
+
 async def list_rooms(request: Request):
     t = now()
-    if _LOBBY_CACHE["data"] is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
-        return JSONResponse(_LOBBY_CACHE["data"], headers={"Cache-Control": "public, max-age=1, s-maxage=2, stale-while-revalidate=5"})
+    if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
+        return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
     async with _LOBBY_LOCK:
         t = now()
-        if _LOBBY_CACHE["data"] is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
-            return JSONResponse(_LOBBY_CACHE["data"], headers={"Cache-Control": "public, max-age=1, s-maxage=2, stale-while-revalidate=5"})
+        if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
+            return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
         all_rooms = await STORE.all()
         existing_ids = {r.get("id") for r in all_rooms if isinstance(r, dict)}
         for spec in CURATED_LIVE_SPECS:
@@ -3070,9 +3231,7 @@ async def list_rooms(request: Request):
                 async with STORE.lock(rid_item):
                     await STORE.put(room)
             p_cnt = len(p_map)
-            creator_cid_chk = str(room.get("creatorCid") or "").strip()
-            creator_missing = bool(creator_cid_chk and not room.get("host_transferred") and creator_cid_chk not in p_map)
-            if (not p_cnt or not has_humans or creator_missing) and not room.get("curated"):
+            if (not p_cnt or not has_humans) and not room.get("curated"):
                 await STORE.delete(rid_item)
                 continue
             if room["privacy"] == "private" or not p_cnt:
@@ -3105,12 +3264,11 @@ async def list_rooms(request: Request):
                 by_creator_slug[c_slug_key] = r
             deduped_candidates.append(r)
         candidates = deduped_candidates
-        candidates.sort(key=lambda r: (0 if not r.get("curated") else 1, -len(r.get("participants") or {}), CURATED_ORDER.get(r.get("id", ""), 999), r.get("id", "")))
-        visible = [lobby_entry(r) for r in candidates[:60]]
-        payload = {"rooms": visible, "shared": STORE.shared}
+        candidates.sort(key=lambda r: (0 if not r.get("curated") else 1, -sum(1 for hp in (r.get("participants") or {}).values() if hp.get("transport") != "bot"), CURATED_ORDER.get(r.get("id", ""), 999), r.get("id", "")))
         _LOBBY_CACHE["ts"] = t
-        _LOBBY_CACHE["data"] = payload
-        return JSONResponse(payload, headers={"Cache-Control": "public, max-age=1, s-maxage=2, stale-while-revalidate=5"})
+        _LOBBY_CACHE["raw_rooms"] = candidates[:70]
+        _LOBBY_CACHE["data"] = None
+    return _render_lobby_for_caller(request, _LOBBY_CACHE.get("raw_rooms") or [])
 
 
 async def room_info(request: Request):

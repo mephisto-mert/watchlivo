@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261103_v79';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261103_v79';
-import { navIcon, logo } from './home.js?v=20261103_v79';
-import { createSelection } from './selection.js?v=20261103_v79';
-import { buildControls } from './controls.js?v=20261103_v79';
-import { buildChat } from './chat.js?v=20261103_v79';
-import { PANELS } from './panels.js?v=20261103_v79';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261103_v80';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261103_v80';
+import { navIcon, logo } from './home.js?v=20261103_v80';
+import { createSelection } from './selection.js?v=20261103_v80';
+import { buildControls } from './controls.js?v=20261103_v80';
+import { buildChat } from './chat.js?v=20261103_v80';
+import { PANELS } from './panels.js?v=20261103_v80';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -106,7 +106,7 @@ export function buildLayout(app, ctx) {
     if (navSig === lastNavSig) return;
     lastNavSig = navSig;
     const openSide = (side, tab) => {
-      if (typeof window !== 'undefined' && window.innerWidth <= 960) {
+      if (typeof window !== 'undefined' && window.innerWidth <= 1180) {
         const opp = side === 'left' ? 'right' : 'left';
         if (state.view[opp] !== 'Collapsed') setView(opp, state.view[opp]);
       }
@@ -120,11 +120,23 @@ export function buildLayout(app, ctx) {
           isCreatorOrHost ? 'Odayı Kapat' : 'Ayrıl',
           isCreatorOrHost ? 'Odayı Kapat ve Herkesi Çıkar' : 'Odadan Ayrıl',
           async () => {
-            const msg = isCreatorOrHost
-              ? 'Odayı kapatıp çıkmak istediğinize emin misiniz? Oda herkes için kapanacaktır.'
+            if (isCreatorOrHost && !m?.curated && people > 1) {
+              popup({
+                title: 'Odadan Ayrıl veya Kapat',
+                message: `Odada şu an ${people} kişi var. Sadece kendiniz ayrılıp odayı diğer izleyicilere devredebilir veya odayı herkes için kapatabilirsiniz.`,
+                options: [
+                  { label: 'Sadece Ben Ayrıl (Oda Açık Kalsın)', primary: true, onClick: () => actions.leave(false) },
+                  { label: 'Odayı Herkes İçin Kapat', danger: true, onClick: () => actions.leave(true) },
+                  { label: 'Kal' },
+                ],
+              });
+              return;
+            }
+            const msg = isCreatorOrHost && !m?.curated
+              ? 'Odayı kapatıp çıkmak istediğinize emin misiniz?'
               : 'Odadan ayrılmak istediğinize emin misiniz?';
-            const okLbl = isCreatorOrHost ? 'Odayı Kapat' : 'Ayrıl';
-            if (await confirmPopup(msg, okLbl, 'Kal')) actions.leave(isCreatorOrHost);
+            const okLbl = isCreatorOrHost && !m?.curated ? 'Odayı Kapat' : 'Ayrıl';
+            if (await confirmPopup(msg, okLbl, 'Kal')) actions.leave(Boolean(isCreatorOrHost && !m?.curated));
           },
           { variant: 'leave-pill', id: 'nav-leave-room' }
         ),
@@ -211,19 +223,26 @@ export function buildLayout(app, ctx) {
 function initResize(handle, chatPanel) {
   const saved = Number(localStorage.getItem('vortex_chat_w'));
   if (saved > 200) chatPanel.style.setProperty('--chat-w', `${saved}px`);
-  handle.addEventListener('mousedown', (e) => {
+  handle.style.touchAction = 'none';
+  handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     handle.classList.add('dragging');
+    try { handle.setPointerCapture(e.pointerId); } catch (_) {}
     const startX = e.clientX, startW = chatPanel.getBoundingClientRect().width;
     const move = (ev) => {
       const w = Math.max(250, Math.min(window.innerWidth * 0.55, startW - (ev.clientX - startX)));
       chatPanel.style.setProperty('--chat-w', `${w}px`);
     };
-    const up = () => {
+    const up = (ev) => {
       handle.classList.remove('dragging');
+      try { handle.releasePointerCapture(ev.pointerId); } catch (_) {}
       localStorage.setItem('vortex_chat_w', String(Math.round(chatPanel.getBoundingClientRect().width)));
-      window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
-    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   });
 }

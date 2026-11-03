@@ -120,7 +120,10 @@ export class SyncEngine {
     const delta = expected - curr;
     const abs = Math.abs(delta);
     const leader = Boolean(this.isLeader());
-    const rawTitleSig = String(media.seriesTitle || media.originalTitle || media.title || '').split(' — ')[0].trim().toLowerCase();
+    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').split(' — ')[0].trim().toLowerCase();
+    const rawTitleSig = ['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitleCandidate)
+      ? ''
+      : rawTitleCandidate;
     const mediaIdSig = media.tmdbId
       ? `tmdb|${media.tmdbId}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
       : media.imdbId
@@ -132,10 +135,13 @@ export class SyncEngine {
             : (rawTitleSig && !media.isMusic && media.mediaType !== 'music' && !media.live)
               ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
               : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${media.season || ''}|${media.episode || ''}`;
-    if (mediaIdSig !== this.mediaIdSig) {
+    const isUnresolvedUrl = String(media.url || '').startsWith('/api/rave/resolve-catalog');
+    const justResolvedUrl = Boolean(this.wasUnresolvedUrl && !isUnresolvedUrl);
+    this.wasUnresolvedUrl = isUnresolvedUrl;
+    if (mediaIdSig !== this.mediaIdSig || justResolvedUrl) {
       this.mediaIdSig = mediaIdSig;
       this.loadedAt = now;
-      this.seekUntil = now + (leader ? 5000 : 8000);
+      this.seekUntil = now + (leader ? 7000 : 9000);
       this.lastSeekTarget = expected;
       this.lastSeekWallAt = now;
       this.lastStatus = status;
@@ -179,6 +185,8 @@ export class SyncEngine {
       return timeout;
     }
 
+    if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
+
     if (ad.isPaused()) {
       if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
@@ -212,7 +220,7 @@ export class SyncEngine {
     if (leader) {
       if (Math.abs(ad.getRate() - base) >= 0.02) ad.setRate(base);
       const startTarget = Number(media.meshStatePosition ?? media.currentTime ?? 0);
-      if (!this.didInitialSeek && startTarget >= 5 && curr < 2 && now - (this.loadedAt || 0) < 10000) {
+      if (!this.didInitialSeek && startTarget >= 3 && curr < 2 && now - (this.loadedAt || 0) < 25000) {
         this.didInitialSeek = true;
         this.lastSeekTarget = startTarget;
         this.lastSeekWallAt = now;
@@ -224,7 +232,7 @@ export class SyncEngine {
       }
       // Leader is the authoritative clock: NEVER jump-seek the leader forward into unbuffered air after a local stall.
       // Instead, re-anchor the room to the leader's true playback position once playing smoothly.
-      if (now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.() && ((abs > JUMP_DELTA && now - this.lastLeaderBroadcast > 3500) || (abs <= JUMP_DELTA && now - this.lastLeaderBroadcast > 15000))) {
+      if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.() && ((abs > JUMP_DELTA && now - this.lastLeaderBroadcast > 3500) || (abs <= JUMP_DELTA && now - this.lastLeaderBroadcast > 15000))) {
         this.lastLeaderBroadcast = now;
         this.onLeaderSync(curr);
       }

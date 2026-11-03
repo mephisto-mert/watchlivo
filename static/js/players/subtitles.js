@@ -155,7 +155,10 @@ export class SubtitleDubController {
     if (typeof window !== 'undefined') {
       window.__activeSubsController = this;
       try { localStorage.removeItem('vortex_dual_sub'); } catch (e) { /* ignore */ }
-      window.__kinoxSyncDuckVolume = () => this.syncVideoVolume();
+      window.__kinoxSyncDuckVolume = () => {
+        window.__kinoxHost?._syncDuckRamp?.();
+        this.syncVideoVolume();
+      };
     }
   }
 
@@ -189,7 +192,14 @@ export class SubtitleDubController {
     } catch (e) { /* ignore */ }
   }
 
-  _detectIntroFromCues() {
+  _detectIntroFromCues(cues = this.subCues) {
+    if (!Array.isArray(cues) || !cues.length) return null;
+    for (const c of cues) {
+      if (c.start > 120) break;
+      if (/\[(?:intro|opening|jenerik|açılış)\]/i.test(String(c.text || '')) && c.end > c.start + 15 && c.end <= 150) {
+        return { start: Math.max(0, c.start), end: c.end };
+      }
+    }
     return null;
   }
 
@@ -197,14 +207,36 @@ export class SubtitleDubController {
     try {
       const v = this.adapter?.video;
       const trEl = v?.querySelector?.('track');
-      const tt = trEl?.track;
+      if (!trEl || !this.subCues.length) return;
+      const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
+      const off = this.offsetSec || 0;
+      if (String(trEl.getAttribute('src') || '').startsWith('blob:')) {
+        const fmt = (sec) => {
+          const s = Math.max(0, Number(sec) || 0);
+          const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+          const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+          const ss = (s % 60).toFixed(3).padStart(6, '0');
+          return `${hh}:${mm}:${ss}`;
+        };
+        const lines = ['WEBVTT', ''];
+        this.subCues.forEach((c, idx) => {
+          const st = Math.max(0, (c.start + off) / scale);
+          const en = Math.max(st + 0.1, (c.end + off) / scale);
+          lines.push(`${idx + 1}\n${fmt(st)} --> ${fmt(en)}\n${c.text}`);
+        });
+        const nextBlob = URL.createObjectURL(new Blob([lines.join('\n\n') + '\n'], { type: 'text/vtt;charset=utf-8' }));
+        if (this.blobUrl) {
+          try { URL.revokeObjectURL(this.blobUrl); } catch (_) {}
+        }
+        this.blobUrl = nextBlob;
+        trEl.src = nextBlob;
+      }
+      const tt = trEl.track;
       const CueCls = window.VTTCue || window.TextTrackCue;
-      if (!tt || !CueCls || !this.subCues.length) return;
+      if (!tt || !CueCls) return;
       while (tt.cues && tt.cues.length > 0) {
         tt.removeCue(tt.cues[0]);
       }
-      const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
-      const off = this.offsetSec || 0;
       for (const c of this.subCues) {
         try { tt.addCue(new CueCls(Math.max(0, (c.start + off) / scale), Math.max(0.1, (c.end + off) / scale), c.text)); } catch (_) {}
       }
@@ -725,6 +757,7 @@ export class SubtitleDubController {
       }
       this.selectedSubId = track.id;
       this.subCues = cues;
+      if (!this.intro) this.intro = this._detectIntroFromCues(cues);
       this.secondaryCues = [];
       this._attachNativeTrack(track);
       this.adapter?._syncYtNativeCaptions?.();
@@ -740,9 +773,17 @@ export class SubtitleDubController {
     if (!file) return null;
     try {
       const buf = await file.arrayBuffer();
-      let text = new TextDecoder('utf-8').decode(buf);
-      if (text.includes('\uFFFD')) {
-        try { text = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
+      const u8 = new Uint8Array(buf);
+      let text = '';
+      if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) {
+        text = new TextDecoder('utf-16le').decode(buf);
+      } else if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) {
+        text = new TextDecoder('utf-16be').decode(buf);
+      } else {
+        text = new TextDecoder('utf-8').decode(buf);
+        if (text.includes('\uFFFD')) {
+          try { text = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
+        }
       }
       const cues = parseVtt(text);
       if (!cues.length) return null;
@@ -812,10 +853,11 @@ export class SubtitleDubController {
         await this.setSubtitleTrack('off', true);
       }
     } else if (!isInit && (track.id === 'orig' || (track.lang !== 'tr' && track.audioLang !== 'tr'))) {
-      if (this._prevSubBeforeDub && (!this.selectedSubId || this.selectedSubId === 'off')) {
-        const restoreId = this._prevSubBeforeDub;
+      if (!this.selectedSubId || this.selectedSubId === 'off') {
+        const trFallback = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+        const restoreId = this._prevSubBeforeDub || trFallback?.id || '';
         this._prevSubBeforeDub = null;
-        await this.setSubtitleTrack(restoreId, true);
+        if (restoreId) await this.setSubtitleTrack(restoreId, true);
       }
     }
 
@@ -1046,9 +1088,15 @@ export class SubtitleDubController {
       }
       this._fsHandler = null;
     }
-    if (this.blobUrl) {
-      try { URL.revokeObjectURL(this.blobUrl); } catch (e) { /* ignore */ }
-      this.blobUrl = null;
-    }
+      if (this.blobUrl) {
+        try { URL.revokeObjectURL(this.blobUrl); } catch (e) { /* ignore */ }
+        this.blobUrl = null;
+      }
+      if (typeof window !== 'undefined' && window.__activeSubsController === this) {
+        window.__activeSubsController = null;
+        if (window.__kinoxHost) {
+          window.__kinoxSyncDuckVolume = () => window.__kinoxHost?._syncDuckRamp?.();
+        }
+      }
   }
 }

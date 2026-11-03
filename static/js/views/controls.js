@@ -1,13 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v79';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v79';
-import { getProvider } from '../providers.js?v=20261103_v79';
-import { expectedPosition } from '../sync.js?v=20261103_v79';
-import { thumbFor } from './lobby.js?v=20261103_v79';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v79';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v79';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v79';
-import { avatar } from '../profile.js?v=20261103_v79';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v80';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress } from '../store.js?v=20261103_v80';
+import { getProvider } from '../providers.js?v=20261103_v80';
+import { expectedPosition } from '../sync.js?v=20261103_v80';
+import { thumbFor } from './lobby.js?v=20261103_v80';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v80';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v80';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v80';
+import { avatar } from '../profile.js?v=20261103_v80';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -526,6 +526,41 @@ export function buildControls(frame, ctx) {
     revealControls(2600);
   };
 
+  const seasonMetaCache = new Map();
+  const seasonMetaInflight = new Set();
+  const ensureSeasonMeta = (m, cleanSeries, sNum) => {
+    const seriesIdKey = m?.tmdbId || m?.id || cleanSeries || '';
+    if (!seriesIdKey || !sNum) return null;
+    const cacheKey = `${seriesIdKey}:${sNum}`;
+    if (seasonMetaCache.has(cacheKey)) return seasonMetaCache.get(cacheKey);
+    if (seasonMetaInflight.has(cacheKey)) return null;
+    seasonMetaInflight.add(cacheKey);
+    fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m?.tmdbId || '')}&title=${encodeURIComponent(cleanSeries || '')}&mediaType=tv&season=${sNum}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((sData) => {
+        if (!sData) return;
+        const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
+        const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
+        const hasNextSeason = seasons.some((s) => Number(s.season) === Number(sNum) + 1);
+        seasonMetaCache.set(cacheKey, { epCount: eps.length, hasNextSeason, episodes: eps });
+        update();
+      })
+      .catch(() => {})
+      .finally(() => { seasonMetaInflight.delete(cacheKey); });
+    return null;
+  };
+  const computeNextEpSpec = (m, sNum, eNum) => {
+    const cleanSeries = String(m?.seriesTitle || m?.title || 'Dizi').split(' — ')[0].trim() || 'Dizi';
+    const meta = ensureSeasonMeta(m, cleanSeries, sNum);
+    if (meta && meta.epCount > 0 && eNum >= meta.epCount) {
+      if (meta.hasNextSeason) {
+        return { season: sNum + 1, episode: 1, shortSig: `S${sNum + 1}:B1`, fullLabel: `S${sNum + 1}:B1`, cleanSeries, isFinale: false };
+      }
+      return { season: sNum, episode: eNum, shortSig: '', fullLabel: '', cleanSeries, isFinale: true };
+    }
+    return { season: sNum, episode: eNum + 1, shortSig: `B${eNum + 1}`, fullLabel: `S${sNum}:B${eNum + 1}`, cleanSeries, isFinale: false };
+  };
+
   let nextEpBusy = false;
   async function triggerNextEpisode(manual = false) {
     const m = state.mesh?.media;
@@ -557,7 +592,7 @@ export function buildControls(frame, ctx) {
       showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
-        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(1800) : undefined;
+        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
         const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
         if (r.ok) {
           const sData = await r.json();
@@ -637,6 +672,7 @@ export function buildControls(frame, ctx) {
   };
   if (typeof document !== 'undefined') {
     document.addEventListener('pointerdown', onDocMenuOutside, { passive: true });
+    document.addEventListener('focusin', onDocMenuOutside, { passive: true });
   }
 
   const rippleLeft = h('div', { class: 'ctl-seek-ripple left hidden' },
@@ -852,8 +888,14 @@ export function buildControls(frame, ctx) {
       }, '✕')));
 
   const syncPill = h('div', { class: 'ctl-sync-pill', id: 'ctl-sync-pill', title: 'Canlı oda senkronizasyon durumu' }, syncDot, syncText);
+  const embedTouchHudBtn = h('button', {
+    type: 'button',
+    class: 'btn embed-touch-hud-btn hidden',
+    id: 'ctl-embed-hud-btn',
+    ...tapProps(() => toggleMenu('list')),
+  }, ico('settings'), 'Kontroller');
   const barRow = h('div', { class: 'ctl-bar-row' },
-    h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: 'vol-wrap' }, volBtn, volRange), time),
+    h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: `vol-wrap ${isIosFixedVol ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange), time),
     h('div', { class: 'ctl-spacer' }),
     h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, castBtn, pipBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
@@ -876,9 +918,10 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
-  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, nextEpBanner, breakBanner, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, embedTouchHudBtn, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
+    if (document.body.classList.contains('mesh-minimized')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target?.tagName || '').toLowerCase();
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
@@ -1122,17 +1165,19 @@ export function buildControls(frame, ctx) {
     updateUnmuteVisibility();
     renderCinemaSeats();
     const m = state.mesh?.media;
-    if (m && !state.mesh?.curated && !m.isMusic && !m.live && !host.adapter?.caps?.live && p > 12 && d > 45 && Date.now() - lastProgressSavedAt > 15000) {
+    if (m && !state.mesh?.curated && !m.isMusic && !m.live && !host.adapter?.caps?.live && !(host.adapter?.initialSeekPending > 3) && p > 12 && d > 45 && Date.now() - lastProgressSavedAt > 15000) {
       lastProgressSavedAt = Date.now();
       saveWatchProgress({ ...m, poster: m.poster || thumbFor(m) || m.thumbnail || '' }, p, d);
     }
-    skipIntroBtn.classList.add('hidden');
+    const activeIntro = getActiveIntro();
+    skipIntroBtn.classList.toggle('hidden', !(activeIntro && p >= Number(activeIntro.start || 0) && p <= Number(activeIntro.end || 0) - 2));
     const rem = d > 300 ? d - p : 9999;
     const curEpKey = m ? `${m.tmdbId || m.id || m.title}:${m.season || 1}:${m.episode || 1}` : '';
-    if (m?.mediaType === 'tv' && m?.tmdbId && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
-      const nextEp = Number(m.episode || 1) + 1;
-      const curSeason = Number(m.season || 1);
-      const cleanSeries = (m.seriesTitle || (m.title || 'Dizi').split(' — ')[0]).trim();
+    const nextSpecBanner = (m?.mediaType === 'tv' && m?.tmdbId) ? computeNextEpSpec(m, Number(m.season || 1), Number(m.episode || 1)) : null;
+    if (nextSpecBanner && !nextSpecBanner.isFinale && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
+      const nextEp = nextSpecBanner.episode;
+      const curSeason = nextSpecBanner.season;
+      const cleanSeries = nextSpecBanner.cleanSeries;
       const pctCountdown = Math.max(0, Math.min(100, ((35 - rem) / 35) * 100));
       const posterSrc = thumbFor(m) || '/static/watchlivo-logo.svg';
       nextEpBanner.classList.remove('hidden');
@@ -1311,7 +1356,7 @@ export function buildControls(frame, ctx) {
     if (frame.classList.contains('fullscreen') || document.body.classList.contains('vortex-fs')) {
       return true;
     }
-    return window.innerWidth <= 960 || window.innerHeight <= 560;
+    return window.innerWidth <= 960 || window.innerHeight <= 560 || frame.clientHeight < 460 || frame.clientWidth < 400;
   };
   const syncMenuPortal = () => {
     if (typeof document === 'undefined') return;
@@ -1774,6 +1819,41 @@ export function buildControls(frame, ctx) {
     },
       optIconLbl('volume', 'Akıllı Ses Kısma (Konuşmada)'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, autoDuckOn ? 'Açık ✓' : 'Kapalı')));
+    if (isIosFixedVol) {
+      const mutedNow = isActuallyMuted();
+      items.push(h('div', {
+        class: `opt ${!mutedNow ? 'on' : ''}`,
+        id: 'ctl-opt-ios-mute',
+        onclick: (e) => {
+          e.stopPropagation();
+          if (mutedNow) doUnlockAudio();
+          else { host.setMuted(true, true); update(); }
+          renderMenuView('list');
+        },
+      },
+        optIconLbl(mutedNow ? 'mute' : 'volume', mutedNow ? 'Sesi Aç (iOS Ses Kontrolü)' : 'Sesi Kapat / Sessize Al'),
+        h('span', { class: 'dim', style: { fontSize: '.85em' } }, mutedNow ? 'Sessiz' : 'Açık ✓')));
+    }
+    const vMenuEl = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video)');
+    const iosAvFs = vMenuEl && (vMenuEl.webkitEnterFullscreen || vMenuEl.webkitEnterFullScreen);
+    if (typeof iosAvFs === 'function') {
+      items.push(h('div', {
+        class: 'opt',
+        id: 'ctl-opt-ios-avfs',
+        onclick: (e) => {
+          e.stopPropagation();
+          closeMenu();
+          try {
+            vMenuEl.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
+            iosAvFs.call(vMenuEl);
+          } catch (_) {
+            toast('Yerel tam ekran için videonun yüklenmesini bekleyin');
+          }
+        },
+      },
+        optIconLbl('fullscreen', '📱 iOS Yerel Tam Ekran (AVPlayer)'),
+        h('span', { class: 'dim', style: { fontSize: '.85em' } }, 'Aç ›')));
+    }
     items.push(h('div', {
       class: 'opt',
       id: 'ctl-opt-cast',
@@ -1817,7 +1897,7 @@ export function buildControls(frame, ctx) {
     const ae = document.activeElement;
     const isInputFocused = Boolean(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
     if (!isInputFocused) {
-      document.body.classList.remove('kb-open');
+      document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
       document.documentElement.style.setProperty('--vvh', '100%');
       document.documentElement.style.setProperty('--vv-top', '0px');
     }
@@ -1939,14 +2019,6 @@ export function buildControls(frame, ctx) {
         onViewportChange();
       });
       return;
-    }
-    const iosEnterFs = v && (v.webkitEnterFullscreen || v.webkitEnterFullScreen);
-    if (typeof iosEnterFs === 'function' && v.readyState >= 1) {
-      try {
-        v.addEventListener('webkitendfullscreen', onNativeFsChange, { once: true });
-        iosEnterFs.call(v);
-        return;
-      } catch (e) { /* fallback to CSS fullscreen below */ }
     }
     frame.classList.add('fullscreen');
     document.body.classList.add('vortex-fs');
@@ -2091,16 +2163,58 @@ export function buildControls(frame, ctx) {
     const isSeries = !isMovie && Boolean(m.mediaType === 'tv' || parsedTitleEp);
     breakTopBtn.classList.toggle('hidden', !has);
     epBtn.classList.toggle('hidden', !isSeries);
-    nextEpTopBtn.classList.toggle('hidden', !isSeries || (!isLeader() && !canSelectVideo()));
+    const sNum = curSeasonNum || 1;
+    const eNum = curEpNum || 1;
+    if (isSeries && !m.episodeCount && !(Array.isArray(m.seasonsMeta) && m.seasonsMeta.length) && (m.tmdbId || m.seriesTitle || m.title)) {
+      const hydKey = `${m.tmdbId || m.seriesTitle || m.title}:${sNum}`;
+      if (typeof window !== 'undefined') {
+        window.__wlSeasonsHydrated = window.__wlSeasonsHydrated || {};
+        const cachedHyd = window.__wlSeasonsHydrated[hydKey];
+        if (cachedHyd && cachedHyd !== 'pending') {
+          m.episodeCount = cachedHyd.episodeCount || 0;
+          m.totalSeasons = cachedHyd.totalSeasons || 0;
+          m.seasonsMeta = cachedHyd.seasonsMeta || [];
+        } else if (!cachedHyd) {
+          window.__wlSeasonsHydrated[hydKey] = 'pending';
+          const q = new URLSearchParams({
+            tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '',
+            title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
+            mediaType: 'tv',
+            season: String(sNum),
+          });
+          fetch(`/api/rave/seasons?${q.toString()}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((inf) => {
+              if (inf && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
+                const payload = {
+                  episodeCount: Array.isArray(inf.episodes) ? inf.episodes.length : 0,
+                  totalSeasons: Array.isArray(inf.seasons) ? inf.seasons.length : 0,
+                  seasonsMeta: Array.isArray(inf.seasons)
+                    ? inf.seasons.map((sx) => ({ season: Number(sx.season || sx.season_number || 0), episodeCount: Number(sx.episodeCount || sx.episode_count || 0) }))
+                    : [],
+                };
+                window.__wlSeasonsHydrated[hydKey] = payload;
+                if (state.mesh?.media) {
+                  state.mesh.media.episodeCount = payload.episodeCount || state.mesh.media.episodeCount || 0;
+                  state.mesh.media.totalSeasons = payload.totalSeasons || state.mesh.media.totalSeasons || 0;
+                  state.mesh.media.seasonsMeta = payload.seasonsMeta.length ? payload.seasonsMeta : (state.mesh.media.seasonsMeta || []);
+                  update();
+                }
+              }
+            })
+            .catch(() => {});
+        }
+      }
+    }
+    const nextSpecTop = isSeries ? computeNextEpSpec(m, sNum, eNum) : null;
+    nextEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(nextSpecTop?.isFinale) || (!isLeader() && !canSelectVideo()));
     if (isSeries) {
-      const sNum = curSeasonNum || 1;
-      const eNum = curEpNum || 1;
       const epSig = `S${sNum}:B${eNum}`;
       if (epBtn.dataset.sig !== epSig) {
         epBtn.dataset.sig = epSig;
         epBtn.replaceChildren(ico('episodes'), epSig);
       }
-      const nextSig = `B${eNum + 1}`;
+      const nextSig = nextSpecTop?.shortSig || `B${eNum + 1}`;
       if (nextEpTopBtn.dataset.sig !== nextSig) {
         nextEpTopBtn.dataset.sig = nextSig;
         nextEpTopBtn.replaceChildren(ico('skip'), nextSig);
@@ -2219,6 +2333,7 @@ export function buildControls(frame, ctx) {
     timeline.classList.toggle('locked', !leader || !canSeek);
     mid.style.pointerEvents = embedOnly ? 'none' : 'auto';
     controls.classList.toggle('passthrough-mid', !!embedOnly);
+    embedTouchHudBtn.classList.toggle('hidden', !(embedOnly && has));
     const status = `${m.meshStateStatus}|${m.lastActionBy || ''}`;
     if (status !== lastStatus) {
       lastStatus = status;
@@ -2254,7 +2369,7 @@ export function buildControls(frame, ctx) {
       }, 12000);
     },
     destroy: () => {
-      if (state.mesh?.media && !state.mesh?.curated && !state.mesh.media.isMusic && !state.mesh.media.live && smoothPos > 12) {
+      if (state.mesh?.media && !state.mesh?.curated && !state.mesh.media.isMusic && !state.mesh.media.live && !(host.adapter?.initialSeekPending > 3) && smoothPos > 12) {
         saveWatchProgress({ ...state.mesh.media, poster: state.mesh.media.poster || thumbFor(state.mesh.media) || state.mesh.media.thumbnail || '' }, smoothPos, duration(), { forceCloud: true });
       }
       clearInterval(tickTimer);
@@ -2264,6 +2379,7 @@ export function buildControls(frame, ctx) {
       try { stageResizeObs?.disconnect?.(); } catch (e) { /* ignore */ }
       if (typeof document !== 'undefined') {
         document.removeEventListener('pointerdown', onDocMenuOutside);
+        document.removeEventListener('focusin', onDocMenuOutside);
       }
       menuBackdrop.remove();
       menu.remove();

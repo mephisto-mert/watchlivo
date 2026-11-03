@@ -1,12 +1,12 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v79';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v79';
-import { avatar } from '../profile.js?v=20261103_v79';
-import { clock } from '../sync.js?v=20261103_v79';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v79';
-import { copyInvite, inviteUrl } from './chat.js?v=20261103_v79';
-import { parseVideoUrl } from '../providers.js?v=20261103_v79';
-import { resolveMedia } from './selection.js?v=20261103_v79';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v80';
+import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v80';
+import { avatar } from '../profile.js?v=20261103_v80';
+import { clock } from '../sync.js?v=20261103_v80';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v80';
+import { copyInvite, inviteUrl } from './chat.js?v=20261103_v80';
+import { parseVideoUrl } from '../providers.js?v=20261103_v80';
+import { resolveMedia } from './selection.js?v=20261103_v80';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -109,7 +109,17 @@ function Vote(ctx) {
     const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
     const parsed = parseVideoUrl(url);
     if (!parsed) {
-      toast('Geçerli bir video bağlantısı girin veya Katalogdan Ara\'ya tıklayın');
+      urlInput.value = '';
+      ctx?.layout?.openSearch?.();
+      setTimeout(() => {
+        const sInp = document.querySelector('#mesh-root .panel input.input');
+        if (sInp) {
+          sInp.value = raw;
+          sInp.dispatchEvent(new Event('input', { bubbles: true }));
+          try { sInp.focus(); } catch (_) {}
+        }
+      }, 60);
+      toast(`🔍 "${raw}" katalogda aranıyor...`);
       return;
     }
     toast('⏳ Video bilgisi alınıyor...');
@@ -173,7 +183,7 @@ function Vote(ctx) {
       q.length ? h('div', { class: 'vote-list' }, q.map((item, i) => {
         const votes = (item.votes || []).length;
         return h('div', { class: `vote-card ${votes && votes === maxVotes ? 'winning' : ''} ${(item.votes || []).includes(me) ? 'voted' : ''}`, onclick: () => ctx.actions.voteVideo(i) },
-          h('img', { src: thumbFor(item) || '/static/watchlivo-logo.svg', alt: '' }),
+          h('img', { src: thumbFor(item) || '/static/watchlivo-logo.svg', alt: '', onerror: (e) => { e.target.onerror = null; e.target.src = '/static/watchlivo-poster.svg'; } }),
           h('div', { class: 'vi' }, h('div', { class: 'vt' }, item.title || 'Video'), h('div', { class: 'vs' }, `${item.addedBy || ''} ekledi`),
             lead ? h('div', { style: { display: 'flex', gap: '.3em', marginTop: '.35em' } },
               h('button', { class: 'btn', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); ctx.actions.playQueueIndex(i); } }, 'Şimdi Oynat'),

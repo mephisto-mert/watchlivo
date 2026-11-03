@@ -15,8 +15,10 @@ import base64
 import hashlib
 import html as html_mod
 import json
+import math
 import re
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
@@ -169,6 +171,54 @@ def _clean(v: Any, limit: int = 200) -> str:
     return str(v or "").strip()[:limit]
 
 
+def _finite_float(v: Any, default: float = 0.0, lo: Optional[float] = None, hi: Optional[float] = None) -> float:
+    try:
+        f = float(v)
+        if not math.isfinite(f):
+            f = default
+    except (TypeError, ValueError, OverflowError):
+        f = default
+    if lo is not None and f < lo:
+        f = lo
+    if hi is not None and f > hi:
+        f = hi
+    return f
+
+
+def _safe_int(v: Any, default: int = 0, lo: Optional[int] = None, hi: Optional[int] = None) -> int:
+    try:
+        f = float(v)
+        if not math.isfinite(f):
+            n = default
+        else:
+            n = int(f)
+    except (TypeError, ValueError, OverflowError):
+        n = default
+    if lo is not None and n < lo:
+        n = lo
+    if hi is not None and n > hi:
+        n = hi
+    return n
+
+
+def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_default") -> str:
+    verified = _clean(request.scope.get("wl_uid"), 64)
+    if verified:
+        return verified
+    cand = _clean(raw_uid, 64)
+    if cand.lower().startswith("u_wl_"):
+        return fallback
+    return cand or fallback
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        full_new = urllib.parse.urljoin(req.full_url, newurl)
+        if not is_safe_public_url(full_new):
+            raise urllib.error.URLError("Unsafe redirect blocked")
+        return super().redirect_request(req, fp, code, msg, headers, full_new)
+
+
 def _compute_medal(minutes: int) -> str:
     if minutes >= 300:
         return "🥇 Altın İzleyici"
@@ -240,7 +290,7 @@ def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str,
 # ---------------------------------------------------------------------------
 async def social_state(request: Request) -> JSONResponse:
     q = request.query_params
-    uid = _clean(q.get("uid") or request.scope.get("wl_uid") or q.get("handle") or q.get("name") or "guest_default", 64)
+    uid = _caller_uid(request, q.get("uid") or q.get("handle") or q.get("name"), "guest_default")
     name = _clean(q.get("name"), 32)
     handle = _clean(q.get("handle"), 32)
     u = _ensure_user_social(uid, name, handle)
@@ -254,7 +304,7 @@ async def social_state(request: Request) -> JSONResponse:
             _DM_THREADS[tk] = persisted_dm
         msgs = _DM_THREADS.get(tk) or []
         last_m = msgs[-1] if msgs else None
-        unr = int((u.get("unread") or {}).get(p_uid) or 0)
+        unr = _safe_int((u.get("unread") or {}).get(p_uid), 0, lo=0)
         total_unread += unr
         threads_summary.append({
             "peer": fr,
@@ -278,7 +328,9 @@ async def social_friends_action(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
-    uid = _clean(body.get("uid") or request.scope.get("wl_uid") or body.get("fromName") or "guest_default", 64)
+    if not isinstance(body, dict):
+        body = {}
+    uid = _caller_uid(request, body.get("uid") or body.get("fromName"), "guest_default")
     name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     handle = _clean(body.get("fromHandle") or body.get("handle"), 32)
     u = _ensure_user_social(uid, name, handle)
@@ -334,7 +386,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
         if target_req:
             u["requests"] = [r for r in reqs if r.get("id") != target_req.get("id")]
             if action == "accept":
-                mins = int(target_req.get("watchMinutes") or 45)
+                mins = _safe_int(target_req.get("watchMinutes"), 45, lo=0, hi=1000000)
                 new_fr = {
                     "uid": target_req.get("fromUid") or f"u_{uuid.uuid4().hex[:6]}",
                     "name": target_req.get("fromName") or "İzleyici",
@@ -361,13 +413,10 @@ async def social_friends_action(request: Request) -> JSONResponse:
 
     elif action == "add_minutes":
         target_uid = _clean(body.get("targetUid"), 64)
-        try:
-            delta = max(1, min(120, int(body.get("minutes") or 5)))
-        except (TypeError, ValueError):
-            delta = 5
+        delta = _safe_int(body.get("minutes"), 5, lo=1, hi=120)
         for f in u.get("friends", []):
             if f.get("uid") == target_uid or not target_uid:
-                f["watchMinutes"] = int(f.get("watchMinutes") or 0) + delta
+                f["watchMinutes"] = _safe_int(f.get("watchMinutes"), 0, lo=0) + delta
                 f["medal"] = _compute_medal(f["watchMinutes"])
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
         return JSONResponse({"ok": True, "friends": u["friends"]})
@@ -377,7 +426,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
 
 async def social_dm_get(request: Request) -> JSONResponse:
     q = request.query_params
-    uid = _clean(q.get("uid") or request.scope.get("wl_uid") or "guest_default", 64)
+    uid = _caller_uid(request, q.get("uid"), "guest_default")
     peer_id = _clean(q.get("peerId"), 64) or "u_ayla_cinema"
     u = _ensure_user_social(uid)
     if isinstance(u.get("unread"), dict):
@@ -395,7 +444,9 @@ async def social_dm_send(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
-    uid = _clean(body.get("uid") or request.scope.get("wl_uid") or "guest_default", 64)
+    if not isinstance(body, dict):
+        body = {}
+    uid = _caller_uid(request, body.get("uid"), "guest_default")
     name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     color = _clean(body.get("color"), 16) or "#27DCC8"
     peer_id = _clean(body.get("peerId"), 64) or "u_ayla_cinema"
@@ -405,7 +456,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
     if snap and len(snap) > 85000:
         snap = ""
     raw_an = body.get("audioNote")
-    audio_note = raw_an if (isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 140000) else None
+    audio_note = raw_an if (isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000) else None
     if not text and not snap and not audio_note and not room_invite:
         return JSONResponse({"ok": False, "error": "Boş mesaj gönderilemez."}, status_code=400)
     _ensure_user_social(uid, name)
@@ -524,8 +575,9 @@ async def link_preview(request: Request) -> JSONResponse:
 
     if is_safe_public_url(raw_url):
         try:
+            opener = urllib.request.build_opener(_SafeRedirectHandler())
             req = urllib.request.Request(raw_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
-            with urllib.request.urlopen(req, timeout=2.8) as r:
+            with opener.open(req, timeout=2.8) as r:
                 ctype = str(r.headers.get("Content-Type") or "").lower()
                 if "html" in ctype or not ctype:
                     html_str = r.read(96000).decode("utf-8", errors="ignore")
@@ -764,6 +816,8 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = dict(request.query_params)
+    if not isinstance(body, dict):
+        body = dict(request.query_params)
     q_a = _clean(body.get("trackA") or body.get("a"), 200)
     q_b = _clean(body.get("trackB") or body.get("b"), 200)
     if not q_a and not q_b:
@@ -890,6 +944,8 @@ async def ai_image_generate(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = dict(request.query_params)
+    if not isinstance(body, dict):
+        body = dict(request.query_params)
     prompt = _clean(body.get("prompt"), 200)
     style = _clean(body.get("style") or "Cyberpunk", 24)
     tagged_user = _clean(body.get("taggedUser") or body.get("tag"), 32)
@@ -927,6 +983,14 @@ async def ai_image_history(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # 7. Google Drive Folder & Multi-Quality MKV/MP4 Browser (GoogleDriveSelection)
 # ---------------------------------------------------------------------------
+def _sign_drive_proxy(dl_u: str) -> str:
+    try:
+        import server
+        return server._proxy_u(dl_u)
+    except Exception:
+        return f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u, safe='')}"
+
+
 async def gdrive_folder_browse(request: Request) -> JSONResponse:
     raw_url = _clean(request.query_params.get("url"), 1000)
     if not raw_url:
@@ -951,16 +1015,18 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
                 seen_ids.add(d_id)
                 ext = d_name.rsplit(".", 1)[-1].lower() if "." in d_name else "mp4"
                 dl_u = f"https://drive.usercontent.google.com/download?id={d_id}&export=download&confirm=t"
+                p_main = _sign_drive_proxy(dl_u)
+                p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
                 items.append({
                     "id": d_id,
                     "title": _clean(d_name, 140),
                     "format": ext.upper(),
                     "mime": "video/x-matroska" if ext == "mkv" else ("video/webm" if ext == "webm" else "video/mp4"),
-                    "url": f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u, safe='')}",
+                    "url": p_main,
                     "directUrl": dl_u,
                     "qualities": [
-                        {"label": "1080p Orijinal (Direct)", "url": f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u, safe='')}"},
-                        {"label": "720p HD Stream", "url": f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u + '&vq=hd720', safe='')}"},
+                        {"label": "1080p Orijinal (Direct)", "url": p_main},
+                        {"label": "720p HD Stream", "url": p_720},
                     ],
                 })
                 if len(items) >= 24:
@@ -987,7 +1053,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
 
     fid_single = (file_m.group(1) or file_m.group(2)) if file_m else raw_url.strip()
     dl_u = f"https://drive.usercontent.google.com/download?id={urllib.parse.quote(fid_single)}&export=download&confirm=t"
-    proxied = f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u, safe='')}"
+    proxied = _sign_drive_proxy(dl_u)
     items.append({
         "id": fid_single,
         "title": f"Google Drive Video ({fid_single[:10]})",
@@ -1010,6 +1076,8 @@ async def moderation_report(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     target_type = _clean(body.get("targetType") or "room", 20)
     target_id = _clean(body.get("targetId"), 80)
@@ -1038,7 +1106,9 @@ async def notifications_subscribe(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
-    uid = _clean(body.get("uid") or request.scope.get("wl_uid") or body.get("name") or "guest_default", 64).lower()
+    if not isinstance(body, dict):
+        body = {}
+    uid = _caller_uid(request, body.get("uid") or body.get("name"), "guest_default").lower()
     sub = body.get("subscription") if isinstance(body.get("subscription"), dict) else {}
     _PUSH_SUBSCRIPTIONS[uid] = {
         "uid": uid,
@@ -1055,7 +1125,9 @@ async def notifications_send(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
-    from_uid = _clean(body.get("fromUid") or request.scope.get("wl_uid") or "guest_default", 64)
+    if not isinstance(body, dict):
+        body = {}
+    from_uid = _caller_uid(request, body.get("fromUid"), "guest_default")
     from_name = _clean(body.get("fromName") or body.get("sender") or "Arkadaşın", 40)
     room_id = _clean(body.get("roomId"), 80)
     room_title = _clean(body.get("roomTitle") or "Sinema Odası", 120)
@@ -1077,12 +1149,9 @@ async def notifications_send(request: Request) -> JSONResponse:
 
 async def notifications_poll(request: Request) -> JSONResponse:
     q = request.query_params
-    uid = _clean(q.get("uid") or request.scope.get("wl_uid") or "guest_default", 64).lower()
+    uid = _caller_uid(request, q.get("uid"), "guest_default").lower()
     name = _clean(q.get("name"), 40).lower()
-    try:
-        since = float(q.get("since") or ( _now() - 30.0 ))
-    except (TypeError, ValueError):
-        since = _now() - 30.0
+    since = _finite_float(q.get("since"), _now() - 30.0)
     out: List[Dict[str, Any]] = []
     seen_ids = set()
     for key in (uid, name, "*"):
@@ -1111,16 +1180,20 @@ async def notifications_poll(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 def _resolve_user_key(request: Request, body: Optional[Dict[str, Any]] = None) -> str:
     q = request.query_params
-    b = body or {}
+    b = body if isinstance(body, dict) else {}
+    verified = _clean(request.scope.get("wl_uid"), 64)
+    if verified:
+        return re.sub(r"[^a-zA-Z0-9_.@-]", "", verified.lower())[:64] or "guest_local"
     raw = (
-        request.scope.get("wl_uid")
-        or b.get("uid")
+        b.get("uid")
         or q.get("uid")
         or b.get("handle")
         or q.get("handle")
         or ""
     )
     key = re.sub(r"[^a-zA-Z0-9_.@-]", "", str(raw).strip().lower())[:64]
+    if key.startswith("u_wl_"):
+        return "guest_local"
     return key or "guest_local"
 
 
@@ -1129,7 +1202,7 @@ async def user_progress_get(request: Request) -> JSONResponse:
     items = _kv_get(f"wl:user:prog:{ukey}", None, max_age=3.0)
     if not isinstance(items, list):
         items = _USER_PROGRESS.get(ukey, [])
-    items = sorted(items, key=lambda x: float(x.get("updatedAt") or 0), reverse=True)[:24]
+    items = sorted(items, key=lambda x: _finite_float(x.get("updatedAt"), 0.0), reverse=True)[:24]
     return JSONResponse({"ok": True, "uid": ukey, "items": items})
 
 
@@ -1137,6 +1210,8 @@ async def user_progress_save(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     ukey = _resolve_user_key(request, body)
     cur = _kv_get(f"wl:user:prog:{ukey}", None, max_age=1.5)
@@ -1153,30 +1228,50 @@ async def user_progress_save(request: Request) -> JSONResponse:
         title = _clean(body.get("title"), 160)
         if not title and not tid:
             return JSONResponse({"ok": False, "error": "title or tmdbId required"}, status_code=400)
-        season = max(1, int(body.get("season") or 1)) if mtype == "tv" else 0
-        episode = max(1, int(body.get("episode") or 1)) if mtype == "tv" else 0
-        pos = max(0.0, float(body.get("position") or 0.0))
-        dur = max(0.0, float(body.get("duration") or 0.0))
-        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else max(0.0, min(99.0, float(body.get("percent") or 5.0)))
+        season = _safe_int(body.get("season"), 1, lo=1, hi=999) if mtype == "tv" else 0
+        episode = _safe_int(body.get("episode"), 1, lo=1, hi=9999) if mtype == "tv" else 0
+        raw_pos = body.get("position") if body.get("position") is not None else body.get("currentTime")
+        pos = _finite_float(raw_pos, 0.0, lo=0.0, hi=86400.0)
+        dur = _finite_float(body.get("duration"), 0.0, lo=0.0, hi=86400.0)
+        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else _finite_float(body.get("percent"), 5.0, lo=0.0, hi=99.0)
         ikey = _clean(body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+        prev_entry = next((it for it in items if isinstance(it, dict) and str(it.get("key") or "") == ikey), None)
         items = [it for it in items if str(it.get("key") or "") != ikey]
         if not (mtype == "movie" and dur > 300 and pct >= 96.0):
+            ep_map: Dict[str, Any] = dict((prev_entry or {}).get("epProgress") or {}) if mtype == "tv" else {}
+            if isinstance(body.get("epProgress"), dict) and mtype == "tv":
+                for ek, ev in list(body["epProgress"].items())[:120]:
+                    if isinstance(ev, dict):
+                        ep_map[str(ek)[:16]] = {
+                            "pos": round(_finite_float(ev.get("pos") if ev.get("pos") is not None else ev.get("currentTime"), 0.0, lo=0.0, hi=86400.0), 1),
+                            "dur": round(_finite_float(ev.get("dur") if ev.get("dur") is not None else ev.get("duration"), 0.0, lo=0.0, hi=86400.0), 1),
+                            "pct": round(_finite_float(ev.get("pct") if ev.get("pct") is not None else ev.get("percent"), 0.0, lo=0.0, hi=100.0), 1),
+                        }
+            if mtype == "tv" and season > 0 and episode > 0:
+                ep_map[f"{season}:{episode}"] = {"pos": round(pos, 1), "dur": round(dur, 1), "pct": round(pct, 1)}
             entry = {
                 "key": ikey,
                 "tmdbId": tid,
-                "imdbId": _clean(body.get("imdbId"), 32),
+                "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
                 "mediaType": mtype,
-                "provider": _clean(body.get("provider") or "cinema", 32),
+                "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
+                "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
+                "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
                 "title": title or "Sinema",
-                "poster": _clean(body.get("poster") or body.get("thumbnail"), 800),
-                "backdrop": _clean(body.get("backdrop"), 800),
-                "year": _clean(body.get("year"), 10),
+                "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
+                "seriesTitle": _clean(body.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
+                "poster": _clean(body.get("poster") or body.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
+                "backdrop": _clean(body.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
+                "year": _clean(body.get("year") or (prev_entry or {}).get("year"), 10),
                 "season": season,
                 "episode": episode,
                 "position": round(pos, 1),
+                "currentTime": round(pos, 1),
                 "duration": round(dur, 1),
                 "percent": pct,
-                "sourceUrl": _clean(body.get("sourceUrl"), 600),
+                "url": _clean(body.get("url") or (prev_entry or {}).get("url"), 800),
+                "sourceUrl": _clean(body.get("sourceUrl") or (prev_entry or {}).get("sourceUrl"), 600),
+                "epProgress": ep_map if mtype == "tv" else {},
                 "updatedAt": _now(),
             }
             items.insert(0, entry)
@@ -1198,6 +1293,8 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
     try:
         body = await request.json()
     except Exception:
+        body = {}
+    if not isinstance(body, dict):
         body = {}
     ukey = _resolve_user_key(request, body)
     cur = _kv_get(f"wl:user:wlist:{ukey}", None, max_age=1.5)
@@ -1222,7 +1319,7 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
             "title": title or "Sinema",
             "poster": _clean(body.get("poster") or body.get("thumbnail"), 800),
             "year": _clean(body.get("year"), 10),
-            "rating": float(body.get("rating") or 0.0),
+            "rating": _finite_float(body.get("rating"), 0.0, lo=0.0, hi=10.0),
             "sourceUrl": _clean(body.get("sourceUrl"), 600),
             "addedAt": _now(),
         })
@@ -1238,11 +1335,16 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 def _extract_srv_bucket(url_or_host: str, label: str = "") -> str:
     raw = str(url_or_host or "").strip()
-    if "u=" in raw:
+    if "u=" in raw or "sid=" in raw:
         try:
             qs_map = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query)
             if qs_map.get("u"):
                 raw = urllib.parse.unquote(qs_map["u"][0])
+            elif qs_map.get("sid"):
+                import server
+                unpacked, _ = server._stream_sid_unpack(qs_map["sid"][0])
+                if unpacked:
+                    raw = unpacked
         except Exception:
             pass
     host = (urllib.parse.urlparse(raw).hostname or "").lower()
@@ -1303,15 +1405,14 @@ async def server_health_report(request: Request) -> JSONResponse:
         body = await request.json()
     except Exception:
         body = {}
+    if not isinstance(body, dict):
+        body = {}
     url_raw = _clean(body.get("url") or body.get("host"), 1200)
     label = _clean(body.get("label"), 80)
     if not url_raw and not label:
         return JSONResponse({"ok": False}, status_code=400)
     ok = bool(body.get("ok", True)) and not bool(body.get("stalled", False))
-    try:
-        lat_ms = max(20.0, min(15000.0, float(body.get("latencyMs") or (550.0 if ok else 4500.0))))
-    except (TypeError, ValueError):
-        lat_ms = 600.0
+    lat_ms = _finite_float(body.get("latencyMs"), 550.0 if ok else 4500.0, lo=20.0, hi=15000.0)
     bkt = _extract_srv_bucket(url_raw, label)
     hmap = _load_health_map()
     rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0})

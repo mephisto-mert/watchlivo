@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v79';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v79';
-import { avatar } from '../profile.js?v=20261103_v79';
-import { api, qs } from '../api.js?v=20261103_v79';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v79';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v80';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v80';
+import { avatar } from '../profile.js?v=20261103_v80';
+import { api, qs } from '../api.js?v=20261103_v80';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v80';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -508,6 +508,7 @@ export function buildChat(ctx) {
       stopVoiceRecorder(true);
       return;
     }
+    window.vortexStopActiveVoiceNote?.();
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
       toast('Tarayıcınız sesli mesaj kaydını desteklemiyor');
       return;
@@ -548,7 +549,7 @@ export function buildChat(ctx) {
       if (!stObj.shouldSend || !chunks.length) return;
       const durSec = Math.max(0.8, Math.min(25, (Date.now() - startedAt) / 1000));
       const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
-      if (blob.size > 102000) {
+      if (blob.size > 280000) {
         toast('Ses kaydı çok uzun — en fazla 25 saniye gönderilebilir');
         return;
       }
@@ -1085,6 +1086,15 @@ export function buildChat(ctx) {
   }
 
   let activeVoiceAudio = null;
+  if (typeof window !== 'undefined') {
+    window.vortexStopActiveVoiceNote = () => {
+      if (activeVoiceAudio) {
+        try { activeVoiceAudio.pause(); } catch (_) {}
+        activeVoiceAudio = null;
+      }
+      window.vortexSetVoiceNotePlaying?.(false);
+    };
+  }
   function buildAudioNoteWidget(m) {
     const an = m?.audioNote;
     if (!an || !an.dataUrl || !String(an.dataUrl).startsWith('data:audio/')) return null;
@@ -1473,27 +1483,42 @@ export function buildChat(ctx) {
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
 
+  let maxPortraitH = 0;
+  let maxLandscapeH = 0;
   const onVisualViewportResize = () => {
     const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
     const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
     const vv = window.visualViewport;
     const vvH = vv ? vv.height : rawH;
+    const activeEl = document.activeElement;
+    const isInputTag = Boolean(activeEl && /^(INPUT|TEXTAREA)$/i.test(activeEl.tagName) && activeEl.type !== 'range' && activeEl.type !== 'checkbox' && activeEl.type !== 'radio' && activeEl.type !== 'file');
+    const isChatFocused = Boolean(activeEl && (activeEl === input || (el.contains(activeEl) && isInputTag)));
+    const isRoomOrPopupInput = Boolean(isChatFocused || (isInputTag && activeEl.closest?.('#mesh-root, #popup-root')));
     const isLandscape = rawW > rawH * 1.08;
-    const baseH = isLandscape ? Math.min(rawW, rawH) : Math.max(rawH, vvH || 0);
-    const isChatFocused = document.activeElement === input;
-    const kbOpen = Boolean(isChatFocused && vv && (baseH - vvH > 130));
+    if (!isRoomOrPopupInput) {
+      if (isLandscape) maxLandscapeH = Math.max(maxLandscapeH, rawH, vvH || 0);
+      else maxPortraitH = Math.max(maxPortraitH, rawH, vvH || 0);
+    }
+    const baseH = isLandscape
+      ? Math.max(maxLandscapeH, Math.min(rawW, rawH))
+      : Math.max(maxPortraitH, rawH, vvH || 0);
+    const kbOpen = Boolean(isRoomOrPopupInput && ((vv && (baseH - vvH > 95)) || (baseH - rawH > 95)));
     if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     }
     if (kbOpen) {
-      const effH = Math.max(280, Math.round(vvH || rawH));
+      const effH = Math.max(120, Math.round(vv ? vvH : rawH));
+      const vvTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
       document.documentElement.style.setProperty('--vvh', `${effH}px`);
+      document.documentElement.style.setProperty('--vv-top', `${vvTop}px`);
     } else {
       document.documentElement.style.setProperty('--vvh', '100%');
+      document.documentElement.style.setProperty('--vv-top', '0px');
     }
-    document.documentElement.style.setProperty('--vv-top', '0px');
     document.body.classList.toggle('kb-open', kbOpen);
-    if (kbOpen) {
+    document.body.classList.toggle('kb-chat-focus', Boolean(kbOpen && isChatFocused));
+    document.body.classList.toggle('kb-portrait', Boolean(kbOpen && !isLandscape));
+    if (kbOpen && isChatFocused) {
       list.scrollTop = list.scrollHeight;
     }
   };
@@ -1508,6 +1533,7 @@ export function buildChat(ctx) {
   input.addEventListener('blur', () => {
     document.body.classList.remove('kb-open');
     document.documentElement.style.setProperty('--vvh', '100%');
+    document.documentElement.style.setProperty('--vv-top', '0px');
     setTimeout(onVisualViewportResize, 80);
   });
   window.addEventListener('resize', onWindowOrientationOrResize);
@@ -1584,7 +1610,7 @@ export function buildChat(ctx) {
       if (activeVoiceAudio) { try { activeVoiceAudio.pause(); } catch (e) { /* ignore */ } activeVoiceAudio = null; }
       window.vortexSetVoiceNotePlaying?.(false);
       clearTimeout(typingTimer);
-      document.body.classList.remove('kb-open');
+      document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
       document.removeEventListener('pointerdown', onDocOutsideTap);
       window.removeEventListener('resize', onWindowOrientationOrResize);
       window.removeEventListener('orientationchange', onWindowOrientationOrResize);

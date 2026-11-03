@@ -1,5 +1,5 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v79';
+import { toast } from './ui.js?v=20261103_v80';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -22,6 +22,7 @@ export class Voice {
     this.camOn = false;
     this.screenOn = false;
     this.inCall = false;
+    this.destroyed = false;
     this.deafened = false;
     this.stageGridMode = false;
     this.stripMode = false;
@@ -557,7 +558,7 @@ export class Voice {
 
   async _negotiate(id, st) {
     const { pc } = st;
-    if (st.makingOffer || pc.signalingState !== 'stable') return;
+    if (this.destroyed || !pc || st.makingOffer || pc.signalingState !== 'stable') return;
     try {
       st.makingOffer = true;
       const offer = await pc.createOffer();
@@ -657,6 +658,7 @@ export class Voice {
   }
 
   async onSignal(data) {
+    if (this.destroyed) return;
     const from = data.fromId;
     if (!from || from === this.getSelfId()) return;
     if (!this.peers.has(from) && this.peers.size >= 12) return;
@@ -882,7 +884,9 @@ export class Voice {
     }
     try {
       this._isAvatarCam = false;
-      this.camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
+      const freshCam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
+      if (this.destroyed) { freshCam.getTracks().forEach((t) => t.stop()); return false; }
+      this.camStream = freshCam;
       toast('📷 Kamera açıldı');
     } catch (e) {
       this._isAvatarCam = true;
@@ -984,6 +988,7 @@ export class Voice {
             : Promise.reject(new Error('getUserMedia unavailable'));
           const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 7500));
           const freshStream = await Promise.race([gumPromise, timeoutPromise]);
+          if (this.destroyed) { freshStream?.getTracks?.().forEach((t) => t.stop()); return false; }
           if (this._usingSynthStream) {
             this.stream?.getTracks().forEach((t) => t.stop());
             this.synthAudioCtx?.close?.().catch(() => {});
@@ -1076,6 +1081,13 @@ export class Voice {
     this.synthAudioCtx = null;
     this.inCall = false;
     this.deafened = false;
+    this.selfSpeaking = false;
+    this._removeVideoBubble('self');
+    this._removeVideoBubble('self-screen');
+    if (typeof window !== 'undefined') {
+      window.__kinoxVoiceDuckFactor = 1.0;
+      window.__kinoxSyncDuckVolume?.();
+    }
     for (const st of this.peers.values()) {
       if (st?.audio) st.audio.muted = true;
     }
@@ -1126,6 +1138,7 @@ export class Voice {
   }
 
   destroy() {
+    this.destroyed = true;
     clearInterval(this.speakTimer);
     clearInterval(this.synthTimer);
     clearInterval(this.screenSynthTimer);
@@ -1151,6 +1164,6 @@ export class Voice {
     document.getElementById('vortex-cam-dock')?.remove();
     this.audioCtx?.close?.().catch(() => {});
     this.synthAudioCtx?.close?.().catch(() => {});
-    if (typeof window !== 'undefined') window.__kinoxVoiceDuckFactor = 1.0;
+    if (typeof window !== 'undefined') { window.__kinoxVoiceDuckFactor = 1.0; window.__kinoxSyncDuckVolume?.(); }
   }
 }

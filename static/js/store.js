@@ -135,7 +135,7 @@ export const isCreatorSelf = () => {
   return false;
 };
 export const isActiveTimeKeeper = () => {
-  if (!state.mesh) return false;
+  if (!state.mesh || state.mesh.curated) return false;
   const myCid = state.clientId;
   const hostId = state.mesh.host_id;
   if (hostId && myCid && hostId === myCid) return true;
@@ -145,7 +145,7 @@ export const isActiveTimeKeeper = () => {
   return false;
 };
 export const isHostOnly = () => {
-  if (!state.mesh) return false;
+  if (!state.mesh || state.mesh.curated) return false;
   if (isActiveTimeKeeper() || isCreatorSelf()) return true;
   return false;
 };
@@ -178,6 +178,11 @@ const _normTs = (v) => {
   return n < 1e11 ? Math.round(n * 1000) : Math.round(n);
 };
 
+const _authHdrs = () => {
+  const tok = state.self?.authToken;
+  return (tok && !state.self?.isGuest) ? { Authorization: `Bearer ${tok}` } : {};
+};
+
 export function getCloudUid() {
   const s = state.self;
   const isRealAccount = Boolean(s && !s.isGuest && (s.email || s.authToken || (s.id && !String(s.id).startsWith('guest_'))));
@@ -206,8 +211,8 @@ export async function syncCloudUserMedia(force = false) {
   let favsChanged = false;
   try {
     const [pRes, wRes] = await Promise.allSettled([
-      fetch(`/api/user/progress?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)),
-      fetch(`/api/user/watchlist?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/user/progress?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin', headers: _authHdrs() }).then((r) => (r.ok ? r.json() : null)),
+      fetch(`/api/user/watchlist?uid=${encodeURIComponent(uid)}`, { credentials: 'same-origin', headers: _authHdrs() }).then((r) => (r.ok ? r.json() : null)),
     ]);
     const cloudProg = pRes.status === 'fulfilled' && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
     if (cloudProg && cloudProg.length) {
@@ -224,25 +229,36 @@ export async function syncCloudUserMedia(force = false) {
         const cTs = _normTs(c.updatedAt);
         const prev = byKey.get(k);
         if (!prev || cTs >= _normTs(prev.updatedAt)) {
+          const syncedPos = Math.max(0, Math.floor(Number(c.currentTime ?? c.position ?? prev?.currentTime ?? 0)));
+          const mergedEpProg = {
+            ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}),
+            ...(c.epProgress && typeof c.epProgress === 'object' ? c.epProgress : {}),
+          };
           byKey.set(k, {
             ...(prev || {}),
             historyId: k,
             key: k,
             title: c.title || prev?.title || 'Sinema',
+            originalTitle: c.originalTitle || prev?.originalTitle || '',
+            seriesTitle: c.seriesTitle || prev?.seriesTitle || '',
             thumbnail: c.poster || c.backdrop || prev?.thumbnail || '',
             poster: c.poster || prev?.poster || prev?.thumbnail || '',
             backdrop: c.backdrop || prev?.backdrop || '',
             provider: c.provider || prev?.provider || 'cinema',
-            catalogProvider: c.provider || prev?.catalogProvider || 'cinema',
+            catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || 'cinema',
+            streamType: c.streamType || prev?.streamType || '',
             tmdbId: c.tmdbId || prev?.tmdbId || '',
             imdbId: c.imdbId || prev?.imdbId || '',
             mediaType: mtype,
             season: Number(c.season || prev?.season || 1),
             episode: Number(c.episode || prev?.episode || 1),
-            url: c.sourceUrl || prev?.url || '',
-            currentTime: Math.max(0, Math.floor(Number(c.position ?? prev?.currentTime ?? 0))),
+            url: c.url || c.sourceUrl || prev?.url || '',
+            officialUrl: c.sourceUrl || prev?.officialUrl || '',
+            currentTime: syncedPos,
+            position: syncedPos,
             duration: Math.max(0, Math.floor(Number(c.duration ?? prev?.duration ?? 0))),
             percent: Number(c.percent ?? prev?.percent ?? 0),
+            epProgress: mergedEpProg,
             year: c.year || prev?.year || '',
             updatedAt: cTs || now,
           });
@@ -313,7 +329,7 @@ export function clearWatchHistory() {
   if (typeof fetch === 'function') {
     fetch('/api/user/progress', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({ uid: getCloudUid(), action: 'clear' }),
       keepalive: true,
     }).catch(() => {});
@@ -331,43 +347,120 @@ export function removeWatchProgress(itemKey) {
   if (typeof fetch === 'function') {
     fetch('/api/user/progress', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({ uid: getCloudUid(), action: 'remove', key: k }),
       keepalive: true,
     }).catch(() => {});
   }
 }
 
+export function findSavedProgress(mediaOrItem, season = null, episode = null) {
+  if (!mediaOrItem) return null;
+  const list = getWatchHistory();
+  if (!list.length) return null;
+  const mtype = (mediaOrItem.mediaType === 'tv' || mediaOrItem.type === 'SHOW') ? 'tv' : 'movie';
+  const tid = String(mediaOrItem.tmdbId || (/^\d+$/.test(String(mediaOrItem.id || '')) ? mediaOrItem.id : '') || '').trim();
+  const baseTitle = String(mediaOrItem.seriesTitle || mediaOrItem.originalTitle || mediaOrItem.title || '').split(' — ')[0].trim().toLowerCase();
+  const hit = list.find((it) => {
+    if (!it) return false;
+    const itType = it.mediaType === 'tv' ? 'tv' : 'movie';
+    if (tid && String(it.tmdbId || '').trim() === tid && itType === mtype) return true;
+    if (mediaOrItem.videoId && it.videoId && String(it.videoId) === String(mediaOrItem.videoId)) return true;
+    const itBase = String(it.seriesTitle || it.originalTitle || it.title || '').split(' — ')[0].trim().toLowerCase();
+    return Boolean(!tid && baseTitle && baseTitle.length >= 2 && itBase === baseTitle && itType === mtype);
+  });
+  if (!hit) return null;
+  const effSeason = season ?? mediaOrItem.season ?? null;
+  const effEpisode = episode ?? mediaOrItem.episode ?? null;
+  if (mtype === 'tv' && effSeason != null && effEpisode != null && Number(effSeason) > 0 && Number(effEpisode) > 0) {
+    const sNum = Math.max(1, Number(effSeason) || 1);
+    const eNum = Math.max(1, Number(effEpisode) || 1);
+    if (Number(hit.season || 1) === sNum && Number(hit.episode || 1) === eNum) {
+      return hit;
+    }
+    const epSaved = hit.epProgress && typeof hit.epProgress === 'object' ? hit.epProgress[`${sNum}:${eNum}`] : null;
+    const epSec = Math.floor(Number(epSaved?.currentTime ?? epSaved?.position ?? 0));
+    if (epSaved && epSec > 3) {
+      return {
+        ...hit,
+        season: sNum,
+        episode: eNum,
+        currentTime: epSec,
+        position: epSec,
+        duration: Math.max(0, Math.floor(Number(epSaved.duration || hit.duration || 0))),
+        percent: Number(epSaved.percent || 0),
+      };
+    }
+    return null;
+  }
+  return hit;
+}
+
 export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   if (!media || (!media.url && !media.videoId && !media.tmdbId)) return;
-  const dur = Math.floor(Number(duration || media.duration || 0));
-  const resumeTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 5 ? Math.floor(Number(currentTime)) : 0;
+  const rawDur = Math.floor(Number(duration || media.duration || 0));
+  const rawTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 3 ? Math.floor(Number(currentTime)) : 0;
   const mtype = media.mediaType === 'tv' ? 'tv' : 'movie';
   const id = media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || '');
-  const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? 8 : 4);
-  try {
-    const list = getWatchHistory().filter((item) => String(item.historyId || item.key || '') !== id);
-    list.unshift({
-      historyId: id,
-      key: id,
-      title: media.title || 'Video',
-      channel: media.channel || media.artist || '',
-      thumbnail: media.poster || media.thumbnail || '',
-      poster: media.poster || media.thumbnail || '',
-      backdrop: media.backdrop || '',
-      provider: media.catalogProvider || media.provider || 'netflix',
-      catalogProvider: media.catalogProvider || media.provider || 'netflix',
-      tmdbId: media.tmdbId || '',
-      imdbId: media.imdbId || '',
-      mediaType: mtype,
-      season: media.season || 1,
-      episode: media.episode || 1,
-      year: media.year || '',
-      url: media.url || '',
-      videoId: media.videoId || '',
+  const existingList = getWatchHistory();
+  const prev = existingList.find((item) => String(item.historyId || item.key || '') === id);
+  const sNum = Math.max(1, Number(media.season || 1));
+  const eNum = Math.max(1, Number(media.episode || 1));
+  const sameEp = Boolean(prev && (mtype !== 'tv' || (Number(prev.season || 1) === sNum && Number(prev.episode || 1) === eNum)));
+  const prevEpObj = (!sameEp && mtype === 'tv' && prev?.epProgress) ? prev.epProgress[`${sNum}:${eNum}`] : null;
+  const prevTime = sameEp
+    ? Math.max(0, Math.floor(Number(prev.currentTime ?? prev.position ?? 0)))
+    : Math.max(0, Math.floor(Number(prevEpObj?.currentTime ?? prevEpObj?.position ?? 0)));
+  const preserveExistingPos = !opts?.resetPosition && opts?.preserveExistingPos !== false;
+  const resumeTime = (rawTime === 0 && prevTime > 3 && preserveExistingPos) ? prevTime : rawTime;
+  const dur = rawDur > 0 ? rawDur : (sameEp ? Math.max(0, Math.floor(Number(prev?.duration || 0))) : Math.max(0, Math.floor(Number(prevEpObj?.duration || 0))));
+  const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? Math.max(8, Number(prev?.percent || 8)) : 4);
+  if (mtype !== 'tv' && dur > 300 && pct >= 96 && resumeTime > 60) {
+    removeWatchProgress(id);
+    return;
+  }
+  const epMap = { ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}) };
+  if (mtype === 'tv') {
+    epMap[`${sNum}:${eNum}`] = {
       currentTime: resumeTime,
       duration: dur,
       percent: pct,
+      updatedAt: Date.now(),
+    };
+  }
+  const origTitle = media.originalTitle || prev?.originalTitle || '';
+  const serTitle = mtype === 'tv' ? (media.seriesTitle || prev?.seriesTitle || String(media.title || prev?.title || '').split(' — ')[0].trim()) : '';
+  const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || 'cinema';
+  const sType = media.streamType || prev?.streamType || '';
+  try {
+    const list = existingList.filter((item) => String(item.historyId || item.key || '') !== id);
+    list.unshift({
+      historyId: id,
+      key: id,
+      title: media.title || prev?.title || 'Video',
+      originalTitle: origTitle,
+      seriesTitle: serTitle,
+      channel: media.channel || media.artist || prev?.channel || '',
+      thumbnail: media.poster || media.thumbnail || prev?.thumbnail || '',
+      poster: media.poster || media.thumbnail || prev?.poster || '',
+      backdrop: media.backdrop || prev?.backdrop || '',
+      provider: catProv,
+      catalogProvider: catProv,
+      streamType: sType,
+      tmdbId: media.tmdbId || prev?.tmdbId || '',
+      imdbId: media.imdbId || prev?.imdbId || '',
+      mediaType: mtype,
+      season: sNum,
+      episode: eNum,
+      year: media.year || prev?.year || '',
+      url: media.url || prev?.url || '',
+      officialUrl: media.officialUrl || prev?.officialUrl || '',
+      videoId: media.videoId || prev?.videoId || '',
+      currentTime: resumeTime,
+      position: resumeTime,
+      duration: dur,
+      percent: pct,
+      epProgress: epMap,
       updatedAt: Date.now(),
     });
     localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, 40)));
@@ -378,7 +471,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
     _lastCloudProgPush.set(id, now);
     fetch('/api/user/progress', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({
         uid: getCloudUid(),
         action: 'upsert',
@@ -386,17 +479,24 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
         tmdbId: String(media.tmdbId || ''),
         imdbId: String(media.imdbId || ''),
         mediaType: mtype,
-        provider: media.catalogProvider || media.provider || 'cinema',
+        provider: catProv,
+        catalogProvider: catProv,
+        streamType: sType,
         title: media.title || 'Video',
+        originalTitle: origTitle,
+        seriesTitle: serTitle,
         poster: media.poster || media.thumbnail || '',
         backdrop: media.backdrop || '',
         year: String(media.year || ''),
-        season: Number(media.season || 1),
-        episode: Number(media.episode || 1),
+        season: sNum,
+        episode: eNum,
         position: resumeTime,
+        currentTime: resumeTime,
         duration: dur,
         percent: pct,
-        sourceUrl: media.officialUrl || media.url || '',
+        epProgress: epMap,
+        url: media.url || prev?.url || '',
+        sourceUrl: media.officialUrl || prev?.officialUrl || media.url || '',
       }),
       keepalive: true,
     }).catch(() => {});
@@ -410,15 +510,16 @@ export function getFavorites() {
 export function isFavoriteMedia(item) {
   if (!item) return false;
   const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
-  const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '');
-  const ikey = item.key || (item.tmdbId || item.id ? `${mtype}:${item.tmdbId || item.id}` : '');
-  return getFavorites().some((f) => String(f.favId) === id || (ikey && String(f.key || '') === ikey));
+  const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '').trim();
+  if (!id) return false;
+  const ikey = String(item.key || (item.tmdbId || item.id ? `${mtype}:${item.tmdbId || item.id}` : `${mtype}:${id}`)).trim();
+  return getFavorites().some((f) => (id && String(f.favId || '').trim() === id) || (ikey && String(f.key || '').trim() === ikey));
 }
 
 export function toggleFavoriteMedia(item) {
   if (!item) return false;
   const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
-  const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '');
+  const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '').trim();
   if (!id) return false;
   const ikey = item.key || `${mtype}:${id}`;
   const list = getFavorites();
@@ -444,7 +545,7 @@ export function toggleFavoriteMedia(item) {
   if (typeof fetch === 'function') {
     fetch('/api/user/watchlist', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({
         uid: getCloudUid(),
         action: exists ? 'remove' : 'add',

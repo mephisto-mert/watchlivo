@@ -4658,3 +4658,257 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
   padding: 0 5px;
   font-size: .68rem;
 }
+
+/* ============================================================================
+   v80: iOS Keyboard-Open Chatbar Visibility, Landscape Control Bar Zero-Overflow,
+        Dynamic Theme Accent Sync & System Pill Layout Polish
+   ============================================================================ */
+
+/* 1. iOS & Mobile Virtual Keyboard Open: Keep .chatbar 100% Visible Above Keyboard */
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) {
+    top: var(--vv-top, 0px) !important;
+    bottom: auto !important;
+    height: var(--vvh, 100%) !important;
+    min-height: 0 !important;
+    max-height: var(--vvh, 100%) !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root > .navbar {
+    height: 36px !important;
+    min-height: 36px !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh {
+    height: calc(100% - 36px) !important;
+    min-height: 0 !important;
+    max-height: calc(100% - 36px) !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh-layout {
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    min-height: 0 !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .video-chat,
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .panel-chat {
+    min-height: 0 !important;
+    gap: 4px !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .discord-call-bar:not(.in-call),
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .reaction-bar,
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .chat-quick-bar {
+    display: none !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .chat-list {
+    flex: 1 1 0% !important;
+    min-height: 28px !important;
+    padding: 3px 7px !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .chatbar {
+    flex: 0 0 auto !important;
+    padding: 3px 6px 4px !important;
+  }
+}
+
+@media (max-width: 960px) and (orientation: portrait) {
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .panel-video {
+    flex: 0 0 auto !important;
+    aspect-ratio: auto !important;
+    height: clamp(92px, 20dvh, 120px) !important;
+    min-height: 92px !important;
+    max-height: 120px !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .ctl-top,
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root:not(.hidden) .ctl-bottom {
+    display: none !important;
+  }
+}
+
+/* 2. Narrow .video-frame & Mobile Landscape Control Bar: Never Clip Fullscreen (#ctl-fs) */
+.ctl-bar-row {
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+.ctl-cluster-left,
+.ctl-cluster-right {
+  min-width: 0 !important;
+  flex-shrink: 1 !important;
+}
+#ctl-play,
+#ctl-sub-btn,
+#ctl-gear,
+#ctl-fs,
+#ctl-pip {
+  flex-shrink: 0 !important;
+}
+@container (max-width: 640px) {
+  .vol-wrap,
+  #ctl-cast,
+  #ctl-snap,
+  #ctl-theater {
+    display: none !important;
+  }
+}
+@container (max-width: 560px) {
+  #ctl-back10,
+  #ctl-fwd10 {
+    display: none !important;
+  }
+  .ctl-bottom {
+    margin: 0 6px 5px !important;
+    width: calc(100% - 12px) !important;
+    min-width: calc(100% - 12px) !important;
+    padding: 6px 8px !important;
+  }
+  .ctl-bar-row,
+  .ctl-cluster-left,
+  .ctl-cluster-right {
+    gap: 3px !important;
+  }
+  .ctl-action,
+  .ctl-action.ctl-labeled-pill,
+  .ctl-speed-btn {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+    flex: 0 0 30px !important;
+  }
+  #ctl-play {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    min-height: 32px !important;
+    flex: 0 0 32px !important;
+  }
+  .ctl-bar-row .ctl-time {
+    font-size: 0.66rem !important;
+    padding: 3px 6px !important;
+  }
+}
+@media (max-width: 960px) and (orientation: landscape) {
+  .video-frame:not(.fullscreen) .vol-wrap,
+  .video-frame:not(.fullscreen) #ctl-cast,
+  .video-frame:not(.fullscreen) #ctl-back10,
+  .video-frame:not(.fullscreen) #ctl-fwd10 {
+    display: none !important;
+  }
+  .panel-chat .chatbar {
+    gap: 4px !important;
+    padding-left: 5px !important;
+    padding-right: 5px !important;
+  }
+  .panel-chat .chatbar .voice-note-btn,
+  .panel-chat .chatbar .mic-btn,
+  .panel-chat .chatbar .chat-input .ctl-action {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+  }
+  .panel-chat .chatbar .chat-input {
+    padding: 1px 4px 1px 8px !important;
+  }
+  .panel-chat .chatbar .chat-input input {
+    font-size: 13.5px !important;
+  }
+}
+
+/* 3. Dynamic Theme Accent Sync & Single-Line System Pill Author */
+.ctl-center-play {
+  background: linear-gradient(135deg, var(--accent, #27DCC8) 0%, color-mix(in srgb, var(--accent, #27DCC8) 78%, #0f172a) 100%) !important;
+  box-shadow: 0 8px 26px color-mix(in srgb, var(--accent, #27DCC8) 44%, transparent) !important;
+}
+.ctl-center-play:hover {
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--accent, #27DCC8) 60%, transparent) !important;
+}
+.timeline .track {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 18%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent, #27DCC8) 40%, transparent) !important;
+}
+.timeline:hover .track {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 26%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent, #27DCC8) 58%, transparent) !important;
+}
+.track-ticks span {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 36%, transparent) !important;
+}
+.timeline .buf {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 34%, transparent) !important;
+}
+.timeline .cur {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent, #27DCC8) 78%, #0f172a) 0%, var(--accent, #27DCC8) 100%) !important;
+  box-shadow: 0 0 12px color-mix(in srgb, var(--accent, #27DCC8) 55%, transparent) !important;
+}
+.timeline .knob {
+  background: var(--accent, #27DCC8) !important;
+  box-shadow: 0 0 0 2px var(--accent, #27DCC8), 0 2px 8px rgba(0, 0, 0, 0.85) !important;
+}
+#mesh-root > .navbar .nav-icon.room-nav-pill.primary-pill {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 18%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent, #27DCC8) 42%, transparent) !important;
+  color: var(--accent, #27DCC8) !important;
+}
+#mesh-root > .navbar .nav-icon.room-nav-pill.invite-pill {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 13%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent, #27DCC8) 34%, transparent) !important;
+  color: var(--accent, #27DCC8) !important;
+}
+.sysmsg.sysmsg-media {
+  background: color-mix(in srgb, var(--accent, #27DCC8) 10%, rgba(255, 255, 255, 0.03)) !important;
+  border-color: color-mix(in srgb, var(--accent, #27DCC8) 28%, transparent) !important;
+  color: #e2e8f0 !important;
+}
+.sysmsg-user,
+.sysmsg-time {
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+.sysmsg-txt {
+  min-width: 0 !important;
+  flex: 1 1 auto !important;
+}
+
+/* 4. iOS Safari Focus-Zoom Prevention, Fixed-Volume Hide, Skip-Intro & Embed HUD Polish */
+.vol-wrap.is-fixed-vol input[type="range"] {
+  display: none !important;
+}
+.embed-touch-hud-btn {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top, 10px));
+  right: max(10px, env(safe-area-inset-right, 10px));
+  z-index: 36;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(10, 14, 24, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #f8fafc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+}
+.embed-touch-hud-btn.hidden,
+#ctl-skip-intro.hidden {
+  display: none !important;
+}
+#ctl-skip-intro {
+  background: linear-gradient(135deg, var(--accent, #27DCC8), color-mix(in srgb, var(--accent, #27DCC8) 76%, #0f172a)) !important;
+  color: #041016 !important;
+  border: 1px solid rgba(255, 255, 255, 0.28) !important;
+  z-index: 34 !important;
+}
+@media (pointer: coarse), (max-width: 960px) {
+  .chat-input input,
+  .sel-search input,
+  .gif-panel input {
+    font-size: 16px !important;
+  }
+}
+@media (max-width: 960px) and (orientation: landscape) and (max-height: 440px) {
+  body.kb-open.kb-chat-focus:not(.vortex-fs):not(.mesh-minimized) #mesh-root .discord-call-bar {
+    display: none !important;
+  }
+}

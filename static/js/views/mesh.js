@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v79';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v79';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v79';
-import { MeshConnection } from '../realtime.js?v=20261103_v79';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v79';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v79';
-import { buildLayout } from './mesh-layout.js?v=20261103_v79';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v79';
-import { Voice } from '../voice.js?v=20261103_v79';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v79';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v80';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v80';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v80';
+import { MeshConnection } from '../realtime.js?v=20261103_v80';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v80';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v80';
+import { buildLayout } from './mesh-layout.js?v=20261103_v80';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v80';
+import { Voice } from '../voice.js?v=20261103_v80';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v80';
 
 let ctx = null;
 
@@ -51,8 +51,11 @@ function saveChat(room) {
     }
     const merged = Array.from(byId.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-80);
     const serialized = JSON.stringify(merged);
-    sessionStorage.setItem(chatKey(room.id), serialized);
-    localStorage.setItem(chatKey(room.id), serialized);
+    try { sessionStorage.setItem(chatKey(room.id), serialized); } catch (_) {}
+    const localSafe = serialized.length > 160000
+      ? JSON.stringify(merged.map(({ audioNote, ...rest }) => rest))
+      : serialized;
+    try { localStorage.setItem(chatKey(room.id), localSafe); } catch (_) {}
   } catch (e) { /* ignore */ }
 }
 function clearSavedChat(id) {
@@ -295,9 +298,11 @@ async function loadMedia(media) {
   ctx.loadSeq = (ctx.loadSeq || 0) + 1;
   const mySeq = ctx.loadSeq;
   ctx.userPaused = false;
-  const initialPos = Number(media?.meshStatePosition ?? media?.currentTime ?? 0);
+  const initialPos = Math.max(0, Number(media?.meshStatePosition ?? media?.currentTime ?? 0));
   const exp = expectedPosition(media);
-  const start = (ctx.isNew && exp < 3.0) ? 0 : (exp > 0.5 ? Math.max(0, exp) : 0);
+  const start = initialPos >= 3.0
+    ? ((exp > initialPos && exp - initialPos < 10.0) ? initialPos : Math.max(initialPos, exp))
+    : ((ctx.isNew && exp < 3.0) ? 0 : (exp > 0.5 ? Math.max(0, exp) : 0));
   ctx.isNew = false;
   const playing = (media?.meshStateStatus || (media?.playing ? 'PLAYING' : 'PAUSED')) === 'PLAYING';
   let resolvedFromCatalogFresh = initialPos < 3.0 && exp < 12.0;
@@ -327,8 +332,8 @@ async function loadMedia(media) {
             if (!ctx || ctx.loadSeq !== mySeq) return;
             if (res && res.url) {
               const freshExp = expectedPosition(state.mesh?.media || media);
-              const resolvedStart = initialPos < 10.0 ? 0 : (freshExp > 0.5 ? freshExp : start);
-              resolvedFromCatalogFresh = initialPos < 10.0;
+              const resolvedStart = initialPos >= 3.0 ? initialPos : (freshExp >= 10.0 ? freshExp : 0);
+              resolvedFromCatalogFresh = resolvedStart < 3.0;
               media = {
                 ...media,
                 provider: res.provider || 'hls',
@@ -367,10 +372,15 @@ async function loadMedia(media) {
     return;
   }
   ctx.loadingSig = `${mediaKey(media)}|${media.url || ''}`;
-  if (media?.isMusic || media?.mediaType === 'music') saveMusicHistory(media);
-  else saveWatchProgress(media, 0, media?.duration || 0);
   const finalExp = expectedPosition(state.mesh?.media || media);
-  const finalStart = (resolvedFromCatalogFresh || (initialPos < 3.0 && finalExp < 12.0)) ? 0 : (finalExp > 0.5 ? finalExp : start);
+  const isFreshRoomLoad = Boolean(resolvedFromCatalogFresh && (ctx?.isNew || initialPos < 3.0) && finalExp < 12.0);
+  const finalStart = isFreshRoomLoad
+    ? 0
+    : ((initialPos >= 3.0 && Math.abs(finalExp - initialPos) < 12.0)
+      ? initialPos
+      : (finalExp >= 1.5 ? finalExp : (start >= 0.5 ? start : 0)));
+  if (media?.isMusic || media?.mediaType === 'music') saveMusicHistory(media);
+  else saveWatchProgress(media, finalStart > 3 ? finalStart : 0, media?.duration || 0);
   await ctx.host.setMedia(media, finalStart, playing);
   if (!ctx || ctx.loadSeq !== mySeq) return;
   if (!isTimeKeeper()) {
@@ -445,6 +455,10 @@ function onMessage(data) {
           if (!mergedMedia.altUrls?.length && room.media?.altUrls?.length) mergedMedia.altUrls = room.media.altUrls;
           if (!mergedMedia.subtitleTracks?.length && room.media?.subtitleTracks?.length) mergedMedia.subtitleTracks = room.media.subtitleTracks;
           if (!mergedMedia.audioTracks?.length && room.media?.audioTracks?.length) mergedMedia.audioTracks = room.media.audioTracks;
+          if (!mergedMedia.servers?.length && room.media?.servers?.length) mergedMedia.servers = room.media.servers;
+        }
+        if (!mergedMedia.servers?.length && room.media?.servers?.length && prevKey === mediaKey(mergedMedia)) {
+          mergedMedia.servers = room.media.servers;
         }
         if (!mergedMedia.url && room.media?.url) mergedMedia.url = room.media.url;
         if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
@@ -467,6 +481,7 @@ function onMessage(data) {
           if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.35) {
             if (ctx?.sync) {
               ctx.sync.lastSeekTarget = target;
+              ctx.sync.lastSeekWallAt = performance.now();
               ctx.sync.seekUntil = performance.now() + 1800;
             }
             ctx?.host?.adapter?.seek?.(target);
@@ -478,9 +493,13 @@ function onMessage(data) {
           const target = Number(mergedMedia.meshStatePosition || 0);
           if (ctx?.sync) {
             ctx.sync.lastSeekTarget = target;
+            ctx.sync.lastSeekWallAt = performance.now();
             ctx.sync.seekUntil = performance.now() + 2600;
           }
           ctx?.host?.adapter?.seek?.(target);
+        } else if (data.action === 'rate') {
+          const nextRate = Number(mergedMedia.meshStatePlaybackSpeed || 1);
+          if (Number.isFinite(nextRate) && nextRate > 0) ctx?.host?.adapter?.setRate?.(nextRate);
         }
         if (ctx?.sync) {
           ctx.sync.kick(isExplicitAction && data.action !== 'seek');
@@ -589,6 +608,9 @@ function onMessage(data) {
     case 'kicked': {
       document.body.classList.remove('mesh-minimized');
       const kickedId = data.roomId || room?.id || state.route?.params?.id;
+      if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+        try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+      }
       if (kickedId) forgetRoom(kickedId);
       ctx?.conn?.close(false);
       set({ mesh: null });
@@ -603,6 +625,9 @@ function onMessage(data) {
 }
 
 function askPassword() {
+  if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+    try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+  }
   const input = h('input', { class: 'input', type: 'password', placeholder: 'Oda şifresi' });
   popup({ title: 'Bu oda şifreli', content: input, dismissable: false, options: [
     { label: 'Katıl', primary: true, onClick: () => { const id = state.route.params.id; leaveMeshView(); enterMesh(document.getElementById('mesh-root') || document.getElementById('app'), { id, pwd: input.value }); } },
@@ -715,7 +740,13 @@ const actions = {
   pickMedia(media) {
     if (!ctx || !media) return;
     const mode = state.mesh?.playMode || 'leader';
-    if (mode === 'leader' && !isLeader()) { toast("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir."); return; }
+    if (mode === 'leader' && !isLeader()) {
+      ctx.conn.send('queue_add', { item: media });
+      toast(`${media.title || 'Video'} sıraya önerildi — oda lideri başlatabilir`);
+      set({ view: { ...state.view, left: 'Collapsed' } });
+      ctx.layout.update();
+      return;
+    }
     if (isLeader() || mode === 'leader' || mode === 'cohost' || mode === 'quickplay' || !state.mesh?.media?.url) {
       ctx.userPaused = false;
       ctx.lastLeaderActionAt = Date.now();
@@ -964,9 +995,12 @@ const actions = {
   },
   async leave(closeForAll = false) {
     document.body.classList.remove('mesh-minimized');
+    if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+      try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+    }
     const leavingId = state.mesh?.id || state.route?.params?.id;
     const isCurated = Boolean(state.mesh?.curated);
-    const shouldCloseRoom = Boolean(!isCurated && (closeForAll || isHostOnly() || isCreatorSelf() || ctx?.conn?.isCreator));
+    const shouldCloseRoom = Boolean(!isCurated && closeForAll && (isHostOnly() || isCreatorSelf() || ctx?.conn?.isCreator));
     if (leavingId && !isCurated) {
       forgetRoom(leavingId);
     }
@@ -1069,7 +1103,7 @@ export async function enterMesh(app, params) {
   ctx.progressTimer = setInterval(() => {
     const m = state.mesh?.media;
     const ad = ctx?.host?.adapter;
-    if (m && ad && !ctx.host.loading && !(m.isMusic || m.mediaType === 'music')) {
+    if (m && ad && !ctx.host.loading && !(ad.initialSeekPending > 3) && !(m.isMusic || m.mediaType === 'music')) {
       const pos = ad.getTime?.() || 0;
       const dur = ad.getDuration?.() || m.duration || 0;
       if (pos > 5) saveWatchProgress(m, pos, dur);
@@ -1149,13 +1183,16 @@ export function leaveMeshView(explicitLeave = false) {
   try {
     const m = state.mesh?.media;
     const ad = ctx?.host?.adapter;
-    if (m && ad && !ctx.host.loading && !(m.isMusic || m.mediaType === 'music')) {
+    if (m && ad && !ctx.host.loading && !(ad.initialSeekPending > 3) && !(m.isMusic || m.mediaType === 'music')) {
       const pos = ad.getTime?.() || 0;
       const dur = ad.getDuration?.() || m.duration || 0;
       if (pos > 5) saveWatchProgress(m, pos, dur);
     }
   } catch (e) { /* ignore */ }
-  const shouldClose = Boolean(explicitLeave && state.mesh && !state.mesh.curated && (isHostOnly() || isCreatorSelf() || ctx?.conn?.isCreator));
+  if (typeof document !== 'undefined' && document.pictureInPictureElement) {
+    try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
+  }
+  const shouldClose = false;
   if (explicitLeave && state.mesh?.id && !state.mesh?.curated) {
     forgetRoom(state.mesh.id);
   }

@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261103_v79';
+import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261103_v80';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -142,6 +142,19 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
   window.__wlCmdKBound = true;
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      const meshRoot = document.getElementById('mesh-root');
+      if (meshRoot && !meshRoot.classList.contains('hidden') && !document.body.classList.contains('mesh-minimized')) {
+        e.preventDefault();
+        if (!document.querySelector('.mesh-layout.has-left')) {
+          document.getElementById('nav-search-video')?.click();
+        }
+        setTimeout(() => {
+          const mInp = document.querySelector('.panel-left input.input, .sel-search input');
+          mInp?.focus();
+          mInp?.select?.();
+        }, 40);
+        return;
+      }
       const inp = document.querySelector('.home-search input');
       if (inp && inp.offsetParent !== null) {
         e.preventDefault();
@@ -153,7 +166,7 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
 }
 
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable }
-export function popup({ title, message, options = [], content = null, dismissable = true } = {}) {
+export function popup({ title, message, options = [], content = null, dismissable = true, wide = false } = {}) {
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   const root = document.getElementById('popup-root');
   if (fsEl && root && !fsEl.contains(root)) {
@@ -166,7 +179,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
       window.removeEventListener('keydown', onKey);
       return;
     }
-    if (e.key === 'Escape' && dismissable) {
+    if (e.key === 'Escape' && dismissable && (!root || root.lastElementChild === back)) {
       close();
     }
   };
@@ -190,14 +203,14 @@ export function popup({ title, message, options = [], content = null, dismissabl
         html: icons.close,
       })
     : null;
-  const card = h('div', { class: 'popup acrylic wl-vaul-sheet', role: 'dialog', 'aria-modal': 'true' },
+  const card = h('div', { class: `popup ${wide ? 'popup-wide ' : ''}acrylic wl-vaul-sheet`, role: 'dialog', 'aria-modal': 'true' },
     drawerHandle,
     closeBtn,
     title ? h('h3', { class: dismissable ? 'popup-title-pad' : '' }, title) : null,
     message ? h('p', {}, message) : null,
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
-      h('button', { class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''}`, onclick: async () => { const keep = await o.onClick?.(); if (keep !== true) close(); } }, o.label))) : null);
+      h('button', { class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(), onclick: async () => { const fn = o.onClick || o.action; const keep = await fn?.(); if (keep !== true) close(); } }, o.label))) : null);
   const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
   root.append(back);
   return { close, card };
@@ -370,13 +383,14 @@ export function openThemeModal() {
 }
 
 export function openDownloadModal() {
+  const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'wl-download-modal' },
     h('div', { class: 'wl-download-header' },
       h('h3', {}, '📱 Watchlivo Cihaz Uygulamaları'),
       h('p', {}, 'Tek tıkla, tam ekran, yüksek performans ve arkadaşlarınla sıfır gecikmeli izle.')
     ),
     h('div', { class: 'wl-download-grid' },
-      h('div', { class: 'wl-download-card apk' },
+      !inApk ? h('div', { class: 'wl-download-card apk' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Android Uygulaması (APK)'),
@@ -389,7 +403,7 @@ export function openDownloadModal() {
           download: 'Watchlivo-v1.1.0.apk',
           onclick: () => toast('📱 Android APK indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')
-      ),
+      ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
@@ -405,9 +419,9 @@ export function openDownloadModal() {
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows İndir (.exe)')
       )
     ),
-    h('div', { class: 'wl-download-footer-note' },
+    !inApk ? h('div', { class: 'wl-download-footer-note' },
       'ℹ️ İndirilen APK dosyasını açmak için cihazınızda "Bilinmeyen kaynaklardan yüklemeye izin ver" seçeneğini onaylayabilirsiniz.'
-    )
+    ) : null
   );
   popup({ title: 'Watchlivo İndir', content: box, options: [{ label: 'Kapat', primary: true }] });
 }

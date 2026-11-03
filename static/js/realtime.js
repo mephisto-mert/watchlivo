@@ -1,7 +1,7 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261103_v79';
-import { api } from './api.js?v=20261103_v79';
-import { state } from './store.js?v=20261103_v79';
+import { clock } from './sync.js?v=20261103_v80';
+import { api } from './api.js?v=20261103_v80';
+import { state } from './store.js?v=20261103_v80';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -157,6 +157,7 @@ export class MeshConnection {
     if (this.profile.authToken) q.set('authToken', this.profile.authToken);
     if (this.clientId) q.set('clientId', this.clientId);
     if (this.clientToken) q.set('clientToken', this.clientToken);
+    if (this.syncToken) q.set('syncToken', this.syncToken);
     let opened = false;
     let ws;
     try {
@@ -416,8 +417,9 @@ export class MeshConnection {
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
           const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
+          const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = { ...this.lastRoom.media, ...res.media };
-          if (statusChanged || significantJump) {
+          if (statusChanged || significantJump || speedChanged) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           } else if (state.mesh?.media) {
             const isSelfHost = Boolean((res.host_id || this.lastRoom.host_id) && this.clientId && (res.host_id || this.lastRoom.host_id) === this.clientId);
@@ -547,7 +549,7 @@ export class MeshConnection {
 
   close(explicitLeave = false, closeRoomForAll = false) {
     if (explicitLeave) {
-      const shouldCloseRoom = Boolean(closeRoomForAll || this.isCreator);
+      const shouldCloseRoom = Boolean(closeRoomForAll);
       if (shouldCloseRoom) {
         try { this._emitP2p({ event: { type: 'room_closed', roomId: this.roomId } }); } catch (e) { /* ignore */ }
       }

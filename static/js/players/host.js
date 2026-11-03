@@ -1,9 +1,9 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v79';
-import { Html5Adapter } from './html5.js?v=20261103_v79';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v79';
-import { EmbedAdapter } from './embed.js?v=20261103_v79';
-import { WebviewAdapter } from './webview.js?v=20261103_v79';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v80';
+import { Html5Adapter } from './html5.js?v=20261103_v80';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v80';
+import { EmbedAdapter } from './embed.js?v=20261103_v80';
+import { WebviewAdapter } from './webview.js?v=20261103_v80';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -104,9 +104,11 @@ export class PlayerHost {
   }
 
   _effectiveVolume() {
-    if (!this.isAutoDuckEnabled()) return this.volume;
+    const base = Math.max(0, Math.min(100, Number(this.volume) || 0));
+    if (base === 0) return 0;
+    if (!this.isAutoDuckEnabled()) return base;
     const g = Number.isFinite(this.duckGain) ? this.duckGain : 1.0;
-    return g < 0.995 ? Math.max(10, Math.round(this.volume * g)) : this.volume;
+    return g < 0.995 ? Math.min(base, Math.max(8, Math.round(base * g))) : base;
   }
 
   _syncDuckRamp() {
@@ -230,7 +232,8 @@ export class PlayerHost {
           this.loading = false;
           this.onEvent('loaded');
         } else {
-          setTimeout(() => {
+          clearTimeout(this._loadFallbackTimer);
+          this._loadFallbackTimer = setTimeout(() => {
             if (this.adapter === ad && this.loading) {
               this.loading = false;
               this.onEvent('loaded');
@@ -320,6 +323,7 @@ export class PlayerHost {
   }
 
   destroyAdapterOnly() {
+    clearTimeout(this._loadFallbackTimer);
     try { this.adapter?.destroy(); } catch (e) { /* ignore */ }
     this.adapter = null;
     this.key = '';

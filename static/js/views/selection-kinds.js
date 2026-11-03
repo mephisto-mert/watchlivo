@@ -1,12 +1,12 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v79';
-import { api, qs } from '../api.js?v=20261103_v79';
-import { parseVideoUrl } from '../providers.js?v=20261103_v79';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v79';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v79';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, state } from '../store.js?v=20261103_v79';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v80';
+import { api, qs } from '../api.js?v=20261103_v80';
+import { parseVideoUrl } from '../providers.js?v=20261103_v80';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v80';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v80';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, state } from '../store.js?v=20261103_v80';
 
-export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '') {
+export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
   const s = Math.max(1, Number(season) || 1);
   const e = Math.max(1, Number(episode) || 1);
@@ -32,6 +32,23 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         const disp = it.title || res.title || prov.name;
         if (mediaType === 'tv') {
           res.title = epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
+          res.seriesTitle = it.seriesTitle || String(disp || '').split(' — ')[0].trim();
+        }
+        res.originalTitle = res.originalTitle || it.originalTitle || '';
+        res.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
+        if (opts?.applySavedResume !== false) {
+          const savedProg = findSavedProgress(
+            { tmdbId: rawTid || res.tmdbId, title: disp, originalTitle: res.originalTitle, seriesTitle: res.seriesTitle, mediaType },
+            mediaType === 'tv' ? s : null,
+            mediaType === 'tv' ? e : null
+          );
+          const savedSec = Number(savedProg?.currentTime ?? savedProg?.position ?? 0);
+          const savedPct = Number(savedProg?.percent || 0);
+          if (Number.isFinite(savedSec) && savedSec > 3 && (mediaType === 'tv' || savedPct < 96)) {
+            const secFloor = Math.floor(savedSec);
+            res.currentTime = secFloor;
+            res.meshStatePosition = secFloor;
+          }
         }
         return res;
       }
@@ -213,7 +230,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
 
   const renderTabs = () => {
     const histCount = getWatchHistory().filter((x) => x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu')).length + getMusicHistory().length;
-    const favCount = getFavorites().length;
+    const favCount = getFavorites().filter((f) => f && (f.provider === 'youtube' || f.videoId || String(f.url || '').includes('youtu'))).length;
     tabBar.replaceChildren(...TABS.map((t) => h('button', {
       type: 'button',
       class: `provider-cat-pill ${activeTab === t.id ? 'active' : ''}`,
@@ -373,15 +390,17 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     }
 
     if (tabId === 'liked') {
-      const favs = getFavorites().map((f) => ({
-        provider: f.provider || 'youtube',
-        videoId: f.videoId || f.id || '',
-        url: f.url || (f.videoId ? `https://www.youtube.com/watch?v=${f.videoId}` : ''),
-        title: f.title || 'Favori İçerik',
-        channel: f.channel || 'Favorilerim',
-        thumbnail: f.poster || f.thumbnail || '/static/watchlivo-poster.svg',
-        duration: f.duration || 0,
-      }));
+      const favs = getFavorites()
+        .filter((f) => f && (f.provider === 'youtube' || f.videoId || String(f.url || '').includes('youtu')))
+        .map((f) => ({
+          provider: 'youtube',
+          videoId: f.videoId || '',
+          url: f.url || (f.videoId ? `https://www.youtube.com/watch?v=${f.videoId}` : ''),
+          title: f.title || 'Favori İçerik',
+          channel: f.channel || 'Favorilerim',
+          thumbnail: f.poster || f.thumbnail || '/static/watchlivo-poster.svg',
+          duration: f.duration || 0,
+        }));
       sectionHeader.replaceChildren(
         h('div', { style: { fontSize: '.85rem', fontWeight: '700', color: '#e2e8f0' } }, `❤️ Beğenilenler & Favorilerim (${favs.length})`)
       );
@@ -578,7 +597,12 @@ function fmtCount(n) {
 }
 
 function itemMatchesCat(it, catId) {
-  if (catId === 'all' || catId === 'dublaj') return true;
+  if (catId === 'all') return true;
+  if (catId === 'dublaj') {
+    const cats = Array.isArray(it.categories) ? it.categories : [];
+    const badge = String(it.sourceBadge || it.audioBadge || '');
+    return Boolean(cats.includes('dublaj') || it.hasTrDub || it.origLang === 'tr' || /dublaj|türkçe|yerli/i.test(badge) || Number(it.voteCount || 0) >= 800 || Number(it.rating || 0) >= 7.2);
+  }
   const isTv = it.mediaType === 'tv' || it.type === 'SHOW';
   if (catId === 'series') return isTv;
   if (catId === 'movies') return !isTv;
@@ -605,6 +629,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   const catBar = h('div', { class: 'cat-tabs-bar', id: 'catalog-cat-bar' });
   const contentArea = h('div', { class: 'catalog-sections-wrap' });
   let seq = 0;
+  let catSeq = 0;
   let catalogLoaded = false;
   let activeCat = p._initialCat || 'all';
   delete p._initialCat;
@@ -687,6 +712,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         e.stopPropagation();
         const nowFav = toggleFavoriteMedia({ ...it, provider: p.id });
         favBtn.textContent = nowFav ? '❤️' : '🤍';
+        const favBadge = catBar.querySelector('.cat-tab-pill[data-cat="favs"] .cat-cnt');
+        if (favBadge) favBadge.textContent = String(getFavorites().length);
+        if (activeCat === 'favs') renderCategoryView();
         toast(nowFav ? `"${it.title}" favorilerine eklendi` : `"${it.title}" favorilerden çıkarıldı`);
       },
     }, isFavoriteMedia(it) ? '❤️' : '🤍');
@@ -774,13 +802,15 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const selectCategory = async (catId) => {
+    const myCatReq = ++catSeq;
     activeCat = catId;
     currentPage = 1;
     hasMorePages = true;
     renderCategoryView();
     if (catId !== 'all' && catId !== 'favs' && !currentQuery) {
       const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, category: catId, page: 1 })}`, { timeout: 10000 }).catch(() => null);
-      if (catData?.items?.length && activeCat === catId) {
+      if (myCatReq !== catSeq || activeCat !== catId) return;
+      if (catData?.items?.length) {
         currentItems = mergeUniqueItems(currentItems, catData.items);
         renderCategoryView();
       }
@@ -1199,24 +1229,22 @@ export function renderDriveKind(p, body, pick) {
   const qualityHolder = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } });
   const listHolder = h('div', { class: 'card-grid' });
   let selectedQuality = '1080p';
+  let cachedDriveItems = [];
 
-  const loadFolder = async (rawUrl = '') => {
-    listHolder.replaceChildren(spinner());
-    try {
-      const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
-      const items = res.items || res.presets || [];
-      qualityHolder.replaceChildren(
-        h('span', { style: { fontSize: '.78rem', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' } }, '🎞️ Çözünürlük & MKV/MP4 Akış Kalitesi:'),
-        ...['1080p', '720p', '480p'].map((q) => h('button', {
-          type: 'button',
-          class: `provider-cat-pill ${selectedQuality === q ? 'active' : ''}`,
-          onclick: () => {
-            selectedQuality = q;
-            loadFolder(rawUrl);
-          },
-        }, `🎬 ${q} Direct Stream`))
-      );
-      listHolder.replaceChildren(...items.map((it) => {
+  const renderDriveItems = (items) => {
+    cachedDriveItems = items || [];
+    qualityHolder.replaceChildren(
+      h('span', { style: { fontSize: '.78rem', color: '#94a3b8', alignSelf: 'center', marginRight: '4px' } }, '🎞️ Çözünürlük & MKV/MP4 Akış Kalitesi:'),
+      ...['1080p', '720p', '480p'].map((q) => h('button', {
+        type: 'button',
+        class: `provider-cat-pill ${selectedQuality === q ? 'active' : ''}`,
+        onclick: () => {
+          selectedQuality = q;
+          renderDriveItems(cachedDriveItems);
+        },
+      }, `🎬 ${q} Direct Stream`))
+    );
+    listHolder.replaceChildren(...cachedDriveItems.map((it) => {
         const qObj = (it.qualities || []).find((x) => x.label === selectedQuality) || (it.qualities || [])[0] || { url: it.url };
         return videoCard({
           provider: 'direct',
@@ -1229,6 +1257,13 @@ export function renderDriveKind(p, body, pick) {
           duration: it.duration || 0,
         }, pick);
       }));
+  };
+
+  const loadFolder = async (rawUrl = '') => {
+    listHolder.replaceChildren(spinner());
+    try {
+      const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
+      renderDriveItems(res.items || res.presets || []);
     } catch (e) {
       listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasörü okunamadı.'));
     }
@@ -1239,7 +1274,14 @@ export function renderDriveKind(p, body, pick) {
     h('div', { class: 'sel-search' },
       h('span', { html: icons.link, style: { display: 'flex', opacity: .7 } }),
       folderInp,
-      h('button', { class: 'btn primary', onclick: () => loadFolder(folderInp.value.trim()) }, '📂 Klasörü / Videoyu Aç')),
+      h('button', {
+        class: 'btn primary',
+        onclick: () => {
+          const val = folderInp.value.trim();
+          if (!val) { folderInp.focus(); toast('Lütfen bir Google Drive klasör veya dosya bağlantısı yapıştırın'); return; }
+          loadFolder(val);
+        },
+      }, '📂 Klasörü / Videoyu Aç')),
     qualityHolder,
     listHolder
   );

@@ -807,23 +807,44 @@ def _yt_ios_extract_sync(video_id: str) -> dict | None:
     return None
 
 
-def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str):
+def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False):
     hdrs = {"User-Agent": UA_YT_IOS, "Accept": "*/*"}
-    chunk_sz = 2048 * 1024
-    start, end = 0, chunk_sz - 1
+    open_chunk_sz = 2 * 1024 * 1024
+    max_closed_sz = 16 * 1024 * 1024
+    start, end = 0, open_chunk_sz - 1
+    read_cap = open_chunk_sz
     if range_hdr and range_hdr.startswith("bytes="):
+        m_suf = re.match(r"bytes=-(\d+)", range_hdr)
         m = re.match(r"bytes=(\d+)-(\d*)", range_hdr)
-        if m:
+        if m_suf:
+            suf_n = min(int(m_suf.group(1)), max_closed_sz)
+            hdrs["Range"] = f"bytes=-{suf_n}"
+            read_cap = suf_n
+        elif m:
             start = int(m.group(1))
-            end = int(m.group(2)) if m.group(2) else start + chunk_sz - 1
-            if end - start >= chunk_sz:
-                end = start + chunk_sz - 1
-    hdrs["Range"] = f"bytes={start}-{end}"
+            if m.group(2):
+                end = int(m.group(2))
+                if end - start >= max_closed_sz:
+                    end = start + max_closed_sz - 1
+                read_cap = max(1, end - start + 1)
+            else:
+                end = start + open_chunk_sz - 1
+                read_cap = open_chunk_sz
+            hdrs["Range"] = f"bytes={start}-{end}"
+    elif is_head:
+        hdrs["Range"] = "bytes=0-0"
+        read_cap = 1
+    else:
+        hdrs["Range"] = f"bytes={start}-{end}"
     req = urllib.request.Request(target_url, headers=hdrs)
     with urllib.request.urlopen(req, timeout=9.0) as r:
-        data = r.read(chunk_sz + 1024)
+        data = r.read(read_cap + 1024)
         cr = r.headers.get("Content-Range") or ""
         ct = (r.headers.get("Content-Type") or default_ct).split(";")[0].strip()
+        if is_head and not range_hdr:
+            m_tot = re.search(r"/(\d+)$", cr)
+            tot_len = int(m_tot.group(1)) if m_tot else len(data)
+            return b"", 200, str(tot_len), ct
         status = 206 if cr else 200
         return data, status, cr, ct
 
@@ -848,6 +869,14 @@ def _yt_fallback_audio_url_sync(vid: str) -> str:
 
 
 async def yt_music_stream(request: Request):
+    cors_hdrs = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+    }
+    if request.method == "OPTIONS":
+        return Response(b"", status_code=204, headers=cors_hdrs)
     vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
     kind = (request.query_params.get("kind") or "audio").strip().lower()
     try:
@@ -861,30 +890,32 @@ async def yt_music_stream(request: Request):
         except Exception:
             target = ""
     if not target:
-        return JSONResponse({"error": "Akış bulunamadı"}, status_code=404)
-    rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
+        return JSONResponse({"error": "Akış bulunamadı"}, status_code=404, headers=cors_hdrs)
+    rng = request.headers.get("range") or ""
+    is_head = request.method == "HEAD"
     def_ct = "video/mp4" if kind == "video" else "audio/mp4"
     try:
         try:
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head), timeout=11.0)
         except Exception:
             _YT_IOS_STREAM_CACHE.pop(vid, None)
             target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
             if not target:
                 raise
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
-            "Content-Length": str(len(data)),
+            "Content-Length": cr if (is_head and status == 200 and cr.isdigit()) else str(len(data)),
             "Accept-Ranges": "bytes",
-            "Access-Control-Allow-Origin": "*",
+            "Vary": "Range",
             "Cache-Control": "public, max-age=1800",
+            **cors_hdrs,
         }
         if cr and status == 206:
             hdrs["Content-Range"] = cr
-        return Response(b"" if request.method == "HEAD" else data, status_code=status, headers=hdrs)
+        return Response(b"" if is_head else data, status_code=status, headers=hdrs)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502)
+        return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
 
 
 def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, provider: str, poster: str, preview_url: str, mv_url_param: str = "", mode: str = "") -> dict:

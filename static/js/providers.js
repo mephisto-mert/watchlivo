@@ -266,9 +266,7 @@ export const PROVIDERS = [
       (u.match(/(?:fullhdfilmizlesene|jetfilmizle)\.[a-z.]+\/(?:film\/)?([\w-]+)/i) || [])[1] ||
       (u.match(/yabancidizi\.[a-z.]+\/(?:dizi|izle)\/([\w-]+)/i) || [])[1] ||
       (u.match(/animecix\.[a-z.]+\/(?:titles|watch)\/([\w-]+)/i) || [])[1] ||
-      (u.match(/plex\.tv\/(?:movie|show|watch)\/([\w-]+)/i) || [])[1] ||
-      (u.match(/pluto\.tv\/.*?(?:movies|series|live-tv)\/([\w-]+)/i) || [])[1] ||
-      (u.match(/tubitv\.com\/(?:video|movies|tv-shows|series)\/(\d+)/i) || [])[1] || null
+      (u.match(/plex\.tv\/(?:movie|show|watch)\/([\w-]+)/i) || [])[1] || null
     ) },
   { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
     homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Semicenk Blok3 Dedublüman Türkçe Hit 2026',
@@ -361,10 +359,11 @@ const INTERNAL_FALLBACK_PROVIDERS = [
   { id: 'drive', name: 'Google Drive', logo: LOGOS.drive, bg: '#10121a', accent: '#34a853', web: true, kind: 'drive', freeNoAuth: true,
     idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
   { id: 'web', name: 'Web', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link', freeNoAuth: true,
-    idParser: (u) => (/^https?:\/\//i.test(u) ? u : null) },
+    idParser: (u) => (/^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i.test(u) ? u : null) },
 ];
 
-const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi', 'plex', 'pluto', 'tubi'];
+const _WEB_URL_RE = /^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i;
+const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi', 'plex'];
 export const getProvider = (id) => {
   const norm = CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id);
   return PROVIDERS.find((p) => p.id === norm) || INTERNAL_FALLBACK_PROVIDERS.find((p) => p.id === norm) || null;
@@ -378,7 +377,7 @@ export function parseVideoUrl(raw) {
     const id = p.idParser?.(url);
     if (id) return { provider: p.id, id, url };
   }
-  if (/^https?:\/\//i.test(url)) return { provider: 'web', id: url, url };
+  if (_WEB_URL_RE.test(url)) return { provider: 'web', id: url, url };
   return null;
 }
 

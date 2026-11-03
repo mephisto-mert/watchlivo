@@ -1,7 +1,7 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v79';
-import { expectedPosition } from '../sync.js?v=20261103_v79';
-import { state } from '../store.js?v=20261103_v79';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v80';
+import { expectedPosition } from '../sync.js?v=20261103_v80';
+import { state } from '../store.js?v=20261103_v80';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -51,6 +51,12 @@ export class Html5Adapter {
     try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
     if (media?.thumbnail || media?.poster) v.poster = media.thumbnail || media.poster;
     this.video = v;
+    const syncVideoCors = (targetUrl) => {
+      const s = String(targetUrl || '');
+      const isFirstPartyRave = s.startsWith('/api/rave/') || (typeof window !== 'undefined' && s.startsWith(`${window.location.origin}/api/rave/`));
+      if (isFirstPartyRave && !v._retriedNoCors) v.crossOrigin = 'anonymous';
+      else v.removeAttribute('crossorigin');
+    };
     const validStart = (Number.isFinite(startAt) && startAt > 0.5) ? Number(startAt) : 0;
     this.lastSeekTarget = validStart;
     this.lastSeekAt = validStart > 0 ? Date.now() : 0;
@@ -404,6 +410,7 @@ export class Html5Adapter {
       for (const t of media.audioTracks) if (t?.url) pushAlt(t.url);
     }
     alts.sort((a, b) => (isHevcUrl(a) ? 1 : 0) - (isHevcUrl(b) ? 1 : 0));
+    this._pushFallbackAlt = pushAlt;
 
     let nativeAltIdx = 0;
     let triedProxySegs = false;
@@ -498,14 +505,30 @@ export class Html5Adapter {
         this.loadedAtMs = Date.now();
       }
       this.currentUrl = nextUrl;
+      syncVideoCors(nextUrl);
       if (this.isMusic) {
         this._setMusicVisualMode?.(isAudioOnlyUrl(nextUrl) ? 'vinyl' : 'clip');
       }
+      const enforceInitialSeek = () => {
+        if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking) return;
+        if (v.readyState < 1) return;
+        if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
+        const targetPos = this.initialSeekPending;
+        if (Math.abs((v.currentTime || 0) - targetPos) > 1.5) {
+          try { v.currentTime = targetPos; } catch (e) { /* ignore */ }
+        } else if (v.readyState >= 2) {
+          this.initialSeekPending = 0;
+        }
+      };
+      if (resumePos >= 0.5 && !v._wlInitSeekBound) {
+        v._wlInitSeekBound = true;
+        ['loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+          v.addEventListener(evName, enforceInitialSeek);
+        });
+      }
       const restorePosOnLoad = () => {
         if (this.video !== v) return;
-        if (resumePos >= 0.5 && Math.abs((v.currentTime || 0) - resumePos) > 1.5) {
-          try { v.currentTime = resumePos; } catch (e) { /* ignore */ }
-        }
+        enforceInitialSeek();
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
@@ -714,7 +737,7 @@ export class Html5Adapter {
               }
             }
             netRetries += 1;
-            if (netRetries <= 2) {
+            if (netRetries <= (nativeAltIdx < alts.length ? 1 : 2)) {
               setTimeout(() => {
                 try { this.hls?.startLoad(curResume >= 5 ? curResume : -1); } catch (err) { /* ignore */ }
               }, 350 * netRetries);
@@ -760,6 +783,14 @@ export class Html5Adapter {
 
     v.addEventListener('error', () => {
       if (this._destroyed || this.video !== v || this.hls) return;
+      if (v.hasAttribute('crossorigin') && !v._retriedNoCors && this.currentUrl) {
+        v._retriedNoCors = true;
+        v.removeAttribute('crossorigin');
+        v.src = this.currentUrl;
+        try { v.load(); } catch (_) {}
+        if (this.wantPlaying) this.tryPlay();
+        return;
+      }
       if (nativeAltIdx < alts.length) {
         this._reportStreamHealth?.(this.currentUrl, false, { stalled: false });
         loadCandidateUrl(alts[nativeAltIdx++]);
@@ -810,6 +841,23 @@ export class Html5Adapter {
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
       this.loadReadyTimer = setTimeout(done, 3400);
+      if (validStart >= 0.5 && !v._wlInitSeekBound) {
+        v._wlInitSeekBound = true;
+        const enforcePrimaryInitialSeek = () => {
+          if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking || v.readyState < 1) return;
+          if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
+          const targetPos = this.initialSeekPending;
+          if (Math.abs((v.currentTime || 0) - targetPos) > 1.5) {
+            try { v.currentTime = targetPos; } catch (_) {}
+          } else if (v.readyState >= 2) {
+            this.initialSeekPending = 0;
+          }
+        };
+        ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+          v.addEventListener(evName, enforcePrimaryInitialSeek);
+        });
+      }
+      syncVideoCors(url);
       if (isHls && canHlsJs && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
@@ -818,15 +866,10 @@ export class Html5Adapter {
       }
     });
     if (this._destroyed || this.video !== v) return;
-    if (!this.hls && startAt >= 0.5) {
-      const applyInitialNativeSeek = () => {
-        if (this.video !== v || this.hls) return;
-        if (startAt >= 0.5 && Math.abs((v.currentTime || 0) - startAt) > 1.2) {
-          try { v.currentTime = startAt; } catch (e) { /* ignore */ }
-        }
-      };
-      if (v.readyState >= 1) applyInitialNativeSeek();
-      else v.addEventListener('loadedmetadata', applyInitialNativeSeek, { once: true });
+    if (startAt >= 0.5 && this.initialSeekPending >= 0.5 && v.readyState >= 1 && !v.seeking) {
+      if (Math.abs((v.currentTime || 0) - startAt) > 1.5) {
+        try { v.currentTime = startAt; } catch (e) { /* ignore */ }
+      }
     }
     if (autoplay) {
       this.tryPlay();
@@ -1162,6 +1205,9 @@ export class Html5Adapter {
   setAudioTrack(id) { return this.subs.setAudioTrack(id); }
   switchStreamSource(newUrl) {
     if (!newUrl || !this.video) return;
+    if (this.currentUrl && this.currentUrl !== newUrl) {
+      this._pushFallbackAlt?.(this.currentUrl);
+    }
     if (typeof this._loadCandidateUrl === 'function') {
       this._loadCandidateUrl(newUrl, () => {
         if (this.subs?.selectedSubId && this.subs.selectedSubId !== 'off') {
@@ -1284,7 +1330,7 @@ export class Html5Adapter {
   canCast() {
     const v = this.video;
     if (!v) return false;
-    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv/i.test(navigator.userAgent || '')));
+    const isNativeApk = typeof navigator !== 'undefined' && (/WatchlivoApp/i.test(navigator.userAgent || '') || (/Android/i.test(navigator.userAgent || '') && /;\s*wv\b/i.test(navigator.userAgent || '')));
     if (isNativeApk) return false;
     return Boolean(typeof v.webkitShowPlaybackTargetPicker === 'function' || (v.remote && typeof v.remote.prompt === 'function'));
   }
