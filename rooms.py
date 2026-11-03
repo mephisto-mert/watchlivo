@@ -187,7 +187,7 @@ def _b64_key(key: bytes, *parts: str) -> str:
 def sign_client_token(room_id: str, cid: str) -> str:
     """Server-issued proof that ``cid`` belongs to the caller for this room."""
     iat = int(now())
-    sig = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat // int(CLIENT_TOKEN_TTL)))
+    sig = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat))
     return f"{cid}.{iat}.{sig}"
 
 
@@ -208,8 +208,11 @@ def verify_client_token(room_id: str, token: Any) -> str:
         return ""
     if now() - iat > CLIENT_TOKEN_TTL or iat - now() > 300:
         return ""
-    expected = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat // int(CLIENT_TOKEN_TTL)))
-    return cid if constant_time_eq(expected, sig) else ""
+    expected = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat))
+    if constant_time_eq(expected, sig):
+        return cid
+    expected_legacy = _b64_key(SYNC_SECRET, "cid", room_id, cid, str(iat // int(CLIENT_TOKEN_TTL)))
+    return cid if constant_time_eq(expected_legacy, sig) else ""
 
 
 def _ws_verified_uid(scope: Any, q: Any) -> str:
@@ -258,12 +261,25 @@ def _cid_is_active(room: Dict[str, Any], cid: str, verified_uid: str = "", data:
         req_uid = clean_str(data.get("uid") or data.get("userId"), 64)
         if p.get("_precreated") and req_name and _slugify_name(p.get("name") or "") == _slugify_name(req_name):
             return False
+        mtype = str(data.get("type") or "")
+        if (
+            mtype not in ("", "poll", "ping") and (mtype != "init" or not room.get("fromCreateApi"))
+            and room.get("explicitCreatorCid")
+            and cid == room.get("explicitCreatorCid")
+            and not str(room.get("creatorId") or "").startswith("u_wl_")
+            and p.get("transport") != "ws"
+            and req_name
+            and p.get("name") == req_name
+        ):
+            return False
         if (
             req_name
             and p.get("name") == req_name
             and (not req_dev or p.get("device") == req_dev)
             and (not req_col or p.get("color") == req_col)
-            and (not p.get("uid") or not req_uid or p.get("uid") == req_uid)
+            and (not p.get("uid") or p.get("uid") == req_uid)
+            and cid != room.get("creatorCid")
+            and cid != room.get("host_id")
         ):
             return False
     try:
@@ -866,7 +882,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         room["creatorCid"] = snap["creatorCid"]
     if (not room.get("creator") or prefer_snap_creator) and snap.get("creator"):
         room["creator"] = snap["creator"]
-    merged_co = list(dict.fromkeys(list(room.get("co_hosts") or []) + list(snap.get("co_hosts") or [])))
+    merged_co = list(dict.fromkeys(list(room.get("co_hosts") or []) + (list(snap.get("co_hosts") or []) if s_rev >= r_rev else [])))
     c_cid_val = str(room.get("creatorCid") or "").strip()
     if c_cid_val and c_cid_val in merged_p and not room.get("host_transferred") and c_cid_val not in merged_co:
         merged_co.append(c_cid_val)
@@ -1035,7 +1051,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
             continue
         if len(ser_parts) >= 60:
             break
-        cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
+        cp = {k: v for k, v in p.items() if not str(k).startswith("_") and k not in ("lastSeen", "uid")}
         p_is_creator = _is_creator_of_room(room, p["id"], p)
         cp["isCreator"] = p_is_creator
         cp["isHost"] = p["id"] == host_id
@@ -1812,8 +1828,10 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             cur_url = str(cur_m.get("url") or "")
             cur_unresolved = not cur_url or cur_url.startswith("/api/rave/resolve-catalog")
             same_key = (not media_key(cur_m)) or (media_key(cur_m) == media_key(incoming))
-            if (cur_unresolved and (can_control or same_key)) or (can_control and same_key and incoming.get("url") != cur_url):
-                inc_ct = max(0.0, float(incoming.get("currentTime") or 0.0))
+            allow_unresolved = can_control if not cur_url else (can_control or same_key)
+            if (cur_unresolved and allow_unresolved) or (can_control and same_key and incoming.get("url") != cur_url):
+                raw_inc_ct = data.get("currentTime") if data.get("currentTime") is not None else incoming.get("currentTime")
+                inc_ct = max(0.0, _finite_float(raw_inc_ct, 0.0))
                 cur_ct = max(0.0, float(cur_m.get("currentTime") or 0.0))
                 if cur_unresolved:
                     cur_m["currentTime"] = max(cur_ct, inc_ct) if (cur_ct > 2.0 or inc_ct > 2.0) else inc_ct
@@ -2697,7 +2715,10 @@ async def ws_endpoint(websocket: WebSocket):
     requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(q.get("clientId") or ""))[:24]
     signed_cid = verify_client_token(room_id, q.get("clientToken"))
     verified_uid = _ws_verified_uid(websocket.scope, q)
-    join_data = {k: v for k, v in q.items() if k not in ("pwd", "uid", "clientId", "clientToken", "syncToken")}
+    join_data = {
+        k: v for k, v in q.items()
+        if not str(k).startswith("_") and k not in ("pwd", "uid", "userId", "clientId", "clientToken", "syncToken")
+    }
     join_data["uid"] = verified_uid
     async with STORE.lock(room_id):
         is_curated_ws = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
@@ -2706,7 +2727,7 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.close()
             return
         room = await STORE.get(room_id)
-        if q.get("syncToken"):
+        if room is None and q.get("syncToken"):
             room = merge_sync_token(room, q.get("syncToken"), room_id)
         room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=q.get("username", ""), creator_id=verified_uid)
         cid = signed_cid or requested_cid
@@ -2735,6 +2756,8 @@ async def ws_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
                 await websocket.close()
                 return
+        if q.get("syncToken"):
+            room = merge_sync_token(room, q.get("syncToken"), room_id)
         prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
@@ -2759,9 +2782,10 @@ async def ws_endpoint(websocket: WebSocket):
     explicit_ws_close = False
     try:
         while True:
-            data = await websocket.receive_json()
-            if not isinstance(data, dict):
+            raw_ws_data = await websocket.receive_json()
+            if not isinstance(raw_ws_data, dict):
                 continue
+            data = {k: v for k, v in raw_ws_data.items() if not str(k).startswith("_")}
             if data.get("type") == "ping":
                 t_ping = now()
                 r_mem = (STORE.l1_rooms if hasattr(STORE, "l1_rooms") else getattr(STORE, "rooms", {})).get(room_id)
@@ -2861,6 +2885,7 @@ async def http_sync(request: Request):
         data = {}
     if not isinstance(data, dict):
         return JSONResponse({"error": "Geçersiz istek"}, status_code=400)
+    data = {k: v for k, v in data.items() if not str(k).startswith("_")}
     requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(data.get("clientId") or ""))[:24]
     signed_cid = verify_client_token(room_id, data.get("clientToken"))
     verified_uid = str(request.scope.get("wl_uid") or "")
@@ -2885,31 +2910,57 @@ async def http_sync(request: Request):
             return JSONResponse({"ok": True, "roomClosed": True, "error": "room_closed"}, status_code=410)
         pre_merge_host = room.get("host_id") if room else None
         pre_merge_seen = float((room.get("participants") or {}).get(signed_cid or requested_cid, {}).get("lastSeen") or 0.0) if room else 0.0
-        if data.get("syncToken"):
+        if room is None and data.get("syncToken"):
             room = merge_sync_token(room, data.get("syncToken"), room_id)
         # A cid is only trusted when the server signed it, or when nobody is
         # currently using it (prevents session takeover by claiming a live cid).
+        if room is not None and not room.get("fromCreateApi") and not room.get("curated") and requested_cid and requested_cid == room.get("creatorCid") and not str(room.get("creatorId") or "").startswith("u_wl_"):
+            room["explicitCreatorCid"] = requested_cid
         cid = signed_cid or requested_cid
         cid_rejected = False
         if not signed_cid and cid and room is not None and _cid_is_active(room, cid, verified_uid, {**data, "uid": verified_uid}):
             cid = ""
             cid_rejected = True
         if not cid:
-            cid = requested_cid if (not cid_rejected and data.get("type") in ("leave", "close_room") and requested_cid) else ("h_" + uuid.uuid4().hex[:8])
+            cid = "h_" + uuid.uuid4().hex[:8]
         if data.get("type") in ("leave", "close_room"):
+            if cid_rejected and not verified_uid:
+                return JSONResponse({"ok": False, "error": "Yetkisiz oda işlemi"}, status_code=403)
             prev_h = room.get("host_id") if room else None
-            left_p = room["participants"].pop(cid, None) if room else None
+            cand_p = (room.get("participants") or {}).get(cid) if room else None
+            is_explicit_creator_match = bool(
+                not cid_rejected
+                and room
+                and room.get("explicitCreatorCid")
+                and cid == room.get("explicitCreatorCid")
+                and not str(room.get("creatorId") or "").startswith("u_wl_")
+                and cand_p
+                and cand_p.get("transport") != "ws"
+                and clean_str(data.get("username"), 24) == cand_p.get("name")
+            )
+            owns_cid = bool(
+                signed_cid == cid
+                or is_explicit_creator_match
+                or (verified_uid and cand_p and cand_p.get("uid") == verified_uid)
+                or (not cid_rejected and cand_p and not cand_p.get("uid") and data.get("type") == "leave" and cand_p.get("name") == clean_str(data.get("username"), 24))
+            )
+            left_p = room["participants"].pop(cid, None) if (room and owns_cid) else None
             if room and not left_p and verified_uid:
                 for k_p, v_p in list((room.get("participants") or {}).items()):
                     if v_p.get("transport") == "bot":
                         continue
                     if v_p.get("uid") == verified_uid:
+                        cid = k_p
+                        owns_cid = True
                         left_p = room["participants"].pop(k_p, None)
                         room.setdefault("left", {})[k_p] = now()
-            if room:
-                room.setdefault("left", {})[cid] = now()
+            if room and (owns_cid or not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())):
+                if owns_cid:
+                    room.setdefault("left", {})[cid] = now()
                 is_creator_close = bool(
-                    data.get("type") == "close_room"
+                    owns_cid
+                    and (signed_cid == cid or is_explicit_creator_match or (verified_uid and verified_uid == room.get("creatorId")))
+                    and data.get("type") == "close_room"
                     and not room.get("curated")
                     and (
                         cid == room.get("creatorCid")
@@ -2946,6 +2997,8 @@ async def http_sync(request: Request):
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
             room["creatorId"] = verified_uid or cid
             room["creatorCid"] = cid
+        if not room.get("fromCreateApi") and not room.get("curated") and requested_cid and requested_cid == room.get("creatorCid") and not str(room.get("creatorId") or "").startswith("u_wl_"):
+            room["explicitCreatorCid"] = requested_cid
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
@@ -2960,6 +3013,8 @@ async def http_sync(request: Request):
                     if not allowed_hit:
                         return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_hit)}, status_code=429)
                 return JSONResponse({"error": "password_required"}, status_code=403)
+        if data.get("syncToken"):
+            room = merge_sync_token(room, data.get("syncToken"), room_id)
         prev_host = pre_merge_host if pre_merge_host is not None else room.get("host_id")
         prev_seen = pre_merge_seen or float((room.get("participants") or {}).get(cid, {}).get("lastSeen") or 0.0)
         pruned = prune(room)
@@ -3092,7 +3147,10 @@ async def create_room(request: Request):
     req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
     creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
     verified_uid = str(request.scope.get("wl_uid") or "")
-    creator_uid = verified_uid or clean_str(payload.get("creatorId"), 40) or creator_cid
+    raw_creator_id = clean_str(payload.get("creatorId"), 40)
+    if not verified_uid and raw_creator_id.lower().startswith("u_wl_"):
+        raw_creator_id = ""
+    creator_uid = verified_uid or raw_creator_id or creator_cid
     creator_slug = _slugify_name(payload.get("creator") or "")
     if verified_uid or creator_cid or (len(creator_slug) >= 2 and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")):
         try:
@@ -3105,19 +3163,20 @@ async def create_room(request: Request):
                     hp.get("transport") != "bot" and (now() - float(hp.get("lastSeen") or 0.0) < 12.0)
                     for hp in (cand.get("participants") or {}).values()
                 )
-                cand_creator_match = bool(
-                    (verified_uid and cand.get("creatorId") == verified_uid)
-                    or (creator_cid and cand.get("creatorId") == creator_cid)
-                    or (creator_cid and cand.get("creatorCid") == creator_cid)
-                    or (creator_cid and cand.get("host_id") == creator_cid)
-                    or (
-                        creator_slug
-                        and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")
-                        and _slugify_name(cand.get("creator") or "") == creator_slug
-                        and (not cand.get("creatorId") or cand.get("creatorId") == creator_uid or not cand_has_live_human)
+                cand_owned_by_verified = bool(verified_uid and cand.get("creatorId") == verified_uid)
+                cand_stale_guest_match = bool(
+                    not cand_has_live_human
+                    and not str(cand.get("creatorId") or "").startswith("u_wl_")
+                    and (
+                        (creator_cid and cand.get("creatorCid") == creator_cid)
+                        or (
+                            creator_slug
+                            and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")
+                            and _slugify_name(cand.get("creator") or "") == creator_slug
+                        )
                     )
                 )
-                if cand_creator_match and cand.get("id"):
+                if (cand_owned_by_verified or cand_stale_guest_match) and cand.get("id"):
                     stale_creator_rooms.append(cand.get("id"))
             for old_rid in stale_creator_rooms:
                 if old_rid and old_rid != room_id:
@@ -3130,6 +3189,9 @@ async def create_room(request: Request):
     room = new_room(room_id, name, payload.get("privacy", "public"), payload.get("playMode", "leader"),
                     payload.get("creator", ""), creator_uid, payload.get("password", ""), bool(payload.get("isMature")))
     room["creatorCid"] = creator_cid
+    room["fromCreateApi"] = True
+    if req_cid:
+        room["explicitCreatorCid"] = creator_cid
     add_participant(
         room,
         creator_cid,
@@ -3198,7 +3260,7 @@ def _render_lobby_for_caller(request: Request, raw_rooms: List[Dict[str, Any]]) 
     filtered = [r for r in raw_rooms if r.get("privacy") != "friends" or _is_friend_of_creator(r, caller_uid)]
     visible = [lobby_entry(r) for r in filtered[:60]]
     cc = "private, no-store" if caller_uid else "public, max-age=1, s-maxage=2, stale-while-revalidate=5"
-    return JSONResponse({"rooms": visible, "shared": STORE.shared}, headers={"Cache-Control": cc})
+    return JSONResponse({"rooms": visible, "shared": STORE.shared}, headers={"Cache-Control": cc, "Vary": "Authorization"})
 
 
 async def list_rooms(request: Request):
@@ -3270,12 +3332,12 @@ async def list_rooms(request: Request):
             if c_slug_key in ("misafir", "izleyici", "misafir-izleyici"):
                 c_slug_key = ""
             slug_collision = False
+            r_has_live = any(hp.get("transport") != "bot" and (t - float(hp.get("lastSeen") or 0.0) < 12.0) for hp in (r.get("participants") or {}).values())
             if c_slug_key and len(c_slug_key) >= 2 and c_slug_key in by_creator_slug:
-                newer_r = by_creator_slug[c_slug_key]
-                r_has_live = any(hp.get("transport") != "bot" and (t - float(hp.get("lastSeen") or 0.0) < 12.0) for hp in (r.get("participants") or {}).values())
-                if not c_id_key or c_id_key == str(newer_r.get("creatorId") or "").strip() or not r_has_live:
+                if not r_has_live and not c_id_key.startswith("u_wl_"):
                     slug_collision = True
-            if (c_id_key and c_id_key in by_creator_id) or slug_collision:
+            id_collision = bool(c_id_key and c_id_key in by_creator_id and (c_id_key.startswith("u_wl_") or not r_has_live))
+            if id_collision or slug_collision:
                 await STORE.delete(r["id"])
                 continue
             if c_id_key:

@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261103_v88';
-import { api, qs } from './api.js?v=20261103_v88';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v88';
+import { h, toast, popup } from './ui.js?v=20261103_v89';
+import { api, qs } from './api.js?v=20261103_v89';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v89';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -15,17 +15,23 @@ function _zkDecode(str) {
   try { return str ? JSON.parse(str) : {}; } catch (e) { return {}; }
 }
 
+function _scopedAccountsKey() {
+  const s = state.self;
+  const uid = (!s?.isGuest && (s?.uid || s?.id)) ? String(s.uid || s.id).trim().toLowerCase() : 'guest';
+  return `${LS_KEY}:${uid || 'guest'}`;
+}
+
 function readLocalAccounts() {
   try {
     localStorage.removeItem('vortex_accounts_v4');
     localStorage.removeItem('vortex_accounts_v5');
     localStorage.removeItem('vortex_accounts_v6');
-    return _zkDecode(localStorage.getItem(LS_KEY) || '');
+    return _zkDecode(localStorage.getItem(_scopedAccountsKey()) || '');
   } catch (e) { return {}; }
 }
 
 function saveLocalAccounts(accs) {
-  try { localStorage.setItem(LS_KEY, _zkEncode(accs)); } catch (e) { /* ignore */ }
+  try { localStorage.setItem(_scopedAccountsKey(), _zkEncode(accs)); } catch (e) { /* ignore */ }
 }
 
 const DEFAULT_SPECS = {

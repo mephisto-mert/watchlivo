@@ -1,7 +1,12 @@
 // HTTP API helpers with explicit timeouts and automatic Bearer token injection.
 function _getAuthToken() {
   try {
-    for (const k of ['vortex_profile_v2', 'vortex_profile_v1', 'vortex_self']) {
+    const v2Raw = localStorage.getItem('vortex_profile_v2');
+    if (v2Raw !== null) {
+      const p2 = JSON.parse(v2Raw);
+      return (p2 && p2.authToken && !p2.isGuest) ? String(p2.authToken) : '';
+    }
+    for (const k of ['vortex_profile_v1', 'vortex_self']) {
       const raw = localStorage.getItem(k);
       if (!raw) continue;
       const p = JSON.parse(raw);
@@ -11,13 +16,20 @@ function _getAuthToken() {
   return '';
 }
 
+function _isSameOriginPath(path) {
+  const s = String(path || '');
+  if (s.startsWith('/') && !s.startsWith('//')) return true;
+  if (typeof window !== 'undefined' && window.location?.origin && s.startsWith(`${window.location.origin}/`)) return true;
+  return false;
+}
+
 export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000 } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
   try {
     const hdrs = { ...(extraHeaders || {}) };
     if (body) hdrs['Content-Type'] = 'application/json';
-    const tok = _getAuthToken();
+    const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
     if (tok && !hdrs.Authorization && !hdrs.authorization) {
       hdrs.Authorization = `Bearer ${tok}`;
     }

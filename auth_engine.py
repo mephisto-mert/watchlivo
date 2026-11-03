@@ -43,6 +43,12 @@ _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+
+
+def _clean_color(val: Any, default: str = "#00f5d4") -> str:
+    s = str(val or "").strip()[:16]
+    return s if HEX_COLOR_RE.match(s) else default
 
 FIREBASE_API_KEY = (
     os.environ.get("FIREBASE_API_KEY")
@@ -351,16 +357,16 @@ def _candidate_auth_secrets() -> list[bytes]:
         ent = (
             os.environ.get("UPSTASH_REDIS_REST_TOKEN")
             or os.environ.get("KV_REST_API_TOKEN")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("OPENAI_CLOUD_FALLBACK_KEY")
-            or os.environ.get("TMDB_API_KEY")
             or ""
-        )
-        for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
-            for tag in ("default",):
-                cand = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:{tag}".encode("utf-8")).digest()
-                if cand not in out:
-                    out.append(cand)
+        ).strip()
+        if len(ent) >= 24:
+            for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
+                cand_v4 = hmac.new(ent.encode("utf-8"), f"watchlivo-hmac-secret-v4:{nm}".encode("utf-8"), hashlib.sha256).digest()
+                if cand_v4 not in out:
+                    out.append(cand_v4)
+                cand_v2 = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:default".encode("utf-8")).digest()
+                if cand_v2 not in out:
+                    out.append(cand_v2)
     return out
 
 
@@ -439,7 +445,7 @@ async def auth_register(request: Request) -> JSONResponse:
     name = str(body.get("name") or "").strip()[:24]
     email = str(body.get("email") or "").strip().lower()[:120]
     password = str(body.get("password") or "")[:256]
-    color = str(body.get("color") or "#00f5d4").strip()[:16]
+    color = _clean_color(body.get("color"))
     avatar = str(body.get("avatar") or "🎬").strip()[:8]
     raw_handle = str(body.get("handle") or "").strip()
     if len(name) < 2:
@@ -519,7 +525,7 @@ async def auth_login(request: Request) -> JSONResponse:
     )
     if local_verified:
         fb_verified = True
-    elif target_email and EMAIL_RE.match(target_email):
+    elif not row and target_email and EMAIL_RE.match(target_email):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
@@ -527,8 +533,11 @@ async def auth_login(request: Request) -> JSONResponse:
                 "returnSecureToken": True,
             })
             if fb_res and fb_res.get("idToken"):
-                fb_verified = True
-                if not row:
+                lk_res = _firebase_auth_req("accounts:lookup", {"idToken": fb_res["idToken"]})
+                lk_users = (lk_res or {}).get("users") or []
+                lk_u0 = lk_users[0] if lk_users else {}
+                if lk_u0.get("emailVerified") is True and str(lk_u0.get("email") or "").strip().lower() == target_email:
+                    fb_verified = True
                     uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
                     salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
@@ -544,17 +553,13 @@ async def auth_login(request: Request) -> JSONResponse:
                         _user_create(row)
                     except Exception:
                         pass
-                elif row.get("auth_provider", "email") == "email":
-                    new_hash = _hash_pw(password, row["salt"])
-                    if row.get("password_hash") != new_hash:
-                        row = _user_update(row["uid"], {"password_hash": new_hash}) or row
                 break
     if not row and EMAIL_RE.match(identifier):
         sb_res = _supabase_auth_req("/auth/v1/token?grant_type=password", {
             "email": identifier,
             "password": password if len(password) >= 6 else (password + "_wl26"),
         })
-        if sb_res and sb_res.get("user"):
+        if sb_res and isinstance(sb_res.get("user"), dict) and sb_res["user"].get("email_confirmed_at"):
             sb_u = sb_res["user"]
             meta = sb_u.get("user_metadata") or {}
             uid = "u_wl_" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:12]
@@ -565,7 +570,7 @@ async def auth_login(request: Request) -> JSONResponse:
                 "handle": _norm_handle(meta.get("handle") or "", meta.get("name") or identifier.split("@")[0]),
                 "name": str(meta.get("name") or identifier.split("@")[0])[:24],
                 "password_hash": pw_hash, "salt": salt,
-                "color": str(meta.get("color") or "#00f5d4"), "avatar": str(meta.get("avatar") or "🎬"),
+                "color": _clean_color(meta.get("color")), "avatar": str(meta.get("avatar") or "🎬")[:8],
                 "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
             }
             try:
@@ -640,7 +645,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Giriş doğrulanamadı. Oturum süresi dolmuş veya geçersiz."}, status_code=401)
     raw_email = fb_email[:120]
     raw_name = (fb_name or str(body.get("name") or "").strip())[:24]
-    color = str(body.get("color") or "#00f5d4").strip()[:16]
+    color = _clean_color(body.get("color"))
     avatar = str(body.get("avatar") or PROVIDER_ICONS.get(provider, "🌐")).strip()[:8]
     if not raw_name:
         raw_name = (raw_email.split("@")[0] if raw_email else f"Watchlivo {provider.capitalize()}")[:24]
@@ -772,7 +777,7 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
         body = {}
     phone = _clean_phone(str(body.get("phone") or ""))
     code = str(body.get("code") or "").strip()[:12]
-    color = str(body.get("color") or "#00f5d4").strip()[:16]
+    color = _clean_color(body.get("color"))
     name = str(body.get("name") or "").strip()[:24]
     if not phone:
         return JSONResponse({"ok": False, "error": "Geçersiz telefon numarası."}, status_code=400)
@@ -1094,23 +1099,27 @@ def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
 
 
 def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> list[Dict[str, Any]]:
-    """Search registered Watchlivo accounts by @handle, name, or exact email."""
+    """Search registered Watchlivo accounts by @handle or display name (never enumerates private emails)."""
     q = str(query or "").strip()
     if not q:
         return []
-    q_low = q.lower().lstrip("@")
+    q_low = re.sub(r"[%_\\]", "", q.lower().lstrip("@")).strip()
+    if not q_low:
+        return []
     results: Dict[str, Dict[str, Any]] = {}
-    exact = resolve_public_user(q)
-    if exact and exact.get("uid") and exact["uid"] != exclude_uid:
-        results[exact["uid"]] = exact
+    if "@" not in q or q.startswith("@"):
+        exact = resolve_public_user(q)
+        if exact and exact.get("uid") and exact["uid"] != exclude_uid:
+            results[exact["uid"]] = exact
     try:
         if store_backend() == "sqlite":
             conn = _get_db()
             try:
-                like_q = f"%{q_low}%"
+                esc_q = q_low.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                like_q = f"%{esc_q}%"
                 rows = conn.execute(
-                    "SELECT * FROM watchlivo_users WHERE lower(handle) LIKE ? OR lower(name) LIKE ? OR lower(email) = ? ORDER BY updated_at DESC LIMIT ?",
-                    (like_q, like_q, q.lower(), max(1, min(limit, 30))),
+                    "SELECT * FROM watchlivo_users WHERE lower(handle) LIKE ? ESCAPE '\\' OR lower(name) LIKE ? ESCAPE '\\' ORDER BY updated_at DESC LIMIT ?",
+                    (like_q, like_q, max(1, min(limit, 30))),
                 ).fetchall()
                 for r in rows:
                     card = public_user_card(r)
@@ -1128,7 +1137,7 @@ def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> l
                     if not row:
                         continue
                     card = public_user_card(row)
-                    if q_low in card["handle"].lower() or q_low in card["name"].lower() or (q.lower() == str(row.get("email") or "").lower()):
+                    if q_low in card["handle"].lower() or q_low in card["name"].lower():
                         results[card["uid"]] = card
     except Exception:
         pass

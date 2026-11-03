@@ -11,16 +11,20 @@ export class WebviewAdapter {
   }
 
   async load(media, startAt = 0, shouldPlay = true) {
+    this._destroyed = false;
+    clearInterval(this.timer);
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
+    const safeUrl = /^https?:\/\//i.test(String(media?.url || '')) ? media.url : 'about:blank';
     const wv = document.createElement('webview');
     wv.setAttribute('partition', window.vortexDesktop?.partition || 'persist:vortex-drm');
     wv.setAttribute('allowpopups', '');
     wv.style.cssText = 'width:100%;height:100%;border:0;';
-    wv.src = media.url;
+    wv.src = safeUrl;
     this.wv = wv;
     this.container.replaceChildren(wv);
     await new Promise((res) => { wv.addEventListener('dom-ready', res, { once: true }); setTimeout(res, 8000); });
+    if (this._destroyed || this.wv !== wv) return;
     if (startAt > 1) this.seek(startAt);
     if (shouldPlay) this.play();
     this.timer = setInterval(() => this.poll(), 250);
@@ -58,5 +62,5 @@ export class WebviewAdapter {
   setVolume(v) { this.exec(`v.volume = ${Math.max(0, Math.min(1, Number(v) / 100))}`); }
   setMuted(m) { this.exec(`v.muted = ${!!m}`); }
   isMuted() { return false; }
-  destroy() { clearInterval(this.timer); this.container.replaceChildren(); this.wv = null; }
+  destroy() { this._destroyed = true; clearInterval(this.timer); this.container.replaceChildren(); this.wv = null; }
 }

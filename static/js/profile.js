@@ -1,11 +1,11 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v88';
-import { api } from './api.js?v=20261103_v88';
+import { h, popup, toast } from './ui.js?v=20261103_v89';
+import { api } from './api.js?v=20261103_v89';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261103_v88';
+} from './store.js?v=20261103_v89';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -101,15 +101,16 @@ export function saveProfile(data = {}) {
   const name = String(data.name || cleanPrevName || 'Üye').trim().slice(0, 24) || 'Üye';
   const rawHandle = String(data.handle ?? prev.handle ?? '').trim().replace(/^@+/, '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
   const resolvedId = data.uid || data.id || prev.id || prev.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
-  const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 0) || 0);
-  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : watchMinutes >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
-  const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
-  const hideLocation = asBool(data.hideLocation ?? prev.hideLocation ?? false);
-  const hideWatching = asBool(data.hideWatching ?? prev.hideWatching ?? false);
-  const hideFriends = asBool(data.hideFriends ?? prev.hideFriends ?? false);
-  const bio = String(data.bio ?? prev.bio ?? '').trim().slice(0, 160);
-  const statusText = String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60);
-  const statusEmoji = String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿';
+  const sameAccount = Boolean(!prev.isGuest && (prev.uid || prev.id) && String(prev.uid || prev.id) === String(resolvedId));
+  const watchMinutes = Math.max(0, Number(data.watchMinutes ?? (sameAccount ? prev.watchMinutes : 0) ?? 0) || 0);
+  const computedMedal = data.medal || (sameAccount ? prev.medal : '') || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : watchMinutes >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
+  const avatarUrl = String(data.avatarUrl ?? data.avatar ?? (sameAccount ? (prev.avatarUrl ?? prev.avatar) : '') ?? '').trim();
+  const hideLocation = asBool(data.hideLocation ?? (sameAccount ? prev.hideLocation : false) ?? false);
+  const hideWatching = asBool(data.hideWatching ?? (sameAccount ? prev.hideWatching : false) ?? false);
+  const hideFriends = asBool(data.hideFriends ?? (sameAccount ? prev.hideFriends : false) ?? false);
+  const bio = String(data.bio ?? (sameAccount ? prev.bio : '') ?? '').trim().slice(0, 160);
+  const statusText = String(data.statusText ?? (sameAccount ? prev.statusText : '') ?? '').trim().slice(0, 60);
+  const statusEmoji = String(data.statusEmoji ?? (sameAccount ? prev.statusEmoji : '🍿') ?? '🍿').trim().slice(0, 12) || '🍿';
   const p = {
     id: resolvedId,
     uid: resolvedId,
@@ -151,6 +152,7 @@ export function saveProfile(data = {}) {
 export function logoutProfile() {
   try {
     localStorage.removeItem(KEY);
+    localStorage.removeItem(VAULT_KEY);
     localStorage.removeItem('vortex_profile_v1');
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
@@ -166,7 +168,12 @@ export function logoutProfile() {
     verified: false,
     authToken: '',
   };
-  try { set({ self: guest }); } catch (_) {}
+  try {
+    set({
+      self: guest,
+      social: { friends: [], requests: [], outgoing: [], blocked: [], unreadDm: {}, totalUnread: 0, presence: {}, loadedAt: 0 },
+    });
+  } catch (_) {}
   return guest;
 }
 

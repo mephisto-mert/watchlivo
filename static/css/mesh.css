@@ -5077,6 +5077,13 @@ html.is-android-pip .video-frame .mini-player-bar,
 html.is-android-pip .video-frame .cinema-seats-bar,
 html.is-android-pip .video-frame .next-ep-banner,
 html.is-android-pip .video-frame .break-request-banner,
+html.is-android-pip .video-frame .cam-dock,
+html.is-android-pip .video-frame .danmaku-layer,
+html.is-android-pip .video-frame .fs-chat-stack,
+html.is-android-pip .video-frame .skip-intro-pill,
+html.is-android-pip .video-frame .embed-touch-hud-btn,
+html.is-android-pip .rave-notif-stack,
+html.is-android-pip body > .ctl-menu.is-body-portal,
 html.is-android-pip .toast-root {
   display: none !important;
 }

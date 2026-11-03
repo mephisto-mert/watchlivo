@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v88", index_txt)
+        self.assertIn("20261103_v89", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -277,4 +277,4 @@ class V83SocialHistoryUiTests(unittest.TestCase):
             self.assertIn(b"restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:", macho)
             self.assertIn(b"startOrSyncNativePiP:forceStart:", macho)
             plist_txt = zf.read("Payload/Watchlivo.app/Info.plist").decode("utf-8")
-            self.assertIn("<string>87</string>", plist_txt)
+            self.assertIn("<string>89</string>", plist_txt)

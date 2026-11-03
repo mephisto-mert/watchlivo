@@ -87,7 +87,7 @@ class RegressionTests(unittest.TestCase):
             {'provider': 'disney', 'email': 'test@test.com', 'password': 'password'},
             {'provider': 'netflix', 'email': 'kullanici@uydurmadomain999999.xyz', 'password': 'GucluSifre!2026'},
             {'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'},
-            {'provider': 'netflix', 'email': 'jokallame06@hotmail.com', 'password': '30012001Mertcan', 'profile': 'mert'},
+            {'provider': 'netflix', 'email': 'demo_user@example.test', 'password': 'DemoPass#2026!', 'profile': 'demo'},
         ]
         for body in attempts:
             resp = self.client.post('/api/rave/accounts/login', json=body)
@@ -899,11 +899,12 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261103_v88 with zero stale v79/v87 references
+        # 1. Cache-bust bumped cleanly to 20261103_v89 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v88", index_html)
+        self.assertIn("20261103_v89", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
+        self.assertNotIn("20261103_v88", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
         cr = self.client.post("/api/rooms/create", json={

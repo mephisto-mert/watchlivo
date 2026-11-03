@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v88';
-import { Html5Adapter } from './html5.js?v=20261103_v88';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v88';
-import { EmbedAdapter } from './embed.js?v=20261103_v88';
-import { WebviewAdapter } from './webview.js?v=20261103_v88';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v88';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v89';
+import { Html5Adapter } from './html5.js?v=20261103_v89';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v89';
+import { EmbedAdapter } from './embed.js?v=20261103_v89';
+import { WebviewAdapter } from './webview.js?v=20261103_v89';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v89';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -57,7 +57,11 @@ export const mediaKey = (m) => {
 export class PlayerHost {
   constructor(container, { onEvent } = {}) {
     this.container = container;
-    this.onEvent = onEvent || (() => {});
+    const rawOnEvent = onEvent || (() => {});
+    this.onEvent = (ev, arg) => {
+      if ((ev === 'pause' || ev === 'play') && !this.adapter) return;
+      rawOnEvent(ev, arg);
+    };
     if (typeof window !== 'undefined') window.__kinoxHost = this;
     this.adapter = null;
     this.key = '';
@@ -257,7 +261,7 @@ export class PlayerHost {
     const guard = (fn) => (...args) => { if (this.adapter === ad) fn(...args); };
     const events = {
       onReady: guard(() => { if (settledReady) return; settledReady = true; this.loading = false; this.onEvent('ready'); }),
-      onPlay: (arg) => { if (this.adapter === ad) { settledReady = true; this.loading = false; } this.onEvent('play', arg); },
+      onPlay: guard((arg) => { settledReady = true; this.loading = false; this.onEvent('play', arg); }),
       onPause: (arg) => this.onEvent('pause', arg),
       onEnded: guard(() => this.onEvent('ended')),
       onBuffering: guard((b) => this.onEvent('buffering', b)),
@@ -408,11 +412,6 @@ export class PlayerHost {
     return false;
   }
 
-  async enterPiP() {
-    if (this.isPiP()) return 'entered';
-    return this.togglePiP();
-  }
-
   async togglePiP() {
     if (this._nativeIosPipActive && typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function') {
       this._nativeIosPipActive = false;
@@ -497,9 +496,10 @@ export class PlayerHost {
 
   destroyAdapterOnly() {
     clearTimeout(this._loadFallbackTimer);
-    try { this.adapter?.destroy(); } catch (e) { /* ignore */ }
+    const oldAdapter = this.adapter;
     this.adapter = null;
     this.key = '';
+    try { oldAdapter?.destroy(); } catch (e) { /* ignore */ }
   }
 
   destroy() {

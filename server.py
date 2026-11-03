@@ -156,7 +156,7 @@ class SecurityHeaders:
                 hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
                 if scope.get("path") == "/api/rave/browser-proxy":
-                    hdrs.append((b"content-security-policy", b"frame-ancestors 'self'; object-src 'none'"))
+                    hdrs.append((b"content-security-policy", b"sandbox allow-scripts allow-forms; frame-ancestors 'self'; object-src 'none'; base-uri 'none'"))
                 else:
                     hdrs.append((
                         b"content-security-policy",
@@ -172,7 +172,7 @@ class SecurityHeaders:
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
                 req_path = str(scope.get("path") or "")
-                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image")):
+                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image")) or (req_path.startswith("/api/rooms/") and req_path != "/api/rooms"):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
                     hdrs.append((b"cdn-cache-control", b"no-store"))
@@ -2236,8 +2236,10 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
 
     def _try_ep_page(ep_u: str, pre_verified: bool) -> list:
         try:
+            if not public_http_url(ep_u):
+                return []
             req = urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": "https://ddizimag.com/"})
-            with urllib.request.urlopen(req, timeout=4.2) as r:
+            with _public_open(req, timeout=4.2) as r:
                 html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             if 'data-player-type="none"' in html:
                 return []
@@ -2750,7 +2752,10 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 continue
         for f_u in fhd_targets[:2]:
             try:
-                mhtml = urllib.request.urlopen(urllib.request.Request(f_u, headers={"User-Agent": UA137, "Referer": "https://www.fullhdfilmizlesene.now/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                if not public_http_url(f_u):
+                    continue
+                with _public_open(urllib.request.Request(f_u, headers={"User-Agent": UA137, "Referer": "https://www.fullhdfilmizlesene.now/"}), timeout=3.4) as _fr:
+                    mhtml = _fr.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 if year and str(year)[:4].isdigit():
                     ym_p = re.search(r'<span class="film-yil">(\d{4})</span>|<title>[^<]*\((\d{4})\)</title>', mhtml, re.I)
                     py_str = next((g for g in (ym_p.groups() if ym_p else []) if g), "") if ym_p else ""
@@ -4690,7 +4695,17 @@ async def resolve_catalog(request: Request):
     imdb_id = (request.query_params.get("imdbId") or "").strip()[:30]
     media_type = (request.query_params.get("mediaType") or request.query_params.get("type") or "movie").strip().lower()
     poster = (request.query_params.get("poster") or "").strip()[:600]
-    source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
+    raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
+    source_url = ""
+    if raw_source_url and public_http_url(raw_source_url):
+        _su_host = (urllib.parse.urlparse(raw_source_url).hostname or "").lower()
+        if _su_host in (
+            "ddizimag.com", "www.ddizimag.com",
+            "fullhdfilmizlesene.now", "www.fullhdfilmizlesene.now",
+            "hdfilmcehennemi.nl", "www.hdfilmcehennemi.nl",
+            "animecix.tv", "www.animecix.tv",
+        ) or bool(re.fullmatch(r"(?:www\.)?dizi\d*\.(?:life|plus)", _su_host)):
+            source_url = raw_source_url
     force_refresh = (request.query_params.get("refresh") or "").strip().lower() in ("1", "true", "yes")
     try:
         season = max(1, int(request.query_params.get("season") or request.query_params.get("s") or 1))
@@ -5293,9 +5308,23 @@ async def rave_site_data(request: Request):
 
 import threading
 _SEGMENT_CACHE: dict[str, tuple[float, bytes, str]] = {}
+_SEG_CACHE_MAX_BYTES = 64 * 1024 * 1024
 _SEG_TABLE_LOCK = threading.Lock()
 _SEG_URL_LOCKS: dict[str, threading.Lock] = {}
 _M3U8_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def _seg_cache_put_locked(key: str, ts: float, payload: bytes, meta: str) -> None:
+    expired = [k for k, v_item in _SEGMENT_CACHE.items() if ts - v_item[0] > 90]
+    for k in expired:
+        _SEGMENT_CACHE.pop(k, None)
+    total_b = sum(len(v_item[1]) for v_item in _SEGMENT_CACHE.values())
+    while _SEGMENT_CACHE and (len(_SEGMENT_CACHE) >= 96 or total_b + len(payload) > _SEG_CACHE_MAX_BYTES):
+        oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
+        ev = _SEGMENT_CACHE.pop(oldest, None)
+        if ev is not None:
+            total_b -= len(ev[1])
+    _SEGMENT_CACHE[key] = (ts, payload, meta)
 
 
 def _get_seg_lock(url: str) -> threading.Lock:
@@ -5369,8 +5398,9 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             hdrs["Origin"] = orig
     clean_u_path = url.lower().split("?", 1)[0]
     is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
-    is_explicit_mp4 = (not is_fmp4_init) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower() or "drive.usercontent.google.com" in url.lower())
-    is_seg_url = is_fmp4_init or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
+    is_fmp4_seg = is_fmp4_init or ext_hint == ".m4s" or clean_u_path.endswith(".m4s")
+    is_explicit_mp4 = (not is_fmp4_seg) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower() or "drive.usercontent.google.com" in url.lower())
+    is_seg_url = is_fmp4_seg or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
         m_hi = re.match(r"bytes=(\d+)-", rng)
@@ -5407,7 +5437,8 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                                     raise ValueError("Upstream returned HTML instead of media segment")
                                 if use_seg_rng and r.status == 206:
                                     cr_up = r.headers.get("Content-Range") or ""
-                                    return data, 206, cr_up, "video/mp2t"
+                                    is_mp4_206 = (len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")) or is_fmp4_seg or clean_u_path.endswith(".mp4")
+                                    return data, 206, cr_up, ("video/mp4" if is_mp4_206 else "video/mp2t")
                                 raw_cl = (r.headers.get("Content-Length") or "").strip()
                                 up_total = int(raw_cl) if raw_cl.isdigit() else 0
                                 if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total and up_total <= 28 * 1024 * 1024:
@@ -5437,14 +5468,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                         _KNOWN_LARGE_MP4_URLS.add(url)
                     elif data and (not up_total or len(data) >= up_total) and len(data) <= int(10 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
-                            now_ts = time.time()
-                            expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 90]
-                            for k in expired:
-                                _SEGMENT_CACHE.pop(k, None)
-                            while len(_SEGMENT_CACHE) >= 96:
-                                oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
-                                _SEGMENT_CACHE.pop(oldest, None)
-                            _SEGMENT_CACHE[url] = (now_ts, data, ct)
+                            _seg_cache_put_locked(url, time.time(), data, ct)
         total = max(len(data), up_total)
         if rng and rng.startswith("bytes=") and len(data) > 0:
             m = re.match(r"bytes=(\d+)-(\d*)", rng)
@@ -5493,16 +5517,15 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     read_cap = max(chunk_sz, (end - start + 1) if end >= start else chunk_sz) + 1024
     with _public_open(req, timeout=10) as r:
         data = r.read(read_cap)
+        raw_mp4_ct = (r.headers.get("Content-Type") or "").lower()
+        if data and ("text/html" in raw_mp4_ct or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
+            raise ValueError("Upstream returned HTML instead of MP4 media")
         cr = r.headers.get("Content-Range") or ""
         status = 206 if cr else 200
         ct = "video/mp4"
     if data and len(data) <= int(3 * 1024 * 1024):
         with _SEG_TABLE_LOCK:
-            now_ts = time.time()
-            while len(_SEGMENT_CACHE) >= 96:
-                oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
-                _SEGMENT_CACHE.pop(oldest, None)
-            _SEGMENT_CACHE[mp4_ckey] = (now_ts, data, f"{ct}\n{cr}\n{status}")
+            _seg_cache_put_locked(mp4_ckey, time.time(), data, f"{ct}\n{cr}\n{status}")
     return data, status, cr, ct
 
 
@@ -5728,10 +5751,11 @@ async def rave_stream_manifest(request: Request):
                     raw = ""
                 except Exception as err:
                     last_err = err
-                    if is_fp and fp_id and attempt == 0 and not is_probe:
+                    if is_fp and fp_id and re.fullmatch(r"[A-Za-z0-9_-]{3,64}", str(fp_id)) and attempt == 0 and not is_probe:
                         try:
                             fp_u = f"https://fastplay.mom/video/{fp_id}"
-                            fp_html = urllib.request.urlopen(urllib.request.Request(fp_u, headers={"User-Agent": UA137, "Referer": "https://setplay.shop/"}), timeout=4.0).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                            with _public_open(urllib.request.Request(fp_u, headers={"User-Agent": UA137, "Referer": "https://setplay.shop/"}), timeout=4.0) as _fpr:
+                                fp_html = _fpr.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                             spg_m = re.search(r"window\.SPG_A\s*=\s*(\{[^}]+\})", fp_html)
                             if spg_m:
                                 spg_obj = json.loads(spg_m.group(1))
@@ -5814,6 +5838,8 @@ async def rave_stream_manifest(request: Request):
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
+                if not public_http_url(u_str):
+                    return ""
                 if cur_is_fp and "/subtitle/" in u_str:
                     return f"/api/rave/subtitle.vtt?url={urllib.parse.quote(u_str, safe='')}&lang=tr"
                 u_path_low = u_str.lower().split("?", 1)[0].split("#", 1)[0]
@@ -5949,10 +5975,11 @@ async def rave_stream_manifest(request: Request):
                                         su = urllib.parse.urljoin(base_u, su)
                                     if any(ext in su.lower() for ext in (".vtt", ".srt", "/subtitle/")):
                                         s_i, e_i = int(s_num or 1), int(e_num or 1)
-                                        for mt_k in ("tv", "movie"):
-                                            es_l = _EMBED_SUB_CACHE.setdefault(f"{mt_k}:{tid}:{s_i}:{e_i}", [])
-                                            if not any(x.get("url") == su for x in es_l):
-                                                es_l.insert(0, {"lang": lm.group(1).lower().strip(), "url": su, "source": "m3u8_embed"})
+                                        with _SEG_TABLE_LOCK:
+                                            for mt_k in ("tv", "movie"):
+                                                es_l = _EMBED_SUB_CACHE.setdefault(f"{mt_k}:{tid}:{s_i}:{e_i}", [])
+                                                if not any(x.get("url") == su for x in es_l):
+                                                    es_l.insert(0, {"lang": lm.group(1).lower().strip(), "url": su, "source": "m3u8_embed"})
                             except Exception:
                                 pass
                             continue
@@ -6209,9 +6236,12 @@ async def stream_proxy(request: Request):
                     if not fut.done():
                         fut.set_result(res_tup)
                     data, status, cr, ct = res_tup
-                except Exception as exc_f:
+                except BaseException as exc_f:
                     if not fut.done():
-                        fut.set_exception(exc_f)
+                        if isinstance(exc_f, asyncio.CancelledError):
+                            fut.cancel()
+                        else:
+                            fut.set_exception(exc_f)
                     raise
                 finally:
                     if _ASYNC_SEG_INFLIGHT.get(url) is fut:

@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+import auth_engine
 from security import is_safe_public_url
 
 UA_CHROME = (
@@ -181,15 +182,14 @@ def _safe_int(v: Any, default: int = 0, lo: Optional[int] = None, hi: Optional[i
 def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_default") -> str:
     verified = _clean(request.scope.get("wl_uid"), 64)
     if verified:
-        return verified
-    cand = _clean(raw_uid, 64)
-    if cand.lower().startswith("u_wl_"):
-        return "unauth_" + hashlib.sha256(cand.lower().encode("utf-8")).hexdigest()[:12]
-    if cand:
-        return cand
+        return verified.lower()
+    cand = _clean(raw_uid, 64).lower()
+    if cand and not cand.startswith("u_wl_") and re.fullmatch(r"[a-z0-9_-]{3,48}", cand):
+        if auth_engine.resolve_public_user(cand) is None:
+            return cand
     ip_seed = str((request.client.host if request.client else "") or "anon")
     ua_seed = str(request.headers.get("user-agent") or "")[:80]
-    return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}".encode("utf-8")).hexdigest()[:10]
+    return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{cand or fallback}".encode("utf-8")).hexdigest()[:12]
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -849,6 +849,7 @@ def _get_dm_expiry(tk: str) -> int:
 async def social_dm_get(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
+    explicit_peer = bool(_clean(q.get("peerId"), 64))
     peer_id = _clean(q.get("peerId"), 64)
     u = _ensure_user_social(uid)
     if not peer_id:
@@ -858,34 +859,48 @@ async def social_dm_get(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "peerId": "", "canMessage": False, "friendshipState": "NONE", "messages": []})
     fstate = _friendship_state(u, peer_id)
     now_t = _now()
-    if isinstance(u.get("unread"), dict) and peer_id in u["unread"]:
+    peer_card = _resolve_social_target(peer_id, peer_id) or {"uid": peer_id, "name": peer_id, "handle": f"@{peer_id[:16]}"}
+    pres = _compute_live_presence(peer_id, uid, is_friend=(fstate == "FRIENDS"))
+    tk = _thread_key(uid, peer_id)
+    exp_val = _get_dm_expiry(tk)
+    if fstate != "FRIENDS":
+        return JSONResponse({
+            "ok": True,
+            "peerId": peer_id,
+            "peer": {**peer_card, **pres},
+            "friendshipState": fstate,
+            "friendState": fstate,
+            "canMessage": False,
+            "peerTyping": False,
+            "expirySec": exp_val,
+            "settings": {"expirySec": exp_val},
+            "messages": [],
+        })
+    if explicit_peer and isinstance(u.get("unread"), dict) and peer_id in u["unread"]:
         u["unread"].pop(peer_id, None)
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
-    tk = _thread_key(uid, peer_id)
     persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=2.0)
     if isinstance(persisted_dm, list):
         _DM_THREADS[tk] = persisted_dm
     raw_msgs = _DM_THREADS.get(tk) or []
     msgs = [m for m in raw_msgs if not (float(m.get("expiryAt") or 0) > 0 and float(m.get("expiryAt") or 0) < now_t)]
     dirty = len(msgs) != len(raw_msgs)
-    for m in msgs:
-        if m.get("fromUid") == peer_id and not m.get("readAt"):
-            m["readAt"] = now_t
-            dirty = True
+    if explicit_peer:
+        for m in msgs:
+            if m.get("fromUid") == peer_id and not m.get("readAt"):
+                m["readAt"] = now_t
+                dirty = True
     if dirty:
         _DM_THREADS[tk] = msgs[-100:]
         _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
     typ_ts = _finite_float(_kv_get(f"wl:soc:typ:{tk}:{peer_id}", _DM_TYPING.get(f"{tk}:{peer_id}", 0.0), max_age=1.5), 0.0)
-    peer_card = _resolve_social_target(peer_id, peer_id) or {"uid": peer_id, "name": peer_id, "handle": f"@{peer_id[:16]}"}
-    pres = _compute_live_presence(peer_id, uid, is_friend=(fstate == "FRIENDS"))
-    exp_val = _get_dm_expiry(tk)
     return JSONResponse({
         "ok": True,
         "peerId": peer_id,
         "peer": {**peer_card, **pres},
         "friendshipState": fstate,
         "friendState": fstate,
-        "canMessage": fstate == "FRIENDS",
+        "canMessage": True,
         "peerTyping": (now_t - typ_ts) < 5.5,
         "expirySec": exp_val,
         "settings": {"expirySec": exp_val},
@@ -968,7 +983,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
     room_invite = _clean(body.get("roomInvite"), 80)
     raw_card = body.get("roomInviteCard") if isinstance(body.get("roomInviteCard"), dict) else None
     snap = str(body.get("snapshot") or "").strip()
-    if snap and len(snap) > 85000:
+    if snap and (len(snap) > 85000 or not re.match(r"^data:image/(?:png|jpe?g|webp);base64,", snap, re.I)):
         snap = ""
     raw_an = body.get("audioNote")
     audio_note = raw_an if (isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000) else None
@@ -1011,6 +1026,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
         msg["audioNote"] = audio_note
     thread.append(msg)
     _DM_TYPING.pop(f"{tk}:{uid}", None)
+    _kv_set(f"wl:soc:typ:{tk}:{uid}", 0.0, ttl_sec=10)
     _DM_THREADS[tk] = thread[-100:]
     _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
 
@@ -1060,7 +1076,13 @@ async def social_invite(request: Request) -> JSONResponse:
         if target_uid:
             q_items = _kv_get(f"wl:soc:ntf:{target_uid}", None, max_age=1.0)
             q_list = list(q_items) if isinstance(q_items, list) else list(_NOTIFICATION_QUEUES.get(target_uid, []))
-            q_list = [x for x in q_list if not ((inv_id and x.get("id") == inv_id) or (not inv_id and x.get("fromUid") == uid and x.get("roomId") == room_id))]
+            q_list = [
+                x for x in q_list
+                if not (
+                    x.get("fromUid") == uid
+                    and ((inv_id and x.get("id") == inv_id) or (not inv_id and x.get("roomId") == room_id))
+                )
+            ]
             _NOTIFICATION_QUEUES[target_uid] = q_list
             _kv_set(f"wl:soc:ntf:{target_uid}", q_list, ttl_sec=86400)
         return JSONResponse({"ok": True, "cancelled": True})
@@ -1725,12 +1747,23 @@ async def notifications_send(request: Request) -> JSONResponse:
         body = {}
     if not isinstance(body, dict):
         body = {}
+    verified_uid = _clean(request.scope.get("wl_uid"), 64).lower()
     from_uid = _caller_uid(request, body.get("fromUid"), "guest_default")
     from_name = _clean(body.get("fromName") or body.get("sender") or "Arkadaşın", 40)
     room_id = _clean(body.get("roomId"), 80)
     room_title = _clean(body.get("roomTitle") or "Sinema Odası", 120)
-    target_uid = _clean(body.get("targetUid") or "*", 64).lower()
-    url = _clean(body.get("url") or (f"/#/mesh/{urllib.parse.quote(room_id)}" if room_id else "/#/"), 240)
+    target_uid = _clean(body.get("targetUid"), 64).lower()
+    if not target_uid or target_uid == "*":
+        return JSONResponse({"ok": False, "error": "Geçerli bir hedef kullanıcı belirtilmelidir."}, status_code=400)
+    if target_uid.startswith("u_wl_") or auth_engine.resolve_public_user(target_uid) is not None:
+        if not verified_uid:
+            return JSONResponse({"ok": False, "error": "Oturum doğrulaması gerekli."}, status_code=401)
+        sender_u = _ensure_user_social(verified_uid, from_name)
+        if _friendship_state(sender_u, target_uid) != "FRIENDS":
+            return JSONResponse({"ok": False, "error": "Yalnızca arkadaşlarınıza bildirim gönderebilirsiniz."}, status_code=403)
+    raw_url = _clean(body.get("url") or "", 240)
+    default_url = f"/#/mesh/{urllib.parse.quote(room_id)}" if room_id else "/#/"
+    url = raw_url if (raw_url.startswith("/#/") or raw_url == "/") else default_url
     title = _clean(body.get("title") or f"🎬 {from_name} seni odaya çağırıyor!", 120)
     msg_body = _clean(body.get("body") or f'"{room_title}" odası şu an canlı. Tek tıkla katıl!', 240)
     item = _queue_notification(target_uid, {

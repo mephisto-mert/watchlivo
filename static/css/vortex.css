@@ -2648,8 +2648,9 @@ header.navbar.top-nav-capsule {
   width: 100% !important;
   max-width: 100% !important;
   margin: 0 !important;
-  padding: 0 clamp(14px, 2.8vw, 36px) !important;
-  height: 60px !important;
+  padding: env(safe-area-inset-top, 0px) clamp(14px, 2.8vw, 36px) 0 !important;
+  min-height: calc(60px + env(safe-area-inset-top, 0px)) !important;
+  height: auto !important;
   border-radius: 0 !important;
   background: color-mix(in srgb, var(--bg-elevated) 94%, rgba(0, 0, 0, 0.88)) !important;
   border: none !important;

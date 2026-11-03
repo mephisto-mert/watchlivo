@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v88';
-import { expectedPosition } from '../sync.js?v=20261103_v88';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v88';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v88';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v89';
+import { expectedPosition } from '../sync.js?v=20261103_v89';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v89';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v89';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -64,6 +64,10 @@ export class Html5Adapter {
   }
 
   async load(media, startAt = 0, autoplay = true) {
+    if (this.hls) { try { this.hls.destroy(); } catch (_) {} this.hls = null; }
+    if (this.mashupHlsB) { try { this.mashupHlsB.destroy(); } catch (_) {} this.mashupHlsB = null; }
+    if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); } catch (_) {} this.mashupDeckB = null; }
+    if (this.iosPipVideo) { try { this.iosPipVideo.pause(); this.iosPipVideo.remove(); } catch (_) {} this.iosPipVideo = null; this._iosPipActive = false; }
     if (media?.live) {
       startAt = 0;
       this.caps = { ...this.caps, seek: false, live: true };
@@ -1451,6 +1455,22 @@ export class Html5Adapter {
     if (targetV && typeof targetV.webkitSetPresentationMode === 'function' && targetV.webkitPresentationMode !== 'picture-in-picture' && targetV.readyState >= 1) {
       try {
         if (!targetV.webkitSupportsPresentationMode || targetV.webkitSupportsPresentationMode('picture-in-picture')) {
+          if (targetV === this.iosPipVideo) {
+            this._iosPipActive = true;
+            this._lastPipEnterAt = Date.now();
+            if (!this._iosPipIsCanvasOnly) {
+              const curT = this.getTime();
+              if (curT > 0.5 && Math.abs((targetV.currentTime || 0) - curT) > 0.8) {
+                try { targetV.currentTime = curT; } catch (_) {}
+              }
+              targetV.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
+              targetV.playbackRate = v.playbackRate || 1;
+              this._suppressInlinePauseOnce = true;
+              try { v.pause(); } catch (_) {}
+              try { this.hls?.stopLoad?.(); } catch (_) {}
+            }
+            try { targetV.play()?.catch?.(() => {}); } catch (_) {}
+          }
           this.subs?.syncNativeTrackToElement?.(targetV, true);
           targetV.webkitSetPresentationMode('picture-in-picture');
           this.events.onPipChange?.(true);
@@ -1919,6 +1939,15 @@ export class Html5Adapter {
     v.disablePictureInPicture = false;
     try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
 
+    if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
+      try {
+        this._syncAndroidPipState(true);
+        if (window.Android.enterPiP(v.videoWidth || 16, v.videoHeight || 9) !== false) {
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+      } catch (_) {}
+    }
     const nativeSrc = this._nativeIosPipSourceUrl();
     if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && nativeSrc) {
       const absU = new URL(nativeSrc, window.location.origin).href;

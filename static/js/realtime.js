@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261103_v88';
-import { api } from './api.js?v=20261103_v88';
-import { state } from './store.js?v=20261103_v88';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261103_v88';
+import { clock } from './sync.js?v=20261103_v89';
+import { api } from './api.js?v=20261103_v89';
+import { state } from './store.js?v=20261103_v89';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261103_v89';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -99,7 +99,7 @@ export class MeshConnection {
     if (pkt.fromCid === this.clientId) return;
     if (pkt._id && this.seenP2pIds.has(pkt._id)) return;
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
-    if (pkt.syncToken && Number(pkt.rev || 0) >= this.lastRev) {
+    if (pkt.room && pkt.syncToken && Number(pkt.rev || 0) >= this.lastRev) {
       this.syncToken = pkt.syncToken;
       this.lastRev = Number(pkt.rev || this.lastRev);
     }
@@ -163,6 +163,11 @@ export class MeshConnection {
   }
 
   startWs() {
+    clearInterval(this.pingTimer);
+    clearTimeout(this.wsRetryTimer);
+    if (this.ws && this.ws.readyState <= 1) {
+      try { this.ws.onclose = null; this.ws.close(); } catch (_) {}
+    }
     this.mode = 'ws';
     this.emitStatus('connecting');
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -198,6 +203,11 @@ export class MeshConnection {
         this._markRoomEventsSeen(data.room);
       }
       if (data.type === 'password_required') this.close();
+      if (data.id) {
+        const seenSet = ['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(data.type) ? this.seenSignalIds : this.seenEventIds;
+        if (seenSet.has(data.id)) return;
+        this._addBounded(seenSet, data.id);
+      }
       this.onMessage?.(data);
     };
     ws.onclose = () => {
@@ -235,7 +245,9 @@ export class MeshConnection {
       const baseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt > 25 ? 1450 : 950;
       const jitterMs = pCnt > 25 ? Math.floor(Math.random() * 450) : Math.floor(Math.random() * 140);
       this.pollTimer = setTimeout(async () => {
-        if (!this.inFlight && !this.outQueue.length) {
+        if (this.outQueue.length && !this.flushing) {
+          await this._flushOutQueue();
+        } else if (!this.inFlight && !this.outQueue.length) {
           await this.httpSend({ type: 'poll' });
         }
         scheduleNextPoll();
@@ -567,6 +579,7 @@ export class MeshConnection {
   send(type, payload = {}) { this.sendRaw({ type, ...payload }); }
 
   close(explicitLeave = false, closeRoomForAll = false) {
+    if (this.closed) return;
     if (explicitLeave) {
       const shouldCloseRoom = Boolean(closeRoomForAll);
       if (shouldCloseRoom) {

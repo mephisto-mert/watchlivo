@@ -1,15 +1,15 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v88';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v89';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261103_v88';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v88';
-import { api } from '../api.js?v=20261103_v88';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v88';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v88';
+} from '../store.js?v=20261103_v89';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v89';
+import { api } from '../api.js?v=20261103_v89';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v89';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v89';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -52,7 +52,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v88', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v89', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -185,13 +185,18 @@ export function renderHome(app) {
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
       h('span', { class: 'wl-btn-apk-text' }, 'APK İndir')) : null,
-      h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async () => {
+      h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
+        const btnEl = ev?.currentTarget;
+        if (btnEl?.dataset?.busy === '1') return;
+        if (btnEl) { btnEl.dataset.busy = '1'; btnEl.disabled = true; }
         try {
           await createRoomWithMedia(null);
         } catch (e) {
           toast(e?.message || 'Oda oluşturulamadı, lütfen tekrar deneyin.');
           document.getElementById('home-selection')?.scrollIntoView({ behavior: 'smooth' });
           setTimeout(() => document.querySelector('#home-selection .home-search input')?.focus(), 80);
+        } finally {
+          if (btnEl) { delete btnEl.dataset.busy; btnEl.disabled = false; }
         }
       } }, h('span', { html: icons.plus, style: { display: 'flex' } }), h('span', { class: 'create-room-lbl' }, 'Oda Oluştur')),
       navIcon('download', 'Tüm Uygulamaları İndir (APK & Windows)', () => openDownloadModal(), { id: 'nav-download-btn' }),

@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v88';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v88';
-import { avatar } from '../profile.js?v=20261103_v88';
-import { api, qs } from '../api.js?v=20261103_v88';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v88';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v89';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v89';
+import { avatar } from '../profile.js?v=20261103_v89';
+import { api, qs } from '../api.js?v=20261103_v89';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v89';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1182,7 +1182,7 @@ export function buildChat(ctx) {
   }
 
   function buildSnapshotWidget(m) {
-    if (!m?.snapshot) return null;
+    if (!m?.snapshot || !/^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(String(m.snapshot))) return null;
     const hasTime = Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
     const sec = hasTime ? Math.round(Number(m.videoTime)) : null;
     return h('div', {
@@ -1303,7 +1303,7 @@ export function buildChat(ctx) {
               ...renderRichMessageText(m.text || ''),
               buildAudioNoteWidget(m),
               buildSnapshotWidget(m),
-              m.gif ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
+              (m.gif && /^https:\/\//i.test(String(m.gif))) ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
         reactWrap));
     let swX = 0;
     let swY = 0;

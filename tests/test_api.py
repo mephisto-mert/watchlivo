@@ -134,7 +134,7 @@ if __name__ == "__main__":
     last = b["room"]["chat"][-1]
     check("chat stored as plain text", last["text"].startswith("<script>") and last["user"] == "Berk")
     s, b = sync("hB", type="chat", gif="https://evil.example/x.gif")
-    check("gif host allow-list", b["room"]["chat"][-1]["text"] != "" or b["room"]["chat"][-1].get("gif", "") == "")
+    check("gif host allow-list", b["room"]["chat"][-1].get("gif", "") == "")
     s, l = call("/api/rooms")
     check("lobby lists active room", any(x["id"] == rid and x["count"] == 2 for x in l.get("rooms", [])),
           str([(x["id"], x["count"]) for x in l.get("rooms", []) if x["id"] == rid]))

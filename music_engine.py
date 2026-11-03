@@ -113,7 +113,7 @@ def _http_get_json(url: str, timeout: float = 4.5, headers: dict | None = None, 
     hdrs = {"User-Agent": UA_MUSIC, "Accept": "application/json", **(headers or {})}
     req = urllib.request.Request(url, data=data, headers=hdrs)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read(1024 * 600).decode("utf-8", errors="ignore"))
+        return json.loads(r.read(2 * 1024 * 1024).decode("utf-8", errors="ignore"))
 
 
 def _spotify_playlist_sync(playlist_id: str, limit: int = 20) -> list[dict]:
@@ -645,6 +645,7 @@ def _get_sc_client_id_sync(force_refresh: bool = False) -> str:
                 return _SC_CLIENT_ID
     except Exception:
         pass
+    _SC_CID_TS = time.time() - 3300.0
     return _SC_CLIENT_ID
 
 
@@ -996,10 +997,12 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     with urllib.request.urlopen(req, timeout=5.5) as r:
         buf = r.read(65536)
     pos = buf.find(b"sidx")
-    if pos < 4 or len(buf) < pos + 20:
+    if pos < 4 or len(buf) < pos + 28:
         return []
     box_start = pos - 4
     ver = buf[pos + 4]
+    if ver != 0 and len(buf) < pos + 36:
+        return []
     p = pos + 8 + 4  # skip version/flags + reference_ID
     timescale = struct.unpack(">I", buf[p:p + 4])[0] or 1000
     p += 4
@@ -1079,7 +1082,10 @@ async def yt_pip_hls_track(request: Request):
     fmt = (info or {}).get("videoFmt" if kind == "video" else "audioFmt")
     if not fmt:
         return JSONResponse({"error": "Katman bulunamadı"}, status_code=404, headers=cors_hdrs)
-    segs = await asyncio.wait_for(asyncio.to_thread(_fetch_sidx_segments_sync, vid, kind, fmt), timeout=6.5)
+    try:
+        segs = await asyncio.wait_for(asyncio.to_thread(_fetch_sidx_segments_sync, vid, kind, fmt), timeout=6.5)
+    except Exception:
+        segs = []
     if not segs:
         return JSONResponse({"error": "Segment dizini okunamadı"}, status_code=502, headers=cors_hdrs)
     init_rng = fmt.get("initRange") or {}
@@ -1346,6 +1352,11 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         primary_stype = sc_stype
         primary_url = sc_url
         alt_urls = [u for u in (sc_alts + ([exact_mv] if not is_preview_mv else []) + [audio_stream]) if u and u != primary_url]
+    elif mode_norm == "audio" and primary_vid:
+        primary_prov = "direct"
+        primary_stype = "mp4"
+        primary_url = f"/api/rave/yt-music-stream?v={urllib.parse.quote(primary_vid, safe='')}&kind=audio"
+        alt_urls = [u for u in [audio_stream, exact_mv] if u and u != primary_url]
     elif primary_vid:
         primary_prov = "youtube"
         primary_stype = "youtube"

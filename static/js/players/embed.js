@@ -46,7 +46,7 @@ export class EmbedAdapter {
     if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {
       u += `${u.includes('?') ? '&' : '?'}startAt=${Math.floor(startAt)}`;
     }
-    return u;
+    return /^https?:\/\//i.test(String(u || '')) ? u : 'about:blank';
   }
 
   _handleMessage(ev) {

@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v88';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v88';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v88';
-import { getProvider } from '../providers.js?v=20261103_v88';
-import { expectedPosition } from '../sync.js?v=20261103_v88';
-import { thumbFor } from './lobby.js?v=20261103_v88';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v88';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v88';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v88';
-import { avatar } from '../profile.js?v=20261103_v88';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v89';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v89';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v89';
+import { getProvider } from '../providers.js?v=20261103_v89';
+import { expectedPosition } from '../sync.js?v=20261103_v89';
+import { thumbFor } from './lobby.js?v=20261103_v89';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v89';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v89';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v89';
+import { avatar } from '../profile.js?v=20261103_v89';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -121,7 +121,7 @@ export function buildControls(frame, ctx) {
     controls.classList.add('ui-active');
     clearTimeout(uiTimer);
     uiTimer = setTimeout(() => {
-      if (!menu.classList.contains('hidden')) return;
+      if (!menu.classList.contains('hidden') || frame.classList.contains('scrubbing')) return;
       controls.classList.remove('ui-active');
       frame.classList.add('idle-cursor');
     }, durationMs);
@@ -521,7 +521,7 @@ export function buildControls(frame, ctx) {
   const brightnessVeil = h('div', { class: 'wl-brightness-veil', id: 'wl-brightness-veil', 'aria-hidden': 'true' });
   const rawSavedBrightStr = localStorage.getItem('vortex_brightness');
   const savedBrightRaw = (rawSavedBrightStr !== null && rawSavedBrightStr !== '') ? Number(rawSavedBrightStr) : NaN;
-  let currentBrightness = Number.isFinite(savedBrightRaw) && savedBrightRaw >= 0 && savedBrightRaw <= 100 ? Math.round(savedBrightRaw) : 100;
+  let currentBrightness = Number.isFinite(savedBrightRaw) && savedBrightRaw > 0 && savedBrightRaw <= 100 ? Math.round(savedBrightRaw) : 100;
   let curFilter = localStorage.getItem('vortex_video_filter') || 'normal';
   let danmakuEnabled = localStorage.getItem('vortex_danmaku') !== 'off';
   let ambilightEnabled = localStorage.getItem('vortex_ambilight') === 'on';
@@ -2345,11 +2345,11 @@ export function buildControls(frame, ctx) {
         });
         const safeHandler = (act, fn) => { try { ms.setActionHandler(act, fn); } catch (e) { /* ignore */ } };
         safeHandler('play', () => {
-          if (isLeader()) actions.play?.() || actions.toggle?.();
+          if (isLeader()) { if (actions.play) actions.play(); else actions.toggle?.(); }
           else host.adapter?.play?.();
         });
         safeHandler('pause', () => {
-          if (isLeader()) actions.pause?.() || actions.toggle?.();
+          if (isLeader()) { if (actions.pause) actions.pause(); else actions.toggle?.(); }
         });
         safeHandler('seekbackward', (details) => {
           if (isLeader()) seekStep(-(details?.seekOffset || 10));

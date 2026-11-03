@@ -592,7 +592,8 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const preserveExistingPos = !opts?.resetPosition && opts?.preserveExistingPos !== false;
   const resumeTime = (rawTime === 0 && prevTime > 3 && preserveExistingPos) ? prevTime : rawTime;
   const dur = rawDur > 0 ? rawDur : (sameEp ? Math.max(0, Math.floor(Number(prev?.duration || 0))) : Math.max(0, Math.floor(Number(prevEpObj?.duration || 0))));
-  const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? Math.max(8, Number(prev?.percent || 8)) : 4);
+  const prevEpPct = sameEp ? Number(prev?.percent || 8) : Number(prevEpObj?.percent || 8);
+  const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? Math.max(8, prevEpPct) : 4);
   const completed = Boolean(opts?.completed || (dur > 180 && pct >= 95));
   const epMap = { ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}) };
   if (mtype === 'tv') {

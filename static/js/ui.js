@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v88';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v89';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -94,9 +94,13 @@ export function h(tag, attrs = {}, ...children) {
       }
     }
     else if (k === 'html') el.innerHTML = v;
-    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'dataset') Object.assign(el.dataset, v);
-    else el.setAttribute(k, v === true ? '' : v);
+    else if (k.startsWith('on')) {
+      if (typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+    } else if (k === 'dataset') Object.assign(el.dataset, v);
+    else {
+      if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string' && /^\s*(?:javascript:|vbscript:|data:text\/html)/i.test(v)) continue;
+      el.setAttribute(k, v === true ? '' : v);
+    }
   }
   for (const c of children.flat(Infinity)) {
     if (c === null || c === undefined || c === false) continue;

@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v88';
-import { api, qs } from '../api.js?v=20261103_v88';
-import { parseVideoUrl } from '../providers.js?v=20261103_v88';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v88';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v88';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v88';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v89';
+import { api, qs } from '../api.js?v=20261103_v89';
+import { parseVideoUrl } from '../providers.js?v=20261103_v89';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v89';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v89';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v89';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -820,11 +820,15 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     const favList = getFavorites();
     catBar.replaceChildren(...CATALOG_CATEGORIES.map((c) => {
       let badgeTxt = '';
+      const matchCount = (catId) => currentItems.filter((it) => itemMatchesCat(it, catId)).length;
       if (c.id === 'favs') badgeTxt = String(favList.length);
       else if (c.id === 'all') badgeTxt = fmtCount(Math.max(catalogTotals.totalAvailable || 0, currentItems.length));
-      else if (c.id === 'series') badgeTxt = fmtCount(Math.max(catalogTotals.totalTv || 0, currentItems.filter((it) => itemMatchesCat(it, 'series')).length));
-      else if (c.id === 'movies') badgeTxt = fmtCount(Math.max(catalogTotals.totalMovies || 0, currentItems.filter((it) => itemMatchesCat(it, 'movies')).length));
-      else badgeTxt = `${currentItems.filter((it) => itemMatchesCat(it, c.id)).length}+`;
+      else if (c.id === 'series') badgeTxt = fmtCount(Math.max(catalogTotals.totalTv || 0, matchCount('series')));
+      else if (c.id === 'movies') badgeTxt = fmtCount(Math.max(catalogTotals.totalMovies || 0, matchCount('movies')));
+      else {
+        const cnt = matchCount(c.id);
+        badgeTxt = cnt > 0 ? `${cnt}+` : '0';
+      }
       return h('button', {
         type: 'button',
         class: `cat-tab-pill ${activeCat === c.id ? 'active' : ''}`,
@@ -915,10 +919,11 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
             }, `Tümünü Gör →`)),
           h('div', { class: 'cat-shelf-row' }, ...list.slice(0, 24).map(makePoster))));
     }
+    const archiveTotal = Math.max(catalogTotals.totalAvailable || 0, currentItems.length);
     sections.push(
       h('section', { class: 'cat-section', 'data-shelf': 'full-archive' },
         h('div', { class: 'cat-sec-head' },
-          h('h3', {}, `📚 Tüm ${p.name} Dizi ve Filmleri (${fmtCount(catalogTotals.totalAvailable)} Arşiv)`)),
+          h('h3', {}, archiveTotal > 0 ? `📚 Tüm ${p.name} Dizi ve Filmleri (${fmtCount(archiveTotal)} Arşiv)` : `📚 Tüm ${p.name} Dizi ve Filmleri`)),
         h('div', { class: 'poster-grid', id: 'cat-archive-grid' }, ...currentItems.map(makePoster)),
         makeLoadMoreFooter()));
     contentArea.replaceChildren(...sections);
@@ -948,8 +953,8 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     if (catData.totalAvailable) {
       catalogTotals = {
         totalAvailable: catData.totalAvailable,
-        totalTv: catData.totalTv || 1400,
-        totalMovies: catData.totalMovies || 2100,
+        totalTv: catData.totalTv || 0,
+        totalMovies: catData.totalMovies || 0,
       };
     }
     hasMorePages = catData.hasMore !== false;

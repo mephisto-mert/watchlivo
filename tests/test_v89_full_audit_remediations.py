@@ -1,0 +1,154 @@
+"""v89 Full 20-Subagent Ecosystem Audit Regression Suite."""
+import pathlib
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from starlette.testclient import TestClient
+
+import auth_engine
+import rooms
+import server
+import social_engine
+
+
+class V89FullAuditRemediationTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db_path = pathlib.Path(self._tmp.name) / "test_v89_auth.db"
+        self._orig_db = auth_engine.AUTH_DB_PATH
+        self._orig_ready = auth_engine._AUTH_DB_SCHEMA_READY
+        auth_engine.AUTH_DB_PATH = self.db_path
+        auth_engine._AUTH_DB_SCHEMA_READY = False
+        auth_engine._get_db().close()
+        social_engine._SOCIAL_USERS.clear()
+        social_engine._DM_THREADS.clear()
+        social_engine._NOTIFICATION_QUEUES.clear()
+        social_engine._PRESENCE_MAP.clear()
+        social_engine._SOCIAL_DIR.clear()
+        social_engine._DM_TYPING.clear()
+        self._kv_get_p = patch.object(social_engine, "_kv_get", side_effect=lambda k, default=None, **kw: default)
+        self._kv_set_p = patch.object(social_engine, "_kv_set", return_value=None)
+        self._kv_get_p.start()
+        self._kv_set_p.start()
+        self.client = TestClient(server.app)
+
+    def tearDown(self):
+        self._kv_get_p.stop()
+        self._kv_set_p.stop()
+        auth_engine.AUTH_DB_PATH = self._orig_db
+        auth_engine._AUTH_DB_SCHEMA_READY = self._orig_ready
+        self._tmp.cleanup()
+
+    def _register(self, email: str, handle: str, name: str, pw: str = "StrongPass!2026"):
+        auth_engine._REGISTER_LIMIT._hits.clear()
+        auth_engine._LOGIN_LIMIT._hits.clear()
+        r = self.client.post("/api/auth/register", json={"email": email, "handle": handle, "name": name, "password": pw})
+        self.assertEqual(r.status_code, 200, r.text)
+        d = r.json()
+        return d["user"], {"Authorization": f"Bearer {d['authToken']}"}
+
+    def test_01_rooms_no_store_vary_and_browser_proxy_csp_sandbox(self):
+        cr = self.client.post("/api/rooms/create", json={"name": "Cache Test", "creator": "HostA"}).json()["room"]
+        sync_r = self.client.post(f"/api/rooms/{cr['id']}/sync", json={"type": "init", "clientId": "c1", "username": "HostA"})
+        self.assertEqual(sync_r.status_code, 200)
+        self.assertIn("no-store", sync_r.headers.get("cache-control", "").lower())
+        lobby_r = self.client.get("/api/rooms")
+        self.assertEqual(lobby_r.status_code, 200)
+        self.assertIn("authorization", lobby_r.headers.get("vary", "").lower())
+        srv_txt = (pathlib.Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
+        self.assertIn("sandbox allow-scripts allow-forms;", srv_txt)
+        self.assertIn("base-uri 'none'", srv_txt)
+
+    def test_02_room_internal_keys_stripped_token_iat_bound_and_leave_verified(self):
+        tok = rooms.sign_client_token("room_x", "cid_owner")
+        self.assertEqual(rooms.verify_client_token("room_x", tok), "cid_owner")
+        parts = tok.split(".")
+        forged_iat = f"{parts[0]}.{int(parts[1]) - 5}.{parts[2]}"
+        self.assertEqual(rooms.verify_client_token("room_x", forged_iat), "")
+
+        cr = self.client.post("/api/rooms/create", json={"name": "ACL Room", "creator": "Owner"}).json()["room"]
+        rid = cr["id"]
+        j1 = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": "owner1", "username": "Owner", "isCreator": True
+        }).json()
+        owner_tok = j1["clientToken"]
+        self.assertEqual(j1["room"]["host_id"], "owner1")
+        j2 = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": "guest1", "username": "Owner", "isCreator": True, "_internalCreator": True, "_precreated": True
+        }).json()
+        self.assertEqual(j2["room"]["host_id"], "owner1")
+        # Unauthenticated spoofed close_room must NOT evict real host or delete room
+        spoof_close = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "close_room", "clientId": "owner1", "username": "Owner"
+        })
+        self.assertEqual(spoof_close.status_code, 403)
+        real_poll = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "poll", "clientId": "owner1", "clientToken": owner_tok
+        }).json()
+        self.assertEqual(real_poll["room"]["host_id"], "owner1")
+
+    def test_03_auth_local_password_never_overwritten_and_search_wildcard_safe(self):
+        u1, h1 = self._register("koruma@watchlivo.online", "koruma_vip", "Koruma VIP", "GercekSifre#2026!")
+        with patch.object(auth_engine, "_firebase_auth_req", return_value={"idToken": "tok_x", "users": [{"emailVerified": True, "email": "koruma@watchlivo.online"}]}):
+            bad = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "SahteSifre#999"})
+            self.assertEqual(bad.status_code, 401)
+        good = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "GercekSifre#2026!"})
+        self.assertEqual(good.status_code, 200)
+
+        u2, h2 = self._register("arayici@watchlivo.online", "arayici_hd", "Arayici HD")
+        wild = self.client.get("/api/rave/social/search", params={"uid": u2["uid"], "q": "%%%"}, headers=h2).json()
+        self.assertEqual(wild["users"], [])
+        by_email = self.client.get("/api/rave/social/search", params={"uid": u2["uid"], "q": "koruma@watchlivo.online"}, headers=h2).json()
+        self.assertFalse(any(x["uid"] == u1["uid"] for x in by_email["users"]))
+        by_handle = self.client.get("/api/rave/social/search", params={"uid": u2["uid"], "q": "@koruma_vip"}, headers=h2).json()
+        self.assertTrue(any(x["uid"] == u1["uid"] for x in by_handle["users"]))
+
+    def test_04_social_dm_privacy_invite_cancel_acl_and_notification_guards(self):
+        u1, h1 = self._register("seda@watchlivo.online", "seda_1", "Seda")
+        u2, h2 = self._register("kaan@watchlivo.online", "kaan_2", "Kaan")
+        u3, h3 = self._register("mert3@watchlivo.online", "mert_3", "Mert3")
+
+        # Seed thread then unfriend / check non-friend DM GET returns empty messages
+        tid = social_engine._thread_key(u1["uid"], u2["uid"])
+        social_engine._DM_THREADS[tid] = [{"id": "m1", "fromUid": u1["uid"], "text": "gizli", "ts": 1000}]
+        dm_non_friend = self.client.get("/api/rave/social/dm", params={"uid": u1["uid"], "peerId": u2["uid"]}, headers=h1).json()
+        self.assertFalse(dm_non_friend["canMessage"])
+        self.assertEqual(dm_non_friend["messages"], [])
+
+        # Broadcast '*' notification spam blocked & unauth push to registered user blocked
+        bcast = self.client.post("/api/rave/notifications/send", json={"targetUid": "*", "roomId": "r1"})
+        self.assertEqual(bcast.status_code, 400)
+        unauth_reg = self.client.post("/api/rave/notifications/send", json={"targetUid": u1["uid"], "roomId": "r1"})
+        self.assertIn(unauth_reg.status_code, (401, 403))
+
+        # Invite cancel requires original sender uid
+        self.client.post("/api/rave/social/friends", headers=h1, json={"uid": u1["uid"], "action": "request", "targetUid": u2["uid"]})
+        self.client.post("/api/rave/social/friends", headers=h2, json={"uid": u2["uid"], "action": "accept", "targetUid": u1["uid"]})
+        inv = self.client.post("/api/rave/social/invite", headers=h1, json={
+            "uid": u1["uid"], "targetUid": u2["uid"], "action": "send", "roomId": "rm_inv", "roomName": "Oda"
+        }).json()["invites"][0]
+        self.client.post("/api/rave/social/invite", headers=h3, json={
+            "uid": u3["uid"], "targetUid": u2["uid"], "action": "cancel", "inviteId": inv["id"]
+        })
+        notifs_u2 = self.client.get("/api/rave/notifications/poll", params={"uid": u2["uid"]}, headers=h2).json()["notifications"]
+        self.assertTrue(any(i["id"] == inv["id"] for i in notifs_u2))
+
+    def test_05_frontend_and_native_apk_ipa_hardening_invariants(self):
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        proj = repo.parent
+        self.assertIn("is_fmp4_seg", (repo / "server.py").read_text(encoding="utf-8"))
+        self.assertIn("_SEG_CACHE_MAX_BYTES", (repo / "server.py").read_text(encoding="utf-8"))
+        self.assertIn("about:blank", (repo / "static" / "js" / "players" / "embed.js").read_text(encoding="utf-8"))
+        self.assertIn("pkt.fromCid = id;", (repo / "static" / "js" / "voice.js").read_text(encoding="utf-8"))
+        self.assertIn("parsed.origin === self.location.origin", (repo / "static" / "sw.js").read_text(encoding="utf-8"))
+        manifest = (proj / "watchlivo_android" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        self.assertIn('android:allowBackup="false"', manifest)
+        self.assertIn('android:versionCode="5"', manifest)
+        ios_main = (proj / "watchlivo_ios" / "main.m").read_text(encoding="utf-8")
+        self.assertIn("forMainFrameOnly:YES", ios_main)
+        self.assertIn("isTrustedWatchlivoHost:", ios_main)
+
+
+if __name__ == "__main__":
+    unittest.main()

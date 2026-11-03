@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261103_v88
+// Watchlivo Service Worker v20261103_v89
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Push & Background OS Notifications)
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -64,7 +64,11 @@ self.addEventListener('message', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   if (event.action === 'dismiss') return;
-  const targetUrl = event.notification.data?.url || '/#/';
+  let targetUrl = '/#/';
+  try {
+    const parsed = new URL(String(event.notification.data?.url || '/#/'), self.location.origin);
+    if (parsed.origin === self.location.origin) targetUrl = parsed.pathname + parsed.search + parsed.hash;
+  } catch (_) {}
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

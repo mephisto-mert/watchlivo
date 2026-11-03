@@ -90,7 +90,7 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   if ((ctx.state === 'suspended' || ctx.state === 'interrupted') && !(typeof document !== 'undefined' && document.hidden)) {
     try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
   }
-  if (isIosWebKit() && ctx.state !== 'running') return null;
+  if (ctx.state !== 'running') return null;
   try {
     const source = ctx.createMediaElementSource(el);
     const eqLow = ctx.createBiquadFilter();
@@ -192,6 +192,13 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     return;
   }
   let node = _streamNodes.get(audioEl);
+  if (node && node.stream !== activeStream) {
+    try { node.source?.disconnect(); } catch (_) {}
+    try { node.gain?.disconnect(); } catch (_) {}
+    try { node.limiter?.disconnect(); } catch (_) {}
+    _streamNodes.delete(audioEl);
+    node = null;
+  }
   if (!node) {
     const ctx = resumeSharedAudioContext();
     if (!ctx) return;

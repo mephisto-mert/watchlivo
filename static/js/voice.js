@@ -1,6 +1,6 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v88';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v88';
+import { toast } from './ui.js?v=20261103_v89';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v89';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -180,7 +180,8 @@ export class Voice {
 
   _updateDuckState() {
     const peerSpeaking = (this.participants || []).some((p) => p.speaking && p.id !== this.getSelfId());
-    const anySpeaking = Boolean(this.selfSpeaking || peerSpeaking);
+    const activeVoice = Boolean((this.inCall || this.micOn || this.camOn || this.screenOn) && !this.deafened);
+    const anySpeaking = Boolean(activeVoice && (this.selfSpeaking || peerSpeaking));
     if (typeof window !== 'undefined') {
       window.__kinoxVoiceDuckFactor = anySpeaking ? 0.32 : 1.0;
       window.__kinoxSyncDuckVolume?.();
@@ -549,7 +550,14 @@ export class Voice {
     try {
       dc = pc.createDataChannel('vortex-p2p', { negotiated: true, id: 0 });
       dc.onmessage = (ev) => {
-        try { this.onP2pData?.(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
+        try {
+          const pkt = JSON.parse(ev.data);
+          if (!pkt || typeof pkt !== 'object') return;
+          pkt.fromCid = id;
+          const evType = pkt.event?.type;
+          if (evType && !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync'].includes(evType)) return;
+          this.onP2pData?.(pkt);
+        } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
     const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], audio, audioSender: null, videoSender: null };
@@ -1052,8 +1060,12 @@ export class Voice {
       window.__kinoxVoiceDuckFactor = 1.0;
       window.__kinoxSyncDuckVolume?.();
     }
+    this.onDuckChange?.(false);
     for (const st of this.peers.values()) {
-      if (st?.audio) st.audio.muted = true;
+      if (st?.audio) {
+        applyStreamBoost(st.audio, st.audio.srcObject, 0);
+        st.audio.muted = true;
+      }
     }
     this._playCallChime(false);
     this.send('voice_state', { inCall: false, muted: true, speaking: false, cam: false, screen: false, deafened: false });

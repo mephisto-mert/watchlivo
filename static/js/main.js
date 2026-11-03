@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v88';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v88';
-import { renderHome, destroyHome } from './views/home.js?v=20261103_v88';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v88';
-import { api } from './api.js?v=20261103_v88';
-import { h, toast } from './ui.js?v=20261103_v88';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v89';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v89';
+import { renderHome, destroyHome } from './views/home.js?v=20261103_v89';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v89';
+import { api } from './api.js?v=20261103_v89';
+import { h, toast } from './ui.js?v=20261103_v89';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -15,7 +15,11 @@ function parseRoute() {
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
   const params = Object.fromEntries(new URLSearchParams(query));
-  if (parts[0] === 'mesh' && parts[1]) return { name: 'mesh', params: { id: decodeURIComponent(parts[1]), ...params } };
+  if (parts[0] === 'mesh' && parts[1]) {
+    let roomId = parts[1];
+    try { roomId = decodeURIComponent(parts[1]); } catch (_) {}
+    return { name: 'mesh', params: { ...params, id: roomId } };
+  }
   return { name: 'home', params };
 }
 
@@ -79,8 +83,8 @@ async function route() {
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');
     const hasMeshDom = Boolean(meshRoot.querySelector('.mesh-layout'));
-    if (enteringMeshRoomId === r.params.id && hasMeshDom) {
-      window.dispatchEvent(new Event('resize'));
+    if (enteringMeshRoomId === r.params.id) {
+      if (hasMeshDom) window.dispatchEvent(new Event('resize'));
     } else if (activeMeshRoomId !== r.params.id || !state.mesh || !hasMeshDom) {
       if (activeMeshRoomId && activeMeshRoomId !== r.params.id) {
         leaveMeshView(true);
@@ -281,7 +285,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261103_v88').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261103_v89', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

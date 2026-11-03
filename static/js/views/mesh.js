@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v88';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v88';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v88';
-import { MeshConnection } from '../realtime.js?v=20261103_v88';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v88';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v88';
-import { buildLayout } from './mesh-layout.js?v=20261103_v88';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v88';
-import { Voice } from '../voice.js?v=20261103_v88';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v88';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v89';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v89';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v89';
+import { MeshConnection } from '../realtime.js?v=20261103_v89';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v89';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v89';
+import { buildLayout } from './mesh-layout.js?v=20261103_v89';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v89';
+import { Voice } from '../voice.js?v=20261103_v89';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v89';
 
 let ctx = null;
 
@@ -102,7 +102,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     };
     nextKey = mediaKey(room.media);
     if (ctx?.conn) ctx.conn.lastRoom = room;
-    if (!ctx?.lastMediaRestoreAt || Date.now() - ctx.lastMediaRestoreAt > 2500) {
+    if (isTimeKeeper() && (!ctx?.lastMediaRestoreAt || Date.now() - ctx.lastMediaRestoreAt > 2500)) {
       if (ctx) ctx.lastMediaRestoreAt = Date.now();
       const curPos = ctx?.host.adapter?.getTime?.() ?? expectedPosition(curRoom.media);
       setTimeout(() => ctx?.conn?.send('change_media', { ...curRoom.media, currentTime: curPos }), 120);
@@ -133,7 +133,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
         meshStateTime: clock.now(),
       },
     };
-    if (ctx && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
+    if (ctx && isTimeKeeper() && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
       ctx.lastResolvePushAt = Date.now();
       const pushMedia = room.media;
       setTimeout(() => ctx?.conn?.send('resolve_media', { ...pushMedia, currentTime: livePos }), 60);
@@ -606,7 +606,8 @@ function onMessage(data) {
     }
     case 'participants_updated':
       if (room) {
-        const nextRoom = { ...room, participants: data.participants };
+        const pList = Array.isArray(data.participants) ? data.participants : [];
+        const nextRoom = { ...room, participants: pList, participantCount: pList.length, count: pList.length };
         set({ mesh: nextRoom });
         if (nextRoom.voipMode === 'stage' && ctx?.voice?.micOn) {
           const meP = (data.participants || []).find((x) => x.id === state.clientId);
@@ -1018,6 +1019,14 @@ const actions = {
   },
   async leave(closeForAll = false) {
     document.body.classList.remove('mesh-minimized');
+    try {
+      const mNow = state.mesh?.media;
+      if (mNow && ctx?.host?.adapter) {
+        const curT = ctx.host.adapter.getTime?.() || 0;
+        const durT = ctx.host.adapter.getDuration?.() || mNow.duration || 0;
+        if (curT > 3) saveWatchProgress(mNow, curT, durT);
+      }
+    } catch (_) {}
     if (typeof document !== 'undefined' && document.pictureInPictureElement) {
       try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
     }

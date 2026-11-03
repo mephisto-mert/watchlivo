@@ -46,20 +46,21 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
     with _SECRET_LOCK:
         if name not in _EPHEMERAL:
             shared_entropy = (
-                os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-                or os.environ.get("KV_REST_API_TOKEN")
-                or os.environ.get("OPENAI_API_KEY")
-                or os.environ.get("OPENAI_CLOUD_FALLBACK_KEY")
-                or os.environ.get("TMDB_API_KEY")
-                or ""
+                (os.environ.get("UPSTASH_REDIS_REST_TOKEN") or "").strip()
+                or (os.environ.get("KV_REST_API_TOKEN") or "").strip()
             )
-            seed = f"watchlivo-deterministic-secret-v3:{name}:{shared_entropy}"
-            _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
+            if len(shared_entropy) >= 24:
+                _EPHEMERAL[name] = hmac.new(
+                    shared_entropy.encode("utf-8"),
+                    f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+            else:
+                _EPHEMERAL[name] = secrets.token_bytes(32)
             if name not in _WARNED:
                 _WARNED.add(name)
-                print(
-                    f"[security] {name} tanımlı değil — deterministik çalışma sırrı üretildi."
-                )
+                mode_lbl = "paylaşımlı KV HMAC sırrı" if len(shared_entropy) >= 24 else "geçici kriptografik sır"
+                print(f"[security] {name} tanımlı değil — {mode_lbl} üretildi.")
         return _EPHEMERAL[name]
 
 
@@ -245,7 +246,14 @@ def client_ip(scope_or_request) -> str:
             headers = scope_or_request.headers  # type: ignore[assignment]
         except Exception:
             pass
-    for hdr_name in ("x-vercel-forwarded-for", "cf-connecting-ip", "x-real-ip", "x-forwarded-for"):
+    trust_vercel = os.environ.get("VERCEL") == "1"
+    trust_proxy = os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
+    trusted_hdrs = (
+        ("x-vercel-forwarded-for",)
+        if (trust_vercel and not trust_proxy)
+        else (("x-vercel-forwarded-for", "cf-connecting-ip", "x-real-ip", "x-forwarded-for") if trust_proxy else ())
+    )
+    for hdr_name in trusted_hdrs:
         try:
             val = (headers.get(hdr_name) or "").split(",")[0].strip()
             if val:

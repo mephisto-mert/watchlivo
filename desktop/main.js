@@ -26,6 +26,31 @@ function createWindow() {
   });
 
   win.webContents.setUserAgent(CHROME_UA);
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+    delete webPreferences.preload;
+    delete webPreferences.preloadURL;
+    webPreferences.nodeIntegration = false;
+    webPreferences.contextIsolation = true;
+    webPreferences.sandbox = true;
+    if (!/^https:\/\//i.test(String(params?.src || ''))) {
+      event.preventDefault();
+    }
+  });
+  win.webContents.on('will-navigate', (event, navUrl) => {
+    try {
+      const targetOrig = new URL(navUrl).origin;
+      const appOrig = new URL(SERVER_URL).origin;
+      if (targetOrig !== appOrig && !/^https:\/\/accounts\.google\.com$/i.test(targetOrig)) {
+        event.preventDefault();
+      }
+    } catch (_) {
+      event.preventDefault();
+    }
+  });
   win.loadURL(SERVER_URL);
 }
 

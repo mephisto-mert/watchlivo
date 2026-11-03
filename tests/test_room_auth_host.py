@@ -1,6 +1,7 @@
 import sys
 import os
-sys.path.insert(0, os.path.abspath('c:/Users/pc/Documents/projelerim/rave_web_platform'))
+import pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from rooms import new_room, add_participant, handle_action, ensure_host, set_media, sign_client_token, verify_client_token
 
 def test_room_host_authorization():
