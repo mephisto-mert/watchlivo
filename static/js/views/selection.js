@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v92';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v92';
-import { api, qs } from '../api.js?v=20261103_v92';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v92';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v92';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261103_v92';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v93';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v93';
+import { api, qs } from '../api.js?v=20261103_v93';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v93';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v93';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261103_v93';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -12,7 +12,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261103_v92';
+} from '../store.js?v=20261103_v93';
 
 let _activeHomePick = null;
 
@@ -589,7 +589,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const nextSig = `${Boolean(st.self && !st.self.isGuest)}|${getAccountStorageScope()}|${st.cloudSyncedAt || 0}`;
     if (nextSig !== _lastAuthWatchSig) {
       _lastAuthWatchSig = nextSig;
-      if (!provider && !superQuery && !compact) refreshYtHomeSection(true);
+      if (provider?.id === 'youtube') render();
     }
   });
   const _onDocPointerDown = (ev) => {
@@ -1096,8 +1096,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               cardEl.classList.add('busy');
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
               try {
-                if (item.tmdbId) {
-                  const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId, imdbId: item.imdbId, mediaType: item.mediaType, title: String(item.title || '').split(' — ')[0], backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail, year: item.year || '' }, prov || { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
+                const isCatalogMedia = Boolean(item.tmdbId || item.imdbId || item.mediaType === 'tv' || item.mediaType === 'movie');
+                if (isCatalogMedia && item.provider !== 'youtube' && !item.isMusic) {
+                  const cleanHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
+                  const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId || '', imdbId: item.imdbId || '', mediaType: item.mediaType || 'movie', title: cleanHistTitle, originalTitle: item.originalTitle || cleanHistTitle, backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail, year: item.year || '' }, (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
                   if (resolved) {
                     resolved.currentTime = resumeSec;
                     resolved.meshStatePosition = resumeSec;
@@ -1370,16 +1372,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
         ...(moreTile ? [moreTile] : [])));
 
-    const showYtHome = !compact && !state.mesh && !superQuery && (catFilter === 'all' || catFilter === 'social');
+    const showYtHome = false;
     root.replaceChildren(
       topBar,
       results,
       ...(heroBanner ? [heroBanner] : []),
       ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
-      ...(showYtHome ? [ytHomeMount] : []),
       gridSection);
-    if (showYtHome) refreshYtHomeSection(false);
     if (superQuery) runSuperSearch(superQuery, results);
   }
 

@@ -338,6 +338,48 @@ class V89FullAuditRemediationTests(unittest.TestCase):
             self.assertEqual(r.status_code, 302)
             self.assertEqual(r.headers.get("location"), "https://image.tmdb.org/t/p/w500/test_healed_poster.jpg")
 
+    def test_09_vidlink_expiry_dead_stream_guard_and_yt_home_gated(self):
+        import time
+        repo = pathlib.Path(__file__).resolve().parents[1]
+
+        # 1. Recent hakunaymatata signed URLs (e.g. 2 hours old CDN signature) must NOT be falsely expired
+        two_hours_ago = int(time.time()) - 7200
+        hk_u = f"https://bcdn.hakunaymatata.com/resource/abc123_1080p.mp4?sign=deadbeef&t={two_hours_ago}"
+        self.assertFalse(server._is_vault_url_expired(hk_u))
+        stale_u = f"https://bcdn.hakunaymatata.com/resource/abc123_1080p.mp4?sign=deadbeef&t={int(time.time()) - 300000}"
+        self.assertTrue(server._is_vault_url_expired(stale_u))
+
+        # 2. Chainsaw Man (114410 -> 11884) must have direct .cfd MP4s for S1E1..S1E12
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("114410"), 11884)
+        for ep_n in range(1, 13):
+            entries = server._ANIMECIX_TAU_MAP.get(f"11884:1:{ep_n}") or []
+            self.assertTrue(
+                any(isinstance(p, list) and len(p) >= 3 and ".cfd/file/tau-video/" in str(p[2]) for p in entries),
+                f"Missing direct .cfd MP4 for Chainsaw Man S1E{ep_n}: {entries}",
+            )
+
+        # 3. Keşfet (selection.js) must NOT render ytHomeMount until YouTube is explicitly opened
+        sel_js = (repo / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        self.assertIn("const showYtHome = false;", sel_js)
+        self.assertNotIn("...(showYtHome ? [ytHomeMount] : [])", sel_js)
+        kinds_js = (repo / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        self.assertIn("fetchPersonalizedYtFeed", kinds_js)
+        store_js = (repo / "static" / "js" / "store.js").read_text(encoding="utf-8")
+        self.assertNotIn("fragman inceleme`", store_js)
+
+        # 4. Dead stream (-1) must NOT be served as 200 OK, and foreign series must NOT trigger Turkish YouTube fallback
+        dead_u = "https://white-tooth-83b1.wellsrobertsonkmlt.workers.dev/video.m3u8"
+        server._STREAM_RES_HINT[dead_u] = -1
+        with patch.object(server, "_get_tmdb_meta_sync", return_value={"originalTitle": "From", "trTitle": "From", "year": "2022", "imdbId": "tt9813792", "origLang": "en", "runtime": 50}), \
+             patch.object(server, "_tv_season_ep_map", return_value={1: 10}), \
+             patch.object(server, "_extract_direct_stream_sync", return_value=[(dead_u, "hls_ve")]), \
+             patch.object(server, "_build_audio_tracks", return_value=[]), \
+             patch.object(server, "_fetch_subtitles_sync", return_value=[]), \
+             patch.object(server, "_extract_official_yt_sync") as mock_yt:
+            res_dead = server._resolve_catalog_sync("cinema", "From", "2022", "124364", "tv", "", season=1, episode=2)
+            self.assertIsNone(res_dead)
+            mock_yt.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

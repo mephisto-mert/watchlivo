@@ -1261,12 +1261,7 @@ export async function fetchPersonalizedYtFeed(chip = 'all', forceRefresh = false
     const vid = String(m?.videoId || '').trim();
     if (vid && vid.length === 11 && !seenV.has(vid)) { seenV.add(vid); seedVideoIds.push({ videoId: vid, title: m.title || '' }); }
   }
-  const seedQueries = [...prefs.searchHistory.slice(0, 3)];
-  for (const w of watchHist.slice(0, 2)) {
-    if (w?.provider !== 'youtube' && w?.title && seedQueries.length < 4) {
-      seedQueries.push(`${String(w.seriesTitle || w.title).split('—')[0].trim()} fragman inceleme`);
-    }
-  }
+  const seedQueries = [...prefs.searchHistory.slice(0, 4)];
   const r = await fetch('/api/rave/yt-personalized-feed', {
     method: 'POST',
     credentials: 'same-origin',

@@ -1,15 +1,15 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v92';
-import { api, qs } from '../api.js?v=20261103_v92';
-import { parseVideoUrl } from '../providers.js?v=20261103_v92';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261103_v92';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v92';
-import { profileSetup } from '../profile.js?v=20261103_v92';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v93';
+import { api, qs } from '../api.js?v=20261103_v93';
+import { parseVideoUrl } from '../providers.js?v=20261103_v93';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261103_v93';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v93';
+import { profileSetup } from '../profile.js?v=20261103_v93';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261103_v92';
+} from '../store.js?v=20261103_v93';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');

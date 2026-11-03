@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v92';
-import { expectedPosition } from '../sync.js?v=20261103_v92';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v92';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v92';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v93';
+import { expectedPosition } from '../sync.js?v=20261103_v93';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v93';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v93';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -627,7 +627,11 @@ export class Html5Adapter {
     this.subs.initForMedia(media);
 
     let triedHlsFallback = false;
-    const isUrlHls = (u) => /\.m3u8(\?|$)/i.test(String(u || '')) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(u || ''));
+    const isUrlHls = (u) => {
+      const s = String(u || '');
+      if (/[?&]ext=\.(?:mp4|webm|mkv)\b/i.test(s)) return false;
+      return /\.m3u8(\?|$)/i.test(s) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(s);
+    };
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';
     const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
