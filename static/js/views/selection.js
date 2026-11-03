@@ -1,10 +1,10 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v91';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v91';
-import { api, qs } from '../api.js?v=20261103_v91';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v91';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v91';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261103_v91';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v92';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v92';
+import { api, qs } from '../api.js?v=20261103_v92';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v92';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v92';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261103_v92';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -12,7 +12,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261103_v91';
+} from '../store.js?v=20261103_v92';
 
 let _activeHomePick = null;
 
@@ -1409,7 +1409,20 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0' },
       h('div', { class: 'poster-thumb-wrap' },
-        h('img', { src: t.poster || '/static/watchlivo-poster.svg', alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('img', {
+          src: t.poster || (t.title ? `/api/rave/poster?${qs({ t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          alt: t.title || '',
+          loading: 'lazy',
+          onerror: (e) => {
+            const el = e.currentTarget || e.target;
+            if (!el.dataset.healed && t.title) {
+              el.dataset.healed = '1';
+              el.src = `/api/rave/poster?${qs({ t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}`;
+            } else {
+              el.src = '/static/watchlivo-poster.svg';
+            }
+          },
+        }),
         defProv?.logo ? h('span', { class: 'poster-prov-badge' }, h('img', { src: defProv.logo, alt: defProv.name })) : null),
       h('div', { class: 'pt' }, `${t.title}${t.year ? ` (${t.year})` : ''}`),
       h('div', { class: 'offers' },

@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261103_v91';
-import { api, qs } from './api.js?v=20261103_v91';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v91';
+import { h, toast, popup } from './ui.js?v=20261103_v92';
+import { api, qs } from './api.js?v=20261103_v92';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v92';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -374,7 +374,20 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           h('button', { class: 'btn', onclick: onBack }, '← Kataloğa Dön'),
           h('span', { class: 'series-badge' }, `${mtype === 'tv' ? '📺 DİZİ' : '🎬 FİLM'}${year ? ` • ${year}` : ''}${rating ? ` • ⭐ ${rating}` : ''}`)),
         h('div', { class: 'series-hero-body' },
-          h('img', { class: 'series-poster', src: poster, alt: title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+          h('img', {
+            class: 'series-poster',
+            src: poster || `/api/rave/poster?${qs({ t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
+            alt: title,
+            onerror: (e) => {
+              const el = e.currentTarget || e.target;
+              if (!el.dataset.healed && title) {
+                el.dataset.healed = '1';
+                el.src = `/api/rave/poster?${qs({ t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
+              } else {
+                el.src = '/static/watchlivo-poster.svg';
+              }
+            },
+          }),
           h('div', { class: 'series-meta' },
             h('h2', {}, title),
             h('p', { class: 'series-overview' }, overview),

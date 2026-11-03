@@ -1650,9 +1650,16 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     dom_hits.append(dict(d_it))
         for item in dom_hits + scraped_q + tmdb_items + jw_items:
             p_u = str(item.get("poster") or "").strip()
-            if p_u and "/api/rave/poster" not in p_u and any(d in p_u for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
-                item["poster"] = f"/api/rave/poster?u={urllib.parse.quote(p_u, safe='')}"
-                item["backdrop"] = item["poster"]
+            if (not p_u and item.get("title")) or (p_u and "/api/rave/poster" not in p_u and any(d in p_u for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag."))):
+                qp = urllib.parse.urlencode({
+                    "u": p_u, "t": str(item.get("title") or "")[:100],
+                    "ot": str(item.get("originalTitle") or "")[:100],
+                    "y": str(item.get("year") or "")[:8],
+                    "mt": str(item.get("mediaType") or "movie")[:10],
+                })
+                item["poster"] = f"/api/rave/poster?{qp}"
+                if not item.get("backdrop") or item.get("backdrop") == p_u:
+                    item["backdrop"] = item["poster"]
             tid = str(item.get("tmdbId") or item.get("id") or "")
             nt_key = _norm_title(item.get("title") or "")
             dedup_k = f"{item.get('mediaType')}:{tid or nt_key}"
@@ -1820,9 +1827,9 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     v_cat = _MAIN_SITES_VAULT.get("catalog") or {}
 
-    def _safe_poster_url(u_img: str) -> str:
+    def _safe_poster_url(u_img: str, meta_it: dict | None = None) -> str:
         u_img = str(u_img or "").strip()
-        if not u_img or u_img.startswith("/"):
+        if u_img.startswith("/"):
             return u_img
         if "wsrv.nl/?url=" in u_img:
             try:
@@ -1831,10 +1838,17 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     u_img = raw_inner
             except Exception:
                 pass
-        if "image.tmdb.org" in u_img:
+        if "image.tmdb.org" in u_img or "m.media-amazon.com" in u_img:
             return u_img
-        if any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
-            return f"/api/rave/poster?u={urllib.parse.quote(u_img, safe='')}"
+        if (not u_img and meta_it and meta_it.get("title")) or any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.")):
+            qp = urllib.parse.urlencode({
+                "u": u_img,
+                "t": str((meta_it or {}).get("title") or "")[:100],
+                "ot": str((meta_it or {}).get("originalTitle") or "")[:100],
+                "y": str((meta_it or {}).get("year") or "")[:8],
+                "mt": str((meta_it or {}).get("mediaType") or "movie")[:10],
+            })
+            return f"/api/rave/poster?{qp}"
         return u_img
 
     if scraped_live:
@@ -1856,8 +1870,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                 s_it["backdrop"] = m_tm.get("backdrop") or s_it.get("backdrop") or ""
                 s_it["overview"] = m_tm.get("overview") or ""
                 s_it["categories"] = list(dict.fromkeys((s_it.get("categories") or []) + (m_tm.get("categories") or [])))
-            s_it["poster"] = _safe_poster_url(s_it.get("poster") or "")
-            s_it["backdrop"] = _safe_poster_url(s_it.get("backdrop") or s_it.get("poster") or "")
+            s_it["poster"] = _safe_poster_url(s_it.get("poster") or "", s_it)
+            s_it["backdrop"] = _safe_poster_url(s_it.get("backdrop") or s_it.get("poster") or "", s_it)
             merged_live.append(s_it)
         merged_live.sort(key=lambda x: (_has_vault_stream(x), int(x.get("voteCount") or 0), float(x.get("rating") or 0)), reverse=True)
         rest_tmdb = [x for x in items if f"{x['mediaType']}:{x['tmdbId']}" not in used_tmdb_keys]
@@ -5211,14 +5225,21 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     pool_items = []
     seen_keys = set()
 
-    def _norm_poster(u_img: str) -> str:
+    def _norm_poster(u_img: str, meta_it: dict | None = None) -> str:
         u_img = str(u_img or "").strip()
-        if not u_img or u_img.startswith("/"):
+        if u_img.startswith("/"):
             return u_img
-        if "image.tmdb.org" in u_img:
+        if "image.tmdb.org" in u_img or "m.media-amazon.com" in u_img:
             return u_img
-        if any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.")):
-            return f"/api/rave/poster?u={urllib.parse.quote(u_img, safe='')}"
+        if (not u_img and meta_it and meta_it.get("title")) or any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.")):
+            qp = urllib.parse.urlencode({
+                "u": u_img,
+                "t": str((meta_it or {}).get("title") or "")[:100],
+                "ot": str((meta_it or {}).get("originalTitle") or "")[:100],
+                "y": str((meta_it or {}).get("year") or "")[:8],
+                "mt": str((meta_it or {}).get("mediaType") or "movie")[:10],
+            })
+            return f"/api/rave/poster?{qp}"
         return u_img
 
     def _add_cand(it_raw: dict, default_badge: str = ""):
@@ -5251,8 +5272,8 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
             return
         if cat_c not in ("all", "trend", "series", "movies", "anime", "tr") and cat_c not in cats:
             return
-        poster = _norm_poster(it.get("poster") or "")
-        backdrop = _norm_poster(it.get("backdrop") or poster)
+        poster = _norm_poster(it.get("poster") or "", it)
+        backdrop = _norm_poster(it.get("backdrop") or poster, it)
         if not poster:
             return
         dedup = f"{mtype}:{tid or _norm_title(title)}"
@@ -6594,37 +6615,131 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
 
 
 _POSTER_LIMIT = RateLimiter(900, 60.0, name="poster")
+_POSTER_REDIRECT_CACHE: "collections.OrderedDict[str, str]" = collections.OrderedDict()
+
+
+def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title: str = "", year: str = "", mtype: str = "movie") -> str:
+    ck = f"{url}|{title.lower()}|{orig_title.lower()}|{year}|{mtype}"
+    with _POSTER_CACHE_LOCK:
+        hit = _POSTER_REDIRECT_CACHE.get(ck)
+        if hit:
+            _POSTER_REDIRECT_CACHE.move_to_end(ck)
+            return hit
+    cands: list[str] = []
+    for raw_t in (orig_title, title):
+        s = re.sub(r"\(\d{4}\)", "", str(raw_t or "")).strip()
+        s = re.sub(r"\b(izle|full|hd|turkce|dublaj|altyazili)\b", "", s, flags=re.I).strip()
+        s2 = re.sub(r"\s+\d{4}$", "", s).strip()
+        for c in (s, s2):
+            if len(c) >= 2 and c.lower() not in {x.lower() for x in cands}:
+                cands.append(c)
+        if ":" in s2:
+            head = s2.split(":", 1)[0].strip()
+            if len(head) >= 4 and head.lower() not in {x.lower() for x in cands}:
+                cands.append(head)
+    if url:
+        m = re.search(r"/([a-z0-9-]+?)(?:-\d+)?(?:\.(?:jpg|jpeg|webp|png)|/?$)", url.lower())
+        if m:
+            slug_q = re.sub(r"\b(izle|film|dizi|full|hd|poster|afisler)\b", "", m.group(1).replace("-", " ")).strip()
+            slug_q = re.sub(r"\b\d{3,4}x\d{3,4}\b", "", slug_q).strip()
+            if len(slug_q) >= 2 and slug_q not in {x.lower() for x in cands}:
+                cands.append(slug_q)
+    ep_primary = "tv" if mtype == "tv" else "movie"
+    resolved = ""
+    for q in cands[:4]:
+        for ep in (ep_primary, "multi"):
+            for lang in ("tr-TR", "en-US"):
+                try:
+                    u_tm = f"https://api.themoviedb.org/3/search/{ep}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "query": q, "language": lang})
+                    res_list = _http_json(u_tm, timeout=3.2).get("results") or []
+                    if year and len(year) == 4:
+                        yr_m = [r for r in res_list if r.get("poster_path") and str(r.get("release_date") or r.get("first_air_date") or "")[:4] == year]
+                        if yr_m:
+                            resolved = f"https://image.tmdb.org/t/p/w500{yr_m[0]['poster_path']}"
+                            break
+                    for r0 in res_list:
+                        if r0.get("poster_path"):
+                            resolved = f"https://image.tmdb.org/t/p/w500{r0['poster_path']}"
+                            break
+                except Exception:
+                    pass
+                if resolved:
+                    break
+            if resolved:
+                break
+        if resolved:
+            break
+    if not resolved:
+        for q in cands[:3]:
+            try:
+                clean_q = re.sub(r"[^\w\s]", " ", q).strip()[:50]
+                if not clean_q:
+                    continue
+                iu = f"https://v3.sg.media-imdb.com/suggestion/x/{urllib.parse.quote(clean_q)}.json"
+                req = urllib.request.Request(iu, headers={"User-Agent": UA137, "Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=3.5) as r:
+                    for cand in (json.loads(r.read().decode("utf-8", errors="ignore")).get("d") or []):
+                        img = ((cand.get("i") or {}).get("imageUrl") or "").strip()
+                        if img.startswith("https://"):
+                            resolved = re.sub(r"\._V1_.*?\.(jpg|png|webp)$", r"._V1_FMjpg_UX600_.jpg", img, flags=re.I)
+                            break
+            except Exception:
+                pass
+            if resolved:
+                break
+    if resolved:
+        with _POSTER_CACHE_LOCK:
+            _POSTER_REDIRECT_CACHE[ck] = resolved
+            while len(_POSTER_REDIRECT_CACHE) > 1500:
+                _POSTER_REDIRECT_CACHE.popitem(last=False)
+    return resolved
 
 
 async def poster_proxy(request: Request):
     url = (request.query_params.get("url") or request.query_params.get("u") or "").strip()
+    title = (request.query_params.get("t") or request.query_params.get("title") or "").strip()[:120]
+    orig_title = (request.query_params.get("ot") or "").strip()[:120]
+    year = (request.query_params.get("y") or "").strip()[:8]
+    mtype = (request.query_params.get("mt") or "movie").strip()[:10]
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter."))
-    if not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig):
+    is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag."))
+    if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title:
         return RedirectResponse("/static/watchlivo-poster.svg")
-    with _POSTER_CACHE_LOCK:
-        cached_poster = _POSTER_MEM_CACHE.get(url)
+    if url:
+        with _POSTER_CACHE_LOCK:
+            cached_poster = _POSTER_MEM_CACHE.get(url)
+            if cached_poster is not None:
+                _POSTER_MEM_CACHE.move_to_end(url)
         if cached_poster is not None:
-            _POSTER_MEM_CACHE.move_to_end(url)
-    if cached_poster is not None:
-        data, ct = cached_poster
-        if data and ct.startswith("image/"):
-            return Response(data, media_type=ct, headers={
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
-            })
+            data, ct = cached_poster
+            if data and ct.startswith("image/"):
+                return Response(data, media_type=ct, headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
+                })
     allowed, retry_after = await asyncio.to_thread(_POSTER_LIMIT.hit, client_ip(request))
     if not allowed:
         return too_many_response(retry_after)
-    if not url.startswith(("https://", "http://")) or not public_http_url(url):
-        return RedirectResponse("/static/watchlivo-poster.svg")
+    if url and url.startswith(("https://", "http://")) and is_whitelisted_poster and public_http_url(url):
+        try:
+            data, ct = await asyncio.wait_for(asyncio.to_thread(_fetch_poster_sync, url), timeout=2.6)
+            if data and ct.startswith("image/"):
+                return Response(data, media_type=ct, headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
+                })
+        except Exception:
+            pass
     try:
-        data, ct = await asyncio.wait_for(asyncio.to_thread(_fetch_poster_sync, url), timeout=6.0)
-        if data and ct.startswith("image/"):
-            return Response(data, media_type=ct, headers={
+        cdn_u = await asyncio.wait_for(
+            asyncio.to_thread(_resolve_fallback_poster_cdn_sync, url, title, orig_title, year, mtype),
+            timeout=5.5,
+        )
+        if cdn_u:
+            return RedirectResponse(cdn_u, status_code=302, headers={
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
+                "Cache-Control": "public, max-age=604800, s-maxage=604800",
             })
     except Exception:
         pass

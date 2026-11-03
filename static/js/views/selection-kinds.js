@@ -1,15 +1,15 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v91';
-import { api, qs } from '../api.js?v=20261103_v91';
-import { parseVideoUrl } from '../providers.js?v=20261103_v91';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261103_v91';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v91';
-import { profileSetup } from '../profile.js?v=20261103_v91';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v92';
+import { api, qs } from '../api.js?v=20261103_v92';
+import { parseVideoUrl } from '../providers.js?v=20261103_v92';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261103_v92';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v92';
+import { profileSetup } from '../profile.js?v=20261103_v92';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261103_v91';
+} from '../store.js?v=20261103_v92';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -637,7 +637,20 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => openDetail(it), onkeydown: (e) => { if (e.key === 'Enter') openDetail(it); } },
       h('div', { class: 'poster-thumb-wrap' },
-        h('img', { src: it.poster || '/static/watchlivo-poster.svg', alt: '', loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+        h('img', {
+          src: it.poster || (it.title ? `/api/rave/poster?${qs({ t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          alt: it.title || '',
+          loading: 'lazy',
+          onerror: (e) => {
+            const el = e.currentTarget || e.target;
+            if (!el.dataset.healed && it.title) {
+              el.dataset.healed = '1';
+              el.src = `/api/rave/poster?${qs({ t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}`;
+            } else {
+              el.src = '/static/watchlivo-poster.svg';
+            }
+          },
+        }),
         it.sourceBadge
           ? h('span', { class: 'poster-source-pill' }, it.sourceBadge)
           : (p?.logo ? h('span', { class: 'poster-prov-badge' }, h('img', { src: p.logo, alt: p.name })) : null),

@@ -314,5 +314,30 @@ class V89FullAuditRemediationTests(unittest.TestCase):
             self.assertTrue(fd["items"][0]["isFollowedChannel"])
 
 
+
+    def test_08_poster_proxy_cloudflare_self_healing_and_vault_posters(self):
+        import json
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        vault = json.loads((repo / "main_sites_vault.json").read_text(encoding="utf-8"))
+        for src_k, items in (vault.get("catalog") or {}).items():
+            for it in (items or []):
+                p = str(it.get("poster") or "").strip()
+                self.assertTrue(bool(p), f"Empty poster in vault {src_k}: {it.get('title')}")
+                for blocked_dom in ("img.fullhdfilmizlesene.", "www.hdfilmcehennemi.", "www.dizibox."):
+                    self.assertNotIn(blocked_dom, p, f"Unhealed CF-blocked poster in {src_k}: {it.get('title')} -> {p}")
+                if "Gekijoban Mononoke" in str(it.get("title") or ""):
+                    self.assertTrue(any(d in p for d in ("image.tmdb.org", "m.media-amazon.com")), p)
+
+        with patch.object(server, "_fetch_poster_sync", side_effect=OSError("HTTP 403 Forbidden")), \
+             patch.object(server, "_http_json", return_value={"results": [{"poster_path": "/test_healed_poster.jpg", "release_date": "2010-07-16"}]}):
+            server._POSTER_REDIRECT_CACHE.clear()
+            r = self.client.get(
+                "/api/rave/poster?u=https%3A%2F%2Fimg.fullhdfilmizlesene.now%2Fposter%2Ffilm%2Finception.jpg&t=Inception&y=2010&mt=movie",
+                follow_redirects=False,
+            )
+            self.assertEqual(r.status_code, 302)
+            self.assertEqual(r.headers.get("location"), "https://image.tmdb.org/t/p/w500/test_healed_poster.jpg")
+
+
 if __name__ == "__main__":
     unittest.main()
