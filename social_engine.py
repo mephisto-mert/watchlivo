@@ -46,6 +46,11 @@ _AI_IMAGE_BY_USER: Dict[str, List[Dict[str, Any]]] = {}
 _REPORTS_LOG: List[Dict[str, Any]] = []
 _NOTIFICATION_QUEUES: Dict[str, List[Dict[str, Any]]] = {}
 _PUSH_SUBSCRIPTIONS: Dict[str, Dict[str, Any]] = {}
+_PRESENCE_MAP: Dict[str, Dict[str, Any]] = {}
+_SOCIAL_DIR: Dict[str, Dict[str, Any]] = {}
+_DM_TYPING: Dict[str, float] = {}
+_DM_CONFIG: Dict[str, Dict[str, Any]] = {}
+_LEGACY_BOT_UIDS = {"u_ayla_cinema", "u_mert_dj", "u_zeynep_anime", "u_emre_4k"}
 
 
 _KV_MEM: Dict[str, Any] = {}
@@ -99,19 +104,30 @@ def _kv_set(key: str, val: Any, ttl_sec: int = 604800) -> None:
 
 def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     key = str(target_key or "*").strip().lower() or "*"
-    item = {
-        "id": payload.get("id") or ("ntf_" + uuid.uuid4().hex[:10]),
-        "type": str(payload.get("type") or "room_invite"),
-        "title": _clean(payload.get("title") or "Watchlivo — Sinema Daveti", 120),
-        "body": _clean(payload.get("body") or "Arkadaşın seni sinema odasına çağırıyor!", 240),
+    now_t = time.time()
+    item: Dict[str, Any] = {
+        "id": _clean(payload.get("id"), 48) or ("ntf_" + uuid.uuid4().hex[:10]),
+        "type": _clean(payload.get("type") or "room_invite", 32),
+        "title": _clean(payload.get("title") or "Watchlivo — Sinema Daveti", 140),
+        "body": _clean(payload.get("body") or "Arkadaşın seni sinema odasına çağırıyor!", 260),
         "fromUid": _clean(payload.get("fromUid"), 64),
         "fromName": _clean(payload.get("fromName") or "Arkadaşın", 40),
+        "fromHandle": _clean(payload.get("fromHandle"), 36),
+        "fromColor": _clean(payload.get("fromColor") or payload.get("color") or "#27DCC8", 16),
+        "fromAvatarUrl": _clean(payload.get("fromAvatarUrl") or payload.get("avatarUrl"), 600),
+        "requestId": _clean(payload.get("requestId"), 48),
         "roomId": _clean(payload.get("roomId"), 80),
-        "url": _clean(payload.get("url"), 240),
-        "ts": float(payload.get("ts") or time.time()),
+        "roomName": _clean(payload.get("roomName") or payload.get("roomTitle"), 120),
+        "mediaTitle": _clean(payload.get("mediaTitle"), 160),
+        "mediaPoster": _clean(payload.get("mediaPoster"), 800),
+        "mediaProvider": _clean(payload.get("mediaProvider"), 32),
+        "url": _clean(payload.get("url"), 260),
+        "ts": float(payload.get("ts") or now_t),
+        "expiresAt": float(payload.get("expiresAt") or 0.0),
     }
-    existing_q = _kv_get(f"wl:soc:ntf:{key}", None, max_age=2.0)
+    existing_q = _kv_get(f"wl:soc:ntf:{key}", None, max_age=1.5)
     q = list(existing_q) if isinstance(existing_q, list) else list(_NOTIFICATION_QUEUES.get(key, []))
+    q = [x for x in q if not (float(x.get("expiresAt") or 0.0) > 0 and float(x.get("expiresAt") or 0.0) < now_t)]
     q.append(item)
     del q[:-50]
     _NOTIFICATION_QUEUES[key] = q
@@ -242,75 +258,315 @@ def _thread_key(u1: str, u2: str) -> str:
     return f"dm:{a}:{b}"
 
 
-def _ensure_user_social(uid: str, name: str = "", handle: str = "") -> Dict[str, Any]:
+def _norm_handle_tag(raw: str, fallback_name: str = "") -> str:
+    base = re.sub(
+        r"[^a-z0-9_.\-]",
+        "",
+        str(raw or "").strip().lower().lstrip("@")
+        .replace("ı", "i").replace("ş", "s").replace("ğ", "g")
+        .replace("ü", "u").replace("ö", "o").replace("ç", "c"),
+    )[:24]
+    if len(base) < 2 and fallback_name:
+        base = re.sub(
+            r"[^a-z0-9_.\-]",
+            "",
+            str(fallback_name).strip().lower().replace(" ", "_")
+            .replace("ı", "i").replace("ş", "s").replace("ğ", "g")
+            .replace("ü", "u").replace("ö", "o").replace("ç", "c"),
+        )[:20]
+    return f"@{base or 'izleyici'}"
+
+
+def _load_social_dir() -> Dict[str, Dict[str, Any]]:
+    persisted = _kv_get("wl:soc:dir", None, max_age=6.0)
+    if isinstance(persisted, dict):
+        _SOCIAL_DIR.update(persisted)
+    return _SOCIAL_DIR
+
+
+def _register_social_dir(card: Dict[str, Any]) -> None:
+    uid_c = _clean(card.get("uid"), 64)
+    if not uid_c or uid_c in _LEGACY_BOT_UIDS or uid_c.startswith(("guest_", "unauth_")):
+        return
+    d = _load_social_dir()
+    prev = d.get(uid_c) if isinstance(d.get(uid_c), dict) else {}
+    merged = {
+        "uid": uid_c,
+        "name": _clean(card.get("name") or prev.get("name") or "İzleyici", 32),
+        "handle": _norm_handle_tag(card.get("handle") or prev.get("handle") or "", card.get("name") or prev.get("name") or ""),
+        "color": _clean(card.get("color") or prev.get("color") or "#27DCC8", 16),
+        "avatar": _clean(card.get("avatar") or prev.get("avatar") or "🎬", 600),
+        "avatarUrl": _clean(card.get("avatarUrl") or prev.get("avatarUrl") or "", 600),
+        "bio": _clean(card.get("bio") or prev.get("bio") or "", 160),
+        "statusEmoji": _clean(card.get("statusEmoji") or prev.get("statusEmoji") or "🍿", 12),
+        "statusText": _clean(card.get("statusText") or prev.get("statusText") or "", 80),
+        "updatedAt": _now(),
+    }
+    d[uid_c] = merged
+    if len(d) > 600:
+        oldest = sorted(d.items(), key=lambda kv: float((kv[1] or {}).get("updatedAt") or 0.0))[:100]
+        for ok, _ in oldest:
+            d.pop(ok, None)
+    _kv_set("wl:soc:dir", d, ttl_sec=2592000)
+
+
+def _ensure_user_social(uid: str, name: str = "", handle: str = "", color: str = "", avatar_url: str = "") -> Dict[str, Any]:
     uid_clean = _clean(uid, 64) or "guest_default"
+    persisted_u = _kv_get(f"wl:soc:u:{uid_clean}", None, max_age=3.0)
+    if isinstance(persisted_u, dict) and persisted_u.get("uid"):
+        _SOCIAL_USERS[uid_clean] = persisted_u
+    auth_card: Optional[Dict[str, Any]] = None
+    if not uid_clean.startswith(("guest_", "unauth_")):
+        try:
+            import auth_engine
+            auth_card = auth_engine.resolve_public_user(uid_clean)
+        except Exception:
+            auth_card = None
+    eff_name = _clean((auth_card or {}).get("name") or name, 32)
+    eff_handle = _clean((auth_card or {}).get("handle") or handle, 32)
+    eff_color = _clean((auth_card or {}).get("color") or color, 16)
+    eff_av = _clean((auth_card or {}).get("avatarUrl") or avatar_url, 600)
     if uid_clean not in _SOCIAL_USERS:
-        persisted_u = _kv_get(f"wl:soc:u:{uid_clean}", None, max_age=15.0)
-        if isinstance(persisted_u, dict) and persisted_u.get("uid"):
-            _SOCIAL_USERS[uid_clean] = persisted_u
-    if uid_clean not in _SOCIAL_USERS:
-        friends = [dict(p) for p in COMMUNITY_PEERS]
         _SOCIAL_USERS[uid_clean] = {
             "uid": uid_clean,
-            "name": _clean(name, 32) or "İzleyici",
-            "handle": _clean(handle, 32) or f"@{_clean(name, 16).lower().replace(' ', '_') or 'izleyici'}",
-            "friends": friends,
-            "requests": [
-                {
-                    "id": "req_emre_01",
-                    "fromUid": "u_emre_4k",
-                    "fromName": "Emre 4K",
-                    "fromHandle": "@emre_4k",
-                    "color": "#F59E0B",
-                    "country": "NL",
-                    "watchMinutes": 95,
-                    "medal": "🥉 Bronz İzleyici",
-                    "ts": _now() - 600,
-                }
-            ],
-            "unread": {"u_ayla_cinema": 1},
+            "name": eff_name or "İzleyici",
+            "handle": _norm_handle_tag(eff_handle, eff_name or "izleyici"),
+            "color": eff_color or "#27DCC8",
+            "avatarUrl": eff_av,
+            "friends": [],
+            "requests": [],
+            "outgoingRequests": [],
+            "blocked": [],
+            "unread": {},
+            "privacy": {
+                "presenceVisibility": "friends",
+                "hideWatching": bool((auth_card or {}).get("hideWatching", False)),
+                "allowInvites": "friends",
+            },
+            "lastSeen": _now(),
         }
-        tk = _thread_key(uid_clean, "u_ayla_cinema")
-        if tk not in _DM_THREADS:
-            _DM_THREADS[tk] = [
-                {
-                    "id": "dm_welcome_1",
-                    "fromUid": "u_ayla_cinema",
-                    "fromName": "Ayla Sinema",
-                    "color": "#FF2A85",
-                    "text": "Selam! Bu akşam yeni film odası kuruyoruz, hazır olduğunda DM'den yaz veya odaya katıl 🍿✨",
-                    "time": _hhmm(_now() - 300),
-                    "ts": _now() - 300,
-                    "reactions": {"❤️": ["Ayla Sinema"]},
-                }
-            ]
+    u = _SOCIAL_USERS[uid_clean]
+    # Purge legacy demo bot entries so only real mutual accounts appear
+    u["friends"] = [f for f in (u.get("friends") or []) if isinstance(f, dict) and f.get("uid") not in _LEGACY_BOT_UIDS]
+    u["requests"] = [r for r in (u.get("requests") or []) if isinstance(r, dict) and r.get("fromUid") not in _LEGACY_BOT_UIDS and r.get("id") != "req_emre_01"]
+    u.setdefault("outgoingRequests", [])
+    u.setdefault("blocked", [])
+    u.setdefault("privacy", {"presenceVisibility": "friends", "hideWatching": False, "allowInvites": "friends"})
+    if isinstance(u.get("unread"), dict):
+        for bk in list(u["unread"].keys()):
+            if bk in _LEGACY_BOT_UIDS:
+                u["unread"].pop(bk, None)
     else:
-        if name:
-            _SOCIAL_USERS[uid_clean]["name"] = _clean(name, 32)
-        if handle:
-            _SOCIAL_USERS[uid_clean]["handle"] = _clean(handle, 32)
-    _kv_set(f"wl:soc:u:{uid_clean}", _SOCIAL_USERS[uid_clean], ttl_sec=2592000)
-    return _SOCIAL_USERS[uid_clean]
+        u["unread"] = {}
+    if eff_name:
+        u["name"] = eff_name
+    if eff_handle:
+        u["handle"] = _norm_handle_tag(eff_handle, u.get("name") or "")
+    if eff_color:
+        u["color"] = eff_color
+    if eff_av:
+        u["avatarUrl"] = eff_av
+    _register_social_dir({
+        "uid": uid_clean,
+        "name": u.get("name"),
+        "handle": u.get("handle"),
+        "color": u.get("color"),
+        "avatarUrl": u.get("avatarUrl"),
+        "bio": (auth_card or {}).get("bio", ""),
+        "statusEmoji": (auth_card or {}).get("statusEmoji", "🍿"),
+        "statusText": (auth_card or {}).get("statusText", ""),
+    })
+    _kv_set(f"wl:soc:u:{uid_clean}", u, ttl_sec=2592000)
+    return u
 
 
-# ---------------------------------------------------------------------------
-# 1. Direct Messages (DMThreads) & Server-Backed Friendships
-# ---------------------------------------------------------------------------
+def _format_last_seen(last_ts: float, now_ts: float) -> str:
+    if not last_ts or last_ts <= 0:
+        return "Çevrimdışı"
+    diff = max(0, int(now_ts - last_ts))
+    if diff < 90:
+        return "Az önce aktifti"
+    if diff < 3600:
+        return f"Son görülme: {max(1, diff // 60)} dk önce"
+    if diff < 86400:
+        return f"Son görülme: {max(1, diff // 3600)} sa önce"
+    return f"Son görülme: {max(1, diff // 86400)} gün önce"
+
+
+def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: bool = False) -> Dict[str, Any]:
+    t_uid = _clean(target_uid, 64)
+    now_t = _now()
+    pres = _kv_get(f"wl:soc:pres:{t_uid}", None, max_age=2.5)
+    if not isinstance(pres, dict):
+        pres = _PRESENCE_MAP.get(t_uid) or {}
+    t_u = _SOCIAL_USERS.get(t_uid) or _kv_get(f"wl:soc:u:{t_uid}", None, max_age=6.0) or {}
+    priv = (t_u.get("privacy") if isinstance(t_u, dict) else None) or {}
+    vis = str(pres.get("visibility") or priv.get("presenceVisibility") or "friends").lower()
+    hide_watch = bool(pres.get("hideWatching") if "hideWatching" in pres else priv.get("hideWatching", False))
+    last_seen = _finite_float(pres.get("lastSeen") or (t_u.get("lastSeen") if isinstance(t_u, dict) else 0.0), 0.0)
+    raw_state = str(pres.get("state") or "offline").lower()
+    custom_txt = _clean(pres.get("statusText"), 60)
+    custom_emj = _clean(pres.get("statusEmoji") or "🟢", 10)
+
+    is_self = bool(viewer_uid and viewer_uid == t_uid)
+    can_see_presence = is_self or vis == "everyone" or (vis == "friends" and is_friend)
+    if not can_see_presence or raw_state == "offline" or (now_t - last_seen) > 75.0 or last_seen <= 0:
+        ls_lbl = _format_last_seen(last_seen, now_t) if can_see_presence else "Çevrimdışı"
+        return {
+            "online": False,
+            "presenceState": "offline",
+            "status": ls_lbl if can_see_presence else "⚫ Çevrimdışı",
+            "lastSeen": last_seen if can_see_presence else 0.0,
+            "lastSeenLabel": ls_lbl,
+            "roomId": "",
+            "mediaTitle": "",
+            "watchingRoom": None,
+        }
+    if raw_state == "idle":
+        return {
+            "online": True,
+            "presenceState": "idle",
+            "status": "🌙 Uzakta",
+            "lastSeen": last_seen,
+            "lastSeenLabel": "Uzakta",
+            "roomId": "",
+            "mediaTitle": "",
+            "watchingRoom": None,
+        }
+    room_id = _clean(pres.get("roomId"), 80)
+    room_priv = _clean(pres.get("roomPrivacy") or "public", 16).lower()
+    media_title = _clean(pres.get("mediaTitle"), 140)
+    room_name = _clean(pres.get("roomName"), 100)
+    if room_id and not hide_watch and (is_self or room_priv != "private"):
+        try:
+            import rooms as rooms_mod
+            live_rm = rooms_mod.ROOMS.get(room_id)
+            if live_rm:
+                room_name = _clean(getattr(live_rm, "name", "") or room_name, 100)
+                rm_media = getattr(live_rm, "media", None) or {}
+                if isinstance(rm_media, dict) and rm_media.get("title"):
+                    media_title = _clean(rm_media.get("title"), 140)
+        except Exception:
+            pass
+        label = media_title or room_name or "Sinema Odası"
+        return {
+            "online": True,
+            "presenceState": "watching",
+            "status": f"🎬 {label} izliyor",
+            "lastSeen": last_seen,
+            "lastSeenLabel": "Şu an izliyor",
+            "roomId": room_id,
+            "mediaTitle": label,
+            "watchingRoom": {
+                "roomId": room_id,
+                "roomName": room_name or "Watchlivo Odası",
+                "mediaTitle": media_title or room_name or "Canlı Oda",
+                "mediaPoster": _clean(pres.get("mediaPoster"), 800),
+                "mediaProvider": _clean(pres.get("mediaProvider") or "cinema", 32),
+            },
+        }
+    return {
+        "online": True,
+        "presenceState": "online",
+        "status": f"{custom_emj} {custom_txt}".strip() if custom_txt else "🟢 Çevrimiçi",
+        "lastSeen": last_seen,
+        "lastSeenLabel": "Şu an çevrimiçi",
+        "roomId": "",
+        "mediaTitle": "",
+        "watchingRoom": None,
+    }
+
+
+def _friendship_state(u: Dict[str, Any], target_uid: str) -> str:
+    t_uid = _clean(target_uid, 64)
+    if not t_uid:
+        return "NONE"
+    if any(b.get("uid") == t_uid for b in (u.get("blocked") or []) if isinstance(b, dict)):
+        return "BLOCKED"
+    if any(f.get("uid") == t_uid for f in (u.get("friends") or []) if isinstance(f, dict)):
+        return "FRIENDS"
+    if any(r.get("toUid") == t_uid for r in (u.get("outgoingRequests") or []) if isinstance(r, dict)):
+        return "OUTGOING_PENDING"
+    if any(r.get("fromUid") == t_uid for r in (u.get("requests") or []) if isinstance(r, dict)):
+        return "INCOMING_PENDING"
+    return "NONE"
+
+
+def _resolve_social_target(identifier: str, target_uid_hint: str = "") -> Optional[Dict[str, Any]]:
+    d = _load_social_dir()
+    for cand in [target_uid_hint, identifier]:
+        c_str = str(cand or "").strip()
+        if not c_str:
+            continue
+        try:
+            import auth_engine
+            ac = auth_engine.resolve_public_user(c_str)
+            if ac and ac.get("uid"):
+                _register_social_dir(ac)
+                return ac
+        except Exception:
+            pass
+        if c_str in d:
+            return dict(d[c_str])
+        if c_str in _SOCIAL_USERS:
+            su = _SOCIAL_USERS[c_str]
+            return {"uid": su["uid"], "name": su.get("name", "İzleyici"), "handle": su.get("handle", "@izleyici"), "color": su.get("color", "#27DCC8"), "avatarUrl": su.get("avatarUrl", "")}
+        c_low = c_str.lower().lstrip("@")
+        for card in d.values():
+            if not isinstance(card, dict):
+                continue
+            if str(card.get("handle") or "").lower().lstrip("@") == c_low or str(card.get("name") or "").lower() == c_str.lower():
+                return dict(card)
+    return None
+def _enrich_friend_entry(fr: Dict[str, Any], viewer_uid: str) -> Dict[str, Any]:
+    p_uid = _clean(fr.get("uid"), 64)
+    d_card = _load_social_dir().get(p_uid) or {}
+    pres = _compute_live_presence(p_uid, viewer_uid, is_friend=True)
+    mins = _safe_int(fr.get("watchMinutes"), 15, lo=0, hi=1000000)
+    return {
+        **fr,
+        "uid": p_uid,
+        "name": _clean(d_card.get("name") or fr.get("name") or "İzleyici", 32),
+        "handle": _norm_handle_tag(d_card.get("handle") or fr.get("handle") or "", d_card.get("name") or fr.get("name") or ""),
+        "color": _clean(d_card.get("color") or fr.get("color") or "#27DCC8", 16),
+        "avatarUrl": _clean(d_card.get("avatarUrl") or fr.get("avatarUrl") or "", 600),
+        "online": pres["online"],
+        "presenceState": pres["presenceState"],
+        "status": pres["status"],
+        "lastSeen": pres["lastSeen"],
+        "lastSeenLabel": pres["lastSeenLabel"],
+        "roomId": pres["roomId"],
+        "mediaTitle": pres["mediaTitle"],
+        "watchingRoom": pres["watchingRoom"],
+        "bestFriend": bool(fr.get("bestFriend", False)),
+        "watchMinutes": mins,
+        "medal": _compute_medal(mins),
+    }
+
+
 async def social_state(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid") or q.get("handle") or q.get("name"), "guest_default")
     name = _clean(q.get("name"), 32)
     handle = _clean(q.get("handle"), 32)
     u = _ensure_user_social(uid, name, handle)
+    enriched_friends = [_enrich_friend_entry(fr, uid) for fr in (u.get("friends") or []) if isinstance(fr, dict)]
+    # Sort: bestFriends & watching/online first
+    enriched_friends.sort(key=lambda f: (
+        0 if f.get("presenceState") == "watching" else (1 if f.get("online") else 2),
+        0 if f.get("bestFriend") else 1,
+        str(f.get("name") or "").lower(),
+    ))
     threads_summary = []
     total_unread = 0
-    for fr in u.get("friends", []):
+    now_t = _now()
+    for fr in enriched_friends:
         p_uid = fr.get("uid") or fr.get("handle") or fr.get("name")
         tk = _thread_key(uid, p_uid)
-        persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=4.0)
+        persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=3.0)
         if isinstance(persisted_dm, list):
             _DM_THREADS[tk] = persisted_dm
-        msgs = _DM_THREADS.get(tk) or []
+        msgs = [m for m in (_DM_THREADS.get(tk) or []) if not (float(m.get("expiryAt") or 0) > 0 and float(m.get("expiryAt") or 0) < now_t)]
         last_m = msgs[-1] if msgs else None
         unr = _safe_int((u.get("unread") or {}).get(p_uid), 0, lo=0)
         total_unread += unr
@@ -320,14 +576,120 @@ async def social_state(request: Request) -> JSONResponse:
             "unreadCount": unr,
             "messageCount": len(msgs),
         })
+    online_count = sum(1 for f in enriched_friends if f.get("online"))
     return JSONResponse({
         "ok": True,
         "uid": uid,
-        "friends": u.get("friends", []),
+        "selfPresence": _compute_live_presence(uid, uid, is_friend=True),
+        "privacy": u.get("privacy") or {"presenceVisibility": "friends", "hideWatching": False, "allowInvites": "friends"},
+        "friends": enriched_friends,
+        "onlineCount": online_count,
         "requests": u.get("requests", []),
         "requestCount": len(u.get("requests", [])),
+        "outgoingRequests": u.get("outgoingRequests", []),
+        "blocked": u.get("blocked", []),
         "threads": threads_summary,
         "totalUnread": total_unread,
+    })
+
+
+async def social_user_search(request: Request) -> JSONResponse:
+    q = request.query_params
+    uid = _caller_uid(request, q.get("uid"), "guest_default")
+    query = _clean(q.get("q") or q.get("query"), 64)
+    u = _ensure_user_social(uid)
+    if not query:
+        return JSONResponse({"ok": True, "users": []})
+    found: Dict[str, Dict[str, Any]] = {}
+    try:
+        import auth_engine
+        for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
+            if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
+                _register_social_dir(ac)
+                found[ac["uid"]] = ac
+    except Exception:
+        pass
+    q_low = query.lower().lstrip("@")
+    for d_uid, card in _load_social_dir().items():
+        if d_uid == uid or d_uid in found or d_uid in _LEGACY_BOT_UIDS or not isinstance(card, dict):
+            continue
+        if q_low in str(card.get("handle") or "").lower() or q_low in str(card.get("name") or "").lower():
+            found[d_uid] = dict(card)
+    out_users = []
+    blocked_by_me = {b.get("uid") for b in (u.get("blocked") or []) if isinstance(b, dict)}
+    for t_uid, card in list(found.items())[:20]:
+        fstate = _friendship_state(u, t_uid)
+        pres = _compute_live_presence(t_uid, uid, is_friend=(fstate == "FRIENDS"))
+        out_users.append({
+            "uid": t_uid,
+            "name": _clean(card.get("name") or "İzleyici", 32),
+            "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
+            "color": _clean(card.get("color") or "#27DCC8", 16),
+            "avatarUrl": _clean(card.get("avatarUrl") or "", 600),
+            "bio": _clean(card.get("bio") or "", 160),
+            "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
+            "online": pres["online"],
+            "presenceState": pres["presenceState"],
+            "status": pres["status"],
+            "watchingRoom": pres["watchingRoom"],
+        })
+    return JSONResponse({"ok": True, "users": out_users})
+
+
+async def social_presence(request: Request) -> JSONResponse:
+    if request.method == "GET":
+        q = request.query_params
+        uid = _caller_uid(request, q.get("uid"), "guest_default")
+        target_uid = _clean(q.get("targetUid") or uid, 64)
+        u = _ensure_user_social(uid)
+        is_fr = _friendship_state(u, target_uid) == "FRIENDS"
+        return JSONResponse({"ok": True, "uid": target_uid, "presence": _compute_live_presence(target_uid, uid, is_friend=is_fr)})
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    uid = _caller_uid(request, body.get("uid"), "guest_default")
+    name = _clean(body.get("name"), 32)
+    handle = _clean(body.get("handle"), 32)
+    color = _clean(body.get("color"), 16)
+    avatar_url = _clean(body.get("avatarUrl"), 600)
+    u = _ensure_user_social(uid, name, handle, color, avatar_url)
+    now_t = _now()
+    raw_st = _clean(body.get("state") or "online", 16).lower()
+    if raw_st not in ("online", "watching", "idle", "offline"):
+        raw_st = "online"
+    priv = u.get("privacy") or {}
+    vis = _clean(body.get("visibility") or priv.get("presenceVisibility") or "friends", 16).lower()
+    if vis not in ("everyone", "friends", "nobody"):
+        vis = "friends"
+    hide_w = bool(body.get("hideWatching")) if "hideWatching" in body else bool(priv.get("hideWatching", False))
+    rec = {
+        "uid": uid,
+        "state": raw_st,
+        "lastSeen": now_t,
+        "roomId": _clean(body.get("roomId"), 80) if raw_st in ("watching", "online") else "",
+        "roomName": _clean(body.get("roomName"), 100),
+        "roomPrivacy": _clean(body.get("roomPrivacy") or "public", 16),
+        "mediaTitle": _clean(body.get("mediaTitle"), 140),
+        "mediaPoster": _clean(body.get("mediaPoster"), 800),
+        "mediaProvider": _clean(body.get("mediaProvider"), 32),
+        "statusText": _clean(body.get("statusText"), 60),
+        "statusEmoji": _clean(body.get("statusEmoji") or "🍿", 10),
+        "visibility": vis,
+        "hideWatching": hide_w,
+    }
+    _PRESENCE_MAP[uid] = rec
+    _kv_set(f"wl:soc:pres:{uid}", rec, ttl_sec=180)
+    u["lastSeen"] = now_t
+    _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+    return JSONResponse({
+        "ok": True,
+        "uid": uid,
+        "presence": _compute_live_presence(uid, uid, is_friend=True),
+        "requestCount": len(u.get("requests") or []),
+        "totalUnread": sum(_safe_int(v, 0, lo=0) for v in (u.get("unread") or {}).values()),
     })
 
 
@@ -341,83 +703,170 @@ async def social_friends_action(request: Request) -> JSONResponse:
     uid = _caller_uid(request, body.get("uid") or body.get("fromName"), "guest_default")
     name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     handle = _clean(body.get("fromHandle") or body.get("handle"), 32)
-    u = _ensure_user_social(uid, name, handle)
+    color = _clean(body.get("color"), 16)
+    avatar_url = _clean(body.get("avatarUrl"), 600)
+    u = _ensure_user_social(uid, name, handle, color, avatar_url)
     action = _clean(body.get("action"), 24).lower()
+    now_t = _now()
+
+    def _resp(extra: Optional[Dict[str, Any]] = None, status_code: int = 200) -> JSONResponse:
+        ef = [_enrich_friend_entry(f, uid) for f in (u.get("friends") or []) if isinstance(f, dict)]
+        payload = {
+            "ok": status_code < 400,
+            "friends": ef,
+            "requests": u.get("requests", []),
+            "requestCount": len(u.get("requests", [])),
+            "outgoingRequests": u.get("outgoingRequests", []),
+            "blocked": u.get("blocked", []),
+            "privacy": u.get("privacy") or {},
+            **(extra or {}),
+        }
+        return JSONResponse(payload, status_code=status_code)
 
     if action == "request":
-        target_name = _clean(body.get("targetName") or body.get("target"), 32)
-        target_handle = _clean(body.get("targetHandle") or target_name, 32)
-        if not target_name:
-            return JSONResponse({"ok": False, "error": "Kullanıcı adı veya @handle gerekli."}, status_code=400)
-        if not target_handle.startswith("@"):
-            target_handle = "@" + re.sub(r"[^a-z0-9_]", "", target_handle.lower().replace(" ", "_"))[:20]
-        target_uid = _clean(body.get("targetUid"), 64) or f"u_{target_handle.lstrip('@')}"
-        existing = next((f for f in u["friends"] if f.get("uid") == target_uid or f.get("name", "").lower() == target_name.lower()), None)
+        raw_ident = _clean(body.get("targetHandle") or body.get("targetEmail") or body.get("targetName") or body.get("target") or body.get("targetUid"), 80)
+        t_hint = _clean(body.get("targetUid"), 64)
+        if not raw_ident and not t_hint:
+            return _resp({"error": "Kullanıcı adı (@handle) veya e-posta gerekli."}, 400)
+        target_card = _resolve_social_target(raw_ident, t_hint)
+        if not target_card or not target_card.get("uid"):
+            return _resp({"error": f'"{raw_ident}" ile eşleşen kayıtlı bir Watchlivo hesabı bulunamadı.'}, 404)
+        target_uid = _clean(target_card["uid"], 64)
+        if target_uid == uid:
+            return _resp({"error": "Kendinize arkadaşlık isteği gönderemezsiniz."}, 400)
+        t_u = _ensure_user_social(target_uid, target_card.get("name", ""), target_card.get("handle", ""), target_card.get("color", ""), target_card.get("avatarUrl", ""))
+        if any(b.get("uid") == target_uid for b in u.get("blocked", [])) or any(b.get("uid") == uid for b in t_u.get("blocked", [])):
+            return _resp({"error": "Bu kullanıcı ile etkileşim engellenmiş."}, 403)
+        existing = next((f for f in u["friends"] if f.get("uid") == target_uid), None)
         if existing:
-            return JSONResponse({"ok": True, "alreadyFriend": True, "friend": existing, "friends": u["friends"]})
-        new_friend = {
-            "uid": target_uid,
-            "name": target_name.lstrip("@"),
-            "handle": target_handle,
-            "color": _clean(body.get("color"), 16) or "#27DCC8",
-            "avatarUrl": _clean(body.get("avatarUrl"), 500),
-            "country": _clean(body.get("country"), 4) or "TR",
-            "online": True,
-            "status": "✨ Yeni Raver Arkadaşı",
-            "watchMinutes": 15,
-            "medal": "⚡ Yeni İzleyici",
-            "rankPill": "Arkadaş",
-        }
-        u["friends"].insert(0, new_friend)
-        # If target user exists in _SOCIAL_USERS, also add incoming request to them
-        if target_uid in _SOCIAL_USERS and target_uid != uid:
-            t_u = _SOCIAL_USERS[target_uid]
-            if not any(r.get("fromUid") == uid for r in t_u.get("requests", [])):
-                t_u.setdefault("requests", []).insert(0, {
-                    "id": "req_" + uuid.uuid4().hex[:8],
-                    "fromUid": uid,
-                    "fromName": name,
-                    "fromHandle": u.get("handle", "@izleyici"),
-                    "color": "#27DCC8",
-                    "country": "TR",
-                    "watchMinutes": 30,
-                    "medal": "🥉 Bronz İzleyici",
-                    "ts": _now(),
-                })
+            return _resp({"alreadyFriend": True, "friendshipState": "FRIENDS", "status": "FRIENDS", "friend": _enrich_friend_entry(existing, uid)})
+        # If target already requested us -> auto-accept mutual friendship!
+        incoming = next((r for r in u.get("requests", []) if r.get("fromUid") == target_uid), None)
+        if incoming:
+            u["requests"] = [r for r in u["requests"] if r.get("fromUid") != target_uid]
+            t_u["outgoingRequests"] = [r for r in t_u.get("outgoingRequests", []) if r.get("toUid") != uid]
+            if not any(f.get("uid") == target_uid for f in u["friends"]):
+                u["friends"].insert(0, {"uid": target_uid, "name": t_u["name"], "handle": t_u["handle"], "color": t_u.get("color", "#27DCC8"), "avatarUrl": t_u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+            if not any(f.get("uid") == uid for f in t_u["friends"]):
+                t_u["friends"].insert(0, {"uid": uid, "name": u["name"], "handle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+            _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+            _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
+            _queue_notification(target_uid, {"type": "friend_accepted", "title": f"🎉 {u['name']} arkadaşlık isteğini kabul etti!", "body": "Artık mesajlaşabilir ve odaya davet gönderebilirsiniz.", "fromUid": uid, "fromName": u["name"], "fromHandle": u["handle"], "fromColor": u.get("color", "#27DCC8"), "fromAvatarUrl": u.get("avatarUrl", "")})
+            return _resp({"mutualAccepted": True, "friendshipState": "FRIENDS", "status": "FRIENDS", "friend": _enrich_friend_entry(u["friends"][0], uid)})
+        if any(r.get("toUid") == target_uid for r in u.get("outgoingRequests", [])):
+            return _resp({"pending": True, "alreadyRequested": True, "friendshipState": "OUTGOING_PENDING", "status": "OUTGOING_PENDING", "target": target_card})
+        req_id = "req_" + uuid.uuid4().hex[:10]
+        out_req = {"id": req_id, "toUid": target_uid, "toName": t_u["name"], "toHandle": t_u["handle"], "color": t_u.get("color", "#27DCC8"), "avatarUrl": t_u.get("avatarUrl", ""), "ts": now_t}
+        in_req = {"id": req_id, "fromUid": uid, "fromName": u["name"], "fromHandle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "ts": now_t}
+        u.setdefault("outgoingRequests", []).insert(0, out_req)
+        t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid]
+        t_u["requests"].insert(0, in_req)
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
-        return JSONResponse({"ok": True, "friend": new_friend, "friends": u["friends"]})
+        _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
+        _queue_notification(target_uid, {
+            "type": "friend_request",
+            "requestId": req_id,
+            "title": f"👋 {u['name']} ({u['handle']}) arkadaşlık isteği gönderdi",
+            "body": "Mesajlaşmak ve odalara davet edebilmek için isteği onayla.",
+            "fromUid": uid,
+            "fromName": u["name"],
+            "fromHandle": u["handle"],
+            "fromColor": u.get("color", "#27DCC8"),
+            "fromAvatarUrl": u.get("avatarUrl", ""),
+        })
+        return _resp({"pending": True, "friendshipState": "OUTGOING_PENDING", "status": "OUTGOING_PENDING", "target": target_card, "request": out_req})
 
     elif action in ("accept", "decline"):
-        req_id = _clean(body.get("requestId"), 40)
+        req_id = _clean(body.get("requestId") or body.get("targetUid"), 64)
         reqs = u.get("requests", [])
         target_req = next((r for r in reqs if r.get("id") == req_id or r.get("fromUid") == req_id), None)
-        if target_req:
-            u["requests"] = [r for r in reqs if r.get("id") != target_req.get("id")]
-            if action == "accept":
-                mins = _safe_int(target_req.get("watchMinutes"), 45, lo=0, hi=1000000)
-                new_fr = {
-                    "uid": target_req.get("fromUid") or f"u_{uuid.uuid4().hex[:6]}",
-                    "name": target_req.get("fromName") or "İzleyici",
-                    "handle": target_req.get("fromHandle") or "@izleyici",
-                    "color": target_req.get("color") or "#F59E0B",
-                    "avatarUrl": "",
-                    "country": target_req.get("country") or "TR",
-                    "online": True,
-                    "status": "🟢 Çevrimiçi",
-                    "watchMinutes": mins,
-                    "medal": _compute_medal(mins),
-                    "rankPill": "Onaylı Arkadaş",
-                }
-                if not any(f.get("uid") == new_fr["uid"] for f in u["friends"]):
-                    u["friends"].insert(0, new_fr)
+        if not target_req:
+            return _resp({"error": "İstek bulunamadı veya zaten işlendi."}, 404)
+        from_uid = _clean(target_req.get("fromUid"), 64)
+        u["requests"] = [r for r in reqs if r.get("id") != target_req.get("id") and r.get("fromUid") != from_uid]
+        s_u = _ensure_user_social(from_uid, target_req.get("fromName", ""), target_req.get("fromHandle", ""), target_req.get("color", ""), target_req.get("avatarUrl", "")) if from_uid else None
+        if s_u:
+            s_u["outgoingRequests"] = [r for r in s_u.get("outgoingRequests", []) if r.get("toUid") != uid and r.get("id") != target_req.get("id")]
+        if action == "accept" and from_uid:
+            mins = _safe_int(target_req.get("watchMinutes"), 15, lo=0, hi=1000000)
+            if not any(f.get("uid") == from_uid for f in u["friends"]):
+                u["friends"].insert(0, {"uid": from_uid, "name": (s_u or {}).get("name") or target_req.get("fromName") or "İzleyici", "handle": (s_u or {}).get("handle") or target_req.get("fromHandle") or "@izleyici", "color": (s_u or {}).get("color") or target_req.get("color") or "#F59E0B", "avatarUrl": (s_u or {}).get("avatarUrl") or target_req.get("avatarUrl") or "", "watchMinutes": mins, "medal": _compute_medal(mins), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+            if s_u and not any(f.get("uid") == uid for f in s_u["friends"]):
+                s_u["friends"].insert(0, {"uid": uid, "name": u["name"], "handle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": mins, "medal": _compute_medal(mins), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+            _queue_notification(from_uid, {
+                "type": "friend_accepted",
+                "title": f"🎉 {u['name']} ({u['handle']}) isteğini kabul etti!",
+                "body": "Artık birbirinize mesaj gönderebilir ve odaya davet atabilirsiniz.",
+                "fromUid": uid,
+                "fromName": u["name"],
+                "fromHandle": u["handle"],
+                "fromColor": u.get("color", "#27DCC8"),
+                "fromAvatarUrl": u.get("avatarUrl", ""),
+            })
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
-        return JSONResponse({"ok": True, "friends": u["friends"], "requests": u["requests"]})
+        if s_u and from_uid:
+            _kv_set(f"wl:soc:u:{from_uid}", s_u, ttl_sec=2592000)
+        res_state = "FRIENDS" if action == "accept" else "NONE"
+        return _resp({"friendshipState": res_state, "status": res_state})
+
+    elif action == "cancel":
+        req_id = _clean(body.get("requestId") or body.get("targetUid"), 64)
+        out_reqs = u.get("outgoingRequests", [])
+        hit = next((r for r in out_reqs if r.get("id") == req_id or r.get("toUid") == req_id), None)
+        u["outgoingRequests"] = [r for r in out_reqs if r.get("id") != req_id and r.get("toUid") != req_id]
+        if hit and hit.get("toUid"):
+            t_u = _ensure_user_social(hit["toUid"])
+            t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid and r.get("id") != hit.get("id")]
+            _kv_set(f"wl:soc:u:{hit['toUid']}", t_u, ttl_sec=2592000)
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        return _resp({"friendshipState": "NONE"})
 
     elif action == "remove":
         target_uid = _clean(body.get("targetUid"), 64)
         u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid and f.get("name") != target_uid]
+        if target_uid:
+            t_u = _ensure_user_social(target_uid)
+            t_u["friends"] = [f for f in t_u.get("friends", []) if f.get("uid") != uid]
+            _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
-        return JSONResponse({"ok": True, "friends": u["friends"]})
+        return _resp({"friendshipState": "NONE"})
+
+    elif action == "toggle_best":
+        target_uid = _clean(body.get("targetUid"), 64)
+        for f in u.get("friends", []):
+            if f.get("uid") == target_uid:
+                f["bestFriend"] = not bool(f.get("bestFriend", False))
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        return _resp()
+
+    elif action in ("block", "unblock"):
+        target_uid = _clean(body.get("targetUid"), 64)
+        if action == "block" and target_uid and target_uid != uid:
+            u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid]
+            u["requests"] = [r for r in u.get("requests", []) if r.get("fromUid") != target_uid]
+            u["outgoingRequests"] = [r for r in u.get("outgoingRequests", []) if r.get("toUid") != target_uid]
+            if not any(b.get("uid") == target_uid for b in u.get("blocked", [])):
+                u.setdefault("blocked", []).append({"uid": target_uid, "name": _clean(body.get("targetName") or target_uid, 32), "ts": now_t})
+            t_u = _ensure_user_social(target_uid)
+            t_u["friends"] = [f for f in t_u.get("friends", []) if f.get("uid") != uid]
+            t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid]
+            t_u["outgoingRequests"] = [r for r in t_u.get("outgoingRequests", []) if r.get("toUid") != uid]
+            _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
+        elif action == "unblock" and target_uid:
+            u["blocked"] = [b for b in u.get("blocked", []) if b.get("uid") != target_uid]
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        return _resp()
+
+    elif action == "privacy":
+        priv = u.setdefault("privacy", {"presenceVisibility": "friends", "hideWatching": False, "allowInvites": "friends"})
+        if "presenceVisibility" in body and body["presenceVisibility"] in ("everyone", "friends", "nobody"):
+            priv["presenceVisibility"] = body["presenceVisibility"]
+        if "hideWatching" in body:
+            priv["hideWatching"] = bool(body["hideWatching"])
+        if "allowInvites" in body and body["allowInvites"] in ("everyone", "friends"):
+            priv["allowInvites"] = body["allowInvites"]
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        return _resp()
 
     elif action == "add_minutes":
         target_uid = _clean(body.get("targetUid"), 64)
@@ -427,24 +876,63 @@ async def social_friends_action(request: Request) -> JSONResponse:
                 f["watchMinutes"] = _safe_int(f.get("watchMinutes"), 0, lo=0) + delta
                 f["medal"] = _compute_medal(f["watchMinutes"])
         _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
-        return JSONResponse({"ok": True, "friends": u["friends"]})
+        return _resp()
 
-    return JSONResponse({"ok": True, "friends": u.get("friends", []), "requests": u.get("requests", [])})
+    return _resp()
+
+
+def _get_dm_expiry(tk: str) -> int:
+    cfg = _kv_get(f"wl:soc:dmcfg:{tk}", None, max_age=10.0)
+    if isinstance(cfg, dict):
+        _DM_CONFIG[tk] = cfg
+    return _safe_int((_DM_CONFIG.get(tk) or {}).get("expirySec"), 0, lo=0, hi=604800)
 
 
 async def social_dm_get(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
-    peer_id = _clean(q.get("peerId"), 64) or "u_ayla_cinema"
+    peer_id = _clean(q.get("peerId"), 64)
     u = _ensure_user_social(uid)
-    if isinstance(u.get("unread"), dict):
+    if not peer_id:
+        first_fr = (u.get("friends") or [None])[0]
+        peer_id = _clean((first_fr or {}).get("uid"), 64)
+    if not peer_id:
+        return JSONResponse({"ok": True, "peerId": "", "canMessage": False, "friendshipState": "NONE", "messages": []})
+    fstate = _friendship_state(u, peer_id)
+    now_t = _now()
+    if isinstance(u.get("unread"), dict) and peer_id in u["unread"]:
         u["unread"].pop(peer_id, None)
+        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
     tk = _thread_key(uid, peer_id)
-    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=3.0)
+    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=2.0)
     if isinstance(persisted_dm, list):
         _DM_THREADS[tk] = persisted_dm
-    msgs = _DM_THREADS.get(tk) or []
-    return JSONResponse({"ok": True, "peerId": peer_id, "messages": msgs[-80:]})
+    raw_msgs = _DM_THREADS.get(tk) or []
+    msgs = [m for m in raw_msgs if not (float(m.get("expiryAt") or 0) > 0 and float(m.get("expiryAt") or 0) < now_t)]
+    dirty = len(msgs) != len(raw_msgs)
+    for m in msgs:
+        if m.get("fromUid") == peer_id and not m.get("readAt"):
+            m["readAt"] = now_t
+            dirty = True
+    if dirty:
+        _DM_THREADS[tk] = msgs[-100:]
+        _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
+    typ_ts = _finite_float(_kv_get(f"wl:soc:typ:{tk}:{peer_id}", _DM_TYPING.get(f"{tk}:{peer_id}", 0.0), max_age=1.5), 0.0)
+    peer_card = _resolve_social_target(peer_id, peer_id) or {"uid": peer_id, "name": peer_id, "handle": f"@{peer_id[:16]}"}
+    pres = _compute_live_presence(peer_id, uid, is_friend=(fstate == "FRIENDS"))
+    exp_val = _get_dm_expiry(tk)
+    return JSONResponse({
+        "ok": True,
+        "peerId": peer_id,
+        "peer": {**peer_card, **pres},
+        "friendshipState": fstate,
+        "friendState": fstate,
+        "canMessage": fstate == "FRIENDS",
+        "peerTyping": (now_t - typ_ts) < 5.5,
+        "expirySec": exp_val,
+        "settings": {"expirySec": exp_val},
+        "messages": msgs[-80:],
+    })
 
 
 async def social_dm_send(request: Request) -> JSONResponse:
@@ -457,81 +945,269 @@ async def social_dm_send(request: Request) -> JSONResponse:
     uid = _caller_uid(request, body.get("uid"), "guest_default")
     name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     color = _clean(body.get("color"), 16) or "#27DCC8"
-    peer_id = _clean(body.get("peerId"), 64) or "u_ayla_cinema"
+    peer_id = _clean(body.get("peerId"), 64)
+    sub_action = _clean(body.get("action") or "send", 20).lower()
+    if not peer_id:
+        return JSONResponse({"ok": False, "error": "Alıcı (peerId) seçilmedi."}, status_code=400)
+    u = _ensure_user_social(uid, name, color=color)
+    fstate = _friendship_state(u, peer_id)
+    tk = _thread_key(uid, peer_id)
+    t_now = _now()
+
+    if sub_action == "typing":
+        if fstate == "FRIENDS":
+            _DM_TYPING[f"{tk}:{uid}"] = t_now
+            _kv_set(f"wl:soc:typ:{tk}:{uid}", t_now, ttl_sec=8)
+        return JSONResponse({"ok": True, "typing": True})
+
+    if fstate != "FRIENDS":
+        return JSONResponse({
+            "ok": False,
+            "canMessage": False,
+            "friendshipState": fstate,
+            "error": "Mesajlaşmak için karşılıklı arkadaşlık onayı gereklidir.",
+        }, status_code=403)
+
+    if sub_action == "settings":
+        exp_sec = _safe_int(body.get("expirySec"), 0, lo=0, hi=604800)
+        _DM_CONFIG[tk] = {"expirySec": exp_sec, "updatedAt": t_now}
+        _kv_set(f"wl:soc:dmcfg:{tk}", _DM_CONFIG[tk], ttl_sec=2592000)
+        return JSONResponse({"ok": True, "expirySec": exp_sec})
+
+    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=1.5)
+    if isinstance(persisted_dm, list):
+        _DM_THREADS[tk] = list(persisted_dm)
+    thread = [m for m in (_DM_THREADS.get(tk) or []) if not (float(m.get("expiryAt") or 0) > 0 and float(m.get("expiryAt") or 0) < t_now)]
+
+    if sub_action == "react":
+        msg_id = _clean(body.get("messageId"), 48)
+        emoji = _clean(body.get("emoji") or "❤️", 12)
+        for m in thread:
+            if m.get("id") == msg_id:
+                rx = m.setdefault("reactions", {})
+                users = list(rx.get(emoji) or [])
+                if uid in users:
+                    users.remove(uid)
+                else:
+                    users.append(uid)
+                if users:
+                    rx[emoji] = users[:20]
+                else:
+                    rx.pop(emoji, None)
+                break
+        _DM_THREADS[tk] = thread[-100:]
+        _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
+        return JSONResponse({"ok": True, "messages": _DM_THREADS[tk][-80:]})
+
+    if sub_action == "delete":
+        msg_id = _clean(body.get("messageId"), 48)
+        thread = [m for m in thread if not (m.get("id") == msg_id and m.get("fromUid") == uid)]
+        _DM_THREADS[tk] = thread[-100:]
+        _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
+        return JSONResponse({"ok": True, "messages": _DM_THREADS[tk][-80:]})
+
     text = _clean(body.get("text"), 1000)
-    room_invite = _clean(body.get("roomInvite"), 200)
+    room_invite = _clean(body.get("roomInvite"), 80)
+    raw_card = body.get("roomInviteCard") if isinstance(body.get("roomInviteCard"), dict) else None
     snap = str(body.get("snapshot") or "").strip()
     if snap and len(snap) > 85000:
         snap = ""
     raw_an = body.get("audioNote")
     audio_note = raw_an if (isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000) else None
-    if not text and not snap and not audio_note and not room_invite:
+    if not text and not snap and not audio_note and not room_invite and not raw_card:
         return JSONResponse({"ok": False, "error": "Boş mesaj gönderilemez."}, status_code=400)
-    _ensure_user_social(uid, name)
-    t_now = _now()
+    exp_sec = _get_dm_expiry(tk)
     msg: Dict[str, Any] = {
         "id": "dm_" + uuid.uuid4().hex[:10],
         "fromUid": uid,
-        "fromName": name,
-        "color": color,
+        "fromName": u.get("name") or name,
+        "color": u.get("color") or color,
         "text": text,
         "time": _hhmm(t_now),
         "ts": t_now,
         "reactions": {},
+        "expiryAt": (t_now + exp_sec) if exp_sec > 0 else 0,
     }
-    if room_invite:
-        msg["roomInvite"] = room_invite
+    raw_reply = body.get("replyTo")
+    if isinstance(raw_reply, dict) and raw_reply.get("id"):
+        msg["replyTo"] = {
+            "id": _clean(raw_reply.get("id"), 48),
+            "fromName": _clean(raw_reply.get("fromName"), 32),
+            "text": _clean(raw_reply.get("text"), 140),
+        }
+    if room_invite or raw_card:
+        r_id = _clean((raw_card or {}).get("roomId") or room_invite, 80)
+        msg["roomInvite"] = r_id
+        msg["roomInviteCard"] = {
+            "roomId": r_id,
+            "roomName": _clean((raw_card or {}).get("roomName") or "Watchlivo Odası", 100),
+            "mediaTitle": _clean((raw_card or {}).get("mediaTitle") or "", 140),
+            "mediaPoster": _clean((raw_card or {}).get("mediaPoster") or "", 800),
+            "mediaProvider": _clean((raw_card or {}).get("mediaProvider") or "cinema", 32),
+        }
     if snap:
         msg["snapshot"] = snap
         if body.get("isExplicit"):
             msg["isExplicit"] = True
     if audio_note:
         msg["audioNote"] = audio_note
-    tk = _thread_key(uid, peer_id)
-    persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=2.0)
-    if isinstance(persisted_dm, list):
-        _DM_THREADS[tk] = list(persisted_dm)
-    thread = _DM_THREADS.setdefault(tk, [])
     thread.append(msg)
-
-    # Mark unread for real recipient if in _SOCIAL_USERS
-    if peer_id in _SOCIAL_USERS and peer_id != uid:
-        peer_u = _SOCIAL_USERS[peer_id]
-        peer_u.setdefault("unread", {})[uid] = int(peer_u.get("unread", {}).get(uid) or 0) + 1
-    if peer_id != uid:
-        _queue_notification(peer_id, {
-            "type": "room_invite" if room_invite else "dm",
-            "title": f"🎬 {name} seni odaya davet etti!" if room_invite else f"💬 {name} sana mesaj gönderdi",
-            "body": text or "Tek tıkla sinema odasına katıl!",
-            "fromUid": uid,
-            "fromName": name,
-            "roomId": room_invite,
-            "url": f"/#/mesh/{urllib.parse.quote(room_invite)}" if room_invite else "/#/",
-        })
-
-    # Community peer instant interactive response
-    peer_bot = next((p for p in COMMUNITY_PEERS if p["uid"] == peer_id), None)
-    if peer_bot:
-        reply_txt = "Harika! Hemen odaya geliyorum, mısırları hazırla 🍿🔥"
-        if "müzik" in text.lower() or "dj" in text.lower() or peer_id == "u_mert_dj":
-            reply_txt = "Watchlivo DJ Mashup stüdyosunda yeni bir mix hazırladım, odada açalım! 🎧⚡"
-        elif "anime" in text.lower() or peer_id == "u_zeynep_anime":
-            reply_txt = "Yeni bölümü birlikte izleyelim! Altyazılar 1080p hazır ⛩️✨"
-        elif room_invite:
-            reply_txt = f"Oda davetin geldi ({room_invite}), hemen katılıyorum! 🚀"
-        thread.append({
-            "id": "dm_" + uuid.uuid4().hex[:10],
-            "fromUid": peer_bot["uid"],
-            "fromName": peer_bot["name"],
-            "color": peer_bot["color"],
-            "text": reply_txt,
-            "time": _hhmm(t_now + 1),
-            "ts": t_now + 0.5,
-            "reactions": {},
-        })
+    _DM_TYPING.pop(f"{tk}:{uid}", None)
     _DM_THREADS[tk] = thread[-100:]
     _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
-    return JSONResponse({"ok": True, "message": msg, "messages": _DM_THREADS[tk][-80:]})
+
+    if peer_id != uid:
+        peer_u = _ensure_user_social(peer_id)
+        peer_u.setdefault("unread", {})[uid] = int(peer_u.get("unread", {}).get(uid) or 0) + 1
+        _kv_set(f"wl:soc:u:{peer_id}", peer_u, ttl_sec=2592000)
+        inv_r = msg.get("roomInvite") or ""
+        inv_c = msg.get("roomInviteCard") or {}
+        _queue_notification(peer_id, {
+            "type": "room_invite" if inv_r else "dm",
+            "title": f"🎬 {u['name']} seni odaya davet etti!" if inv_r else f"💬 {u['name']} mesaj gönderdi",
+            "body": text or (f'"{inv_c.get("mediaTitle") or inv_c.get("roomName") or "Sinema Odası"}" — Tek tıkla katıl!' if inv_r else "Yeni mesaj"),
+            "fromUid": uid,
+            "fromName": u["name"],
+            "fromHandle": u.get("handle", ""),
+            "fromColor": u.get("color", "#27DCC8"),
+            "fromAvatarUrl": u.get("avatarUrl", ""),
+            "roomId": inv_r,
+            "roomName": inv_c.get("roomName", ""),
+            "mediaTitle": inv_c.get("mediaTitle", ""),
+            "mediaPoster": inv_c.get("mediaPoster", ""),
+            "url": f"/#/mesh/{urllib.parse.quote(inv_r)}" if inv_r else "/#/",
+            "expiresAt": (t_now + 60.0) if inv_r else 0.0,
+        })
+    return JSONResponse({"ok": True, "canMessage": True, "message": msg, "messages": _DM_THREADS[tk][-80:]})
+
+
+async def social_invite(request: Request) -> JSONResponse:
+    """Rave SendInviteButton + Poke parity: send/cancel room invites & pokes to mutual friends."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    uid = _caller_uid(request, body.get("uid"), "guest_default")
+    name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
+    u = _ensure_user_social(uid, name)
+    action = _clean(body.get("action") or "send", 24).lower()
+    now_t = _now()
+
+    if action == "cancel":
+        inv_id = _clean(body.get("inviteId"), 48)
+        target_uid = _clean(body.get("targetUid"), 64).lower()
+        room_id = _clean(body.get("roomId"), 80)
+        if target_uid:
+            q_items = _kv_get(f"wl:soc:ntf:{target_uid}", None, max_age=1.0)
+            q_list = list(q_items) if isinstance(q_items, list) else list(_NOTIFICATION_QUEUES.get(target_uid, []))
+            q_list = [x for x in q_list if not ((inv_id and x.get("id") == inv_id) or (not inv_id and x.get("fromUid") == uid and x.get("roomId") == room_id))]
+            _NOTIFICATION_QUEUES[target_uid] = q_list
+            _kv_set(f"wl:soc:ntf:{target_uid}", q_list, ttl_sec=86400)
+        return JSONResponse({"ok": True, "cancelled": True})
+
+    if action == "poke":
+        target_uid = _clean(body.get("targetUid"), 64)
+        if not target_uid or _friendship_state(u, target_uid) != "FRIENDS":
+            return JSONResponse({"ok": False, "error": "El sallamak için arkadaş olmalısınız."}, status_code=403)
+        ntf = _queue_notification(target_uid.lower(), {
+            "type": "poke",
+            "title": f"👋 {u['name']} ({u['handle']}) sana el salladı!",
+            "body": "Sohbete geçmek veya birlikte bir oda açmak için dokun.",
+            "fromUid": uid,
+            "fromName": u["name"],
+            "fromHandle": u.get("handle", ""),
+            "fromColor": u.get("color", "#27DCC8"),
+            "fromAvatarUrl": u.get("avatarUrl", ""),
+            "expiresAt": now_t + 30.0,
+        })
+        return JSONResponse({"ok": True, "notification": ntf})
+
+    room_id = _clean(body.get("roomId"), 80)
+    room_name = _clean(body.get("roomName") or body.get("roomTitle") or "Watchlivo Odası", 100)
+    media_title = _clean(body.get("mediaTitle"), 140)
+    media_poster = _clean(body.get("mediaPoster"), 800)
+    media_provider = _clean(body.get("mediaProvider") or "cinema", 32)
+    pwd_q = _clean(body.get("password"), 64)
+    if not room_id:
+        return JSONResponse({"ok": False, "error": "Oda kimliği (roomId) gerekli."}, status_code=400)
+
+    targets: List[str] = []
+    if action == "invite_all_online":
+        for fr in [_enrich_friend_entry(f, uid) for f in (u.get("friends") or []) if isinstance(f, dict)]:
+            if fr.get("online") and fr.get("uid"):
+                targets.append(fr["uid"])
+    else:
+        raw_t = body.get("targetUids")
+        if isinstance(raw_t, list):
+            targets = [_clean(x, 64) for x in raw_t if _clean(x, 64)]
+        elif body.get("targetUid"):
+            targets = [_clean(body.get("targetUid"), 64)]
+
+    if not targets:
+        return JSONResponse({"ok": False, "error": "Davet edilecek arkadaş seçilmedi."}, status_code=400)
+
+    pwd_sfx = f"?pwd={urllib.parse.quote(pwd_q, safe='')}" if pwd_q else ""
+    join_url = f"/#/mesh/{urllib.parse.quote(room_id)}{pwd_sfx}"
+    sent_invites = []
+    for t_uid in targets[:25]:
+        if not t_uid or t_uid == uid:
+            continue
+        if _friendship_state(u, t_uid) != "FRIENDS":
+            continue
+        inv_id = "inv_" + uuid.uuid4().hex[:10]
+        ntf = _queue_notification(t_uid.lower(), {
+            "id": inv_id,
+            "type": "room_invite",
+            "title": f"🎬 {u['name']} seni odaya çağırıyor!",
+            "body": f"{media_title or room_name} · Tek tıkla canlı odaya katıl!",
+            "fromUid": uid,
+            "fromName": u["name"],
+            "fromHandle": u.get("handle", ""),
+            "fromColor": u.get("color", "#27DCC8"),
+            "fromAvatarUrl": u.get("avatarUrl", ""),
+            "roomId": room_id,
+            "roomName": room_name,
+            "mediaTitle": media_title,
+            "mediaPoster": media_poster,
+            "poster": media_poster,
+            "mediaProvider": media_provider,
+            "url": join_url,
+            "ts": now_t,
+            "expiresAt": now_t + 60.0,
+        })
+        # Also drop a rich roomInviteCard in their mutual DM thread
+        tk = _thread_key(uid, t_uid)
+        persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=1.5)
+        dm_list = list(persisted_dm) if isinstance(persisted_dm, list) else list(_DM_THREADS.get(tk) or [])
+        dm_list.append({
+            "id": "dm_" + uuid.uuid4().hex[:10],
+            "fromUid": uid,
+            "fromName": u["name"],
+            "color": u.get("color", "#27DCC8"),
+            "text": f"🎬 Seni \"{media_title or room_name}\" odasına davet ettim!",
+            "time": _hhmm(now_t),
+            "ts": now_t,
+            "reactions": {},
+            "roomInvite": room_id,
+            "roomInviteCard": {
+                "roomId": room_id,
+                "roomName": room_name,
+                "mediaTitle": media_title,
+                "mediaPoster": media_poster,
+                "mediaProvider": media_provider,
+                "url": join_url,
+            },
+        })
+        _DM_THREADS[tk] = dm_list[-100:]
+        _kv_set(f"wl:soc:dm:{tk}", _DM_THREADS[tk], ttl_sec=2592000)
+        t_u = _ensure_user_social(t_uid)
+        t_u.setdefault("unread", {})[uid] = int(t_u.get("unread", {}).get(uid) or 0) + 1
+        _kv_set(f"wl:soc:u:{t_uid}", t_u, ttl_sec=2592000)
+        sent_invites.append(ntf)
+
+    return JSONResponse({"ok": True, "sentCount": len(sent_invites), "invites": sent_invites})
 
 
 # ---------------------------------------------------------------------------
@@ -1170,29 +1846,34 @@ async def notifications_send(request: Request) -> JSONResponse:
 async def notifications_poll(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default").lower()
-    name = _clean(q.get("name"), 40).lower()
-    since = _finite_float(q.get("since"), _now() - 30.0)
+    now_t = _now()
+    since = _finite_float(q.get("since"), now_t - 30.0)
     out: List[Dict[str, Any]] = []
     seen_ids = set()
-    for key in (uid, name, "*"):
+    keys = [uid] if uid and uid != "guest_default" else [uid, "*"]
+    for key in keys:
         if not key:
             continue
-        q_items = _kv_get(f"wl:soc:ntf:{key}", None, max_age=2.0)
+        q_items = _kv_get(f"wl:soc:ntf:{key}", None, max_age=1.5)
         if isinstance(q_items, list):
             _NOTIFICATION_QUEUES[key] = q_items
         for item in _NOTIFICATION_QUEUES.get(key, []):
             if item["id"] in seen_ids:
                 continue
+            exp_at = float(item.get("expiresAt") or 0.0)
+            if exp_at > 0 and exp_at < now_t:
+                continue
             if float(item.get("ts") or 0) <= since:
                 continue
             if item.get("fromUid", "").lower() == uid and uid != "guest_default":
                 continue
-            if name and item.get("fromName", "").lower() == name:
-                continue
             seen_ids.add(item["id"])
             out.append(item)
     out.sort(key=lambda x: float(x.get("ts") or 0))
-    return JSONResponse({"ok": True, "notifications": out[-10:], "serverTs": _now()})
+    u_rec = _SOCIAL_USERS.get(uid) or _kv_get(f"wl:soc:u:{uid}", None, max_age=4.0) or {}
+    req_cnt = len(u_rec.get("requests") or []) if isinstance(u_rec, dict) else 0
+    unr_cnt = sum(_safe_int(v, 0, lo=0) for v in ((u_rec.get("unread") or {}).values() if isinstance(u_rec, dict) else []))
+    return JSONResponse({"ok": True, "notifications": out[-12:], "requestCount": req_cnt, "totalUnread": unr_cnt, "serverTs": now_t})
 
 
 # ---------------------------------------------------------------------------
@@ -1231,7 +1912,7 @@ async def user_progress_get(request: Request) -> JSONResponse:
     items = _kv_get(f"wl:user:prog:{ukey}", None, max_age=2.0)
     if not isinstance(items, list):
         items = _USER_PROGRESS.get(ukey, [])
-    items = sorted(items, key=lambda x: _finite_float(x.get("updatedAt"), 0.0), reverse=True)[:24]
+    items = sorted(items, key=lambda x: _finite_float(x.get("updatedAt"), 0.0), reverse=True)[:50]
     return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items}, headers=_PRIVATE_HEADERS)
 
 
@@ -1264,52 +1945,53 @@ async def user_progress_save(request: Request) -> JSONResponse:
         raw_pos = body.get("position") if body.get("position") is not None else body.get("currentTime")
         pos = _finite_float(raw_pos, 0.0, lo=0.0, hi=86400.0)
         dur = _finite_float(body.get("duration"), 0.0, lo=0.0, hi=86400.0)
-        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else _finite_float(body.get("percent"), 5.0, lo=0.0, hi=99.0)
+        pct = min(100.0, round((pos / dur) * 100.0, 1)) if dur > 30.0 else _finite_float(body.get("percent"), 5.0, lo=0.0, hi=100.0)
+        is_completed = bool(body.get("completed")) or bool(dur > 180 and pct >= 95.0)
         ikey = _clean(body.get("key"), 120) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
         prev_entry = next((it for it in items if isinstance(it, dict) and str(it.get("key") or "") == ikey), None)
         items = [it for it in items if str(it.get("key") or "") != ikey]
-        if not (mtype == "movie" and dur > 300 and pct >= 96.0):
-            ep_map: Dict[str, Any] = dict((prev_entry or {}).get("epProgress") or {}) if mtype == "tv" else {}
-            if isinstance(body.get("epProgress"), dict) and mtype == "tv":
-                for ek, ev in list(body["epProgress"].items())[:120]:
-                    if isinstance(ev, dict):
-                        ep_map[str(ek)[:16]] = {
-                            "pos": round(_finite_float(ev.get("pos") if ev.get("pos") is not None else ev.get("currentTime"), 0.0, lo=0.0, hi=86400.0), 1),
-                            "dur": round(_finite_float(ev.get("dur") if ev.get("dur") is not None else ev.get("duration"), 0.0, lo=0.0, hi=86400.0), 1),
-                            "pct": round(_finite_float(ev.get("pct") if ev.get("pct") is not None else ev.get("percent"), 0.0, lo=0.0, hi=100.0), 1),
-                        }
-            if mtype == "tv" and season > 0 and episode > 0:
-                ep_map[f"{season}:{episode}"] = {"pos": round(pos, 1), "dur": round(dur, 1), "pct": round(pct, 1)}
-            entry = {
-                "key": ikey,
-                "tmdbId": tid,
-                "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
-                "mediaType": mtype,
-                "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
-                "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
-                "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
-                "title": title or "Sinema",
-                "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
-                "seriesTitle": _clean(body.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
-                "poster": _clean(body.get("poster") or body.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
-                "backdrop": _clean(body.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
-                "year": _clean(body.get("year") or (prev_entry or {}).get("year"), 10),
-                "season": season,
-                "episode": episode,
-                "position": round(pos, 1),
-                "currentTime": round(pos, 1),
-                "duration": round(dur, 1),
-                "percent": pct,
-                "url": _clean(body.get("url") or (prev_entry or {}).get("url"), 800),
-                "sourceUrl": _clean(body.get("sourceUrl") or (prev_entry or {}).get("sourceUrl"), 600),
-                "epProgress": ep_map if mtype == "tv" else {},
-                "updatedAt": _now(),
-            }
-            items.insert(0, entry)
-        items = items[:30]
+        ep_map: Dict[str, Any] = dict((prev_entry or {}).get("epProgress") or {}) if mtype == "tv" else {}
+        if isinstance(body.get("epProgress"), dict) and mtype == "tv":
+            for ek, ev in list(body["epProgress"].items())[:120]:
+                if isinstance(ev, dict):
+                    ep_map[str(ek)[:16]] = {
+                        "pos": round(_finite_float(ev.get("pos") if ev.get("pos") is not None else ev.get("currentTime"), 0.0, lo=0.0, hi=86400.0), 1),
+                        "dur": round(_finite_float(ev.get("dur") if ev.get("dur") is not None else ev.get("duration"), 0.0, lo=0.0, hi=86400.0), 1),
+                        "pct": round(_finite_float(ev.get("pct") if ev.get("pct") is not None else ev.get("percent"), 0.0, lo=0.0, hi=100.0), 1),
+                    }
+        if mtype == "tv" and season > 0 and episode > 0:
+            ep_map[f"{season}:{episode}"] = {"pos": round(pos, 1), "dur": round(dur, 1), "pct": round(pct, 1)}
+        entry = {
+            "key": ikey,
+            "tmdbId": tid,
+            "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
+            "mediaType": mtype,
+            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
+            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
+            "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
+            "title": title or "Sinema",
+            "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
+            "seriesTitle": _clean(body.get("seriesTitle") or (prev_entry or {}).get("seriesTitle"), 160),
+            "poster": _clean(body.get("poster") or body.get("thumbnail") or (prev_entry or {}).get("poster"), 800),
+            "backdrop": _clean(body.get("backdrop") or (prev_entry or {}).get("backdrop"), 800),
+            "year": _clean(body.get("year") or (prev_entry or {}).get("year"), 10),
+            "season": season,
+            "episode": episode,
+            "position": round(pos, 1),
+            "currentTime": round(pos, 1),
+            "duration": round(dur, 1),
+            "percent": pct,
+            "completed": is_completed,
+            "url": _clean(body.get("url") or (prev_entry or {}).get("url"), 800),
+            "sourceUrl": _clean(body.get("sourceUrl") or (prev_entry or {}).get("sourceUrl"), 600),
+            "epProgress": ep_map if mtype == "tv" else {},
+            "updatedAt": _now(),
+        }
+        items.insert(0, entry)
+        items = items[:50]
     _USER_PROGRESS[ukey] = items
     _kv_set(f"wl:user:prog:{ukey}", items, ttl_sec=2592000)
-    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items[:24]}, headers=_PRIVATE_HEADERS)
+    return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items[:50]}, headers=_PRIVATE_HEADERS)
 
 
 async def user_watchlist_get(request: Request) -> JSONResponse:

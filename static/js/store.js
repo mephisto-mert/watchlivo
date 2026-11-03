@@ -3,14 +3,14 @@ const listeners = new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
 
 export const THEME_SCHEMAS = [
-  { id: 'supabase',   name: 'Supabase Horizon', badge: '98p · Varsayılan', desc: '21st.dev Obsidyen & Zümrüt-Turkuaz stüdyo', swatch: 'linear-gradient(135deg, #06090e 0%, #0d1f1d 100%)', accent: '#27dcc8', accent2: '#10b981' },
-  { id: 'vercel',     name: 'Vercel OLED',      badge: '97p · Saf Siyah',  desc: '21st.dev #000000 OLED & 1px gümüş kontrast', swatch: 'linear-gradient(135deg, #000000 0%, #111318 100%)', accent: '#38bdf8', accent2: '#e2e8f0' },
-  { id: 'graphite',   name: 'Graphite Cinema',  badge: '95p · Göz Dostu',  desc: '21st.dev Mat antrasit uzun maraton sinema', swatch: 'linear-gradient(135deg, #0d0f14 0%, #181c26 100%)', accent: '#818cf8', accent2: '#6366f1' },
-  { id: 't3chat',     name: 'T3 Chat Cosmic',   badge: '94p · Sosyal Oda', desc: '21st.dev Kozmik mor & neon eflatun parti', swatch: 'linear-gradient(135deg, #0c0916 0%, #1e1136 100%)', accent: '#c084fc', accent2: '#f472b6' },
-  { id: 'indigo',     name: 'Indigo IMAX',      badge: '93p · 4K IMAX',    desc: '21st.dev Gece mavisi & Oceanic Glow', swatch: 'linear-gradient(135deg, #060b16 0%, #0f2042 100%)', accent: '#3b82f6', accent2: '#06b6d4' },
-  { id: 'amber',      name: 'Amber VIP Luxury', badge: '92p · Altın Sinema', desc: '21st.dev Sıcak altın-kehribar VIP salon', swatch: 'linear-gradient(135deg, #0e0b07 0%, #271c0c 100%)', accent: '#f59e0b', accent2: '#fbbf24' },
-  { id: 'catppuccin', name: 'Catppuccin Mocha', badge: '90p · Anime Gece', desc: '21st.dev Kadife mocha & pastel lavanta', swatch: 'linear-gradient(135deg, #11111b 0%, #1e1e2e 100%)', accent: '#b4befe', accent2: '#cba6f7' },
-  { id: 'mint',       name: 'Mint Signal',      badge: '89p · Canlı Yayın', desc: '21st.dev Arduvaz & sinyal yeşili kontrast', swatch: 'linear-gradient(135deg, #071013 0%, #0d2629 100%)', accent: '#2dd4bf', accent2: '#14b8a6' },
+  { id: 'supabase',   name: 'Zümrüt Stüdyo',    badge: 'Zümrüt Kontrast',    desc: 'Obsidyen zemin & zümrüt-turkuaz stüdyo', swatch: 'linear-gradient(135deg, #06090e 0%, #0d1f1d 100%)', bg: '#06090e', accent: '#27dcc8', accent2: '#10b981', ink: '#041014' },
+  { id: 'vercel',     name: 'Saf OLED Siyah',   badge: 'Gerçek Siyah',       desc: '#000000 OLED & gümüş sinema kontrastı',  swatch: 'linear-gradient(135deg, #000000 0%, #111318 100%)', bg: '#000000', accent: '#38bdf8', accent2: '#e2e8f0', ink: '#041014' },
+  { id: 'graphite',   name: 'Antrasit Sinema',  badge: 'Göz Dostu',          desc: 'Mat antrasit uzun maraton salonu',       swatch: 'linear-gradient(135deg, #0d0f14 0%, #181c26 100%)', bg: '#0d0f14', accent: '#818cf8', accent2: '#6366f1', ink: '#ffffff' },
+  { id: 't3chat',     name: 'Kozmik Fuşya',     badge: 'Sosyal Parti',       desc: 'Gece moru & neon eflatun enerjisi',      swatch: 'linear-gradient(135deg, #0c0916 0%, #1e1136 100%)', bg: '#0c0916', accent: '#c084fc', accent2: '#f472b6', ink: '#090412' },
+  { id: 'indigo',     name: 'Gece IMAX',        badge: 'Varsayılan · IMAX',  desc: 'Derin gece mavisi & okyanus ışıltısı',   swatch: 'linear-gradient(135deg, #060b16 0%, #0f2042 100%)', bg: '#060b16', accent: '#3b82f6', accent2: '#06b6d4', ink: '#ffffff' },
+  { id: 'amber',      name: 'Altın Loca VIP',   badge: 'Sıcak Kehribar',     desc: 'Altın-kehribar özel gösterim salonu',    swatch: 'linear-gradient(135deg, #0e0b07 0%, #271c0c 100%)', bg: '#0e0b07', accent: '#f59e0b', accent2: '#fbbf24', ink: '#140c02' },
+  { id: 'catppuccin', name: 'Kadife Gece',      badge: 'Anime & Pastel',     desc: 'Yumuşak mocha & pastel lavanta dokusu',  swatch: 'linear-gradient(135deg, #11111b 0%, #1e1e2e 100%)', bg: '#11111b', accent: '#b4befe', accent2: '#cba6f7', ink: '#0b0b14' },
+  { id: 'mint',       name: 'Kuzey Işığı',      badge: 'Canlı Yayın',        desc: 'Arduvaz gece & nane yeşili netlik',      swatch: 'linear-gradient(135deg, #071013 0%, #0d2629 100%)', bg: '#071013', accent: '#2dd4bf', accent2: '#14b8a6', ink: '#031210' },
 ];
 
 const LEGACY_THEME_MAP = {
@@ -63,6 +63,9 @@ export function applyUiPrefs(prefs = state?.uiPrefs) {
   if (schema) {
     root.style.setProperty('--theme-accent', schema.accent);
     root.style.setProperty('--theme-accent-2', schema.accent2 || schema.accent);
+    root.style.setProperty('--accent-ink', schema.ink || '#041014');
+    const metaTheme = document.querySelector('meta[name="theme-color"]');
+    if (metaTheme && schema.bg) metaTheme.setAttribute('content', schema.bg);
   }
   const sizeMap = { sm: '0.92rem', md: '1.15rem', lg: '1.42rem', xl: '1.72rem' };
   const colorMap = { white: '#ffffff', yellow: '#fde047', cyan: '#6366f1', box: '#ffffff' };
@@ -87,6 +90,17 @@ export const state = {
   chatVisible: true,
   unseenChat: 0,
   uiPrefs: loadUiPrefs(),
+  social: {
+    friends: [],
+    onlineCount: 0,
+    requests: [],
+    requestCount: 0,
+    outgoingRequests: [],
+    blocked: [],
+    totalUnread: 0,
+    privacy: { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' },
+    loaded: false,
+  },
 };
 
 applyUiPrefs(state.uiPrefs);
@@ -118,6 +132,33 @@ export function setUiPref(patch) {
   try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
   applyUiPrefs(next);
   set({ uiPrefs: next });
+}
+
+export function transitionTheme(themeId, evt = null) {
+  const target = normalizeThemeId(themeId);
+  if (state.uiPrefs?.theme === target) return;
+  const reduced = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  if (typeof document !== 'undefined' && typeof document.startViewTransition === 'function' && !reduced) {
+    const x = Number.isFinite(evt?.clientX) ? evt.clientX : window.innerWidth / 2;
+    const y = Number.isFinite(evt?.clientY) ? evt.clientY : 48;
+    const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    document.documentElement.style.setProperty('--vt-x', `${x}px`);
+    document.documentElement.style.setProperty('--vt-y', `${y}px`);
+    document.documentElement.style.setProperty('--vt-r', `${Math.ceil(endRadius)}px`);
+    try {
+      const vt = document.startViewTransition(() => {
+        setUiPref({ theme: target });
+      });
+      vt.ready.then(() => {
+        document.documentElement.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${Math.ceil(endRadius)}px at ${x}px ${y}px)`] },
+          { duration: 420, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
+        );
+      }).catch(() => {});
+      return;
+    } catch (e) { /* fallback */ }
+  }
+  setUiPref({ theme: target });
 }
 
 export function subscribe(fn) {
@@ -316,8 +357,14 @@ export async function syncCloudUserMedia(force = false) {
     if (getAccountStorageScope() !== startScope || !isCloudAuthenticated()) {
       return { historyChanged: false, favsChanged: false, musicChanged: false };
     }
-    const validP = pRes.status === 'fulfilled' && pRes.value?.authenticated === true && pRes.value?.uid === startUid && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
-    if (validP && validP.length) {
+    const verifiedUid = String(pRes.value?.uid || wRes.value?.uid || mRes.value?.uid || '').trim().toLowerCase();
+    if (verifiedUid && state.self && !state.self.isGuest && String(state.self.uid || '').toLowerCase() !== verifiedUid) {
+      state.self.uid = verifiedUid;
+      _activeAccountScope = getAccountStorageScope();
+    }
+    const effScope = getAccountStorageScope();
+    const validP = pRes.status === 'fulfilled' && pRes.value?.authenticated === true && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
+    if (validP) {
       const cloudProg = validP;
       const localList = getWatchHistory();
       const byKey = new Map();
@@ -337,6 +384,7 @@ export async function syncCloudUserMedia(force = false) {
             ..._normEpMap(prev?.epProgress),
             ..._normEpMap(c.epProgress),
           };
+          const syncedPct = Number(c.percent ?? prev?.percent ?? 0);
           byKey.set(k, {
             ...(prev || {}),
             historyId: k,
@@ -360,7 +408,8 @@ export async function syncCloudUserMedia(force = false) {
             currentTime: syncedPos,
             position: syncedPos,
             duration: Math.max(0, Math.floor(Number(c.duration ?? prev?.duration ?? 0))),
-            percent: Number(c.percent ?? prev?.percent ?? 0),
+            percent: syncedPct,
+            completed: Boolean(c.completed || syncedPct >= 95),
             epProgress: mergedEpProg,
             year: c.year || prev?.year || '',
             updatedAt: cTs || now,
@@ -368,12 +417,12 @@ export async function syncCloudUserMedia(force = false) {
           historyChanged = true;
         }
       }
-      if (historyChanged) {
-        const merged = [...byKey.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 40);
-        try { localStorage.setItem(_historyKey(startScope), JSON.stringify(merged)); } catch (e) { /* ignore */ }
+      if (historyChanged || effScope !== startScope) {
+        const merged = [...byKey.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 50);
+        try { localStorage.setItem(_historyKey(effScope), JSON.stringify(merged)); } catch (e) { /* ignore */ }
       }
     }
-    const validW = wRes.status === 'fulfilled' && wRes.value?.authenticated === true && wRes.value?.uid === startUid && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
+    const validW = wRes.status === 'fulfilled' && wRes.value?.authenticated === true && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
     if (validW && validW.length) {
       const cloudWlist = validW;
       const localFavs = getFavorites();
@@ -408,12 +457,12 @@ export async function syncCloudUserMedia(force = false) {
       }
       if (favsChanged) {
         const mergedFavs = [...byFav.values()].sort((a, b) => _normTs(b.addedAt) - _normTs(a.addedAt)).slice(0, 60);
-        try { localStorage.setItem(_favKey(startScope), JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(_favKey(effScope), JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
       }
     }
-    const validM = mRes.status === 'fulfilled' && mRes.value?.authenticated === true && mRes.value?.uid === startUid && Array.isArray(mRes.value?.items) ? mRes.value.items : null;
+    const validM = mRes.status === 'fulfilled' && mRes.value?.authenticated === true && Array.isArray(mRes.value?.items) ? mRes.value.items : null;
     if (validM && validM.length) {
-      const localMus = (() => { try { return JSON.parse(localStorage.getItem(_musicKey(startScope)) || '[]'); } catch (e) { return []; } })();
+      const localMus = (() => { try { return JSON.parse(localStorage.getItem(_musicKey(effScope)) || '[]'); } catch (e) { return []; } })();
       const byMus = new Map();
       for (const lm of (Array.isArray(localMus) ? localMus : [])) {
         const mk = `${(lm.artist || '').toLowerCase()}|${(lm.songTitle || '').toLowerCase()}`;
@@ -429,7 +478,7 @@ export async function syncCloudUserMedia(force = false) {
       }
       if (musicChanged) {
         const mergedMus = [...byMus.values()].sort((a, b) => _normTs(b.playedAt) - _normTs(a.playedAt)).slice(0, 20);
-        try { localStorage.setItem(_musicKey(startScope), JSON.stringify(mergedMus)); } catch (e) { /* ignore */ }
+        try { localStorage.setItem(_musicKey(effScope), JSON.stringify(mergedMus)); } catch (e) { /* ignore */ }
       }
     }
     if (historyChanged || favsChanged || musicChanged) set({ cloudSyncedAt: Date.now() });
@@ -444,6 +493,10 @@ export function getWatchHistory() {
   } catch (e) {
     return [];
   }
+}
+
+export function getContinueWatching() {
+  return getWatchHistory().filter((it) => it && !it.completed && Number(it.percent || 0) < 95);
 }
 
 export function clearWatchHistory() {
@@ -540,10 +593,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const resumeTime = (rawTime === 0 && prevTime > 3 && preserveExistingPos) ? prevTime : rawTime;
   const dur = rawDur > 0 ? rawDur : (sameEp ? Math.max(0, Math.floor(Number(prev?.duration || 0))) : Math.max(0, Math.floor(Number(prevEpObj?.duration || 0))));
   const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? Math.max(8, Number(prev?.percent || 8)) : 4);
-  if (mtype !== 'tv' && dur > 300 && pct >= 96 && resumeTime > 60) {
-    removeWatchProgress(id);
-    return;
-  }
+  const completed = Boolean(opts?.completed || (dur > 180 && pct >= 95));
   const epMap = { ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}) };
   if (mtype === 'tv') {
     epMap[`${sNum}:${eNum}`] = {
@@ -585,14 +635,15 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       position: resumeTime,
       duration: dur,
       percent: pct,
+      completed,
       epProgress: epMap,
       updatedAt: Date.now(),
     });
-    localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 40)));
+    localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 50)));
   } catch (e) { /* ignore */ }
   const now = Date.now();
   const prevPush = _lastCloudProgPush.get(id) || 0;
-  if (typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || now - prevPush >= 12000)) {
+  if (typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || completed || now - prevPush >= 12000)) {
     _lastCloudProgPush.set(id, now);
     fetch('/api/user/progress', {
       method: 'POST',
@@ -618,6 +669,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
         currentTime: resumeTime,
         duration: dur,
         percent: pct,
+        completed,
         epProgress: epMap,
         url: media.url || prev?.url || '',
         sourceUrl: media.officialUrl || prev?.officialUrl || media.url || '',
@@ -688,15 +740,212 @@ export function toggleFavoriteMedia(item) {
   return !exists;
 }
 
+let _lastSocialSyncAt = 0;
+
+function _socialUidParam() {
+  const s = state.self;
+  return String(s?.uid || s?.id || s?.handle || '').trim();
+}
+
+function _applySocialPayload(data) {
+  if (!data || typeof data !== 'object') return;
+  const prev = state.social || {};
+  const friends = Array.isArray(data.friends) ? data.friends : (prev.friends || []);
+  const requests = Array.isArray(data.requests) ? data.requests : (prev.requests || []);
+  const outgoingRequests = Array.isArray(data.outgoingRequests) ? data.outgoingRequests : (prev.outgoingRequests || []);
+  const blocked = Array.isArray(data.blocked) ? data.blocked : (prev.blocked || []);
+  const privacy = (data.privacy && typeof data.privacy === 'object') ? { ...(prev.privacy || {}), ...data.privacy } : (prev.privacy || { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' });
+  const onlineCount = Number.isFinite(Number(data.onlineCount)) ? Number(data.onlineCount) : friends.filter((f) => f?.online).length;
+  const totalUnread = Number.isFinite(Number(data.totalUnread)) ? Number(data.totalUnread) : (prev.totalUnread || 0);
+  try {
+    localStorage.setItem(_friendsKey(), JSON.stringify(friends.map((f) => ({ ...f, id: f.uid || f.id }))));
+  } catch (e) { /* ignore */ }
+  set({
+    social: {
+      ok: true,
+      friends,
+      onlineCount,
+      requests,
+      requestCount: requests.length,
+      outgoingRequests,
+      blocked,
+      totalUnread,
+      privacy,
+      threads: Array.isArray(data.threads) ? data.threads : (prev.threads || []),
+      loaded: true,
+    },
+    friendsUpdated: Date.now(),
+  });
+}
+
+export async function syncSocialState(force = false) {
+  if (typeof fetch !== 'function') return state.social;
+  const now = Date.now();
+  if (!force && state.social?.loaded && now - _lastSocialSyncAt < 4500) return state.social;
+  _lastSocialSyncAt = now;
+  try {
+    const s = state.self || {};
+    const qs = new URLSearchParams({
+      uid: _socialUidParam(),
+      name: s.name || '',
+      handle: s.handle || '',
+    });
+    const r = await fetch(`/api/rave/social/state?${qs}`, { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() });
+    if (r.ok) {
+      const data = await r.json();
+      if (data?.ok) _applySocialPayload(data);
+    }
+  } catch (e) { /* ignore */ }
+  return state.social;
+}
+
+export async function searchUsersServer(query) {
+  const q = String(query || '').trim();
+  if (!q || typeof fetch !== 'function') return [];
+  try {
+    const qs = new URLSearchParams({ q, uid: _socialUidParam() });
+    const r = await fetch(`/api/rave/social/search?${qs}`, { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return Array.isArray(data?.users) ? data.users : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function sendFriendRequest(targetIdent, extra = {}) {
+  const s = state.self || {};
+  const r = await fetch('/api/rave/social/friends', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+    body: JSON.stringify({
+      action: 'request',
+      uid: _socialUidParam(),
+      fromName: s.name || 'İzleyici',
+      fromHandle: s.handle || '',
+      color: s.color || '#27DCC8',
+      avatarUrl: s.avatarUrl || '',
+      target: String(targetIdent || '').trim(),
+      targetName: String(targetIdent || '').trim(),
+      ...extra,
+    }),
+  });
+  const data = await r.json().catch(() => ({ ok: false, error: 'Sunucu yanıtı alınamadı.' }));
+  if (data?.ok) _applySocialPayload(data);
+  return data;
+}
+
+export async function updateFriendAction(action, payload = {}) {
+  const s = state.self || {};
+  const r = await fetch('/api/rave/social/friends', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+    body: JSON.stringify({
+      action,
+      uid: _socialUidParam(),
+      fromName: s.name || 'İzleyici',
+      fromHandle: s.handle || '',
+      color: s.color || '#27DCC8',
+      avatarUrl: s.avatarUrl || '',
+      ...payload,
+    }),
+  });
+  const data = await r.json().catch(() => ({ ok: false }));
+  if (data?.ok) _applySocialPayload(data);
+  return data;
+}
+
+export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
+  const payload = (typeof targetOrPayload === 'string')
+    ? { targetUid: targetOrPayload, action: actionArg || 'send' }
+    : (targetOrPayload || {});
+  const s = state.self || {};
+  const m = state.mesh;
+  const r = await fetch('/api/rave/social/invite', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+    body: JSON.stringify({
+      action: payload.action || actionArg || 'send',
+      uid: _socialUidParam(),
+      fromName: s.name || 'İzleyici',
+      roomId: payload.roomId || m?.id || '',
+      roomName: payload.roomName || m?.name || 'Watchlivo Odası',
+      mediaTitle: payload.mediaTitle || m?.media?.title || '',
+      mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.thumbnail || '',
+      mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
+      ...payload,
+    }),
+  });
+  return r.json().catch(() => ({ ok: false }));
+}
+
+export async function pushPresenceHeartbeat(override = {}) {
+  if (typeof fetch !== 'function' || !state.self) return null;
+  const s = state.self;
+  const m = state.mesh;
+  const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  const defState = override.state || (m?.id ? 'watching' : (hidden ? 'idle' : 'online'));
+  try {
+    const r = await fetch('/api/rave/social/presence', {
+      method: 'POST',
+      credentials: 'same-origin',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+      body: JSON.stringify({
+        uid: _socialUidParam(),
+        name: s.name || 'İzleyici',
+        handle: s.handle || '',
+        color: s.color || '#27DCC8',
+        avatarUrl: s.avatarUrl || '',
+        state: defState,
+        roomId: m?.id || '',
+        roomName: m?.name || '',
+        roomPrivacy: m?.privacy || 'public',
+        mediaTitle: m?.media?.title || '',
+        mediaPoster: m?.media?.poster || m?.media?.thumbnail || '',
+        mediaProvider: m?.media?.provider || '',
+        statusText: s.statusText || '',
+        statusEmoji: s.statusEmoji || '🍿',
+        hideWatching: Boolean(s.hideWatching ?? state.social?.privacy?.hideWatching),
+        visibility: state.social?.privacy?.presenceVisibility || 'friends',
+        ...override,
+      }),
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (data?.ok && state.social) {
+      const rc = Number.isFinite(Number(data.requestCount)) ? Number(data.requestCount) : state.social.requestCount;
+      const tu = Number.isFinite(Number(data.totalUnread)) ? Number(data.totalUnread) : state.social.totalUnread;
+      if (rc !== state.social.requestCount || tu !== state.social.totalUnread) {
+        set({ social: { ...state.social, requestCount: rc, totalUnread: tu } });
+      }
+    }
+    return data;
+  } catch (e) {
+    return null;
+  }
+}
+
 export function getFriends() {
+  if (state.social?.loaded && Array.isArray(state.social.friends)) {
+    return state.social.friends;
+  }
   try { return JSON.parse(localStorage.getItem(_friendsKey()) || '[]'); } catch (e) { return []; }
 }
 
 export function isFriend(userOrName) {
   if (!userOrName) return false;
   const name = typeof userOrName === 'string' ? userOrName.trim().toLowerCase() : String(userOrName.name || '').trim().toLowerCase();
-  const id = typeof userOrName === 'object' ? String(userOrName.id || userOrName.uid || '') : '';
-  return getFriends().some((f) => (id && f.id === id) || (name && String(f.name || '').toLowerCase() === name));
+  const handle = typeof userOrName === 'object' ? String(userOrName.handle || '').trim().toLowerCase() : '';
+  const id = typeof userOrName === 'object' ? String(userOrName.uid || userOrName.id || '') : '';
+  return getFriends().some((f) =>
+    (id && (f.uid === id || f.id === id)) ||
+    (handle && String(f.handle || '').toLowerCase() === handle) ||
+    (name && String(f.name || '').toLowerCase() === name)
+  );
 }
 
 export function toggleFriend(user) {

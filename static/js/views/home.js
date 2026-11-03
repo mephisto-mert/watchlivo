@@ -1,13 +1,39 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v82';
-import { state, set, getFriends, THEME_SCHEMAS, setUiPref, syncCloudUserMedia, getRecentRoomsKey, getRoomSnapshotsKey } from '../store.js?v=20261103_v82';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v82';
-import { api } from '../api.js?v=20261103_v82';
-import { createSelection } from './selection.js?v=20261103_v82';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal } from './lobby.js?v=20261103_v82';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v83';
+import {
+  state, set, subscribe, getFriends, getWatchHistory,
+  THEME_SCHEMAS, setUiPref, transitionTheme,
+  syncCloudUserMedia, syncSocialState,
+  getRecentRoomsKey, getRoomSnapshotsKey,
+} from '../store.js?v=20261103_v83';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v83';
+import { api } from '../api.js?v=20261103_v83';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v83';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v83';
 
 let refreshTimer = null;
+let unsubHomeStore = null;
 let rooms = [];
+
+function attachTubelight(container, itemSel, activeCls) {
+  const ind = h('span', { class: 'wl-tubelight-indicator', 'aria-hidden': 'true' });
+  container.style.position = 'relative';
+  container.prepend(ind);
+  const sync = () => {
+    const act = container.querySelector(`${itemSel}.${activeCls}`);
+    if (!act || !act.offsetWidth) {
+      ind.style.opacity = '0';
+      return;
+    }
+    ind.style.opacity = '1';
+    ind.style.width = `${act.offsetWidth}px`;
+    ind.style.transform = `translate3d(${act.offsetLeft}px, 0, 0)`;
+  };
+  requestAnimationFrame(() => requestAnimationFrame(sync));
+  window.addEventListener('resize', sync, { passive: true });
+  container._syncTubelight = sync;
+  return sync;
+}
 
 export function navIcon(name, tip, onClick, { selected = false, disabled = false, badge = 0, red = false, id } = {}) {
   return h('button', { class: `nav-icon ${selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}`, 'data-tip': tip, 'aria-label': tip, id, onclick: onClick },
@@ -26,7 +52,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v82', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v83', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -132,8 +158,20 @@ export function renderHome(app) {
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
         toast('🎬 Aktif izleme odaları listesi');
       }),
-      navIcon('friends', 'Arkadaşlarım & Arkadaş Ekle', () => openFriendsManagerModal(() => draw(true)), { id: 'nav-friends-btn', badge: getFriends().length }),
-      navIcon('chat', 'Özel Mesajlar (DM)', () => openDmModal(), { id: 'nav-dm-btn' }),
+      navIcon('clock', 'İzleme Geçmişim & Listem', () => openWatchHistoryModal('all'), {
+        id: 'nav-history-btn',
+        badge: getWatchHistory().length,
+      }),
+      navIcon('friends', 'Arkadaşlarım & İstekler', () => openFriendsManagerModal(() => draw(true), (state.social?.requestCount || 0) > 0 ? 'requests' : 'friends'), {
+        id: 'nav-friends-btn',
+        badge: (state.social?.requestCount || 0) > 0 ? state.social.requestCount : getFriends().length,
+        red: (state.social?.requestCount || 0) > 0,
+      }),
+      navIcon('chat', 'Özel Mesajlar (DM)', () => openDmModal(), {
+        id: 'nav-dm-btn',
+        badge: Number(state.social?.totalUnread || 0),
+        red: Number(state.social?.totalUnread || 0) > 0,
+      }),
       navIcon('settings', 'Ayarlar & Tema', () => openAppSettings(), { id: 'nav-theme-btn' })),
     h('div', { class: 'nav-center navbar-center' }, logo()),
     h('div', { class: 'nav-right navbar-right' },
@@ -181,7 +219,16 @@ export function renderHome(app) {
   const lobbyBox = h('div', { id: 'lobby-box' });
   const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', style: { maxWidth: '360px' } });
   const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['nearby', 'Çevremdekiler'], ['public', 'Herkese Açık']].map(([k, label]) =>
-    h('button', { class: `lobby-tab ${k === filter ? 'on' : ''}`, onclick: (e) => { filter = k; tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b === e.currentTarget)); draw(true); } }, label)));
+    h('button', {
+      class: `lobby-tab ${k === filter ? 'on' : ''}`,
+      onclick: (e) => {
+        filter = k;
+        tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+        tabs._syncTubelight?.();
+        draw(true);
+      },
+    }, label)));
+  attachTubelight(tabs, '.lobby-tab', 'on');
   let lastRoomsSig = '';
   let lastScrollAt = 0;
   let pendingDrawTimer = null;
@@ -234,6 +281,7 @@ export function renderHome(app) {
       title,
       onclick: () => {
         dockEl.querySelectorAll('.dock-btn').forEach((x) => x.classList.toggle('active', x === b));
+        dockEl._syncTubelight?.();
         onClick();
       },
     },
@@ -297,15 +345,21 @@ export function renderHome(app) {
       }, '🎲 Rastgele Film'),
       h('button', {
         type: 'button',
+        class: 'dock-quick-btn',
+        onclick: () => openWatchHistoryModal('all'),
+      }, '🕒 İzleme Geçmişim'),
+      h('button', {
+        type: 'button',
         id: 'btn-dock-themes',
         class: 'dock-quick-btn theme-btn',
-        title: '21st.dev 8 Sinema Teması Seçici',
+        title: 'Sinema Temaları',
         onclick: () => openThemeModal(),
-      }, '🎨 8 Tema'))
+      }, '🎨 Temalar'))
   );
+  attachTubelight(dockEl, '.dock-btn', 'active');
 
   const themeStripEl = h('div', { class: 'wl-studio-theme-strip', id: 'wl-studio-theme-strip' },
-    h('span', { class: 'wl-theme-strip-label' }, '🎨 21st.dev 8 Tema:'),
+    h('span', { class: 'wl-theme-strip-label' }, '🎨 Tema:'),
     h('div', { class: 'wl-theme-strip-pills' },
       ...THEME_SCHEMAS.map((t) => h('button', {
         type: 'button',
@@ -314,25 +368,27 @@ export function renderHome(app) {
         title: `${t.name} (${t.badge}) — ${t.desc}`,
         style: { '--pill-accent': t.accent, '--pill-accent-2': t.accent2 || t.accent },
         onclick: (e) => {
-          setUiPref({ theme: t.id });
+          transitionTheme(t.id, e);
           const parent = e.currentTarget.parentElement;
           if (parent) {
             parent.querySelectorAll('.wl-theme-pill').forEach((b) => b.classList.toggle('active', b.dataset.themePill === t.id));
           }
-          toast(`🎨 ${t.name} (${t.badge}) uygulandı!`);
+          toast(`🎨 ${t.name} teması uygulandı!`);
         },
       },
         h('span', { class: 'wl-theme-pill-dot', style: { background: t.accent } }),
-        h('span', { class: 'wl-theme-pill-name' }, t.name),
-        h('span', { class: 'wl-theme-pill-score' }, (t.badge || '').split('·')[0].trim())))),
+        h('span', { class: 'wl-theme-pill-name' }, t.name)))),
     h('button', {
       type: 'button',
       class: 'wl-theme-strip-more',
       onclick: () => openThemeModal(),
     }, '✨ Ambiyans'));
 
+  const friendsStripEl = renderHomeFriendsStrip(openRoom);
+
   const glassWindow = h('div', { class: 'glass-main-window' },
     selection,
+    friendsStripEl,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },
       h('div', { class: 'lobby-toolbar-left' },
         h('h2', { class: 'lobby-heading' }, 'Canlı Odalar'),
@@ -343,10 +399,40 @@ export function renderHome(app) {
           class: 'btn sm primary',
           id: 'btn-toolbar-friends',
           style: { flexShrink: '0' },
-          onclick: () => openFriendsManagerModal(() => draw(true)),
+          onclick: () => openFriendsManagerModal(() => draw(true), (state.social?.requestCount || 0) > 0 ? 'requests' : 'search'),
         }, '👥 + Arkadaş Ekle'),
         lobbySearch)),
     lobbyBox);
+
+  const setNavBadge = (btnId, count, isRed = false) => {
+    const btn = nav.querySelector(`#${btnId}`);
+    if (!btn) return;
+    let b = btn.querySelector('.badge');
+    const n = Number(count || 0);
+    if (n <= 0) {
+      b?.remove();
+      return;
+    }
+    if (!b) {
+      b = h('span', { class: 'badge' });
+      btn.append(b);
+    }
+    b.className = `badge ${isRed ? 'red' : ''}`;
+    b.textContent = n > 9999 ? '9.9B+' : String(n);
+  };
+
+  unsubHomeStore = subscribe(() => {
+    if (!nav.isConnected) return;
+    const reqC = Number(state.social?.requestCount || 0);
+    const frC = reqC > 0 ? reqC : getFriends().length;
+    setNavBadge('nav-friends-btn', frC, reqC > 0);
+    setNavBadge('nav-dm-btn', Number(state.social?.totalUnread || 0), true);
+    setNavBadge('nav-history-btn', getWatchHistory().length, false);
+    friendsStripEl?._refresh?.();
+    const curTheme = state.uiPrefs?.theme || 'indigo';
+    themeStripEl.querySelectorAll('.wl-theme-pill').forEach((b) => b.classList.toggle('active', b.dataset.themePill === curTheme));
+  });
+  syncSocialState().catch(() => {});
 
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
     h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
@@ -374,7 +460,14 @@ export function renderHome(app) {
   refreshTimer = setInterval(load, 8000);
 }
 
-export function destroyHome() { clearInterval(refreshTimer); refreshTimer = null; }
+export function destroyHome() {
+  clearInterval(refreshTimer);
+  refreshTimer = null;
+  if (typeof unsubHomeStore === 'function') {
+    unsubHomeStore();
+    unsubHomeStore = null;
+  }
+}
 
 function joinByCode() {
   const input = h('input', { class: 'input', placeholder: 'Oda kodu veya davet bağlantısı' });

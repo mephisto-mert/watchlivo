@@ -1,12 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v82';
-import { state, isLeader, isHostOnly, isFriend, toggleFriend, getWatchHistory, getMusicHistory } from '../store.js?v=20261103_v82';
-import { avatar } from '../profile.js?v=20261103_v82';
-import { clock } from '../sync.js?v=20261103_v82';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal } from './lobby.js?v=20261103_v82';
-import { copyInvite, inviteUrl } from './chat.js?v=20261103_v82';
-import { parseVideoUrl } from '../providers.js?v=20261103_v82';
-import { resolveMedia } from './selection.js?v=20261103_v82';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v83';
+import {
+  state, isLeader, isHostOnly, isFriend,
+  getWatchHistory, getMusicHistory,
+  syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
+} from '../store.js?v=20261103_v83';
+import { avatar } from '../profile.js?v=20261103_v83';
+import { clock } from '../sync.js?v=20261103_v83';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261103_v83';
+import { copyInvite, inviteUrl } from './chat.js?v=20261103_v83';
+import { parseVideoUrl } from '../providers.js?v=20261103_v83';
+import { resolveMedia } from './selection.js?v=20261103_v83';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -208,32 +212,93 @@ function Friends() {
     try { await navigator.clipboard.writeText(inviteText); toast('📋 Hazır davet mesajı kopyalandı!'); }
     catch (e) { copyInvite(); }
   };
+  const invitedSet = new Set();
+  const liveFriendsSlot = h('div', { class: 'wl-room-invite-friends' });
+
+  const renderLiveFriends = () => {
+    const friends = state.social?.friends || [];
+    if (!friends.length) {
+      liveFriendsSlot.replaceChildren(
+        h('div', { style: { padding: '8px 10px', borderRadius: '10px', background: 'rgba(255,255,255,0.04)', fontSize: '.77rem', color: 'rgba(255,255,255,0.65)' } },
+          'Henüz karşılıklı arkadaşın yok. Aşağıdan @kullaniciadi ile arkadaş ekleyip tek tıkla odaya davet edebilirsin.')
+      );
+      return;
+    }
+    liveFriendsSlot.replaceChildren(
+      h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' } },
+        h('strong', { style: { fontSize: '.78rem', color: '#e2e8f0' } }, `👥 Arkadaşlarını Odaya Çağır (${friends.length})`),
+        h('button', {
+          type: 'button',
+          class: 'btn sm',
+          style: { fontSize: '.7rem', padding: '3px 8px' },
+          onclick: () => openRoomInviteModal(),
+        }, 'Tüm Liste')),
+      ...friends.slice(0, 8).map((fr) => {
+        const pState = fr.presenceState || (fr.online ? 'online' : 'offline');
+        const isInv = invitedSet.has(fr.uid);
+        return h('div', { class: 'wl-room-invite-row' },
+          h('div', { style: { position: 'relative', flexShrink: '0' } },
+            avatar(fr, 30),
+            h('span', { class: `wl-pres-dot is-${pState}` })),
+          h('div', { style: { flex: '1', minWidth: '0' } },
+            h('strong', { style: { fontSize: '.79rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, fr.name),
+            h('span', { class: `wl-dm-pres-line is-${pState}` },
+              pState === 'watching' && fr.mediaTitle ? `🎬 ${fr.mediaTitle}` : (pState === 'online' ? '🟢 Çevrimiçi' : (pState === 'idle' ? '🌙 Uzakta' : '⚫ Çevrimdışı')))),
+          h('button', {
+            type: 'button',
+            class: `btn sm ${isInv ? '' : 'primary'}`,
+            style: { fontSize: '.72rem', padding: '4px 9px' },
+            onclick: async () => {
+              if (isInv) {
+                await sendRoomInvite(fr.uid, 'cancel');
+                invitedSet.delete(fr.uid);
+                toast(`${fr.name} daveti iptal edildi`);
+              } else {
+                const r = await sendRoomInvite(fr.uid, 'send');
+                if (r?.ok) {
+                  invitedSet.add(fr.uid);
+                  toast(`📩 ${fr.name} odaya davet edildi!`);
+                } else {
+                  toast(r?.error || 'Davet gönderilemedi');
+                }
+              }
+              renderLiveFriends();
+            },
+          }, isInv ? '✓ Davetli · İptal' : '📩 Davet Et'));
+      })
+    );
+  };
+
+  renderLiveFriends();
+  syncSocialState(true).then(() => { if (liveFriendsSlot.isConnected) renderLiveFriends(); }).catch(() => {});
+
   const el = h('div', { class: 'invite-panel-wrap' },
     h('div', { class: 'invite-preview-card' },
       h('div', { class: 'invite-preview-badge' }, '🎬 WATCHLIVO DAVET KARTI'),
       h('div', { class: 'invite-preview-title' }, roomTitle),
       h('div', { class: 'invite-preview-sub' }, `${sender} seni birlikte film/dizi izlemeye davet ediyor.`)),
-    h('button', {
-      type: 'button',
-      class: 'btn primary',
-      style: { width: '100%', justifyContent: 'center', gap: '6px' },
-      onclick: () => openFriendsManagerModal(),
-    }, '👥 + Arkadaş Ekle & Arkadaş Listem'),
+    liveFriendsSlot,
     h('div', { style: { display: 'flex', gap: '6px', width: '100%' } },
       h('button', {
         type: 'button',
         class: 'btn sm primary',
         id: 'btn-send-room-push',
         style: { flex: '1', justifyContent: 'center' },
-        onclick: () => window.vortexSendRoomNotification?.(),
-      }, '🔔 Arkadaşlara Bildirim Gönder'),
+        onclick: async () => {
+          const r = await sendRoomInvite('', 'invite_all_online');
+          if (r?.ok && r.invitedCount > 0) {
+            toast(`🔔 ${r.invitedCount} çevrimiçi arkadaşına oda daveti gönderildi!`);
+          } else {
+            window.vortexSendRoomNotification?.();
+          }
+        },
+      }, '🔔 Çevrimiçi Arkadaşları Çağır'),
       h('button', {
         type: 'button',
-        class: 'btn sm ghost',
-        id: 'btn-enable-push',
+        class: 'btn sm',
         style: { justifyContent: 'center' },
-        onclick: () => window.vortexRequestPushPermission?.(),
-      }, '🔔 Bildirim İzni')),
+        onclick: () => openFriendsManagerModal(() => renderLiveFriends(), 'search'),
+      }, '➕ Arkadaş Ekle')),
     h('div', { class: 'share-box' },
       h('input', { class: 'input', value: url, readonly: true, onclick: (e) => e.target.select() }),
       h('button', { class: 'btn primary', onclick: copyInvite, 'aria-label': 'Kopyala' }, h('span', { html: icons.copy, style: { display: 'flex' } }))),
@@ -244,7 +309,7 @@ function Friends() {
       navigator.share ? h('button', { type: 'button', class: 'btn invite-social-btn', onclick: () => navigator.share({ title: 'Watchlivo Sinema Odası', text: inviteText, url }).catch(() => {}) }, '📲 Diğer Uygulamalar') : null),
     h('img', { class: 'qr', alt: 'Davet QR kodu', src: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(url)}` }),
     h('div', { class: 'sel-note', style: { textAlign: 'center' } }, 'Telefon kamerasıyla QR kodu okut ve anında odaya katıl.'));
-  return { el };
+  return { el, update: renderLiveFriends };
 }
 
 const flag = (cc) => (cc && /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(...[...cc].map((c) => 127397 + c.charCodeAt(0))) : '🌐');
@@ -319,16 +384,30 @@ function Participants(ctx) {
                 },
               })) : null),
           (p.isHost || p.isCreator) ? h('span', { class: 'crown', title: p.isHost ? 'Oda Lideri' : 'Oda Kurucusu', html: icons.crown }) : null,
-          !isMe && !isBot ? h('button', {
-            type: 'button',
-            class: `btn sm friend-toggle-btn ${friendAdded ? 'on' : ''}`,
-            title: friendAdded ? 'Arkadaş listende' : 'Arkadaş olarak ekle',
-            onclick: () => {
-              const nowFriend = toggleFriend(p);
-              toast(nowFriend ? `👥 ${p.name} arkadaşlarına eklendi` : `${p.name} arkadaşlardan çıkarıldı`);
-              update();
-            },
-          }, friendAdded ? '✓ Arkadaş' : '+ Arkadaş') : null,
+          !isMe && !isBot ? (() => {
+            const pTarget = p.uid || (p.handle ? `@${String(p.handle).replace(/^@+/, '')}` : p.name);
+            const pHandleClean = String(p.handle || '').replace(/^@+/, '').toLowerCase();
+            const isMut = friendAdded || Boolean((state.social?.friends || []).some((f) => (p.uid && f.uid === p.uid) || (pHandleClean && String(f.handle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)));
+            const isPend = Boolean((state.social?.outgoingRequests || []).some((o) => (p.uid && o.toUid === p.uid) || (pHandleClean && String(o.toHandle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)));
+            return h('button', {
+              type: 'button',
+              class: `btn sm friend-toggle-btn ${isMut ? 'on' : ''}`,
+              title: isMut ? 'Karşılıklı arkadaşsınız' : (isPend ? 'Onay bekleniyor' : 'Arkadaşlık isteği gönder'),
+              onclick: async () => {
+                if (isMut && p.uid) {
+                  await updateFriendAction('remove', { targetUid: p.uid });
+                  toast(`${p.name} arkadaş listesinden çıkarıldı`);
+                } else if (isPend && p.uid) {
+                  await updateFriendAction('cancel', { targetUid: p.uid });
+                  toast('Arkadaşlık isteği geri çekildi');
+                } else {
+                  const r = await sendFriendRequest(pTarget);
+                  toast(r?.ok ? `📩 ${p.name} kişisine arkadaşlık isteği gönderildi` : (r?.error || 'Kayıtlı kullanıcı bulunamadı'));
+                }
+                update();
+              },
+            }, isMut ? '✓ Arkadaş' : (isPend ? '⏳ İstekli' : '+ Arkadaş'));
+          })() : null,
           hostOnly && !isMe && !isBot ? h('div', { class: 'raver-actions' },
             m?.voipMode === 'stage' ? h('button', { 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
             h('button', { 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),

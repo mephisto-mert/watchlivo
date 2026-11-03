@@ -901,7 +901,7 @@ class RegressionTests(unittest.TestCase):
 
         # 1. Cache-bust bumped cleanly to 20261103_v81 with zero stale v79 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v82", index_html)
+        self.assertIn("20261103_v83", index_html)
         self.assertNotIn("20261103_v79", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host

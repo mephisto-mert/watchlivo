@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v82';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory } from '../store.js?v=20261103_v82';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v82';
-import { MeshConnection } from '../realtime.js?v=20261103_v82';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v82';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v82';
-import { buildLayout } from './mesh-layout.js?v=20261103_v82';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v82';
-import { Voice } from '../voice.js?v=20261103_v82';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v82';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v83';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v83';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v83';
+import { MeshConnection } from '../realtime.js?v=20261103_v83';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v83';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v83';
+import { buildLayout } from './mesh-layout.js?v=20261103_v83';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v83';
+import { Voice } from '../voice.js?v=20261103_v83';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v83';
 
 let ctx = null;
 
@@ -382,11 +382,12 @@ async function loadMedia(media) {
       : (finalExp >= 1.5 ? finalExp : (start >= 0.5 ? start : 0)));
   if (!state.mesh?.curated && !media?.live) {
     if (media?.isMusic || media?.mediaType === 'music') {
-      if (isTimeKeeper()) saveMusicHistory(media);
-    } else if (isTimeKeeper()) {
-      saveWatchProgress(media, finalStart > 3 ? finalStart : 0, media?.duration || 0);
+      saveMusicHistory(media);
+    } else {
+      saveWatchProgress(media, finalStart > 3 ? finalStart : 0, media?.duration || 0, { forceCloud: true });
     }
   }
+  pushPresenceHeartbeat().catch(() => {});
   await ctx.host.setMedia(media, finalStart, playing);
   if (!ctx || ctx.loadSeq !== mySeq) return;
   if (!isTimeKeeper()) {
@@ -1116,9 +1117,13 @@ export async function enterMesh(app, params) {
     const m = state.mesh?.media;
     const ad = ctx?.host?.adapter;
     if (m && ad && !state.mesh?.curated && !m.live && !ctx.host.loading && !(ad.initialSeekPending > 3) && !(m.isMusic || m.mediaType === 'music')) {
-      const pos = ad.getTime?.() || 0;
+      const rawPos = ad.getTime?.() || 0;
+      const expPos = expectedPosition(m) || 0;
+      const pos = rawPos > 3 ? rawPos : (expPos > 10 ? expPos : 0);
       const dur = ad.getDuration?.() || m.duration || 0;
-      if (pos > 10 && (!ad.isPaused?.() || isTimeKeeper())) saveWatchProgress(m, pos, dur);
+      if (pos > 8 && (!ad.isPaused?.() || isTimeKeeper())) {
+        saveWatchProgress(m, pos, dur);
+      }
     }
   }, 15000);
   ctx.conn.start();
@@ -1178,6 +1183,11 @@ function onPlayerEvent(ev, arg) {
     actions.play();
   }
   if (ev === 'ended') {
+    const endMedia = state.mesh?.media;
+    if (endMedia && !state.mesh?.curated && !endMedia.live && !(endMedia.isMusic || endMedia.mediaType === 'music')) {
+      const endDur = ctx.host?.adapter?.getDuration?.() || endMedia.duration || 0;
+      saveWatchProgress(endMedia, endDur, endDur, { completed: true, forceCloud: true });
+    }
     const curKey = mediaKey(state.mesh?.media);
     if (ctx.lastEndedKey !== curKey && (isLeader() || isHostOnly() || state.mesh?.playMode === 'cohost' || state.mesh?.playMode === 'quickplay')) {
       ctx.lastEndedKey = curKey;
@@ -1199,9 +1209,11 @@ export function leaveMeshView(explicitLeave = false) {
     const m = state.mesh?.media;
     const ad = ctx?.host?.adapter;
     if (m && ad && !state.mesh?.curated && !m.live && !ctx.host.loading && !(ad.initialSeekPending > 3) && !(m.isMusic || m.mediaType === 'music')) {
-      const pos = ad.getTime?.() || 0;
+      const rawPos = ad.getTime?.() || 0;
+      const expPos = expectedPosition(m) || 0;
+      const pos = rawPos > 3 ? rawPos : (expPos > 10 ? expPos : 0);
       const dur = ad.getDuration?.() || m.duration || 0;
-      if (pos > 10 && (isTimeKeeper() || !ad.isPaused?.())) saveWatchProgress(m, pos, dur);
+      if (pos > 8) saveWatchProgress(m, pos, dur, { forceCloud: true });
     }
   } catch (e) { /* ignore */ }
   if (typeof document !== 'undefined' && document.pictureInPictureElement) {
@@ -1220,4 +1232,5 @@ export function leaveMeshView(explicitLeave = false) {
   ctx.layout?.destroy?.();
   ctx = null;
   set({ mesh: null, clientId: null });
+  setTimeout(() => pushPresenceHeartbeat({ state: 'online', roomId: '', roomName: '', mediaTitle: '' }).catch(() => {}), 40);
 }

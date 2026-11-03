@@ -1,7 +1,11 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v82';
-import { api } from './api.js?v=20261103_v82';
-import { state, set, getFriends, addFriendByName, toggleFriend, isFriend, getWatchHistory, syncCloudUserMedia, resetCloudSyncState } from './store.js?v=20261103_v82';
+import { h, popup, toast } from './ui.js?v=20261103_v83';
+import { api } from './api.js?v=20261103_v83';
+import {
+  state, set, getFriends, isFriend, getWatchHistory,
+  syncCloudUserMedia, resetCloudSyncState,
+  syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
+} from './store.js?v=20261103_v83';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -134,6 +138,13 @@ export function saveProfile(data = {}) {
     localStorage.setItem(LAST_PROVIDER_KEY, p.authProvider);
   }
   try { set({ self: p }); } catch (_) {}
+  if (!p.isGuest && p.authToken) {
+    setTimeout(() => {
+      syncCloudUserMedia(true).catch(() => {});
+      syncSocialState(true).catch(() => {});
+      pushPresenceHeartbeat().catch(() => {});
+    }, 30);
+  }
   return p;
 }
 
@@ -633,16 +644,60 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             type: 'button',
             class: 'btn sm primary',
             style: { padding: '5px 10px', fontSize: '.74rem' },
-            onclick: () => {
-              const v = addFrInp.value.trim().replace(/^@+/, '');
+            onclick: async () => {
+              const v = addFrInp.value.trim();
               if (!v) return;
-              addFriendByName(v);
-              addFrInp.value = '';
-              toast(`👥 @${v} arkadaş listene eklendi!`);
-              refreshLiveCard();
+              const r = await sendFriendRequest(v);
+              if (r?.ok) {
+                addFrInp.value = '';
+                toast(r.status === 'FRIENDS'
+                  ? `🎉 ${r.friend?.name || v} ile artık karşılıklı arkadaşsınız!`
+                  : `📩 ${r.target?.name || v} kişisine arkadaşlık isteği gönderildi (Onay bekleniyor)`);
+                refreshLiveCard();
+              } else {
+                toast(r?.error || 'Kullanıcı bulunamadı. Tam @kullaniciadi yazın.');
+              }
             },
-          }, '+ Ekle');
+          }, '+ İstek Gönder');
+          const socialFriends = state.social?.friends?.length ? state.social.friends : myFriends;
+          const reqCount = Number(state.social?.requestCount || state.social?.requests?.length || 0);
+          const histCount = (getWatchHistory() || []).length;
           liveFriendsBox.append(
+            h('div', {
+              style: {
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', gap: '7px', marginBottom: '7px',
+              },
+            },
+            h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              id: 'wl-profile-open-history-btn',
+              style: { justifyContent: 'center', padding: '8px 10px', fontSize: '.76rem' },
+              onclick: () => {
+                modalRef?.close?.();
+                window.vortexOpenWatchHistory?.('all');
+              },
+            }, `🕒 İzleme Geçmişim (${histCount})`),
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              id: 'wl-profile-open-friends-btn',
+              style: { justifyContent: 'center', padding: '8px 10px', fontSize: '.76rem', background: 'rgba(99,102,241,0.16)', border: '1px solid rgba(99,102,241,0.38)', color: '#e0e7ff' },
+              onclick: () => {
+                modalRef?.close?.();
+                window.vortexOpenFriendsModal?.(null, reqCount > 0 ? 'requests' : 'friends');
+              },
+            }, reqCount > 0 ? `👥 Arkadaşlar (${socialFriends.length}) · 🔔 ${reqCount}` : `👥 Arkadaşlarım (${socialFriends.length})`),
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              id: 'wl-profile-open-dm-btn',
+              style: { justifyContent: 'center', padding: '8px 10px', fontSize: '.76rem', background: 'rgba(39,220,200,0.12)', border: '1px solid rgba(39,220,200,0.32)', color: '#5eead4' },
+              onclick: () => {
+                modalRef?.close?.();
+                openDmModal();
+              },
+            }, `💬 Mesajlarım${state.social?.totalUnread ? ` (${state.social.totalUnread})` : ''}`)),
             h('div', {
               style: {
                 padding: '9px 11px', borderRadius: '12px', background: 'rgba(255,255,255,0.035)',
@@ -650,18 +705,19 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               },
             },
             h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '.76rem', fontWeight: '700', color: 'rgba(255,255,255,0.85)' } },
-              h('span', {}, `👥 Arkadaşlarım (${myFriends.length})`),
-              h('span', { style: { fontSize: '.68rem', color: '#6ee7b7' } }, '🌐 Profilde Açık')),
-            myFriends.length
+              h('span', {}, `👥 Onaylı Arkadaşlarım (${socialFriends.length})`),
+              h('span', { style: { fontSize: '.68rem', color: '#6ee7b7' } }, '🔒 Karşılıklı Onaylı')),
+            socialFriends.length
               ? h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-                  myFriends.slice(0, 10).map((fr) => h('span', {
+                  socialFriends.slice(0, 10).map((fr) => h('span', {
                     style: {
                       display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '3px 8px',
                       borderRadius: '99px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-                      fontSize: '.74rem', color: '#f8fafc',
+                      fontSize: '.74rem', color: '#f8fafc', cursor: 'pointer',
                     },
-                  }, avatar(fr, 18), fr.name)))
-              : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Henüz arkadaş eklenmedi. Hemen aşağıdan ekleyebilirsin:'),
+                    onclick: () => { modalRef?.close?.(); openDmModal(fr.uid || fr.id); },
+                  }, avatar(fr, 18, { online: Boolean(fr.online) }), fr.name)))
+              : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Henüz karşılıklı arkadaşın yok. @kullaniciadi ile istek gönder:'),
             h('div', { style: { display: 'flex', gap: '6px' } }, addFrInp, addFrBtn))
           );
         }
@@ -1124,224 +1180,432 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
 export async function openDmModal(initialPeerId = null) {
   const me = state.self || loadProfile() || { id: 'guest_default', uid: 'guest_default', name: 'İzleyici', handle: 'izleyici', color: '#27dcc8' };
   const myUid = me.uid || me.id || 'guest_default';
-  let socialData = { friends: [], requests: [], threads: [], totalUnread: 0 };
-  let activePeerId = initialPeerId || 'u_ayla_cinema';
+  let socialData = { friends: [], requests: [], outgoingRequests: [], threads: [], totalUnread: 0 };
+  let activePeerId = initialPeerId || '';
+  let activeDmMeta = { canMessage: false, friendState: 'NONE', peerTyping: false, settings: { expirySec: 0 }, peer: null };
   let activeMessages = [];
-
+  let replyTarget = null;
+  let lastTypingSentAt = 0;
+  let lastRenderSig = '';
   let dmModal = null;
-  const root = h('div', { class: 'DMThreads DirectMessageView wl-dm-root', style: { display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', maxHeight: '76vh' } });
+  let pollTimer = null;
 
-  const loadState = async () => {
-    try {
-      const r = await api(`/api/rave/social/state?uid=${encodeURIComponent(myUid)}&name=${encodeURIComponent(me.name || '')}&handle=${encodeURIComponent(me.handle || '')}`);
+  const root = h('div', { class: 'DMThreads DirectMessageView wl-dm-root' });
+  const topBarWrap = h('div', { class: 'wl-dm-topbar' });
+  const requestsWrap = h('div', { class: 'wl-dm-requests-slot' });
+  const threadsCol = h('div', { class: 'DMThreads__list wl-dm-threads' });
+  const peerHeaderEl = h('div', { class: 'wl-dm-peer-header' });
+  const msgListEl = h('div', { class: 'DirectMessageView__messages wl-dm-messages' });
+  const typingBarEl = h('div', { class: 'wl-dm-typing-bar', style: { display: 'none' } });
+  const replyBarEl = h('div', { class: 'wl-dm-reply-bar', style: { display: 'none' } });
+  const composerWrap = h('div', { class: 'wl-dm-composer-slot' });
+
+  const addInp = h('input', {
+    class: 'input',
+    placeholder: '@kullaniciadi ile arkadaş ekle (Karşılıklı onaylı)',
+    style: { flex: '1', height: '36px', fontSize: '.82rem' },
+  });
+  const addBtn = h('button', {
+    type: 'button',
+    class: 'btn primary sm',
+    onclick: async () => {
+      const val = addInp.value.trim();
+      if (!val) return;
+      const r = await sendFriendRequest(val);
       if (r?.ok) {
-        socialData = r;
-        if (!initialPeerId && socialData.friends?.length && !socialData.friends.some((f) => f.uid === activePeerId)) {
-          activePeerId = socialData.friends[0].uid;
-        }
+        addInp.value = '';
+        toast(r.status === 'FRIENDS'
+          ? `🎉 ${r.friend?.name || val} ile artık arkadaşsınız!`
+          : `📩 ${r.target?.name || val} kişisine arkadaşlık isteği gönderildi`);
+        await refreshAll(r.friend?.uid || r.target?.uid || activePeerId, true);
+      } else {
+        toast(r?.error || 'Kullanıcı bulunamadı');
       }
-    } catch (e) { /* ignore */ }
+    },
+  }, '➕ İstek Gönder');
+  addInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addBtn.click(); });
+
+  const openHubBtn = h('button', {
+    type: 'button',
+    class: 'btn sm',
+    onclick: () => {
+      dmModal?.close?.();
+      window.vortexOpenFriendsModal?.(null, 'search');
+    },
+  }, '🔎 Rehber');
+  topBarWrap.append(addInp, addBtn, openHubBtn);
+
+  const dmInp = h('input', {
+    class: 'input',
+    id: 'wl-dm-message-input',
+    placeholder: 'Mesaj yaz... (Enter ile gönder)',
+    style: { flex: '1', height: '40px' },
+  });
+
+  const emitTyping = () => {
+    if (!activePeerId || !activeDmMeta.canMessage) return;
+    const now = Date.now();
+    if (now - lastTypingSentAt < 2500) return;
+    lastTypingSentAt = now;
+    api('/api/rave/social/dm', {
+      method: 'POST',
+      body: { uid: myUid, peerId: activePeerId, action: 'typing' },
+    }).catch(() => {});
+  };
+  dmInp.addEventListener('input', emitTyping);
+
+  const setReply = (msg) => {
+    replyTarget = msg ? { id: msg.id, fromName: msg.fromName || 'İzleyici', text: String(msg.text || '').slice(0, 90) } : null;
+    if (!replyTarget) {
+      replyBarEl.style.display = 'none';
+      replyBarEl.replaceChildren();
+      return;
+    }
+    replyBarEl.style.display = 'flex';
+    replyBarEl.replaceChildren(
+      h('span', { style: { flex: '1', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, `↩ ${replyTarget.fromName}: "${replyTarget.text}"`),
+      h('button', { type: 'button', class: 'btn sm', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => setReply(null) }, '✕')
+    );
+    dmInp.focus();
   };
 
-  const loadMessages = async (peerId) => {
-    activePeerId = peerId;
+  const sendDmNow = async (extra = {}) => {
+    if (!activePeerId) return;
+    const txt = (extra.text !== undefined ? extra.text : dmInp.value).trim();
+    if (!txt && !extra.roomInvite && !extra.roomInviteCard) return;
+    if (extra.text === undefined) dmInp.value = '';
+    const replyPayload = replyTarget;
+    setReply(null);
     try {
-      const r = await api(`/api/rave/social/dm?uid=${encodeURIComponent(myUid)}&peerId=${encodeURIComponent(peerId)}`);
-      if (r?.ok) activeMessages = r.messages || [];
-    } catch (e) { activeMessages = []; }
-    renderUI();
+      const r = await api('/api/rave/social/dm', {
+        method: 'POST',
+        body: {
+          uid: myUid,
+          fromName: me.name || 'İzleyici',
+          color: me.color || '#27dcc8',
+          peerId: activePeerId,
+          text: txt,
+          replyTo: replyPayload,
+          ...extra,
+        },
+      });
+      if (r?.ok) {
+        activeMessages = r.messages || [];
+        lastRenderSig = '';
+        await refreshAll(activePeerId, true);
+      } else {
+        toast(r?.error || 'Mesaj gönderilemedi');
+      }
+    } catch (e) {
+      toast(e?.message || 'Karşılıklı arkadaş olmadan mesaj gönderilemez');
+    }
+  };
+  dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
+
+  const joinRoomById = (rid) => {
+    if (!rid) return;
+    dmModal?.close?.();
+    if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(rid)}`);
+    else window.location.href = `/r/${encodeURIComponent(rid)}`;
   };
 
-  const renderUI = () => {
-    root.replaceChildren();
-
-    // Top row: Add friend + incoming friend requests
-    const addInp = h('input', {
-      class: 'input',
-      placeholder: '@kullaniciadi ile arkadaş ekle (Örn: @can_sinema)',
-      style: { flex: '1', height: '36px', fontSize: '.84rem' },
-    });
-    const addBtn = h('button', {
-      type: 'button',
-      class: 'btn primary sm',
-      onclick: async () => {
-        const val = addInp.value.trim();
-        if (!val) return;
-        try {
-          const r = await api('/api/rave/social/friends', {
-            method: 'POST',
-            body: { uid: myUid, fromName: me.name, action: 'request', targetName: val, targetHandle: val },
-          });
-          if (r?.ok) {
-            toast(`✓ ${val} arkadaş listene ve DM kutuna eklendi!`);
-            addInp.value = '';
-            await loadState();
-            if (r.friend?.uid) await loadMessages(r.friend.uid);
-            else renderUI();
-          }
-        } catch (e) { toast('Arkadaş isteği gönderilemedi'); }
-      },
-    }, '➕ Arkadaş Ekle');
-
-    root.append(h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, addInp, addBtn));
-
+  const renderParts = (forceScroll = false) => {
+    requestsWrap.replaceChildren();
     if (socialData.requests?.length) {
-      root.append(h('div', { class: 'rave-friend-requests-bar', style: { background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.32)', borderRadius: '10px', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '6px' } },
-        h('div', { style: { fontSize: '.76rem', fontWeight: '700', color: '#a5b4fc' } }, `🔔 Bekleyen Arkadaşlık İstekleri (${socialData.requests.length})`),
-        ...socialData.requests.map((req) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '.82rem' } },
-            avatar({ name: req.fromName, color: req.color }, 28),
-            h('span', {}, `${req.fromName} (${req.fromHandle || '@izleyici'}) · ${req.medal || '🥉 Bronz İzleyici'}`)),
+      requestsWrap.append(h('div', { class: 'rave-friend-requests-bar' },
+        h('div', { style: { fontSize: '.76rem', fontWeight: '800', color: '#a5b4fc' } }, `🔔 Bekleyen Arkadaşlık İstekleri (${socialData.requests.length})`),
+        ...socialData.requests.map((req) => h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '.81rem' } },
+            avatar({ name: req.fromName, color: req.color, avatarUrl: req.avatarUrl }, 28),
+            h('span', {}, `${req.fromName} (${req.fromHandle || '@uye'})`)),
           h('div', { style: { display: 'flex', gap: '6px' } },
             h('button', {
               type: 'button',
               class: 'btn primary sm',
               onclick: async () => {
-                await api('/api/rave/social/friends', { method: 'POST', body: { uid: myUid, action: 'accept', requestId: req.id } });
-                toast(`✓ ${req.fromName} ile artık arkadaşsınız!`);
-                await loadState();
-                renderUI();
+                await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                toast(`🎉 ${req.fromName} ile artık karşılıklı arkadaşsınız!`);
+                await refreshAll(req.fromUid || activePeerId, true);
               },
             }, '✓ Kabul Et'),
             h('button', {
               type: 'button',
               class: 'btn sm',
               onclick: async () => {
-                await api('/api/rave/social/friends', { method: 'POST', body: { uid: myUid, action: 'decline', requestId: req.id } });
-                await loadState();
-                renderUI();
+                await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                await refreshAll(activePeerId, true);
               },
             }, '✕ Reddet'))))));
     }
 
-    // 2-Column split: Left = DMThreads, Right = DirectMessageView
-    const activePeer = (socialData.friends || []).find((f) => f.uid === activePeerId) || socialData.friends?.[0] || {
-      uid: activePeerId, name: 'Ayla Sinema', handle: '@ayla_cinema', color: '#FF2A85', medal: '🥇 Altın İzleyici', watchMinutes: 420,
-    };
-
-    const threadsCol = h('div', {
-      class: 'DMThreads__list',
-      style: { width: '220px', flexShrink: '0', display: 'flex', flexDirection: 'column', gap: '6px', overflowY: 'auto', maxHeight: '48vh', borderRight: '1px solid rgba(255,255,255,0.08)', paddingRight: '8px' },
-    }, ...(socialData.friends || []).map((fr) => {
-      const isAct = fr.uid === activePeer.uid;
+    const friends = socialData.friends || [];
+    threadsCol.replaceChildren(...(friends.length ? friends.map((fr) => {
+      const isAct = fr.uid === activePeerId;
       const th = (socialData.threads || []).find((t) => t.peer?.uid === fr.uid);
-      const unread = th?.unreadCount || 0;
+      const unread = Number(th?.unreadCount || fr.unread || 0);
+      const pState = fr.presenceState || (fr.online ? 'online' : 'offline');
       return h('button', {
         type: 'button',
         class: `dm-thread-item ${isAct ? 'on' : ''}`,
-        style: {
-          display: 'flex', alignItems: 'center', gap: '8px', padding: '8px', borderRadius: '10px', textAlign: 'left', cursor: 'pointer',
-          background: isAct ? 'rgba(39,220,200,0.15)' : 'rgba(255,255,255,0.03)',
-          border: isAct ? '1px solid rgba(39,220,200,0.45)' : '1px solid transparent', color: '#fff',
-        },
-        onclick: () => loadMessages(fr.uid),
+        onclick: () => { lastRenderSig = ''; refreshAll(fr.uid, true); },
       },
-      avatar(fr, 34, { online: fr.online !== false }),
+      h('div', { style: { position: 'relative', flexShrink: '0' } },
+        avatar(fr, 36),
+        h('span', { class: `wl-pres-dot is-${pState}` })),
       h('div', { style: { flex: '1', minWidth: '0' } },
         h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px' } },
-          h('strong', { style: { fontSize: '.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, fr.name),
-          unread > 0 ? h('span', { style: { background: '#f43f5e', color: '#fff', fontSize: '.68rem', padding: '1px 6px', borderRadius: '99px', fontWeight: '700' } }, String(unread)) : null),
-        h('div', { class: 'Tooltip__friend-tooltip-medal', style: { fontSize: '.7rem', color: '#fbbf24', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, `${fr.medal || '🥉 Raver'} · ${fr.watchMinutes || 60}dk`),
-        h('div', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, th?.lastMessage?.text || fr.status || 'Sohbet başlat')));
-    }));
+          h('strong', { style: { fontSize: '.82rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, `${fr.bestFriend ? '⭐ ' : ''}${fr.name}`),
+          unread > 0 ? h('span', { class: 'wl-dm-unread-pill' }, String(unread)) : null),
+        h('div', { class: `wl-dm-pres-line is-${pState}` },
+          pState === 'watching' && fr.mediaTitle ? `🎬 ${fr.mediaTitle}` : (pState === 'online' ? '🟢 Çevrimiçi' : (pState === 'idle' ? '🌙 Uzakta' : `⚫ ${fr.lastSeenLabel || 'Çevrimdışı'}`))),
+        h('div', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.52)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, th?.lastMessage?.text || 'Mesaj gönder...')));
+    }) : [
+      h('div', { style: { padding: '14px 8px', fontSize: '.78rem', color: 'rgba(255,255,255,0.55)', textAlign: 'center' } }, 'Henüz onaylı arkadaşın yok. Yukarıdan @kullaniciadi ile istek gönder ✨'),
+    ]));
 
-    const msgListEl = h('div', {
-      class: 'DirectMessageView__messages',
-      style: { flex: '1', overflowY: 'auto', maxHeight: '36vh', minHeight: '190px', display: 'flex', flexDirection: 'column', gap: '8px', padding: '8px', background: 'rgba(0,0,0,0.28)', borderRadius: '10px' },
-    }, ...(activeMessages.length ? activeMessages.map((m) => {
-      const isMe = m.fromUid === myUid;
-      return h('div', {
-        style: {
-          alignSelf: isMe ? 'flex-end' : 'flex-start',
-          maxWidth: '82%',
-          background: isMe ? 'linear-gradient(135deg, rgba(39,220,200,0.22), rgba(99,102,241,0.24))' : 'rgba(255,255,255,0.07)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: '12px',
-          padding: '7px 11px',
-        },
-      },
-      h('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '.7rem', color: m.color || '#27dcc8', marginBottom: '2px' } },
-        h('strong', {}, m.fromName || 'İzleyici'),
-        h('span', { style: { color: 'rgba(255,255,255,0.45)' } }, m.time || '')),
-      h('div', { style: { fontSize: '.84rem', color: '#f8fafc', wordBreak: 'break-word' } }, m.text || ''),
-      m.roomInvite ? h('button', {
-        type: 'button',
-        class: 'btn primary sm',
-        style: { marginTop: '6px', width: '100%' },
-        onclick: () => {
-          dmModal?.close?.();
-          if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(m.roomInvite)}`);
-          else window.location.href = `/r/${encodeURIComponent(m.roomInvite)}`;
-        },
-      }, `🎬 Odaya Katıl (#${m.roomInvite})`) : null);
-    }) : [h('div', { style: { color: 'rgba(255,255,255,0.5)', fontSize: '.82rem', textAlign: 'center', margin: 'auto' } }, `${activePeer.name} ile özel mesajlaşmaya başla 💬`)]));
+    const activePeer = friends.find((f) => f.uid === activePeerId) || activeDmMeta.peer || null;
+    peerHeaderEl.replaceChildren();
+    composerWrap.replaceChildren();
+    typingBarEl.style.display = activeDmMeta.peerTyping && activePeer ? 'flex' : 'none';
+    if (activeDmMeta.peerTyping && activePeer) {
+      typingBarEl.textContent = `💬 ${activePeer.name} yazıyor...`;
+    }
 
-    const dmInp = h('input', {
-      class: 'input',
-      placeholder: `${activePeer.name} kişisine özel mesaj yaz...`,
-      style: { flex: '1', height: '38px' },
-    });
+    if (!activePeer) {
+      msgListEl.replaceChildren(h('div', { class: 'wl-dm-empty-placeholder' },
+        h('div', { style: { fontSize: '1.8rem' } }, '💬'),
+        h('strong', {}, 'Özel Mesajlaşma & Oda Davetleri'),
+        h('span', {}, 'Soldan bir arkadaşını seç veya yukarıdan @kullaniciadi yazarak arkadaşlık isteği gönder.')));
+      return;
+    }
 
-    const sendDmNow = async (extra = {}) => {
-      const txt = dmInp.value.trim() || extra.text || '';
-      if (!txt && !extra.roomInvite) return;
-      dmInp.value = '';
-      try {
-        const r = await api('/api/rave/social/dm', {
-          method: 'POST',
-          body: {
-            uid: myUid,
-            fromName: me.name || 'İzleyici',
-            color: me.color || '#27dcc8',
-            peerId: activePeer.uid,
-            text: txt,
-            ...extra,
+    const pState = activePeer.presenceState || (activePeer.online ? 'online' : 'offline');
+    const expOn = Number(activeDmMeta.settings?.expirySec || 0) > 0;
+    peerHeaderEl.append(
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '9px', minWidth: '0' } },
+        h('div', { style: { position: 'relative', flexShrink: '0' } },
+          avatar(activePeer, 36),
+          h('span', { class: `wl-pres-dot is-${pState}` })),
+        h('div', { style: { minWidth: '0' } },
+          h('strong', { style: { fontSize: '.86rem', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, `${activePeer.name} (@${String(activePeer.handle || 'uye').replace(/^@+/, '')})`),
+          h('div', { class: `wl-dm-pres-line is-${pState}` },
+            pState === 'watching' && activePeer.mediaTitle
+              ? `🎬 ${activePeer.mediaTitle} izliyor`
+              : (pState === 'online' ? '🟢 Şu an çevrimiçi' : (pState === 'idle' ? '🌙 Uzakta' : `⚫ Çevrimdışı · ${activePeer.lastSeenLabel || 'Son görülme yakın zamanda'}`))))),
+      h('div', { style: { display: 'flex', gap: '5px', flexWrap: 'wrap', alignItems: 'center' } },
+        pState === 'watching' && activePeer.roomId ? h('button', {
+          type: 'button',
+          class: 'btn primary sm',
+          onclick: () => joinRoomById(activePeer.roomId),
+        }, '▶ Odasına Katıl') : null,
+        activeDmMeta.canMessage ? h('button', {
+          type: 'button',
+          class: 'btn sm',
+          title: 'El Salla (Anlık Bildirim)',
+          onclick: async () => {
+            const r = await sendRoomInvite(activePeer.uid, 'poke');
+            if (r?.ok) toast(`👋 ${activePeer.name} kişisine el salladın!`);
           },
-        });
-        if (r?.ok) {
-          activeMessages = r.messages || [];
-          await loadState();
-          renderUI();
-        }
-      } catch (e) { toast('DM gönderilemedi'); }
-    };
+        }, '👋') : null,
+        activeDmMeta.canMessage && state.mesh?.id ? h('button', {
+          type: 'button',
+          class: 'btn sm',
+          style: { background: 'rgba(39,220,200,0.16)', color: '#5eead4', border: '1px solid rgba(39,220,200,0.38)' },
+          onclick: async () => {
+            const r = await sendRoomInvite(activePeer.uid, 'send');
+            if (r?.ok) {
+              toast(`📩 ${activePeer.name} odana davet edildi!`);
+              await refreshAll(activePeer.uid, true);
+            }
+          },
+        }, '📩 Odaya Davet') : null,
+        activeDmMeta.canMessage ? h('button', {
+          type: 'button',
+          class: 'btn sm',
+          title: 'Kaybolan Mesaj Süresi (Kalıcı / 24 Saat)',
+          style: { fontSize: '.71rem', opacity: expOn ? '1' : '.75', borderColor: expOn ? '#fbbf24' : '' },
+          onclick: async () => {
+            const nextSec = expOn ? 0 : 86400;
+            await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'settings', expirySec: nextSec } });
+            toast(nextSec ? '⏱️ 24 saatlik kaybolan mesaj modu açıldı' : '∞ Mesajlar kalıcı moda alındı');
+            lastRenderSig = '';
+            await refreshAll(activePeer.uid, false);
+          },
+        }, expOn ? '⏱️ 24s' : '∞') : null)
+    );
 
-    dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
+    if (!activeDmMeta.canMessage) {
+      const fSt = activeDmMeta.friendState || 'NONE';
+      msgListEl.replaceChildren(h('div', { class: 'wl-dm-empty-placeholder non-friend-placeholder' },
+        h('div', { style: { fontSize: '1.9rem' } }, '🔒'),
+        h('strong', {}, 'Karşılıklı Arkadaş Onayı Gerekli'),
+        h('span', {}, fSt === 'OUTGOING_PENDING'
+          ? `${activePeer.name} kişisine arkadaşlık isteği gönderdin. Onayladığında mesajlaşma ve oda daveti açılacak.`
+          : fSt === 'INCOMING_PENDING'
+            ? `${activePeer.name} sana arkadaşlık isteği gönderdi! Hemen kabul ederek sohbete başlayabilirsin.`
+            : `${activePeer.name} ile mesajlaşmak ve birbirinizi odaya davet etmek için önce arkadaşlık isteği gönderin.`),
+        fSt === 'INCOMING_PENDING'
+          ? h('button', {
+              type: 'button',
+              class: 'btn primary',
+              onclick: async () => {
+                await updateFriendAction('accept', { targetUid: activePeer.uid });
+                toast(`🎉 ${activePeer.name} ile artık arkadaşsınız!`);
+                lastRenderSig = '';
+                await refreshAll(activePeer.uid, true);
+              },
+            }, '✓ Arkadaşlık İsteğini Kabul Et')
+          : fSt === 'OUTGOING_PENDING'
+            ? h('span', { class: 'wl-verified-pill' }, '⏳ Onay Bekleniyor')
+            : h('button', {
+                type: 'button',
+                class: 'btn primary',
+                onclick: async () => {
+                  const r = await sendFriendRequest(activePeer.uid);
+                  if (r?.ok) {
+                    toast(`📩 ${activePeer.name} kişisine istek gönderildi!`);
+                    lastRenderSig = '';
+                    await refreshAll(activePeer.uid, false);
+                  }
+                },
+              }, '➕ Arkadaşlık İsteği Gönder')));
+      return;
+    }
 
-    const rightCol = h('div', {
-      style: { flex: '1', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '0' },
-    },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 6px', borderBottom: '1px solid rgba(255,255,255,0.08)' } },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-        avatar(activePeer, 32, { online: true }),
-        h('div', {},
-          h('strong', { style: { fontSize: '.86rem' } }, `${activePeer.name} (${activePeer.handle || '@izleyici'})`),
-          h('div', { class: 'Tooltip__friend-tooltip-minutes', style: { fontSize: '.72rem', color: '#27dcc8' } }, `${activePeer.medal || '🥇 Altın İzleyici'} · ⏱️ ${activePeer.watchMinutes || 180} dk birlikte izlendi`))),
-      state.mesh?.id ? h('button', {
-        type: 'button',
-        class: 'btn sm',
-        style: { fontSize: '.74rem', background: 'rgba(39,220,200,0.16)', color: '#27dcc8', border: '1px solid rgba(39,220,200,0.35)' },
-        onclick: () => sendDmNow({ text: `🎬 Seni "${state.mesh.name || state.mesh.id}" odasına davet ediyorum!`, roomInvite: state.mesh.id }),
-      }, '🎬 Odaya Davet Gönder') : null),
-    msgListEl,
-    h('div', { style: { display: 'flex', gap: '6px' } },
+    dmInp.placeholder = `${activePeer.name} kişisine mesaj yaz...`;
+    composerWrap.append(
       dmInp,
-      h('button', { type: 'button', class: 'btn primary', onclick: () => sendDmNow() }, 'Gönder ➤')));
+      h('button', { type: 'button', class: 'btn primary', onclick: () => sendDmNow() }, 'Gönder ➤')
+    );
 
-    root.append(h('div', { class: 'wl-dm-split', style: { display: 'flex', gap: '12px', flex: '1', minHeight: '0' } }, threadsCol, rightCol));
-    setTimeout(() => { msgListEl.scrollTop = msgListEl.scrollHeight; }, 20);
+    msgListEl.replaceChildren(...(activeMessages.length ? activeMessages.map((m) => {
+      const isMe = m.fromUid === myUid;
+      const card = m.roomInviteCard || (m.roomInvite ? { roomId: m.roomInvite, roomName: `Oda #${m.roomInvite}` } : null);
+      const reactions = m.reactions && typeof m.reactions === 'object' ? Object.entries(m.reactions).filter(([, arr]) => Array.isArray(arr) && arr.length > 0) : [];
+      return h('div', { class: `wl-dm-bubble ${isMe ? 'is-me' : 'is-peer'}` },
+        h('div', { class: 'wl-dm-bubble-meta' },
+          h('strong', { style: { color: isMe ? '#5eead4' : (m.color || '#a5b4fc') } }, isMe ? 'Sen' : (m.fromName || activePeer.name)),
+          h('span', {}, [m.time || '', isMe ? (m.readAt ? ' · ✓✓' : ' · ✓') : ''].join(''))),
+        m.replyTo ? h('div', { class: 'wl-dm-reply-quote' }, `↩ ${m.replyTo.fromName || ''}: ${m.replyTo.text || ''}`) : null,
+        m.text ? h('div', { class: 'wl-dm-bubble-text' }, m.text) : null,
+        card?.roomId ? h('div', { class: 'wl-dm-invite-card' },
+          card.poster ? h('img', { src: card.poster, alt: '', class: 'wl-dm-invite-poster' }) : h('div', { class: 'wl-dm-invite-icon' }, '🎬'),
+          h('div', { style: { flex: '1', minWidth: '0' } },
+            h('strong', { style: { display: 'block', fontSize: '.8rem', color: '#fff' } }, card.mediaTitle || card.roomName || 'Canlı Sinema Odası'),
+            h('span', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.65)' } }, `${card.roomName || 'Watchlivo Odası'} · Canlı İzleme`)),
+          h('button', { type: 'button', class: 'btn primary sm', onclick: () => joinRoomById(card.roomId) }, '▶ Katıl')) : null,
+        reactions.length ? h('div', { class: 'wl-dm-reactions-row' },
+          ...reactions.map(([emo, uids]) => h('button', {
+            type: 'button',
+            class: `wl-dm-react-chip ${uids.includes(myUid) ? 'on' : ''}`,
+            onclick: async () => {
+              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
+              lastRenderSig = '';
+              await refreshAll(activePeer.uid, false);
+            },
+          }, `${emo} ${uids.length}`))) : null,
+        h('div', { class: 'wl-dm-bubble-actions' },
+          ...['❤️', '😂', '🔥', '🍿'].map((emo) => h('button', {
+            type: 'button',
+            class: 'wl-dm-mini-act',
+            onclick: async () => {
+              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'react', messageId: m.id, emoji: emo } });
+              lastRenderSig = '';
+              await refreshAll(activePeer.uid, false);
+            },
+          }, emo)),
+          h('button', { type: 'button', class: 'wl-dm-mini-act', title: 'Yanıtla', onclick: () => setReply(m) }, '↩'),
+          isMe ? h('button', {
+            type: 'button',
+            class: 'wl-dm-mini-act',
+            title: 'Mesajı Sil',
+            onclick: async () => {
+              await api('/api/rave/social/dm', { method: 'POST', body: { uid: myUid, peerId: activePeer.uid, action: 'delete', messageId: m.id } });
+              lastRenderSig = '';
+              await refreshAll(activePeer.uid, false);
+            },
+          }, '🗑️') : null));
+    }) : [
+      h('div', { class: 'wl-dm-empty-placeholder' }, `${activePeer.name} ile sohbet başlat veya bir odaya davet gönder 💬`),
+    ]));
+
+    if (forceScroll) {
+      setTimeout(() => { msgListEl.scrollTop = msgListEl.scrollHeight; }, 20);
+    }
   };
 
-  await loadState();
-  await loadMessages(activePeerId);
+  const refreshAll = async (peerId = activePeerId, forceScroll = false) => {
+    try {
+      const st = await syncSocialState(true);
+      if (st?.ok) socialData = st;
+    } catch (_) {}
+    if (!peerId && socialData.friends?.length) {
+      peerId = socialData.friends[0].uid;
+    }
+    activePeerId = peerId || '';
+    if (activePeerId) {
+      try {
+        const d = await api(`/api/rave/social/dm?uid=${encodeURIComponent(myUid)}&peerId=${encodeURIComponent(activePeerId)}`);
+        if (d?.ok) {
+          activeMessages = d.messages || [];
+          activeDmMeta = {
+            canMessage: Boolean(d.canMessage),
+            friendState: d.friendState || 'NONE',
+            peerTyping: Boolean(d.peerTyping),
+            settings: d.settings || { expirySec: 0 },
+            peer: d.peer || null,
+          };
+        }
+      } catch (_) {
+        activeMessages = [];
+      }
+    }
+    const sig = JSON.stringify([
+      activePeerId,
+      activeDmMeta.canMessage,
+      activeDmMeta.friendState,
+      activeDmMeta.peerTyping,
+      activeDmMeta.settings?.expirySec,
+      (socialData.requests || []).length,
+      (socialData.friends || []).map((f) => `${f.uid}:${f.presenceState}:${f.unread || 0}`),
+      activeMessages.map((m) => `${m.id}:${m.readAt || 0}:${JSON.stringify(m.reactions || {})}`),
+    ]);
+    if (sig !== lastRenderSig || forceScroll) {
+      const hadFocus = document.activeElement === dmInp;
+      lastRenderSig = sig;
+      renderParts(forceScroll);
+      if (hadFocus && dmInp.isConnected) dmInp.focus();
+    }
+  };
+
+  const rightCol = h('div', { class: 'wl-dm-right-col' },
+    peerHeaderEl,
+    msgListEl,
+    typingBarEl,
+    replyBarEl,
+    composerWrap
+  );
+  root.append(topBarWrap, requestsWrap, h('div', { class: 'wl-dm-split' }, threadsCol, rightCol));
+
+  await refreshAll(activePeerId, true);
 
   dmModal = popup({
-    title: '💬 Özel Mesajlar (DM) & Watchlivo Arkadaşlarım',
+    title: '💬 Özel Mesajlar (DM) & Arkadaş Sohbeti',
     content: root,
     dismissable: true,
     wide: true,
+    onClose: () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } },
     options: [{ label: 'Kapat', class: 'btn' }],
   });
+
+  pollTimer = setInterval(() => {
+    if (!root.isConnected) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      return;
+    }
+    refreshAll(activePeerId, false).catch(() => {});
+  }, 2800);
 }
 
 // ============================================================================
@@ -1530,23 +1794,60 @@ export function openUserProfileModal(targetUser) {
               }, avatar(f, 18), f.name)))
           : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Açık arkadaş listesi boş.')),
     h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' } },
-      h('button', {
+      (() => {
+        const targetUid = targetUser.uid || targetUser.id || '';
+        const isMutual = Boolean((state.social?.friends || []).some((f) => (f.uid && f.uid === targetUid) || (f.handle && String(f.handle).replace(/^@+/, '').toLowerCase() === uHandle.toLowerCase()))) || isFriend(targetUser);
+        const isPendingOut = Boolean((state.social?.outgoingRequests || []).some((o) => (o.toUid && o.toUid === targetUid) || String(o.toHandle || '').replace(/^@+/, '').toLowerCase() === uHandle.toLowerCase()));
+        return h('button', {
+          type: 'button',
+          class: `btn ${isMutual || isPendingOut ? '' : 'primary'}`,
+          style: { flex: '1', justifyContent: 'center' },
+          onclick: async (e) => {
+            const btn = e.currentTarget;
+            if (isMutual && targetUid) {
+              await updateFriendAction('remove', { targetUid });
+              btn.textContent = '👥 + Arkadaş Ekle';
+              toast(`${uName} arkadaş listesinden çıkarıldı`);
+              return;
+            }
+            if (isPendingOut && targetUid) {
+              await updateFriendAction('cancel', { targetUid });
+              btn.textContent = '👥 + Arkadaş Ekle';
+              toast('Arkadaşlık isteği geri çekildi');
+              return;
+            }
+            const r = await sendFriendRequest(targetUid || `@${uHandle}`);
+            if (r?.ok) {
+              btn.textContent = r.status === 'FRIENDS' ? '✓ Arkadaşsınız' : '⏳ Onay Bekleniyor';
+              toast(r.status === 'FRIENDS' ? `🎉 ${uName} ile artık arkadaşsınız!` : `📩 ${uName} kişisine arkadaşlık isteği gönderildi`);
+            } else {
+              toast(r?.error || 'İstek gönderilemedi');
+            }
+          },
+        }, isMutual ? '✓ Arkadaşsınız' : (isPendingOut ? '⏳ Onay Bekleniyor' : '👥 + Arkadaş Ekle'));
+      })(),
+      state.mesh?.id ? h('button', {
         type: 'button',
-        class: 'btn primary',
-        style: { flex: '1', justifyContent: 'center' },
-        onclick: (e) => {
-          const added = toggleFriend(targetUser);
-          e.currentTarget.textContent = added ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle';
-          toast(added ? `👥 ${uName} arkadaşlarına eklendi!` : `${uName} arkadaşlardan çıkarıldı`);
+        class: 'btn',
+        style: { flex: '1', justifyContent: 'center', background: 'rgba(39,220,200,0.14)', border: '1px solid rgba(39,220,200,0.35)', color: '#5eead4' },
+        onclick: async (e) => {
+          const btn = e.currentTarget;
+          const r = await sendRoomInvite(targetUser.uid || targetUser.id || `@${uHandle}`, 'send');
+          if (r?.ok) {
+            btn.textContent = '✓ Odaya Davet Edildi';
+            toast(`📩 ${uName} kişisine oda daveti gönderildi!`);
+          } else {
+            toast(r?.error || 'Davet gönderilemedi');
+          }
         },
-      }, isFriend(targetUser) ? '✓ Arkadaş Listende' : '👥 + Arkadaş Ekle'),
+      }, '📩 Odaya Davet Et') : null,
       h('button', {
         type: 'button',
         class: 'btn',
         style: { flex: '1', justifyContent: 'center' },
         onclick: () => {
           userModal?.close?.();
-          openDmModal(targetUser.uid || targetUser.id || uHandle);
+          openDmModal(targetUser.uid || targetUser.id || `@${uHandle}`);
         },
       }, '💬 Özel Mesaj')));
 

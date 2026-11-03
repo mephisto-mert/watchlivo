@@ -1,10 +1,17 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v82';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v82';
-import { api, qs } from '../api.js?v=20261103_v82';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v82';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v82';
-import { state, getWatchHistory, clearWatchHistory, removeWatchProgress, getFavorites, isFavoriteMedia, toggleFavoriteMedia } from '../store.js?v=20261103_v82';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v83';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v83';
+import { api, qs } from '../api.js?v=20261103_v83';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v83';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v83';
+import {
+  state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
+  getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress,
+  getFavorites, isFavoriteMedia, toggleFavoriteMedia,
+  getMusicHistory, clearMusicHistory,
+} from '../store.js?v=20261103_v83';
+
+let _activeHomePick = null;
 
 export const parseDuration = (s) => {
   if (typeof s === 'number') return s;
@@ -93,6 +100,10 @@ export function providerTile(p, onClick) {
   const shortName = p.id === 'cinema' ? 'Sinema+' : (p.id === 'ravedj' ? 'Watchlivo DJ' : p.name);
   const subText = PROVIDER_SUBTITLES[p.id] || p.badge || '4K Senkron İzle';
   const cornerTag = PROVIDER_CORNER_TAGS[p.id] || (p.cat === 'tr' ? 'YERLİ' : '4K HD');
+  let cachedRect = null;
+  let rafId = 0;
+  let lastX = 0;
+  let lastY = 0;
   const card = h('div', {
     class: `provider-tile rave-icon-tile ${isHero ? 'hero-provider-tile' : ''}`,
     role: 'button',
@@ -101,14 +112,30 @@ export function providerTile(p, onClick) {
     'data-brand': p.id,
     'data-category': p.cat || 'global',
     title: `${p.name} — ${subText}`,
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--brand': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8') },
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--brand': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--spot-alpha': '0' },
+    onmouseenter: (e) => {
+      cachedRect = e.currentTarget.getBoundingClientRect();
+      e.currentTarget.style.setProperty('--spot-alpha', '1');
+    },
     onmousemove: (e) => {
-      const r = e.currentTarget.getBoundingClientRect();
-      e.currentTarget.style.setProperty('--mx', `${Math.round(e.clientX - r.left)}px`);
-      e.currentTarget.style.setProperty('--my', `${Math.round(e.clientY - r.top)}px`);
+      const el = e.currentTarget;
+      if (!cachedRect) cachedRect = el.getBoundingClientRect();
+      lastX = Math.round(e.clientX - cachedRect.left);
+      lastY = Math.round(e.clientY - cachedRect.top);
+      if (!rafId) {
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          el.style.setProperty('--mx', `${lastX}px`);
+          el.style.setProperty('--my', `${lastY}px`);
+        });
+      }
+    },
+    onmouseleave: (e) => {
+      cachedRect = null;
+      e.currentTarget.style.setProperty('--spot-alpha', '0');
     },
     onclick: () => onClick(p),
-    onkeydown: (e) => { if (e.key === 'Enter') onClick(p); },
+    onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(p); } },
   },
     h('span', { class: 'provider-corner-tag' }, cornerTag),
     h('div', { class: 'provider-logo-wrap' },
@@ -295,6 +322,20 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return; }
     await onPick(media);
   };
+  if (!compact) {
+    _activeHomePick = pickSafe;
+    let lastSyncedStamp = state.cloudMediaSynced || 0;
+    subscribe((s) => {
+      if (!root.isConnected) return;
+      if ((s.cloudMediaSynced || 0) !== lastSyncedStamp) {
+        lastSyncedStamp = s.cloudMediaSynced || 0;
+        const activeInp = root.querySelector('input');
+        if (!provider && !superQuery && !(activeInp && document.activeElement === activeInp)) {
+          renderGrid();
+        }
+      }
+    });
+  }
 
   async function ensureTrending(forceShuffle = false) {
     if (trendingLoading) return trendingItems;
@@ -434,9 +475,37 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;
     let cmdkSeq = 0;
-    const hideCmdk = () => { cmdkDropdown.style.display = 'none'; };
+    let cmdkSelectedIdx = -1;
+    let cmdkTriggers = [];
+    const hideCmdk = () => { cmdkDropdown.style.display = 'none'; cmdkSelectedIdx = -1; cmdkTriggers = []; };
+    const syncCmdkSelection = () => {
+      const rows = cmdkDropdown.querySelectorAll('.wl-cmdk-item');
+      rows.forEach((r, idx) => r.classList.toggle('is-selected', idx === cmdkSelectedIdx));
+      if (cmdkSelectedIdx >= 0 && rows[cmdkSelectedIdx]) {
+        rows[cmdkSelectedIdx].scrollIntoView({ block: 'nearest' });
+      }
+    };
     const run = () => { hideCmdk(); superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
     input.addEventListener('keydown', (e) => {
+      if (cmdkDropdown.style.display !== 'none' && cmdkTriggers.length) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          cmdkSelectedIdx = (cmdkSelectedIdx + 1) % cmdkTriggers.length;
+          syncCmdkSelection();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          cmdkSelectedIdx = (cmdkSelectedIdx - 1 + cmdkTriggers.length) % cmdkTriggers.length;
+          syncCmdkSelection();
+          return;
+        }
+        if (e.key === 'Enter' && cmdkSelectedIdx >= 0 && cmdkTriggers[cmdkSelectedIdx]) {
+          e.preventDefault();
+          cmdkTriggers[cmdkSelectedIdx]();
+          return;
+        }
+      }
       if (e.key === 'Enter') run();
       else if (e.key === 'Escape') hideCmdk();
     });
@@ -467,13 +536,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             );
             return;
           }
+          cmdkSelectedIdx = -1;
+          cmdkTriggers = [];
           cmdkDropdown.replaceChildren(
             h('div', { class: 'wl-cmdk-head' },
-              h('span', {}, `⚡ 21st.dev Hızlı Sonuçlar (${items.length})`),
+              h('span', {}, `⚡ Hızlı Sonuçlar (${items.length}) · ↑↓ Seç`),
               h('button', { type: 'button', class: 'wl-cmdk-all-btn', onclick: run }, 'Tüm Sonuçları Gör →'),
               h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
             h('div', { class: 'wl-cmdk-list' },
-              ...items.map((it) => {
+              ...items.map((it, rowIdx) => {
                 const isTv = it.mediaType === 'tv' || it.type === 'SHOW';
                 const defProv = getProvider(it.provider || 'cinema') || getProvider('cinema');
                 const normalized = { ...it, tmdbId: String(it.tmdbId || it.id || '') };
@@ -487,7 +558,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                     if (media) await pickSafe(media);
                   }
                 };
-                return h('div', { class: 'wl-cmdk-item', onclick: triggerPlay },
+                cmdkTriggers.push(triggerPlay);
+                return h('div', {
+                  class: 'wl-cmdk-item',
+                  onmouseenter: () => { cmdkSelectedIdx = rowIdx; syncCmdkSelection(); },
+                  onclick: triggerPlay,
+                },
                   h('img', { class: 'wl-cmdk-poster', src: it.poster || '/static/watchlivo-poster.svg', alt: it.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
                   h('div', { class: 'wl-cmdk-meta wl-cmdk-info' },
                     h('div', { class: 'wl-cmdk-title' }, it.title),
@@ -528,6 +604,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           onclick: () => { catFilter = c.id; renderGrid(); },
         }, h('span', {}, c.label), h('span', { class: 'cat-count' }, String(count)));
       }),
+      !compact ? h('button', {
+        type: 'button',
+        id: 'btn-watch-history-pill',
+        class: 'provider-cat-pill wl-history-pill',
+        title: 'Kişiye Özel İzleme Geçmişim & Kaldığım Yerler',
+        onclick: () => openWatchHistoryModal('all', pickSafe),
+      }, h('span', {}, '🕒 İzleme Geçmişim'), h('span', { class: 'cat-count' }, String(getWatchHistory().length))) : null,
       !compact ? h('button', {
         type: 'button',
         id: 'btn-watchlist-pill',
@@ -606,22 +689,30 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
         }))) : null;
 
-    const historyList = (!compact && !state.mesh) ? getWatchHistory().slice(0, 8) : [];
+    const fullHistory = (!compact && !state.mesh) ? getWatchHistory() : [];
+    const continueOnly = (!compact && !state.mesh) ? getContinueWatching() : [];
+    const historyList = (continueOnly.length ? continueOnly : fullHistory).slice(0, 8);
     const historyRail = historyList.length ? h('section', { class: 'wl-continue-section', id: 'wl-continue-section' },
       h('div', { class: 'wl-continue-head' },
         h('div', { class: 'wl-continue-title-group' },
-          h('span', { class: 'wl-continue-heading' }, '▶ Kaldığın Yerden Devam Et'),
-          h('span', { class: 'wl-continue-cloud-pill' }, '☁️ Cihazlar Arası Senkron')),
-        h('button', {
-          type: 'button',
-          class: 'btn sm ghost continue-clear-btn',
-          title: 'İzleme geçmişini temizle',
-          onclick: () => {
-            clearWatchHistory();
-            renderGrid();
-            toast('🧹 Kaldığın yer geçmişi temizlendi');
-          },
-        }, 'Temizle ×')),
+          h('span', { class: 'wl-continue-heading' }, continueOnly.length ? '▶ Kaldığın Yerden Devam Et' : '🕒 Son İzlediklerim'),
+          h('span', { class: 'wl-continue-cloud-pill' }, isCloudAuthenticated() ? '🔒 Hesabına Özel Bulut Senkron' : '📱 Bu Cihaza Özel')),
+        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('button', {
+            type: 'button',
+            class: 'btn sm ghost',
+            onclick: () => openWatchHistoryModal('all', pickSafe),
+          }, `🕒 Tüm Geçmişim (${fullHistory.length})`),
+          h('button', {
+            type: 'button',
+            class: 'btn sm ghost continue-clear-btn',
+            title: 'İzleme geçmişini temizle',
+            onclick: () => {
+              clearWatchHistory();
+              renderGrid();
+              toast('🧹 Kişisel izleme geçmişin temizlendi');
+            },
+          }, 'Temizle ×'))),
       h('div', { class: 'wl-continue-strip' },
         ...historyList.map((item) => {
           const prov = getProvider(item.catalogProvider || item.provider || 'cinema');
@@ -683,7 +774,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search wl-cmdk-host' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
-      !compact ? h('kbd', { class: 'wl-search-kbd', title: '21st.dev Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
+      !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
       h('button', { class: 'btn primary', onclick: run }, 'Ara'),
       !compact ? cmdkDropdown : null);
 
@@ -1089,4 +1180,202 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     }
   }
   return null;
+}
+
+export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
+  let activeTab = initialTab || 'all';
+  const pickFn = customOnPick || _activeHomePick || (async (media) => {
+    try {
+      const created = await api('/api/rave/meshes', {
+        method: 'POST',
+        body: { name: media?.title || 'Sinema Odası', visibility: 'friends', voipMode: 'everyone', controlMode: 'all', media },
+      });
+      if (created?.id && typeof window.vortexNavigate === 'function') {
+        window.vortexNavigate(`/mesh/${encodeURIComponent(created.id)}`);
+      }
+    } catch (_) {}
+  });
+
+  const root = h('div', { class: 'HistorySelection wl-history-hub' });
+  let modalRef = null;
+
+  const playHistoryItem = async (item) => {
+    const prov = getProvider(item.catalogProvider || item.provider || 'cinema') || getProvider('cinema');
+    const isDone = Boolean(item.completed || Number(item.percent || 0) >= 95);
+    const rawSavedSec = isDone ? 0 : Number(item.currentTime ?? item.position ?? 0);
+    const resumeSec = Number.isFinite(rawSavedSec) && rawSavedSec > 3 ? Math.floor(rawSavedSec) : 0;
+    modalRef?.close?.();
+    if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
+    else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
+    if (item.tmdbId) {
+      const resolved = await resolveCatalogItem(
+        {
+          tmdbId: item.tmdbId,
+          imdbId: item.imdbId,
+          mediaType: item.mediaType || 'movie',
+          title: String(item.title || '').split(' — ')[0],
+          backdrop: item.backdrop || item.thumbnail,
+          poster: item.poster || item.thumbnail,
+          year: item.year || '',
+        },
+        prov || { id: 'cinema', name: 'Sinema+' },
+        item.season || 1,
+        item.episode || 1
+      );
+      if (resolved) {
+        resolved.currentTime = resumeSec;
+        resolved.meshStatePosition = resumeSec;
+        await pickFn(resolved);
+        return;
+      }
+    }
+    await pickFn({ ...item, currentTime: resumeSec, meshStatePosition: resumeSec });
+  };
+
+  const renderHub = () => {
+    const allHist = getWatchHistory();
+    const contHist = getContinueWatching();
+    const favList = getFavorites();
+    const musicList = getMusicHistory();
+    const me = state.self || {};
+    const authed = isCloudAuthenticated();
+
+    const tabs = [
+      { id: 'all', label: `🕒 Tüm Geçmişim (${allHist.length})` },
+      { id: 'continue', label: `▶ Devam Edenler (${contHist.length})` },
+      { id: 'watchlist', label: `🔖 İzleme Listem (${favList.length})` },
+      { id: 'music', label: `🎵 Müzik Geçmişim (${musicList.length})` },
+    ];
+
+    const body = h('div', { class: 'wl-history-body' });
+
+    if (activeTab === 'all' || activeTab === 'continue') {
+      const list = activeTab === 'continue' ? contHist : allHist;
+      if (!list.length) {
+        body.append(h('div', { class: 'wl-dm-empty-placeholder' },
+          h('div', { style: { fontSize: '2rem' } }, '🍿'),
+          h('strong', {}, activeTab === 'continue' ? 'Yarım kalan film veya dizi yok' : 'Henüz izleme geçmişin boş'),
+          h('span', {}, 'Bir odaya girip film, dizi veya video açtığında yalnızca senin hesabına özel olarak buraya kaydedilir.')));
+      } else {
+        body.append(
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' } },
+            h('span', { style: { fontSize: '.76rem', color: 'rgba(255,255,255,0.65)' } }, `${list.length} kişisel kayıt`),
+            h('button', {
+              type: 'button',
+              class: 'btn sm ghost',
+              onclick: () => { clearWatchHistory(); renderHub(); toast('🧹 İzleme geçmişin temizlendi'); },
+            }, '🧹 Tümünü Temizle')),
+          ...list.map((item) => {
+            const rawSavedSec = Number(item.currentTime ?? item.position ?? 0);
+            const resumeSec = Number.isFinite(rawSavedSec) && rawSavedSec > 3 ? Math.floor(rawSavedSec) : 0;
+            const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
+            const isDone = Boolean(item.completed || Number(item.percent || 0) >= 95);
+            const pct = isDone ? 100 : (durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(94, Math.round(Number(item.percent || 10)))));
+            const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
+            const itemKey = item.historyId || item.key || item.tmdbId || item.title;
+            return h('div', { class: 'wl-history-row' },
+              h('img', {
+                class: 'wl-history-poster',
+                src: item.poster || item.thumbnail || item.backdrop || '/static/watchlivo-poster.svg',
+                alt: item.title || '',
+                onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
+              }),
+              h('div', { class: 'wl-history-meta' },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
+                  h('strong', { class: 'wl-history-title' }, item.title || 'Yapım'),
+                  isDone
+                    ? h('span', { class: 'wl-history-badge is-done' }, '✅ Tamamlandı')
+                    : h('span', { class: 'wl-history-badge' }, `%${pct}`)),
+                h('div', { class: 'wl-history-sub' }, `${epTag}${isDone ? 'Baştan izlemeye hazır' : (resumeSec > 0 ? `Kaldığın yer: ${fmtDur(resumeSec)}` : 'Yeni başlatıldı')}${durSec > 0 ? ` / ${fmtDur(durSec)}` : ''}`),
+                h('div', { class: 'wl-continue-prog', style: { marginTop: '5px' } },
+                  h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))),
+              h('div', { class: 'wl-history-actions' },
+                h('button', { type: 'button', class: 'btn primary sm', onclick: () => playHistoryItem(item) }, isDone ? '↺ İzle' : '▶ Devam'),
+                h('button', {
+                  type: 'button',
+                  class: 'btn sm ghost',
+                  title: 'Geçmişten sil',
+                  onclick: () => { removeWatchProgress(itemKey); renderHub(); },
+                }, '✕')));
+          })
+        );
+      }
+    } else if (activeTab === 'watchlist') {
+      if (!favList.length) {
+        body.append(h('div', { class: 'wl-dm-empty-placeholder' },
+          h('div', { style: { fontSize: '2rem' } }, '🔖'),
+          h('strong', {}, 'İzleme listen henüz boş'),
+          h('span', {}, 'Beğendiğin film ve dizilerde 🔖 butonuna basarak kişisel listene ekleyebilirsin.')));
+      } else {
+        body.append(...favList.map((fav) => h('div', { class: 'wl-history-row' },
+          h('img', { class: 'wl-history-poster', src: fav.poster || fav.backdrop || '/static/watchlivo-poster.svg', alt: fav.title || '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+          h('div', { class: 'wl-history-meta' },
+            h('strong', { class: 'wl-history-title' }, fav.title || 'Yapım'),
+            h('div', { class: 'wl-history-sub' }, `${fav.year || '2025'} · ${fav.mediaType === 'tv' ? '📺 Dizi' : '🎬 Film'}`)),
+          h('div', { class: 'wl-history-actions' },
+            h('button', { type: 'button', class: 'btn primary sm', onclick: () => playHistoryItem(fav) }, '▶ Başlat'),
+            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { toggleFavoriteMedia(fav); renderHub(); } }, '✕')))));
+      }
+    } else {
+      if (!musicList.length) {
+        body.append(h('div', { class: 'wl-dm-empty-placeholder' }, '🎵 Müzik geçmişin boş.'));
+      } else {
+        body.append(
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '6px' } },
+            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { clearMusicHistory(); renderHub(); } }, '🧹 Müzik Geçmişini Temizle')),
+          ...musicList.map((m) => h('div', { class: 'wl-history-row' },
+            h('img', { class: 'wl-history-poster', src: m.poster || m.thumbnail || '/static/watchlivo-poster.svg', alt: m.title || '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+            h('div', { class: 'wl-history-meta' },
+              h('strong', { class: 'wl-history-title' }, m.title || m.songTitle || 'Parça'),
+              h('div', { class: 'wl-history-sub' }, `${m.artist || ''} · ${m.genre || 'Müzik'}`)),
+            h('div', { class: 'wl-history-actions' },
+              h('button', {
+                type: 'button',
+                class: 'btn primary sm',
+                onclick: async () => {
+                  modalRef?.close?.();
+                  const resolved = await resolveMusicItem(m, getProvider('music'));
+                  if (resolved) await pickFn(resolved);
+                },
+              }, '▶ Dinle'))))
+        );
+      }
+    }
+
+    root.replaceChildren(
+      h('div', { class: 'wl-history-isolation-banner' },
+        h('span', {}, authed
+          ? `🔒 Kişiye Özel Bulut Senkron (@${String(me.handle || me.name || 'hesap').replace(/^@+/, '')}) — Yalnızca sana görünür`
+          : '📱 Bu Cihaza Özel Geçmiş — Hesabınla giriş yaparak tüm cihazlarında senkronla'),
+        !authed ? h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: () => { modalRef?.close?.(); document.getElementById('nav-account-btn')?.click(); },
+        }, '🔑 Giriş Yap') : null),
+      h('div', { class: 'wl-history-tabs' },
+        ...tabs.map((t) => h('button', {
+          type: 'button',
+          class: `wl-history-tab ${activeTab === t.id ? 'active' : ''}`,
+          onclick: () => { activeTab = t.id; renderHub(); },
+        }, t.label))),
+      body
+    );
+  };
+
+  renderHub();
+  if (isCloudAuthenticated()) {
+    syncCloudUserMedia(true).then(() => { if (root.isConnected) renderHub(); }).catch(() => {});
+  }
+
+  modalRef = popup({
+    title: '🕒 Kişisel İzleme Geçmişim & Listem',
+    content: root,
+    dismissable: true,
+    wide: true,
+    options: [{ label: 'Kapat', class: 'btn' }],
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.vortexOpenWatchHistory = openWatchHistoryModal;
 }

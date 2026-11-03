@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js?v=20261103_v82';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v83';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -135,7 +135,10 @@ export function toast(text, ms = 2800, opts = null) {
   const targetHost = host || document.body;
   targetHost.querySelectorAll('.wl-dynamic-toast').forEach((old) => old.remove());
   targetHost.append(t);
-  setTimeout(() => t.remove(), ms);
+  setTimeout(() => {
+    t.classList.add('is-leaving');
+    setTimeout(() => t.remove(), 190);
+  }, ms);
 }
 
 if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
@@ -183,9 +186,13 @@ export function popup({ title, message, options = [], content = null, dismissabl
       close();
     }
   };
+  let closing = false;
   const close = () => {
+    if (closing) return;
+    closing = true;
     window.removeEventListener('keydown', onKey);
-    back.remove();
+    back.classList.add('is-closing');
+    setTimeout(() => back.remove(), 175);
   };
   if (dismissable) window.addEventListener('keydown', onKey);
   const drawerHandle = h('div', {
@@ -212,6 +219,33 @@ export function popup({ title, message, options = [], content = null, dismissabl
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
       h('button', { class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(), onclick: async () => { const fn = o.onClick || o.action; const keep = await fn?.(); if (keep !== true) close(); } }, o.label))) : null);
   const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
+  if (dismissable) {
+    let startY = 0, deltaY = 0, dragging = false;
+    drawerHandle.addEventListener('touchstart', (e) => {
+      if (!e.touches?.[0]) return;
+      startY = e.touches[0].clientY;
+      deltaY = 0;
+      dragging = true;
+      card.style.transition = 'none';
+    }, { passive: true });
+    drawerHandle.addEventListener('touchmove', (e) => {
+      if (!dragging || !e.touches?.[0]) return;
+      deltaY = Math.max(0, e.touches[0].clientY - startY);
+      card.style.transform = `translateY(${deltaY}px)`;
+    }, { passive: true });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      card.style.transition = '';
+      if (deltaY > 88) {
+        close();
+      } else {
+        card.style.transform = '';
+      }
+    };
+    drawerHandle.addEventListener('touchend', endDrag, { passive: true });
+    drawerHandle.addEventListener('touchcancel', endDrag, { passive: true });
+  }
   root.append(back);
   return { close, card };
 }
@@ -307,15 +341,15 @@ export function buildThemeStudio() {
     const prefs = state.uiPrefs || { theme: 'supabase', ambient: 'low', density: 'comfortable', cardStyle: 'glass' };
 
     wrap.replaceChildren(
-      h('div', { class: 'theme-sec-title' }, '🎨 21st.dev Onaylı 8 Sinema Teması (MiroFish Seçkisi)'),
+      h('div', { class: 'theme-sec-title' }, '🎨 Sinema Temaları'),
       h('div', { class: 'theme-grid theme-grid-8' }, THEME_SCHEMAS.map((t) =>
         h('button', {
           type: 'button',
           class: `theme-card ${prefs.theme === t.id ? 'on' : ''}`,
           'data-theme-id': t.id,
-          onclick: () => {
-            setUiPref({ theme: t.id });
-            draw();
+          onclick: (e) => {
+            transitionTheme(t.id, e);
+            setTimeout(() => draw(), 20);
             toast(`🎨 Tema uygulandı: ${t.name}`);
           },
         },

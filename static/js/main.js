@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set } from './store.js?v=20261103_v82';
-import { loadProfile, saveProfile, profileSetup, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v82';
-import { renderHome, destroyHome } from './views/home.js?v=20261103_v82';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v82';
-import { api } from './api.js?v=20261103_v82';
-import { h, toast } from './ui.js?v=20261103_v82';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v83';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v83';
+import { renderHome, destroyHome } from './views/home.js?v=20261103_v83';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v83';
+import { api } from './api.js?v=20261103_v83';
+import { h, toast } from './ui.js?v=20261103_v83';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -202,15 +202,80 @@ async function boot() {
   checkRedirectAuth().then((redirectProf) => {
     if (redirectProf) start(redirectProf);
   }).catch(() => {});
-  if ('serviceWorker' in navigator) {
-    initRaveNotifications();
-  }
+  initPresenceLifecycle();
+  initRaveNotifications();
+}
+
+function playNotifChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    if (ctx.state === 'suspended') { ctx.close?.(); return; }
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, now);
+    osc.frequency.exponentialRampToValueAtTime(880, now + 0.14);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.exponentialRampToValueAtTime(0.06, now + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.36);
+    setTimeout(() => ctx.close?.().catch?.(() => {}), 500);
+  } catch (_) {}
+}
+
+function initPresenceLifecycle() {
+  const sendBeat = (overrideState = '') => {
+    const extra = overrideState ? { state: overrideState } : {};
+    pushPresenceHeartbeat(extra).catch(() => {});
+  };
+  setTimeout(() => {
+    sendBeat();
+    syncSocialState(true).catch(() => {});
+  }, 450);
+
+  setInterval(() => {
+    sendBeat();
+    syncSocialState(false).catch(() => {});
+  }, 24000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      sendBeat();
+      syncSocialState(true).catch(() => {});
+    } else if (!state.mesh?.id) {
+      sendBeat('idle');
+    }
+  });
+
+  const markOffline = () => {
+    const s = state.self;
+    const uid = String(s?.uid || s?.id || '').trim();
+    if (!uid) return;
+    try {
+      const hdrs = { 'Content-Type': 'application/json' };
+      if (s?.authToken) hdrs.Authorization = `Bearer ${s.authToken}`;
+      fetch('/api/rave/social/presence', {
+        method: 'POST',
+        headers: hdrs,
+        body: JSON.stringify({ uid, state: 'offline' }),
+        keepalive: true,
+      }).catch(() => {});
+    } catch (_) {}
+  };
+  window.addEventListener('pagehide', markOffline);
+  window.addEventListener('beforeunload', markOffline);
 }
 
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261103_v82').then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261103_v83').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -225,46 +290,94 @@ function initRaveNotifications() {
   const ensureStack = () => {
     let st = document.getElementById('rave-notif-stack');
     if (!st) {
-      st = h('div', { class: 'rave-notif-stack', id: 'rave-notif-stack' });
+      st = h('div', { class: 'rave-notif-stack NotificationWindowApp', id: 'rave-notif-stack' });
       document.body.appendChild(st);
     }
     return st;
   };
 
   window.vortexShowNotificationCard = (payload = {}) => {
-    const title = String(payload.title || 'Watchlivo — Sinema Daveti');
-    const body = String(payload.body || 'Arkadaşın seni sinema odasına çağırıyor!');
+    const nType = String(payload.type || 'room_invite');
+    const title = String(payload.title || 'Watchlivo Bildirimi');
+    const body = String(payload.body || 'Yeni bir bildirim aldın!');
     const roomId = String(payload.roomId || '');
     const targetUrl = String(payload.url || (roomId ? `/#/mesh/${encodeURIComponent(roomId)}` : ''));
     const stack = ensureStack();
     while (stack.childElementCount >= 3) {
       stack.firstElementChild?.remove();
     }
-    const card = h('div', { class: 'rave-notif-card' },
-      h('div', { class: 'rave-notif-icon' }, payload.type === 'dm' ? '💬' : '🎬'),
-      h('div', { class: 'rave-notif-body' },
-        h('div', { class: 'rave-notif-title' }, title),
-        h('div', { class: 'rave-notif-text' }, body)),
-      h('div', { class: 'rave-notif-actions' },
-        (roomId || targetUrl) ? h('button', {
+    playNotifChime();
+
+    const closeCard = () => {
+      card.classList.add('is-leaving');
+      setTimeout(() => { try { card.remove(); } catch (_) {} }, 180);
+    };
+
+    const actionBtns = [];
+    if (nType === 'friend_request' && (payload.requestId || payload.fromUid)) {
+      actionBtns.push(
+        h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: async () => {
+            closeCard();
+            const r = await updateFriendAction('accept', { requestId: payload.requestId || '', targetUid: payload.fromUid || '' });
+            if (r?.ok) toast(`🎉 ${payload.fromName || 'Kullanıcı'} ile artık karşılıklı arkadaşsınız!`);
+          },
+        }, '✓ Kabul Et'),
+        h('button', {
+          type: 'button',
+          class: 'btn sm',
+          onclick: async () => {
+            closeCard();
+            await updateFriendAction('decline', { requestId: payload.requestId || '', targetUid: payload.fromUid || '' });
+          },
+        }, 'Reddet')
+      );
+    } else if ((nType === 'dm' || nType === 'poke' || nType === 'friend_accepted') && payload.fromUid && !roomId) {
+      actionBtns.push(
+        h('button', {
           type: 'button',
           class: 'btn sm primary',
           onclick: () => {
-            card.remove();
+            closeCard();
+            openDmModal(payload.fromUid);
+          },
+        }, '💬 Mesaj Aç')
+      );
+    } else if (roomId || targetUrl) {
+      actionBtns.push(
+        h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: () => {
+            closeCard();
             if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
             else if (targetUrl) {
               const cleanHash = targetUrl.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
               if (cleanHash) navigate(cleanHash);
             }
           },
-        }, 'Katıl') : null,
-        h('button', {
-          type: 'button',
-          class: 'btn sm ghost',
-          onclick: () => card.remove(),
-        }, '✕')));
+        }, '▶ Odaya Katıl')
+      );
+    }
+    actionBtns.push(h('button', { type: 'button', class: 'btn sm ghost', onclick: closeCard }, '✕'));
+
+    const leadVisual = payload.fromName
+      ? avatar({ name: payload.fromName, color: payload.color || '#27dcc8', avatarUrl: payload.avatarUrl || '' }, 38, { online: true })
+      : h('div', { class: 'rave-notif-icon' }, nType === 'dm' ? '💬' : (nType === 'friend_request' ? '👥' : '🎬'));
+
+    const card = h('div', { class: `rave-notif-card is-${nType}` },
+      leadVisual,
+      h('div', { class: 'rave-notif-body' },
+        h('div', { class: 'rave-notif-title' }, title),
+        h('div', { class: 'rave-notif-text' }, body)),
+      payload.poster ? h('img', { src: payload.poster, alt: '', class: 'rave-notif-poster', onerror: (e) => e.currentTarget.remove() }) : null,
+      h('div', { class: 'rave-notif-actions' }, ...actionBtns),
+      h('div', { class: 'rave-notif-timer' }, h('div', { class: 'rave-notif-timer-bar' }))
+    );
     stack.appendChild(card);
-    setTimeout(() => { try { card.remove(); } catch (e) { /* ignore */ } }, 9000);
+    setTimeout(() => { if (card.isConnected) closeCard(); }, 12000);
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (document.visibilityState === 'hidden' || payload.forceOsNotification)) {
       if (swReg?.active) {
@@ -275,6 +388,7 @@ function initRaveNotifications() {
           n.onclick = () => {
             window.focus();
             if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
+            else if (payload.fromUid) openDmModal(payload.fromUid);
             n.close();
           };
         } catch (e) { /* ignore */ }
@@ -334,23 +448,53 @@ function initRaveNotifications() {
     return res;
   };
 
-  let lastNotifTs = Date.now() / 1000;
+  let lastNotifTs = (Date.now() / 1000) - 25;
   const seenNotifIds = new Set();
+  try {
+    const savedSeen = JSON.parse(sessionStorage.getItem('wl_seen_notifs') || '[]');
+    if (Array.isArray(savedSeen)) savedSeen.forEach((id) => seenNotifIds.add(id));
+  } catch (_) {}
+
+  const rememberSeen = (id) => {
+    seenNotifIds.add(id);
+    try {
+      sessionStorage.setItem('wl_seen_notifs', JSON.stringify(Array.from(seenNotifIds).slice(-120)));
+    } catch (_) {}
+  };
+
   setInterval(async () => {
-    const uid = state.self?.uid || state.self?.id || state.clientId || 'guest_default';
+    const uid = state.self?.uid || state.self?.id || state.clientId || '';
+    if (!uid) return;
     const name = state.self?.name || '';
     const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
-    if (res?.ok && Array.isArray(res.notifications)) {
+    if (!res?.ok) return;
+
+    const prevReq = Number(state.social?.requestCount || 0);
+    const prevUnr = Number(state.social?.totalUnread || 0);
+    const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
+    const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
+    if (nextReq !== prevReq || nextUnr !== prevUnr) {
+      set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
+    }
+
+    if (Array.isArray(res.notifications) && res.notifications.length) {
+      let needSocialRefresh = false;
       for (const item of res.notifications) {
         if (!item?.id || seenNotifIds.has(item.id)) continue;
-        seenNotifIds.add(item.id);
+        rememberSeen(item.id);
         lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
-        if (item.roomId && item.roomId === state.mesh?.id) continue;
+        if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
+          needSocialRefresh = true;
+        }
+        if (item.type === 'invite_cancelled') continue;
+        if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
+        if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
         window.vortexShowNotificationCard?.({ ...item, forceOsNotification: true });
       }
-      if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+      if (needSocialRefresh) syncSocialState(true).catch(() => {});
     }
-  }, 12000);
+    if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+  }, 4500);
 }
 
 boot();

@@ -5127,3 +5127,30 @@ html.is-android-pip .rave-subtitle-cue {
   font-size: clamp(9px, 4.2vw, 14px) !important;
   padding: 2px 6px !important;
 }
+
+/* v83: Theme-Synchronized Room Accents & In-Room Friend Invite Rows */
+.fs-chat-pill {
+  border-color: color-mix(in srgb, var(--accent, #27dcc8) 38%, rgba(255, 255, 255, 0.12));
+}
+.wl-room-invite-friends {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin: 4px 0;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  max-height: 240px;
+  overflow-y: auto;
+}
+.wl-room-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}

@@ -1,10 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261103_v82';
-import { avatar } from '../profile.js?v=20261103_v82';
-import { getProvider } from '../providers.js?v=20261103_v82';
-import { api, qs } from '../api.js?v=20261103_v82';
-import { state, getFriends, isFriend, toggleFriend, addFriendByName, getRecentRoomsKey, getRoomSnapshotsKey } from '../store.js?v=20261103_v82';
-import { expectedPosition } from '../sync.js?v=20261103_v82';
+import { h, icons, popup, toast } from '../ui.js?v=20261103_v83';
+import { avatar, openDmModal } from '../profile.js?v=20261103_v83';
+import { getProvider } from '../providers.js?v=20261103_v83';
+import { api, qs } from '../api.js?v=20261103_v83';
+import {
+  state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
+  syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
+} from '../store.js?v=20261103_v83';
+import { expectedPosition } from '../sync.js?v=20261103_v83';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -220,152 +223,370 @@ export async function fetchRooms() {
   return lastLobbyRooms;
 }
 
-export function openFriendsManagerModal(onRefresh) {
-  const box = h('div', { class: 'friends-manager-modal', style: { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 'min(420px, 86vw)' } });
-  const input = h('input', {
-    class: 'input',
-    id: 'friend-name-input',
-    placeholder: 'Kullanıcı adı veya @etiket yaz (örn. Berk, @elif)...',
-    style: { flex: '1' },
-  });
-
+export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
+  const box = h('div', { class: 'friends-manager-modal wl-rave-friends-hub', style: { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 'min(480px, 90vw)' } });
+  let activeTab = initialTab;
+  let searchQuery = '';
+  let searchResults = [];
+  let searching = false;
+  let searchTimer = null;
+  const sentRoomInvites = new Map();
   let modalRef = null;
+  let liveTimer = null;
+
+  const findFriendActiveRoom = (f) => {
+    if (f.watchingRoom?.roomId) {
+      return { id: f.watchingRoom.roomId, name: f.watchingRoom.roomName, media: { title: f.watchingRoom.mediaTitle, poster: f.watchingRoom.mediaPoster } };
+    }
+    const fn = String(f.name || '').toLowerCase();
+    return (lastLobbyRooms || []).find((r) => !r.curated && (
+      String(r.creator || '').toLowerCase() === fn ||
+      (r.participants || []).some((p) => String(p.name || '').toLowerCase() === fn)
+    ));
+  };
+
+  const renderFriendRow = (f) => {
+    const activeRoom = findFriendActiveRoom(f);
+    const inMyRoom = Boolean(state.mesh?.id && activeRoom?.id !== state.mesh.id);
+    const invId = sentRoomInvites.get(f.uid);
+    const pState = f.presenceState || (f.online ? 'online' : 'offline');
+    const dotClass = `wl-pres-dot is-${pState}`;
+    return h('div', { class: `wl-friend-row is-${pState}` },
+      h('div', { class: 'wl-friend-main' },
+        h('div', { class: 'wl-friend-avatar-wrap' },
+          avatar(f, 36, { online: Boolean(f.online) }),
+          h('span', { class: dotClass, title: f.status || '' })),
+        h('div', { class: 'wl-friend-info' },
+          h('div', { class: 'wl-friend-title-line' },
+            h('b', {}, f.name || 'İzleyici'),
+            f.handle ? h('span', { class: 'wl-friend-handle' }, f.handle) : null,
+            h('button', {
+              type: 'button',
+              class: `wl-best-star ${f.bestFriend ? 'on' : ''}`,
+              title: f.bestFriend ? 'Yakın arkadaşlardan çıkar' : 'Yakın arkadaş olarak işaretle',
+              onclick: async () => {
+                await updateFriendAction('toggle_best', { targetUid: f.uid });
+                renderModalContent();
+              },
+            }, f.bestFriend ? '⭐' : '☆')),
+          h('div', { class: `wl-friend-status is-${pState}` },
+            activeRoom ? `🎬 ${activeRoom.media?.title || activeRoom.name} izliyor` : (f.status || (f.online ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı'))))),
+      h('div', { class: 'wl-friend-actions' },
+        activeRoom ? h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          onclick: () => {
+            modalRef?.close?.();
+            rememberRoom(activeRoom);
+            window.vortexNavigate?.(`/mesh/${encodeURIComponent(activeRoom.id)}`);
+          },
+        }, '▶ Katıl') : null,
+        inMyRoom ? h('button', {
+          type: 'button',
+          class: `btn sm ${invId ? '' : 'primary'}`,
+          onclick: async () => {
+            if (invId) {
+              await sendRoomInvite({ action: 'cancel', inviteId: invId, targetUid: f.uid, roomId: state.mesh?.id });
+              sentRoomInvites.delete(f.uid);
+              toast('Davet geri çekildi');
+            } else {
+              const res = await sendRoomInvite({ action: 'send', targetUid: f.uid });
+              if (res?.ok && res.invites?.[0]?.id) {
+                sentRoomInvites.set(f.uid, res.invites[0].id);
+                toast(`📩 ${f.name} odaya davet edildi!`);
+              }
+            }
+            renderModalContent();
+          },
+        }, invId ? '✓ Davetli · İptal' : '📩 Davet Et') : null,
+        h('button', {
+          type: 'button',
+          class: 'btn sm',
+          title: 'Özel Mesaj (DM)',
+          onclick: () => {
+            modalRef?.close?.();
+            openDmModal(f.uid);
+          },
+        }, '💬'),
+        h('button', {
+          type: 'button',
+          class: 'btn sm ghost',
+          title: 'El Salla',
+          onclick: async () => {
+            const r = await sendRoomInvite({ action: 'poke', targetUid: f.uid });
+            if (r?.ok) toast(`👋 ${f.name} kişisine el salladın!`);
+          },
+        }, '👋'),
+        h('button', {
+          type: 'button',
+          class: 'btn sm ghost',
+          title: 'Arkadaşlıktan çıkar',
+          onclick: async () => {
+            await updateFriendAction('remove', { targetUid: f.uid });
+            toast(`${f.name} arkadaş listesinden çıkarıldı`);
+            renderModalContent();
+            onRefresh?.();
+          },
+        }, '×')));
+  };
 
   const renderModalContent = () => {
+    const soc = state.social || {};
     const friends = getFriends();
-    const myName = (state.self?.name || '').trim().toLowerCase();
-    const onlineCandidates = [];
-    const seenNames = new Set([myName, 'watchlivo canlı tv', 'watchlivo canlı radyo', 'watchlivo 7/24']);
+    const onlineFriends = friends.filter((f) => f.online);
+    const offlineFriends = friends.filter((f) => !f.online);
+    const inReqs = soc.requests || [];
+    const outReqs = soc.outgoingRequests || [];
+    const blocked = soc.blocked || [];
+    const priv = soc.privacy || { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' };
 
-    for (const p of (state.mesh?.participants || [])) {
-      const nm = (p?.name || '').trim();
-      if (!nm || p.id === state.clientId || p.id === 'kinox_bot' || seenNames.has(nm.toLowerCase())) continue;
-      seenNames.add(nm.toLowerCase());
-      onlineCandidates.push({ id: p.id, name: nm, color: p.color || '#27DCC8', roomName: state.mesh?.name || 'Bu Odada', roomId: state.mesh?.id });
-    }
-    for (const r of (lastLobbyRooms || [])) {
-      if (r.curated) continue;
-      for (const p of (r.participants || [])) {
-        const nm = (p?.name || '').trim();
-        if (!nm || p.id === 'kinox_bot' || seenNames.has(nm.toLowerCase())) continue;
-        seenNames.add(nm.toLowerCase());
-        onlineCandidates.push({ id: p.id, name: nm, color: p.color || '#6366f1', roomName: r.media?.title || r.name || 'Aktif Oda', roomId: r.id });
-      }
-    }
+    const tabBar = h('div', { class: 'wl-social-tabs' },
+      [
+        ['friends', `👥 Arkadaşlar (${friends.length})`, onlineFriends.length ? `🟢 ${onlineFriends.length}` : ''],
+        ['requests', '🔔 İstekler', inReqs.length ? String(inReqs.length) : ''],
+        ['search', '🔎 Kullanıcı Ara & Ekle', ''],
+        ['privacy', '🛡️ Gizlilik', ''],
+      ].map(([id, lbl, badgeTxt]) => h('button', {
+        type: 'button',
+        class: `wl-social-tab ${activeTab === id ? 'on' : ''}`,
+        onclick: () => { activeTab = id; renderModalContent(); },
+      }, h('span', {}, lbl), badgeTxt ? h('span', { class: 'wl-social-tab-badge' }, badgeTxt) : null)));
 
-    const doAdd = () => {
-      const raw = input.value.trim().replace(/^@+/, '');
-      if (!raw) {
-        toast('Lütfen eklenecek arkadaşının adını yaz');
-        input.focus();
-        return;
-      }
-      addFriendByName(raw);
-      input.value = '';
-      toast(`👥 ${raw} arkadaş listene eklendi!`);
-      renderModalContent();
-      if (onRefresh) onRefresh();
-    };
-
-    input.onkeydown = (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        doAdd();
-      }
-    };
-
-    const findFriendActiveRoom = (f) => {
-      const fn = String(f.name || '').toLowerCase();
-      return (lastLobbyRooms || []).find((r) => !r.curated && (
-        String(r.creator || '').toLowerCase() === fn ||
-        (r.participants || []).some((p) => String(p.name || '').toLowerCase() === fn)
-      ));
-    };
-
-    box.replaceChildren(
-      h('div', { class: 'dim', style: { fontSize: '.82rem', lineHeight: '1.45' } },
-        'Arkadaş eklediğin kişilerin "Sadece Arkadaşlar" odalarını görebilir ve tek tıkla odalarına katılabilirsin.'),
-      h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-        input,
-        h('button', { type: 'button', class: 'btn primary', id: 'btn-confirm-add-friend', onclick: doAdd }, '+ Arkadaş Ekle')),
-      ...(onlineCandidates.length ? [h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-        h('div', { style: { fontSize: '.75rem', fontWeight: '800', color: '#27DCC8', letterSpacing: '.04em' } }, '🟢 ODADAKİ & ÇEVRİMİÇİ KİŞİLER (TEK TIKLA EKLE)'),
-        h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '150px', overflowY: 'auto' } },
-          ...onlineCandidates.slice(0, 10).map((cand) => {
-            const added = isFriend(cand);
-            return h('div', {
-              style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '7px 10px', borderRadius: '10px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' },
+    let bodyNode = null;
+    if (activeTab === 'friends') {
+      bodyNode = h('div', { class: 'wl-social-pane' },
+        state.mesh?.id && onlineFriends.length ? h('button', {
+          type: 'button',
+          class: 'btn primary sm',
+          style: { width: '100%', justifyContent: 'center' },
+          onclick: async () => {
+            const r = await sendRoomInvite({ action: 'invite_all_online' });
+            toast(r?.sentCount ? `📩 ${r.sentCount} çevrimiçi arkadaşın odaya çağrıldı!` : 'Çevrimiçi arkadaş bulunamadı');
+          },
+        }, `🔔 Tüm Çevrimiçi Arkadaşları Odaya Çağır (${onlineFriends.length})`) : null,
+        friends.length ? h('div', { class: 'wl-friends-sections' },
+          onlineFriends.length ? h('div', { class: 'wl-friends-sec' },
+            h('div', { class: 'wl-friends-sec-head' }, `🟢 ÇEVRİMİÇİ & ODADA (${onlineFriends.length})`),
+            ...onlineFriends.map(renderFriendRow)) : null,
+          offlineFriends.length ? h('div', { class: 'wl-friends-sec' },
+            h('div', { class: 'wl-friends-sec-head' }, `⚫ ÇEVRİMDIŞI (${offlineFriends.length})`),
+            ...offlineFriends.map(renderFriendRow)) : null,
+        ) : h('div', { class: 'lobby-empty', style: { padding: '20px 14px', fontSize: '.83rem' } },
+          'Henüz onaylı arkadaşın yok. ',
+          h('button', { type: 'button', class: 'btn sm primary', style: { marginTop: '10px' }, onclick: () => { activeTab = 'search'; renderModalContent(); } }, '🔎 Kullanıcı Adıyla İlk Arkadaşını Ekle')));
+    } else if (activeTab === 'requests') {
+      bodyNode = h('div', { class: 'wl-social-pane' },
+        h('div', { class: 'wl-friends-sec-head' }, `📥 GELEN ARKADAŞLIK İSTEKLERİ (${inReqs.length})`),
+        inReqs.length ? h('div', { class: 'wl-friends-sec' }, ...inReqs.map((req) => h('div', { class: 'wl-friend-row' },
+          h('div', { class: 'wl-friend-main' },
+            avatar({ name: req.fromName, color: req.color, avatarUrl: req.avatarUrl }, 36),
+            h('div', { class: 'wl-friend-info' },
+              h('b', {}, req.fromName || 'İzleyici'),
+              h('div', { class: 'wl-friend-handle' }, `${req.fromHandle || ''} · Onay bekliyor`))),
+          h('div', { class: 'wl-friend-actions' },
+            h('button', {
+              type: 'button', class: 'btn sm primary',
+              onclick: async () => {
+                await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
+                toast(`🎉 ${req.fromName} ile artık arkadaşsınız!`);
+                renderModalContent();
+                onRefresh?.();
+              },
+            }, '✓ Kabul Et'),
+            h('button', {
+              type: 'button', class: 'btn sm ghost',
+              onclick: async () => {
+                await updateFriendAction('decline', { requestId: req.id, targetUid: req.fromUid });
+                toast('İstek reddedildi');
+                renderModalContent();
+              },
+            }, '✕ Reddet'))))) : h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '6px 2px' } }, 'Bekleyen gelen arkadaşlık isteği yok.'),
+        h('div', { class: 'wl-friends-sec-head', style: { marginTop: '10px' } }, `📤 GÖNDERİLEN İSTEKLER (${outReqs.length})`),
+        outReqs.length ? h('div', { class: 'wl-friends-sec' }, ...outReqs.map((req) => h('div', { class: 'wl-friend-row' },
+          h('div', { class: 'wl-friend-main' },
+            avatar({ name: req.toName, color: req.color, avatarUrl: req.avatarUrl }, 34),
+            h('div', { class: 'wl-friend-info' },
+              h('b', {}, req.toName || 'İzleyici'),
+              h('div', { class: 'wl-friend-handle' }, `${req.toHandle || ''} · ⏳ Karşı tarafın onayı bekleniyor`))),
+          h('button', {
+            type: 'button', class: 'btn sm ghost',
+            onclick: async () => {
+              await updateFriendAction('cancel', { requestId: req.id, targetUid: req.toUid });
+              toast('Gönderilen istek iptal edildi');
+              renderModalContent();
             },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: '0' } },
-                avatar(cand, 28),
-                h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: '0' } },
-                  h('b', { style: { fontSize: '.82rem', color: '#F5F7FA' } }, cand.name),
-                  h('span', { style: { fontSize: '.7rem', color: '#A0A9B8', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, `🎬 ${cand.roomName}`))),
-              h('button', {
-                type: 'button',
-                class: `btn sm ${added ? '' : 'primary'}`,
-                onclick: () => {
-                  const nowF = toggleFriend(cand);
-                  toast(nowF ? `👥 ${cand.name} arkadaşlarına eklendi` : `${cand.name} arkadaşlardan çıkarıldı`);
-                  renderModalContent();
-                  if (onRefresh) onRefresh();
-                },
-              }, added ? '✓ Arkadaş' : '+ Arkadaş Ekle'));
-          })))] : []),
-      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px' } },
-        h('div', { style: { fontSize: '.75rem', fontWeight: '800', color: '#A0A9B8', letterSpacing: '.04em' } }, `👥 ARKADAŞ LİSTEM (${friends.length})`),
-        friends.length
-          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '210px', overflowY: 'auto' } },
-              ...friends.map((f) => {
-                const activeRoom = findFriendActiveRoom(f);
-                return h('div', {
-                  style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', padding: '8px 10px', borderRadius: '10px', background: 'rgba(16,20,29,0.85)', border: '1px solid rgba(255,255,255,0.08)' },
-                },
-                  h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', minWidth: '0' } },
-                    avatar(f, 28),
-                    h('div', { style: { display: 'flex', flexDirection: 'column', minWidth: '0' } },
-                      h('b', { style: { fontSize: '.83rem', color: '#F5F7FA' } }, f.name),
-                      h('span', { style: { fontSize: '.7rem', color: activeRoom ? '#27DCC8' : '#A0A9B8' } },
-                        activeRoom ? `🟢 Odada: ${activeRoom.media?.title || activeRoom.name}` : 'Çevrimdışı / Beklemede'))),
-                  h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexShrink: '0' } },
-                    activeRoom ? h('button', {
-                      type: 'button',
-                      class: 'btn sm primary',
-                      onclick: () => {
-                        modalRef?.close?.();
-                        rememberRoom(activeRoom);
-                        window.vortexNavigate(`/mesh/${encodeURIComponent(activeRoom.id)}`);
-                      },
-                    }, '🎬 Odasına Katıl') : null,
-                    h('button', {
-                      type: 'button',
-                      class: 'btn sm ghost',
-                      title: 'Arkadaşlardan çıkar',
-                      onclick: () => {
-                        toggleFriend(f);
-                        toast(`${f.name} arkadaş listesinden çıkarıldı`);
-                        renderModalContent();
-                        if (onRefresh) onRefresh();
-                      },
-                    }, 'Çıkar ×')));
-              }))
-          : h('div', { class: 'lobby-empty', style: { padding: '14px', fontSize: '.8rem' } },
-              'Henüz arkadaş eklemedin. Yukarıdan kullanıcı adı yazarak hemen ilk arkadaşını ekle!')));
+          }, 'İptal Et')))) : h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '6px 2px' } }, 'Onay bekleyen gönderilmiş isteğin yok.'));
+    } else if (activeTab === 'search') {
+      const sInp = h('input', {
+        class: 'input', id: 'friend-name-input', value: searchQuery,
+        placeholder: '@kullaniciadi, isim veya e-posta yaz...',
+        style: { flex: '1' },
+      });
+      const triggerSendReq = async (ident, extra = {}) => {
+        const cleanIdent = String(ident || sInp.value || '').trim();
+        if (!cleanIdent) { toast('Lütfen kullanıcı adı (@handle) veya e-posta girin'); sInp.focus(); return; }
+        const r = await sendFriendRequest(cleanIdent, extra);
+        if (!r?.ok) { toast(`⚠️ ${r?.error || 'Kullanıcı bulunamadı'}`); return; }
+        if (r.alreadyFriend) toast('Bu kullanıcı zaten arkadaş listende ✓');
+        else if (r.mutualAccepted) toast('🎉 Karşılıklı istek onaylandı, artık arkadaşsınız!');
+        else toast(`📨 ${cleanIdent} hesabına arkadaşlık isteği gönderildi (onay bekleniyor)`);
+        if (searchQuery) searchResults = await searchUsersServer(searchQuery);
+        renderModalContent();
+        onRefresh?.();
+      };
+      sInp.addEventListener('input', () => {
+        searchQuery = sInp.value.trim();
+        clearTimeout(searchTimer);
+        if (searchQuery.length < 2) { searchResults = []; return; }
+        searching = true;
+        searchTimer = setTimeout(async () => {
+          searchResults = await searchUsersServer(searchQuery);
+          searching = false;
+          renderModalContent();
+          const newInp = box.querySelector('#friend-name-input');
+          if (newInp) { newInp.focus(); newInp.setSelectionRange(searchQuery.length, searchQuery.length); }
+        }, 260);
+      });
+      sInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); triggerSendReq(sInp.value); } });
+      bodyNode = h('div', { class: 'wl-social-pane' },
+        h('div', { class: 'dim', style: { fontSize: '.8rem' } }, 'Arkadaş eklediğin kişiye onay isteği gider. Onaylandığında gerçek zamanlı mesajlaşabilir, çevrimiçi durumunu görebilir ve odaya davet edebilirsin.'),
+        h('div', { style: { display: 'flex', gap: '8px' } },
+          sInp,
+          h('button', { type: 'button', class: 'btn primary', id: 'btn-confirm-add-friend', onclick: () => triggerSendReq(sInp.value) }, '+ İstek Gönder')),
+        searching ? h('div', { class: 'dim', style: { fontSize: '.8rem' } }, '🔎 Aranıyor...') : null,
+        searchResults.length ? h('div', { class: 'wl-friends-sec' },
+          ...searchResults.map((uCard) => {
+            const st = uCard.friendshipState || 'NONE';
+            return h('div', { class: 'wl-friend-row' },
+              h('div', { class: 'wl-friend-main' },
+                avatar(uCard, 36, { online: uCard.online }),
+                h('div', { class: 'wl-friend-info' },
+                  h('div', { class: 'wl-friend-title-line' }, h('b', {}, uCard.name), h('span', { class: 'wl-friend-handle' }, uCard.handle)),
+                  h('div', { class: `wl-friend-status is-${uCard.presenceState || 'offline'}` }, uCard.status || ''))),
+              st === 'FRIENDS' ? h('span', { class: 'wl-friend-pill ok' }, '✓ Arkadaş')
+                : st === 'OUTGOING_PENDING' ? h('button', { type: 'button', class: 'btn sm ghost', onclick: async () => { await updateFriendAction('cancel', { targetUid: uCard.uid }); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '⏳ İstek Gönderildi · İptal')
+                : st === 'INCOMING_PENDING' ? h('button', { type: 'button', class: 'btn sm primary', onclick: async () => { await updateFriendAction('accept', { targetUid: uCard.uid }); toast(`🎉 ${uCard.name} ile artık arkadaşsınız!`); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '✓ Seni Ekledi · Onayla')
+                : h('button', { type: 'button', class: 'btn sm primary', onclick: () => triggerSendReq(uCard.handle || uCard.name, { targetUid: uCard.uid }) }, '+ Arkadaş Ekle'));
+          })) : (searchQuery.length >= 2 && !searching ? h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '8px 2px' } }, `"${searchQuery}" ile eşleşen kayıtlı kullanıcı bulunamadı.`) : null));
+    } else {
+      bodyNode = h('div', { class: 'wl-social-pane' },
+        h('div', { class: 'wl-friends-sec-head' }, '🟢 ÇEVRİMİÇİ DURUM GÖRÜNÜRLÜĞÜ'),
+        h('div', { class: 'seg' }, [
+          ['everyone', 'Herkese Açık', 'Tüm kullanıcılar görür'],
+          ['friends', 'Yalnızca Arkadaşlar', 'Onaylı arkadaşların görür'],
+          ['nobody', 'Gizli (Çevrimdışı)', 'Kimse çevrimiçi görmez'],
+        ].map(([k, lbl, dsc]) => h('button', {
+          type: 'button', class: priv.presenceVisibility === k ? 'on' : '',
+          onclick: async () => {
+            await updateFriendAction('privacy', { presenceVisibility: k });
+            await pushPresenceHeartbeat({ visibility: k });
+            renderModalContent();
+          },
+        }, lbl, h('small', {}, dsc)))),
+        h('div', { class: 'wl-privacy-toggle-row' },
+          h('span', {}, '🎬 Ne İzlediğimi ve Hangi Odada Olduğumu Gizle'),
+          h('button', {
+            type: 'button', class: `btn sm ${priv.hideWatching ? 'primary' : ''}`,
+            onclick: async () => {
+              const next = !priv.hideWatching;
+              await updateFriendAction('privacy', { hideWatching: next });
+              await pushPresenceHeartbeat({ hideWatching: next });
+              renderModalContent();
+            },
+          }, priv.hideWatching ? 'Gizli ✓' : 'Açık (Arkadaşlar Görür)')),
+        blocked.length ? h('div', { class: 'wl-friends-sec' },
+          h('div', { class: 'wl-friends-sec-head' }, `🚫 ENGELLENENLER (${blocked.length})`),
+          ...blocked.map((b) => h('div', { class: 'wl-friend-row' },
+            h('span', {}, b.name || b.uid),
+            h('button', { type: 'button', class: 'btn sm', onclick: async () => { await updateFriendAction('unblock', { targetUid: b.uid }); renderModalContent(); } }, 'Engeli Kaldır')))) : null);
+    }
+
+    box.replaceChildren(tabBar, bodyNode);
   };
 
   renderModalContent();
+  syncSocialState(true).then(() => { if (box.isConnected) renderModalContent(); });
+  liveTimer = setInterval(() => {
+    if (!box.isConnected) { clearInterval(liveTimer); return; }
+    syncSocialState(true).then(() => { if (box.isConnected && activeTab !== 'search') renderModalContent(); });
+  }, 6000);
+
   modalRef = popup({
-    title: '👥 Arkadaşlarım & Arkadaş Ekle',
+    title: '👥 Arkadaşlarım, İstekler & Çevrimiçi Durum',
     content: box,
-    options: [{ label: 'Kapat' }],
+    wide: true,
+    options: [{ label: 'Kapat', onClick: () => clearInterval(liveTimer) }],
   });
-  setTimeout(() => input.focus(), 40);
   return modalRef;
+}
+
+export function openRoomInviteModal() {
+  return openFriendsManagerModal(null, 'friends');
+}
+
+export function renderHomeFriendsStrip(onOpenRoom) {
+  const wrap = h('section', { class: 'wl-home-friends-strip HomeHeader__home-header-friend-list-container', id: 'wl-home-friends-strip' });
+  const drawStrip = () => {
+    const soc = state.social || {};
+    const friends = getFriends();
+    const reqCnt = Number(soc.requestCount || soc.requests?.length || 0);
+    const unrCnt = Number(soc.totalUnread || 0);
+    wrap.replaceChildren(
+      h('div', { class: 'wl-hfs-head' },
+        h('div', { class: 'wl-hfs-title' },
+          h('span', { class: 'wl-pres-dot is-online' }),
+          h('b', {}, 'Arkadaşlar & Çevrimiçi'),
+          friends.length ? h('span', { class: 'wl-hfs-count' }, `${friends.filter((f) => f.online).length}/${friends.length} aktif`) : null),
+        h('div', { class: 'wl-hfs-actions' },
+          reqCnt > 0 ? h('button', {
+            type: 'button', class: 'wl-hfs-pill req-alert',
+            onclick: () => openFriendsManagerModal(null, 'requests'),
+          }, `🔔 ${reqCnt} Onay Bekleyen İstek`) : null,
+          unrCnt > 0 ? h('button', {
+            type: 'button', class: 'wl-hfs-pill dm-alert',
+            onclick: () => openDmModal(),
+          }, `💬 ${unrCnt} Okunmamış Mesaj`) : null,
+          h('button', {
+            type: 'button', class: 'wl-hfs-pill add-btn',
+            onclick: () => openFriendsManagerModal(null, 'search'),
+          }, '➕ Arkadaş Ekle'),
+          h('button', {
+            type: 'button', class: 'wl-hfs-pill',
+            onclick: () => openDmModal(),
+          }, '💬 Mesajlar'))),
+      friends.length ? h('div', { class: 'wl-hfs-rail' },
+        ...friends.map((f) => {
+          const pState = f.presenceState || (f.online ? 'online' : 'offline');
+          const wRoom = f.watchingRoom;
+          return h('div', {
+            class: `wl-hfs-chip is-${pState}`,
+            onclick: () => {
+              if (wRoom?.roomId && onOpenRoom) {
+                onOpenRoom({ id: wRoom.roomId, name: wRoom.roomName });
+              } else {
+                openDmModal(f.uid);
+              }
+            },
+          },
+            h('div', { class: 'wl-friend-avatar-wrap' },
+              avatar(f, 34, { online: Boolean(f.online) }),
+              h('span', { class: `wl-pres-dot is-${pState}` })),
+            h('div', { class: 'wl-hfs-chip-meta' },
+              h('b', {}, f.name),
+              h('span', {}, wRoom ? `🎬 ${wRoom.mediaTitle || wRoom.roomName}` : (f.online ? (pState === 'idle' ? '🌙 Uzakta' : '🟢 Çevrimiçi') : (f.status || '⚫ Çevrimdışı')))),
+            wRoom?.roomId ? h('span', { class: 'wl-hfs-join-tag' }, 'Katıl →') : null);
+        })) : h('div', { class: 'wl-hfs-empty' },
+        'Arkadaşlarını @kullaniciadi ile ekle; çevrimiçi olduklarında gör, mesajlaş ve tek tıkla odalarına davet et.'));
+  };
+  drawStrip();
+  wrap._refresh = drawStrip;
+  return wrap;
 }
 
 export const openAddFriendDialog = openFriendsManagerModal;
 if (typeof window !== 'undefined') {
   window.vortexOpenFriendsModal = openFriendsManagerModal;
+  window.vortexOpenInviteModal = openRoomInviteModal;
 }
 
 const LIVE_BRAND_ORDER = Object.keys(LIVE_BRANDS);

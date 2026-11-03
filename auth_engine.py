@@ -245,6 +245,10 @@ def _user_create(row: Dict[str, Any]) -> bool:
             return False
         row["handle"] = _claim_handle(row["handle"], uid)
         _kv("SET", f"{_kp()}user:{uid}", json.dumps(row, ensure_ascii=False))
+        try:
+            _kv("SADD", f"{_kp()}uids", uid)
+        except Exception:
+            pass
         return True
     if _uid_for("email", email):
         return False
@@ -272,6 +276,10 @@ def _user_update(uid: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     cur["updated_at"] = time.time()
     if store_backend() == "redis":
         _kv("SET", f"{_kp()}user:{uid}", json.dumps(cur, ensure_ascii=False))
+        try:
+            _kv("SADD", f"{_kp()}uids", uid)
+        except Exception:
+            pass
         return cur
     conn = _get_db()
     try:
@@ -1021,3 +1029,108 @@ async def auth_me(request: Request) -> JSONResponse:
         "isGuest": False,
     }
     return JSONResponse({"ok": True, "authenticated": True, "user": user, "authToken": sign_auth_token(user)}, headers=priv_hdrs)
+
+
+def public_user_card(row: Any) -> Dict[str, Any]:
+    """Return a public-safe user profile card (never exposes password hash, salt, or private email)."""
+    u = _row_to_user(row)
+    raw_h = str(u.get("handle") or "").strip().lstrip("@")
+    return {
+        "uid": str(u.get("uid") or ""),
+        "name": str(u.get("name") or "Üye"),
+        "handle": f"@{raw_h}" if raw_h else "@uye",
+        "color": str(u.get("color") or "#00f5d4"),
+        "avatar": str(u.get("avatar") or "🎬"),
+        "avatarUrl": str(u.get("avatarUrl") or ""),
+        "bio": str(u.get("bio") or ""),
+        "statusText": str(u.get("statusText") or ""),
+        "statusEmoji": str(u.get("statusEmoji") or "🍿"),
+        "hideWatching": bool(u.get("hideWatching", False)),
+        "hideFriends": bool(u.get("hideFriends", False)),
+        "hideLocation": bool(u.get("hideLocation", False)),
+        "verified": bool(u.get("verified", True)),
+    }
+
+
+def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
+    """Resolve a registered Watchlivo account by uid, @handle, exact email, or exact display name."""
+    raw = str(identifier or "").strip()
+    if not raw or len(raw) > 120:
+        return None
+    try:
+        if raw.startswith("u_"):
+            row = _user_get(raw)
+            if row:
+                return public_user_card(row)
+        if "@" in raw and not raw.startswith("@"):
+            uid_em = _uid_for("email", raw.lower())
+            if uid_em:
+                row = _user_get(uid_em)
+                if row:
+                    return public_user_card(row)
+        clean_h = raw.lstrip("@").strip().lower()
+        for h_cand in dict.fromkeys([clean_h, _norm_handle(clean_h)]):
+            if not h_cand:
+                continue
+            uid_h = _uid_for("handle", h_cand)
+            if uid_h:
+                row = _user_get(uid_h)
+                if row:
+                    return public_user_card(row)
+        if store_backend() == "sqlite":
+            conn = _get_db()
+            try:
+                row = conn.execute(
+                    "SELECT * FROM watchlivo_users WHERE lower(handle) = ? OR lower(name) = ? OR lower(email) = ? LIMIT 1",
+                    (clean_h, raw.lower(), raw.lower()),
+                ).fetchone()
+                if row:
+                    return public_user_card(row)
+            finally:
+                conn.close()
+    except Exception:
+        return None
+    return None
+
+
+def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> list[Dict[str, Any]]:
+    """Search registered Watchlivo accounts by @handle, name, or exact email."""
+    q = str(query or "").strip()
+    if not q:
+        return []
+    q_low = q.lower().lstrip("@")
+    results: Dict[str, Dict[str, Any]] = {}
+    exact = resolve_public_user(q)
+    if exact and exact.get("uid") and exact["uid"] != exclude_uid:
+        results[exact["uid"]] = exact
+    try:
+        if store_backend() == "sqlite":
+            conn = _get_db()
+            try:
+                like_q = f"%{q_low}%"
+                rows = conn.execute(
+                    "SELECT * FROM watchlivo_users WHERE lower(handle) LIKE ? OR lower(name) LIKE ? OR lower(email) = ? ORDER BY updated_at DESC LIMIT ?",
+                    (like_q, like_q, q.lower(), max(1, min(limit, 30))),
+                ).fetchall()
+                for r in rows:
+                    card = public_user_card(r)
+                    if card.get("uid") and card["uid"] != exclude_uid:
+                        results[card["uid"]] = card
+            finally:
+                conn.close()
+        else:
+            uids = _kv("SMEMBERS", f"{_kp()}uids") or []
+            if isinstance(uids, list):
+                for u_id in uids[:150]:
+                    if len(results) >= limit or str(u_id) == exclude_uid:
+                        continue
+                    row = _user_get(str(u_id))
+                    if not row:
+                        continue
+                    card = public_user_card(row)
+                    if q_low in card["handle"].lower() or q_low in card["name"].lower() or (q.lower() == str(row.get("email") or "").lower()):
+                        results[card["uid"]] = card
+    except Exception:
+        pass
+    return list(results.values())[:limit]
+
