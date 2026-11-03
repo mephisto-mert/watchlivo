@@ -1,6 +1,6 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v86';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit } from './audio-gain.js?v=20261103_v86';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v87';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit } from './audio-gain.js?v=20261103_v87';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -330,6 +330,7 @@ export class YouTubeAdapter {
   setSubtitleFpsScale(scale = 1.0) { return this.subs?.setSubtitleFpsScale(scale) || 1.0; }
   isDualSubtitleEnabled() { return false; }
   setDualSubtitle() { return Promise.resolve(false); }
+  _syncNativeIosPip(playing) { this._syncPipBridgeState(Boolean(playing)); }
   _syncPipBridgeState(playing) {
     const pv = this.pipVideo;
     if (!pv || this._destroyed || this._pipActive) return;

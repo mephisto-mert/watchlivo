@@ -899,10 +899,11 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261103_v86 with zero stale v79/v85 references
+        # 1. Cache-bust bumped cleanly to 20261103_v87 with zero stale v79/v86 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v86", index_html)
+        self.assertIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v79", index_html)
+        self.assertNotIn("20261103_v86", index_html)
 
         # 2. Non-destructive creator leave: creator leaves without closing room -> viewer stays & becomes host
         cr = self.client.post("/api/rooms/create", json={
@@ -1180,6 +1181,107 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('android:supportsPictureInPicture="true"', manifest_xml)
         self.assertIn("WatchlivoBridge", main_java)
         self.assertIn("enterPictureInPictureMode", main_java)
+
+    def test_v87_hls_large_segment_no_truncation_and_sync(self):
+        import io as _io
+        from unittest.mock import patch
+
+        server._SEGMENT_CACHE.clear()
+        ts_packets = 27888  # 27888 * 188 = 5,242,944 bytes (> 3.5 MB)
+        big_ts = (b"\x47" + b"\x11" * 187) * ts_packets
+        test_ts_url = "https://example.com/hls/movie1080/seg_001.ts"
+
+        class _FakeResp:
+            def __init__(self, payload: bytes, content_type: str = "video/mp2t", declared_len: int | None = None):
+                self._buf = _io.BytesIO(payload)
+                self.status = 200
+                self.headers = {
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(payload) if declared_len is None else declared_len),
+                }
+
+            def read(self, n: int = -1) -> bytes:
+                return self._buf.read(n)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        # 1) Full 5.24 MB MPEG-TS segment under IS_VERCEL=True must NOT truncate at 3.5 MB
+        sig1 = server._proxy_sig(test_ts_url, "")
+        with patch.object(server, "IS_VERCEL", True), patch.object(server, "_public_open", return_value=_FakeResp(big_ts)):
+            r_seg = self.client.get(f"/api/rave/stream-proxy?url={test_ts_url}&sig={sig1}&ext=.ts")
+            self.assertEqual(r_seg.status_code, 200)
+            self.assertEqual(len(r_seg.content), len(big_ts))
+            self.assertEqual(r_seg.headers.get("content-type"), "video/mp2t")
+
+        # 2) Truncated upstream read (declared 5 MB, delivered 2 MB) must fail and NOT poison _SEGMENT_CACHE
+        trunc_url = "https://example.com/hls/movie1080/seg_trunc.ts"
+        sig2 = server._proxy_sig(trunc_url, "")
+        with patch.object(server, "IS_VERCEL", True), patch.object(
+            server, "_public_open", side_effect=lambda *a, **kw: _FakeResp(big_ts[:2_000_000], declared_len=len(big_ts))
+        ):
+            r_bad = self.client.get(f"/api/rave/stream-proxy?url={trunc_url}&sig={sig2}&ext=.ts")
+            self.assertEqual(r_bad.status_code, 502)
+            self.assertNotIn(trunc_url, server._SEGMENT_CACHE)
+
+        # 3) 3.1 MB fMP4 .m4s HLS segment with ext=.m4s must return full 200 OK video/mp4 (not 206 2MB slice)
+        m4s_body = b"\x00\x00\x00\x18moof" + (b"\x22" * (3_145_728 - 8))
+        m4s_url = "https://example.com/hls/fmp4/seg_002.m4s"
+        sig3 = server._proxy_sig(m4s_url, "")
+        with patch.object(server, "IS_VERCEL", True), patch.object(
+            server, "_public_open", return_value=_FakeResp(m4s_body, content_type="video/iso.segment")
+        ):
+            r_m4s = self.client.get(f"/api/rave/stream-proxy?url={m4s_url}&sig={sig3}&ext=.m4s")
+            self.assertEqual(r_m4s.status_code, 200)
+            self.assertEqual(len(r_m4s.content), len(m4s_body))
+            self.assertEqual(r_m4s.headers.get("content-type"), "video/mp4")
+
+        # 4) Non-leader viewer http_sync activeMedia resolves unresolved /api/rave/resolve-catalog room URL
+        c_res = self.client.post("/api/rooms/create", json={
+            "name": "V87 Sync Room",
+            "privacy": "public",
+            "playMode": "leader",
+            "creator": "HostUser",
+            "creatorId": "u_host_v87",
+            "clientId": "h_host_v87",
+            "media": {
+                "title": "Çürük Elmalar",
+                "tmdbId": "1198654",
+                "mediaType": "movie",
+                "provider": "hls",
+                "url": "/api/rave/resolve-catalog?tmdbId=1198654&type=movie",
+            },
+        })
+        self.assertEqual(c_res.status_code, 200)
+        rid = c_res.json()["room"]["id"]
+        # Host initializes room so host_id is locked to HostUser
+        self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_host_v87",
+            "username": "HostUser",
+            "isCreator": True,
+        })
+        # Viewer joins with already-resolved URL in activeMedia for same tmdbId
+        v_sync = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "poll",
+            "clientId": "h_viewer_v87",
+            "username": "ViewerUser",
+            "activeMedia": {
+                "title": "Çürük Elmalar",
+                "tmdbId": "1198654",
+                "mediaType": "movie",
+                "provider": "hls",
+                "streamType": "hls",
+                "url": "/api/rave/stream?url=https%3A%2F%2Fcdn-v87-test.shop%2Fmaster.m3u8&ext=.m3u8",
+                "currentTime": 4.2,
+            },
+        })
+        self.assertEqual(v_sync.status_code, 200)
+        synced_url = v_sync.json()["room"]["media"]["url"]
+        self.assertTrue(synced_url.startswith("/api/rave/stream?"), synced_url)
 
 
 if __name__ == '__main__':

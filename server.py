@@ -25,9 +25,8 @@ import uuid
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
@@ -210,18 +209,27 @@ def _uid_from_token(token: str) -> str:
     return uid
 
 
-class IdentityMiddleware(BaseHTTPMiddleware):
-    """Attach the verified account id to the request scope.
+class IdentityMiddleware:
+    """Attach the verified account id to the request scope without buffering streaming responses.
 
     Downstream handlers read ``scope["wl_uid"]``. A client-supplied ``uid`` field
     is never trusted, so identity cannot be spoofed by editing a JSON body.
     """
 
-    async def dispatch(self, request, call_next):
-        header = request.headers.get("authorization") or ""
-        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
-        request.scope["wl_uid"] = _uid_from_token(token) if token else ""
-        return await call_next(request)
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            token = ""
+            for hk, hv in scope.get("headers") or ():
+                if hk.lower() == IDENTITY_HEADER:
+                    val = hv.decode("latin-1", errors="ignore")
+                    if val.lower().startswith("bearer "):
+                        token = val[7:].strip()
+                    break
+            scope["wl_uid"] = _uid_from_token(token) if token else ""
+        await self.app(scope, receive, send)
 
 
 # ---------------------------------------------------------------------------
@@ -5393,22 +5401,23 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                     for _attempt in range(2):
                         try:
                             req = urllib.request.Request(url, headers=req_hdrs)
-                            with _public_open(req, timeout=14) as r:
-                                data = r.read((3584 * 1024) if IS_VERCEL else (28 * 1024 * 1024))
+                            with _public_open(req, timeout=16) as r:
+                                data = r.read(28 * 1024 * 1024)
                                 if data and ("text/html" in (r.headers.get("Content-Type") or "").lower() or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
                                     raise ValueError("Upstream returned HTML instead of media segment")
                                 if use_seg_rng and r.status == 206:
                                     cr_up = r.headers.get("Content-Range") or ""
                                     return data, 206, cr_up, "video/mp2t"
                                 raw_cl = (r.headers.get("Content-Length") or "").strip()
-                                if raw_cl.isdigit():
-                                    up_total = int(raw_cl)
+                                up_total = int(raw_cl) if raw_cl.isdigit() else 0
+                                if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total and up_total <= 28 * 1024 * 1024:
+                                    raise IOError(f"Incomplete upstream segment ({len(data)}/{up_total} bytes)")
                                 is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
                                 is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
                                 raw_ct = (r.headers.get("Content-Type") or "").lower()
                                 if len(data) == 16 or "key.php" in url:
                                     ct = "application/octet-stream"
-                                elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url)):
+                                elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url or ext_hint == ".m4s")):
                                     ct = "video/mp4"
                                 elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
                                     ct = "video/mp2t"
@@ -5426,7 +5435,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                         if len(_KNOWN_LARGE_MP4_URLS) > 500:
                             _KNOWN_LARGE_MP4_URLS.clear()
                         _KNOWN_LARGE_MP4_URLS.add(url)
-                    elif data and len(data) <= int(10 * 1024 * 1024):
+                    elif data and (not up_total or len(data) >= up_total) and len(data) <= int(10 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
                             now_ts = time.time()
                             expired = [k for k, v_item in _SEGMENT_CACHE.items() if now_ts - v_item[0] > 90]
@@ -5523,6 +5532,10 @@ async def rave_stream_manifest(request: Request):
     aud_pref = (request.query_params.get("aud") or "").strip().lower()
     proxy_segs = request.query_params.get("proxy_segs") == "1"
     is_probe = request.query_params.get("probe") == "1"
+    try:
+        max_h = int(request.query_params.get("max_h") or 0)
+    except ValueError:
+        max_h = 0
     target = ""
     if sid:
         try:
@@ -5544,7 +5557,7 @@ async def rave_stream_manifest(request: Request):
     is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimg" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
-    m3u8_ckey = f"v6|{target}|{aud_pref}|{prov}|{tid}|{explicit_mtype}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}"
+    m3u8_ckey = f"v6|{target}|{aud_pref}|{prov}|{tid}|{explicit_mtype}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}|{max_h}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
@@ -5831,7 +5844,7 @@ async def rave_stream_manifest(request: Request):
                     if "dragonballzfans" in cur_target or ref_mode == "hx":
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
-                seg_ext_hint = ".mp4" if (u_path_low.endswith((".mp4", ".m4s")) or "init-" in u_path_low or "/init." in u_path_low) else ".ts"
+                seg_ext_hint = ".m4s" if (u_path_low.endswith((".m4s", ".mp4")) or "init-" in u_path_low or "/init." in u_path_low or "_init." in u_path_low) else ".ts"
                 if "key.php" in u_str:
                     return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
                 if cur_is_ve:
@@ -6028,6 +6041,11 @@ async def rave_stream_manifest(request: Request):
                 non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]
                 if non_4k:
                     variant_pairs = non_4k
+                if max_h >= 240:
+                    max_eff_w = int(max_h * 16 / 9) + 96
+                    capped_v = [v for v in variant_pairs if 0 < v[0] <= max_eff_w]
+                    if capped_v:
+                        variant_pairs = capped_v
                 if cur_is_ve and not any(1000 <= v[0] < 1800 for v in variant_pairs):
                     for v_w, _v_bw, v_inf, v_uri in list(variant_pairs):
                         if v_w >= 1800 and "sid=" in v_uri:
@@ -6131,6 +6149,19 @@ async def poster_proxy(request: Request):
 _ASYNC_SEG_INFLIGHT: dict[str, asyncio.Future] = {}
 
 
+def _build_media_response(data: bytes, status_code: int, headers: dict, is_head: bool = False):
+    if is_head:
+        return Response(b"", status_code=status_code, headers=headers)
+    if len(data) > 2 * 1024 * 1024:
+        async def _chunk_iter():
+            mv = memoryview(data)
+            step = 262144
+            for off in range(0, len(mv), step):
+                yield bytes(mv[off:off + step])
+        return StreamingResponse(_chunk_iter(), status_code=status_code, headers=headers)
+    return Response(data, status_code=status_code, headers=headers)
+
+
 async def stream_proxy(request: Request):
     url = (request.query_params.get("url") or "").strip()
     ref = (request.query_params.get("referer") or "").strip()
@@ -6155,7 +6186,7 @@ async def stream_proxy(request: Request):
             fast_hit = _SEGMENT_CACHE.get(url)
         if fast_hit and (time.time() - fast_hit[0] < 90):
             f_data, f_ct = fast_hit[1], fast_hit[2]
-            return Response(f_data, status_code=200, headers={
+            return _build_media_response(f_data, 200, {
                 "Content-Type": f_ct,
                 "Content-Length": str(len(f_data)),
                 "Accept-Ranges": "bytes",
@@ -6212,7 +6243,12 @@ async def stream_proxy(request: Request):
         }
         if cr and status in (206, 416):
             hdrs["Content-Range"] = cr
-        return Response(b"" if request.method == "HEAD" else data, status_code=status if status in (200, 206, 416) else 200, headers=hdrs)
+        return _build_media_response(
+            data,
+            status if status in (200, 206, 416) else 200,
+            hdrs,
+            is_head=(request.method == "HEAD"),
+        )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
 

@@ -2996,7 +2996,7 @@ async def http_sync(request: Request):
             incoming_clean = clean_media(active_m)
             cur_unresolved = str(room["media"].get("url") or "").startswith("/api/rave/resolve-catalog")
             inc_resolved = bool(incoming_clean.get("url") and not str(incoming_clean.get("url")).startswith("/api/rave/resolve-catalog"))
-            should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (caller_is_leader and cur_unresolved and inc_resolved and media_key(room["media"]) == media_key(incoming_clean))
+            should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (cur_unresolved and inc_resolved and media_key(room["media"]) == media_key(incoming_clean))
             if should_sync_active:
                 if cur_unresolved and inc_resolved and not room_empty_media and media_key(room["media"]) == media_key(incoming_clean):
                     for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "bgVideoUrl", "bgYoutubeId", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):

@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "env": {
+    "VERCEL_FORCE_PYTHON_STREAMING": "1"
+  },
   "regions": [
     "fra1"
   ],

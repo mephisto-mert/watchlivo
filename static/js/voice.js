@@ -1,6 +1,6 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v86';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v86';
+import { toast } from './ui.js?v=20261103_v87';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v87';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 

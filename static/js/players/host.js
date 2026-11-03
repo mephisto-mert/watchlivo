@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261103_v86';
-import { Html5Adapter } from './html5.js?v=20261103_v86';
-import { VimeoAdapter } from './vimeo.js?v=20261103_v86';
-import { EmbedAdapter } from './embed.js?v=20261103_v86';
-import { WebviewAdapter } from './webview.js?v=20261103_v86';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v86';
+import { YouTubeAdapter } from './youtube.js?v=20261103_v87';
+import { Html5Adapter } from './html5.js?v=20261103_v87';
+import { VimeoAdapter } from './vimeo.js?v=20261103_v87';
+import { EmbedAdapter } from './embed.js?v=20261103_v87';
+import { WebviewAdapter } from './webview.js?v=20261103_v87';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v87';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -88,6 +88,12 @@ export class PlayerHost {
       window.vortexSetVoiceNotePlaying = (playing) => this.setVoiceNotePlaying(playing);
       window.vortexSetAutoDuck = (enabled) => this.setAutoDuckEnabled(enabled);
       window.__kinoxSyncDuckVolume = () => this._syncDuckRamp();
+      window.__onWatchlivoAppState = (appState) => {
+        if (appState === 'willResignActive' && this.adapter && !this._nativeIosPipActive) {
+          const shouldPlay = Boolean(this.adapter.wantPlaying !== false && !this.adapter.isPaused?.());
+          this.adapter._syncNativeIosPip?.(shouldPlay);
+        }
+      };
       window.__onWatchlivoNativePiP = (ev) => {
         if (!ev || typeof ev !== 'object') return;
         if (ev.state === 'started') {

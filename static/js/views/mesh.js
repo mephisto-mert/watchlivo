@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v86';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v86';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v86';
-import { MeshConnection } from '../realtime.js?v=20261103_v86';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v86';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v86';
-import { buildLayout } from './mesh-layout.js?v=20261103_v86';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v86';
-import { Voice } from '../voice.js?v=20261103_v86';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v86';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v87';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v87';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v87';
+import { MeshConnection } from '../realtime.js?v=20261103_v87';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v87';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v87';
+import { buildLayout } from './mesh-layout.js?v=20261103_v87';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v87';
+import { Voice } from '../voice.js?v=20261103_v87';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v87';
 
 let ctx = null;
 
@@ -109,6 +109,10 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.url && !String(curRoom.media.url).startsWith('/api/rave/resolve-catalog') && String(room.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
+    const livePos = (ctx?.host?.adapter && !ctx.host.loading)
+      ? (ctx.host.adapter.getTime?.() ?? expectedPosition(curRoom.media))
+      : expectedPosition(curRoom.media);
+    const keepPaused = Boolean(ctx?.userPaused || curRoom.media.meshStateStatus === 'PAUSED' || curRoom.media.playing === false);
     room = {
       ...room,
       media: {
@@ -117,11 +121,23 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
         streamType: curRoom.media.streamType || room.media.streamType,
         url: curRoom.media.url,
         altUrls: curRoom.media.altUrls || room.media.altUrls,
+        servers: (curRoom.media.servers && curRoom.media.servers.length) ? curRoom.media.servers : room.media.servers,
         audioTracks: (curRoom.media.audioTracks && curRoom.media.audioTracks.length) ? curRoom.media.audioTracks : room.media.audioTracks,
         subtitleTracks: (curRoom.media.subtitleTracks && curRoom.media.subtitleTracks.length) ? curRoom.media.subtitleTracks : room.media.subtitleTracks,
         intro: curRoom.media.intro || room.media.intro,
+        duration: curRoom.media.duration || room.media.duration,
+        playing: !keepPaused,
+        currentTime: livePos,
+        meshStateStatus: keepPaused ? 'PAUSED' : 'PLAYING',
+        meshStatePosition: livePos,
+        meshStateTime: clock.now(),
       },
     };
+    if (ctx && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
+      ctx.lastResolvePushAt = Date.now();
+      const pushMedia = room.media;
+      setTimeout(() => ctx?.conn?.send('resolve_media', { ...pushMedia, currentTime: livePos }), 60);
+    }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
     room = { ...room, media: { ...room.media, similar: curRoom.media.similar } };
@@ -355,9 +371,8 @@ async function loadMedia(media) {
                 if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
                 rememberRoom(updatedMesh);
               }
-              if (isTimeKeeper() || String(state.mesh?.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
-                ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
-              }
+              if (ctx) ctx.lastResolvePushAt = Date.now();
+              ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
               break;
             }
           }
@@ -1077,28 +1092,25 @@ export async function enterMesh(app, params) {
   ctx.layout = buildLayout(app, ctx);
   const cachedRoom = getRememberedRoom(params.id);
   const initialSavedChat = loadSavedChat(params.id);
-  if (cachedRoom && cachedRoom.id === params.id) {
-    if (initialSavedChat.length && !(cachedRoom.chat && cachedRoom.chat.length)) {
-      cachedRoom.chat = initialSavedChat;
-    }
-    applyRoom(cachedRoom, { reload: true });
-  } else {
-    if (initialSavedChat.length) {
-      ctx.seenChatIds = new Set(initialSavedChat.map((m) => m.id));
-      for (const m of initialSavedChat) ctx.layout?.chatAppended?.(m);
-    }
-    ctx.layout.playerEvent?.('loading');
-  }
-  sync.start();
   ctx.conn = new MeshConnection({
     roomId: params.id, profile: state.self, password: params.pwd || '', device: deviceLabel(),
     onMessage, onStatus: (s) => { set({ connection: s }); ctx?.layout.update(); },
   });
   if (cachedRoom && cachedRoom.id === params.id) {
     ctx.conn.lastRoom = cachedRoom;
-  } else if (initialSavedChat.length) {
-    ctx.conn.lastRoom = { id: params.id, chat: initialSavedChat };
+    if (initialSavedChat.length && !(cachedRoom.chat && cachedRoom.chat.length)) {
+      cachedRoom.chat = initialSavedChat;
+    }
+    applyRoom(cachedRoom, { reload: true });
+  } else {
+    if (initialSavedChat.length) {
+      ctx.conn.lastRoom = { id: params.id, chat: initialSavedChat };
+      ctx.seenChatIds = new Set(initialSavedChat.map((m) => m.id));
+      for (const m of initialSavedChat) ctx.layout?.chatAppended?.(m);
+    }
+    ctx.layout.playerEvent?.('loading');
   }
+  sync.start();
   ctx.voice = new Voice({
     send: (type, payload) => ctx.conn.send(type, payload),
     getSelfId: () => state.clientId,

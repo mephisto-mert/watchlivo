@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v86';
-import { expectedPosition } from '../sync.js?v=20261103_v86';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v86';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v86';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v87';
+import { expectedPosition } from '../sync.js?v=20261103_v87';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v87';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v87';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -374,6 +374,13 @@ export class Html5Adapter {
       }, ms));
       if (this.wantPlaying && v.paused && !v.ended) {
         this.tryPlay();
+      } else if (!v.paused) {
+        this._syncNativeIosPip?.(true);
+      }
+    });
+    v.addEventListener('ratechange', () => {
+      if (this.video === v && !v.paused) {
+        this._syncNativeIosPip?.(true);
       }
     });
     v.addEventListener('timeupdate', () => {
@@ -387,7 +394,7 @@ export class Html5Adapter {
         }
       }
       if (v.currentTime > 0 && !v.paused && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) reportPlay();
-      if (!v.paused && Date.now() - (this._lastNativeIosSyncAt || 0) > 2500) {
+      if (!v.paused && Date.now() - (this._lastNativeIosSyncAt || 0) > 25000) {
         this._syncNativeIosPip?.(true);
       }
       if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined') {
@@ -699,7 +706,7 @@ export class Html5Adapter {
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
-        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || wantInitialIosMse || this._forceIosMseInline);
+        const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
         if (allowHlsJsHere) {
           if (isApple) this._ensureIosPipStandby?.(nextUrl);
           attachHlsJs(isApple ? withProxySegs(nextUrl) : nextUrl, doneCb, resumePos);
@@ -1316,7 +1323,13 @@ export class Html5Adapter {
       if (this.bgMvEl?.src) return this.bgMvEl.src;
     }
     if (!this.currentUrl || this.currentUrl.startsWith('blob:')) return '';
-    return this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
+    let base = this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
+    if (/\/api\/rave\/stream(?:\?|_manifest\?)/i.test(base) && !base.includes('max_h=')) {
+      base = base.includes('&ext=.m3u8')
+        ? base.replace('&ext=.m3u8', '&max_h=720&ext=.m3u8')
+        : `${base}${base.includes('?') ? '&' : '?'}max_h=720`;
+    }
+    return base;
   }
   _syncNativeIosPip(playingOverride = null) {
     if (typeof window === 'undefined' || !window.isWatchlivoNativeIOS || typeof window.watchlivoNativePiP !== 'function') return;
