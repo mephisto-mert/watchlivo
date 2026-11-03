@@ -745,6 +745,7 @@ def _sc_resolve_full_track_sync(artist: str, song_title: str, expected_dur_sec: 
 
 
 UA_YT_IOS = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
+UA_YT_VR = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
 UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
 _YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = {}
 
@@ -757,7 +758,7 @@ def _parse_dash_rng(val) -> dict | None:
 
 
 def _yt_piped_fallback_sync(vid: str) -> dict | None:
-    for inv_host in ("https://yt.chocolatemoo53.com", "https://inv.nadeko.net"):
+    for inv_host in ("https://yt.chocolatemoo53.com", "https://inv.nadeko.net", "https://invidious.nerdvpn.de"):
         try:
             req = urllib.request.Request(f"{inv_host}/api/v1/videos/{vid}?local=true", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=5.0) as r:
@@ -773,37 +774,42 @@ def _yt_piped_fallback_sync(vid: str) -> dict | None:
             v_fmt, a_fmt, aud_u, vid_u = None, None, "", ""
             af_list = d.get("adaptiveFormats") or []
             for it_a in ("140", "139", "251", "250"):
-                for f in af_list:
-                    if str(f.get("itag") or "") == it_a and f.get("url"):
-                        fu = _abs_u(f["url"])
-                        aud_u = aud_u or fu
-                        ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
-                        if it_a in ("140", "139") and ir and xr and not a_fmt:
-                            a_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "bandwidth": int(f.get("bitrate") or 132000)}
-                        break
+                cand_a = [f for f in af_list if str(f.get("itag") or "") == it_a and f.get("url")]
+                cand_a.sort(key=lambda x: (not bool((x.get("audioTrack") or {}).get("audioIsDefault", True)), str((x.get("audioTrack") or {}).get("id") or "")))
+                for f in cand_a:
+                    fu = _abs_u(f["url"])
+                    aud_u = aud_u or fu
+                    ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
+                    if it_a in ("140", "139") and ir and xr and not a_fmt:
+                        a_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "bandwidth": int(f.get("bitrate") or 132000), "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
+                    break
                 if aud_u:
                     break
-            for it_v in ("136", "135", "134"):
+            for it_v in ("137", "136", "135", "134"):
                 for f in af_list:
                     if str(f.get("itag") or "") == it_v and f.get("url"):
+                        bw_v = int(f.get("bitrate") or 1200000)
+                        if it_v == "137" and bw_v > 4800000:
+                            continue
                         fu = _abs_u(f["url"])
                         vid_u = vid_u or fu
                         ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
                         if ir and xr and not v_fmt:
                             res_m = re.match(r"(\d+)x(\d+)", str(f.get("size") or ""))
-                            w = int(res_m.group(1)) if res_m else (1280 if it_v == "136" else (854 if it_v == "135" else 640))
-                            h = int(res_m.group(2)) if res_m else (720 if it_v == "136" else (480 if it_v == "135" else 360))
-                            v_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "width": w, "height": h, "bandwidth": int(f.get("bitrate") or 1200000), "codecs": str(f.get("type") or "")}
+                            def_w = 1920 if it_v == "137" else (1280 if it_v == "136" else (854 if it_v == "135" else 640))
+                            def_h = 1080 if it_v == "137" else (720 if it_v == "136" else (480 if it_v == "135" else 360))
+                            w = int(res_m.group(1)) if res_m else def_w
+                            h = int(res_m.group(2)) if res_m else def_h
+                            v_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "width": w, "height": h, "bandwidth": bw_v, "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
                         break
                 if v_fmt:
                     break
             hls_u = _abs_u(d.get("hlsUrl") or "")
             if hls_u or (v_fmt and a_fmt) or mux_u or aud_u:
-                return {"hlsUrl": hls_u, "muxedUrl": mux_u, "audioUrl": aud_u or mux_u, "videoUrl": mux_u or vid_u, "videoFmt": v_fmt, "audioFmt": a_fmt, "duration": int(d.get("lengthSeconds") or 0), "external": True}
+                return {"hlsUrl": hls_u, "muxedUrl": mux_u, "audioUrl": aud_u or mux_u, "videoUrl": mux_u or vid_u, "videoFmt": v_fmt, "audioFmt": a_fmt, "duration": int(d.get("lengthSeconds") or 0), "external": True, "ua": UA_MUSIC}
         except Exception:
             continue
     return None
-
 
 def _yt_mobile_live_hls_sync(vid: str) -> str:
     try:
@@ -829,10 +835,10 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     if cached and time.time() - cached[0] < 1200:
         if not (want_live and not cached[1].get("hlsUrl")):
             return cached[1]
-    payload = {
-        "videoId": vid,
-        "context": {
-            "client": {
+    clients = (
+        (
+            UA_YT_IOS,
+            {
                 "clientName": "IOS",
                 "clientVersion": "20.03.02",
                 "deviceMake": "Apple",
@@ -841,36 +847,49 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
                 "osVersion": "18.2.1.22C161",
                 "hl": "tr",
                 "gl": "TR",
-            }
-        },
-    }
-    try:
-        req = urllib.request.Request(
-            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": UA_YT_IOS},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5.0) as r:
-            data = json.loads(r.read(1024 * 900).decode("utf-8", errors="ignore"))
-        sd = data.get("streamingData") or {}
-        hls_url = str(sd.get("hlsManifestUrl") or "").strip()
-        fmts = (sd.get("adaptiveFormats") or []) + (sd.get("formats") or [])
-        audio_url = ""
-        video_url = ""
-        muxed_url = ""
-        video_fmt = None
-        audio_fmt = None
-        for m_itag in (22, 18):
-            for f in (sd.get("formats") or []):
-                if f.get("itag") == m_itag and f.get("url"):
-                    muxed_url = f["url"]
+            },
+        ),
+        (
+            UA_YT_VR,
+            {
+                "clientName": "ANDROID_VR",
+                "clientVersion": "1.60.19",
+                "deviceMake": "Oculus",
+                "deviceModel": "Quest 3",
+                "androidSdkVersion": 32,
+                "osName": "Android",
+                "osVersion": "12L",
+                "hl": "tr",
+                "gl": "TR",
+            },
+        ),
+    )
+    for cli_ua, cli_ctx in clients:
+        try:
+            req = urllib.request.Request(
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                data=json.dumps({"videoId": vid, "context": {"client": cli_ctx}}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": cli_ua},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as r:
+                data = json.loads(r.read(1024 * 900).decode("utf-8", errors="ignore"))
+            sd = data.get("streamingData") or {}
+            hls_url = str(sd.get("hlsManifestUrl") or "").strip()
+            fmts = (sd.get("adaptiveFormats") or []) + (sd.get("formats") or [])
+            audio_url, video_url, muxed_url = "", "", ""
+            video_fmt, audio_fmt = None, None
+            for m_itag in (22, 18):
+                for f in (sd.get("formats") or []):
+                    if f.get("itag") == m_itag and f.get("url"):
+                        muxed_url = f["url"]
+                        break
+                if muxed_url:
                     break
-            if muxed_url:
-                break
-        for pref_itag in (140, 139, 251, 250):
-            for f in fmts:
-                if f.get("itag") == pref_itag and f.get("url"):
+            for pref_itag in (140, 139, 251, 250):
+                cand_a = [f for f in fmts if f.get("itag") == pref_itag and f.get("url")]
+                cand_a.sort(key=lambda x: (not bool((x.get("audioTrack") or {}).get("audioIsDefault", True)), str((x.get("audioTrack") or {}).get("id") or "")))
+                for f in cand_a:
                     audio_url = f["url"]
                     if pref_itag in (140, 139) and f.get("initRange") and f.get("indexRange") and not audio_fmt:
                         audio_fmt = {
@@ -878,45 +897,52 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
                             "initRange": f["initRange"],
                             "indexRange": f["indexRange"],
                             "bandwidth": int(f.get("bitrate") or 132000),
-                        }
-                    break
-            if audio_url:
-                break
-        for pref_vitag in (136, 135, 134, 22, 18):
-            for f in fmts:
-                if f.get("itag") == pref_vitag and f.get("url"):
-                    if not video_url:
-                        video_url = f["url"]
-                    if pref_vitag in (136, 135, 134) and f.get("initRange") and f.get("indexRange") and not video_fmt:
-                        video_fmt = {
-                            "url": f["url"],
-                            "initRange": f["initRange"],
-                            "indexRange": f["indexRange"],
-                            "width": int(f.get("width") or 1280),
-                            "height": int(f.get("height") or 720),
-                            "bandwidth": int(f.get("bitrate") or 1500000),
                             "codecs": str(f.get("mimeType") or ""),
+                            "ua": cli_ua,
                         }
                     break
-            if video_fmt:
-                break
-        if (want_live or (data.get("videoDetails") or {}).get("isLiveContent")) and not hls_url:
-            hls_url = _yt_mobile_live_hls_sync(vid)
-        dur_s = int((data.get("videoDetails") or {}).get("lengthSeconds") or 0)
-        if hls_url or muxed_url or audio_url or video_url:
-            out = {
-                "hlsUrl": hls_url,
-                "muxedUrl": muxed_url,
-                "audioUrl": audio_url,
-                "videoUrl": muxed_url or video_url,
-                "videoFmt": video_fmt,
-                "audioFmt": audio_fmt,
-                "duration": dur_s,
-            }
-            _YT_IOS_STREAM_CACHE[vid] = (time.time(), out)
-            return out
-    except Exception:
-        pass
+                if audio_url:
+                    break
+            for pref_vitag in (137, 136, 135, 134, 22, 18):
+                for f in fmts:
+                    if f.get("itag") == pref_vitag and f.get("url"):
+                        bw_v = int(f.get("bitrate") or 1500000)
+                        if pref_vitag == 137 and bw_v > 4800000:
+                            continue
+                        if not video_url:
+                            video_url = f["url"]
+                        if pref_vitag in (137, 136, 135, 134) and f.get("initRange") and f.get("indexRange") and not video_fmt:
+                            video_fmt = {
+                                "url": f["url"],
+                                "initRange": f["initRange"],
+                                "indexRange": f["indexRange"],
+                                "width": int(f.get("width") or (1920 if pref_vitag == 137 else 1280)),
+                                "height": int(f.get("height") or (1080 if pref_vitag == 137 else 720)),
+                                "bandwidth": bw_v,
+                                "codecs": str(f.get("mimeType") or ""),
+                                "ua": cli_ua,
+                            }
+                        break
+                if video_fmt:
+                    break
+            if (want_live or (data.get("videoDetails") or {}).get("isLiveContent")) and not hls_url:
+                hls_url = _yt_mobile_live_hls_sync(vid)
+            dur_s = int((data.get("videoDetails") or {}).get("lengthSeconds") or 0)
+            if hls_url or (video_fmt and audio_fmt) or muxed_url or audio_url or video_url:
+                out = {
+                    "hlsUrl": hls_url,
+                    "muxedUrl": muxed_url,
+                    "audioUrl": audio_url,
+                    "videoUrl": muxed_url or video_url,
+                    "videoFmt": video_fmt,
+                    "audioFmt": audio_fmt,
+                    "duration": dur_s,
+                    "ua": cli_ua,
+                }
+                _YT_IOS_STREAM_CACHE[vid] = (time.time(), out)
+                return out
+        except Exception:
+            continue
     ext_fb = _yt_piped_fallback_sync(vid)
     if ext_fb:
         _YT_IOS_STREAM_CACHE[vid] = (time.time(), ext_fb)
@@ -924,11 +950,11 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     return None
 
 
-def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False):
-    use_ua = UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC
+def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False, client_ua: str = ""):
+    use_ua = client_ua or (UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC)
     hdrs = {"User-Agent": use_ua, "Accept": "*/*"}
     open_chunk_sz = 2 * 1024 * 1024
-    max_closed_sz = 3 * 1024 * 1024
+    max_closed_sz = 4 * 1024 * 1024
     start, end = 0, open_chunk_sz - 1
     read_cap = open_chunk_sz
     if range_hdr and range_hdr.startswith("bytes="):
@@ -966,7 +992,6 @@ def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_he
         status = 206 if cr else 200
         return data, status, cr, ct
 
-
 def _yt_fallback_audio_url_sync(vid: str) -> str:
     try:
         oemb = _http_get_json(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json", timeout=3.5)
@@ -990,9 +1015,10 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     idx_rng = fmt.get("indexRange") or {}
     i_start = int(idx_rng.get("start") or 0)
     i_end = int(idx_rng.get("end") or 2047)
+    fmt_ua = fmt.get("ua") or (UA_YT_IOS if "googlevideo.com" in fmt["url"] else UA_MUSIC)
     req = urllib.request.Request(
         fmt["url"],
-        headers={"User-Agent": (UA_YT_IOS if "googlevideo.com" in fmt["url"] else UA_MUSIC), "Range": f"bytes={i_start}-{i_end}"},
+        headers={"User-Agent": fmt_ua, "Range": f"bytes={i_start}-{i_end}"},
     )
     with urllib.request.urlopen(req, timeout=5.5) as r:
         buf = r.read(65536)
@@ -1003,26 +1029,26 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     ver = buf[pos + 4]
     if ver != 0 and len(buf) < pos + 36:
         return []
-    p = pos + 8 + 4  # skip version/flags + reference_ID
-    timescale = struct.unpack(">I", buf[p:p + 4])[0] or 1000
-    p += 4
+    p_off = pos + 8 + 4
+    timescale = struct.unpack(">I", buf[p_off:p_off + 4])[0] or 1000
+    p_off += 4
     if ver == 0:
-        _, first_offset = struct.unpack(">II", buf[p:p + 8])
-        p += 8
+        _, first_offset = struct.unpack(">II", buf[p_off:p_off + 8])
+        p_off += 8
     else:
-        _, first_offset = struct.unpack(">QQ", buf[p:p + 16])
-        p += 16
-    p += 2  # reserved
-    ref_cnt = struct.unpack(">H", buf[p:p + 2])[0]
-    p += 2
+        _, first_offset = struct.unpack(">QQ", buf[p_off:p_off + 16])
+        p_off += 16
+    p_off += 2
+    ref_cnt = struct.unpack(">H", buf[p_off:p_off + 2])[0]
+    p_off += 2
     box_sz = struct.unpack(">I", buf[box_start:box_start + 4])[0]
     cur_off = i_start + box_start + box_sz + first_offset
     segs: list[tuple[int, int, float]] = []
     for _ in range(ref_cnt):
-        if p + 12 > len(buf):
+        if p_off + 12 > len(buf):
             break
-        w1, sub_dur, _ = struct.unpack(">III", buf[p:p + 12])
-        p += 12
+        w1, sub_dur, _ = struct.unpack(">III", buf[p_off:p_off + 12])
+        p_off += 12
         sz = w1 & 0x7FFFFFFF
         dur = max(0.2, float(sub_dur) / float(timescale))
         segs.append((sz, cur_off, dur))
@@ -1030,6 +1056,11 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     if segs:
         _YT_SIDX_CACHE[ckey] = (time.time(), segs)
     return segs
+
+
+def _extract_rfc_codec(mime_or_codecs: str, fallback: str) -> str:
+    m = re.search(r'codecs="([^"]+)"', str(mime_or_codecs or ""))
+    return m.group(1).strip() if m and m.group(1).strip() else fallback
 
 
 async def yt_pip_hls_master(request: Request):
@@ -1042,30 +1073,32 @@ async def yt_pip_hls_master(request: Request):
         info = None
     if not info:
         return JSONResponse({"error": "PiP akışı bulunamadı"}, status_code=404, headers=cors_hdrs)
-    hls_u = str(info.get("hlsUrl") or "").strip()
-    if hls_u:
-        prox = f"/api/rave/stream?u={urllib.parse.quote(hls_u, safe='')}&proxy_segs=1&ext=.m3u8"
-        lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:6",
-            f"#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720",
-            prox,
-        ]
-        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
     v_fmt = info.get("videoFmt")
     a_fmt = info.get("audioFmt")
-    if v_fmt and a_fmt:
+    hls_u = str(info.get("hlsUrl") or "").strip()
+    if not want_live and v_fmt and a_fmt:
         w = int(v_fmt.get("width") or 1280)
         h = int(v_fmt.get("height") or 720)
         bw = int(v_fmt.get("bandwidth") or 1500000) + int(a_fmt.get("bandwidth") or 132000)
+        v_codec = _extract_rfc_codec(v_fmt.get("codecs") or "", "avc1.4d401f")
+        a_codec = _extract_rfc_codec(a_fmt.get("codecs") or "", "mp4a.40.2")
         q_vid = urllib.parse.quote(vid, safe="")
         lines = [
             "#EXTM3U",
             "#EXT-X-VERSION:7",
             "#EXT-X-INDEPENDENT-SEGMENTS",
             f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Orijinal",DEFAULT=YES,AUTOSELECT=YES,URI="/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=audio"',
-            f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="avc1.4d401f,mp4a.40.2",RESOLUTION={w}x{h},AUDIO="aud"',
+            f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="{v_codec},{a_codec}",RESOLUTION={w}x{h},AUDIO="aud"',
             f"/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=video",
+        ]
+        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+    if hls_u:
+        prox = f"/api/rave/stream?u={urllib.parse.quote(hls_u, safe='')}&proxy_segs=1&ext=.m3u8"
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:6",
+            "#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720",
+            prox,
         ]
         return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
     return JSONResponse({"error": "Uyumlu HLS PiP katmanı yok"}, status_code=404, headers=cors_hdrs)
@@ -1120,13 +1153,15 @@ async def yt_music_stream(request: Request):
         return Response(b"", status_code=204, headers=cors_hdrs)
     vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
     kind = (request.query_params.get("kind") or "audio").strip().lower()
-    is_video_req = kind in ("video", "video_fmp4")
+    is_video_req = kind in ("video", "video_fmp4", "muxed")
     try:
         info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
     except Exception:
         info = None
     if kind == "video_fmp4":
         target = ((info or {}).get("videoFmt") or {}).get("url") or (info or {}).get("videoUrl") or ""
+    elif kind == "muxed":
+        target = (info or {}).get("muxedUrl") or ""
     elif kind == "video":
         target = (info or {}).get("muxedUrl") or (info or {}).get("videoUrl") or ""
     else:
@@ -1141,9 +1176,10 @@ async def yt_music_stream(request: Request):
     rng = request.headers.get("range") or ""
     is_head = request.method == "HEAD"
     def_ct = "video/mp4" if is_video_req else "audio/mp4"
+    cli_ua = str((info or {}).get("ua") or "")
     try:
         try:
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, cli_ua), timeout=11.0)
         except Exception:
             _YT_IOS_STREAM_CACHE.pop(vid, None)
             if is_video_req:
@@ -1151,7 +1187,7 @@ async def yt_music_stream(request: Request):
             target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
             if not target:
                 raise
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, ""), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
             "Content-Length": cr if (is_head and status == 200 and cr.isdigit()) else str(len(data)),
@@ -1165,7 +1201,6 @@ async def yt_music_stream(request: Request):
         return Response(b"" if is_head else data, status_code=status, headers=hdrs)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
-
 
 def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, provider: str, poster: str, preview_url: str, mv_url_param: str = "", mode: str = "") -> dict:
     if not url and video_id and re.match(r"^[A-Za-z0-9_-]{11}$", video_id):

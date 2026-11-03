@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v89';
-import { api, qs } from '../api.js?v=20261103_v89';
-import { parseVideoUrl } from '../providers.js?v=20261103_v89';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v89';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v89';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v89';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v90';
+import { api, qs } from '../api.js?v=20261103_v90';
+import { parseVideoUrl } from '../providers.js?v=20261103_v90';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v90';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v90';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v90';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');

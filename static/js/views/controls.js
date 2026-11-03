@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v89';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v89';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v89';
-import { getProvider } from '../providers.js?v=20261103_v89';
-import { expectedPosition } from '../sync.js?v=20261103_v89';
-import { thumbFor } from './lobby.js?v=20261103_v89';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v89';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v89';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v89';
-import { avatar } from '../profile.js?v=20261103_v89';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v90';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v90';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v90';
+import { getProvider } from '../providers.js?v=20261103_v90';
+import { expectedPosition } from '../sync.js?v=20261103_v90';
+import { thumbFor } from './lobby.js?v=20261103_v90';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v90';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v90';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v90';
+import { avatar } from '../profile.js?v=20261103_v90';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },

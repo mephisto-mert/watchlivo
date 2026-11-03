@@ -150,5 +150,56 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertIn("isTrustedWatchlivoHost:", ios_main)
 
 
+    def test_06_adfree_youtube_fmp4_hls_and_nocookie_fallback(self):
+        import music_engine
+        repo = pathlib.Path(__file__).resolve().parents[1]
+        yt_js = (repo / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        self.assertIn("yt-adfree-video", yt_js)
+        self.assertIn("/api/rave/yt-pip-hls.m3u8", yt_js)
+        self.assertIn("kind=muxed", yt_js)
+        self.assertIn("https://www.youtube-nocookie.com", yt_js)
+        self.assertIn("enterAutoPiP", yt_js)
+
+        fake_info = {
+            "hlsUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/ip/1.2.3.4/index.m3u8",
+            "muxedUrl": "",
+            "audioUrl": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140",
+            "videoUrl": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=137",
+            "videoFmt": {
+                "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=137",
+                "initRange": {"start": "0", "end": "739"},
+                "indexRange": {"start": "740", "end": "1227"},
+                "width": 1920,
+                "height": 1080,
+                "bandwidth": 3200000,
+                "codecs": 'video/mp4; codecs="avc1.640028"',
+                "ua": music_engine.UA_YT_IOS,
+            },
+            "audioFmt": {
+                "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140",
+                "initRange": {"start": "0", "end": "631"},
+                "indexRange": {"start": "632", "end": "999"},
+                "bandwidth": 130000,
+                "codecs": 'audio/mp4; codecs="mp4a.40.2"',
+                "ua": music_engine.UA_YT_IOS,
+            },
+            "duration": 212,
+            "ua": music_engine.UA_YT_IOS,
+        }
+        with patch.object(music_engine, "_yt_ios_extract_sync", return_value=fake_info):
+            r_vod = self.client.get("/api/rave/yt-pip-hls.m3u8?v=dQw4w9WgXcQ")
+            self.assertEqual(r_vod.status_code, 200)
+            self.assertIn("/api/rave/yt-pip-track.m3u8?v=dQw4w9WgXcQ&kind=video", r_vod.text)
+            self.assertIn('CODECS="avc1.640028,mp4a.40.2"', r_vod.text)
+            self.assertIn("RESOLUTION=1920x1080", r_vod.text)
+
+            r_live = self.client.get("/api/rave/yt-pip-hls.m3u8?v=dQw4w9WgXcQ&live=1")
+            self.assertEqual(r_live.status_code, 200)
+            self.assertIn("/api/rave/stream?u=", r_live.text)
+
+            r_mux = self.client.get("/api/rave/yt-music-stream?v=dQw4w9WgXcQ&kind=muxed")
+            self.assertEqual(r_mux.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()
