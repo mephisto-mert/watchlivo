@@ -2587,7 +2587,7 @@ html.is-apk .wl-btn-apk {
   --fg-3: #64748b;
   --text-main: #f8fafc;
   --neon-cyan: var(--accent);
-  --neon-cyan-glow: var(--accent-glow);
+  --neon-cyan-glow: color-mix(in srgb, var(--accent) 42%, transparent);
   --neon-green: var(--accent);
   --radius-xl: 20px;
   --radius-lg: 14px;
@@ -4113,7 +4113,7 @@ header.navbar.top-nav-capsule {
 }
 
 /* ============================================================================
-   v70: WATCHLIVO CINEMA STUDIO OVERHAUL (85.000+ ARCHIVE & LARGE BENTO CARDS)
+   v70: WATCHLIVO CINEMA STUDIO OVERHAUL (CINEMA ARCHIVE & LARGE BENTO CARDS)
    ============================================================================ */
 
 @media (min-width: 901px) {

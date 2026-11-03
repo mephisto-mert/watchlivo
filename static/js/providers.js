@@ -229,7 +229,7 @@ export const LOGOS = {
     '<rect x="6" y="7" width="30" height="30" rx="9" fill="url(#chub)"/>' +
     '<path d="M16 14v16l13-8-13-8z" fill="#ffffff"/>' +
     '<text x="42" y="21" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13.2" letter-spacing="0.3">SİNEMA, DİZİ &amp; ANİME+</text>' +
-    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">85.000+ FİLM · DİZİ · ANİMETRİX 4K</text>'
+    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">4K HDR · TR DUBLAJ & ALTYAZI</text>'
   ),
   vk: svgRaw(
     '<rect x="8" y="8" width="28" height="28" rx="8" fill="#0077ff"/>' +
@@ -251,25 +251,25 @@ export const LOGOS = {
 
 export const PROVIDER_CATEGORIES = [
   { id: 'all', label: '🌐 Tüm Platformlar' },
-  { id: 'free_tr', label: '🍿 85.000+ Ana Arşiv' },
+  { id: 'free_tr', label: '🍿 Sinema+ Ana Arşiv' },
   { id: 'global', label: '🎬 Global Sinema & Anime' },
   { id: 'tr', label: '🇹🇷 Yerli Platformlar' },
 ];
 
 export const PROVIDERS = [
-  { id: 'cinema', name: 'Sinema, Dizi & Anime+', cat: 'free_tr', badge: '85.000+ Film · Dizi · Anime · TR Dublaj & Altyazı', logo: LOGOS.cinema, bg: '#10121a', accent: '#ff6b00', web: true, kind: 'catalog', freeNoAuth: true,
-    homeUrl: '', placeholder: '85.000+ ücretsiz film, yabancı dizi, Animetrix/Animecix anime ara veya bağlantı yapıştır...',
+  { id: 'cinema', name: 'Sinema, Dizi & Anime+', cat: 'free_tr', badge: 'Film · Dizi · Anime · 4K TR Dublaj & Altyazı', logo: LOGOS.cinema, bg: '#10121a', accent: '#ff6b00', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: '', placeholder: 'Ücretsiz film, yabancı dizi, Animetrix/Animecix anime ara veya bağlantı yapıştır...',
     idParser: (u) => (
       (u.match(/hdfilmcehennemi\.[a-z.]+\/((?:film|dizi|bolum)\/[\w-]+)/i) || [])[1] ||
       (u.match(/dizibox\.[a-z.]+\/((?:diziler\/)?[\w-]+(?:-izle)?)/i) || [])[1] ||
-      (u.match(/dizi\d*\.(?:life|com|org)\/((?:dizi|film)\/[\w-]+)/i) || [])[1] ||
+      (u.match(/dizi\d*\.(?:life|plus|com|org)\/((?:dizi|film)\/[\w-]+)/i) || [])[1] ||
       (u.match(/(?:fullhdfilmizlesene|jetfilmizle)\.[a-z.]+\/(?:film\/)?([\w-]+)/i) || [])[1] ||
       (u.match(/yabancidizi\.[a-z.]+\/(?:dizi|izle)\/([\w-]+)/i) || [])[1] ||
       (u.match(/animecix\.[a-z.]+\/(?:titles|watch)\/([\w-]+)/i) || [])[1] ||
       (u.match(/plex\.tv\/(?:movie|show|watch)\/([\w-]+)/i) || [])[1] || null
     ) },
   { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
-    homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Semicenk Blok3 Dedublüman Türkçe Hit 2026',
+    homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
     idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
   { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Dizi & Film Vitrini', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",

@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v85';
-import { expectedPosition } from '../sync.js?v=20261103_v85';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v85';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261103_v85';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v86';
+import { expectedPosition } from '../sync.js?v=20261103_v86';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261103_v86';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261103_v86';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -66,7 +66,11 @@ export class Html5Adapter {
     this._healthSentSet = new Set();
     v.preload = 'auto';
     v.preservesPitch = true;
-    try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (e) { /* ignore */ }
+    try {
+      const autoPipOn = localStorage.getItem('vortex_auto_pip') !== 'off';
+      v.autoPictureInPicture = autoPipOn;
+      if (autoPipOn) v.setAttribute('autopictureinpicture', '');
+    } catch (e) { /* ignore */ }
     if (media?.thumbnail || media?.poster) v.poster = media.thumbnail || media.poster;
     this.video = v;
     const syncVideoCors = (targetUrl, forNativeHls = false) => {
@@ -204,14 +208,28 @@ export class Html5Adapter {
           } else {
             deckB.src = bSrc;
           }
+          const bpmA = Math.max(70, Math.min(190, Number(media.bpmA || media.mashupTracks?.[0]?.bpm || 124)));
+          const bpmB = Math.max(70, Math.min(190, Number(media.bpmB || trB?.bpm || 126)));
+          const tempoRatio = Math.max(0.86, Math.min(1.16, bpmA / bpmB));
+          try { deckB.preservesPitch = true; deckB.playbackRate = tempoRatio; } catch (_) {}
+          const barSec = (60 / bpmA) * 4;
+          const cycleSec = Math.max(16, barSec * 8);
           const syncDeckB = () => {
             if (!this.mashupDeckB || this.video !== v) return;
             const ct = Number(v.currentTime || 0);
-            const phase = (Math.sin(ct * (Math.PI / 22)) + 1) * 0.5;
+            const xfade = 0.5 - 0.5 * Math.cos((ct / cycleSec) * Math.PI * 2);
+            const gainA = Math.cos(xfade * Math.PI * 0.5);
+            const gainB = Math.sin(xfade * Math.PI * 0.5);
             const rawBase = Number.isFinite(Number(this.baseVolume)) ? Number(this.baseVolume) : 80;
             const isDeckMuted = Boolean(v.muted || this.userExplicitMuted || rawBase <= 0);
-            const targetPct = isDeckMuted ? 0 : Math.min(100, rawBase * (0.22 + phase * 0.36));
-            applyElementVolume(this.mashupDeckB, targetPct, isDeckMuted);
+            const pctA = isDeckMuted ? 0 : Math.min(100, rawBase * Math.max(0.32, gainA));
+            const pctB = isDeckMuted ? 0 : Math.min(100, rawBase * Math.max(0.18, gainB * 0.92));
+            if (!isIosWebKit()) {
+              applyElementVolume(v, pctA, isDeckMuted, { enableDjEq: true });
+              setElementBassCutDb(v, xfade > 0.55 ? -11 * ((xfade - 0.55) / 0.45) : 0);
+            }
+            applyElementVolume(this.mashupDeckB, pctB, isDeckMuted, { enableDjEq: true });
+            setElementBassCutDb(this.mashupDeckB, xfade < 0.45 ? -12 * ((0.45 - xfade) / 0.45) : 0);
           };
           this._syncDeckBVolume = syncDeckB;
           v.addEventListener('timeupdate', syncDeckB);
@@ -258,8 +276,13 @@ export class Html5Adapter {
       if (!roomExplicitlyPaused || inNativeUi) {
         this.wantPlaying = true;
       }
-      try { v.autoPictureInPicture = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (_) {}
+      try {
+        const autoPipOn = localStorage.getItem('vortex_auto_pip') !== 'off';
+        v.autoPictureInPicture = autoPipOn;
+        if (autoPipOn) v.setAttribute('autopictureinpicture', '');
+      } catch (_) {}
       try { window.Android?.setVideoPlaying?.(true, v.videoWidth || 16, v.videoHeight || 9); } catch (_) {}
+      this._syncNativeIosPip?.(true);
       if (this.bgMvEl && !this.vinylMode) {
         this.bgMvEl.play().catch(() => {});
       }
@@ -270,12 +293,20 @@ export class Html5Adapter {
     });
     const onPipChange = () => {
       const nowPip = this.isPiP();
-      if (this._wasInPip && !nowPip) {
+      if (!this._wasInPip && nowPip) {
+        this._lastPipEnterAt = Date.now();
+      } else if (this._wasInPip && !nowPip) {
         this._lastPipExitAt = Date.now();
       }
       this._wasInPip = nowPip;
-      if (nowPip) this.subs?.syncNativeTrackToElement?.(v, true);
-      else this.subs?._disableAllNativeTextTracks?.();
+      if (nowPip) {
+        this.subs?.syncNativeTrackToElement?.(v, true);
+        if (this.wantPlaying && v.paused && !v.ended) {
+          v.play?.().catch?.(() => {});
+        }
+      } else {
+        this.subs?._disableAllNativeTextTracks?.();
+      }
       this.events.onPipChange?.(nowPip);
     };
     v.addEventListener('enterpictureinpicture', onPipChange);
@@ -287,15 +318,17 @@ export class Html5Adapter {
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
       this._lastVisChangeAt = Date.now();
+      if (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) return;
+      const av = this._activeMediaEl();
       if (document.visibilityState === 'visible') {
-        if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked) {
+        if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked && !this.isPiP()) {
           this._autoResumeCount = 0;
           this._requestWakeLock?.();
-          if (v.paused && !v.ended) this.tryPlay();
+          if (av && av.paused && !av.ended) this.tryPlay();
         }
       } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded) {
-        if ((this.isPiP() || this.isMusic) && v.paused && !v.ended) {
-          v.play?.().catch(() => {});
+        if ((this.isPiP() || this.isMusic || isIosWebKit()) && av && av.paused && !av.ended) {
+          av.play?.().catch(() => {});
         }
       }
     };
@@ -354,6 +387,9 @@ export class Html5Adapter {
         }
       }
       if (v.currentTime > 0 && !v.paused && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) reportPlay();
+      if (!v.paused && Date.now() - (this._lastNativeIosSyncAt || 0) > 2500) {
+        this._syncNativeIosPip?.(true);
+      }
       if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined') {
         window.__watchlivoBgSyncTick?.();
       }
@@ -396,6 +432,10 @@ export class Html5Adapter {
     });
     v.addEventListener('pause', () => {
       if (this._destroyed || this.video !== v) return;
+      if (this._suppressInlinePauseOnce || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) || this._iosPipActive) {
+        this._suppressInlinePauseOnce = false;
+        return;
+      }
       this.playingReported = false;
       this.subs.stopDubAudio();
       try { this.bgMvEl?.pause(); } catch (e) { /* ignore */ }
@@ -404,40 +444,55 @@ export class Html5Adapter {
         fireEndedOnce();
         return;
       }
-      if (!this.isPiP()) {
+      if (!this.isPiP() && !this.wantPlaying) {
         try { window.Android?.setVideoPlaying?.(false, v.videoWidth || 16, v.videoHeight || 9); } catch (_) {}
+        this._syncNativeIosPip?.(false);
       }
       const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 2500);
-      const exitingWebkitFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 950);
-      const exitingPipNow = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 950);
-      const visJustChanged = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 950);
+      const exitingWebkitFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 1200);
+      const exitingPipNow = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 1200);
+      const enteringPipNow = Boolean(this._lastPipEnterAt && Date.now() - this._lastPipEnterAt < 1500);
+      const visJustChanged = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1500);
       const inNativePlayerUi = Boolean(
         v.webkitDisplayingFullscreen
         || this.isPiP()
         || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
       );
+      if ((enteringPipNow || visJustChanged) && this.wantPlaying && (this.isPiP() || isIosWebKit())) {
+        setTimeout(() => {
+          const av = this._activeMediaEl();
+          if (this.video === v && this.wantPlaying && av && av.paused && !av.ended && (this.isPiP() || document.visibilityState === 'visible')) {
+            av.play?.().catch?.(() => {});
+          }
+        }, 180);
+        return;
+      }
       if (inNativePlayerUi && !exitingWebkitFs && !exitingPipNow && !visJustChanged && !v.seeking && !recentSeek && v.readyState >= 2) {
         clearTimeout(this._pipPauseTimer);
         this._pipPauseTimer = setTimeout(() => {
           if (this._destroyed || this.video !== v || !v.paused || v.ended || v.seeking) return;
-          const leftPip = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 1100);
-          const leftFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 1100);
-          const visFlip = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1100);
+          const leftPip = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 1400);
+          const leftFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 1400);
+          const enteredPip = Boolean(this._lastPipEnterAt && Date.now() - this._lastPipEnterAt < 1600);
+          const visFlip = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1600);
           const stillNativeUi = Boolean(
             v.webkitDisplayingFullscreen
             || this.isPiP()
             || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
           );
-          if (leftPip || leftFs || visFlip || !stillNativeUi) {
-            if (this.wantPlaying && (typeof document === 'undefined' || document.visibilityState === 'visible') && !this.autoplayHardBlocked) {
-              this.tryPlay();
+          if (leftPip || leftFs || enteredPip || visFlip || !stillNativeUi) {
+            if (this.wantPlaying && !this.autoplayHardBlocked) {
+              const av = this._activeMediaEl();
+              if (this.isPiP() && av) av.play?.().catch?.(() => {});
+              else if (typeof document === 'undefined' || document.visibilityState === 'visible') this.tryPlay();
             }
             return;
           }
           this.wantPlaying = false;
           clearTimeout(this.resumeTimer);
+          this._syncNativeIosPip?.(false);
           this.events.onPause?.({ userFullscreenPause: true });
-        }, 120);
+        }, 650);
         return;
       }
       if (this.wantPlaying && !this.hasEnded && !v.ended) {
@@ -535,26 +590,21 @@ export class Html5Adapter {
     this.subs.initForMedia(media);
 
     let triedHlsFallback = false;
-    const isUrlHls = (u) => /\.m3u8(\?|$)/i.test(String(u || '')) || /\/proxy\?data=|\/api\/rave\/stream\?|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(u || ''));
-    const isRaveProxiedHls = (u) => /\/api\/rave\/stream\?/i.test(String(u || ''));
+    const isUrlHls = (u) => /\.m3u8(\?|$)/i.test(String(u || '')) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(u || ''));
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';
     const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
-    const hasManagedMse = typeof window !== 'undefined' && typeof window.ManagedMediaSource === 'function';
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
-    const isApple = /Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-    const hasNativeVolBridge = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.watchlivoVolume);
-    const canAppleMseHls = isApple && !hasNativeVolBridge && hasManagedMse && canHlsJs && isRaveProxiedHls(url);
-    const wantInitialIosMse = canAppleMseHls && this.baseVolume > 0 && this.baseVolume < 99.5;
-    let useNativeHls = isHls && canNativeHls && ((isApple && !wantInitialIosMse) || !canHlsJs);
+    const isApple = isIosWebKit() || (/Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
+    let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
     this._isApple = isApple;
-    this._canAppleMseHls = canAppleMseHls;
+    this._canAppleMseHls = false;
     this.useNativeHls = useNativeHls;
     const withProxySegs = (u) => {
       const s = String(u || '');
-      if (!s.includes('/api/rave/stream?') || s.includes('proxy_segs=1')) return u;
+      if (!/\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)/i.test(s) || s.includes('proxy_segs=1')) return u;
       return s.includes('&ext=.m3u8')
         ? s.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
-        : `${s}&proxy_segs=1`;
+        : `${s}${s.includes('?') ? '&' : '?'}proxy_segs=1`;
     };
     this._withProxySegs = withProxySegs;
 
@@ -1070,7 +1120,7 @@ export class Html5Adapter {
     v.addEventListener('timeupdate', checkZeroDimAudioOnly);
     const checkUniversalStall = () => {
       if (this.video !== v) return;
-      if (!this.wantPlaying || v.seeking || document.hidden) {
+      if (!this.wantPlaying || v.seeking || document.hidden || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         return;
       }
@@ -1127,7 +1177,7 @@ export class Html5Adapter {
         clearBuf();
         return;
       }
-      if (!this.wantPlaying || v.seeking || document.hidden) {
+      if (!this.wantPlaying || v.seeking || document.hidden || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         consecutiveMidStalls = 0;
         lastWatchdogPos = curT;
         return;
@@ -1222,6 +1272,7 @@ export class Html5Adapter {
         return;
       }
       if (e && e.name === 'NotAllowedError') {
+        if (typeof document !== 'undefined' && document.hidden) return;
         v.muted = true;
         this.audioUnlocked = false;
         this.events.onAutoplayBlocked?.();
@@ -1256,11 +1307,44 @@ export class Html5Adapter {
     if (av && av === this.iosPipVideo) { av.play()?.catch?.(() => {}); return; }
     this.tryPlay();
   }
+  _nativeIosPipSourceUrl() {
+    if (this.isMusic && !(this.video?.videoWidth > 0)) {
+      const clipVid = String(this.media?.clipVideoId || this.media?.videoId || '');
+      if (/^[A-Za-z0-9_-]{11}$/.test(clipVid) && !this.media?.live) {
+        return `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(clipVid)}`;
+      }
+      if (this.bgMvEl?.src) return this.bgMvEl.src;
+    }
+    if (!this.currentUrl || this.currentUrl.startsWith('blob:')) return '';
+    return this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
+  }
+  _syncNativeIosPip(playingOverride = null) {
+    if (typeof window === 'undefined' || !window.isWatchlivoNativeIOS || typeof window.watchlivoNativePiP !== 'function') return;
+    const eff = this._nativeIosPipSourceUrl();
+    if (!this.video || !eff) return;
+    this._lastNativeIosSyncAt = Date.now();
+    try {
+      const absU = new URL(eff, window.location.origin).href;
+      const r = this.container?.getBoundingClientRect?.() || { left: 0, top: 80, width: 360, height: 202 };
+      const isPlaying = typeof playingOverride === 'boolean' ? playingOverride : (!this.video.paused && this.wantPlaying);
+      window.watchlivoNativePiP(isPlaying ? 'sync' : 'pause', {
+        url: absU,
+        time: this.getTime(),
+        rate: this.video.playbackRate || 1,
+        playing: isPlaying,
+        live: Boolean(this.media?.live),
+        muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0),
+        rect: { x: Math.round(r.left || 0), y: Math.round(r.top || 80), width: Math.max(240, Math.round(r.width || 360)), height: Math.max(135, Math.round(r.height || 202)) },
+      });
+    } catch (_) {}
+  }
+
   pause() {
     this.wantPlaying = false;
     clearTimeout(this.resumeTimer);
     this._activeMediaEl()?.pause();
     if (this._iosPipIsCanvasOnly) this.video?.pause();
+    this._syncNativeIosPip(false);
   }
   isEnded() { return Boolean(this.hasEnded || this._activeMediaEl()?.ended); }
   seek(t) {
@@ -1360,14 +1444,6 @@ export class Html5Adapter {
   setVolume(v) {
     const rawNum = Number(v);
     this.baseVolume = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
-    if (isIosWebKit() && this.baseVolume > 0 && this.baseVolume < 99.5 && !this.isPiP()) {
-      resumeSharedAudioContext();
-      if (this.useNativeHls && this._canAppleMseHls) {
-        this._switchIosNativeToInlineMse();
-        return;
-      }
-      this._ensureIosPipStandby?.(this.currentUrl);
-    }
     this.subs.syncVideoVolume();
     if (this.video && (this.hls || hasWebAudioGraph(this.video)) && isIosWebKit()) {
       this._ensureIosPipStandby?.(this.currentUrl);
@@ -1430,7 +1506,7 @@ export class Html5Adapter {
       }
       this.subs?.onTimeUpdate?.(this.getTime(), true);
     };
-    const isNextHls = /\.m3u8(\?|$)/i.test(String(newUrl || '')) || /\/proxy\?data=|\/api\/rave\/stream\?|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(newUrl || ''));
+    const isNextHls = /\.m3u8(\?|$)/i.test(String(newUrl || '')) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(newUrl || ''));
     const isNextAudioOnly = /\.(m4a|mp3|aac|ogg|wav)(\?|$)/i.test(String(newUrl || '')) || /audio-ssl\.itunes\.apple\.com|p\.scdn\.co\/mp3-preview|soundcloud\.cloud|sndcdn\.com/i.test(String(newUrl || ''));
     if (this.isMusic) {
       this._setMusicVisualMode?.(isNextAudioOnly ? 'vinyl' : 'clip');
@@ -1464,8 +1540,8 @@ export class Html5Adapter {
     } else {
       try { this.hls?.destroy(); } catch (e) { /* ignore */ }
       this.hls = null;
-      const effUrl = (this.useNativeHls && !/stream-proxy/i.test(newUrl) && String(newUrl).includes('/api/rave/stream?') && !String(newUrl).includes('proxy_segs=1'))
-        ? String(newUrl).replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
+      const effUrl = (this.useNativeHls && this._withProxySegs)
+        ? this._withProxySegs(newUrl)
         : newUrl;
       this.video.src = effUrl;
       try { this.video.load(); } catch (e) { /* ignore */ }
@@ -1483,7 +1559,7 @@ export class Html5Adapter {
     if (!levels.length) {
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
-      const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : '1080p Full HD';
+      const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Otomatik Akış');
       return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
     }
     const isAuto = Boolean(this.hls.autoLevelEnabled);
@@ -1662,7 +1738,7 @@ export class Html5Adapter {
       return pv;
     }
     this._iosPipIsCanvasOnly = false;
-    const targetSrc = (this._withProxySegs && /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(rawUrl || '')))
+    const targetSrc = (this._withProxySegs && /\.m3u8(\?|$)|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)/i.test(String(rawUrl || '')))
       ? this._withProxySegs(rawUrl)
       : String(rawUrl || '');
     if (!targetSrc || targetSrc.startsWith('blob:')) return null;
@@ -1677,7 +1753,7 @@ export class Html5Adapter {
   }
 
   _switchIosNativeToInlineMse() {
-    if (!this._canAppleMseHls || !this.useNativeHls || !this.video || this.isPiP() || !window.Hls?.isSupported?.()) return;
+    if (isIosWebKit() || !this._canAppleMseHls || !this.useNativeHls || !this.video || this.isPiP() || !window.Hls?.isSupported?.()) return;
     const v = this.video;
     const srcUrl = this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
     if (!srcUrl) return;
@@ -1724,6 +1800,15 @@ export class Html5Adapter {
     v.disablePictureInPicture = false;
     try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
 
+    const nativeSrc = this._nativeIosPipSourceUrl();
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && nativeSrc) {
+      const absU = new URL(nativeSrc, window.location.origin).href;
+      this._lastPipEnterAt = Date.now();
+      if (window.watchlivoNativePiP('toggle', { url: absU, time: this.getTime(), rate: v.playbackRate || 1, playing: true, live: Boolean(this.media?.live), muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0) })) {
+        return 'entered';
+      }
+    }
+
     if (this.iosPipVideo && (this._iosPipActive || this.iosPipVideo.webkitPresentationMode === 'picture-in-picture')) {
       this._lastPipExitAt = Date.now();
       try { this.iosPipVideo.webkitSetPresentationMode('inline'); } catch (_) {}
@@ -1736,6 +1821,8 @@ export class Html5Adapter {
       const pv = this._ensureIosPipStandby(this.currentUrl);
       if (pv) {
         if (pv.readyState >= 1 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
+          this._iosPipActive = true;
+          this._lastPipEnterAt = Date.now();
           if (!this._iosPipIsCanvasOnly) {
             const curT = this.getTime();
             if (curT > 0.5 && Math.abs((pv.currentTime || 0) - curT) > 0.8) {
@@ -1744,12 +1831,12 @@ export class Html5Adapter {
             pv.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
             pv.playbackRate = v.playbackRate || 1;
             this.subs?.syncNativeTrackToElement?.(pv, true);
+            this._suppressInlinePauseOnce = true;
             try { v.pause(); } catch (_) {}
             try { this.hls?.stopLoad?.(); } catch (_) {}
           } else if (v.paused && this.wantPlaying !== false) {
             try { v.play()?.catch?.(() => {}); } catch (_) {}
           }
-          this._iosPipActive = true;
           try { pv.play()?.catch?.(() => {}); } catch (_) {}
           try {
             pv.webkitSetPresentationMode('picture-in-picture');
@@ -1856,6 +1943,9 @@ export class Html5Adapter {
     clearTimeout(this._pipPauseTimer);
     clearTimeout(this.watchdogTimer);
     try { window.Android?.setVideoPlaying?.(false, 16, 9); } catch (_) {}
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && !window.__kinoxHost?._nativeIosPipActive) {
+      try { window.watchlivoNativePiP?.('stop', {}); } catch (_) {}
+    }
     clearInterval(this.playbackWatchdog);
     setReferrerMeta('strict-origin-when-cross-origin');
     this.subs.stopDubAudio();

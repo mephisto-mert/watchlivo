@@ -1,6 +1,6 @@
 // YouTube IFrame + Music Clip & Vinyl Visualizer adapter (with automatic VEVO error-150 fallback & Karaoke Lyrics).
-import { SubtitleDubController } from './subtitles.js?v=20261103_v85';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit } from './audio-gain.js?v=20261103_v85';
+import { SubtitleDubController } from './subtitles.js?v=20261103_v86';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit } from './audio-gain.js?v=20261103_v86';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -50,12 +50,12 @@ export class YouTubeAdapter {
     const videoId = /^[A-Za-z0-9_-]{11}$/.test(rawId) ? rawId : (urlId || rawId);
     this.media.videoId = videoId;
     ensureIosPlaybackAudioSession();
-    if (isIosWebKit() && /^[A-Za-z0-9_-]{11}$/.test(videoId)) {
-      this._ensureIosPipBridge(videoId);
-    }
     const mount = document.createElement('div');
     mount.className = 'yt-mount';
     this.container.replaceChildren(mount);
+    if (isIosWebKit() && /^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+      this._ensureIosPipBridge(videoId);
+    }
     if (media?.isMusic) this._mountVinylOverlay(media);
     this.subs.initForMedia({ ...this.media, videoId, provider: this.media.provider || 'youtube' }).then(() => {
       if (media?.isMusic && this.subs.subtitleTracks?.length) {
@@ -136,10 +136,19 @@ export class YouTubeAdapter {
                 this.player?.setPlaybackQuality?.('hd1080');
               } catch (err) { /* ignore */ }
               this._syncYtNativeCaptions();
+              this._syncPipBridgeState(true);
               this.events.onBuffering?.(false);
               this.events.onPlay?.();
             }
-            else if (e.data === S.PAUSED) { this.events.onBuffering?.(false); this.events.onPause?.(); }
+            else if (e.data === S.PAUSED) {
+              if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+                this._suppressYtPauseOnce = false;
+                return;
+              }
+              this._syncPipBridgeState(false);
+              this.events.onBuffering?.(false);
+              this.events.onPause?.();
+            }
             else if (e.data === S.BUFFERING) this.events.onBuffering?.(true);
             else if (e.data === S.ENDED) { this.events.onBuffering?.(false); this.events.onEnded?.(); }
           },
@@ -321,6 +330,36 @@ export class YouTubeAdapter {
   setSubtitleFpsScale(scale = 1.0) { return this.subs?.setSubtitleFpsScale(scale) || 1.0; }
   isDualSubtitleEnabled() { return false; }
   setDualSubtitle() { return Promise.resolve(false); }
+  _syncPipBridgeState(playing) {
+    const pv = this.pipVideo;
+    if (!pv || this._destroyed || this._pipActive) return;
+    const curT = this.getTime();
+    if (!this.media?.live && curT > 0.5 && pv.readyState >= 1 && Math.abs((pv.currentTime || 0) - curT) > 1.6) {
+      try { pv.currentTime = curT; } catch (_) {}
+    }
+    pv.muted = true;
+    pv.playbackRate = this.getRate() || 1;
+    if (playing && pv.src) {
+      pv.play?.().catch?.(() => {});
+    } else if (!playing && !pv.paused) {
+      try { pv.pause(); } catch (_) {}
+    }
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && pv.src) {
+      try {
+        const absU = new URL(pv.src, window.location.origin).href;
+        const r = this.container?.getBoundingClientRect?.() || { left: 0, top: 80, width: 360, height: 202 };
+        window.watchlivoNativePiP(playing ? 'sync' : 'pause', {
+          url: absU,
+          time: curT,
+          rate: this.getRate() || 1,
+          playing: Boolean(playing),
+          muted: Boolean(this._muted || this.baseVolume <= 0),
+          rect: { x: Math.round(r.left || 0), y: Math.round(r.top || 80), width: Math.max(240, Math.round(r.width || 360)), height: Math.max(135, Math.round(r.height || 202)) },
+        });
+      } catch (_) {}
+    }
+  }
+
   _ensureIosPipBridge(videoId) {
     if (!isIosWebKit() || this._destroyed || typeof document === 'undefined') return null;
     let pv = this.pipVideo;
@@ -332,22 +371,36 @@ export class YouTubeAdapter {
       pv.setAttribute('webkit-playsinline', '');
       pv.setAttribute('x-webkit-airplay', 'allow');
       pv.disablePictureInPicture = false;
-      pv.preload = 'metadata';
+      try {
+        const autoPipOn = localStorage.getItem('vortex_auto_pip') !== 'off';
+        pv.autoPictureInPicture = autoPipOn;
+        if (autoPipOn) pv.setAttribute('autopictureinpicture', '');
+      } catch (_) {}
+      pv.preload = 'auto';
       pv.muted = true;
-      pv.style.cssText = 'position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.001;pointer-events:none;z-index:-1;';
+      pv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0.001;pointer-events:none;z-index:2;object-fit:contain;';
       pv.addEventListener('webkitpresentationmodechanged', () => {
         if (this._destroyed || this.pipVideo !== pv) return;
         const inPipNow = pv.webkitPresentationMode === 'picture-in-picture';
         if (inPipNow) {
           this._pipActive = true;
+          const ytCur = Number(this.player?.getCurrentTime?.() || this.audioEl?.currentTime || 0);
+          if (!this.media?.live && ytCur > 0.5 && Math.abs((pv.currentTime || 0) - ytCur) > 1.2) {
+            try { pv.currentTime = ytCur; } catch (_) {}
+          }
+          pv.muted = Boolean(this._muted || this.baseVolume <= 0);
+          this._suppressYtPauseOnce = true;
+          try { this.player?.pauseVideo?.(); } catch (_) {}
+          try { this.audioEl?.pause?.(); } catch (_) {}
+          pv.play?.().catch?.(() => {});
           this.subs?.syncNativeTrackToElement?.(pv, true);
           this.events.onPipChange?.(true);
         } else if (this._pipActive) {
           const resumeT = Number(pv.currentTime || 0);
           const keepPlaying = !pv.paused || this.wantPlaying;
           this._pipActive = false;
-          try { pv.pause(); } catch (_) {}
           pv.muted = true;
+          if (!keepPlaying) { try { pv.pause(); } catch (_) {} }
           if (this.audioEl) {
             if (resumeT > 0.5) { try { this.audioEl.currentTime = resumeT; } catch (_) {} }
             if (keepPlaying) this.audioEl.play().catch(() => {});
@@ -358,25 +411,32 @@ export class YouTubeAdapter {
           this.events.onPipChange?.(false);
         }
       });
-      document.body.appendChild(pv);
+      (this.container || document.body).appendChild(pv);
       this.pipVideo = pv;
+    } else if (this.container && pv.parentElement !== this.container) {
+      this.container.appendChild(pv);
     }
     const srvHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
     if (pv.getAttribute('data-yt-vid') !== videoId) {
       pv.setAttribute('data-yt-vid', videoId);
-      pv.src = srvHls;
-      try { pv.load(); } catch (_) {}
+      const applyCandidate = (bestUrl) => {
+        if (!bestUrl || this._destroyed || this._pipActive || this.pipVideo !== pv) return false;
+        if (pv.src === bestUrl) return true;
+        pv.src = bestUrl;
+        try { pv.load(); } catch (_) {}
+        if (this.wantPlaying && !this.isPaused()) {
+          this._syncPipBridgeState(true);
+        }
+        return true;
+      };
+      applyCandidate(srvHls);
       if (typeof window !== 'undefined' && typeof window.watchlivoResolveYouTube === 'function') {
         window.watchlivoResolveYouTube(videoId).then((sd) => {
           if (this._destroyed || this._pipActive || this.pipVideo !== pv || !sd) return;
           const directHls = sd.hlsManifestUrl || '';
           const fmts = Array.isArray(sd.formats) ? sd.formats : [];
           const muxed = (fmts.find((f) => f?.itag === 22 && f?.url) || fmts.find((f) => f?.itag === 18 && f?.url))?.url || '';
-          const bestDirect = directHls || muxed;
-          if (bestDirect) {
-            pv.src = bestDirect;
-            try { pv.load(); } catch (_) {}
-          }
+          applyCandidate(directHls || muxed);
         }).catch(() => {});
       }
     }
@@ -409,9 +469,10 @@ export class YouTubeAdapter {
       pv.playbackRate = this.getRate() || 1;
       pv.muted = Boolean(this._muted || this.baseVolume <= 0);
       this.subs?.syncNativeTrackToElement?.(pv, true);
+      this._pipActive = true;
+      this._suppressYtPauseOnce = true;
       try { this.player?.pauseVideo?.(); } catch (_) {}
       try { this.audioEl?.pause?.(); } catch (_) {}
-      this._pipActive = true;
       try { pv.play()?.catch?.(() => {}); } catch (_) {}
       try {
         pv.webkitSetPresentationMode('picture-in-picture');
@@ -508,6 +569,9 @@ export class YouTubeAdapter {
     if (this.pipVideo) {
       try { this.pipVideo.pause(); this.pipVideo.removeAttribute('src'); this.pipVideo.remove(); } catch (_) {}
       this.pipVideo = null;
+    }
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && !window.__kinoxHost?._nativeIosPipActive) {
+      try { window.watchlivoNativePiP?.('stop', {}); } catch (_) {}
     }
     if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute?.('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }

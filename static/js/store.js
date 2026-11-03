@@ -972,13 +972,7 @@ export function addFriendByName(name, color = '#6366f1') {
 }
 
 // Account-scoped music history (v4)
-const DEFAULT_MUSIC_RECENT = [
-  { id: 'seed_1', title: 'Semicenk — Çıkmaz Bir Sokakta', songTitle: 'Çıkmaz Bir Sokakta', artist: 'Semicenk', genre: 'Slow & Pop', sourceBadge: '🟢 Spotify', duration: 163, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/49/bf/7c/49bf7c3f-ba04-f425-2766-a0d310fb7182/cover.jpg/600x600bb.jpg', isMusic: true },
-  { id: 'seed_2', title: 'Duman — Senden Daha Güzel', songTitle: 'Senden Daha Güzel', artist: 'Duman', genre: 'Türkçe Rock', sourceBadge: '🍎 Apple Music', duration: 238, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music126/v4/e3/6a/03/e36a0347-7191-da04-7d53-32569e5904fd/884977122039.jpg/600x600bb.jpg', isMusic: true },
-  { id: 'seed_3', title: 'The Weeknd — Blinding Lights', songTitle: 'Blinding Lights', artist: 'The Weeknd', genre: 'Global Hit', sourceBadge: '🟢 Spotify', duration: 200, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/2b/b9/fe/2bb9fef5-d7f3-8345-25a9-db0e79fde4e4/20UMGIM11048.rgb.jpg/600x600bb.jpg', isMusic: true },
-  { id: 'seed_4', title: 'Linkin Park — Numb', songTitle: 'Numb', artist: 'Linkin Park', genre: 'Rock Efsane', sourceBadge: '🟣 Deezer Hi-Fi', duration: 187, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Features125/v4/dd/7d/72/dd7d7259-d27f-5b3e-ce64-9e304d2cb40f/dj.rxzrauer.jpg/600x600bb.jpg', isMusic: true },
-  { id: 'seed_5', title: 'Queen — Bohemian Rhapsody', songTitle: 'Bohemian Rhapsody', artist: 'Queen', genre: 'Klasik Rock', sourceBadge: '🔴 YouTube Music', duration: 355, poster: 'https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/62/2e/97/622e97c4-d620-2ae1-2a47-a32e16a01492/602567988847.jpg/600x600bb.jpg', isMusic: true },
-];
+const DEFAULT_MUSIC_RECENT = [];
 
 export function getMusicHistory() {
   try {

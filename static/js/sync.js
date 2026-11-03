@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261103_v85';
+import { isRoomMediaPlaying } from './store.js?v=20261103_v86';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -112,7 +112,8 @@ export class SyncEngine {
       return CYCLE_MS;
     }
     const now = performance.now();
-    if (ad.video && ad.video.readyState < 1) {
+    const activeVideo = ad._activeMediaEl ? ad._activeMediaEl() : ad.video;
+    if (activeVideo && activeVideo.readyState < 1 && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
       this.lastStepAt = now;
       this.lastExpected = expected;
       this.mode = 'buffering';
@@ -201,7 +202,7 @@ export class SyncEngine {
         this.onStatus({ mode: 'paused', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return timeout;
       }
-      const hiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !ad.isPiP?.() && !ad.isMusic;
+      const hiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !ad.isPiP?.() && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) && !ad.isMusic;
       if (hiddenNonPip || ad.autoplayHardBlocked) {
         return timeout;
       }

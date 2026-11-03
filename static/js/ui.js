@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v85';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v86';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -287,9 +287,9 @@ const DEFAULT_SUNO_KEY = '';
 
 export function getAiApiConfig() {
   return {
-    openaiModel: localStorage.getItem('kinox_openai_model') || 'gpt-6.1-sol',
+    openaiModel: localStorage.getItem('kinox_openai_model') || 'claude-sonnet-4-5',
     openaiKey: localStorage.getItem('kinox_openai_key') || DEFAULT_OPENAI_KEY,
-    sunoModel: localStorage.getItem('kinox_suno_model') || 'suno-v4.5-mureka-9.5',
+    sunoModel: localStorage.getItem('kinox_suno_model') || 'suno-v4.5',
     sunoKey: localStorage.getItem('kinox_suno_key') || DEFAULT_SUNO_KEY,
   };
 }
@@ -298,7 +298,7 @@ export function openAiConfigModal(onSaved) {
   const cur = getAiApiConfig();
   const modelInp = h('input', { class: 'input', value: cur.openaiModel, placeholder: 'Dil & DJ Modeli (örn. claude-sonnet-4-5, deepseek-v3)' });
   const keyInp = h('input', { class: 'input', type: 'password', value: cur.openaiKey, placeholder: 'Özel AI API Anahtarı (isteğe bağlı)' });
-  const sunoModelInp = h('input', { class: 'input', value: cur.sunoModel, placeholder: 'Müzik Motoru (örn. suno-v4.5-mureka-9.5)' });
+  const sunoModelInp = h('input', { class: 'input', value: cur.sunoModel, placeholder: 'Müzik Motoru (örn. suno-v4.5)' });
   const sunoKeyInp = h('input', { class: 'input', type: 'password', value: cur.sunoKey, placeholder: 'Özel Suno/Mureka API Anahtarı (isteğe bağlı)' });
   const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
     h('div', { class: 'dim', style: { fontSize: '.83rem', lineHeight: '1.45' } },
@@ -319,9 +319,9 @@ export function openAiConfigModal(onSaved) {
         primary: true,
         onClick: () => {
           try {
-            localStorage.setItem('kinox_openai_model', modelInp.value.trim() || 'gpt-6.1-sol');
+            localStorage.setItem('kinox_openai_model', modelInp.value.trim() || 'claude-sonnet-4-5');
             localStorage.setItem('kinox_openai_key', keyInp.value.trim());
-            localStorage.setItem('kinox_suno_model', sunoModelInp.value.trim() || 'suno-v4.5-mureka-9.5');
+            localStorage.setItem('kinox_suno_model', sunoModelInp.value.trim() || 'suno-v4.5');
             localStorage.setItem('kinox_suno_key', sunoKeyInp.value.trim());
           } catch (_) {}
           toast('✓ AI & Model yapılandırması kaydedildi');
@@ -402,9 +402,15 @@ export function openThemeModal() {
     !inApk ? h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları') : null,
     !inApk ? h('div', { class: 'wl-modal-download-actions' },
       h('a', {
-        class: 'btn primary wl-btn-apk-dl',
-        href: '/download/Watchlivo-v1.1.0.apk',
-        download: 'Watchlivo-v1.1.0.apk',
+        class: 'btn primary wl-btn-ios-dl',
+        href: '/download/ipa',
+        download: 'Watchlivo.ipa',
+        onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
+      }, '🍎 iPhone IPA İndir (v1.2)'),
+      h('a', {
+        class: 'btn wl-btn-apk-dl',
+        href: '/download/Watchlivo-v1.1.apk',
+        download: 'Watchlivo-v1.1.apk',
         onclick: () => toast('📱 Android APK indiriliyor...', 4000)
       }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android APK İndir (v1.1)'),
       h('a', {
@@ -425,17 +431,37 @@ export function openDownloadModal() {
       h('p', {}, 'Tek tıkla, tam ekran, yüksek performans ve arkadaşlarınla sıfır gecikmeli izle.')
     ),
     h('div', { class: 'wl-download-grid' },
+      !inApk ? h('div', { class: 'wl-download-card ios' },
+        h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
+        h('div', { class: 'wl-download-info' },
+          h('b', {}, 'iPhone & iPad (iOS IPA)'),
+          h('small', {}, 'v1.2.0 • iOS 15+ Arka Plan PiP & AltStore / TrollStore'),
+          h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi ve arka plan ses desteği.')
+        ),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+          h('a', {
+            class: 'btn primary wl-download-action',
+            href: '/download/ipa',
+            download: 'Watchlivo.ipa',
+            onclick: () => toast('🍎 Watchlivo iOS IPA indiriliyor...', 4000)
+          }, 'IPA İndir (.ipa)'),
+          h('a', {
+            class: 'btn wl-download-action',
+            href: '/download/ios',
+            onclick: () => toast('📲 iOS WebClip profili açılıyor...', 4000)
+          }, 'WebClip Profili'))
+      ) : null,
       !inApk ? h('div', { class: 'wl-download-card apk' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Android Uygulaması (APK)'),
-          h('small', {}, 'v1.1.0 • Android 5.0+ Tüm Telefon & Tabletler'),
-          h('p', {}, 'Hızlı bağlantı, senkron odalar, reklamsız tam ekran oynatıcı.')
+          h('small', {}, 'v1.1.0 • Android 8.0+ PiP & Tam Ekran Oynatıcı'),
+          h('p', {}, 'Hızlı bağlantı, sistem PiP penceresi, reklamsız tam ekran oynatıcı.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/Watchlivo-v1.1.0.apk',
-          download: 'Watchlivo-v1.1.0.apk',
+          href: '/download/Watchlivo-v1.1.apk',
+          download: 'Watchlivo-v1.1.apk',
           onclick: () => toast('📱 Android APK indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')
       ) : null,
@@ -443,7 +469,7 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Windows Masaüstü'),
-          h('small', {}, 'v1.1.0 • Windows 10 / 11 64-bit'),
+          h('small', {}, 'v1.2.0 • Windows 10 / 11 64-bit'),
           h('p', {}, 'Masaüstü donma önleyici, ultra düşük gecikme ve sistem bildirimleri.')
         ),
         h('a', {

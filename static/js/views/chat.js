@@ -1,9 +1,9 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v85';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v85';
-import { avatar } from '../profile.js?v=20261103_v85';
-import { api, qs } from '../api.js?v=20261103_v85';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v85';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261103_v86';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261103_v86';
+import { avatar } from '../profile.js?v=20261103_v86';
+import { api, qs } from '../api.js?v=20261103_v86';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v86';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -520,7 +520,8 @@ export function buildChat(ctx) {
       toast('Sesli mesaj için mikrofon izni gerekli');
       return;
     }
-    const mimeCandidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', ''];
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    const mimeCandidates = isIOS ? ['audio/mp4', 'audio/aac', 'audio/webm;codecs=opus', 'audio/webm', ''] : ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', ''];
     const mimeType = mimeCandidates.find((m) => !m || MediaRecorder.isTypeSupported?.(m)) || '';
     const chunks = [];
     const peaks = [];
@@ -548,7 +549,7 @@ export function buildChat(ctx) {
       try { stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* ignore */ }
       if (!stObj.shouldSend || !chunks.length) return;
       const durSec = Math.max(0.8, Math.min(25, (Date.now() - startedAt) / 1000));
-      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || 'audio/webm' });
+      const blob = new Blob(chunks, { type: rec.mimeType || mimeType || (isIOS ? 'audio/mp4' : 'audio/webm') });
       if (blob.size > 280000) {
         toast('Ses kaydı çok uzun — en fazla 25 saniye gönderilebilir');
         return;
@@ -1441,11 +1442,11 @@ export function buildChat(ctx) {
     btnTabSimilar.classList.toggle('active', musicTab === 'similar');
     btnTabRecent.classList.toggle('active', musicTab === 'recent');
     const recentList = getMusicHistory();
-    const seedArtist = (curMedia?.isMusic && curMedia?.artist) ? curMedia.artist : (recentList[0]?.artist || 'Semicenk');
-    const seedTitle = (curMedia?.isMusic && curMedia?.songTitle) ? curMedia.songTitle : (recentList[0]?.songTitle || 'Çıkmaz Bir Sokakta');
+    const seedArtist = (curMedia?.isMusic && curMedia?.artist) ? curMedia.artist : (recentList[0]?.artist || '');
+    const seedTitle = (curMedia?.isMusic && curMedia?.songTitle) ? curMedia.songTitle : (recentList[0]?.songTitle || curMedia?.title || '');
     const titleEl = musicSimilarBar.querySelector('#music-similar-title');
     if (titleEl) {
-      titleEl.textContent = musicTab === 'recent' ? '🕘 Son Çalınanlar' : `🎵 Diğer Müzikler (${seedArtist} Mix)`;
+      titleEl.textContent = musicTab === 'recent' ? '🕘 Son Çalınanlar' : (seedArtist ? `🎵 Diğer Müzikler (${seedArtist} Mix)` : '🎵 Diğer Müzikler');
     }
     if (musicTab === 'recent') {
       renderMusicStripItems(recentList);

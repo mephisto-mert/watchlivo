@@ -1,4 +1,4 @@
-// Shared WebAudio GainNode + Soft-Limiter Engine (0% - 150% real volume & boost, CORS/iOS safe).
+// Shared WebAudio GainNode + Soft-Limiter Engine (0% - 150% real volume & boost, CORS/iOS PiP safe).
 
 let _audioCtx = null;
 const _mediaNodes = new WeakMap();
@@ -11,6 +11,7 @@ export function isIosWebKit() {
 }
 
 export function ensureIosPlaybackAudioSession() {
+  if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS) return;
   if (typeof navigator === 'undefined' || !navigator.audioSession) return;
   try {
     if (navigator.audioSession.type !== 'playback') {
@@ -37,8 +38,9 @@ export function getSharedAudioContext(createIfMissing = false) {
 }
 
 export function resumeSharedAudioContext() {
+  if (typeof document !== 'undefined' && document.hidden) return _audioCtx;
   const ctx = getSharedAudioContext(true);
-  if (ctx && ctx.state === 'suspended') {
+  if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
     ctx.resume().catch(() => {});
   }
   return ctx;
@@ -50,10 +52,11 @@ export function isCorsSafeMediaElement(el, opts = {}) {
   if (opts.retriedNoCors || el._retriedNoCors) return false;
   const src = String(el.currentSrc || el.src || '').trim();
   if (!src) return Boolean(el.crossOrigin === 'anonymous' && !opts.useNativeHls);
-  // WebKit Bug 180696: iOS native AVPlayer HLS outputs silence if attached to MediaElementAudioSourceNode.
+  // Preserve native iOS AVPlayer on <video> and HLS streams so Home-Screen Auto-PiP & background audio never detach.
   if (isIosWebKit()) {
+    if (el.tagName === 'VIDEO') return false;
     if (opts.useNativeHls) return false;
-    if (!src.startsWith('blob:') && /\.m3u8(\?|$)/i.test(src)) return false;
+    if (!src.startsWith('blob:') && /(\.m3u8(\?|$)|\/api\/rave\/stream(?:[-_]manifest|-proxy)?)/i.test(src)) return false;
   }
   if (src.startsWith('blob:') || src.startsWith('data:')) return true;
   if (typeof window !== 'undefined') {
@@ -69,25 +72,31 @@ export function isCorsSafeMediaElement(el, opts = {}) {
 
 export function canControlElementVolume(el, opts = {}) {
   if (!isIosWebKit()) return true;
+  if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume) return true;
   if (!el) return false;
+  if (el.tagName === 'VIDEO') return true;
   if (_mediaNodes.has(el)) return true;
   return isCorsSafeMediaElement(el, opts);
 }
 
 function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   if (!el || opts.forbidWebAudio || opts.inPip) return null;
+  if (isIosWebKit() && el.tagName === 'VIDEO') return null;
   const existing = _mediaNodes.get(el);
   if (existing) return existing;
   if (!isCorsSafeMediaElement(el, opts)) return null;
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
-  if (ctx.state === 'suspended') {
+  if ((ctx.state === 'suspended' || ctx.state === 'interrupted') && !(typeof document !== 'undefined' && document.hidden)) {
     try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
   }
-  // On iOS WebKit, never hijack <video> into a suspended AudioContext (preserves native AVPlayer OS PiP & background audio).
-  if (isIosWebKit() && el.tagName === 'VIDEO' && ctx.state !== 'running') return null;
+  if (isIosWebKit() && ctx.state !== 'running') return null;
   try {
     const source = ctx.createMediaElementSource(el);
+    const eqLow = ctx.createBiquadFilter();
+    eqLow.type = 'lowshelf';
+    eqLow.frequency.value = 180;
+    eqLow.gain.value = 0;
     const gain = ctx.createGain();
     gain.gain.value = Math.max(0, Math.min(1, Number.isFinite(initialGain) ? initialGain : 1.0));
     const limiter = ctx.createDynamicsCompressor();
@@ -96,14 +105,31 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
     limiter.ratio.value = 10;
     limiter.attack.value = 0.003;
     limiter.release.value = 0.14;
-    source.connect(gain);
+    source.connect(eqLow);
+    eqLow.connect(gain);
     gain.connect(limiter);
     limiter.connect(ctx.destination);
-    const entry = { ctx, source, gain, limiter };
+    const entry = { ctx, source, eqLow, gain, limiter };
     _mediaNodes.set(el, entry);
     return entry;
   } catch (e) {
     return null;
+  }
+}
+
+export function setElementBassCutDb(el, db = 0) {
+  const graph = el ? _mediaNodes.get(el) : null;
+  if (!graph?.eqLow) return false;
+  const clamped = Math.max(-18, Math.min(6, Number(db) || 0));
+  try {
+    if (graph.ctx.state === 'running') {
+      graph.eqLow.gain.setTargetAtTime(clamped, graph.ctx.currentTime, 0.03);
+    } else {
+      graph.eqLow.gain.value = clamped;
+    }
+    return true;
+  } catch (e) {
+    return false;
   }
 }
 
@@ -121,13 +147,13 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
     return true;
   }
 
-  // On iOS WebKit, 100% and 0% work natively via el.muted without WebAudio, keeping AVPlayer OS Home-Screen PiP 100% intact.
-  const wantIosAttenuation = isIosWebKit() && !isMuted && pct > 0 && pct < 99.5 && !opts.forbidWebAudio && !opts.inPip;
-  const needWebAudio = _mediaNodes.has(el) || wantIosAttenuation;
+  // Keep <video> on iOS WebKit strictly on native AVPlayer (never attach createMediaElementSource).
+  const wantIosAudioGraph = isIosWebKit() && el.tagName !== 'VIDEO' && !isMuted && pct > 0 && pct < 99.5 && !opts.forbidWebAudio && !opts.inPip;
+  const needWebAudio = _mediaNodes.has(el) || wantIosAudioGraph || Boolean(opts.enableDjEq && !isIosWebKit());
   const graph = needWebAudio ? _attachElementGraph(el, opts, targetGain) : _mediaNodes.get(el);
 
   if (graph) {
-    if (graph.ctx.state === 'suspended' && !isMuted) {
+    if ((graph.ctx.state === 'suspended' || graph.ctx.state === 'interrupted') && !isMuted && !(typeof document !== 'undefined' && document.hidden)) {
       graph.ctx.resume().catch(() => {});
     }
     el.muted = isMuted;
@@ -168,24 +194,30 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
   let node = _streamNodes.get(audioEl);
   if (!node) {
     const ctx = resumeSharedAudioContext();
-    if (!ctx || ctx.state !== 'running') {
-      try { audioEl.volume = Math.max(0, Math.min(1, clamped / 100)); } catch (e) { /* ignore */ }
-      return;
-    }
+    if (!ctx) return;
     try {
       const source = ctx.createMediaStreamSource(activeStream);
       const gain = ctx.createGain();
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -2.0;
+      limiter.knee.value = 8;
+      limiter.ratio.value = 12;
+      limiter.attack.value = 0.003;
+      limiter.release.value = 0.12;
       source.connect(gain);
-      gain.connect(ctx.destination);
+      gain.connect(limiter);
+      limiter.connect(ctx.destination);
       audioEl.muted = true;
-      node = { ctx, source, gain };
+      node = { ctx, source, gain, limiter, stream: activeStream };
       _streamNodes.set(audioEl, node);
     } catch (e) {
-      try { audioEl.volume = Math.max(0, Math.min(1, clamped / 100)); } catch (_) {}
       return;
     }
   }
   if (node) {
+    if (node.ctx.state === 'suspended' || node.ctx.state === 'interrupted') {
+      node.ctx.resume().catch(() => {});
+    }
     node.gain.gain.value = Math.max(0, Math.min(1.5, clamped / 100));
   }
 }

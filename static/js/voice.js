@@ -1,6 +1,6 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261103_v85';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v85';
+import { toast } from './ui.js?v=20261103_v86';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261103_v86';
 
 const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
 
@@ -923,7 +923,15 @@ export class Voice {
 
   async toggleMic() {
     if (this.micOn) {
-      this.stream?.getTracks().forEach((t) => { t.enabled = false; });
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+      const isIos = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIos) {
+        this.stream?.getAudioTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
+        this.stream = null;
+        try { if (navigator.audioSession && !window.isWatchlivoNativeIOS) navigator.audioSession.type = 'playback'; } catch (_) {}
+      } else {
+        this.stream?.getTracks().forEach((t) => { t.enabled = false; });
+      }
       this.micOn = false;
       this.selfSpeaking = false;
       this.onMicLevel?.(0);
@@ -1070,7 +1078,7 @@ export class Voice {
           if (speaking) { speaking = false; this.selfSpeaking = false; this._updateDuckState(); }
           return;
         }
-        if (this.audioCtx?.state === 'suspended') this.audioCtx.resume().catch(() => {});
+        if (this.audioCtx?.state === 'suspended' && !(typeof document !== 'undefined' && document.hidden)) this.audioCtx.resume().catch(() => {});
         an.getByteFrequencyData(buf);
         const avg = buf.reduce((a, b) => a + b, 0) / (buf.length || 1);
         const norm = Math.min(1, avg / 55);

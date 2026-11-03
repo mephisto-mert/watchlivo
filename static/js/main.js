@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v85';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v85';
-import { renderHome, destroyHome } from './views/home.js?v=20261103_v85';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v85';
-import { api } from './api.js?v=20261103_v85';
-import { h, toast } from './ui.js?v=20261103_v85';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261103_v86';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261103_v86';
+import { renderHome, destroyHome } from './views/home.js?v=20261103_v86';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261103_v86';
+import { api } from './api.js?v=20261103_v86';
+import { h, toast } from './ui.js?v=20261103_v86';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -133,7 +133,10 @@ async function boot() {
     window.dispatchEvent(new Event('resize'));
   };
   window.addEventListener('pageshow', (ev) => {
-    if (ev.persisted) window.location.reload();
+    if (ev.persisted && !state.mesh?.id) {
+      pushPresenceHeartbeat().catch(() => {});
+      syncSocialState(true).catch(() => {});
+    }
   });
   try {
     for (const k of Object.keys(localStorage)) {
@@ -207,6 +210,9 @@ async function boot() {
 }
 
 function playNotifChime() {
+  if (typeof document !== 'undefined' && document.hidden) return;
+  const isIos = typeof navigator !== 'undefined' && (/iP(hone|ad|od)/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  if (isIos && state.mesh?.id) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -268,14 +274,13 @@ function initPresenceLifecycle() {
       }).catch(() => {});
     } catch (_) {}
   };
-  window.addEventListener('pagehide', markOffline);
   window.addEventListener('beforeunload', markOffline);
 }
 
 function initRaveNotifications() {
   let swReg = null;
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js?v=20261103_v85').then((reg) => {
+  if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
+    navigator.serviceWorker.register('/sw.js?v=20261103_v86').then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

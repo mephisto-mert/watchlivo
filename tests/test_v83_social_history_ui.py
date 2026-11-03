@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261103_v85", index_txt)
+        self.assertIn("20261103_v86", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -181,7 +181,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
 
         # 2. Volume 0..100 smooth scaling without 0 -> 100 jump
         self.assertNotIn("if (!controllable && nv > 0 && nv !== 100)", ctl_js)
-        self.assertIn("ManagedMediaSource", html5_js)
+        self.assertIn("autoPictureInPicture", html5_js)
         self.assertIn("initialGain", gain_js)
         self.assertIn("this.userMuted = true;", host_js)
 
@@ -211,7 +211,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         ctl_js = (static_root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
 
         # 1. HTML5 adapter preserves untouched Native AVPlayer HLS on iOS + pre-warmed iosPipVideo standby + canvas Music PiP
-        self.assertIn("wantInitialIosMse", html5_js)
+        self.assertIn("_nativeIosPipSourceUrl", html5_js)
         self.assertIn("_ensureIosPipStandby", html5_js)
         self.assertIn("_switchIosNativeToInlineMse", html5_js)
         self.assertIn("watchlivoNativePiP", html5_js)
@@ -250,3 +250,31 @@ class V83SocialHistoryUiTests(unittest.TestCase):
             self.assertIn(b"setCanStartPictureInPictureAutomaticallyFromInline:", macho)
             self.assertIn(b"watchlivoPiP", macho)
 
+
+    def test_08_v86_zero_mock_and_native_ios_app_exit_pip(self):
+        import zipfile
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        static_root = repo_root / "static"
+
+        # 1. Zero fake counters / dead mocks across all static JS/HTML/CSS
+        for ext in ("*.js", "*.css", "*.html"):
+            for p in static_root.rglob(ext):
+                txt = p.read_text(encoding="utf-8")
+                self.assertNotIn("85.000+", txt, f"Found 85.000+ in {p.name}")
+                self.assertNotIn("Çevremdekiler", txt, f"Found Çevremdekiler in {p.name}")
+                self.assertNotIn("SoundHelix", txt, f"Found SoundHelix in {p.name}")
+                self.assertNotIn("BigBuckBunny", txt, f"Found BigBuckBunny in {p.name}")
+                self.assertNotIn("gpt-6.1", txt, f"Found gpt-6.1 in {p.name}")
+
+        # 2. WebClip mobileconfig has FullScreen=false so iOS allows OS-level PiP on app exit
+        mc_txt = (static_root / "Watchlivo.mobileconfig").read_text(encoding="utf-8")
+        self.assertIn("<key>FullScreen</key>\n            <false/>", mc_txt)
+
+        # 3. Native Watchlivo.ipa Mach-O binary contains inline sync/pause + applicationWillResignActive: OS PiP handoff
+        with zipfile.ZipFile(static_root / "Watchlivo.ipa", "r") as zf:
+            macho = zf.read("Payload/Watchlivo.app/Watchlivo")
+            self.assertIn(b"applicationWillResignActive:", macho)
+            self.assertIn(b"restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:", macho)
+            self.assertIn(b"startOrSyncNativePiP:forceStart:", macho)
+            plist_txt = zf.read("Payload/Watchlivo.app/Info.plist").decode("utf-8")
+            self.assertIn("<string>86</string>", plist_txt)

@@ -6,7 +6,7 @@
     <array>
         <dict>
             <key>FullScreen</key>
-            <true/>
+            <false/>
             <key>IgnoreManifestScope</key>
             <true/>
             <key>IsRemovable</key>

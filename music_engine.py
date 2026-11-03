@@ -133,7 +133,7 @@ def _spotify_playlist_sync(playlist_id: str, limit: int = 20) -> list[dict]:
         data = json.loads(m.group(1))
         entity = ((data.get("props") or {}).get("pageProps") or {}).get("state", {}).get("data", {}).get("entity") or {}
         cover_list = ((entity.get("coverArt") or {}).get("sources") or [])
-        default_cover = cover_list[0].get("url") if cover_list else "/static/kinox-poster.svg"
+        default_cover = cover_list[0].get("url") if cover_list else "/static/watchlivo-poster.svg"
         tracks = entity.get("trackList") or []
         out = []
         for idx, tr in enumerate(tracks):
@@ -195,7 +195,7 @@ def _itunes_music_video_sync(term: str, limit: int = 8, country: str = "TR") -> 
         if not title or not artist:
             continue
         art100 = it.get("artworkUrl100") or ""
-        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/kinox-poster.svg"
+        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/watchlivo-poster.svg"
         dur_sec = max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
         out.append({
             "id": f"amv_{tid}",
@@ -248,7 +248,7 @@ def _itunes_search_sync(term: str, limit: int = 20, country: str = "TR") -> list
             continue
         seen.add(dk)
         art100 = it.get("artworkUrl100") or ""
-        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/kinox-poster.svg"
+        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/watchlivo-poster.svg"
         dur_sec = max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
         out.append({
             "id": f"trk_{tid}" if tid else f"trk_{abs(hash(dk)) % 10000000}",
@@ -288,7 +288,7 @@ def _deezer_search_sync(term: str, limit: int = 12) -> list[dict]:
         if not title or not artist:
             continue
         alb = it.get("album") or {}
-        poster = alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium") or "/static/kinox-poster.svg"
+        poster = alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium") or "/static/watchlivo-poster.svg"
         out.append({
             "id": f"dz_{it.get('id')}",
             "trackId": str(it.get("id") or ""),
@@ -484,7 +484,7 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
     clean_artist = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", artist or "").strip()
     q = f"{clean_artist} {clean_title}".strip() or f"{artist} {song_title}".strip()
     if not q:
-        return "WEBVTT\n\n1\n00:00:01.000 --> 00:00:08.000\n🎤 Watchlivo Hi-Fi Müzik & Karaoke\n"
+        return "WEBVTT\n\n"
     ckey = q.lower()
     if ckey in _LYRICS_CACHE and time.time() - _LYRICS_CACHE[ckey][0] < 3600:
         return _LYRICS_CACHE[ckey][1]
@@ -520,12 +520,9 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
         for idx_l, ln in enumerate(lines[:60]):
             parsed.append((6.0 + idx_l * 3.8, ln))
     if not parsed:
-        disp_head = f"{clean_artist} — {clean_title}".strip(" —") or q
-        parsed = [
-            (1.0, f"{disp_head} · Hi-Fi Stüdyo"),
-            (8.0, f"{clean_title or disp_head} · Orijinal Kayıt"),
-            (16.0, f"{clean_artist or 'Watchlivo Müzik'} · Senkron Ses Akışı"),
-        ]
+        vtt_empty = "WEBVTT\n\n"
+        _LYRICS_CACHE[ckey] = (time.time(), vtt_empty)
+        return vtt_empty
     cues = []
     for idx, (st, txt) in enumerate(parsed):
         et = parsed[idx + 1][0] - 0.08 if idx + 1 < len(parsed) else st + 4.5
@@ -596,9 +593,9 @@ def _build_music_catalog_sync(provider: str, category: str, query: str, recent_a
         return batches
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as main_pool:
-        f_sim = main_pool.submit(_find_similar_songs_sync, recent_artist or "Semicenk", recent_title or "Çıkmaz Bir Sokakta", category, 14)
+        f_sim = main_pool.submit(_find_similar_songs_sync, recent_artist, recent_title, category, 14) if recent_artist.strip() else None
         cat_futs = [(c, main_pool.submit(_fetch_cat_raw, c)) for c in target_cats]
-        sim_items = f_sim.result() or []
+        sim_items = (f_sim.result() or []) if f_sim else []
         cat_raw_results = [(c, fut.result() or []) for c, fut in cat_futs]
 
     rap_block = ("lvbel", "blok3", "uzi", "motive", "ati242", "cakal", "reckol", "batuflex", "murda")
@@ -751,32 +748,57 @@ UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWeb
 _YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = {}
 
 
+def _parse_dash_rng(val) -> dict | None:
+    if isinstance(val, dict) and "start" in val and "end" in val:
+        return {"start": str(val["start"]), "end": str(val["end"])}
+    m = re.match(r"^(\d+)-(\d+)$", str(val or "").strip())
+    return {"start": m.group(1), "end": m.group(2)} if m else None
+
+
 def _yt_piped_fallback_sync(vid: str) -> dict | None:
-    for host in ("https://pipedapi.kavin.rocks", "https://api.piped.private.coffee"):
+    for inv_host in ("https://yt.chocolatemoo53.com", "https://inv.nadeko.net"):
         try:
-            req = urllib.request.Request(f"{host}/streams/{vid}", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=4.2) as r:
-                d = json.loads(r.read(512 * 1024).decode("utf-8", errors="ignore"))
-            hls_u = str(d.get("hls") or "").strip()
+            req = urllib.request.Request(f"{inv_host}/api/v1/videos/{vid}?local=true", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5.0) as r:
+                d = json.loads(r.read(768 * 1024).decode("utf-8", errors="ignore"))
+            def _abs_u(raw_u: str) -> str:
+                u_s = str(raw_u or "").strip()
+                return (inv_host + u_s) if u_s.startswith("/") else u_s
             mux_u = ""
-            aud_u = ""
-            for vs in (d.get("videoStreams") or []):
-                if not vs.get("videoOnly") and vs.get("url") and "mp4" in str(vs.get("mimeType") or vs.get("format") or "").lower():
-                    mux_u = vs["url"]
+            for fs in (d.get("formatStreams") or []):
+                if str(fs.get("itag") or "") in ("22", "18") and fs.get("url"):
+                    mux_u = _abs_u(fs["url"])
                     break
-            for aus in (d.get("audioStreams") or []):
-                if aus.get("url") and "mp4" in str(aus.get("mimeType") or aus.get("format") or "").lower():
-                    aud_u = aus["url"]
+            v_fmt, a_fmt, aud_u, vid_u = None, None, "", ""
+            af_list = d.get("adaptiveFormats") or []
+            for it_a in ("140", "139", "251", "250"):
+                for f in af_list:
+                    if str(f.get("itag") or "") == it_a and f.get("url"):
+                        fu = _abs_u(f["url"])
+                        aud_u = aud_u or fu
+                        ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
+                        if it_a in ("140", "139") and ir and xr and not a_fmt:
+                            a_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "bandwidth": int(f.get("bitrate") or 132000)}
+                        break
+                if aud_u:
                     break
-            if hls_u or mux_u or aud_u:
-                return {
-                    "hlsUrl": hls_u,
-                    "muxedUrl": mux_u,
-                    "audioUrl": aud_u or mux_u,
-                    "videoUrl": mux_u,
-                    "duration": int(d.get("duration") or 0),
-                    "external": True,
-                }
+            for it_v in ("136", "135", "134"):
+                for f in af_list:
+                    if str(f.get("itag") or "") == it_v and f.get("url"):
+                        fu = _abs_u(f["url"])
+                        vid_u = vid_u or fu
+                        ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
+                        if ir and xr and not v_fmt:
+                            res_m = re.match(r"(\d+)x(\d+)", str(f.get("size") or ""))
+                            w = int(res_m.group(1)) if res_m else (1280 if it_v == "136" else (854 if it_v == "135" else 640))
+                            h = int(res_m.group(2)) if res_m else (720 if it_v == "136" else (480 if it_v == "135" else 360))
+                            v_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "width": w, "height": h, "bandwidth": int(f.get("bitrate") or 1200000), "codecs": str(f.get("type") or "")}
+                        break
+                if v_fmt:
+                    break
+            hls_u = _abs_u(d.get("hlsUrl") or "")
+            if hls_u or (v_fmt and a_fmt) or mux_u or aud_u:
+                return {"hlsUrl": hls_u, "muxedUrl": mux_u, "audioUrl": aud_u or mux_u, "videoUrl": mux_u or vid_u, "videoFmt": v_fmt, "audioFmt": a_fmt, "duration": int(d.get("lengthSeconds") or 0), "external": True}
         except Exception:
             continue
     return None
@@ -902,9 +924,10 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
 
 
 def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False):
-    hdrs = {"User-Agent": UA_YT_IOS, "Accept": "*/*"}
+    use_ua = UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC
+    hdrs = {"User-Agent": use_ua, "Accept": "*/*"}
     open_chunk_sz = 2 * 1024 * 1024
-    max_closed_sz = 16 * 1024 * 1024
+    max_closed_sz = 3 * 1024 * 1024
     start, end = 0, open_chunk_sz - 1
     read_cap = open_chunk_sz
     if range_hdr and range_hdr.startswith("bytes="):
@@ -955,10 +978,6 @@ def _yt_fallback_audio_url_sync(vid: str) -> str:
                     return it["audioPreviewUrl"]
     except Exception:
         pass
-    it_def = _itunes_search_sync("Semicenk", 2)
-    for it in (it_def or []):
-        if it.get("audioPreviewUrl"):
-            return it["audioPreviewUrl"]
     return ""
 
 
@@ -972,7 +991,7 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     i_end = int(idx_rng.get("end") or 2047)
     req = urllib.request.Request(
         fmt["url"],
-        headers={"User-Agent": UA_YT_IOS, "Range": f"bytes={i_start}-{i_end}"},
+        headers={"User-Agent": (UA_YT_IOS if "googlevideo.com" in fmt["url"] else UA_MUSIC), "Range": f"bytes={i_start}-{i_end}"},
     )
     with urllib.request.urlopen(req, timeout=5.5) as r:
         buf = r.read(65536)
@@ -1193,7 +1212,9 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         sp = song_title.replace("🎵", "").split(" - ", 1)
         artist, song_title = sp[0].strip(), sp[1].strip()
     want_remix, var_badge = _classify_track_variant(song_title, "", artist)
-    clean_q = f"{artist} {song_title}".strip() or "Semicenk Çıkmaz Bir Sokakta"
+    clean_q = f"{artist} {song_title}".strip()
+    if not clean_q and not video_id and not url and not preview_url and not mv_url_param:
+        return {"error": "Şarkı adı veya bağlantı gerekli", "url": ""}
     mode_norm = "video" if mode.lower() in ("video", "clip", "mv") else ("audio" if mode.lower() in ("audio", "song") else "")
     ckey = f"v15|{clean_q.lower()}|{'rmx' if want_remix else 'orig'}|{mode_norm}|{video_id}|{url}|{preview_url}|{mv_url_param}"
     cached = _RESOLVE_MUSIC_CACHE.get(ckey)
@@ -1383,7 +1404,7 @@ async def music_catalog(request: Request):
     prov = (request.query_params.get("provider") or "music").strip().lower()
     cat = (request.query_params.get("category") or "all").strip().lower()
     q = (request.query_params.get("q") or "").strip()[:120]
-    rec_artist = (request.query_params.get("recentArtist") or "Semicenk").strip()[:80]
+    rec_artist = (request.query_params.get("recentArtist") or "").strip()[:80]
     rec_title = (request.query_params.get("recentTitle") or "").strip()[:80]
     try:
         data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
@@ -1400,7 +1421,7 @@ async def music_similar(request: Request):
         sp = title.replace("🎵", "").split("—", 1)
         artist, title = sp[0].strip(), sp[1].strip()
     try:
-        items = await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist or "Semicenk", title, cat, 16), timeout=9.0)
+        items = (await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist, title, cat, 16), timeout=9.0)) if (artist or title or cat) else []
     except Exception:
         items = []
     return JSONResponse({"artist": artist, "title": title, "items": items}, headers={"Cache-Control": "public, max-age=120, s-maxage=600"})

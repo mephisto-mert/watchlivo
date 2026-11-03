@@ -134,49 +134,6 @@ def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, A
     _kv_set(f"wl:soc:ntf:{key}", q, ttl_sec=86400)
     return item
 
-COMMUNITY_PEERS = [
-    {
-        "uid": "u_ayla_cinema",
-        "name": "Ayla Sinema",
-        "handle": "@ayla_cinema",
-        "color": "#FF2A85",
-        "avatarUrl": "",
-        "country": "TR",
-        "online": True,
-        "status": "🎬 Dune: Part Two odasında",
-        "watchMinutes": 420,
-        "medal": "🥇 Altın İzleyici",
-        "rankPill": "Top %1 İzleyici",
-    },
-    {
-        "uid": "u_mert_dj",
-        "name": "Mert Watchlivo DJ",
-        "handle": "@mert_dj",
-        "color": "#00F5D4",
-        "avatarUrl": "",
-        "country": "DE",
-        "online": True,
-        "status": "🎧 Watchlivo DJ Synthwave Mix dinliyor",
-        "watchMinutes": 215,
-        "medal": "🥈 Gümüş İzleyici",
-        "rankPill": "Watchlivo DJ Prodüktör",
-    },
-    {
-        "uid": "u_zeynep_anime",
-        "name": "Zeynep Anime",
-        "handle": "@zeynep_anime",
-        "color": "#9B5DE5",
-        "avatarUrl": "",
-        "country": "JP",
-        "online": True,
-        "status": "⛩️ Solo Leveling B2 izliyor",
-        "watchMinutes": 140,
-        "medal": "🥉 Bronz İzleyici",
-        "rankPill": "Anime Gurusu",
-    },
-]
-
-
 def _now() -> float:
     return time.time()
 
@@ -440,10 +397,11 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
     if room_id and not hide_watch and (is_self or room_priv != "private"):
         try:
             import rooms as rooms_mod
-            live_rm = rooms_mod.ROOMS.get(room_id)
-            if live_rm:
-                room_name = _clean(getattr(live_rm, "name", "") or room_name, 100)
-                rm_media = getattr(live_rm, "media", None) or {}
+            rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
+            live_rm = rm_dict.get(room_id)
+            if isinstance(live_rm, dict):
+                room_name = _clean(live_rm.get("name") or room_name, 100)
+                rm_media = live_rm.get("media") or {}
                 if isinstance(rm_media, dict) and rm_media.get("title"):
                     media_title = _clean(rm_media.get("title"), 140)
         except Exception:
@@ -522,7 +480,7 @@ def _enrich_friend_entry(fr: Dict[str, Any], viewer_uid: str) -> Dict[str, Any]:
     p_uid = _clean(fr.get("uid"), 64)
     d_card = _load_social_dir().get(p_uid) or {}
     pres = _compute_live_presence(p_uid, viewer_uid, is_friend=True)
-    mins = _safe_int(fr.get("watchMinutes"), 15, lo=0, hi=1000000)
+    mins = _safe_int(fr.get("watchMinutes"), 0, lo=0, hi=1000000)
     return {
         **fr,
         "uid": p_uid,
@@ -746,9 +704,9 @@ async def social_friends_action(request: Request) -> JSONResponse:
             u["requests"] = [r for r in u["requests"] if r.get("fromUid") != target_uid]
             t_u["outgoingRequests"] = [r for r in t_u.get("outgoingRequests", []) if r.get("toUid") != uid]
             if not any(f.get("uid") == target_uid for f in u["friends"]):
-                u["friends"].insert(0, {"uid": target_uid, "name": t_u["name"], "handle": t_u["handle"], "color": t_u.get("color", "#27DCC8"), "avatarUrl": t_u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+                u["friends"].insert(0, {"uid": target_uid, "name": t_u["name"], "handle": t_u["handle"], "color": t_u.get("color", "#27DCC8"), "avatarUrl": t_u.get("avatarUrl", ""), "watchMinutes": 0, "medal": _compute_medal(0), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
             if not any(f.get("uid") == uid for f in t_u["friends"]):
-                t_u["friends"].insert(0, {"uid": uid, "name": u["name"], "handle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
+                t_u["friends"].insert(0, {"uid": uid, "name": u["name"], "handle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 0, "medal": _compute_medal(0), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
             _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
             _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
             _queue_notification(target_uid, {"type": "friend_accepted", "title": f"🎉 {u['name']} arkadaşlık isteğini kabul etti!", "body": "Artık mesajlaşabilir ve odaya davet gönderebilirsiniz.", "fromUid": uid, "fromName": u["name"], "fromHandle": u["handle"], "fromColor": u.get("color", "#27DCC8"), "fromAvatarUrl": u.get("avatarUrl", "")})
@@ -757,7 +715,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
             return _resp({"pending": True, "alreadyRequested": True, "friendshipState": "OUTGOING_PENDING", "status": "OUTGOING_PENDING", "target": target_card})
         req_id = "req_" + uuid.uuid4().hex[:10]
         out_req = {"id": req_id, "toUid": target_uid, "toName": t_u["name"], "toHandle": t_u["handle"], "color": t_u.get("color", "#27DCC8"), "avatarUrl": t_u.get("avatarUrl", ""), "ts": now_t}
-        in_req = {"id": req_id, "fromUid": uid, "fromName": u["name"], "fromHandle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 15, "medal": _compute_medal(15), "ts": now_t}
+        in_req = {"id": req_id, "fromUid": uid, "fromName": u["name"], "fromHandle": u["handle"], "color": u.get("color", "#27DCC8"), "avatarUrl": u.get("avatarUrl", ""), "watchMinutes": 0, "medal": _compute_medal(0), "ts": now_t}
         u.setdefault("outgoingRequests", []).insert(0, out_req)
         t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid]
         t_u["requests"].insert(0, in_req)
@@ -788,7 +746,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
         if s_u:
             s_u["outgoingRequests"] = [r for r in s_u.get("outgoingRequests", []) if r.get("toUid") != uid and r.get("id") != target_req.get("id")]
         if action == "accept" and from_uid:
-            mins = _safe_int(target_req.get("watchMinutes"), 15, lo=0, hi=1000000)
+            mins = _safe_int(target_req.get("watchMinutes"), 0, lo=0, hi=1000000)
             if not any(f.get("uid") == from_uid for f in u["friends"]):
                 u["friends"].insert(0, {"uid": from_uid, "name": (s_u or {}).get("name") or target_req.get("fromName") or "İzleyici", "handle": (s_u or {}).get("handle") or target_req.get("fromHandle") or "@izleyici", "color": (s_u or {}).get("color") or target_req.get("color") or "#F59E0B", "avatarUrl": (s_u or {}).get("avatarUrl") or target_req.get("avatarUrl") or "", "watchMinutes": mins, "medal": _compute_medal(mins), "rankPill": "Onaylı Arkadaş", "addedAt": now_t})
             if s_u and not any(f.get("uid") == uid for f in s_u["friends"]):
@@ -1396,24 +1354,7 @@ async def youtube_playlist(request: Request) -> JSONResponse:
     except Exception:
         pass
 
-    # Fallback if YouTube playlist is a Mix/Radio or blocked by consent page
-    if not items:
-        fallback_tracks = [
-            ("jfKfPfyJRdk", "lofi hip hop radio - beats to relax/study to", "Lofi Girl", 240),
-            ("4xDzrJKXOOY", "Synthwave Radio - Chill Synth / Retro Beats", "Lofi Girl Synthwave", 225),
-            ("DWcJFNfaw9c", "Ambient Space & Cinema Soundtrack Mix", "Watchlivo Playlist", 260),
-            ("5qap5aO4i9A", "Chillhop Essentials — Gece Sineması Mix", "Chillhop Music", 195),
-        ]
-        for vid, t_title, ch, dur in fallback_tracks:
-            items.append({
-                "provider": "youtube",
-                "videoId": vid,
-                "url": f"https://www.youtube.com/watch?v={vid}",
-                "title": t_title,
-                "channel": ch,
-                "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "duration": dur,
-            })
+
 
     return JSONResponse({
         "ok": True,
@@ -1427,29 +1368,21 @@ async def youtube_playlist(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # 5. RaveDJ AI Dual-Track Mashup & Mix Engine (RAVEDJ RENDERER PROVIDER)
 # ---------------------------------------------------------------------------
-def _resolve_mashup_track(query_or_url: str, fallback_query: str, fallback_title: str, fallback_artist: str) -> Dict[str, Any]:
+def _resolve_mashup_track(query_or_url: str) -> Optional[Dict[str, Any]]:
     import music_engine
-    q = _clean(query_or_url, 200) or fallback_query
+    q = _clean(query_or_url, 200)
+    if not q:
+        return None
     is_url = q.startswith(("http://", "https://"))
     try:
-        res = music_engine._resolve_music_sync(
-            "",
-            "" if is_url else q,
-            "",
-            q if is_url else "",
-            "music",
-            "",
-            "",
-            "",
-            "audio",
-        )
+        res = music_engine._resolve_music_sync("", "" if is_url else q, "", q if is_url else "", "music", "", "", "", "audio")
         if res and res.get("url"):
             bpm_val = 118 + (sum(ord(c) for c in q) % 18)
             return {
                 "videoId": res.get("videoId") or res.get("clipVideoId") or "",
                 "clipVideoId": res.get("clipVideoId") or res.get("videoId") or "",
-                "title": res.get("songTitle") or res.get("title") or fallback_title,
-                "artist": res.get("artist") or fallback_artist,
+                "title": res.get("songTitle") or res.get("title") or q,
+                "artist": res.get("artist") or "Sanatçı",
                 "url": res["url"],
                 "altUrls": res.get("altUrls") or [],
                 "audioPreviewUrl": res.get("audioPreviewUrl") or res["url"],
@@ -1460,38 +1393,7 @@ def _resolve_mashup_track(query_or_url: str, fallback_query: str, fallback_title
             }
     except Exception:
         pass
-    # Guaranteed fallback via iTunes / SoundCloud resolver
-    try:
-        res_fb = music_engine._resolve_music_sync(fallback_artist, fallback_title, "", "", "music", "", "", "", "audio")
-        if res_fb and res_fb.get("url"):
-            return {
-                "videoId": res_fb.get("videoId") or res_fb.get("clipVideoId") or "",
-                "clipVideoId": res_fb.get("clipVideoId") or res_fb.get("videoId") or "",
-                "title": res_fb.get("songTitle") or fallback_title,
-                "artist": res_fb.get("artist") or fallback_artist,
-                "url": res_fb["url"],
-                "altUrls": res_fb.get("altUrls") or [],
-                "audioPreviewUrl": res_fb.get("audioPreviewUrl") or res_fb["url"],
-                "mvUrl": res_fb.get("mvUrl") or "",
-                "thumbnail": res_fb.get("poster") or res_fb.get("thumbnail") or "/static/watchlivo-poster.svg",
-                "duration": int(res_fb.get("duration") or 210),
-                "bpm": 124,
-            }
-    except Exception:
-        pass
-    return {
-        "videoId": "",
-        "clipVideoId": "",
-        "title": q or fallback_title,
-        "artist": fallback_artist,
-        "url": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        "altUrls": ["https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"],
-        "audioPreviewUrl": "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-        "mvUrl": "",
-        "thumbnail": "/static/watchlivo-poster.svg",
-        "duration": 210,
-        "bpm": 124,
-    }
+    return None
 
 
 async def ravedj_mashup(request: Request) -> JSONResponse:
@@ -1504,86 +1406,100 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
         body = dict(request.query_params)
     q_a = _clean(body.get("trackA") or body.get("a"), 200)
     q_b = _clean(body.get("trackB") or body.get("b"), 200)
-    if not q_a and not q_b:
-        return JSONResponse({"ok": False, "error": "Mashup için en az iki şarkı veya bağlantı girin."}, status_code=400)
-
+    if not q_a or not q_b:
+        return JSONResponse({"ok": False, "error": "Mashup oluşturmak için iki şarkı adı veya bağlantısı girin."}, status_code=400)
     loop = asyncio.get_running_loop()
     tr_a, tr_b = await asyncio.gather(
-        loop.run_in_executor(None, _resolve_mashup_track, q_a, "Semicenk Canın Sağ Olsun", "Canın Sağ Olsun", "Semicenk"),
-        loop.run_in_executor(None, _resolve_mashup_track, q_b, "Blok3 Aklına Ben Gelicem", "Aklına Ben Gelicem", "Blok3"),
+        loop.run_in_executor(None, _resolve_mashup_track, q_a),
+        loop.run_in_executor(None, _resolve_mashup_track, q_b),
     )
+    if not tr_a or not tr_b:
+        return JSONResponse({"ok": False, "error": "Seçilen parçalar için ses akışı çözümlenemedi."}, status_code=404)
     target_bpm = int(round((int(tr_a["bpm"]) + int(tr_b["bpm"])) / 2.0))
     short_a = _clean(tr_a["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
     short_b = _clean(tr_b["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
     mashup_title = f"🎧 Watchlivo DJ: {short_a} × {short_b} ({target_bpm} BPM)"
-
-    combined_alts = []
-    for u in [tr_a.get("audioPreviewUrl"), *(tr_a.get("altUrls") or []), tr_b.get("url"), tr_b.get("audioPreviewUrl"), *(tr_b.get("altUrls") or [])]:
-        if u and u != tr_a["url"] and u not in combined_alts:
-            combined_alts.append(u)
-
+    combined_alts = [u for u in [tr_a.get("audioPreviewUrl"), *(tr_a.get("altUrls") or []), tr_b.get("url"), tr_b.get("audioPreviewUrl"), *(tr_b.get("altUrls") or [])] if u and u != tr_a["url"]]
     mashup_media = {
-        "id": "wldj_" + uuid.uuid4().hex[:8],
-        "provider": "direct",
-        "streamType": "direct",
-        "videoId": tr_a.get("videoId") or "",
-        "clipVideoId": tr_a.get("clipVideoId") or tr_b.get("clipVideoId") or "",
+        "id": "wldj_" + uuid.uuid4().hex[:8], "provider": "direct", "streamType": "direct",
+        "videoId": tr_a.get("videoId") or "", "clipVideoId": tr_a.get("clipVideoId") or tr_b.get("clipVideoId") or "",
         "altVideoIds": [tr_b.get("videoId")] if tr_b.get("videoId") else [],
-        "url": tr_a["url"],
-        "altUrls": combined_alts,
-        "audioPreviewUrl": tr_a.get("audioPreviewUrl") or tr_a["url"],
-        "mvUrl": tr_a.get("mvUrl") or tr_b.get("mvUrl") or "",
-        "title": mashup_title,
-        "songTitle": f"{short_a} × {short_b}",
-        "artist": f"Watchlivo DJ AI ({target_bpm} BPM)",
-        "channel": "Watchlivo DJ AI Mashup Studio",
-        "thumbnail": tr_a["thumbnail"],
-        "poster": tr_a["thumbnail"],
-        "duration": int(tr_a.get("duration") or 210),
-        "bpm": target_bpm,
-        "isMusic": True,
-        "isRemix": True,
-        "isRaveDJ": True,
-        "musicMode": "clip",
-        "versionBadge": f"🎧 Watchlivo DJ {target_bpm} BPM",
-        "musicPlatformLabel": "Watchlivo DJ Beat-Match",
-        "mashupTracks": [tr_a, tr_b],
-        "crossfadePoints": [18, 45, 78, 112, 148, 180],
+        "url": tr_a["url"], "altUrls": list(dict.fromkeys(combined_alts)),
+        "audioPreviewUrl": tr_a.get("audioPreviewUrl") or tr_a["url"], "mvUrl": tr_a.get("mvUrl") or tr_b.get("mvUrl") or "",
+        "title": mashup_title, "songTitle": f"{short_a} × {short_b}", "artist": f"Watchlivo DJ ({target_bpm} BPM)",
+        "channel": "Watchlivo DJ Mashup Studio", "thumbnail": tr_a["thumbnail"], "poster": tr_a["thumbnail"],
+        "duration": int(tr_a.get("duration") or 210), "bpm": target_bpm,
+        "isMusic": True, "isRemix": True, "isRaveDJ": True, "musicMode": "clip",
+        "versionBadge": f"🎧 Watchlivo DJ {target_bpm} BPM", "musicPlatformLabel": "Watchlivo DJ Beat-Match",
+        "mashupTracks": [tr_a, tr_b], "crossfadePoints": [18, 45, 78, 112, 148, 180],
     }
     return JSONResponse({"ok": True, "mashup": mashup_media})
 
 
+_RAVEDJ_TREND_CACHE: Dict[str, Any] = {"ts": 0.0, "items": []}
+
+
+def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
+    now_t = _now()
+    if _RAVEDJ_TREND_CACHE["items"] and (now_t - float(_RAVEDJ_TREND_CACHE["ts"] or 0.0) < 900.0):
+        return _RAVEDJ_TREND_CACHE["items"]
+    out: List[Dict[str, Any]] = []
+    try:
+        html_s = ""
+        try:
+            from curl_cffi import requests as creq
+            cr = creq.get("https://rave.dj/", impersonate="chrome124", timeout=6.0)
+            if cr.status_code == 200:
+                html_s = cr.text
+        except Exception:
+            pass
+        if not html_s:
+            req = urllib.request.Request("https://rave.dj/", headers={"User-Agent": UA_CHROME, "Accept": "text/html"})
+            with urllib.request.urlopen(req, timeout=6.0) as r:
+                html_s = r.read(650000).decode("utf-8", errors="ignore")
+        marker = html_s.find("Env.dataStore")
+        ds = None
+        if marker >= 0:
+            brace_idx = html_s.find("{", marker)
+            if brace_idx >= 0:
+                ds, _ = json.JSONDecoder().raw_decode(html_s, brace_idx)
+        if isinstance(ds, dict):
+            for row in (ds.get("content") or [])[:16]:
+                urls = row.get("urls") or {}
+                thumbs = row.get("thumbnails") or {}
+                v_url = str(urls.get("720") or urls.get("default") or urls.get("480") or urls.get("max") or urls.get("audio") or "").strip()
+                if not v_url.startswith("https://"):
+                    continue
+                t_raw = re.sub(r"(?i)ravedj", "Watchlivo DJ", _clean(row.get("title") or "Mashup", 90))
+                art_raw = re.sub(r"(?i)ravedj", "Watchlivo DJ", _clean(row.get("artists") or "Watchlivo DJ Mix", 70))
+                parts = [p.strip() for p in art_raw.split("&", 1)]
+                out.append({
+                    "id": "wldj_" + str(row.get("id") or uuid.uuid4().hex[:8]),
+                    "title": f"🎧 Watchlivo DJ: {t_raw} — {art_raw}",
+                    "songTitle": t_raw,
+                    "artist": art_raw,
+                    "trackA": parts[0] if parts else t_raw,
+                    "trackB": parts[1] if len(parts) > 1 else t_raw,
+                    "bpm": 124,
+                    "provider": "direct",
+                    "streamType": "mp4",
+                    "url": v_url,
+                    "audioPreviewUrl": str(urls.get("audio") or v_url),
+                    "thumbnail": str(thumbs.get("max") or thumbs.get("720") or thumbs.get("default") or thumbs.get("480") or "/static/watchlivo-poster.svg"),
+                    "duration": int(float(row.get("duration") or 180)),
+                })
+    except Exception:
+        pass
+    if out:
+        _RAVEDJ_TREND_CACHE["ts"] = now_t
+        _RAVEDJ_TREND_CACHE["items"] = out
+    return out
+
+
 async def ravedj_trending(request: Request) -> JSONResponse:
-    presets = [
-        {
-            "id": "wldj_preset_1",
-            "title": "🎧 Watchlivo DJ: Blinding Lights × Midnight City (126 BPM)",
-            "trackA": "The Weeknd Blinding Lights",
-            "trackB": "M83 Midnight City",
-            "bpm": 126,
-            "videoId": "4NRXx6U8ABQ",
-            "thumbnail": "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
-        },
-        {
-            "id": "wldj_preset_2",
-            "title": "🎧 Watchlivo DJ: Starboy × Nightcall Synth Mix (118 BPM)",
-            "trackA": "The Weeknd Starboy",
-            "trackB": "Kavinsky Nightcall",
-            "bpm": 118,
-            "videoId": "34Na4j8AVgA",
-            "thumbnail": "https://i.ytimg.com/vi/34Na4j8AVgA/hqdefault.jpg",
-        },
-        {
-            "id": "wldj_preset_3",
-            "title": "🎧 Watchlivo DJ: Semicenk × Blok3 Hit Mix (128 BPM)",
-            "trackA": "Semicenk Canın Sağ Olsun",
-            "trackB": "Blok3 Aklına Ben Gelicem",
-            "bpm": 128,
-            "videoId": "iuJDhFRDx9M",
-            "thumbnail": "https://i.ytimg.com/vi/iuJDhFRDx9M/hqdefault.jpg",
-        },
-    ]
-    return JSONResponse({"ok": True, "items": presets, "presets": presets})
+    import asyncio
+    items = await asyncio.to_thread(_fetch_ravedj_trending_sync)
+    return JSONResponse({"ok": True, "items": items, "presets": items})
 
 
 # ---------------------------------------------------------------------------
@@ -1616,7 +1532,7 @@ def _make_svg_sticker_data_url(prompt: str, style: str, tagged_user: str = "") -
         f'{tag_badge}'
         f'<text x="28" y="155" fill="{c2}" font-family="sans-serif" font-size="13" font-weight="800" letter-spacing="2">✨ WATCHLIVO AI STUDIO · {safe_style}</text>'
         f'<text x="28" y="195" fill="#ffffff" font-family="sans-serif" font-size="22" font-weight="800">{safe_p}</text>'
-        f'<text x="28" y="285" fill="rgba(255,255,255,0.65)" font-family="sans-serif" font-size="12">StableDiffusion Mesh Renderer</text>'
+        f'<text x="28" y="285" fill="rgba(255,255,255,0.65)" font-family="sans-serif" font-size="12">Watchlivo Görsel Kartı</text>'
         f'</svg>'
     )
     b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
@@ -1641,8 +1557,8 @@ async def ai_image_generate(request: Request) -> JSONResponse:
     full_prompt = f"{prompt}, {style} style, ultra detailed, cinematic lighting"
     if tagged_user:
         full_prompt += f", featuring {tagged_user}"
-    pollinations_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(full_prompt)}?width=640&height=400&seed={seed}&nologo=true"
     svg_fallback = _make_svg_sticker_data_url(prompt, style, tagged_user)
+    pollinations_url = svg_fallback
 
     item = {
         "id": "sd_" + uuid.uuid4().hex[:8],
@@ -1730,21 +1646,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
         except Exception:
             pass
         if not items:
-            # Provide clean playable entries for the folder ID so folder UI works reliably
-            for idx, (ep_name, fmt) in enumerate([("Bölüm 01 - 1080p Dual Audio.mkv", "MKV"), ("Bölüm 02 - 1080p Dual Audio.mp4", "MP4"), ("Bölüm 03 - 1080p Dual Audio.webm", "WEBM")], 1):
-                dl_u = f"https://drive.usercontent.google.com/download?id={fid}_{idx}&export=download&confirm=t"
-                items.append({
-                    "id": f"{fid}_{idx}",
-                    "title": ep_name,
-                    "format": fmt,
-                    "mime": "video/x-matroska" if fmt == "MKV" else "video/mp4",
-                    "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-                    "directUrl": dl_u,
-                    "qualities": [
-                        {"label": "1080p Orijinal (MKV/MP4)", "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"},
-                        {"label": "720p Akıcı", "url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"},
-                    ],
-                })
+            return JSONResponse({"ok": True, "type": "folder", "folderId": fid, "items": [], "warning": "Klasörde herkese açık video dosyası bulunamadı. Paylaşım ayarının 'Bağlantıya sahip olan herkes' olduğundan emin olun."})
         return JSONResponse({"ok": True, "type": "folder", "folderId": fid, "items": items})
 
     fid_single = (file_m.group(1) or file_m.group(2)) if file_m else raw_url.strip()

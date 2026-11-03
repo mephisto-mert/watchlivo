@@ -62,7 +62,7 @@ PROXY_URL_TTL = 21600.0
 
 
 def _proxy_sig(url: str, ref: str = "") -> str:
-    exp = int(time.time()) + int(PROXY_URL_TTL)
+    exp = ((int(time.time()) // 3600) + 6) * 3600
     return hmac.new(_PROXY_SECRET, f"{url}|{ref}|{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24] + f".{exp}"
 
 
@@ -91,8 +91,8 @@ def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
     return q
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY") or "4f042878f22ef63cb94f25e60cb4ec6e"
 GIPHY_API_KEY = os.environ.get("GIPHY_API_KEY") or "y66IkWFVC8eBWb4VWUgb8ad2RREu4v8T"
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or "gpt-6.1-sol"
-SUNO_MODEL = os.environ.get("SUNO_MODEL") or "suno-v4.5-mureka-9.5"
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or "claude-sonnet-4-5"
+SUNO_MODEL = os.environ.get("SUNO_MODEL") or "suno-v4.5"
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_CLOUD_FALLBACK_KEY = os.environ.get("OPENAI_CLOUD_FALLBACK_KEY", "")
 SUNO_API_KEY = os.environ.get("SUNO_API_KEY", "")
@@ -153,7 +153,7 @@ class SecurityHeaders:
                 hdrs.append((b"x-content-type-options", b"nosniff"))
                 hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
                 hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
-                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self), fullscreen=(self), picture-in-picture=(self *)"))
+                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self *), fullscreen=(self *), picture-in-picture=(self *)"))
                 hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
                 if scope.get("path") == "/api/rave/browser-proxy":
@@ -178,7 +178,6 @@ class SecurityHeaders:
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
                     hdrs.append((b"cdn-cache-control", b"no-store"))
                     hdrs.append((b"vary", b"Authorization"))
-                hdrs.append((b"alt-svc", b"clear"))
                 message = {**message, "headers": hdrs}
             await send(message)
 
@@ -464,8 +463,8 @@ _STAR_WARS_CURATED = [
     {"id": "92830", "tmdbId": "92830", "mediaType": "tv", "title": "Obi-Wan Kenobi (Star Wars)", "originalTitle": "Obi-Wan Kenobi", "year": "2022", "rating": 7.1, "voteCount": 1650, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Sith'in İntikamı'ndan on yıl sonra Tatooine'de genç Luke'u uzaktan koruyan Obi-Wan Kenobi, Engizisyoncular ve Darth Vader ile karşı karşıya gelir.", "poster": "https://image.tmdb.org/t/p/w500/qJRB789ceLryrLvOKrZqLKr2CGf.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/qJRB789ceLryrLvOKrZqLKr2CGf.jpg"},
     {"id": "114461", "tmdbId": "114461", "mediaType": "tv", "title": "Star Wars: Ahsoka", "originalTitle": "Ahsoka", "year": "2023", "rating": 7.6, "voteCount": 1100, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluğun düşüşünden sonra eski Jedi Şövalyesi Ahsoka Tano, Büyük Amiral Thrawn'ın geri dönüş tehdidini araştırır.", "poster": "https://image.tmdb.org/t/p/w500/laCJxobHoPVaLQTKxc14Y2zV64J.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/laCJxobHoPVaLQTKxc14Y2zV64J.jpg"},
     {"id": "115036", "tmdbId": "115036", "mediaType": "tv", "title": "The Book of Boba Fett (Star Wars)", "originalTitle": "The Book of Boba Fett", "year": "2021", "rating": 7.4, "voteCount": 2400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Efsanevi ödül avcısı Boba Fett ve paralı asker Fennec Shand, Jabba the Hutt'ın Tatooine'deki suç imparatorluğunu ele geçirir.", "poster": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCrfvM9JeA94bNi2.jpg"},
-    {"id": "60554", "tmdbId": "60554", "mediaType": "tv", "title": "Star Wars Asiler (Rebels)", "originalTitle": "Star Wars Rebels", "year": "2014", "rating": 7.8, "voteCount": 950, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Hayalet gemisinin cesur mürettebatı, galaktik İmparatorluk'a karşı ilk isyan kıvılcımlarını ateşler.", "poster": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/jmg2K1efZq0v2Q9T6L1v0z4G0eB.jpg"},
-    {"id": "105971", "tmdbId": "105971", "mediaType": "tv", "title": "Star Wars: Kötüler Timi (The Bad Batch)", "originalTitle": "Star Wars: The Bad Batch", "year": "2021", "rating": 8.2, "voteCount": 980, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Klon Savaşları'nın hemen ardından genetik mutasyonlu seçkin klon birliği Kuvvet 99, hızla değişen galakside paralı asker olarak hayatta kalmaya çalışır.", "poster": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0c9Y0X.jpg"},
+    {"id": "60554", "tmdbId": "60554", "mediaType": "tv", "title": "Star Wars Asiler (Rebels)", "originalTitle": "Star Wars Rebels", "year": "2014", "rating": 7.8, "voteCount": 950, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Hayalet gemisinin cesur mürettebatı, galaktik İmparatorluk'a karşı ilk isyan kıvılcımlarını ateşler.", "poster": "https://image.tmdb.org/t/p/w500/7ThzIAWrL33FnvnCG9pSHThx7lq.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/8BNjxMJMFp0BgqMh4PyuwZMXxh1.jpg"},
+    {"id": "105971", "tmdbId": "105971", "mediaType": "tv", "title": "Star Wars: Kötüler Timi (The Bad Batch)", "originalTitle": "Star Wars: The Bad Batch", "year": "2021", "rating": 8.2, "voteCount": 980, "origLang": "en", "categories": ["scifi", "animation", "action"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Klon Savaşları'nın hemen ardından genetik mutasyonlu seçkin klon birliği Kuvvet 99, hızla değişen galakside paralı asker olarak hayatta kalmaya çalışır.", "poster": "https://image.tmdb.org/t/p/w500/5mHus672nuinyaE0FtqvD0AddcY.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/sjxtIUCWR74yPPcZFfTsToepfWm.jpg"},
     {"id": "114479", "tmdbId": "114479", "mediaType": "tv", "title": "Star Wars: The Acolyte", "originalTitle": "The Acolyte", "year": "2024", "rating": 6.4, "voteCount": 780, "origLang": "en", "categories": ["scifi", "action", "series"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Yüksek Cumhuriyet döneminin son günlerinde saygın bir Jedi Ustası, eski Padawan'ı ile birlikte şok edici bir suç dalgasını araştırır.", "poster": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg"},
     {"id": "202879", "tmdbId": "202879", "mediaType": "tv", "title": "Star Wars: Skeleton Crew", "originalTitle": "Star Wars: Skeleton Crew", "year": "2024", "rating": 7.3, "voteCount": 520, "origLang": "en", "categories": ["scifi", "action", "series"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Kendi gezegenlerinde gizemli bir keşif yapan dört çocuk, tehlikeli galakside kaybolur ve eve dönüş yolunda Jod Na Nawood ile karşılaşır.", "poster": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/srQbJhLRKoAwRrNN5ga7webPHbC.jpg"},
     {"id": "203085", "tmdbId": "203085", "mediaType": "tv", "title": "Star Wars: Jedi Hikayeleri (Tales of the Jedi)", "originalTitle": "Star Wars: Tales of the Jedi", "year": "2022", "rating": 8.1, "voteCount": 610, "origLang": "en", "categories": ["scifi", "animation", "series"], "genreLabel": "Bilim Kurgu • Animasyon", "overview": "Öncül üçleme dönemindeki Jedi Şövalyeleri Ahsoka Tano ve Kont Dooku'nun kaderlerini belirleyen dönüm noktalarını anlatan antoloji dizisi.", "poster": "https://image.tmdb.org/t/p/w500/k3nWQb0E8mLSR8acSkJP78VRVMv.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/vp52Er9JebGn49GG37jFTwx15Lw.jpg"},
@@ -940,7 +939,7 @@ _DOMESTIC_TR_ORIGINALS = {
     ],
     "puhutv": [
         {"id": "77994", "tmdbId": "77994", "mediaType": "tv", "title": "Şahsiyet", "originalTitle": "Şahsiyet", "origLang": "tr", "year": "2018", "rating": 9.0, "voteCount": 6400, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 puhutv Orijinal · Suç & Gerilim", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/vnAsH4kvVVQYQZZ4pf3rJKx1fcR.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aCHCa6YScaZQ9tlGk6zoQmAkIRA.jpg"},
-        {"id": "84404", "tmdbId": "84404", "mediaType": "tv", "title": "Bozkır", "originalTitle": "Bozkır", "origLang": "tr", "year": "2018", "rating": 8.2, "voteCount": 1800, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Polisiye & Suç · HD", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/ncfVin2A1KdVRQHab4gRp16PFit.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/hAOPaXbIR6dMr4cAlcOLA3xFJTl.jpg"},
+        {"id": "84575", "tmdbId": "84575", "mediaType": "tv", "title": "Bozkır", "originalTitle": "Bozkır", "origLang": "tr", "year": "2018", "rating": 8.2, "voteCount": 1800, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Polisiye & Suç · HD", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/xtk5XY0SfH4Wb4UvqjykeY42OHp.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2rbAJwxUxq5P4Xx7JREu1ReN6C7.jpg"},
         {"id": "32519", "tmdbId": "32519", "mediaType": "tv", "title": "Ezel", "originalTitle": "Ezel", "origLang": "tr", "year": "2009", "rating": 8.9, "voteCount": 4800, "categories": ["series", "drama", "action", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Suç & İntikam", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/pHSjh4MINU2JnK7qQvjogQaX3wr.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/3IJPtnlFoY8bjllHxnEw21qlK2p.jpg"},
         {"id": "42099", "tmdbId": "42099", "mediaType": "tv", "title": "Kuzey Güney", "originalTitle": "Kuzey Güney", "origLang": "tr", "year": "2011", "rating": 8.3, "voteCount": 2700, "categories": ["series", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Dram", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/eG35U9iYp6cWigQxIpzwlPEPY0l.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/tQprHjpB1Utq3QmPDdQRKwPDDRh.jpg"},
         {"id": "74823", "tmdbId": "74823", "mediaType": "tv", "title": "Çukur", "originalTitle": "Çukur", "origLang": "tr", "year": "2017", "rating": 8.1, "voteCount": 3300, "categories": ["series", "action", "drama", "tr", "trend"], "genreLabel": "🇹🇷 Yerli Efsane · Aksiyon & Suç", "sourceBadge": "🔴 puhutv HD", "poster": "https://image.tmdb.org/t/p/w500/7aL9P5NLSgBjdChcwp4cH1OLdKf.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xtCzLQOocIajjQ5Mhwp834BQhVX.jpg"},
@@ -1513,8 +1512,11 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         dedup_final.append(it_x)
 
     items = dedup_final[:120] if pg == 1 else dedup_final[:96]
-    tot_tv = max(totals["tv"], 31600 if is_free_tr else sum(1 for x in items if x["mediaType"] == "tv") * 18, 1200)
-    tot_mv = max(totals["movie"], 54800 if is_free_tr else sum(1 for x in items if x["mediaType"] != "tv") * 22, 1800)
+    vault_streams = (_MAIN_SITES_VAULT.get("streams") or {}) if is_free_tr else {}
+    v_tv = sum(1 for k in vault_streams if str(k).startswith("tv:"))
+    v_mv = sum(1 for k in vault_streams if str(k).startswith("movie:"))
+    tot_tv = max(totals["tv"], v_tv, sum(1 for x in items if x["mediaType"] == "tv"))
+    tot_mv = max(totals["movie"], v_mv, sum(1 for x in items if x["mediaType"] != "tv"))
     payload = {
         "items": items,
         "totalAvailable": tot_tv + tot_mv,
@@ -1549,9 +1551,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
                 mtype = hits[0]["mediaType"]
     s_num = max(1, int(season or 1))
     if not tid.isdigit():
-        def_seasons = [{"season": i, "name": f"{i}. Sezon", "count": 12} for i in range(1, 4)] if mtype == "tv" else []
-        def_eps = [{"episode": i, "season": s_num, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{title} — {s_num}. Sezon {i}. Bölüm Türkçe Dublaj & Altyazılı", "runtime": 45, "still": ""} for i in range(1, 13)] if mtype == "tv" else []
-        return {"tmdbId": "", "mediaType": mtype, "title": title, "originalTitle": title, "year": "2025", "rating": 8.0, "overview": f"{title} — 1080p Full HD Türkçe Dublaj & Altyazılı", "seasons": def_seasons, "episodes": def_eps}
+        return {"tmdbId": "", "mediaType": mtype, "title": title, "originalTitle": title, "year": "", "rating": 0.0, "overview": "", "seasons": [], "episodes": []}
     try:
         info = _http_json(f"https://api.themoviedb.org/3/{mtype}/{tid}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "append_to_response": "external_ids"}), timeout=5.5)
     except Exception:
@@ -1576,7 +1576,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
             {"season": int(s.get("season_number") or 1), "name": s.get("name") or f"{s.get('season_number')}. Sezon", "count": int(s.get("episode_count") or 0)}
             for s in (info.get("seasons") or []) if int(s.get("season_number") or 0) >= 1
         ]
-        out["seasons"] = seasons or [{"season": 1, "name": "1. Sezon", "count": 10}]
+        out["seasons"] = seasons
         try:
             sdata = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=5.5)
             for ep in sdata.get("episodes") or []:
@@ -1591,8 +1591,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
                 })
         except Exception:
             pass
-        if not out["episodes"]:
-            out["episodes"] = [{"episode": i, "season": s_num, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{t_disp} — {s_num}. Sezon {i}. Bölüm", "runtime": 45, "still": backdrop} for i in range(1, 11)]
+
     return out
 
 
@@ -1624,10 +1623,7 @@ async def title_seasons(request: Request):
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_seasons_sync, tmdb_id, title, media_type, season), timeout=9)
         except Exception:
-            res = {
-                "seasons": [{"season": max(1, season), "name": f"{max(1, season)}. Sezon", "count": 10}],
-                "episodes": [{"episode": i, "season": season, "name": f"{i}. Bölüm (1080p HD)", "overview": f"{title or 'Dizi'} — {season}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 11)],
-            }
+            res = {"seasons": [], "episodes": []}
         if len(_SEASONS_CACHE) >= 300:
             _SEASONS_CACHE.pop(next(iter(_SEASONS_CACHE)), None)
         _SEASONS_CACHE[ckey] = (time.time(), res)
@@ -1854,7 +1850,7 @@ def _gen_fp_xsp(sp: str, spt: int = 0) -> str:
 
 
 _TR_ASCII_MAP = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
-DIZIPAL_DOMAINS = [d.strip() for d in (os.environ.get("DIZIPAL_DOMAINS") or "dizipal1592.com,dizipalw2.com").split(",") if d.strip()]
+DIZIPAL_DOMAINS = [d.strip() for d in (os.environ.get("DIZIPAL_DOMAINS") or "dizipal1593.com,dizipal1592.com,dizipalw2.com").split(",") if d.strip()]
 DIZIPAL_PASSPHRASE = "3hPn4uCjTVtfYWcjIcoJQ4cL1WWk1qxXI39egLYOmNv6IblA7eKJz68uU3eLzux1biZLCms0quEjTYniGv5z1JcKbNIsDQFSeIZOBZJz4is6pD7UyWDggWWzTLBQbHcQFpBQdClnuQaMNUHtLHTpzCvZy33p6I7wFBvL4fnXBYH84aUIyWGTRvM2G5cfoNf4705tO2kv"
 _DP_M3U8_CACHE = {}
 
@@ -2348,7 +2344,7 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             q_cands.append(x.replace(":", " "))
         q_cands.append(x)
     valid_titles = list(dict.fromkeys(q_cands + [disp_title, title]))
-    direct_dl = source_url if (source_url and re.search(r"dizi\d*\.life/(?:dizi|film)/", source_url)) else ""
+    direct_dl = source_url if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
     steps = ([("__DIRECT__", direct_dl)] if direct_dl else []) + [("__SEARCH__", q) for q in list(dict.fromkeys(q_cands))[:3]]
     for mode, val in steps:
         try:
@@ -2356,8 +2352,15 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                 matched_url = val
                 base_dom = f"{urllib.parse.urlparse(matched_url).scheme}://{urllib.parse.urlparse(matched_url).netloc}"
             else:
-                su = f"https://dizi82.life/ara?q={urllib.parse.quote(val)}"
-                r = urllib.request.urlopen(urllib.request.Request(su, headers={"User-Agent": UA137}), timeout=4.2)
+                r = None
+                for _dl_host in ("https://dizi83.plus", "https://dizi82.life"):
+                    try:
+                        r = urllib.request.urlopen(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=4.0)
+                        break
+                    except Exception:
+                        continue
+                if r is None:
+                    continue
                 base_dom = f"{urllib.parse.urlparse(r.geturl()).scheme}://{urllib.parse.urlparse(r.geturl()).netloc}"
                 html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 seg = "dizi" if mtype == "tv" else "film"
@@ -3608,7 +3611,7 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
         parts = stype.split(":", 4)
         _, _fmode, vid, sp, spt = (parts + ["", "", "", ""])[:5]
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
-        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}{mt_q}&sid={sid}&ref=fp&fp_id={vid}&sp={sp}&spt={spt}&ext=.m3u8"
+        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}{mt_q}&sid={sid}&ref=fp&fp_id={urllib.parse.quote(str(vid), safe='')}&sp={urllib.parse.quote(str(sp), safe='')}&spt={urllib.parse.quote(str(spt), safe='')}&ext=.m3u8"
     if stype in ("hls_fhd", "hls_fhd_tr", "hls_fhd_multi"):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}{mt_q}&sid={sid}&ref=fhd&ext=.m3u8"
@@ -4670,7 +4673,9 @@ _SUPERSEARCH_CACHE: dict[str, tuple[float, dict]] = {}
 
 async def resolve_catalog(request: Request):
     prov = (request.query_params.get("provider") or "netflix").strip().lower()
-    title = (request.query_params.get("title") or "Sinema").strip()[:160]
+    title = (request.query_params.get("title") or "").strip()[:160]
+    if not title and not (request.query_params.get("tmdbId") or "").strip() and not (request.query_params.get("imdbId") or "").strip() and not (request.query_params.get("sourceUrl") or "").strip():
+        return JSONResponse({"error": "İçerik başlığı veya kimliği gerekli"}, status_code=400)
     display_title = (request.query_params.get("displayTitle") or title).strip()[:160]
     year = (request.query_params.get("year") or "").strip()[:10]
     tmdb_id = (request.query_params.get("tmdbId") or "").strip()[:30]
@@ -4820,11 +4825,14 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     random.shuffle(with_backdrop)
     random.shuffle(others)
     final_items = (with_backdrop + others)[:max(12, min(96, int(limit or 40)))]
+    v_st = _MAIN_SITES_VAULT.get("streams") or {}
+    real_tv = max(sum(1 for k in v_st if str(k).startswith("tv:")), sum(1 for x in pool_items if x.get("mediaType") == "tv"))
+    real_mv = max(sum(1 for k in v_st if str(k).startswith("movie:")), sum(1 for x in pool_items if x.get("mediaType") != "tv"))
     return {
         "items": final_items,
-        "totalAvailable": 86400,
-        "totalTv": 31600,
-        "totalMovies": 54800,
+        "totalAvailable": real_tv + real_mv,
+        "totalTv": real_tv,
+        "totalMovies": real_mv,
         "page": 1,
         "category": cat_c,
         "shuffled": True,
@@ -4850,7 +4858,7 @@ async def provider_catalog(request: Request):
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_showcase_shuffle_sync, category, mt_filter, limit), timeout=5.0)
         except Exception:
-            res = {"items": [], "totalAvailable": 86400, "totalTv": 31600, "totalMovies": 54800, "page": 1, "category": category, "shuffled": True, "hasMore": True}
+            res = {"items": [], "totalAvailable": len(_MAIN_SITES_VAULT.get("streams") or {}), "totalTv": 0, "totalMovies": 0, "page": 1, "category": category, "shuffled": True, "hasMore": False}
         return JSONResponse(
             {"provider": prov, "query": "", **res},
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
@@ -5019,7 +5027,9 @@ def _extract_sync(url: str, fallback_title: str):
     raw_t = re.sub(r"(?i)(\s*[-|•]\s*(Netflix|Disney\+|Prime Video|Max|Crunchyroll|Tubi|Watch|İzle|Official Site).*)$", "", raw_t).strip()
     if matched_prov:
         slugs = [s for s in urllib.parse.urlparse(url).path.split("/") if s and not s.isdigit() and s not in ("watch", "title", "movies", "tv", "video", "browse", "play", "tr", "en", "series", "film", "dizi", "bolum", "sezon", "diziler")]
-        guess = fallback_title or (raw_t if raw_t.lower() not in ("netflix", "disney+", "prime video", "max", "crunchyroll", "just a moment...") else "") or (slugs[-1].replace("-", " ").title() if slugs else "Stranger Things")
+        guess = fallback_title or (raw_t if raw_t.lower() not in ("netflix", "disney+", "prime video", "max", "crunchyroll", "just a moment...") else "") or (slugs[-1].replace("-", " ").title() if slugs else "")
+        if not guess:
+            raise ValueError("Bağlantıdan içerik başlığı çıkarılamadı")
         guess_mtype = "movie" if ("/film/" in url.lower() or matched_prov in ("hdfilmcehennemi", "fullhdfilm") and "/dizi/" not in url.lower() and "/bolum/" not in url.lower()) else "tv"
         return _resolve_catalog_sync(matched_prov, guess, "", "", guess_mtype, "", 1, 1, "", guess, url)
     title = fallback_title or raw_t or urllib.parse.urlparse(url).hostname
@@ -5351,7 +5361,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             hdrs["Origin"] = orig
     clean_u_path = url.lower().split("?", 1)[0]
     is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
-    is_explicit_mp4 = (not is_fmp4_init) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower())
+    is_explicit_mp4 = (not is_fmp4_init) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower() or "drive.usercontent.google.com" in url.lower())
     is_seg_url = is_fmp4_init or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
@@ -5384,7 +5394,9 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                         try:
                             req = urllib.request.Request(url, headers=req_hdrs)
                             with _public_open(req, timeout=14) as r:
-                                data = r.read(28 * 1024 * 1024)
+                                data = r.read((3584 * 1024) if IS_VERCEL else (28 * 1024 * 1024))
+                                if data and ("text/html" in (r.headers.get("Content-Type") or "").lower() or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
+                                    raise ValueError("Upstream returned HTML instead of media segment")
                                 if use_seg_rng and r.status == 206:
                                     cr_up = r.headers.get("Content-Range") or ""
                                     return data, 206, cr_up, "video/mp2t"
@@ -5438,7 +5450,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
         return data, 200, "", ct
 
     chunk_sz = 2048 * 1024
-    max_closed_sz = 16 * 1024 * 1024
+    max_closed_sz = (3 * 1024 * 1024) if IS_VERCEL else (16 * 1024 * 1024)
     start, end = 0, chunk_sz - 1
     m_suf = None
     if rng and rng.startswith("bytes="):
@@ -5586,6 +5598,9 @@ async def rave_stream_manifest(request: Request):
             elif "daioncdn.net/ntv" in target:
                 hdrs["Referer"] = "https://www.ntv.com.tr/"
                 hdrs["Origin"] = "https://www.ntv.com.tr"
+            elif "daioncdn.net/halktv" in target:
+                hdrs["Referer"] = "https://halktv.com.tr/"
+                hdrs["Origin"] = "https://halktv.com.tr"
             elif ref_mode == "vm" or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
                 hdrs["Referer"] = "https://vidmoly.biz/"
                 hdrs["Origin"] = "https://vidmoly.biz"
@@ -5806,7 +5821,7 @@ async def rave_stream_manifest(request: Request):
                     if cur_is_cj:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=cj{ps_q}&ext=.m3u8"
                     if cur_is_fp:
-                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=fp&fp_id={fp_id}&sp={cur_sp}&spt={cur_spt}{ps_q}&ext=.m3u8"
+                        return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=fp&fp_id={urllib.parse.quote(str(fp_id), safe='')}&sp={urllib.parse.quote(str(cur_sp), safe='')}&spt={urllib.parse.quote(str(cur_spt), safe='')}{ps_q}&ext=.m3u8"
                     if cur_is_pv:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=pv{ps_q}&ext=.m3u8"
                     if cur_is_dp:
@@ -5816,21 +5831,22 @@ async def rave_stream_manifest(request: Request):
                     if "dragonballzfans" in cur_target or ref_mode == "hx":
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
+                seg_ext_hint = ".mp4" if (u_path_low.endswith((".mp4", ".m4s")) or "init-" in u_path_low or "/init." in u_path_low) else ".ts"
                 if "key.php" in u_str:
                     return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
                 if cur_is_ve:
-                    return _proxy_u(u_str, "https://vidy.st/", ".ts")
+                    return _proxy_u(u_str, "https://vidy.st/", seg_ext_hint)
                 if cur_is_cj:
-                    return _proxy_u(u_str, "https://cinejoy.pk/", ".ts")
+                    return _proxy_u(u_str, "https://cinejoy.pk/", seg_ext_hint)
                 if cur_is_dbx or "molystream" in u_str or "/sheila_" in u_str:
-                    return _proxy_u(u_str, "https://dbx.molystream.org/", ".ts")
+                    return _proxy_u(u_str, "https://dbx.molystream.org/", seg_ext_hint)
                 if cur_is_dp or "uk-traffic-" in u_str:
                     dp_ref = f"{urllib.parse.urlparse(cur_target).scheme}://{urllib.parse.urlparse(cur_target).netloc}/" if ("dplayer" in cur_target or ".com/f/" in u_str) else "https://x.ag2m5.cfd/"
-                    return _proxy_u(u_str, dp_ref, ".ts")
+                    return _proxy_u(u_str, dp_ref, seg_ext_hint)
                 if cur_is_vm:
-                    return _proxy_u(u_str, "https://vidmoly.biz/", ".ts")
+                    return _proxy_u(u_str, "https://vidmoly.biz/", seg_ext_hint)
                 if cur_is_fp or ".cfd/" in u_str:
-                    return _proxy_u(u_str, "https://fastplay.mom/", ".ts")
+                    return _proxy_u(u_str, "https://fastplay.mom/", seg_ext_hint)
                 if "dragonballzfans" in u_str or needs_seg_proxy:
                     ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
                         "https://rapidvid.org/" if cur_is_fhd else (
@@ -5838,7 +5854,7 @@ async def rave_stream_manifest(request: Request):
                         "https://dbx.molystream.org/" if cur_is_dbx else (
                         "https://one.makesomthingup.click/" if cur_is_dl else (
                         f"https://{urllib.parse.urlparse(cur_target).netloc or 'play2.pilavyerplay.top'}/" if cur_is_pv else "")))))
-                    return _proxy_u(u_str, ref_p, ".ts")
+                    return _proxy_u(u_str, ref_p, seg_ext_hint)
                 return u_str
 
             def _line_lang(l: str) -> str:
@@ -5856,7 +5872,7 @@ async def rave_stream_manifest(request: Request):
             pending_inf = None
             has_default_aud = any('DEFAULT=YES' in l for l in valid_aud_lines)
             selected_aud_set = False
-            if not is_master and "#EXT-X-DISCONTINUITY" in raw and "#EXTINF:" in raw:
+            if not is_master and not is_live_tv and "#EXT-X-ENDLIST" in raw and "#EXT-X-DISCONTINUITY" in raw and "#EXTINF:" in raw:
                 try:
                     hdr_part, blocks, cur_blk, cur_dur, cur_uris = [], [], [], 0.0, []
                     in_segs = False
@@ -6878,36 +6894,32 @@ async def download_apk_endpoint(request: Request):
 
 
 async def download_windows_endpoint(request: Request):
-    if IS_VERCEL:
-        return RedirectResponse(
-            "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.exe",
-            status_code=302,
-        )
-    exe_file = STATIC_DIR / "Watchlivo.exe"
-    if exe_file.exists():
-        return FileResponse(
-            exe_file,
-            media_type="application/vnd.microsoft.portable-executable",
-            filename="Watchlivo.exe",
-            headers={"Content-Disposition": 'attachment; filename="Watchlivo.exe"'},
-        )
+    if not IS_VERCEL:
+        exe_file = STATIC_DIR / "Watchlivo.exe"
+        if exe_file.exists():
+            return FileResponse(
+                exe_file,
+                media_type="application/vnd.microsoft.portable-executable",
+                filename="Watchlivo.exe",
+                headers={"Content-Disposition": 'attachment; filename="Watchlivo.exe"'},
+            )
     return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.exe",
+        "https://github.com/mephisto-mert/watchlivo/releases/download/v1.2.0/Watchlivo.exe",
         status_code=302,
     )
 
 
 async def download_ipa_endpoint(request: Request):
     ipa_file = STATIC_DIR / "Watchlivo.ipa"
-    if ipa_file.exists() and not IS_VERCEL:
+    if ipa_file.exists():
         return FileResponse(
             ipa_file,
             media_type="application/octet-stream",
             filename="Watchlivo.ipa",
-            headers={"Content-Disposition": 'attachment; filename="Watchlivo.ipa"'},
+            headers={"Content-Disposition": 'attachment; filename="Watchlivo.ipa"', "Cache-Control": "no-cache"},
         )
     return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.ipa",
+        "https://github.com/mephisto-mert/watchlivo/releases/download/v1.2.0/Watchlivo.ipa",
         status_code=302,
     )
 
@@ -6919,7 +6931,7 @@ async def download_ios_endpoint(request: Request):
             cfg_file,
             media_type="application/x-apple-aspen-config",
             filename="Watchlivo.mobileconfig",
-            headers={"Content-Disposition": 'attachment; filename="Watchlivo.mobileconfig"'},
+            headers={"Content-Disposition": 'inline; filename="Watchlivo.mobileconfig"', "Cache-Control": "no-cache"},
         )
     return RedirectResponse(
         "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.mobileconfig",
@@ -6954,7 +6966,7 @@ def _ai_guard(request: Request, limiter: RateLimiter):
 
 
 def _call_openai_sync(prompt: str, model: str) -> dict:
-    use_model = (model or OPENAI_MODEL or "gpt-6.1-sol").split()[0].strip()
+    use_model = (model or OPENAI_MODEL or "claude-sonnet-4-5").split()[0].strip()
     use_key = (OPENAI_API_KEY or "").strip()
     sys_msg = (
         "Sen dünyaca ünlü bir Türkçe/Global şarkı sözü yazarı, Suno v4.5 müzik prodüktörü ve Watchlivo sinema/müzik yapay zeka asistanısın. "
@@ -7265,7 +7277,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
         og_desc = f"Odada {max(1, p_count)} kişi seni bekliyor — Tek tıkla birlikte izlemeye katıl!"
     else:
         og_title = "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları"
-        og_desc = "Arkadaşlarınla aynı anda, tek kare gecikmesiz 85.000+ film, dizi ve anime izle."
+        og_desc = "Arkadaşlarınla aynı anda, tek kare gecikmesiz film, dizi, anime ve canlı yayın izle."
 
     esc_title = _html.escape(og_title, quote=True)
     esc_desc = _html.escape(og_desc, quote=True)
@@ -7302,6 +7314,36 @@ async def room_share_landing(request: Request) -> HTMLResponse:
 </body>
 </html>"""
     return HTMLResponse(html_doc, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+async def rave_sub_vtt_translate(request: Request):
+    if request.method == "OPTIONS":
+        return Response(b"", status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"})
+    if request.method == "POST":
+        raw_b = (await request.body())[:2 * 1024 * 1024]
+        vtt_in = _srt_to_vtt(raw_b) if raw_b else "WEBVTT\n\n"
+        if vtt_in.count("-->") >= 1:
+            try:
+                vtt_in = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt_in), timeout=8.5)
+            except Exception:
+                pass
+        return Response(vtt_in.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
+    url_q = (request.query_params.get("url") or "").strip()
+    if not url_q.startswith(("https://", "http://")) or not public_http_url(url_q):
+        return Response("WEBVTT\n\n", media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
+    try:
+        vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_vtt_sync, url_q), timeout=7.5)
+        if vtt.count("-->") >= 1:
+            vtt = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt), timeout=8.5)
+    except Exception:
+        vtt = "WEBVTT\n\n"
+    return Response(vtt.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
+
+
+async def rave_meshes_compat(request: Request):
+    if request.method == "POST":
+        return await rooms.create_room(request)
+    return await rooms.list_rooms(request)
 
 
 app = Starlette(
@@ -7386,6 +7428,8 @@ app = Starlette(
         Route("/api/rave/subtitles", rave_subtitles),
         Route("/api/rave/subtitle.vtt", rave_subtitle_vtt, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/sub-proxy", rave_subtitle_vtt, methods=["GET", "HEAD", "OPTIONS"]),
+        Route("/api/rave/sub-vtt-translate", rave_sub_vtt_translate, methods=["GET", "POST", "OPTIONS"]),
+        Route("/api/rave/meshes", rave_meshes_compat, methods=["GET", "POST"]),
         Route("/api/rave/tts", rave_tts),
         Route("/api/rave/accounts", rave_get_accounts),
         Route("/api/rave/accounts/login", rave_login_account, methods=["POST"]),

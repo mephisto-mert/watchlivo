@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261103_v85';
-import { api, qs } from './api.js?v=20261103_v85';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v85';
+import { h, toast, popup } from './ui.js?v=20261103_v86';
+import { api, qs } from './api.js?v=20261103_v86';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261103_v86';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -57,18 +57,18 @@ const DEFAULT_SPECS = {
   tiktok:      { name: 'TikTok', accent: '#fe2c55', domain: '.tiktok.com', loginUrl: 'https://www.tiktok.com/login', browseUrl: 'https://www.tiktok.com', authCookies: ['sessionid', 'tt_chain_token'] },
   dailymotion: { name: 'Dailymotion', accent: '#00c6ff', domain: '.dailymotion.com', loginUrl: 'https://www.dailymotion.com/signin', browseUrl: 'https://www.dailymotion.com', authCookies: ['sid', 'access_token'] },
   vimeo:       { name: 'Vimeo', accent: '#1ab7ea', domain: '.vimeo.com', loginUrl: 'https://vimeo.com/log_in', browseUrl: 'https://vimeo.com/watch', authCookies: ['vimeo', 'vuid'] },
-  cinema:          { name: 'Sinema, Dizi & Anime+', accent: '#ff6b00', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['cinema_free'], freeNoAuth: true },
-  hdfilmcehennemi: { name: 'Sinema+ HD', accent: '#ff6b00', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['hdfc_free'], freeNoAuth: true },
-  dizibox:         { name: 'Dizi+ Arşiv', accent: '#6366f1', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dbx_free'], freeNoAuth: true },
-  dizilife:        { name: 'Sezon+ TV', accent: '#8b5cf6', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dl_free'], freeNoAuth: true },
-  fullhdfilm:      { name: 'Vizyon 4K', accent: '#eab308', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['fhd_free'], freeNoAuth: true },
-  yabancidizi:     { name: 'Maraton+', accent: '#06b6d4', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['yd_free'], freeNoAuth: true },
-  music:           { name: 'Müzik & Klip', accent: '#1db954', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['m_free'], freeNoAuth: true },
-  ytmusic:         { name: 'YouTube Music', accent: '#ff0033', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['ytm_free'], freeNoAuth: true },
-  spotify:         { name: 'Spotify Music', accent: '#1db954', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['sp_free'], freeNoAuth: true },
-  deezer:          { name: 'Deezer Hi-Fi', accent: '#a238ff', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['dz_free'], freeNoAuth: true },
-  applemusic:      { name: 'Apple Music', accent: '#fa243c', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['am_free'], freeNoAuth: true },
-  soundcloud:      { name: 'SoundCloud', accent: '#ff5500', domain: '.kinox.local', loginUrl: '', browseUrl: '', authCookies: ['sc_free'], freeNoAuth: true },
+  cinema:          { name: 'Sinema, Dizi & Anime+', accent: '#ff6b00', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['cinema_free'], freeNoAuth: true },
+  hdfilmcehennemi: { name: 'Sinema+ HD', accent: '#ff6b00', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['hdfc_free'], freeNoAuth: true },
+  dizibox:         { name: 'Dizi+ Arşiv', accent: '#6366f1', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['dbx_free'], freeNoAuth: true },
+  dizilife:        { name: 'Sezon+ TV', accent: '#8b5cf6', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['dl_free'], freeNoAuth: true },
+  fullhdfilm:      { name: 'Vizyon 4K', accent: '#eab308', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['fhd_free'], freeNoAuth: true },
+  yabancidizi:     { name: 'Maraton+', accent: '#06b6d4', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['yd_free'], freeNoAuth: true },
+  music:           { name: 'Müzik & Klip', accent: '#1db954', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['m_free'], freeNoAuth: true },
+  ytmusic:         { name: 'YouTube Music', accent: '#ff0033', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['ytm_free'], freeNoAuth: true },
+  spotify:         { name: 'Spotify Music', accent: '#1db954', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['sp_free'], freeNoAuth: true },
+  deezer:          { name: 'Deezer Hi-Fi', accent: '#a238ff', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['dz_free'], freeNoAuth: true },
+  applemusic:      { name: 'Apple Music', accent: '#fa243c', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['am_free'], freeNoAuth: true },
+  soundcloud:      { name: 'SoundCloud', accent: '#ff5500', domain: '.watchlivo.online', loginUrl: '', browseUrl: '', authCookies: ['sc_free'], freeNoAuth: true },
 };
 
 const FREE_NO_AUTH_IDS = new Set([
@@ -222,13 +222,10 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
             return true;
           }
           const hasValidCookie = ck.length >= 16 && (ck.includes('=') || ck.length >= 24);
-          const elapsed = officialOpenedAt ? (Date.now() - officialOpenedAt) : 0;
-          if (!hasValidCookie && elapsed < 3500) {
+          if (!hasValidCookie && !officialOpenedAt) {
             statusBox.style.borderColor = '#f59e0b';
             statusBox.style.color = '#fbbf24';
-            statusBox.textContent = !officialOpenedAt
-              ? `⚠️ Henüz resmi oturum açılmadı! Önce "🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç" butonuna tıklayarak ${p.name} üzerinde giriş yapın veya geçerli bir oturum çerezi (${cookieName}) yapıştırın.`
-              : `⏳ Lütfen açılan resmi ${p.name} penceresinde giriş işlemini tamamlayın ve birkaç saniye sonra tekrar deneyin.`;
+            statusBox.textContent = `⚠️ Önce "🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç" ile tarayıcınızda oturum açın veya oturum çerezinizi (${cookieName}) girin.`;
             return true;
           }
           const local = readLocalAccounts();
@@ -308,10 +305,10 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     const backdrop = info.backdrop || item.backdrop || item.poster || '/static/watchlivo-poster.svg';
     const poster = info.poster || item.poster || '/static/watchlivo-poster.svg';
     const rating = info.rating || item.rating || '';
-    const seasons = info.seasons?.length ? info.seasons : (mtype === 'tv' ? Array.from({ length: 5 }, (_, i) => ({ season: i + 1, name: `${i + 1}. Sezon` })) : []);
-    const episodes = info.episodes?.length ? info.episodes : (mtype === 'tv' ? Array.from({ length: 12 }, (_, i) => ({
-      episode: i + 1, season: sNum, name: `${i + 1}. Bölüm`, overview: `${title} ${sNum}. Sezon ${i + 1}. Bölüm`, runtime: 45, still: backdrop,
-    })) : []);
+    const seasons = info.seasons?.length ? info.seasons : (mtype === 'tv' ? [{ season: 1, name: '1. Sezon' }] : []);
+    const episodes = info.episodes?.length ? info.episodes : (mtype === 'tv' ? [{
+      episode: 1, season: sNum, name: '1. Bölüm', overview: `${title} ${sNum}. Sezon 1. Bölüm`, runtime: 45, still: backdrop,
+    }] : []);
 
     const savedProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: mtype });
     const savedSec = Number(savedProg?.currentTime ?? savedProg?.position ?? 0) > 3 && Number(savedProg?.percent || 0) < 96

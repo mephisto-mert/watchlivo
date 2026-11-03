@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261103_v85';
-import { avatar, openDmModal } from '../profile.js?v=20261103_v85';
-import { getProvider } from '../providers.js?v=20261103_v85';
-import { api, qs } from '../api.js?v=20261103_v85';
+import { h, icons, popup, toast } from '../ui.js?v=20261103_v86';
+import { avatar, openDmModal } from '../profile.js?v=20261103_v86';
+import { getProvider } from '../providers.js?v=20261103_v86';
+import { api, qs } from '../api.js?v=20261103_v86';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261103_v85';
-import { expectedPosition } from '../sync.js?v=20261103_v85';
+} from '../store.js?v=20261103_v86';
+import { expectedPosition } from '../sync.js?v=20261103_v86';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -96,13 +96,14 @@ export function meshThumb(room, onOpen) {
   const thumb = thumbFor(media, room.id);
   const brand = LIVE_BRANDS[room.id];
   const dur = Number(media.duration || 0);
-  const viewerCount = Math.max(1, Number(room.count ?? (room.participants || []).length) || 1);
-  const hasHumanViewer = room.curated ? viewerCount > 1 : viewerCount > 0;
+  const rawViewerCount = Number(room.count ?? (room.participants || []).filter((p) => p.transport !== 'bot').length) || 0;
+  const viewerCount = room.curated ? rawViewerCount : Math.max(0, rawViewerCount);
+  const hasHumanViewer = viewerCount > 0;
   const rawPos = hasHumanViewer ? expectedPosition(media) : 0;
   const pos = dur > 0 ? (rawPos % dur) : rawPos;
   const pct = dur > 0 ? Math.min(100, Math.max(0, (pos / dur) * 100)) : 0;
   const users = room.participants || [];
-  const privacyLabel = { public: '🌐 Herkese Açık', friends: '👥 Arkadaşlar', nearby: '📍 Çevremdekiler', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' }[room.privacy || 'public'] || '🌐 Herkese Açık';
+  const privacyLabel = { public: '🌐 Herkese Açık', friends: '👥 Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' }[room.privacy || 'public'] || '🌐 Herkese Açık';
   const hasTr = Boolean(
     media.catalogProvider ||
     (media.audioTracks || []).some((a) => /tr|türk/i.test(`${a.lang} ${a.label}`)) ||
@@ -213,7 +214,7 @@ export function getRememberedRoom(roomId) {
     return null;
   }
 }
-const recentIds = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch (e) { return []; } };
+const recentIds = () => { try { return JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]'); } catch (e) { return []; } };
 
 let lastLobbyRooms = [];
 
@@ -616,7 +617,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     const liveIds = new Set(mergedRooms.map((r) => r.id));
     const validRecents = recents.filter((id) => liveIds.has(id) || id === state.mesh?.id);
     if (validRecents.length !== recents.length) {
-      try { localStorage.setItem(RECENT_KEY, JSON.stringify(validRecents)); } catch (e) { /* ignore */ }
+      try { localStorage.setItem(getRecentRoomsKey(), JSON.stringify(validRecents)); } catch (e) { /* ignore */ }
     }
   }
   const friends = getFriends();
@@ -638,22 +639,11 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     )
   );
 
-  const nearbyRooms = visible.filter((r) =>
-    !r.curated && r.privacy !== 'friends' && r.privacy !== 'private' && r.privacy !== 'hidden' && (
-      r.privacy === 'nearby' ||
-      (filter === 'nearby' && (
-        r.privacy === 'public' && (r.participants || []).some((p) => p.country === 'TR') ||
-        r.id === 'kinox-dizi-maraton' || r.id === 'kinox-sinema-tr'
-      ))
-    )
-  );
-
   const isTvRoom = (r) => Boolean(r.curated && r.media?.live && !r.media?.isMusic && LIVE_BRANDS[r.id]);
   const isRadioRoom = (r) => Boolean(r.curated && r.media?.live && r.media?.isMusic && LIVE_BRANDS[r.id]);
   const sections = [
     { key: 'public', title: '🌐 Herkese Açık Odalar', list: publicRooms, empty: q ? 'Bu arama ölçütleriyle bir oda bulamadık' : 'Şu anda herkese açık oda yok — "+ Oda Oluştur" ile hemen ilk odayı başlat!' },
     { key: 'friends', title: '👥 Arkadaş Odaları', list: friendRooms, empty: 'Henüz aktif bir arkadaş odası yok. "+ Arkadaş Ekle" butonuyla arkadaşlarını ekleyebilirsin.' },
-    { key: 'nearby', title: '📍 Çevremdekiler (Türkiye · Yakındaki Odalar)', list: nearbyRooms, empty: 'Şu anda yakındaki oda yok' },
     { key: 'tv', title: '📺 Canlı TV Kanalları · 7/24', list: sortByBrandOrder(visible.filter(isTvRoom)) },
     { key: 'radio', title: '📻 Canlı Radyolar · 7/24', list: sortByBrandOrder(visible.filter(isRadioRoom)) },
   ].filter((s) => filter === 'all' || s.key === filter || (filter === 'public' && (s.key === 'tv' || s.key === 'radio')));
@@ -667,7 +657,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
       card.onclick = () => onOpen(r);
       const badge = card.querySelector('.meshthumb-live-badge');
       if (badge && !r.curated) {
-        const vc = Math.max(1, Number(r.count ?? (r.participants || []).length) || 1);
+        const vc = Math.max(0, Number(r.count ?? (r.participants || []).filter((p) => p.transport !== 'bot').length) || 0);
         badge.textContent = r.privacy === 'friends' ? `👥 ${vc} izleyici` : `🔴 ${vc} izleyici`;
       }
       const titleEl = card.querySelector('.meshthumb-title');
@@ -691,7 +681,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
               type: 'button',
               class: 'friend-remove',
               title: 'Arkadaşlardan çıkar',
-              onclick: () => { container.dataset.layoutSig = ''; toggleFriend(f); renderLobbySections(container, rooms, onOpen, { filter, query }); },
+              onclick: async () => { container.dataset.layoutSig = ''; if (f.uid || f.id) await updateFriendAction('remove', { targetUid: f.uid || f.id }); renderLobbySections(container, rooms, onOpen, { filter, query }); },
             }, '×')))
         : [h('span', { class: 'dim', style: { fontSize: '.78rem' } }, 'Arkadaşlarını ekleyerek özel odalarını burada görebilirsin.')]),
       h('button', {

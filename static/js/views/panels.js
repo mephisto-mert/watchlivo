@@ -1,16 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v85';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261103_v86';
 import {
   state, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261103_v85';
-import { avatar } from '../profile.js?v=20261103_v85';
-import { clock } from '../sync.js?v=20261103_v85';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261103_v85';
-import { copyInvite, inviteUrl } from './chat.js?v=20261103_v85';
-import { parseVideoUrl } from '../providers.js?v=20261103_v85';
-import { resolveMedia } from './selection.js?v=20261103_v85';
+} from '../store.js?v=20261103_v86';
+import { avatar } from '../profile.js?v=20261103_v86';
+import { clock } from '../sync.js?v=20261103_v86';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261103_v86';
+import { copyInvite, inviteUrl } from './chat.js?v=20261103_v86';
+import { parseVideoUrl } from '../providers.js?v=20261103_v86';
+import { resolveMedia } from './selection.js?v=20261103_v86';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -46,7 +46,7 @@ function Settings(ctx) {
       lead ? null : h('div', { class: 'sel-note' }, 'Oda ayarlarını yalnızca oda lideri değiştirebilir.'),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Oda adı'), nameInput),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Gizlilik'), seg([
-        ['public', 'Herkese Açık', 'Herkes odaya katılabilir'], ['nearby', 'Çevremdekiler', 'Aynı ağdaki kullanıcılar görür'],
+        ['public', 'Herkese Açık', 'Herkes odaya katılabilir'],
         ['friends', 'Arkadaşlar', 'Arkadaşlar odaya katılabilir'], ['private', 'Gizli', 'Yalnızca bağlantısı olanlar katılır']], m.privacy, (k) => act('set_privacy', { privacy: k }), !lead)),
       h('div', { class: 'settings-group' }, h('h4', {}, 'Oynatma'), seg([
         ['leader', 'Liderin Seçimi', 'Yalnızca lider video seçebilir'],
@@ -85,7 +85,8 @@ function Settings(ctx) {
         return h('div', { class: 'settings-group' },
           h('h4', {}, 'Watchlivo Uygulamaları'),
           h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-            h('a', { href: '/download/apk', download: 'Watchlivo-v1.1.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
+            h('a', { href: '/download/ipa', download: 'Watchlivo.ipa', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(244,63,94,.18), rgba(251,146,60,.18))', border: '1px solid rgba(244,63,94,.4)', color: '#fda4af', fontWeight: '700' } }, '🍎 iPhone / iOS IPA İndir (.ipa)'),
+            h('a', { href: '/download/Watchlivo-v1.1.apk', download: 'Watchlivo-v1.1.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android APK İndir (.apk)'),
             h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
           )
         );
@@ -147,7 +148,7 @@ function Vote(ctx) {
       urlInput,
       h('button', { type: 'button', class: 'btn sm primary', onclick: () => addFromInput(false) }, '+ Ekle')),
     h('div', { style: { display: 'flex', gap: '6px' } },
-      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 85.000+ Katalog & YouTube Ara')));
+      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 Katalog & YouTube Ara')));
 
   const update = () => {
     if (el.contains(document.activeElement) && document.activeElement === urlInput) return;
@@ -286,8 +287,9 @@ function Friends() {
         style: { flex: '1', justifyContent: 'center' },
         onclick: async () => {
           const r = await sendRoomInvite('', 'invite_all_online');
-          if (r?.ok && r.invitedCount > 0) {
-            toast(`🔔 ${r.invitedCount} çevrimiçi arkadaşına oda daveti gönderildi!`);
+          const invCnt = Number(r?.invitedCount ?? r?.sentCount ?? 0);
+          if (r?.ok && invCnt > 0) {
+            toast(`🔔 ${invCnt} çevrimiçi arkadaşına oda daveti gönderildi!`);
           } else {
             window.vortexSendRoomNotification?.();
           }

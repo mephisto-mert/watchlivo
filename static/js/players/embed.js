@@ -39,7 +39,8 @@ export class EmbedAdapter {
     }
     if (media.provider === 'drive') {
       this.caps.seek = false;
-      return `https://drive.google.com/file/d/${encodeURIComponent(media.videoId)}/preview`;
+      const fid = media.videoId || media.fileId || (String(media.url || '').match(/(?:\/d\/|id=)([A-Za-z0-9_-]{15,})/) || [])[1] || '';
+      return fid ? `https://drive.google.com/file/d/${encodeURIComponent(fid)}/preview` : (media.embedUrl || media.url || '');
     }
     let u = media.embedUrl || media.url || '';
     if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {

@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v85';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261103_v86';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -53,7 +53,7 @@ export function parseVtt(vttText) {
           .replace(/\{\\[^}]*\}/g, '')
           .replace(/<[^>]+>/g, '')
           .trim();
-        if (body && end > start) rawCues.push({ start, end, text: body });
+        if (body && end > start) rawCues.push({ start, end, text: body, norm: String(body).toLowerCase().replace(/[^a-z0-9çğıöşüа-яё]+/gi, ' ').trim() });
       }
     }
   }
@@ -702,6 +702,15 @@ export class SubtitleDubController {
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
       const minEnd = dur > 600 ? (dur * 0.5) : 900;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
+      if (track.source === 'youtube-native') {
+        this.selectedSubId = track.id;
+        this.subCues = [];
+        this.secondaryCues = [];
+        this.adapter?._syncYtNativeCaptions?.();
+        this.adapter.events.onSubtitleCue?.('', '');
+        this.adapter.events.onTracksChanged?.();
+        return track;
+      }
       const isStreamEmbeddedFansub = track.source === 'fansub' || track.source === 'local';
       const isForcedOrTruncated = isStreamEmbeddedFansub
         ? (cues.length < 20)
@@ -927,7 +936,8 @@ export class SubtitleDubController {
     const nativeVideoFs = this._isNativeSubView(v);
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
-    if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && this.subtitleTracks.length) {
+    const curSubObj = this.subtitleTracks.find((tr) => tr.id === this.selectedSubId);
+    if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && curSubObj?.source !== 'youtube-native' && this.subtitleTracks.length) {
       const nowMs = Date.now();
       if (!this._lastEmptyReload || nowMs - this._lastEmptyReload > 8000) {
         this._lastEmptyReload = nowMs;
@@ -1022,7 +1032,9 @@ export class SubtitleDubController {
       });
     }
     if (this.adapter?.iosPipVideo) {
-      this.adapter.iosPipVideo.muted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);
+      this.adapter.iosPipVideo.muted = this.adapter._iosPipActive
+        ? Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0)
+        : true;
     }
     if (this._ttsAudio) {
       const isMuted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);

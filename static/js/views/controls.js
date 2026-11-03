@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v85';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v85';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v85';
-import { getProvider } from '../providers.js?v=20261103_v85';
-import { expectedPosition } from '../sync.js?v=20261103_v85';
-import { thumbFor } from './lobby.js?v=20261103_v85';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v85';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v85';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v85';
-import { avatar } from '../profile.js?v=20261103_v85';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261103_v86';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261103_v86';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261103_v86';
+import { getProvider } from '../providers.js?v=20261103_v86';
+import { expectedPosition } from '../sync.js?v=20261103_v86';
+import { thumbFor } from './lobby.js?v=20261103_v86';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261103_v86';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261103_v86';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261103_v86';
+import { avatar } from '../profile.js?v=20261103_v86';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -348,16 +348,11 @@ export function buildControls(frame, ctx) {
     }),
   }, ico('forward10'));
   const cur = h('div', { class: 'cur' }), buf = h('div', { class: 'buf' }), knob = h('div', { class: 'knob' });
-  const seekPreviewCanvas = h('canvas', { class: 'seek-preview-canvas', width: '128', height: '72' });
-  const seekPreviewChapter = h('div', { class: 'seek-preview-chapter' }, 'Sahne Önizleme');
+  const seekPreviewChapter = h('div', { class: 'seek-preview-chapter hidden' }, '');
   const seekPreviewSub = h('div', { class: 'seek-preview-sub' }, '');
   const seekPreviewTime = h('div', { class: 'seek-preview-time' }, '0:00');
-  const seekPreview = h('div', { class: 'seek-preview-card hidden', id: 'ctl-seek-preview' }, seekPreviewCanvas, seekPreviewChapter, seekPreviewSub, seekPreviewTime);
-  const trackTicks = h('div', { class: 'track-ticks', 'aria-hidden': 'true' },
-    h('span', { style: { left: '25%' } }),
-    h('span', { style: { left: '50%' } }),
-    h('span', { style: { left: '75%' } }));
-  const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, trackTicks, buf, cur, knob));
+  const seekPreview = h('div', { class: 'seek-preview-card hidden', id: 'ctl-seek-preview' }, seekPreviewChapter, seekPreviewSub, seekPreviewTime);
+  const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const isIosFixedVol = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   const volRange = h('input', { type: 'range', min: '0', max: '100', step: '1', value: String(Math.min(100, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
@@ -371,7 +366,7 @@ export function buildControls(frame, ctx) {
     let lastRun = 0;
     return {
       onpointerdown: (e) => { e.stopPropagation(); revealControls(3600); },
-      ontouchstart: (e) => { e.stopPropagation(); lastAnyTouchAt = Date.now(); resumeSharedAudioContext(); revealControls(3600); },
+      ontouchstart: (e) => { e.stopPropagation(); lastAnyTouchAt = Date.now(); if (!isIosFixedVol) resumeSharedAudioContext(); revealControls(3600); },
       onclick: (e) => {
         e.stopPropagation();
         const now = Date.now();
@@ -404,6 +399,16 @@ export function buildControls(frame, ctx) {
       const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
       update();
       showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
+      return;
+    }
+    if (isIosFixedVol || (typeof window !== 'undefined' && window.Android)) {
+      const v = host.adapter?.video;
+      if (v && v.readyState < 1) {
+        try { v.load(); v.play?.().catch?.(() => {}); } catch (_) {}
+        toast('⏳ Video akışı hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
+        return;
+      }
+      toast('⧉ Bu yayın kaynağı için sistem PiP penceresi şu an hazır değil');
       return;
     }
     if (typeof window !== 'undefined' && typeof window.vortexMinimizeRoom === 'function') {
@@ -1185,24 +1190,15 @@ export function buildControls(frame, ctx) {
     const target = ratio * d;
     seekPreview.classList.remove('hidden');
     seekPreview.style.left = `${Math.max(8, Math.min(92, ratio * 100))}%`;
-    const chLabel = target < 90 ? '🎬 Giriş / İntro'
-      : ratio < 0.25 ? 'Bölüm 1 · Başlangıç'
-      : ratio < 0.55 ? 'Bölüm 2 · Gelişme'
-      : ratio < 0.85 ? 'Bölüm 3 · Doruk Noktası'
-      : 'Bölüm 4 · Final';
-    seekPreviewChapter.textContent = chLabel;
+    const realChapters = Array.isArray(state.mesh?.media?.chapters) ? state.mesh.media.chapters : [];
+    const hitChap = realChapters.find((ch) => Number.isFinite(ch?.start) && target >= ch.start && (!ch.end || target < ch.end));
+    seekPreviewChapter.textContent = hitChap?.title || '';
+    seekPreviewChapter.classList.toggle('hidden', !hitChap?.title);
     seekPreviewTime.textContent = `${fmtTime(target)} / ${fmtTime(d)}`;
     const subsObj = host.adapter?.subs;
     const adjTarget = subsObj ? ((target * (subsObj.fpsScale || 1.0)) - (subsObj.offsetSec || 0)) : target;
     const cueAt = subsObj?.findCueAt?.(subsObj.subCues || [], adjTarget);
     seekPreviewSub.textContent = cueAt?.text ? `"${cueAt.text.slice(0, 48)}"` : '';
-    const v = host.adapter?.video || frame.querySelector('video:not(.cam-bubble video):not(.wl-ios-pip-standby)');
-    if (v && v.videoWidth > 0) {
-      try {
-        const ctx2d = seekPreviewCanvas.getContext('2d');
-        ctx2d.drawImage(v, 0, 0, 128, 72);
-      } catch (err) { /* ignore */ }
-    }
   };
   timeline.addEventListener('pointermove', (e) => {
     updateSeekPreview(e);
@@ -1603,7 +1599,7 @@ export function buildControls(frame, ctx) {
       : (m.isMusic || m.isLive
           ? [{ id: 'orig', label: '🎬 Orijinal Ses (HD)' }]
           : [
-              { id: 'orig', label: '🎬 Orijinal Ses (1080p HD)' },
+              { id: 'orig', label: '🎬 Orijinal Ses' },
               { id: 'tr-ai-dub', label: '🇹🇷 Türkçe Dublaj (Akıllı Seslendirme)', mode: 'tts' },
             ]);
     const curAudioId = host.adapter?.getSelectedAudioId?.() || 'orig';
@@ -1825,7 +1821,7 @@ export function buildControls(frame, ctx) {
     }
 
     if (view === 'quality') {
-      const qLevels = host.adapter?.getQualityLevels?.() || [{ id: 0, label: '✨ 1080p Full HD (Doğrudan Akış)', active: true }];
+      const qLevels = host.adapter?.getQualityLevels?.() || [{ id: 0, label: '✨ Otomatik Akış', active: true }];
       menu.replaceChildren(
         backHeader('Görüntü Kalitesi', 'list'),
         ...qLevels.map((q) => h('div', {
@@ -2371,7 +2367,8 @@ export function buildControls(frame, ctx) {
         });
         safeHandler('enterpictureinpicture', async () => {
           try {
-            await host.togglePiP?.();
+            if (host.enterPiP) await host.enterPiP();
+            else if (!host.isPiP?.()) await host.togglePiP?.();
             update();
           } catch (e) { /* ignore */ }
         });
@@ -2495,7 +2492,7 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : '1080p';
+    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
     if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '720p') {
       artist.textContent = artist.textContent.replace('1080p HD', '720p HD');
     } else if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '4K') {
@@ -2690,7 +2687,7 @@ export function buildControls(frame, ctx) {
         fsStack.append(pill);
         setTimeout(() => pill.remove(), 5500);
       }
-      if (!danmakuEnabled && !inFs) return;
+      if (!danmakuEnabled) return;
       if (!msg.text) return;
       while (danmakuLayer.childElementCount >= 20) {
         danmakuLayer.firstElementChild?.remove();

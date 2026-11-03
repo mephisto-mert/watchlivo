@@ -7,3 +7,10 @@ uploads/
 static/Watchlivo.exe
 *.db
 *.db-journal
+rave_extracted/
+desktop/
+.env
+.env.*
+*.bak
+*.log
+*.zip

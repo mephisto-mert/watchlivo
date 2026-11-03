@@ -1,15 +1,15 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v85';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v85';
-import { api, qs } from '../api.js?v=20261103_v85';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v85';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v85';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261103_v86';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261103_v86';
+import { api, qs } from '../api.js?v=20261103_v86';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261103_v86';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261103_v86';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress,
   getFavorites, isFavoriteMedia, toggleFavoriteMedia,
   getMusicHistory, clearMusicHistory,
-} from '../store.js?v=20261103_v85';
+} from '../store.js?v=20261103_v86';
 
 let _activeHomePick = null;
 
@@ -41,7 +41,7 @@ export function attachTilt(card) {
 }
 
 const PROVIDER_SUBTITLES = {
-  cinema: '85.000+ Film · Dizi · Anime 4K',
+  cinema: 'Film · Dizi · Anime · 4K HDR',
   youtube: 'Video, Müzik & Canlı Yayın',
   ravedj: 'AI Mashup & Ortak DJ Mix',
   drive: 'Bulut 1080p MKV & MP4',
@@ -69,7 +69,7 @@ const PROVIDER_SUBTITLES = {
 };
 
 const PROVIDER_CORNER_TAGS = {
-  cinema: '85.000+ 4K',
+  cinema: '4K ARŞİV',
   youtube: 'CANLI & 4K',
   ravedj: 'AI MASHUP',
   drive: 'DIRECT HD',
@@ -189,7 +189,7 @@ export function desktopOnlyCard(p) {
     h('b', {}, `${p.name} şu anda yalnızca Watchlivo Masaüstü sürümünde kullanılabilir.`),
     h('div', { class: 'dim', style: { fontSize: '.85em', lineHeight: 1.5 } },
       'Masaüstü uygulamasında her katılımcı kendi hesabıyla giriş yapar. Seçilen bölüm herkesin kendi aboneliğinde açılır ve oda zamanına senkronize edilir.'),
-    h('button', { class: 'btn', onclick: () => popup({ title: 'Watchlivo Masaüstü', message: 'Masaüstü uygulaması Windows için hazırlanıyor. Kurulum dosyası yayınlandığında bu ekrandan indirebileceksin.', options: [{ label: 'Tamam' }] }) }, h('span', { html: icons.desktop }), 'Masaüstü Uygulaması'));
+    h('a', { class: 'btn primary', href: '/download/windows', download: 'Watchlivo.exe', style: { textDecoration: 'none' } }, h('span', { html: icons.desktop }), 'Windows Masaüstü İndir (.exe)'));
 }
 
 const HERO_DEFAULT_POOL = [
@@ -375,7 +375,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     try {
       await ensureTrending(true);
       if (!provider && root.isConnected) renderGrid();
-      toast('🎲 85.000+ Arşivden yeni vitrin önerileri getirildi!');
+      toast('🎲 Arşivden yeni vitrin önerileri getirildi!');
     } finally {
       if (btnEl && btnEl.isConnected) {
         btnEl.disabled = false;
@@ -439,7 +439,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             h('span', { class: 'wl-preview-tag rating' }, `⭐ IMDb ${t.rating || '8.2'}`),
             h('span', { class: 'wl-preview-tag tr' }, '🇹🇷 Dublaj & Altyazı')),
           h('h3', { class: 'wl-preview-title' }, t.title),
-          h('p', { class: 'wl-preview-desc' }, t.overview || '85.000+ Watchlivo arşivinde 1080p/4K kalitesinde Türkçe dublaj ve altyazı seçenekleriyle arkadaşlarınla senkronize izle.'),
+          h('p', { class: 'wl-preview-desc' }, t.overview || 'Watchlivo arşivinde 1080p/4K kalitesinde Türkçe dublaj ve altyazı seçenekleriyle arkadaşlarınla senkronize izle.'),
           h('div', { class: 'wl-preview-actions' },
             h('button', {
               type: 'button',
@@ -470,7 +470,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   function renderGrid() {
-    const input = h('input', { placeholder: '85.000+ film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { placeholder: 'Film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;
@@ -655,7 +655,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
     const trendingRail = !compact && showTrending && trendingItems.length ? h('div', { class: 'trending-strip' },
       h('div', { class: 'trending-strip-head' },
-        h('span', { class: 'trending-strip-title' }, '🔥 85.000+ Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
+        h('span', { class: 'trending-strip-title' }, '🔥 Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
         h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
           h('button', { type: 'button', class: 'btn sm', onclick: (e) => shuffleShowcaseUI(e.currentTarget) }, '🎲 Yenile & Karıştır'),
           h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×'))),
@@ -917,12 +917,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 provider = getProvider('cinema');
                 render();
               },
-            }, '🎬 85.000+ Kataloğu Aç'),
+            }, '🎬 Sinema+ Kataloğu Aç'),
             h('button', {
               type: 'button',
               id: 'btn-shuffle-hero',
               class: 'btn-download-glass hero-shuffle-btn',
-              title: '85.000+ içerikten vitrini rastgele karıştır',
+              title: 'Arşivden vitrini rastgele karıştır',
               onclick: (e) => shuffleShowcaseUI(e.currentTarget),
             }, '🎲 Vitrini Karıştır'),
             h('button', {
@@ -962,7 +962,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           }))),
       h('div', { class: 'hero-showcase-strip' },
         h('div', { class: 'hero-showcase-head' },
-          h('span', { class: 'hero-showcase-title' }, `🎬 85.000+ Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
+          h('span', { class: 'hero-showcase-title' }, `🎬 Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
           h('div', { class: 'hero-showcase-arrows' },
             h('button', {
               type: 'button',
@@ -979,7 +979,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               type: 'button',
               id: 'btn-shuffle-showcase',
               class: 'btn sm primary',
-              title: '85.000+ arşivden yeni rastgele vitrin önerileri getir',
+              title: 'Arşivden yeni rastgele vitrin önerileri getir',
               onclick: (e) => shuffleShowcaseUI(e.currentTarget),
             }, '🎲 Karıştır'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
@@ -991,13 +991,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       !compact ? h('div', { class: 'rave-providers-head' },
         h('div', { class: 'rave-providers-title-group' },
           h('span', { class: 'rave-providers-title' }, '🎬 Yayın Platformları & Stüdyolar'),
-          h('span', { class: 'rave-providers-badge' }, `${PROVIDERS.length} Platform · 85.000+ Film, Dizi & Anime`)),
+          h('span', { class: 'rave-providers-badge' }, `${PROVIDERS.length} Platform · Film, Dizi & Anime`)),
         h('div', { class: 'rave-providers-actions' },
           h('button', {
             type: 'button',
             class: 'provider-head-btn primary',
             onclick: () => { provider = getProvider('cinema'); render(); },
-          }, '🍿 85.000+ Ana Arşivi Aç'),
+          }, '🍿 Sinema+ Ana Arşivi Aç'),
           catFilter === 'all' ? h('button', {
             type: 'button',
             id: 'provider-expand-btn',
@@ -1157,7 +1157,7 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
   }
   if (CATALOG_IDS.has(provider)) {
     const p = getProvider(provider);
-    if (window.vortexDesktop) return { provider, videoId: id, url, title: fallbackTitle || p?.name || provider, channel: p?.name || provider };
+    if (window.vortexDesktop?.isElectron) return { provider, videoId: id, url, title: fallbackTitle || p?.name || provider, channel: p?.name || provider };
     try {
       const extracted = await api(`/api/rave/extract-video?${qs({ url, title: fallbackTitle })}`, { timeout: 18000 });
       if (extracted && (extracted.url || extracted.videoId)) return extracted;
@@ -1184,7 +1184,7 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
 
 export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
   let activeTab = initialTab || 'all';
-  const pickFn = customOnPick || _activeHomePick || (async (media) => {
+  const pickFn = customOnPick || ((state.mesh && !state.mesh.curated && typeof window.vortexActions?.pickMedia === 'function') ? async (media) => { await window.vortexActions.pickMedia(media); window.vortexRestoreRoom?.(); } : null) || _activeHomePick || (async (media) => {
     try {
       const created = await api('/api/rave/meshes', {
         method: 'POST',

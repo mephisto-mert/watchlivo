@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261103_v85';
-import { api } from './api.js?v=20261103_v85';
-import { state } from './store.js?v=20261103_v85';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261103_v85';
+import { clock } from './sync.js?v=20261103_v86';
+import { api } from './api.js?v=20261103_v86';
+import { state } from './store.js?v=20261103_v86';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261103_v86';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -157,7 +157,7 @@ export class MeshConnection {
     this._lastBgNudgeAt = now;
     if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
       this.startWs();
-    } else if (this.mode === 'http' && !this.pollInFlight) {
+    } else if (this.mode === 'http' && !this.inFlight) {
       this.httpSend({ type: 'poll' }, false);
     }
   }
@@ -335,7 +335,8 @@ export class MeshConnection {
           if (mergedInitChat.length) reqBody.recentChat = mergedInitChat;
         } catch (e) { /* ignore */ }
       }
-      if ((isInit || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
+      const initialCreatorSeed = Boolean(isInit && this.isCreator && this.lastRev === 0);
+      if ((initialCreatorSeed || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
         this.needsMediaPush = false;
       }

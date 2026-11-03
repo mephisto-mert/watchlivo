@@ -2,32 +2,27 @@
   "8:1:1": [
     [
       "6310981896d13322efb0330e",
-      false,
-      "https://kitsurai-3.asia/file/tau-video/8_1_1_1080p.mp4"
+      false
     ],
     [
       "65bfc445b304d628d5f55402",
-      false,
-      "https://yurexa-1.asia/file/tau-video/0fe3cd04-edfe-4b0d-84a7-d0f8156f1255.mp4"
+      false
     ]
   ],
   "8:1:2": [
     [
       "63109a0396d13322efb0330f",
-      false,
-      "https://meisura-3.asia/file/tau-video/8_1_2_1080p.mp4"
+      false
     ],
     [
       "688b145db1180258a5b7b2e1",
-      false,
-      "https://yorugen-4.asia/file/tau-video/80cc8145-e5c6-4929-bf57-548df4965a0e.mp4"
+      false
     ]
   ],
   "8:1:3": [
     [
       "63109ba896d13322efb03310",
-      false,
-      "https://kyanori-4.asia/file/tau-video/8_1_3_1080p.mp4"
+      false
     ],
     [
       "688c506eb1180258a5b7b2f3",
@@ -86,8 +81,7 @@
   "8:1:8": [
     [
       "6310a10196d13322efb03314",
-      false,
-      "https://arukane-4.asia/file/tau-video/8_1_8_720p.mp4"
+      false
     ],
     [
       "688c5357b1180258a5b7b2f6",
@@ -98,20 +92,17 @@
   "8:1:9": [
     [
       "6310a31296d13322efb03315",
-      false,
-      "https://inorix-1.asia/file/tau-video/8_1_9_1080p.mp4"
+      false
     ],
     [
       "688b25175baf72aaf9e537e0",
-      false,
-      "https://rhyzoku-4.asia/file/tau-video/e61873cf-33c8-4f05-b6ab-16669c9f9042.mp4"
+      false
     ]
   ],
   "8:1:10": [
     [
       "6310a4d896d13322efb03316",
-      false,
-      "https://akumaryu-1.asia/file/tau-video/8_1_10_1080p.mp4"
+      false
     ],
     [
       "688c53eeb1180258a5b7b2f7",
@@ -134,8 +125,7 @@
   "8:1:12": [
     [
       "6310ad0d96d13322efb0331d",
-      false,
-      "https://shurami-4.asia/file/tau-video/8_1_12_720p.mp4"
+      false
     ],
     [
       "688b27c57425b00d51bcf4ed",
@@ -146,8 +136,7 @@
   "8:2:1": [
     [
       "6331bca7d22fe78a0265e71e",
-      false,
-      "https://inorix-1.asia/file/tau-video/8_2_1_1080p.mp4"
+      false
     ],
     [
       "688c9c69b1180258a5b7b2f8",
@@ -158,8 +147,7 @@
   "8:2:2": [
     [
       "6331bb36d22fe78a0265e71d",
-      false,
-      "https://zerikai-3.asia/file/tau-video/8_2_2_1080p.mp4"
+      false
     ]
   ],
   "8:2:3": [
@@ -246,8 +234,7 @@
   "17:1:1": [
     [
       "67dc68e047b862535fe06093",
-      false,
-      "https://midorane-4.asia/file/tau-video/a8cf9037-ca81-448d-abb4-7b39d22f9cf5.mp4"
+      false
     ],
     [
       "67ed2cb75eaf06b6b69270b4",
@@ -541,8 +528,7 @@
   "17:4:4": [
     [
       "631025c696d13322efb032ab",
-      false,
-      "https://mirakai-2.asia/file/tau-video/17_4_4_1080p.mp4"
+      false
     ],
     [
       "6883c1d6b18f16fb20452edb",
@@ -553,8 +539,7 @@
   "17:4:5": [
     [
       "6310273896d13322efb032ac",
-      false,
-      "https://meisura-1.asia/file/tau-video/17_4_5_1080p.mp4"
+      false
     ],
     [
       "6883c26a71f7c699c1d7eab6",
@@ -1337,15 +1322,13 @@
   "58:1:9": [
     [
       "6310872c96d13322efb032fd",
-      false,
-      "https://zorami-2.asia/file/tau-video/58_1_9_720p.mp4"
+      false
     ]
   ],
   "58:1:10": [
     [
       "631087b396d13322efb032fe",
-      false,
-      "https://yurexa-1.asia/file/tau-video/58_1_10_720p.mp4"
+      false
     ]
   ],
   "58:1:11": [
@@ -1503,8 +1486,7 @@
   "60:1:5": [
     [
       "6308f642308bf7aae782c631",
-      false,
-      "https://shurami-4.asia/file/tau-video/60_1_5_720p.mp4"
+      false
     ],
     [
       "66cba3f648d0b8046dc066d3",
@@ -1527,8 +1509,7 @@
   "60:1:7": [
     [
       "6308f426308bf7aae782c62f",
-      false,
-      "https://akumaryu-1.asia/file/tau-video/60_1_7_720p.mp4"
+      false
     ]
   ],
   "60:1:8": [
@@ -1548,15 +1529,13 @@
   "60:1:10": [
     [
       "6308f125308bf7aae782c62c",
-      false,
-      "https://kaizeru-4.asia/file/tau-video/60_1_10_720p.mp4"
+      false
     ]
   ],
   "60:1:11": [
     [
       "6308f05c308bf7aae782c62b",
-      false,
-      "https://kyanori-4.asia/file/tau-video/60_1_11_720p.mp4"
+      false
     ]
   ],
   "60:1:12": [
@@ -1850,8 +1829,7 @@
   "80:1:2": [
     [
       "658b3aabda9c805585548bb0",
-      false,
-      "https://onimaru-1.asia/file/tau-video/7bc1f713-d8d3-4e62-b363-6cd88aa7c26a.mp4"
+      false
     ],
     [
       "66c3b7e948d0b8046dc065b1",
@@ -1929,15 +1907,13 @@
   "7792:1:1": [
     [
       "65edf872926a0f406b38af4d",
-      false,
-      "https://zerikai-3.asia/file/tau-video/c66be28b-f127-4770-8bcd-0add9c76d11e.mp4"
+      false
     ]
   ],
   "10879:1:1": [
     [
       "68618104dafe07db6dda7b03",
-      false,
-      "https://midorane-4.asia/file/tau-video/7fb958b8-c22b-4db8-a9d8-2b938ea4136a.mp4"
+      false
     ]
   ],
   "11184:1:1": [
@@ -1950,8 +1926,7 @@
   "7791:1:1": [
     [
       "6330f508d22fe78a0265e5af",
-      false,
-      "https://akumaryu-2.asia/file/tau-video/7791_1_1_720p.mp4"
+      false
     ]
   ],
   "11166:1:1": [
@@ -1969,42 +1944,35 @@
     ],
     [
       "65c8e10db304d628d5f55540",
-      true,
-      "https://yurexa-1.asia/file/tau-video/16b7f648-4682-4d8b-9fd0-2b39547fbfb4.mp4"
+      true
     ],
     [
       "66854ab2318edab2f3f142ec",
-      false,
-      "https://inorix-2.asia/file/tau-video/60c161e0-a619-4dfa-84a9-c0c94aa300f8.mp4"
+      false
     ],
     [
       "66854b8d318edab2f3f142ed",
-      false,
-      "https://akumaryu-1.asia/file/tau-video/b6c5e648-726f-4718-9fdb-56056807c3b3.mp4"
+      false
     ]
   ],
   "7352:1:2": [
     [
       "630dd6c296d13322efb02ca4",
-      false,
-      "https://zerikai-3.asia/file/tau-video/7352_1_2_1080p.mp4"
+      false
     ]
   ],
   "7352:1:3": [
     [
       "64ee33179c4e18521a0f95f3",
-      false,
-      "https://takurox-1.asia/file/tau-video/123476dd-3b40-4443-82c9-041fee6a840d.mp4"
+      false
     ],
     [
       "65e49947926a0f406b38ae9d",
-      true,
-      "https://rhyzoku-4.asia/file/tau-video/5f365edd-9d40-436c-a0c2-206a7fe64bd2.mp4"
+      true
     ],
     [
       "67730e25c88ed221efe34992",
-      false,
-      "https://kairuma-4.asia/file/tau-video/f0c75eea-701c-458d-9125-2f349198463e.mp4"
+      false
     ],
     [
       "67e1c80247b862535fe061b3",
@@ -2022,25 +1990,21 @@
   "7394:1:2": [
     [
       "64cbe593a3ed279cb3f7df20",
-      false,
-      "https://xenrai-2.asia/file/tau-video/1b2049fd-04c0-4951-aafe-7b4224886a38.mp4"
+      false
     ]
   ],
   "7394:1:4": [
     [
       "64cc1bc3a3ed279cb3f7df30",
-      false,
-      "https://inorix-1.asia/file/tau-video/fdaaa251-8351-4766-8be4-54e7acebd81c.mp4"
+      false
     ],
     [
       "64cc170aa3ed279cb3f7df2e",
-      false,
-      "https://arukane-4.asia/file/tau-video/05de0a4f-a652-415f-9fd4-c046e8f36f1a.mp4"
+      false
     ],
     [
       "64e96abdcae9319bf648c0ac",
-      false,
-      "https://midorane-4.asia/file/tau-video/8e978acd-1d23-4f7a-b0ad-46a49d40f0b4.mp4"
+      false
     ]
   ],
   "7585:1:1": [
@@ -2051,8 +2015,7 @@
     ],
     [
       "65bac667b304d628d5f553a2",
-      false,
-      "https://valenx-2.asia/file/tau-video/133372da-2b76-4bbf-a3ce-c711d93e2758.mp4"
+      false
     ]
   ],
   "7585:1:2": [
@@ -2094,27 +2057,23 @@
     ],
     [
       "649a4278dbea6eaa65690132",
-      false,
-      "https://yurexa-1.asia/file/tau-video/f8a42bc4-2f9d-40cb-b911-b3d887a90f8e.mp4"
+      false
     ]
   ],
   "10995:1:5": [
     [
       "65bea586b304d628d5f553de",
-      false,
-      "https://meisura-1.asia/file/tau-video/ce543d2d-2584-4f50-8d16-c19ac1390e96.mp4"
+      false
     ]
   ],
   "82:1:2": [
     [
       "64d5fb7828edaf68b3c26c93",
-      false,
-      "https://valenx-2.asia/file/tau-video/0254bf30-f544-49df-a2b7-08046eee56a3.mp4"
+      false
     ],
     [
       "655f625930e908b3e8e71ff2",
-      false,
-      "https://tsuriko-2.asia/file/tau-video/82a5d2a3-3ccb-4d43-9776-fb9394c435a5.mp4"
+      false
     ]
   ],
   "82:1:3": [
@@ -2127,8 +2086,7 @@
   "82:1:4": [
     [
       "64ce65f2696168264d5dd775",
-      false,
-      "https://takurox-1.asia/file/tau-video/258c83bd-9229-4c27-aa36-d4fd596764ec.mp4"
+      false
     ]
   ],
   "90:1:1": [

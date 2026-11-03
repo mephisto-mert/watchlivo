@@ -71,7 +71,7 @@ def test_rave_3_approved_features():
     # 2. Verify Camera Bubbles & PiP & Lock-Screen MediaSession in static bundle
     base = pathlib.Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "static"
     voice_js = (base / "js" / "voice.js").read_text(encoding="utf-8")
-    assert "--voice-scale" in voice_js and "shape-btn" in voice_js
+    assert "--voice-scale" in voice_js and "shape-btn" not in voice_js
     chat_js = (base / "js" / "views" / "chat.js").read_text(encoding="utf-8")
     assert "btn-discord-head-cam" in chat_js
     controls_js = (base / "js" / "views" / "controls.js").read_text(encoding="utf-8")

@@ -1,10 +1,10 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v85';
-import { api, qs } from '../api.js?v=20261103_v85';
-import { parseVideoUrl } from '../providers.js?v=20261103_v85';
-import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v85';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v85';
-import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v85';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261103_v86';
+import { api, qs } from '../api.js?v=20261103_v86';
+import { parseVideoUrl } from '../providers.js?v=20261103_v86';
+import { videoCard, ytToMedia, resolveMedia } from './selection.js?v=20261103_v86';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261103_v86';
+import { getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory, getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress, getYtAccountKey, state } from '../store.js?v=20261103_v86';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -118,12 +118,12 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       class: 'input',
       type: 'text',
       placeholder: 'Görünen Profil / Kanal Adı',
-      value: cur?.channelName || state.self?.name || 'Mert Can Yıldız',
+      value: cur?.channelName || state.self?.name || '',
     });
     const interestInp = h('input', {
       class: 'input',
       type: 'text',
-      placeholder: 'Öneri İlgi Alanların (örn. Semicenk, Blok3, Film, Özet, Podcast)',
+      placeholder: 'Öneri İlgi Alanların (örn. Türkçe Müzik, Sinema, Fragman, Podcast)',
       value: cur?.interests || 'Türkçe Hit Müzik, Sinema & Fragman, Eğlence, Teknoloji',
     });
     popup({
@@ -338,7 +338,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         grid.replaceChildren(...uniqueHist.map((m) => videoCard(m, pickAndRecord)));
         return;
       }
-      await runSearchQuery(prof?.interests || 'Semicenk Lvbel C5 Blok3 Dedublüman klip', '🕘 Henüz yerel geçmişin boş — Hesabına göre son popüler izlenenler:');
+      grid.replaceChildren(h('div', { class: 'lobby-empty' }, 'Henüz YouTube izleme geçmişin boş. İzlediğin videolar burada listelenir.'));
       return;
     }
 
@@ -360,7 +360,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       }
       const recQuery = seedTerms.length
         ? `${seedTerms.join(' ')} resmi klip HD`
-        : 'Semicenk Blok3 Ati242 Dedublüman Türkçe Hit 2026';
+        : 'Türkiye popüler video müzik sinema 2026';
       await runSearchQuery(
         recQuery,
         prof
@@ -409,7 +409,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         grid.replaceChildren(...favs.map((m) => videoCard(m, pickAndRecord)));
         return;
       }
-      await runSearchQuery('Semicenk Dedublüman Mert Demir popüler akustik 2026', '❤️ Henüz favori eklemedin — Popüler Favori Önerileri:');
+      grid.replaceChildren(h('div', { class: 'lobby-empty' }, 'Henüz favori eklemedin. Videoları favorilerine ekleyerek burada saklayabilirsin.'));
       return;
     }
 
@@ -575,7 +575,7 @@ export function renderDesktopKind(p, body, pick) {
 }
 
 const CATALOG_CATEGORIES = [
-  { id: 'all', label: '✨ Tüm Katalog (85.000+)' },
+  { id: 'all', label: '✨ Tüm Katalog' },
   { id: 'series', label: '📺 Tüm Diziler' },
   { id: 'movies', label: '🎬 Tüm Filmler' },
   { id: 'anime', label: '⛩️ Anime (Animetrix / Fansub)' },
@@ -639,9 +639,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   let currentPage = 1;
   let hasMorePages = true;
   let loadingMore = false;
-  let catalogTotals = p.id === 'cinema' || p.freeNoAuth
-    ? { totalAvailable: 86400, totalTv: 31600, totalMovies: 54800 }
-    : { totalAvailable: 3500, totalTv: 1400, totalMovies: 2100 };
+  let catalogTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
   let ioObserver = null;
 
   const mergeUniqueItems = (existing, incoming) => {
@@ -1048,8 +1046,8 @@ export function renderMusicKind(p, body, presetQuery, pick) {
         h('b', {}, `${p.name} · Klip, Şarkı Sözleri & Ortak DJ Partisi`),
         h('span', { class: 'dim' }, 'Güncel hitler, eski klasikler, son çalınanlar ve YouTube Music benzer şarkı radyosu hazır.'))),
     h('div', { class: 'rab-actions', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
-      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#6366f1', background: 'rgba(99, 102, 241,0.14)', border: '1px solid rgba(99, 102, 241,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● OpenAI (${aiCfg.openaiModel}): AKTİF`),
-      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, '● Suno v4.5 + Mureka 9.5: AKTİF'),
+      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#6366f1', background: 'rgba(99, 102, 241,0.14)', border: '1px solid rgba(99, 102, 241,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● AI Radyo (${aiCfg.openaiModel})`),
+      h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● ${aiCfg.sunoModel || 'suno-v4.5'}`),
       h('button', { type: 'button', class: 'btn', style: { padding: '5px 11px', fontSize: '.76rem' }, onclick: () => openAiConfigModal() }, '🔑 API & Model Ayarları')));
 
   const input = h('input', { placeholder: p.placeholder || 'Şarkı, sanatçı, klip ara veya bağlantı yapıştır...', value: currentQuery, 'aria-label': `${p.name} ara` });
@@ -1137,23 +1135,25 @@ export function renderMusicKind(p, body, presetQuery, pick) {
   const renderShelves = (data) => {
     lastData = data || lastData;
     const recentList = getMusicHistory();
-    const topRecent = recentList[0] || { artist: 'Semicenk', songTitle: 'Çıkmaz Bir Sokakta' };
+    const topRecent = recentList[0] || null;
     const sections = [];
 
     if (!currentQuery && activeCat === 'all') {
-      sections.push(
-        h('section', { class: 'cat-section', 'data-shelf': 'music-recent' },
-          h('div', { class: 'cat-sec-head' },
-            h('h3', {}, `🕘 Son Çalınanlar & Tekrar Dinle (${recentList.length})`),
-            h('span', { class: 'cat-total-pill' }, '🎧 Dinleme Geçmişin')),
-          h('div', { class: 'cat-shelf-row' }, ...recentList.slice(0, 12).map(makeMusicCard))));
+      if (recentList.length) {
+        sections.push(
+          h('section', { class: 'cat-section', 'data-shelf': 'music-recent' },
+            h('div', { class: 'cat-sec-head' },
+              h('h3', {}, `🕘 Son Çalınanlar & Tekrar Dinle (${recentList.length})`),
+              h('span', { class: 'cat-total-pill' }, '🎧 Dinleme Geçmişin')),
+            h('div', { class: 'cat-shelf-row' }, ...recentList.slice(0, 12).map(makeMusicCard))));
+      }
 
-      if ((data.similarItems || []).length) {
+      if ((data.similarItems || []).length && topRecent) {
         sections.push(
           h('section', { class: 'cat-section', 'data-shelf': 'music-similar' },
             h('div', { class: 'cat-sec-head' },
-              h('h3', {}, `✨ Son Çalınanlara Göre Benzer Müzikler (${topRecent.artist} — ${topRecent.songTitle} Mix)`),
-              h('span', { class: 'cat-total-pill' }, '📻 YouTube Music Diğer Müzikler')),
+              h('h3', {}, `✨ Son Çalınanlara Göre Benzer Müzikler (${topRecent.artist || ''} — ${topRecent.songTitle || topRecent.title || ''} Mix)`),
+              h('span', { class: 'cat-total-pill' }, '📻 Benzer Şarkılar')),
             h('div', { class: 'cat-shelf-row' }, ...(data.similarItems || []).map(makeMusicCard))));
       }
     }
@@ -1187,12 +1187,12 @@ export function renderMusicKind(p, body, presetQuery, pick) {
       return;
     }
     contentArea.replaceChildren(spinner());
-    const recent = getMusicHistory()[0] || { artist: 'Semicenk', songTitle: 'Çıkmaz Bir Sokakta' };
+    const recent = getMusicHistory()[0] || {};
     const data = await api(`/api/rave/music-catalog?${qs({
       provider: p.id,
       category: activeCat,
       q: raw,
-      recentArtist: recent.artist || 'Semicenk',
+      recentArtist: recent.artist || '',
       recentTitle: recent.songTitle || '',
     })}`, { timeout: 14000 }).catch(() => ({ items: [], similarItems: [], shelves: [] }));
     if (mine !== seq) return;
@@ -1286,19 +1286,19 @@ export function renderDriveKind(p, body, pick) {
     qualityHolder,
     listHolder
   );
-  loadFolder('');
+  listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasör veya video bağlantısını yukarıya yapıştırıp "Klasörü / Videoyu Aç" butonuna tıklayın.'));
 }
 
 export function renderRaveDjKind(p, body, pick) {
   const trackAInp = h('input', {
     class: 'input',
-    placeholder: '1. Şarkı veya YouTube URL (örn. Semicenk - Canın Sağ Olsun)',
-    value: 'Semicenk - Canın Sağ Olsun',
+    placeholder: '1. Şarkı adı veya YouTube URL girin...',
+    value: '',
   });
   const trackBInp = h('input', {
     class: 'input',
-    placeholder: '2. Şarkı veya YouTube URL (örn. Blok3 - Aklına Ben Gelicem)',
-    value: 'Blok3 - Aklına Ben Gelicem',
+    placeholder: '2. Şarkı adı veya YouTube URL girin...',
+    value: '',
   });
   const statusBox = h('div', { style: { marginTop: '10px' } });
   const presetGrid = h('div', { class: 'card-grid', style: { marginTop: '12px' } });
@@ -1328,14 +1328,21 @@ export function renderRaveDjKind(p, body, pick) {
       class: 'vcard',
       role: 'button',
       tabindex: '0',
-      onclick: () => createMashup(it.trackA, it.trackB),
+      onclick: async () => {
+        if (it.url && /^https?:\/\//i.test(it.url)) {
+          toast(`🎧 RaveDJ Mix başlatılıyor: ${it.title}`);
+          await pick({ provider: 'direct', streamType: 'mp4', url: it.url, title: it.title, thumbnail: it.thumbnail || '/static/watchlivo-poster.svg', channel: it.channel || 'Watchlivo DJ', duration: it.duration || 0 });
+        } else if (it.trackA || it.trackB) {
+          await createMashup(it.trackA || it.title, it.trackB || '');
+        }
+      },
     },
-      h('div', { class: 'vcard-thumb', style: { background: 'linear-gradient(135deg,#ec4899,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '110px', fontSize: '2rem' } },
-        '🎧',
-        h('span', { class: 'vcard-dur' }, `${it.bpm} BPM`)),
+      h('div', { class: 'vcard-thumb', style: { background: 'linear-gradient(135deg,#ec4899,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '110px', fontSize: '2rem', position: 'relative', overflow: 'hidden' } },
+        it.thumbnail ? h('img', { src: it.thumbnail, alt: it.title, style: { width: '100%', height: '100%', objectFit: 'cover' }, onerror: (e) => { e.target.remove(); } }) : '🎧',
+        it.bpm ? h('span', { class: 'vcard-dur' }, `${it.bpm} BPM`) : null),
       h('div', { class: 'vcard-info' },
         h('div', { class: 'vcard-title' }, it.title),
-        h('div', { class: 'vcard-sub' }, `${it.trackA} × ${it.trackB}`)))));
+        h('div', { class: 'vcard-sub' }, it.channel || (it.trackA && it.trackB ? `${it.trackA} × ${it.trackB}` : 'RaveDJ Mix'))))));
   }).catch(() => {});
 
   body.append(

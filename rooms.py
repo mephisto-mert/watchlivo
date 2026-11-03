@@ -27,7 +27,7 @@ SYNC_SECRET = server_secret("VORTEX_SECRET")
 VALID_PRIVACY = ("public", "nearby", "friends", "private")
 VALID_PLAY_MODES = ("leader", "cohost", "autoplay", "quickplay", "vote")
 VALID_VOIP = ("off", "leader", "stage", "all")
-HTTP_PARTICIPANT_TTL = 60.0
+HTTP_PARTICIPANT_TTL = 300.0
 EMPTY_ROOM_TTL = 14400.0
 VOTE_WINDOW = 8.0
 MAX_CHAT = 80
@@ -1030,7 +1030,11 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
     dedup_parts = list(raw_parts)
     total_p = sum(1 for p in dedup_parts if p.get("transport") != "bot")
     ser_parts = []
-    for p in dedup_parts[:60]:
+    for p in dedup_parts:
+        if p.get("transport") == "bot":
+            continue
+        if len(ser_parts) >= 60:
+            break
         cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
         p_is_creator = _is_creator_of_room(room, p["id"], p)
         cp["isCreator"] = p_is_creator
@@ -1498,7 +1502,7 @@ def ensure_host(room: Dict[str, Any]) -> None:
     cur_host_id = room.get("host_id")
     cur_host = room["participants"].get(cur_host_id) if cur_host_id else None
     if cur_host and (
-        (cur_host.get("transport") != "bot" and (cur_host_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 15.0)))
+        (cur_host.get("transport") != "bot" and (cur_host_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 120.0)))
         or not humans
     ):
         return
@@ -1507,7 +1511,7 @@ def ensure_host(room: Dict[str, Any]) -> None:
     creator_candidates = [
         (cid, p) for cid, p in room["participants"].items()
         if p.get("transport") != "bot"
-        and (cid in live_ws or (t_now - float(p.get("lastSeen") or 0.0) <= 15.0))
+        and (cid in live_ws or (t_now - float(p.get("lastSeen") or 0.0) <= 120.0))
         and _is_creator_of_room(room, cid, p)
     ]
     if creator_candidates and not room.get("host_transferred"):
@@ -1640,7 +1644,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         cur_host_alive = bool(
             cur_host
             and cur_host.get("transport") != "bot"
-            and (cur_host_id in SOCKETS.get(room.get("id", ""), {}) or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 10.0))
+            and (cur_host_id in SOCKETS.get(room.get("id", ""), {}) or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 90.0))
         )
         cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
         if not cur_host_alive or not cur_host_is_creator:
@@ -1800,6 +1804,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         return out
 
     if mtype == "resolve_media":
+        if room.get("curated"):
+            return out
         cur_m = room.get("media") or {}
         incoming = clean_media(data)
         if incoming.get("url") and not str(incoming.get("url")).startswith("/api/rave/resolve-catalog"):
@@ -2574,7 +2580,7 @@ ROOM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,47}$")
 _LIVE_TV = [
     ("trt1", "TRT 1", "https://tv-trt1.medya.trt.com.tr/master.m3u8"),
     ("atv", "ATV", "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv_1080p.m3u8"),
-    ("now-tv", "NOW", "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv_720p.m3u8"),
+    ("now-tv", "NOW", "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8"),
     ("star-tv", "Star TV", "https://dogus.daioncdn.net/startv/startv.m3u8?ce=3&app=a20ac41e-bdc3-4aa1-934d-26b484480ac9"),
     ("trt-spor", "TRT Spor", "https://tv-trtspor1.medya.trt.com.tr/master.m3u8"),
     ("a-spor", "A Spor", "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8"),
@@ -2595,7 +2601,7 @@ _LIVE_RADIO = [
     ("radyo-joy-turk", "Joy Türk", "https://playerservices.streamtheworld.com/api/livestream-redirect/JOY_TURK_SC", "direct"),
     ("radyo-slow-turk", "Slow Türk", "https://radyo1.radyo-dinle.tc/8062/stream", "direct"),
     ("radyo-best-fm", "Best FM", "https://ssldyg.radyotvonline.com/best/bestfm.stream/playlist.m3u8", "hls"),
-    ("radyo-alem-fm", "Alem FM", "https://dygedge2.radyotvonline.net/kralpop/playlist.m3u8", "hls"),
+    ("radyo-alem-fm", "Alem FM", "https://alemfm.radyotvonline.net/alemfmaac", "direct"),
 ]
 
 
@@ -3244,7 +3250,9 @@ async def list_rooms(request: Request):
                     await STORE.put(room)
             p_cnt = len(p_map)
             if (not p_cnt or not has_humans) and not room.get("curated"):
-                await STORE.delete(rid_item)
+                idle_sec = t - float(room.get("lastActiveAt") or room.get("createdAt") or 0.0)
+                if idle_sec > EMPTY_ROOM_TTL:
+                    await STORE.delete(rid_item)
                 continue
             if room["privacy"] == "private" or not p_cnt:
                 continue

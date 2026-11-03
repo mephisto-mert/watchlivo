@@ -1,15 +1,15 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v85';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v86';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261103_v85';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v85';
-import { api } from '../api.js?v=20261103_v85';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v85';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v85';
+} from '../store.js?v=20261103_v86';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v86';
+import { api } from '../api.js?v=20261103_v86';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v86';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v86';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -52,7 +52,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v85', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v86', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -178,8 +178,8 @@ export function renderHome(app) {
       !isNativeWatchlivoApp() ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
-        href: '/download/Watchlivo-v1.1.0.apk',
-        download: 'Watchlivo-v1.1.0.apk',
+        href: '/download/Watchlivo-v1.1.apk',
+        download: 'Watchlivo-v1.1.apk',
         title: 'Watchlivo Android APK İndir',
         onclick: () => toast('📱 Watchlivo Android APK indiriliyor...', 4000),
       },
@@ -218,7 +218,7 @@ export function renderHome(app) {
   let query = '';
   const lobbyBox = h('div', { id: 'lobby-box' });
   const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', style: { maxWidth: '360px' } });
-  const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['nearby', 'Çevremdekiler'], ['public', 'Herkese Açık']].map(([k, label]) =>
+  const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık']].map(([k, label]) =>
     h('button', {
       class: `lobby-tab ${k === filter ? 'on' : ''}`,
       onclick: (e) => {
@@ -256,8 +256,8 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-actions' },
       h('a', {
         class: 'btn primary sm wl-banner-apk-btn',
-        href: '/download/Watchlivo-v1.1.0.apk',
-        download: 'Watchlivo-v1.1.0.apk',
+        href: '/download/Watchlivo-v1.1.apk',
+        download: 'Watchlivo-v1.1.apk',
         onclick: () => toast('📱 Watchlivo Android APK indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
@@ -267,7 +267,7 @@ export function renderHome(app) {
 
   const makeDockLabel = (id) => ({
     home: 'Keşfet',
-    cinema: '85.000+ Sinema+',
+    cinema: 'Sinema+',
     rooms: 'Canlı Odalar',
     tv: '7/24 Canlı TV',
     profile: 'Profil',
@@ -296,7 +296,7 @@ export function renderHome(app) {
       selection.setProvider(null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
-    makeDockBtn('cinema', '85.000+ Sinema, Dizi & Anime', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
+    makeDockBtn('cinema', 'Sinema, Dizi & Anime Arşivi', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
       selection.setProvider('cinema');
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
@@ -326,7 +326,7 @@ export function renderHome(app) {
     h('div', { class: 'dock-studio-meta' },
       h('span', { class: 'dock-archive-pill' },
         h('span', { class: 'dock-pulse-dot' }),
-        '85.000+ Film, Dizi & Anime · 4K TR Dublaj & Altyazı'),
+        'Sinema, Dizi & Anime · 4K TR Dublaj & Altyazı'),
       h('button', {
         type: 'button',
         class: 'dock-quick-btn',

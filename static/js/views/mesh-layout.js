@@ -1,13 +1,13 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261103_v85';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261103_v85';
-import { navIcon, logo } from './home.js?v=20261103_v85';
-import { createSelection } from './selection.js?v=20261103_v85';
-import { buildControls } from './controls.js?v=20261103_v85';
-import { buildChat } from './chat.js?v=20261103_v85';
-import { PANELS } from './panels.js?v=20261103_v85';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261103_v86';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261103_v86';
+import { navIcon, logo } from './home.js?v=20261103_v86';
+import { createSelection } from './selection.js?v=20261103_v86';
+import { buildControls } from './controls.js?v=20261103_v86';
+import { buildChat } from './chat.js?v=20261103_v86';
+import { PANELS } from './panels.js?v=20261103_v86';
 
-const PRIVACY_LABEL = { public: '🌐 Herkese Açık', nearby: '📍 Çevremdekiler', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
+const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
 
 export function buildLayout(app, ctx) {

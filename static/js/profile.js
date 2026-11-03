@@ -1,11 +1,11 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261103_v85';
-import { api } from './api.js?v=20261103_v85';
+import { h, popup, toast } from './ui.js?v=20261103_v86';
+import { api } from './api.js?v=20261103_v86';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261103_v85';
+} from './store.js?v=20261103_v86';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -77,7 +77,7 @@ export function saveGuestProfile(data = {}) {
     hideLocation: asBool(data.hideLocation ?? prev.hideLocation ?? false),
     hideWatching: asBool(data.hideWatching ?? prev.hideWatching ?? false),
     hideFriends: asBool(data.hideFriends ?? prev.hideFriends ?? false),
-    watchMinutes: Math.max(0, Number(prev.watchMinutes || 15)),
+    watchMinutes: Math.max(0, Number(prev.watchMinutes || 0)),
     medal: '🍿 Misafir İzleyici',
     authProvider: 'guest',
     authToken: '',
@@ -101,8 +101,8 @@ export function saveProfile(data = {}) {
   const name = String(data.name || cleanPrevName || 'Üye').trim().slice(0, 24) || 'Üye';
   const rawHandle = String(data.handle ?? prev.handle ?? '').trim().replace(/^@+/, '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
   const resolvedId = data.uid || data.id || prev.id || prev.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
-  const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 145) || 145);
-  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
+  const watchMinutes = Math.max(0, Number(data.watchMinutes ?? prev.watchMinutes ?? 0) || 0);
+  const computedMedal = data.medal || prev.medal || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : watchMinutes >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
   const avatarUrl = String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? prev.avatar ?? '').trim();
   const hideLocation = asBool(data.hideLocation ?? prev.hideLocation ?? false);
   const hideWatching = asBool(data.hideWatching ?? prev.hideWatching ?? false);
@@ -528,8 +528,8 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       let hideWatchingState = asBool(profObj.hideWatching);
       let hideFriendsState = asBool(profObj.hideFriends);
       let hideLocState = asBool(profObj.hideLocation);
-      const userMins = Number(profObj.watchMinutes || 145);
-      const userMedal = profObj.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : '🥉 Bronz İzleyici');
+      const userMins = Math.max(0, Number(profObj.watchMinutes || 0));
+      const userMedal = profObj.medal || (userMins >= 300 ? '🥇 Altın İzleyici' : userMins >= 120 ? '🥈 Gümüş İzleyici' : userMins >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
       const errBox = h('div', { class: 'wl-auth-err' });
 
       // Live active media ("Şu An İzliyor")
@@ -1121,8 +1121,8 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     }
 
     // activeTab === 'register'
-    const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın (Örn: Mert Can)', value: (current && current.name && !/^Misafir/i.test(current.name)) ? current.name : '' });
-    const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi (Örn: @mertcan)' });
+    const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın (Örn: Deniz)', value: (current && current.name && !/^Misafir/i.test(current.name)) ? current.name : '' });
+    const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi (Örn: @izleyici)' });
     const emailInp = h('input', { class: 'input', type: 'email', placeholder: 'E-posta adresin (Örn: ad@gmail.com)', autocomplete: 'email' });
     const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifre belirle (en az 4 karakter)', autocomplete: 'new-password' });
     const errBox = h('div', { class: 'wl-auth-err' });
@@ -1726,7 +1726,7 @@ export function openUserProfileModal(targetUser) {
   const uHideWatching = asBool(targetUser.hideWatching);
   const uHideFriends = asBool(targetUser.hideFriends);
   const uMedal = targetUser.medal || '🍿 İzleyici';
-  const uMins = Number(targetUser.watchMinutes || 45);
+  const uMins = Math.max(0, Number(targetUser.watchMinutes || 0));
   const activeMediaTitle = state.mesh?.media?.title || targetUser.nowWatching || '';
   const friendList = Array.isArray(targetUser.friendsPreview) ? targetUser.friendsPreview : [];
 

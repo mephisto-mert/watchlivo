@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v85';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v85';
-import { resolveMusicItem } from './selection-kinds.js?v=20261103_v85';
-import { MeshConnection } from '../realtime.js?v=20261103_v85';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v85';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v85';
-import { buildLayout } from './mesh-layout.js?v=20261103_v85';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v85';
-import { Voice } from '../voice.js?v=20261103_v85';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v85';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261103_v86';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261103_v86';
+import { resolveMusicItem } from './selection-kinds.js?v=20261103_v86';
+import { MeshConnection } from '../realtime.js?v=20261103_v86';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261103_v86';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261103_v86';
+import { buildLayout } from './mesh-layout.js?v=20261103_v86';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261103_v86';
+import { Voice } from '../voice.js?v=20261103_v86';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261103_v86';
 
 let ctx = null;
 
@@ -902,7 +902,6 @@ const actions = {
         const privNotice = {
           public: '🌐 Oda gizliliği "Herkese Açık" olarak ayarlandı',
           friends: '👥 Oda gizliliği "Sadece Arkadaşlar" olarak ayarlandı',
-          nearby: '📍 Oda gizliliği "Çevremdekiler" olarak ayarlandı',
           private: '🔒 Oda gizliliği "Gizli Oda (Sadece Davet)" olarak ayarlandı',
         }[extra.privacy];
         if (privNotice) toast(privNotice);
@@ -973,7 +972,7 @@ const actions = {
         : (Array.isArray(window.__kinoxCachedSimilar) && window.__kinoxCachedSimilar.length ? window.__kinoxCachedSimilar : []);
       if (!simPool.length) {
         try {
-          const qs = new URLSearchParams({ artist: m.artist || 'Semicenk', title: m.songTitle || m.title || '' });
+          const qs = new URLSearchParams({ artist: m.artist || '', title: m.songTitle || m.title || '' });
           const r = await fetch(`/api/rave/music-similar?${qs}`);
           if (r.ok) {
             const d = await r.json();
