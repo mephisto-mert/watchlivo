@@ -4,6 +4,9 @@ import sys
 import urllib.error
 import urllib.request
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8765"
 results = []
 
@@ -135,6 +138,7 @@ if __name__ == "__main__":
     check("chat stored as plain text", last["text"].startswith("<script>") and last["user"] == "Berk")
     s, b = sync("hB", type="chat", gif="https://evil.example/x.gif")
     check("gif host allow-list", b["room"]["chat"][-1].get("gif", "") == "")
+    s, a = sync("hA", type="host_action", action="set_privacy", playMode="vote", privacy="public")
     s, l = call("/api/rooms")
     check("lobby lists active room", any(x["id"] == rid and x["count"] == 2 for x in l.get("rooms", [])),
           str([(x["id"], x["count"]) for x in l.get("rooms", []) if x["id"] == rid]))

@@ -302,10 +302,19 @@ def fetch_user_page(url: str) -> str:
 # ---------------------------------------------------------------------------
 # Content search (Rave SuperSearch: YouTube + titles with "where to watch" offers)
 # ---------------------------------------------------------------------------
+_YT_SEARCH_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+
+
 def _yt_search_sync(q: str):
+    q_norm = str(q or "").strip().lower()
+    now_ts = time.time()
+    if q_norm:
+        cached = _YT_SEARCH_CACHE.get(q_norm)
+        if cached and now_ts - cached[1] < 300.0 and cached[0]:
+            return list(cached[0])
     items = []
     try:
-        html = _http("https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"}), timeout=6).decode("utf-8", errors="ignore")
+        html = _http("https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"}), timeout=4.2).decode("utf-8", errors="ignore")
         m = re.search(r"var ytInitialData\s*=\s*(\{.*?\});</script>", html, re.S)
         if m:
             data = json.loads(m.group(1))
@@ -337,7 +346,9 @@ def _yt_search_sync(q: str):
                         "url": f"https://www.youtube.com/watch?v={vid}",
                     })
                     if len(items) >= 24:
-                        return items
+                        break
+                if len(items) >= 24:
+                    break
     except Exception:
         pass
     if not items:
@@ -360,6 +371,10 @@ def _yt_search_sync(q: str):
                 })
         except Exception:
             pass
+    if q_norm and items:
+        _YT_SEARCH_CACHE[q_norm] = (list(items), now_ts)
+        while len(_YT_SEARCH_CACHE) > 120:
+            _YT_SEARCH_CACHE.popitem(last=False)
     return items
 
 
@@ -8232,7 +8247,9 @@ app = Starlette(
         Route("/sw.js", service_worker),
         Route("/api/health", health),
         Route("/api/app/version", app_version_endpoint, methods=["GET", "HEAD"]),
+        Route("/app_version.json", app_version_endpoint, methods=["GET", "HEAD"]),
         Route("/api/ios/version", ios_version_endpoint, methods=["GET", "HEAD"]),
+        Route("/ios_version.json", ios_version_endpoint, methods=["GET", "HEAD"]),
         Route("/api/ios/manifest.plist", ios_manifest_endpoint, methods=["GET", "HEAD"]),
         Route("/download/apk", download_apk_endpoint),
         Route("/download/Watchlivo-v2.0.apk", download_apk_endpoint),

@@ -322,6 +322,10 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         renderTabs();
       }
       const items = (feed?.items || []).map(ytToMedia);
+      if (!items.length && (tabId === 'all' || tabId === 'recommended' || tabId === 'for_you')) {
+        await runSearchQuery('Türkiye popüler video müzik sinema 2026', '🔥 Önerilen Videolar', false);
+        return;
+      }
       grid.replaceChildren(...(items.length ? items.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, 'Bu kategoride henüz video bulunamadı.')]));
     } catch (e) {
       if (mine === seq) await runSearchQuery('Türkiye popüler video müzik sinema 2026', '🔥 Önerilen Videolar', false);

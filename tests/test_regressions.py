@@ -1471,6 +1471,36 @@ class RegressionTests(unittest.TestCase):
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
         self.assertIn("if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.04)", html5_js)
 
+    def test_v104_yt_search_cache_and_personalized_feed_fallback(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. _yt_search_sync caches results in _YT_SEARCH_CACHE for 300s to prevent cold YouTube feed timeouts
+        server._YT_SEARCH_CACHE.clear()
+        with patch.object(server, "_http", side_effect=OSError("simulated timeout")), \
+             patch.object(server.music_engine, "_yt_innertube_search_sync", return_value=[{"videoId": "dQw4w9WgXcQ", "title": "Cached Hit", "artist": "Watchlivo", "duration": 212}]) as mock_it:
+            res1 = server._yt_search_sync("Watchlivo Test Query 2026")
+            res2 = server._yt_search_sync("Watchlivo Test Query 2026")
+        self.assertEqual(len(res1), 1)
+        self.assertEqual(res1[0]["videoId"], "dQw4w9WgXcQ")
+        self.assertEqual(res2[0]["videoId"], "dQw4w9WgXcQ")
+        self.assertEqual(mock_it.call_count, 1)
+
+        # 2. selection-kinds.js falls back to runSearchQuery when personalized feed returns empty items on default tab
+        sk_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        self.assertIn("if (!items.length && (tabId === 'all' || tabId === 'recommended' || tabId === 'for_you'))", sk_js)
+
+        # 3. Root /ios_version.json and /app_version.json endpoints return valid version metadata
+        r_ios = self.client.get("/ios_version.json")
+        self.assertEqual(r_ios.status_code, 200)
+        self.assertTrue(r_ios.json().get("ok"))
+        self.assertEqual(r_ios.json().get("bundleId"), "online.watchlivo.app")
+
+        r_apk = self.client.get("/app_version.json")
+        self.assertEqual(r_apk.status_code, 200)
+        self.assertTrue(r_apk.json().get("ok"))
+        self.assertEqual(r_apk.json().get("packageName"), "online.watchlivo.app")
+
 
 if __name__ == '__main__':
     unittest.main()

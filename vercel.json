@@ -45,7 +45,10 @@
           "static/index.html",
           "static/sw.js",
           "static/Watchlivo-v2.0.apk",
+          "static/Watchlivo.ipa",
+          "static/Watchlivo.mobileconfig",
           "app_version.json",
+          "ios_version.json",
           "animecix_tau_map.json",
           "hidden_titles.json",
           "main_sites_vault.json"
@@ -149,7 +152,7 @@
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js)",
+      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json)",
       "dest": "server.py"
     },
     {
