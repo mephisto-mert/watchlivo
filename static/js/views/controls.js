@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v102';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v102';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v102';
-import { getProvider } from '../providers.js?v=20261104_v102';
-import { expectedPosition } from '../sync.js?v=20261104_v102';
-import { thumbFor } from './lobby.js?v=20261104_v102';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v102';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v102';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v102';
-import { avatar } from '../profile.js?v=20261104_v102';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v103';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v103';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v103';
+import { getProvider } from '../providers.js?v=20261104_v103';
+import { expectedPosition } from '../sync.js?v=20261104_v103';
+import { thumbFor } from './lobby.js?v=20261104_v103';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v103';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v103';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v103';
+import { avatar } from '../profile.js?v=20261104_v103';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -43,7 +43,7 @@ export function buildControls(frame, ctx) {
     h('h2', {}, 'Henüz bir şey oynatılmıyor'),
     h('p', {}, 'Video Ara ile bir sağlayıcı seç. Seçtiğin video odadaki herkes için aynı anda başlar.'),
     h('button', { class: 'btn primary', onclick: () => { setView('left', 'Search'); ctx.layout.update(); } }, ico('searchVideo'), 'Video Ara'));
-  const loading = h('div', { class: 'stage-empty hidden', style: { background: 'rgba(0,0,0,.35)' } }, h('div', { class: 'spinner' }));
+  const loading = h('div', { class: 'stage-empty hidden', style: { background: 'rgba(0,0,0,.35)', pointerEvents: 'none' } }, h('div', { class: 'spinner' }));
   const errorBox = h('div', { class: 'stage-error hidden' });
   const dualCue = h('div', { class: 'rave-subtitle-dual hidden', id: 'rave-sub-dual' });
   const subCue = h('div', { class: 'rave-subtitle-cue', id: 'rave-sub-primary' });
@@ -113,7 +113,7 @@ export function buildControls(frame, ctx) {
   const revealControls = (ms) => {
     const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
     const durationMs = ms || (isTouch ? 4500 : 3000);
-    const wasVisible = controls.classList.contains('ui-active') && !frame.classList.contains('idle-cursor');
+    const wasVisible = (controls.classList.contains('ui-active') || controls.classList.contains('show')) && !frame.classList.contains('idle-cursor');
     if (!wasVisible) {
       lastUiRevealAt = Date.now();
     }
@@ -121,7 +121,15 @@ export function buildControls(frame, ctx) {
     controls.classList.add('ui-active');
     clearTimeout(uiTimer);
     uiTimer = setTimeout(() => {
-      if (!menu.classList.contains('hidden') || frame.classList.contains('scrubbing')) return;
+      const v = host.adapter?.video;
+      const activelyPlaying = Boolean(
+        host.adapter
+        && !host.loading
+        && !host.autoplayBlocked
+        && !host.adapter.isPaused?.()
+        && (!v || (!v.paused && !v.ended && v.readyState >= 2))
+      );
+      if (!activelyPlaying || !menu.classList.contains('hidden') || frame.classList.contains('scrubbing')) return;
       controls.classList.remove('ui-active');
       frame.classList.add('idle-cursor');
     }, durationMs);
@@ -156,7 +164,7 @@ export function buildControls(frame, ctx) {
       onpointerdown: (e) => {
         e.stopPropagation();
         if (e.pointerType === 'touch' || e.pointerType === 'pen') lastAnyTouchAt = Date.now();
-        resumeSharedAudioContext();
+        if (!isIosFixedVol) resumeSharedAudioContext();
         startX = e.clientX || 0;
         startY = e.clientY || 0;
         if (!opts.noAutoReveal) revealControls(3600);
@@ -164,7 +172,7 @@ export function buildControls(frame, ctx) {
       ontouchstart: (e) => {
         e.stopPropagation();
         lastAnyTouchAt = Date.now();
-        resumeSharedAudioContext();
+        if (!isIosFixedVol) resumeSharedAudioContext();
         const t = e.touches?.[0];
         if (t) { startX = t.clientX; startY = t.clientY; }
         if (!opts.noAutoReveal) revealControls(3600);
@@ -308,7 +316,7 @@ export function buildControls(frame, ctx) {
       revealControls(3200);
       return;
     }
-    const shouldPause = !adapterPaused || (roomPlaying && !ctx.userPaused);
+    const shouldPause = host.adapter ? (!adapterPaused && roomPlaying) : (roomPlaying && !ctx.userPaused);
     if (shouldPause) {
       actions.pause();
       host.adapter?.pause?.();
@@ -1176,6 +1184,18 @@ export function buildControls(frame, ctx) {
   }, { passive: true });
   controls.addEventListener('pointerdown', (e) => {
     if (e.target?.closest?.('.ctl-top, .ctl-bottom, .ctl-menu, .ctl-center-play, .ctl-center-side')) {
+      revealControls(4500);
+    }
+  }, { passive: true });
+  frame.addEventListener('touchend', () => {
+    if (host.adapter && !host.adapter.caps?.overlayClicks) return;
+    if (!controls.classList.contains('ui-active') && !controls.classList.contains('show')) {
+      revealControls(4500);
+    }
+  }, { passive: true });
+  frame.addEventListener('click', () => {
+    if (host.adapter && !host.adapter.caps?.overlayClicks) return;
+    if (!controls.classList.contains('ui-active') && !controls.classList.contains('show')) {
       revealControls(4500);
     }
   }, { passive: true });
@@ -2710,13 +2730,17 @@ export function buildControls(frame, ctx) {
       localPauseSince = Date.now();
     }
     const localPaused = Boolean(
-      rawLocalPaused
-      && !host.adapter?.wantPlaying
-      && (!roomPlaying || host.autoplayBlocked || (localPauseSince > 0 && Date.now() - localPauseSince >= 550))
+      (host.adapter && (host.autoplayBlocked || host.adapter.autoplayHardBlocked) && host.adapter.isPaused?.())
+      || (
+        rawLocalPaused
+        && !host.adapter?.wantPlaying
+        && (!roomPlaying || host.autoplayBlocked || (localPauseSince > 0 && Date.now() - localPauseSince >= 550))
+      )
     );
     const playing = roomPlaying && !localPaused;
     const embedOnly = host.adapter && !host.adapter.caps.overlayClicks;
-    controls.classList.toggle('show', !playing && !embedOnly);
+    const keepControlsShown = (!playing || Boolean(host.loading) || Boolean(host.adapter?.video?.paused)) && !embedOnly;
+    controls.classList.toggle('show', keepControlsShown);
     const playIconName = playing ? 'pause' : 'play';
     if (playBtn.dataset.sig !== playIconName) {
       playBtn.dataset.sig = playIconName;

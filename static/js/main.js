@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v102';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v102';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v102';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v102';
-import { api } from './api.js?v=20261104_v102';
-import { h, toast } from './ui.js?v=20261104_v102';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v103';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v103';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v103';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v103';
+import { api } from './api.js?v=20261104_v103';
+import { h, toast } from './ui.js?v=20261104_v103';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -168,31 +168,14 @@ async function boot() {
     const rawH = Math.round(window.innerHeight || root.clientHeight || 844);
     const vvH = vv ? Math.round(vv.height) : rawH;
     const w = Math.max(280, rawW);
-    let h = Math.max(240, (!kbOpen && vvH > 0) ? Math.max(rawH, vvH) : (vvH || rawH));
+    const h = Math.max(240, kbOpen ? Math.min(rawH, vvH || rawH) : rawH);
     const insets = readSafeAreaInsets();
-    const isStandalone = Boolean(
-      navigator.standalone === true ||
-      window.matchMedia?.('(display-mode: standalone)').matches ||
-      window.matchMedia?.('(display-mode: fullscreen)').matches ||
-      window.isWatchlivoNativeIOS
-    );
-    const scrW = Number(window.screen?.width) || 0;
-    const scrH = Number(window.screen?.height) || 0;
-    const isPortrait = w <= h;
-    const fullScreenH = (scrW > 0 && scrH > 0)
-      ? (isPortrait ? Math.max(scrW, scrH) : Math.min(scrW, scrH))
-      : 0;
-    if (!kbOpen) {
-      if (insets.top > 0 && fullScreenH > h && (fullScreenH - h) <= (insets.top + insets.bottom + 24)) {
-        h = fullScreenH;
-      } else if (isStandalone && fullScreenH > h && (fullScreenH - h) <= 96) {
-        h = fullScreenH;
-      } else if (insets.top > 0 && isStandalone) {
-        h = Math.max(h, rawH + insets.top);
-      }
-    }
     root.style.setProperty('--app-width', `${w}px`);
     root.style.setProperty('--app-height', `${h}px`);
+    if (!kbOpen) {
+      root.style.setProperty('--vvh', `${h}px`);
+      root.style.setProperty('--vv-top', '0px');
+    }
     root.style.setProperty('--safe-top-px', `${insets.top}px`);
     root.style.setProperty('--safe-bottom-px', `${insets.bottom}px`);
     if (!kbOpen && (window.scrollX !== 0 || window.scrollY !== 0)) {
@@ -364,7 +347,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v102', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v103', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

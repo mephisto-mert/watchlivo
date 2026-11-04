@@ -3642,7 +3642,7 @@ header.navbar.top-nav-capsule {
   .home-rail {
     --dock-mobile-h: 56px;
     position: fixed !important;
-    top: calc(var(--app-height, 100vh) - var(--dock-mobile-h, 56px)) !important;
+    top: auto !important;
     bottom: 0 !important;
     left: 0 !important;
     right: 0 !important;
@@ -6353,24 +6353,211 @@ html.is-native-apk .wl-btn-apk-dl,
   .wl-yt-home-section { padding: 12px; border-radius: 14px; }
 }
 
-/* v102: iOS Safari & Standalone WebClip Safe-Area + Viewport Fit Hardening */
+/* v103: iOS Safari & Standalone WebClip Safe-Area + Viewport Fit + Touch Target Hardening */
+html {
+  width: 100% !important;
+  max-width: 100vw !important;
+  height: var(--app-height, 100dvh) !important;
+  max-height: var(--app-height, 100dvh) !important;
+  overflow: hidden !important;
+  position: relative !important;
+}
+
+body,
+.app {
+  width: 100% !important;
+  max-width: 100vw !important;
+  height: var(--app-height, 100dvh) !important;
+  max-height: var(--app-height, 100dvh) !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
 #home-root:not(.hidden) {
   position: fixed !important;
   top: 0 !important;
   left: 0 !important;
   right: 0 !important;
-  bottom: auto !important;
+  bottom: 0 !important;
   width: 100% !important;
   max-width: 100vw !important;
-  height: 100% !important;
-  height: 100vh !important;
-  height: var(--app-height, 100vh) !important;
-  max-height: var(--app-height, 100vh) !important;
+  height: var(--app-height, 100dvh) !important;
+  max-height: var(--app-height, 100dvh) !important;
   min-height: 0 !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
   box-sizing: border-box !important;
+  z-index: 10 !important;
+}
+
+.top-nav-capsule button,
+.top-nav-capsule .nav-icon,
+.top-nav-capsule .user-profile-badge,
+.top-nav-capsule .btn-create-room,
+.floating-dock .dock-btn,
+.home-rail .dock-btn,
+.wl-studio-theme-strip button,
+.vortex-hero-omnibox button,
+.platform-card {
+  pointer-events: auto !important;
+  touch-action: manipulation !important;
+  -webkit-tap-highlight-color: transparent !important;
+  cursor: pointer !important;
+}
+
+@media (max-width: 900px) {
+  .top-nav-capsule,
+  .top-nav-capsule.navbar,
+  header.navbar.top-nav-capsule {
+    position: relative !important;
+    top: 0 !important;
+    z-index: 500 !important;
+    height: calc(52px + env(safe-area-inset-top, 0px)) !important;
+    min-height: calc(52px + env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(52px + env(safe-area-inset-top, 0px)) !important;
+    padding: calc(env(safe-area-inset-top, 0px) + 4px) max(10px, env(safe-area-inset-right, 0px)) 4px max(10px, env(safe-area-inset-left, 0px)) !important;
+    gap: 6px !important;
+    background: rgba(9, 13, 22, 0.98) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  }
+
+  .top-nav-capsule .navbar-left,
+  .top-nav-capsule .navbar-right {
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+
+  /* Hide redundant top Rooms button on mobile since Live Rooms is in bottom dock */
+  .top-nav-capsule .navbar-left > .nav-icon[aria-label*="Odalar"],
+  .top-nav-capsule .navbar-left > .nav-icon[data-tip*="Odalar"] {
+    display: none !important;
+  }
+
+  .top-nav-capsule .nav-icon {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    color: #f8fafc !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .top-nav-capsule .user-profile-badge {
+    min-width: 36px !important;
+    min-height: 36px !important;
+    padding: 2px !important;
+    border-radius: 50% !important;
+  }
+
+  .top-nav-capsule .btn-create-room {
+    height: 36px !important;
+    min-height: 36px !important;
+    padding: 0 12px !important;
+    font-size: 0.78rem !important;
+    font-weight: 800 !important;
+    border-radius: 10px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  .home {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    height: calc(var(--app-height, 100dvh) - 52px - env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(var(--app-height, 100dvh) - 52px - env(safe-area-inset-top, 0px)) !important;
+    overflow: hidden !important;
+  }
+
+  .home-scroll.glass-home-shell {
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-bottom: 68px !important;
+  }
+
+  .app-layout {
+    width: 100% !important;
+    max-width: 100vw !important;
+    padding: 8px max(10px, env(safe-area-inset-right, 0px)) 68px max(10px, env(safe-area-inset-left, 0px)) !important;
+    gap: 10px !important;
+    box-sizing: border-box !important;
+  }
+
+  .floating-dock,
+  .home-rail {
+    --dock-mobile-h: 56px;
+    position: fixed !important;
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    transform: none !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    padding: 4px max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px)) !important;
+    background: rgba(8, 11, 19, 0.98) !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 -8px 26px rgba(0, 0, 0, 0.72) !important;
+    z-index: 9500 !important;
+    pointer-events: auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .floating-dock .dock-nav-group,
+  .home-rail .dock-nav-group {
+    display: grid !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+    width: 100% !important;
+    height: 100% !important;
+    gap: 4px !important;
+    align-items: center !important;
+  }
+
+  .floating-dock .dock-btn,
+  .home-rail .dock-btn {
+    width: 100% !important;
+    height: 46px !important;
+    min-height: 46px !important;
+    padding: 2px 2px !important;
+    border-radius: 10px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 2px !important;
+    font-size: 0.65rem !important;
+    font-weight: 700 !important;
+    color: #94a3b8 !important;
+    pointer-events: auto !important;
+    touch-action: manipulation !important;
+  }
+
+  .floating-dock .dock-btn.active,
+  .home-rail .dock-btn.active {
+    color: #ffffff !important;
+    background: rgba(59, 130, 246, 0.18) !important;
+    border: 1px solid rgba(59, 130, 246, 0.42) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .top-nav-capsule .navbar-center {
+    display: none !important;
+  }
 }
 
 @media (max-width: 960px) and (orientation: landscape) {
@@ -6385,7 +6572,7 @@ html.is-native-apk .wl-btn-apk-dl,
   .floating-dock,
   .home-rail {
     --dock-mobile-h: 50px;
-    top: calc(var(--app-height, 100vh) - 50px) !important;
+    top: auto !important;
     bottom: 0 !important;
     height: 50px !important;
     min-height: 50px !important;

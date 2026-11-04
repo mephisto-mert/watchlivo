@@ -1,13 +1,14 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261104_v102';
-import { api } from './api.js?v=20261104_v102';
-import { state } from './store.js?v=20261104_v102';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v102';
+import { clock } from './sync.js?v=20261104_v103';
+import { api } from './api.js?v=20261104_v103';
+import { state } from './store.js?v=20261104_v103';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v103';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
 export class MeshConnection {
   constructor({ roomId, profile, password = '', device = 'Web', onMessage, onStatus }) {
+    profile = profile || state.self || { id: 'guest_user', name: 'Misafir İzleyici', color: '#27DCC8', isGuest: true };
     Object.assign(this, { roomId, profile, password, device, onMessage, onStatus });
     this.ws = null; this.mode = null; this.closed = false; this.retry = 0;
     this.pollTimer = null; this.pingTimer = null; this.clientId = null; this.lastRoomStamp = '';
