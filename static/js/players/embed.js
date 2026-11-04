@@ -57,7 +57,7 @@ export class EmbedAdapter {
       if (typeof d.data.duration === 'number' && d.data.duration > 0) this.duration = d.data.duration;
       if (d.data.event === 'play') { this.paused = false; this.anchorPerf = performance.now(); this.events.onPlay?.(); }
       if (d.data.event === 'pause') { this.baseTime = this.getTime(); this.paused = true; this.events.onPause?.(); }
-      if (d.data.event === 'ended') this.events.onEnded?.();
+      if (d.data.event === 'ended') { this.paused = true; this.events.onEnded?.(); }
     }
   }
 
@@ -90,6 +90,8 @@ export class EmbedAdapter {
       sw.onclick = (e) => {
         e.stopPropagation();
         idx = (idx + 1) % allSrcs.length;
+        this.baseTime = 0;
+        this.anchorPerf = performance.now();
         f.src = allSrcs[idx];
         sw.textContent = `🔄 Kaynak ${idx + 1}/${allSrcs.length}`;
       };

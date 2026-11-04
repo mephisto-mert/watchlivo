@@ -1544,7 +1544,7 @@ def ensure_host(room: Dict[str, Any]) -> None:
         or not humans
     ):
         return
-    if room.get("host_transferred") and cur_host is None:
+    if room.get("host_transferred") and cur_host is None and not humans:
         room["host_transferred"] = False
     creator_candidates = [
         (cid, p) for cid, p in room["participants"].items()

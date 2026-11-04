@@ -6775,11 +6775,17 @@ async def poster_proxy(request: Request):
     mtype = (request.query_params.get("mt") or "movie").strip()[:10]
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    is_whitelisted_poster = any(d in url.lower() for d in (
-        "fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.",
-        "image.tmdb.org", "themoviedb.org", "ytimg.com", "ggpht.com", "googleusercontent.com",
-        "mzstatic.com", "dzcdn.net", "scdn.co", "spotifycdn.com", "media-amazon.com", "media-imdb.com",
-    ))
+    _poster_host = (urllib.parse.urlparse(url).hostname or "").lower()
+    is_whitelisted_poster = any(
+        _poster_host == d.rstrip(".") or _poster_host.endswith("." + d.strip("."))
+        for d in (
+            "fullhdfilmizlesene.com", "fullhdfilmizlesene.de", "fullhdfilmizlesene.pw", "fullhdfilmizlesene.net",
+            "hdfilmcehennemi.mobi", "hdfilmcehennemi.com", "hdfilmcehennemi.de", "dizibox. arbitrary",
+            "cdnhipter.com", "ddizimag.com", "image.tmdb.org", "themoviedb.org", "ytimg.com",
+            "ggpht.com", "googleusercontent.com", "mzstatic.com", "dzcdn.net", "scdn.co",
+            "spotifycdn.com", "media-amazon.com", "media-imdb.com",
+        )
+    ) or any(h in _poster_host for h in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag."))
     if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title:
         return RedirectResponse("/static/watchlivo-poster.svg")
     if url:
@@ -7082,7 +7088,8 @@ def _fetch_vtt_sync(url: str) -> str:
         raw = r.read(2 * 1024 * 1024)
     if raw[:2] == b"\x1f\x8b":
         try:
-            raw = gzip.decompress(raw)
+            import zlib
+            raw = zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(raw, max_length=4 * 1024 * 1024)
         except Exception:
             pass
     vtt = _srt_to_vtt(raw)

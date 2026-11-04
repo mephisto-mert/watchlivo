@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261104_v103';
-import { api } from './api.js?v=20261104_v103';
-import { state } from './store.js?v=20261104_v103';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v103';
+import { clock } from './sync.js?v=20261104_v104';
+import { api } from './api.js?v=20261104_v104';
+import { state } from './store.js?v=20261104_v104';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v104';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -441,8 +441,12 @@ export class MeshConnection {
           const normNext = normalizeRoomMediaState(prevMedia, res.media);
           const prevPlaying = isRoomMediaPlaying(prevMedia);
           const nextPlaying = isRoomMediaPlaying(normNext);
-          const prevExp = Number(prevMedia.meshStatePosition ?? prevMedia.currentTime ?? 0) + (prevPlaying ? Math.max(0, nowSec - Number(prevMedia.meshStateTime ?? prevMedia.updatedAt ?? nowSec)) * Number(prevMedia.meshStatePlaybackSpeed ?? prevMedia.rate ?? 1) : 0);
-          const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - Number(res.media.meshStateTime ?? res.media.updatedAt ?? nowSec)) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
+          const rawPrevT0 = Number(prevMedia.meshStateTime ?? prevMedia.updatedAt ?? nowSec);
+          const prevT0 = rawPrevT0 > 1e11 ? rawPrevT0 / 1000 : rawPrevT0;
+          const rawNextT0 = Number(res.media.meshStateTime ?? res.media.updatedAt ?? nowSec);
+          const nextT0 = rawNextT0 > 1e11 ? rawNextT0 / 1000 : rawNextT0;
+          const prevExp = Number(prevMedia.meshStatePosition ?? prevMedia.currentTime ?? 0) + (prevPlaying ? Math.max(0, nowSec - prevT0) * Number(prevMedia.meshStatePlaybackSpeed ?? prevMedia.rate ?? 1) : 0);
+          const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
           const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
@@ -535,8 +539,10 @@ export class MeshConnection {
       const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
       obj.actionId = actId;
       this._addBounded(this.seenEventIds, actId);
-      const isPaused = obj.type === 'pause' || (obj.type === 'heartbeat' && obj.playing === false);
-      const baseMedia = this.lastRoom?.media || {};
+      const baseMedia = this.lastRoom?.media || state.mesh?.media || {};
+      const isPaused = obj.type === 'pause'
+        || (obj.type === 'heartbeat' && obj.playing === false)
+        || ((obj.type === 'seek' || obj.type === 'rate') && Boolean(baseMedia && !isRoomMediaPlaying(baseMedia)));
       this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: { ...baseMedia, meshStateStatus: isPaused ? 'PAUSED' : 'PLAYING', meshStatePosition: Number(obj.currentTime || 0), meshStateTime: Number(obj.atTime || clock.now()), meshStatePlaybackSpeed: Number(obj.rate || baseMedia.meshStatePlaybackSpeed || 1), playing: !isPaused, currentTime: Number(obj.currentTime || 0) } } });
     } else if (obj.type === 'chat' && (obj.text || obj.gif || obj.snapshot || obj.audioNote)) {
       let hhmm = '';

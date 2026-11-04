@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261104_v103';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v103';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v103';
+import { toast } from './ui.js?v=20261104_v104';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v104';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v104';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -92,7 +92,9 @@ export class Voice {
     for (const [id, st] of this.peers.entries()) {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
-        st.audio.muted = this.deafened || volPct === 0;
+        const effVol = this.deafened ? 0 : volPct;
+        applyStreamBoost(st.audio, st.audio.srcObject, effVol);
+        st.audio.muted = this.deafened || effVol === 0 || effVol > 100;
       }
     }
     this.send('voice_state', { deafened: this.deafened });
@@ -656,7 +658,7 @@ export class Voice {
       const old = this.peers.get(from);
       const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (newU && oldU && newU !== oldU && (old.pc.connectionState === 'closed' || old.pc.connectionState === 'failed')) {
+      if (newU && oldU && newU !== oldU) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);

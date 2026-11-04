@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261104_v103';
-import { expectedPosition } from '../sync.js?v=20261104_v103';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v103';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v103';
+import { SubtitleDubController } from './subtitles.js?v=20261104_v104';
+import { expectedPosition } from '../sync.js?v=20261104_v104';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v104';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v104';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -1508,7 +1508,12 @@ export class Html5Adapter {
           this.events.onPipChange?.(true);
           return 'entered';
         }
-      } catch (_) {}
+      } catch (_) {
+        if (this._iosPipActive) {
+          this._iosPipActive = false;
+          try { this.hls?.startLoad?.(-1); } catch (e) {}
+        }
+      }
     }
     return false;
   }
@@ -1829,7 +1834,7 @@ export class Html5Adapter {
     const rawPoster = String(this.media?.poster || this.media?.thumbnail || '');
     if (rawPoster) {
       img.onload = drawFrame;
-      img.src = rawPoster.startsWith('http') ? `/api/rave/poster?u=${encodeURIComponent(rawPoster)}` : rawPoster;
+      img.src = rawPoster.startsWith('http') ? `/api/rave/poster?url=${encodeURIComponent(rawPoster)}` : rawPoster;
     }
     clearInterval(this._musicPipTimer);
     this._musicPipTimer = setInterval(drawFrame, 1000);

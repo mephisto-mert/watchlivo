@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261104_v103';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261104_v104';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -56,7 +56,7 @@ export function parseVtt(vttText) {
         if (body && end > start) rawCues.push({ start, end, text: body, norm: String(body).toLowerCase().replace(/[^a-z0-9çğıöşüа-яё]+/gi, ' ').trim() });
       }
     }
-  }
+  } else {
   const timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})/;
   let i = 0;
   while (i < lines.length) {
@@ -102,6 +102,7 @@ export function parseVtt(vttText) {
     } else {
       i += 1;
     }
+  }
   }
   rawCues.sort((a, b) => (a.start - b.start) || (a.end - b.end));
   const cues = [];
@@ -224,6 +225,7 @@ export class SubtitleDubController {
       const off = this.offsetSec || 0;
       for (const c of this.subCues) {
         try {
+          if ((c.end + off) <= 0) continue;
           const st = Math.max(0, (c.start + off) / scale);
           const en = Math.max(st + 0.15, (c.end + off) / scale);
           const cue = new CueCls(st, en, c.text);
@@ -685,6 +687,7 @@ export class SubtitleDubController {
     }
     let track = this.subtitleTracks.find((t) => t.id === cleanId)
       || this.subtitleTracks.find((t) => t.lang === cleanId)
+      || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId))
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith('tr'))
       || this.subtitleTracks[0];
     if (!track) {

@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v103';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v103';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v103';
-import { getProvider } from '../providers.js?v=20261104_v103';
-import { expectedPosition } from '../sync.js?v=20261104_v103';
-import { thumbFor } from './lobby.js?v=20261104_v103';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v103';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v103';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v103';
-import { avatar } from '../profile.js?v=20261104_v103';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v104';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v104';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v104';
+import { getProvider } from '../providers.js?v=20261104_v104';
+import { expectedPosition } from '../sync.js?v=20261104_v104';
+import { thumbFor } from './lobby.js?v=20261104_v104';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v104';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v104';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v104';
+import { avatar } from '../profile.js?v=20261104_v104';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -848,7 +848,8 @@ export function buildControls(frame, ctx) {
             if (hasNextSeason) {
               targetSeason += 1;
               targetEp = 1;
-              const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`);
+              const sig2 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
+              const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig2 ? { signal: sig2 } : {});
               if (r2.ok) {
                 const s2 = await r2.json();
                 const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
@@ -1479,10 +1480,10 @@ export function buildControls(frame, ctx) {
                 h('div', { class: 'next-ep-progress-bar', style: { width: `${pctCountdown.toFixed(1)}%` } }),
               ),
               h('div', { class: 'next-ep-actions' },
-                isLeader()
+                (isLeader() || canSelectVideo())
                   ? h('button', {
                       class: 'btn primary next-ep-go',
-                      ...tapProps(() => triggerNextEpisode()),
+                      ...tapProps(() => triggerNextEpisode(true)),
                     }, '▶ Hemen Geç')
                   : h('span', { class: 'dim', style: { fontSize: '.74em' } }, 'Oda başkanı bekleniyor…'),
                 h('button', {
@@ -2105,7 +2106,7 @@ export function buildControls(frame, ctx) {
     };
 
     if (view === 'effects') {
-      const duckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
+      const duckOn = !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
       menu.replaceChildren(
         backHeader('Sinema Efektleri & Araçlar', 'list'),
         buildSlidersPanel(),
@@ -2531,7 +2532,7 @@ export function buildControls(frame, ctx) {
         });
         safeHandler('nexttrack', () => {
           if (!isLeader()) return;
-          if (m?.mediaType === 'tv') triggerNextEpisode();
+          if (m?.mediaType === 'tv') triggerNextEpisode(true);
           else if ((state.mesh?.queue || []).length) actions.skip();
         });
         safeHandler('enterpictureinpicture', async () => {

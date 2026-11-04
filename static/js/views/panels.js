@@ -1,16 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261104_v103';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261104_v104';
 import {
   state, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261104_v103';
-import { avatar } from '../profile.js?v=20261104_v103';
-import { clock } from '../sync.js?v=20261104_v103';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261104_v103';
-import { copyInvite, inviteUrl } from './chat.js?v=20261104_v103';
-import { parseVideoUrl } from '../providers.js?v=20261104_v103';
-import { resolveMedia } from './selection.js?v=20261104_v103';
+} from '../store.js?v=20261104_v104';
+import { avatar } from '../profile.js?v=20261104_v104';
+import { clock } from '../sync.js?v=20261104_v104';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261104_v104';
+import { copyInvite, inviteUrl } from './chat.js?v=20261104_v104';
+import { parseVideoUrl } from '../providers.js?v=20261104_v104';
+import { resolveMedia } from './selection.js?v=20261104_v104';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -117,7 +117,7 @@ function Vote(ctx) {
       urlInput.value = '';
       ctx?.layout?.openSearch?.();
       setTimeout(() => {
-        const sInp = document.querySelector('#mesh-root .panel input.input');
+        const sInp = document.querySelector('#mesh-root .panel-side input.input, #mesh-root .panel input.input');
         if (sInp) {
           sInp.value = raw;
           sInp.dispatchEvent(new Event('input', { bubbles: true }));
@@ -334,7 +334,7 @@ function Participants(ctx) {
     if (el.contains(document.activeElement) && document.activeElement?.classList?.contains('peer-vol-slider')) return;
     const m = state.mesh;
     const hostOnly = isHostOnly();
-    const duckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
+    const duckOn = !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
     const duckBar = h('div', { class: 'voice-duck-bar' },
       h('span', {}, '🔉 Konuşurken Filmi Otomatik Kıs'),
       h('button', {

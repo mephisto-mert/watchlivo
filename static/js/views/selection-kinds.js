@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v103';
-import { api, qs } from '../api.js?v=20261104_v103';
-import { parseVideoUrl } from '../providers.js?v=20261104_v103';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v103';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v103';
-import { profileSetup } from '../profile.js?v=20261104_v103';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v103';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v104';
+import { api, qs } from '../api.js?v=20261104_v104';
+import { parseVideoUrl } from '../providers.js?v=20261104_v104';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v104';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v104';
+import { profileSetup } from '../profile.js?v=20261104_v104';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v104';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261104_v103';
+} from '../store.js?v=20261104_v104';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -50,7 +50,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
           );
           const savedSec = Number(savedProg?.currentTime ?? savedProg?.position ?? 0);
           const savedPct = Number(savedProg?.percent || 0);
-          if (Number.isFinite(savedSec) && savedSec > 3 && (mediaType === 'tv' || savedPct < 96)) {
+          if (Number.isFinite(savedSec) && savedSec > 3 && savedPct < 96) {
             const secFloor = Math.floor(savedSec);
             res.currentTime = secFloor;
             res.meshStatePosition = secFloor;
@@ -228,6 +228,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   };
 
   const loadTab = async (tabId, forceRefresh = false) => {
+    const tabSeq = ++seq;
     activeTab = tabId;
     renderTabs();
     const watchHist = getWatchHistory();

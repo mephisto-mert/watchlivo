@@ -137,9 +137,9 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   if (!el) return false;
   ensureIosPlaybackAudioSession();
   const rawNum = Number(effectivePct);
-  const pct = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
+  const pct = Math.max(0, Math.min(150, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
   const isMuted = Boolean(muted || pct <= 0);
-  const targetGain = isMuted ? 0 : Math.max(0, Math.min(1, pct / 100));
+  const targetGain = isMuted ? 0 : Math.max(0, Math.min(1.5, pct / 100));
 
   if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume?.postMessage) {
     el.muted = isMuted;

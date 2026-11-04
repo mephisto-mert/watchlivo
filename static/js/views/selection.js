@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v103';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v103';
-import { api, qs } from '../api.js?v=20261104_v103';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261104_v103';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v103';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v103';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v103';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v104';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v104';
+import { api, qs } from '../api.js?v=20261104_v104';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261104_v104';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v104';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v104';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v104';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261104_v103';
+} from '../store.js?v=20261104_v104';
 
 let _activeHomePick = null;
 
@@ -1406,7 +1406,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const hasAny = Boolean(tmdb.length || titles.length || yt.length);
     fill(box,
       tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
-      tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard({ ...t, tmdbId: String(t.id || ''), offers: [] }, box)), ...titles.map((t) => posterCard(t, box))]) : null,
+      tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard({ ...t, tmdbId: String(t.tmdbId || t.id || ''), offers: [] }, box)), ...titles.map((t) => posterCard(t, box))]) : null,
       yt.length ? h('div', { class: 'section-head' }, h('h2', {}, 'YouTube'), h('span', { class: 'dim' }, `${yt.length} video`)) : null,
       yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : (!hasAny ? h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen içerik bulunamadı.') : null));
   }

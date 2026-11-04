@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v103';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v103';
-import { avatar } from '../profile.js?v=20261104_v103';
-import { api, qs } from '../api.js?v=20261104_v103';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v103';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v103';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v104';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v104';
+import { avatar } from '../profile.js?v=20261104_v104';
+import { api, qs } from '../api.js?v=20261104_v104';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v104';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v104';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -790,7 +790,7 @@ export function buildChat(ctx) {
     const load = async () => {
       grid.replaceChildren(h('div', { class: 'spinner' }));
       const res = await api(`/api/rave/gifs?${qs({ q: q.value || 'funny' })}`).catch(() => ({ gifs: [] }));
-      grid.replaceChildren(...(res.gifs || []).map((g) => h('img', { src: g.preview || g.url, loading: 'lazy', alt: g.title || 'gif', onclick: () => { actions.sendChat('', { gif: g.url }); gifPanel.classList.add('hidden'); } })));
+      grid.replaceChildren(...(res.gifs || []).map((g) => h('img', { src: g.preview || g.url, loading: 'lazy', alt: g.title || 'gif', onclick: () => { actions.sendChat('', { gif: g.url, ...(activeReply ? { replyTo: activeReply } : {}) }); clearReply(); gifPanel.classList.add('hidden'); } })));
     };
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
     gifPanel.replaceChildren(q, grid);
@@ -1056,7 +1056,7 @@ export function buildChat(ctx) {
 
   function buildSnapshotWidget(m) {
     if (!m?.snapshot || !/^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(String(m.snapshot))) return null;
-    const hasTime = Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
+    const hasTime = m.videoTime !== null && m.videoTime !== undefined && m.videoTime !== '' && Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
     const sec = hasTime ? Math.round(Number(m.videoTime)) : null;
     return h('div', {
       class: 'chat-snapshot-card',

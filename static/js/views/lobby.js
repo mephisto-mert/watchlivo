@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261104_v103';
-import { avatar, openDmModal } from '../profile.js?v=20261104_v103';
-import { getProvider } from '../providers.js?v=20261104_v103';
-import { api, qs } from '../api.js?v=20261104_v103';
+import { h, icons, popup, toast } from '../ui.js?v=20261104_v104';
+import { avatar, openDmModal } from '../profile.js?v=20261104_v104';
+import { getProvider } from '../providers.js?v=20261104_v104';
+import { api, qs } from '../api.js?v=20261104_v104';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261104_v103';
-import { expectedPosition } from '../sync.js?v=20261104_v103';
+} from '../store.js?v=20261104_v104';
+import { expectedPosition } from '../sync.js?v=20261104_v104';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -97,12 +97,12 @@ export function meshThumb(room, onOpen) {
   const brand = LIVE_BRANDS[room.id];
   const dur = Number(media.duration || 0);
   const rawViewerCount = Number(room.count ?? (room.participants || []).filter((p) => p.transport !== 'bot').length) || 0;
-  const viewerCount = room.curated ? rawViewerCount : Math.max(0, rawViewerCount);
-  const hasHumanViewer = viewerCount > 0;
+  const viewerCount = Math.max(0, rawViewerCount);
+  const hasHumanViewer = viewerCount > 0 || Boolean(room.curated);
   const rawPos = hasHumanViewer ? expectedPosition(media) : 0;
   const pos = dur > 0 ? (rawPos % dur) : rawPos;
   const pct = dur > 0 ? Math.min(100, Math.max(0, (pos / dur) * 100)) : 0;
-  const users = room.participants || [];
+  const users = (room.participants || []).filter((p) => p.transport !== 'bot');
   const privacyLabel = { public: '🌐 Herkese Açık', friends: '👥 Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' }[room.privacy || 'public'] || '🌐 Herkese Açık';
   const hasTr = Boolean(
     media.catalogProvider ||

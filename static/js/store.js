@@ -545,8 +545,14 @@ export function clearWatchHistory() {
 export function removeWatchProgress(itemKey) {
   const k = String(itemKey || '').trim();
   if (!k) return;
+  let removedCloudKey = k;
   try {
-    const next = getWatchHistory().filter((it) => String(it.historyId || it.key || '') !== k && String(it.tmdbId || '') !== k);
+    const prev = getWatchHistory();
+    const matched = prev.find((it) => String(it.historyId || it.key || '') === k || String(it.tmdbId || '') === k);
+    if (matched) removedCloudKey = String(matched.historyId || matched.key || k);
+    _lastCloudProgPush.delete(removedCloudKey);
+    _lastCloudProgPush.delete(k);
+    const next = prev.filter((it) => String(it.historyId || it.key || '') !== k && String(it.tmdbId || '') !== k);
     localStorage.setItem(_historyKey(), JSON.stringify(next));
     set({});
   } catch (e) { /* ignore */ }
@@ -554,7 +560,7 @@ export function removeWatchProgress(itemKey) {
     fetch('/api/user/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
-      body: JSON.stringify({ action: 'remove', key: k }),
+      body: JSON.stringify({ action: 'remove', key: removedCloudKey }),
       keepalive: true,
     }).catch(() => {});
   }
@@ -937,7 +943,8 @@ export async function pushPresenceHeartbeat(override = {}) {
   const s = state.self;
   const m = state.mesh;
   const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
-  const defState = override.state || (m?.id ? 'watching' : (hidden ? 'idle' : 'online'));
+  const hideWatchFlag = Boolean(s.hideWatching ?? state.social?.privacy?.hideWatching);
+  const defState = override.state || ((m?.id && !hideWatchFlag) ? 'watching' : (hidden ? 'idle' : 'online'));
   try {
     const r = await fetch('/api/rave/social/presence', {
       method: 'POST',

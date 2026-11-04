@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261104_v103';
-import { api } from './api.js?v=20261104_v103';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261104_v103';
+import { h, icons, popup, toast } from './ui.js?v=20261104_v104';
+import { api } from './api.js?v=20261104_v104';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261104_v104';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261104_v103';
+} from './store.js?v=20261104_v104';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -62,17 +62,18 @@ export function saveGuestProfile(data = {}) {
   const defaultGuestName = (prev.isGuest && prev.name && prev.name !== 'Misafir İzleyici') ? prev.name : `Misafir #${randSuffix}`;
   const name = String(data.name || defaultGuestName).trim().slice(0, 24) || defaultGuestName;
   const resolvedId = data.uid || data.id || (prev.isGuest && (prev.id || prev.uid)) || ('guest_' + Math.random().toString(36).slice(2, 10));
-  const handle = String(data.handle || prev.handle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || `misafir${randSuffix}`);
+  const guestPrev = prev.isGuest ? prev : {};
+  const handle = String(data.handle || guestPrev.handle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || `misafir${randSuffix}`);
   const p = {
     id: resolvedId,
     uid: resolvedId,
     name,
     handle,
     email: '',
-    color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    avatar: String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? '').trim(),
-    avatarUrl: String(data.avatarUrl ?? data.avatar ?? prev.avatarUrl ?? '').trim(),
-    bio: String(data.bio ?? prev.bio ?? '').trim().slice(0, 160),
+    color: data.color || guestPrev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
+    avatar: String(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? '').trim(),
+    avatarUrl: String(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? '').trim(),
+    bio: String(data.bio ?? guestPrev.bio ?? '').trim().slice(0, 160),
     statusText: String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60),
     statusEmoji: String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿',
     hideLocation: asBool(data.hideLocation ?? prev.hideLocation ?? false),
