@@ -268,7 +268,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
 
         # 2. WebClip mobileconfig has FullScreen=false so iOS allows OS-level PiP on app exit
         mc_txt = (static_root / "Watchlivo.mobileconfig").read_text(encoding="utf-8")
-        self.assertIn("<key>FullScreen</key>\n            <false/>", mc_txt)
+        self.assertRegex(mc_txt, r"<key>FullScreen</key>\s*<false/>")
 
         # 3. Native Watchlivo.ipa Mach-O binary contains inline sync/pause + applicationWillResignActive: OS PiP handoff
         with zipfile.ZipFile(static_root / "Watchlivo.ipa", "r") as zf:
