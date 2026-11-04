@@ -1501,6 +1501,31 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(r_apk.json().get("ok"))
         self.assertEqual(r_apk.json().get("packageName"), "online.watchlivo.app")
 
+    def test_v105_cross_platform_zero_stutter_video_pipeline(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        self.assertIn("if (this.isSolo())", sync_js)
+        self.assertIn("this.isRateNudging", sync_js)
+        self.assertIn("Math.abs(ad.getRate() - targetRate) >= 0.01", sync_js)
+
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        self.assertIn("isSolo: () => !state.mesh?.curated && (state.mesh?.participants || []).length <= 1", mesh_js)
+        self.assertIn("if (!isTimeKeeper() && ctx?.sync && data.action === 'play')", mesh_js)
+
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("const clearInitSeekListeners = () =>", html5_js)
+        self.assertIn("v.removeEventListener('timeupdate', checkZeroDimAudioOnly);", html5_js)
+        self.assertIn("maxBufferLength: isMobileScreen ? 35 : 50", html5_js)
+
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("let lastCinemaSeatsSig = '';", controls_js)
+        self.assertIn("if (nextEpBanner.dataset.bannerKey !== bannerKey)", controls_js)
+
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("filter: var(--wl-composed-filter, none);", mesh_css)
+
 
 if __name__ == '__main__':
     unittest.main()

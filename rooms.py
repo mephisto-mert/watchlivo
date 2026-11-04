@@ -1183,8 +1183,9 @@ class MemoryStore:
             except Exception:
                 pass
 
-    async def delete(self, room_id: str) -> None:
-        _CLOSED_ROOMS[room_id] = now()
+    async def delete(self, room_id: str, mark_closed: bool = True) -> None:
+        if mark_closed:
+            _CLOSED_ROOMS[room_id] = now()
         self.rooms.pop(room_id, None)
         if self.tmp_dir:
             try:
@@ -1368,17 +1369,20 @@ class RedisStore:
             ["DEL", f"vortex:closed:{rid}"],
         ])
 
-    async def delete(self, room_id: str) -> None:
-        _CLOSED_ROOMS[room_id] = now()
+    async def delete(self, room_id: str, mark_closed: bool = True) -> None:
+        if mark_closed:
+            _CLOSED_ROOMS[room_id] = now()
         self.l1_rooms.pop(room_id, None)
         self.l1_read_ts.pop(room_id, None)
         self.l1_write_ts.pop(room_id, None)
-        await self.fallback.delete(room_id)
-        await self.pipeline([
+        await self.fallback.delete(room_id, mark_closed=mark_closed)
+        cmds = [
             ["DEL", f"vortex:room:{room_id}"],
             ["SREM", "vortex:rooms", room_id],
-            ["SET", f"vortex:closed:{room_id}", "1", "EX", "7200"],
-        ])
+        ]
+        if mark_closed:
+            cmds.append(["SET", f"vortex:closed:{room_id}", "1", "EX", "7200"])
+        await self.pipeline(cmds)
 
     async def all(self) -> List[Dict[str, Any]]:
         ids = await self.cmd("SMEMBERS", "vortex:rooms") or []
@@ -3272,7 +3276,7 @@ async def create_room(request: Request):
                     stale_creator_rooms.append(cand.get("id"))
             for old_rid in stale_creator_rooms:
                 if old_rid and old_rid != room_id:
-                    await STORE.delete(old_rid)
+                    await STORE.delete(old_rid, mark_closed=bool(verified_uid))
                     await broadcast(old_rid, {"type": "room_closed", "roomId": old_rid})
             if stale_creator_rooms:
                 _LOBBY_CACHE["ts"] = 0.0
@@ -3413,7 +3417,7 @@ async def list_rooms(request: Request):
             if (not p_cnt or not has_humans) and not room.get("curated"):
                 idle_sec = t - float(room.get("lastActiveAt") or room.get("createdAt") or 0.0)
                 if idle_sec > EMPTY_ROOM_TTL:
-                    await STORE.delete(rid_item)
+                    await STORE.delete(rid_item, mark_closed=False)
                 continue
             if room["privacy"] == "private" or not p_cnt:
                 continue
@@ -3437,7 +3441,7 @@ async def list_rooms(request: Request):
                     slug_collision = True
             id_collision = bool(c_id_key and c_id_key in by_creator_id and (c_id_key.startswith("u_wl_") or not r_has_live))
             if id_collision or slug_collision:
-                await STORE.delete(r["id"])
+                await STORE.delete(r["id"], mark_closed=False)
                 continue
             if c_id_key:
                 by_creator_id[c_id_key] = r

@@ -720,19 +720,37 @@ export class Html5Adapter {
           this._ensureIosPipStandby?.(nextUrl);
         }
       }
+      const clearInitSeekListeners = () => {
+        this.initialSeekPending = 0;
+        if (v._wlInitSeekFn) {
+          ['loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+            v.removeEventListener(evName, v._wlInitSeekFn);
+          });
+          v._wlInitSeekFn = null;
+        }
+        v._wlInitSeekBound = false;
+      };
       const enforceInitialSeek = () => {
-        if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking) return;
-        if (v.readyState < 1) return;
+        if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 10000) {
+          clearInitSeekListeners();
+          return;
+        }
+        if (v.seeking || v.readyState < 1) return;
         if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
         const targetPos = this.initialSeekPending;
-        if (Math.abs((v.currentTime || 0) - targetPos) > 1.5) {
-          try { v.currentTime = targetPos; } catch (e) { /* ignore */ }
-        } else if (v.readyState >= 2) {
-          this.initialSeekPending = 0;
+        const curT = Number(v.currentTime || 0);
+        if (curT >= targetPos - 1.2) {
+          clearInitSeekListeners();
+          return;
         }
+        try {
+          v.currentTime = targetPos;
+          clearInitSeekListeners();
+        } catch (e) { /* ignore */ }
       };
       if (resumePos >= 0.5 && !v._wlInitSeekBound) {
         v._wlInitSeekBound = true;
+        v._wlInitSeekFn = enforceInitialSeek;
         ['loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
           v.addEventListener(evName, enforceInitialSeek);
         });
@@ -812,16 +830,16 @@ export class Html5Adapter {
         abrBandWidthFactor: isMobileScreen ? 0.78 : 0.85,
         abrBandWidthUpFactor: isMobileScreen ? 0.55 : 0.65,
         autoLevelCapping: -1,
-        maxBufferLength: isMobileScreen ? 28 : 35,
-        maxMaxBufferLength: isMobileScreen ? 55 : 75,
+        maxBufferLength: isMobileScreen ? 35 : 50,
+        maxMaxBufferLength: isMobileScreen ? 70 : 110,
         backBufferLength: isMobileScreen ? 25 : 45,
-        maxBufferSize: (isMobileScreen ? 28 : 45) * 1000 * 1000,
-        maxBufferHole: 0.8,
+        maxBufferSize: (isMobileScreen ? 35 : 60) * 1000 * 1000,
+        maxBufferHole: 0.5,
         maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
         forceKeyFrameOnDiscontinuity: true,
         progressive: false,
-        highBufferWatchdogPeriod: 2,
+        highBufferWatchdogPeriod: 3,
         maxFragLookUpTolerance: 0.35,
         nudgeOffset: 0.25,
         nudgeMaxRetry: 10,
@@ -1119,12 +1137,19 @@ export class Html5Adapter {
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
     const checkZeroDimAudioOnly = () => {
-      if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) return;
+      if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) {
+        v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
+        return;
+      }
       const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
       const decFrames = q && typeof q.totalVideoFrames === 'number'
         ? q.totalVideoFrames
         : (typeof v.webkitDecodedFrameCount === 'number' ? v.webkitDecodedFrameCount : -1);
       const elapsedAfterStart = (v.currentTime || 0) - (startAt || 0);
+      if (v.videoWidth > 0 && v.videoHeight > 0 && (decFrames > 2 || decFrames < 0) && elapsedAfterStart > 1.5) {
+        v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
+        return;
+      }
       const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > 0.45;
       const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.2;
       if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
@@ -1528,6 +1553,7 @@ export class Html5Adapter {
           }, { once: true });
         }
       } else {
+        this.initialSeekPending = 0;
         try { v.currentTime = target; } catch (e) { /* ignore */ }
       }
     }
@@ -1587,8 +1613,8 @@ export class Html5Adapter {
     return Boolean(v.seeking || this.bufferingReported || (activePlay && v.readyState < 2) || starvedAhead);
   }
   setRate(r) {
-    if (this.video && Math.abs(this.video.playbackRate - r) > 0.001) this.video.playbackRate = r;
-    if (this.iosPipVideo && Math.abs(this.iosPipVideo.playbackRate - r) > 0.001) this.iosPipVideo.playbackRate = r;
+    if (this.video && Math.abs(this.video.playbackRate - r) >= 0.005) this.video.playbackRate = r;
+    if (this.iosPipVideo && Math.abs(this.iosPipVideo.playbackRate - r) >= 0.005) this.iosPipVideo.playbackRate = r;
   }
   getRate() { return Number(this._activeMediaEl()?.playbackRate || 1); }
   setVolume(v) {

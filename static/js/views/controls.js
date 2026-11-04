@@ -1336,6 +1336,7 @@ export function buildControls(frame, ctx) {
   const duration = () => Number(host.adapter?.getDuration?.() || state.mesh?.media?.duration || 0);
   const position = () => (host.adapter ? host.adapter.getTime() : 0);
 
+  let lastCinemaSeatsSig = '';
   function renderCinemaSeats() {
     const parts = Array.isArray(state.mesh?.participants) ? state.mesh.participants : [];
     const hasMedia = Boolean(state.mesh?.media && (state.mesh.media.url || state.mesh.media.videoId));
@@ -1348,11 +1349,26 @@ export function buildControls(frame, ctx) {
       return hasEmoji || isSpk;
     });
     if (!hasMedia || !activeParts.length) {
-      cinemaSeatsBar.classList.add('hidden');
+      if (lastCinemaSeatsSig !== '') {
+        lastCinemaSeatsSig = '';
+        cinemaSeatsBar.classList.add('hidden');
+      } else if (!cinemaSeatsBar.classList.contains('hidden')) {
+        cinemaSeatsBar.classList.add('hidden');
+      }
       return;
     }
     cinemaSeatsBar.classList.remove('hidden');
     const visibleParts = activeParts.slice(0, 6);
+    const nextSig = visibleParts.map((p) => {
+      const uName = String(p.name || 'Misafir');
+      const reactObj = seatReactions.get(uName);
+      const activeEmoji = (reactObj && now - reactObj.at < 2600) ? reactObj.emoji : '';
+      const isSpeaking = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+      const isRoomHost = Boolean(p.isHost || p.id === state.mesh?.hostId || p.id === state.mesh?.leaderId);
+      return `${p.id || uName}:${isSpeaking ? 1 : 0}:${isRoomHost ? 1 : 0}:${activeEmoji}`;
+    }).join('|');
+    if (nextSig === lastCinemaSeatsSig) return;
+    lastCinemaSeatsSig = nextSig;
     fill(
       cinemaSeatsBar,
       ...visibleParts.map((p) => {
@@ -1428,35 +1444,44 @@ export function buildControls(frame, ctx) {
       const cleanSeries = nextSpecBanner.cleanSeries;
       const pctCountdown = Math.max(0, Math.min(100, ((35 - rem) / 35) * 100));
       const posterSrc = thumbFor(m) || '/static/watchlivo-logo.svg';
+      const bannerKey = `${curEpKey}:${curSeason}:${nextEp}:${isLeader() ? 1 : 0}`;
       nextEpBanner.classList.remove('hidden');
-      fill(
-        nextEpBanner,
-        h('div', { class: 'next-ep-card' },
-          h('img', { class: 'next-ep-thumb', src: posterSrc, alt: cleanSeries }),
-          h('div', { class: 'next-ep-info' },
-            h('div', { class: 'next-ep-kicker' }, `SIRADAKİ BÖLÜM · ${Math.ceil(rem)} SN`),
-            h('div', { class: 'next-ep-title' }, `${cleanSeries} · S${curSeason}:B${nextEp}`),
-            h('div', { class: 'next-ep-progress' },
-              h('div', { class: 'next-ep-progress-bar', style: { width: `${pctCountdown.toFixed(1)}%` } }),
-            ),
-            h('div', { class: 'next-ep-actions' },
-              isLeader()
-                ? h('button', {
-                    class: 'btn primary next-ep-go',
-                    ...tapProps(() => triggerNextEpisode()),
-                  }, '▶ Hemen Geç')
-                : h('span', { class: 'dim', style: { fontSize: '.74em' } }, 'Oda başkanı bekleniyor…'),
-              h('button', {
-                class: 'btn next-ep-cancel',
-                ...tapProps(() => {
-                  cancelledNextEpKey = curEpKey;
-                  nextEpBanner.classList.add('hidden');
-                }),
-              }, '✕ İptal'),
+      if (nextEpBanner.dataset.bannerKey !== bannerKey) {
+        nextEpBanner.dataset.bannerKey = bannerKey;
+        fill(
+          nextEpBanner,
+          h('div', { class: 'next-ep-card' },
+            h('img', { class: 'next-ep-thumb', src: posterSrc, alt: cleanSeries }),
+            h('div', { class: 'next-ep-info' },
+              h('div', { class: 'next-ep-kicker' }, `SIRADAKİ BÖLÜM · ${Math.ceil(rem)} SN`),
+              h('div', { class: 'next-ep-title' }, `${cleanSeries} · S${curSeason}:B${nextEp}`),
+              h('div', { class: 'next-ep-progress' },
+                h('div', { class: 'next-ep-progress-bar', style: { width: `${pctCountdown.toFixed(1)}%` } }),
+              ),
+              h('div', { class: 'next-ep-actions' },
+                isLeader()
+                  ? h('button', {
+                      class: 'btn primary next-ep-go',
+                      ...tapProps(() => triggerNextEpisode()),
+                    }, '▶ Hemen Geç')
+                  : h('span', { class: 'dim', style: { fontSize: '.74em' } }, 'Oda başkanı bekleniyor…'),
+                h('button', {
+                  class: 'btn next-ep-cancel',
+                  ...tapProps(() => {
+                    cancelledNextEpKey = curEpKey;
+                    nextEpBanner.classList.add('hidden');
+                  }),
+                }, '✕ İptal'),
+              ),
             ),
           ),
-        ),
-      );
+        );
+      } else {
+        const kickerEl = nextEpBanner.querySelector('.next-ep-kicker');
+        if (kickerEl) kickerEl.textContent = `SIRADAKİ BÖLÜM · ${Math.ceil(rem)} SN`;
+        const progEl = nextEpBanner.querySelector('.next-ep-progress-bar');
+        if (progEl) progEl.style.width = `${pctCountdown.toFixed(1)}%`;
+      }
       if (rem <= 1.2 && isHostOnly()) triggerNextEpisode();
     } else {
       nextEpBanner.classList.add('hidden');

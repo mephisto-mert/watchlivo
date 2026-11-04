@@ -421,9 +421,8 @@ video::cue {
 }
 .video-frame .player-host video:not(.wl-ios-pip-standby),
 .video-frame iframe {
-  filter: var(--wl-composed-filter, brightness(var(--video-brightness, 100%)));
-  -webkit-filter: var(--wl-composed-filter, brightness(var(--video-brightness, 100%)));
-  transition: filter .1s ease-out;
+  filter: var(--wl-composed-filter, none);
+  -webkit-filter: var(--wl-composed-filter, none);
 }
 @supports (-webkit-touch-callout: none) {
   .video-frame .player-host video {

@@ -6028,8 +6028,8 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                 return part, 206, f"bytes {start}-{start + len(part) - 1}/{total}", ct
         return data, 200, "", ct
 
-    chunk_sz = 2048 * 1024
-    max_closed_sz = (3 * 1024 * 1024) if IS_VERCEL else (16 * 1024 * 1024)
+    chunk_sz = (3584 * 1024) if IS_VERCEL else (8 * 1024 * 1024)
+    max_closed_sz = (4 * 1024 * 1024) if IS_VERCEL else (16 * 1024 * 1024)
     start, end = 0, chunk_sz - 1
     m_suf = None
     if rng and rng.startswith("bytes="):
