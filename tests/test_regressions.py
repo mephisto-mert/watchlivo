@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v101 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261104_v102 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v101", index_html)
+        self.assertIn("20261104_v102", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1536,7 +1536,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("navigator.standalone === true", main_js)
 
         vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
-        self.assertIn("height: var(--app-height, 100dvh)", vortex_css)
+        self.assertIn("height: var(--app-height, 100vh)", vortex_css)
         self.assertIn("height: calc(50px + env(safe-area-inset-top, 0px)) !important;", vortex_css)
         self.assertNotIn("height: calc(100vh - 60px) !important;", vortex_css)
 

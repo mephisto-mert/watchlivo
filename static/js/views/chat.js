@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v101';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v101';
-import { avatar } from '../profile.js?v=20261104_v101';
-import { api, qs } from '../api.js?v=20261104_v101';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v101';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v101';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v102';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v102';
+import { avatar } from '../profile.js?v=20261104_v102';
+import { api, qs } from '../api.js?v=20261104_v102';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v102';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v102';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1398,6 +1398,7 @@ export function buildChat(ctx) {
     document.body.classList.toggle('kb-open', kbOpen);
     document.body.classList.toggle('kb-chat-focus', Boolean(kbOpen && isChatFocused));
     document.body.classList.toggle('kb-portrait', Boolean(kbOpen && physicalPortrait));
+    window.__wlSyncViewport?.();
     if (kbOpen && isChatFocused) {
       list.scrollTop = list.scrollHeight;
     }

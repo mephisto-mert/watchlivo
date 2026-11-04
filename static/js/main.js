@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v101';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v101';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v101';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v101';
-import { api } from './api.js?v=20261104_v101';
-import { h, toast } from './ui.js?v=20261104_v101';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v102';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v102';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v102';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v102';
+import { api } from './api.js?v=20261104_v102';
+import { h, toast } from './ui.js?v=20261104_v102';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -140,18 +140,66 @@ async function boot() {
   if (navigator.userAgent.includes('WatchlivoApp') || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP || window.Android || navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
     document.documentElement.classList.add('is-apk', 'is-native-apk');
   }
+  let safeAreaProbe = null;
+  const readSafeAreaInsets = () => {
+    if (!document.body) return { top: 0, right: 0, bottom: 0, left: 0 };
+    if (!safeAreaProbe || !safeAreaProbe.isConnected) {
+      safeAreaProbe = document.getElementById('wl-safe-area-probe');
+      if (!safeAreaProbe) {
+        safeAreaProbe = document.createElement('div');
+        safeAreaProbe.id = 'wl-safe-area-probe';
+        safeAreaProbe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;visibility:hidden;z-index:-1;padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);';
+        document.body.appendChild(safeAreaProbe);
+      }
+    }
+    const cs = window.getComputedStyle(safeAreaProbe);
+    return {
+      top: Math.max(0, Math.round(parseFloat(cs.paddingTop) || 0)),
+      right: Math.max(0, Math.round(parseFloat(cs.paddingRight) || 0)),
+      bottom: Math.max(0, Math.round(parseFloat(cs.paddingBottom) || 0)),
+      left: Math.max(0, Math.round(parseFloat(cs.paddingLeft) || 0)),
+    };
+  };
   const syncAppViewportMetrics = () => {
     const root = document.documentElement;
     const kbOpen = document.body?.classList?.contains('kb-open');
     const vv = window.visualViewport;
-    const w = Math.max(280, Math.round(window.innerWidth || root.clientWidth || 390));
-    const h = Math.max(240, Math.round((vv && !kbOpen ? vv.height : window.innerHeight) || root.clientHeight || 844));
+    const rawW = Math.round(window.innerWidth || root.clientWidth || 390);
+    const rawH = Math.round(window.innerHeight || root.clientHeight || 844);
+    const vvH = vv ? Math.round(vv.height) : rawH;
+    const w = Math.max(280, rawW);
+    let h = Math.max(240, (!kbOpen && vvH > 0) ? Math.max(rawH, vvH) : (vvH || rawH));
+    const insets = readSafeAreaInsets();
+    const isStandalone = Boolean(
+      navigator.standalone === true ||
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      window.matchMedia?.('(display-mode: fullscreen)').matches ||
+      window.isWatchlivoNativeIOS
+    );
+    const scrW = Number(window.screen?.width) || 0;
+    const scrH = Number(window.screen?.height) || 0;
+    const isPortrait = w <= h;
+    const fullScreenH = (scrW > 0 && scrH > 0)
+      ? (isPortrait ? Math.max(scrW, scrH) : Math.min(scrW, scrH))
+      : 0;
+    if (!kbOpen) {
+      if (insets.top > 0 && fullScreenH > h && (fullScreenH - h) <= (insets.top + insets.bottom + 24)) {
+        h = fullScreenH;
+      } else if (isStandalone && fullScreenH > h && (fullScreenH - h) <= 96) {
+        h = fullScreenH;
+      } else if (insets.top > 0 && isStandalone) {
+        h = Math.max(h, rawH + insets.top);
+      }
+    }
     root.style.setProperty('--app-width', `${w}px`);
     root.style.setProperty('--app-height', `${h}px`);
+    root.style.setProperty('--safe-top-px', `${insets.top}px`);
+    root.style.setProperty('--safe-bottom-px', `${insets.bottom}px`);
     if (!kbOpen && (window.scrollX !== 0 || window.scrollY !== 0)) {
       window.scrollTo(0, 0);
     }
   };
+  window.__wlSyncViewport = syncAppViewportMetrics;
   syncAppViewportMetrics();
   window.addEventListener('resize', syncAppViewportMetrics, { passive: true });
   window.addEventListener('orientationchange', () => {
@@ -316,7 +364,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v101', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v102', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
