@@ -1475,7 +1475,11 @@ async def music_similar(request: Request):
 
 async def music_resolve(request: Request):
     artist = (request.query_params.get("artist") or "").strip()[:80]
-    title = (request.query_params.get("title") or request.query_params.get("songTitle") or "").strip()[:120]
+    title = (request.query_params.get("title") or request.query_params.get("songTitle") or request.query_params.get("q") or "").strip()[:120]
+    if not artist and (" — " in title or " - " in title):
+        sep = " — " if " — " in title else " - "
+        parts = title.split(sep, 1)
+        artist, title = parts[0].strip()[:80], parts[1].strip()[:120]
     vid = (request.query_params.get("videoId") or "").strip()[:20]
     url = (request.query_params.get("url") or "").strip()[:500]
     prov = (request.query_params.get("provider") or "music").strip()[:30]

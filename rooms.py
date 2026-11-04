@@ -2619,7 +2619,7 @@ _LIVE_RADIO = [
     ("radyo-joy-turk", "Joy Türk", "https://playerservices.streamtheworld.com/api/livestream-redirect/JOY_TURK_SC", "direct"),
     ("radyo-slow-turk", "Slow Türk", "https://radyo1.radyo-dinle.tc/8062/stream", "direct"),
     ("radyo-best-fm", "Best FM", "https://ssldyg.radyotvonline.com/best/bestfm.stream/playlist.m3u8", "hls"),
-    ("radyo-alem-fm", "Alem FM", "https://alemfm.radyotvonline.net/alemfmaac", "direct"),
+    ("radyo-alem-fm", "Alem FM", "http://turkmedya.radyotvonline.com/turkmedya/alemfm.stream/playlist.m3u8", "hls"),
 ]
 
 
@@ -2632,18 +2632,20 @@ def _wrap_live_cors_url(u: str) -> str:
 
 def _tv_spec(rid: str, name: str, url: str) -> Dict[str, Any]:
     play_u = _wrap_live_cors_url(url)
+    alt_u = [url] if (play_u != url and url.startswith("https://")) else []
     return {
         "id": f"tv-{rid}", "name": f"7/24 {name} Canlı Yayın", "creator": "Watchlivo Canlı TV", "privacy": "public", "playMode": "cohost",
-        "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": play_u, "altUrls": [url] if play_u != url else [], "channel": "Canlı TV · 7/24",
+        "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": play_u, "altUrls": alt_u, "channel": "Canlı TV · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "mediaType": "live", "duration": 0.0},
     }
 
 
 def _radio_spec(rid: str, name: str, url: str, kind: str) -> Dict[str, Any]:
     play_u = _wrap_live_cors_url(url) if kind == "hls" else url
+    alt_u = [url] if (play_u != url and url.startswith("https://")) else []
     return {
         "id": rid, "name": f"7/24 {name} Canlı Radyo", "creator": "Watchlivo Canlı Radyo", "privacy": "public", "playMode": "cohost",
-        "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": play_u, "altUrls": [url] if play_u != url else [], "channel": "Canlı Radyo · 7/24",
+        "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": play_u, "altUrls": alt_u, "channel": "Canlı Radyo · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "isMusic": True, "mediaType": "music", "artist": name,
                   "songTitle": "Canlı Yayın", "musicPlatformLabel": "Canlı Radyo", "duration": 0.0},
     }
@@ -3034,6 +3036,8 @@ async def http_sync(request: Request):
                     room["creator"] = spec.get("creator", "Watchlivo 7/24")
                     if "kinox_bot" in room.get("participants", {}):
                         room["participants"]["kinox_bot"]["name"] = room["creator"]
+                    if (room.get("media") or {}).get("url") != spec["media"]["url"]:
+                        set_media(room, spec["media"], room["creator"], start=0.0)
         room.pop("emptySince", None)
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now())
         p, is_new = add_participant(room, cid, {**data, "uid": verified_uid}, "http")
@@ -3298,7 +3302,10 @@ async def list_rooms(request: Request):
                     if "kinox_bot" in p_map:
                         p_map["kinox_bot"]["name"] = room["creator"]
                     needs_save = True
-                if not has_humans and (room.get("chat") or float((room.get("media") or {}).get("currentTime") or 0.0) > 0.0 or (spec and (room.get("media") or {}).get("url") != spec["media"]["url"])):
+                if spec and (room.get("media") or {}).get("url") != spec["media"]["url"]:
+                    set_media(room, spec["media"], spec.get("creator", "Watchlivo 7/24"), start=0.0)
+                    needs_save = True
+                if not has_humans and (room.get("chat") or float((room.get("media") or {}).get("currentTime") or 0.0) > 0.0):
                     room["chat"] = []
                     room["polls"] = []
                     if spec:

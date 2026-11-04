@@ -398,6 +398,31 @@ class V89FullAuditRemediationTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(apk_resp.content).hexdigest(), vdata["sha256"])
             self.assertEqual(len(apk_resp.content), vdata["sizeBytes"])
 
+    def test_11_v95_alem_fm_hls_and_music_q_and_ota_v21(self):
+        import rooms
+        import music_engine
+        # 1. Alem FM must use HLS stream via /api/rave/stream proxy with zero mixed-content http:// altUrls
+        alem_spec = next((s for s in rooms.CURATED_LIVE_SPECS if s["id"] == "radyo-alem-fm"), None)
+        self.assertIsNotNone(alem_spec)
+        self.assertEqual(alem_spec["media"]["streamType"], "hls")
+        self.assertTrue(alem_spec["media"]["url"].startswith("/api/rave/stream?"))
+        for u in alem_spec["media"].get("altUrls", []):
+            self.assertTrue(u.startswith("https://"), f"Mixed-content altUrl leaked: {u}")
+
+        # 2. music-resolve must parse ?q=Artist - Title when title/artist params are omitted
+        with patch.object(music_engine, "_resolve_music_sync") as mock_rm:
+            mock_rm.return_value = {"provider": "direct", "streamType": "mp4", "url": "https://example.com/a.mp4", "isMusic": True}
+            mr = self.client.get("/api/rave/music-resolve?q=Tarkan+-+Kuzu+Kuzu")
+            self.assertEqual(mr.status_code, 200)
+            args = mock_rm.call_args[0]
+            self.assertEqual(args[0], "Tarkan")
+            self.assertEqual(args[1], "Kuzu Kuzu")
+
+        # 3. OTA versionCode bumped to >= 21 (v2.0.1+)
+        ver_resp = self.client.get("/api/app/version")
+        self.assertEqual(ver_resp.status_code, 200)
+        self.assertGreaterEqual(int(ver_resp.json().get("versionCode") or 0), 21)
+
 
 if __name__ == "__main__":
     unittest.main()
