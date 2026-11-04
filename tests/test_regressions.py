@@ -1304,6 +1304,48 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("setVideoPlayingBounds", main_java)
         self.assertIn("canStartPictureInPictureAutomaticallyFromInline = true", swift_wv)
 
+    def test_v100_native_non_webrtc_ios_ipa_and_rave_ota_updater(self):
+        import hashlib
+        import io
+        import zipfile
+
+        # 1. /api/ios/version returns Rave.io-style OTA metadata & remoteConfig
+        v_resp = self.client.get("/api/ios/version")
+        self.assertEqual(v_resp.status_code, 200)
+        v_data = v_resp.json()
+        self.assertTrue(v_data.get("ok"))
+        self.assertEqual(v_data.get("bundleId"), "online.watchlivo.app")
+        self.assertGreaterEqual(int(v_data.get("versionCode") or 0), 200)
+        self.assertTrue(v_data.get("autoInstall"))
+        self.assertTrue(v_data.get("mandatory"))
+        self.assertIn("remoteConfig", v_data)
+
+        # 2. /api/ios/manifest.plist returns valid Apple itms-services OTA manifest XML
+        m_resp = self.client.get("/api/ios/manifest.plist")
+        self.assertEqual(m_resp.status_code, 200)
+        self.assertIn("software-package", m_resp.text)
+        self.assertIn("online.watchlivo.app", m_resp.text)
+        self.assertIn("https://watchlivo.online/download/ipa", m_resp.text)
+
+        # 3. /download/ipa serves pure native ARM64 Mach-O IPA (ZERO WebKit/WebRTC) matching SHA-256
+        ipa_resp = self.client.get("/download/ipa")
+        self.assertEqual(ipa_resp.status_code, 200)
+        self.assertTrue(ipa_resp.content.startswith(b"PK\x03\x04"))
+        self.assertEqual(len(ipa_resp.content), v_data.get("sizeBytes"))
+        self.assertEqual(hashlib.sha256(ipa_resp.content).hexdigest(), v_data.get("sha256"))
+
+        with zipfile.ZipFile(io.BytesIO(ipa_resp.content), "r") as zf:
+            names = set(zf.namelist())
+            self.assertIn("Payload/Watchlivo.app/Watchlivo", names)
+            self.assertIn("Payload/Watchlivo.app/Info.plist", names)
+            self.assertIn("Payload/Watchlivo.app/_CodeSignature/CodeResources", names)
+            macho = zf.read("Payload/Watchlivo.app/Watchlivo")
+            self.assertEqual(macho[:4], b"\xcf\xfa\xed\xfe")  # 64-bit ARM64 Mach-O magic
+            for forbidden in (b"WebKit.framework", b"WKWebView", b"RTCPeerConnection", b"WebRTC.framework"):
+                self.assertNotIn(forbidden, macho)
+            for required in (b"AVPlayerViewController", b"AVAudioRecorder", b"WLAutoUpdater", b"/api/ios/version"):
+                self.assertIn(required, macho)
+
 
 if __name__ == '__main__':
     unittest.main()

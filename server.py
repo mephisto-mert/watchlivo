@@ -7566,6 +7566,7 @@ async def index(request: Request):
 
 
 _APK_HASH_CACHE: dict[str, object] = {"mtime": None, "sha256": "", "sizeBytes": 0}
+_IPA_HASH_CACHE: dict[str, object] = {"mtime": None, "sha256": "", "sizeBytes": 0}
 
 
 async def app_version_endpoint(request: Request):
@@ -7657,11 +7658,135 @@ async def download_ipa_endpoint(request: Request):
             ipa_file,
             media_type="application/octet-stream",
             filename="Watchlivo.ipa",
-            headers={"Content-Disposition": 'attachment; filename="Watchlivo.ipa"', "Cache-Control": "no-cache"},
+            headers={
+                "Content-Disposition": 'attachment; filename="Watchlivo.ipa"',
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     return RedirectResponse(
         "https://github.com/mephisto-mert/watchlivo/releases/download/v1.2.0/Watchlivo.ipa",
         status_code=302,
+    )
+
+
+async def ios_version_endpoint(request: Request):
+    meta_file = BASE_DIR / "ios_version.json"
+    ipa_file = STATIC_DIR / "Watchlivo.ipa"
+    data: dict[str, object] = {
+        "ok": True,
+        "bundleId": "online.watchlivo.app",
+        "packageName": "online.watchlivo.app",
+        "versionCode": 200,
+        "versionName": "2.0.0",
+        "ipaUrl": "https://watchlivo.online/download/ipa",
+        "fallbackUrl": "https://watchlivo.online/static/Watchlivo.ipa",
+        "manifestUrl": "https://watchlivo.online/api/ios/manifest.plist",
+        "sha256": "",
+        "sizeBytes": 0,
+        "mandatory": True,
+        "autoInstall": True,
+        "changelog": "Watchlivo Native iOS v2.0.0 — %100 Native UIKit & AVPlayerViewController (WebRTC/WKWebView yok), tüm uygulamalarda çalışan sistem PiP, oda içi AAC sesli mesaj kaydı/dinleme ve Rave.io tarzı otomatik güncelleme.",
+        "remoteConfig": {
+            "baseUrl": "https://watchlivo.online",
+            "posterProxyEnabled": True,
+            "syncIntervalMs": 2000,
+        },
+    }
+    if meta_file.exists():
+        try:
+            loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data.update(loaded)
+        except Exception:
+            pass
+    if ipa_file.exists():
+        try:
+            st = ipa_file.stat()
+            if _IPA_HASH_CACHE.get("mtime") == st.st_mtime_ns and _IPA_HASH_CACHE.get("sizeBytes") == st.st_size:
+                data["sha256"] = _IPA_HASH_CACHE["sha256"]
+                data["sizeBytes"] = _IPA_HASH_CACHE["sizeBytes"]
+            else:
+                raw = ipa_file.read_bytes()
+                sha = hashlib.sha256(raw).hexdigest()
+                _IPA_HASH_CACHE.update({"mtime": st.st_mtime_ns, "sha256": sha, "sizeBytes": len(raw)})
+                data["sha256"] = sha
+                data["sizeBytes"] = len(raw)
+        except Exception:
+            pass
+    return JSONResponse(
+        data,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+async def ios_manifest_endpoint(request: Request):
+    meta_file = BASE_DIR / "ios_version.json"
+    version_name = "2.0.0"
+    bundle_id = "online.watchlivo.app"
+    ipa_url = "https://watchlivo.online/download/ipa"
+    if meta_file.exists():
+        try:
+            loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                version_name = str(loaded.get("versionName") or version_name)
+                bundle_id = str(loaded.get("bundleId") or bundle_id)
+                ipa_url = str(loaded.get("ipaUrl") or ipa_url)
+        except Exception:
+            pass
+    plist_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>items</key>
+    <array>
+        <dict>
+            <key>assets</key>
+            <array>
+                <dict>
+                    <key>kind</key>
+                    <string>software-package</string>
+                    <key>url</key>
+                    <string>{ipa_url}</string>
+                </dict>
+                <dict>
+                    <key>kind</key>
+                    <string>display-image</string>
+                    <key>url</key>
+                    <string>https://watchlivo.online/static/watchlivo-icon-192.png</string>
+                </dict>
+                <dict>
+                    <key>kind</key>
+                    <string>full-size-image</string>
+                    <key>url</key>
+                    <string>https://watchlivo.online/static/watchlivo-icon-512.png</string>
+                </dict>
+            </array>
+            <key>metadata</key>
+            <dict>
+                <key>bundle-identifier</key>
+                <string>{bundle_id}</string>
+                <key>bundle-version</key>
+                <string>{version_name}</string>
+                <key>kind</key>
+                <string>software</string>
+                <key>title</key>
+                <string>Watchlivo</string>
+            </dict>
+        </dict>
+    </array>
+</dict>
+</plist>"""
+    return Response(
+        content=plist_xml,
+        media_type="application/xml; charset=utf-8",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
@@ -8096,12 +8221,16 @@ app = Starlette(
         Route("/sw.js", service_worker),
         Route("/api/health", health),
         Route("/api/app/version", app_version_endpoint, methods=["GET", "HEAD"]),
+        Route("/api/ios/version", ios_version_endpoint, methods=["GET", "HEAD"]),
+        Route("/api/ios/manifest.plist", ios_manifest_endpoint, methods=["GET", "HEAD"]),
         Route("/download/apk", download_apk_endpoint),
         Route("/download/Watchlivo-v2.0.apk", download_apk_endpoint),
         Route("/download/Watchlivo-v2.0.0.apk", download_apk_endpoint),
         Route("/download/Watchlivo-v1.1.0.apk", download_apk_endpoint),
         Route("/download/Watchlivo-v1.1.apk", download_apk_endpoint),
         Route("/download/ipa", download_ipa_endpoint),
+        Route("/download/Watchlivo.ipa", download_ipa_endpoint),
+        Route("/download/Watchlivo-v2.0.ipa", download_ipa_endpoint),
         Route("/download/ios", download_ios_endpoint),
         Route("/download/windows", download_windows_endpoint),
         Route("/download/exe", download_windows_endpoint),

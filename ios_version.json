@@ -1,0 +1,21 @@
+{
+  "ok": true,
+  "bundleId": "online.watchlivo.app",
+  "packageName": "online.watchlivo.app",
+  "versionCode": 200,
+  "versionName": "2.0.0",
+  "ipaUrl": "https://watchlivo.online/download/ipa",
+  "fallbackUrl": "https://watchlivo.online/static/Watchlivo.ipa",
+  "manifestUrl": "https://watchlivo.online/api/ios/manifest.plist",
+  "sha256": "be06220d3d79a350eea6bd95f423a236ee25430461ab0b9c7c1d89e8a26c6955",
+  "sizeBytes": 298277,
+  "mandatory": true,
+  "autoInstall": true,
+  "publishedAt": "2026-11-04T07:11:57.973214+00:00",
+  "changelog": "Watchlivo Native iOS v2.0.0 — %100 Native UIKit & AVPlayerViewController, sistem PiP, sesli mesaj ve Rave.io tarzı otomatik güncelleme.",
+  "remoteConfig": {
+    "baseUrl": "https://watchlivo.online",
+    "posterProxyEnabled": true,
+    "syncIntervalMs": 2000
+  }
+}

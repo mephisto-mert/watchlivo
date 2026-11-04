@@ -149,7 +149,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertIn('android:allowBackup="false"', manifest)
         self.assertIn('android:versionCode="5"', manifest)
         ios_main = (proj / "watchlivo_ios" / "main.m").read_text(encoding="utf-8")
-        self.assertIn("forMainFrameOnly:YES", ios_main)
         self.assertIn("isTrustedWatchlivoHost:", ios_main)
 
 
