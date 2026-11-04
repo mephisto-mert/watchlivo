@@ -6,7 +6,9 @@
 	<array>
 		<dict>
 			<key>FullScreen</key>
-			<false/>
+			<true/>
+			<key>IgnoreManifestScope</key>
+			<true/>
 			<key>Icon</key>
 			<data>
 			iVBORw0KGgoAAAANSUhEUgAAAHgAAAB4CAYAAAA5ZDbSAAAeiUlE

@@ -266,9 +266,10 @@ class V83SocialHistoryUiTests(unittest.TestCase):
                 self.assertNotIn("BigBuckBunny", txt, f"Found BigBuckBunny in {p.name}")
                 self.assertNotIn("gpt-6.1", txt, f"Found gpt-6.1 in {p.name}")
 
-        # 2. WebClip mobileconfig has FullScreen=false so iOS allows OS-level PiP on app exit
+        # 2. WebClip mobileconfig has FullScreen=true and IgnoreManifestScope=true so iOS opens without Safari link bar
         mc_txt = (static_root / "Watchlivo.mobileconfig").read_text(encoding="utf-8")
-        self.assertRegex(mc_txt, r"<key>FullScreen</key>\s*<false/>")
+        self.assertRegex(mc_txt, r"<key>FullScreen</key>\s*<true/>")
+        self.assertRegex(mc_txt, r"<key>IgnoreManifestScope</key>\s*<true/>")
 
         # 3. Native Watchlivo.ipa Mach-O binary contains inline sync/pause + applicationWillResignActive: OS PiP handoff
         with zipfile.ZipFile(static_root / "Watchlivo.ipa", "r") as zf:
