@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "packageName": "online.watchlivo.app",
+  "versionCode": 20,
+  "versionName": "2.0.0",
+  "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
+  "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
+  "sha256": "085d22f633835d817947a4ae10589ce7ae5af5d6bb590b7b60adf59c40876c6c",
+  "sizeBytes": 54835,
+  "mandatory": true,
+  "autoInstall": true,
+  "publishedAt": "2026-11-04T00:47:42.110064+00:00",
+  "changelog": "Watchlivo Native v2.0.0 — Donanım hızlandırmalı oynatıcı, otomatik PiP ve Rave.io tarzı canlı otomatik güncelleme."
+}

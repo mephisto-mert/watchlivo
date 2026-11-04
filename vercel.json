@@ -44,6 +44,8 @@
           "social_engine.py",
           "static/index.html",
           "static/sw.js",
+          "static/Watchlivo-v2.0.apk",
+          "app_version.json",
           "animecix_tau_map.json",
           "hidden_titles.json",
           "main_sites_vault.json"
@@ -97,6 +99,16 @@
     {
       "src": "/download/(apk|Watchlivo.*\\.apk|ipa|ios|windows|exe)",
       "dest": "server.py"
+    },
+    {
+      "src": "/static/(Watchlivo.*\\.apk)",
+      "headers": {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"Watchlivo-v2.0.apk\"",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "dest": "/static/$1"
     },
     {
       "src": "/static/Watchlivo\\.mobileconfig",

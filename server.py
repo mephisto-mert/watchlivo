@@ -7565,22 +7565,60 @@ async def index(request: Request):
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
 
 
+async def app_version_endpoint(request: Request):
+    meta_file = BASE_DIR / "app_version.json"
+    apk_file = STATIC_DIR / "Watchlivo-v2.0.apk"
+    data = {
+        "ok": True,
+        "packageName": "online.watchlivo.app",
+        "versionCode": 20,
+        "versionName": "2.0.0",
+        "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
+        "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
+        "sha256": "",
+        "sizeBytes": 0,
+        "mandatory": True,
+        "autoInstall": True,
+        "changelog": "Watchlivo Native v2.0.0 — Gerçek Android donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncelleme.",
+    }
+    if meta_file.exists():
+        try:
+            loaded = json.loads(meta_file.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data.update(loaded)
+        except Exception:
+            pass
+    if apk_file.exists() and (not data.get("sha256") or not data.get("sizeBytes")):
+        raw = apk_file.read_bytes()
+        data["sha256"] = hashlib.sha256(raw).hexdigest()
+        data["sizeBytes"] = len(raw)
+    return JSONResponse(
+        data,
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
 async def download_apk_endpoint(request: Request):
-    apk_file = STATIC_DIR / "Watchlivo-v1.1.apk"
+    apk_file = STATIC_DIR / "Watchlivo-v2.0.apk"
+    if not apk_file.exists():
+        apk_file = STATIC_DIR / "Watchlivo-v1.1.apk"
     if not apk_file.exists():
         apk_file = STATIC_DIR / "Watchlivo-v1.0.apk"
     if apk_file.exists():
         return FileResponse(
             apk_file,
             media_type="application/vnd.android.package-archive",
-            filename="Watchlivo-v1.1.0.apk",
+            filename="Watchlivo-v2.0.apk",
             headers={
-                "Content-Disposition": 'attachment; filename="Watchlivo-v1.1.0.apk"',
-                "Cache-Control": "public, max-age=3600",
+                "Content-Disposition": 'attachment; filename="Watchlivo-v2.0.apk"',
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "X-Content-Type-Options": "nosniff",
             },
         )
-    return RedirectResponse("/static/Watchlivo-v1.1.apk", status_code=302)
+    return RedirectResponse("/static/Watchlivo-v2.0.apk", status_code=302)
 
 
 async def download_windows_endpoint(request: Request):
@@ -8044,7 +8082,10 @@ app = Starlette(
         Route("/manifest.json", manifest_json),
         Route("/sw.js", service_worker),
         Route("/api/health", health),
+        Route("/api/app/version", app_version_endpoint, methods=["GET", "HEAD"]),
         Route("/download/apk", download_apk_endpoint),
+        Route("/download/Watchlivo-v2.0.apk", download_apk_endpoint),
+        Route("/download/Watchlivo-v2.0.0.apk", download_apk_endpoint),
         Route("/download/Watchlivo-v1.1.0.apk", download_apk_endpoint),
         Route("/download/Watchlivo-v1.1.apk", download_apk_endpoint),
         Route("/download/ipa", download_ipa_endpoint),

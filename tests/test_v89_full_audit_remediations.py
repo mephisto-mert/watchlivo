@@ -380,6 +380,24 @@ class V89FullAuditRemediationTests(unittest.TestCase):
             self.assertIsNone(res_dead)
             mock_yt.assert_not_called()
 
+    def test_10_native_apk_download_and_rave_auto_updater_endpoint(self):
+        import hashlib
+        ver_resp = self.client.get("/api/app/version")
+        self.assertEqual(ver_resp.status_code, 200)
+        vdata = ver_resp.json()
+        self.assertTrue(vdata.get("ok"))
+        self.assertEqual(vdata.get("packageName"), "online.watchlivo.app")
+        self.assertGreaterEqual(int(vdata.get("versionCode") or 0), 20)
+        self.assertTrue(vdata.get("autoInstall"))
+        self.assertIn("/download/Watchlivo-v2.0.apk", vdata.get("apkUrl", ""))
+
+        for dl_path in ("/download/Watchlivo-v2.0.apk", "/download/apk", "/download/Watchlivo-v1.1.apk"):
+            apk_resp = self.client.get(dl_path)
+            self.assertEqual(apk_resp.status_code, 200, f"Failed on {dl_path}")
+            self.assertEqual(apk_resp.content[:4], b"PK\x03\x04")
+            self.assertEqual(hashlib.sha256(apk_resp.content).hexdigest(), vdata["sha256"])
+            self.assertEqual(len(apk_resp.content), vdata["sizeBytes"])
+
 
 if __name__ == "__main__":
     unittest.main()

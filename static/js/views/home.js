@@ -1,15 +1,15 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261103_v93';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261104_v94';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261103_v93';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261103_v93';
-import { api } from '../api.js?v=20261103_v93';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261103_v93';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261103_v93';
+} from '../store.js?v=20261104_v94';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261104_v94';
+import { api } from '../api.js?v=20261104_v94';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261104_v94';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261104_v94';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -52,7 +52,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261103_v93', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261104_v94', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -178,13 +178,13 @@ export function renderHome(app) {
       !isNativeWatchlivoApp() ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
-        href: '/download/Watchlivo-v1.1.apk',
-        download: 'Watchlivo-v1.1.apk',
-        title: 'Watchlivo Android APK İndir',
-        onclick: () => toast('📱 Watchlivo Android APK indiriliyor...', 4000),
+        href: '/download/Watchlivo-v2.0.apk',
+        download: 'Watchlivo-v2.0.apk',
+        title: 'Watchlivo Native Android APK İndir (v2.0 Otomatik Güncellemeli)',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000),
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
-      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir')) : null,
+      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0)')) : null,
       h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
         const btnEl = ev?.currentTarget;
         if (btnEl?.dataset?.busy === '1') return;
@@ -255,15 +255,15 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
     h('div', { class: 'wl-app-banner-text' },
       h('div', { class: 'wl-app-banner-title' },
-        h('span', { class: 'wl-app-banner-badge' }, 'RESMİ APK'),
-        h('b', {}, 'Watchlivo Android Yayında!')),
-      h('span', { class: 'wl-app-banner-sub' }, 'Kesintisiz, reklamsız ve arkadaşlarınla tam senkron odalar için Android uygulamasını kur.')),
+        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0'),
+        h('b', {}, 'Watchlivo Android Uygulaması (Otomatik Güncellemeli)')),
+      h('span', { class: 'wl-app-banner-sub' }, 'Gerçek donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncellemeli yeni sürüm.')),
     h('div', { class: 'wl-app-banner-actions' },
       h('a', {
         class: 'btn primary sm wl-banner-apk-btn',
-        href: '/download/Watchlivo-v1.1.apk',
-        download: 'Watchlivo-v1.1.apk',
-        onclick: () => toast('📱 Watchlivo Android APK indiriliyor...', 4000)
+        href: '/download/Watchlivo-v2.0.apk',
+        download: 'Watchlivo-v2.0.apk',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
         class: 'btn sm wl-banner-info-btn',
@@ -392,6 +392,7 @@ export function renderHome(app) {
   const friendsStripEl = renderHomeFriendsStrip(openRoom);
 
   const glassWindow = h('div', { class: 'glass-main-window' },
+    !isNativeWatchlivoApp() ? appBanner : null,
     selection,
     friendsStripEl,
     h('div', { id: 'lobby-anchor', class: 'lobby-toolbar' },

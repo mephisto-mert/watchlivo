@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261103_v93';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v94';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -413,10 +413,10 @@ export function openThemeModal() {
       }, '🍎 iPhone IPA İndir (v1.2)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
-        href: '/download/Watchlivo-v1.1.apk',
-        download: 'Watchlivo-v1.1.apk',
-        onclick: () => toast('📱 Android APK indiriliyor...', 4000)
-      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android APK İndir (v1.1)'),
+        href: '/download/Watchlivo-v2.0.apk',
+        download: 'Watchlivo-v2.0.apk',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
+      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0)'),
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
@@ -458,16 +458,16 @@ export function openDownloadModal() {
       !inApk ? h('div', { class: 'wl-download-card apk' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
-          h('b', {}, 'Android Uygulaması (APK)'),
-          h('small', {}, 'v1.1.0 • Android 8.0+ PiP & Tam Ekran Oynatıcı'),
-          h('p', {}, 'Hızlı bağlantı, sistem PiP penceresi, reklamsız tam ekran oynatıcı.')
+          h('b', {}, 'Android Uygulaması (Native APK)'),
+          h('small', {}, 'v2.0.0 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
+          h('p', {}, 'Tarayıcısız saf Android donanım oynatıcı, sistem PiP penceresi ve yeni sürüm çıktığında kendi kendini otomatik güncelleyen altyapı.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/Watchlivo-v1.1.apk',
-          download: 'Watchlivo-v1.1.apk',
-          onclick: () => toast('📱 Android APK indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')
+          href: '/download/Watchlivo-v2.0.apk',
+          download: 'Watchlivo-v2.0.apk',
+          onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0)')
       ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
