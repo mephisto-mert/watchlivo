@@ -4124,7 +4124,31 @@ header.navbar.top-nav-capsule {
   margin: 0 !important;
 }
 
-/* v68: Zero-Overlap Home Top Navbar Across All Mobile Widths (320px - 720px) */
+/* v68: Zero-Overlap Home Top Navbar Across All Tablet & Mobile Widths (320px - 1020px) */
+@media (max-width: 1020px) {
+  .top-nav-capsule .navbar-center {
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+  }
+  .top-nav-capsule .navbar-left,
+  .top-nav-capsule .navbar-right {
+    gap: 5px !important;
+    min-width: 0 !important;
+  }
+  .top-nav-capsule .wl-nav-account-sub,
+  .top-nav-capsule #nav-btn-apk {
+    display: none !important;
+  }
+}
+@media (max-width: 820px) {
+  .top-nav-capsule .wl-nav-account-text {
+    display: none !important;
+  }
+  .top-nav-capsule .user-profile-badge {
+    padding: 4px !important;
+    gap: 0 !important;
+  }
+}
 @media (max-width: 720px) {
   .top-nav-capsule .navbar-center {
     min-width: 0 !important;

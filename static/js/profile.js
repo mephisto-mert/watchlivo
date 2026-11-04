@@ -1143,6 +1143,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       const email = emailInp.value.trim();
       const password = pwInp.value;
       if (name.length < 2) { errBox.textContent = 'Görünen ad en az 2 karakter olmalıdır.'; return; }
+      if (!email && !password) { doGuestLogin(name); return; }
       if (!email.includes('@')) { errBox.textContent = 'Geçerli bir e-posta adresi girin.'; return; }
       if (password.length < 4) { errBox.textContent = 'Şifre en az 4 karakter olmalıdır.'; return; }
       try {

@@ -1346,6 +1346,22 @@ class RegressionTests(unittest.TestCase):
             for required in (b"AVPlayerViewController", b"AVAudioRecorder", b"WLAutoUpdater", b"/api/ios/version"):
                 self.assertIn(required, macho)
 
+    def test_v101_home_navbar_tablet_overflow_and_mobile_web_app_meta(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('<meta name="mobile-web-app-capable" content="yes" />', index_html)
+        self.assertIn('<meta name="apple-mobile-web-app-capable" content="yes" />', index_html)
+
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("@media (max-width: 1020px)", vortex_css)
+        self.assertIn(".top-nav-capsule .wl-nav-account-sub,\n  .top-nav-capsule #nav-btn-apk", vortex_css)
+        self.assertIn("@media (max-width: 820px)", vortex_css)
+
+        profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
+        self.assertIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
+
 
 if __name__ == '__main__':
     unittest.main()
