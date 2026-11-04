@@ -10,12 +10,6 @@ export function isIosWebKit() {
   return /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-export function isIosStandalonePwa() {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
-  if (!isIosWebKit() || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP) return false;
-  return Boolean(window.navigator.standalone === true || window.matchMedia?.('(display-mode: standalone)')?.matches);
-}
-
 export function ensureIosPlaybackAudioSession() {
   if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS) return;
   if (typeof navigator === 'undefined' || !navigator.audioSession) return;

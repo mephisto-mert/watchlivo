@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261104_v99';
-import { Html5Adapter } from './html5.js?v=20261104_v99';
-import { VimeoAdapter } from './vimeo.js?v=20261104_v99';
-import { EmbedAdapter } from './embed.js?v=20261104_v99';
-import { WebviewAdapter } from './webview.js?v=20261104_v99';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit, isIosStandalonePwa } from './audio-gain.js?v=20261104_v99';
+import { YouTubeAdapter } from './youtube.js?v=20261104_v100';
+import { Html5Adapter } from './html5.js?v=20261104_v100';
+import { VimeoAdapter } from './vimeo.js?v=20261104_v100';
+import { EmbedAdapter } from './embed.js?v=20261104_v100';
+import { WebviewAdapter } from './webview.js?v=20261104_v100';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261104_v100';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -60,10 +60,6 @@ export class PlayerHost {
     const rawOnEvent = onEvent || (() => {});
     this.onEvent = (ev, arg) => {
       if ((ev === 'pause' || ev === 'play') && !this.adapter) return;
-      if (ev === 'pip-change' && typeof document !== 'undefined') {
-        const osActive = Boolean(arg) && !document.documentElement.classList.contains('is-android-pip');
-        document.body?.classList?.toggle('os-pip-active', osActive);
-      }
       rawOnEvent(ev, arg);
     };
     if (typeof window !== 'undefined') window.__kinoxHost = this;
@@ -146,7 +142,7 @@ export class PlayerHost {
         if (k === 'm' || k === 'escape' || k === 'tab' || k === 'shift' || k === ' ' || k === 'k') return;
       } else {
         if (this._gDown && (Math.hypot((e.clientX ?? 0) - this._gDown.x, (e.clientY ?? 0) - this._gDown.y) > 14)) return;
-        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn, #ctl-pip, #wl-autopip-launch-btn, #nav-minimize-room, #ctl-fs, #ctl-cast, input[type="range"], #ctl-sliders-card, .ctl-slider-row, .vol-wrap')) return;
+        if (e?.target?.closest?.('#ctl-play, #ctl-center-play, #ctl-break-btn, #ctl-break-accept, #ctl-vol, #ctl-bright-btn, #ctl-pip, #ctl-fs, #ctl-cast, input[type="range"], #ctl-sliders-card, .ctl-slider-row, .vol-wrap')) return;
       }
       resumeSharedAudioContext();
       if (!this.userMuted && (this.autoplayBlocked || this.muted || this.adapter?.isMuted?.())) {
@@ -416,32 +412,13 @@ export class PlayerHost {
     return false;
   }
 
-  tryEnterPipSync({ enterOnly = false } = {}) {
-    if (!enterOnly && this._nativeIosPipActive && typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function') {
+  async togglePiP() {
+    if (this._nativeIosPipActive && typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function') {
       this._nativeIosPipActive = false;
       window.watchlivoNativePiP('stop', {});
       this.onEvent('pip-change', false);
       return 'exited';
     }
-    if (typeof this.adapter?.tryEnterWebKitPipSync === 'function') {
-      const res = this.adapter.tryEnterWebKitPipSync({ enterOnly });
-      if (res) return res;
-    }
-    if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
-      const v = this.adapter?.video;
-      const ok = window.Android.enterPiP(v?.videoWidth || 16, v?.videoHeight || 9);
-      if (ok !== false) {
-        this.onEvent('pip-change', true);
-        return 'entered';
-      }
-    }
-    if (isIosStandalonePwa()) return 'ios-standalone-blocked';
-    return false;
-  }
-
-  async togglePiP() {
-    const syncRes = this.tryEnterPipSync({ enterOnly: false });
-    if (syncRes) return syncRes;
     if (this._docPipWin && !this._docPipWin.closed) {
       try { this._docPipWin.close(); } catch (e) { /* ignore */ }
       this._docPipWin = null;
@@ -502,7 +479,6 @@ export class PlayerHost {
       const res = await this.adapter.enterAutoPiP(reason);
       if (res) return res;
     }
-    if (reason === 'room-minimize' && isIosStandalonePwa()) return 'ios-standalone-blocked';
     if (!this.isPiP()) return await this.togglePiP();
     return 'already-pip';
   }
@@ -520,7 +496,6 @@ export class PlayerHost {
 
   destroyAdapterOnly() {
     clearTimeout(this._loadFallbackTimer);
-    if (typeof document !== 'undefined') document.body?.classList?.remove('os-pip-active');
     const oldAdapter = this.adapter;
     this.adapter = null;
     this.key = '';

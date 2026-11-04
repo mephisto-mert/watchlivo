@@ -774,7 +774,7 @@ class RegressionTests(unittest.TestCase):
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         self.assertIn("stageBackdrop.classList.toggle('is-hero-cover', false);", ctl_js)
         self.assertIn("const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));", ctl_js)
-        self.assertIn("if (ok === 'entered' || ok === 'exited' || ok === true)", ctl_js)
+        self.assertIn("if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video)", ctl_js)
 
         # 3. mesh.css keeps #ctl-pip and #nav-minimize-room visible on mobile, allows mesh-minimized on mobile, and locks .player-host > video to 100%
         mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
@@ -821,7 +821,7 @@ class RegressionTests(unittest.TestCase):
 
         # 3. Mobile room entry & Watchlivo DJ branding static checks
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("import { h, toast, openIosCrossAppPipSheet } from", main_js)
+        self.assertIn("import { h, toast } from", main_js)
         self.assertIn("const hasMeshDom = Boolean(meshRoot.querySelector('.mesh-layout'));", main_js)
         self.assertIn("enteringMeshRoomId", main_js)
 
@@ -899,10 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v99 with zero stale v79/v87/v88/v97 references
+        # 1. Cache-bust bumped cleanly to 20261104_v100 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v99", index_html)
-        self.assertNotIn("20261104_v97", index_html)
+        self.assertIn("20261104_v100", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)

@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v99';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v99';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v99';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v99';
-import { api } from './api.js?v=20261104_v99';
-import { h, toast, openIosCrossAppPipSheet } from './ui.js?v=20261104_v99';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v100';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v100';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v100';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v100';
+import { api } from './api.js?v=20261104_v100';
+import { h, toast } from './ui.js?v=20261104_v100';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -42,40 +42,15 @@ function ensureViewRoots(app) {
   return { homeRoot, meshRoot };
 }
 
-window.vortexMinimizeRoom = async (opts = {}) => {
+window.vortexMinimizeRoom = () => {
   if (!activeMeshRoomId) {
     navigate('/');
     return;
   }
   window.__vortexCancelChatVoiceRec?.();
-  const isAndroidActivityPipCapable = Boolean(window.Android?.canPiP?.() || typeof window.Android?.enterPiP === 'function');
-  let enteredOsPip = Boolean(window.__kinoxHost?.isPiP?.());
-  if (!enteredOsPip && opts?.preferInAppOnly !== true && state.mesh?.media && window.__kinoxHost) {
-    try {
-      let res = window.__kinoxHost.tryEnterPipSync?.({ enterOnly: true });
-      if (!res) {
-        res = await window.__kinoxHost.enterPiP?.('room-minimize');
-      }
-      if (res === 'ios-standalone-blocked') {
-        openIosCrossAppPipSheet({
-          roomId: activeMeshRoomId,
-          onMinimizeInApp: () => window.vortexMinimizeRoom?.({ preferInAppOnly: true }),
-        });
-        return;
-      }
-      if (isAndroidActivityPipCapable && (res === 'entered' || res === 'already-pip' || document.documentElement.classList.contains('is-android-pip'))) {
-        document.body.classList.remove('vortex-fs');
-        return;
-      }
-      enteredOsPip = Boolean(res === 'entered' || res === 'already-pip' || window.__kinoxHost.isPiP?.());
-    } catch (_) {}
-  }
   document.body.classList.add('mesh-minimized');
-  document.body.classList.toggle('os-pip-active', Boolean(enteredOsPip && !document.documentElement.classList.contains('is-android-pip')));
   document.body.classList.remove('vortex-fs');
-  toast(enteredOsPip
-    ? '⧉ Sistem PiP penceresi açıldı · Diğer uygulamalarda da izlemeye devam edebilirsin'
-    : '🗗 Oda sağ alta küçültüldü · Gezinmeye devam edebilirsin');
+  toast('🗗 Oda sağ alta küçültüldü · Gezinmeye devam edebilirsin');
   navigate('/');
 };
 
@@ -86,7 +61,7 @@ window.vortexRestoreRoom = () => {
 };
 
 window.vortexCloseMinimizedRoom = () => {
-  document.body.classList.remove('mesh-minimized', 'os-pip-active');
+  document.body.classList.remove('mesh-minimized');
   activeMeshRoomId = null;
   leaveMeshView(true);
   const meshRoot = document.getElementById('mesh-root');
@@ -318,7 +293,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v99', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v100', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

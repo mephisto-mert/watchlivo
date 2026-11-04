@@ -7526,24 +7526,15 @@ async def upload_file(request: Request):
 
 
 async def manifest_json(request: Request):
-    return JSONResponse(
-        {
-            "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik",
-            "short_name": "Watchlivo",
-            "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
-            "start_url": "/",
-            "display": "standalone",
-            "background_color": "#080A0F",
-            "theme_color": "#080A0F",
-            "orientation": "any",
-            "icons": [
-                {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
-                {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-                {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
-            ],
-        },
-        headers={"Vary": "User-Agent", "Cache-Control": "no-cache"},
-    )
+    return JSONResponse({
+        "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik", "short_name": "Watchlivo", "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
+        "start_url": "/", "display": "standalone", "background_color": "#080A0F", "theme_color": "#080A0F", "orientation": "any",
+        "icons": [
+            {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
+            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+        ],
+    })
 
 
 async def service_worker(request: Request):

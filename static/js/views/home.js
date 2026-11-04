@@ -1,16 +1,16 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261104_v99';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261104_v100';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261104_v99';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261104_v99';
-import { api } from '../api.js?v=20261104_v99';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261104_v99';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v99';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261104_v99';
+} from '../store.js?v=20261104_v100';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261104_v100';
+import { api } from '../api.js?v=20261104_v100';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261104_v100';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v100';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261104_v100';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -22,20 +22,16 @@ function attachTubelight(container, itemSel, activeCls) {
   container.prepend(ind);
   const sync = () => {
     const act = container.querySelector(`${itemSel}.${activeCls}`);
-    if (!act || !act.offsetWidth || !act.offsetHeight) {
+    if (!act || !act.offsetWidth) {
       ind.style.opacity = '0';
       return;
     }
     ind.style.opacity = '1';
-    ind.style.top = `${act.offsetTop}px`;
-    ind.style.height = `${act.offsetHeight}px`;
-    ind.style.bottom = 'auto';
     ind.style.width = `${act.offsetWidth}px`;
     ind.style.transform = `translate3d(${act.offsetLeft}px, 0, 0)`;
   };
   requestAnimationFrame(() => requestAnimationFrame(sync));
   window.addEventListener('resize', sync, { passive: true });
-  container.addEventListener('scroll', sync, { passive: true });
   container._syncTubelight = sync;
   return sync;
 }
@@ -57,7 +53,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261104_v99', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261104_v100', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
