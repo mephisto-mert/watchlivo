@@ -1554,9 +1554,64 @@ def _scrape_dizipal_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -
     return out
 
 
+import threading
+
+_CUSTOM_RELEASES_POOL: list[dict] = []
+_CUSTOM_RELEASES_LOADED = False
+_CUSTOM_RELEASES_LOCK = threading.Lock()
+_NEW_RELEASES_MEM_CACHE: dict[str, object] = {"ts": 0.0, "items": []}
+
+
+def _register_custom_release_stream(it_obj: dict) -> None:
+    if not isinstance(it_obj, dict):
+        return
+    st_u = str(it_obj.get("streamUrl") or "").strip()
+    if not st_u.startswith(("http://", "https://")):
+        return
+    v_streams = _MAIN_SITES_VAULT.setdefault("streams", {})
+    mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
+    tid_k = str(it_obj.get("tmdbId") or it_obj.get("id") or "").strip()
+    nt_k = _norm_title(it_obj.get("title") or "")
+    no_k = _norm_title(it_obj.get("originalTitle") or "")
+    st_type = "mp4_fhd" if ".mp4" in st_u.lower() else ("yt" if ("youtube.com" in st_u.lower() or "youtu.be" in st_u.lower()) else "hls_fhd_multi")
+    entry = {"streams": [[st_u, st_type]], "customDirect": True, "title": it_obj.get("title") or ""}
+    keys = []
+    if tid_k:
+        keys.extend([f"tmdb:{mt_k}:{tid_k}:1:1", f"id:{tid_k}"])
+    if nt_k:
+        keys.append(f"{mt_k}:{nt_k}:1:1")
+    if no_k:
+        keys.append(f"{mt_k}:{no_k}:1:1")
+    for k in keys:
+        v_streams[k] = entry
+
+
+def _load_custom_releases_sync() -> list[dict]:
+    global _CUSTOM_RELEASES_LOADED
+    with _CUSTOM_RELEASES_LOCK:
+        if not _CUSTOM_RELEASES_LOADED:
+            _CUSTOM_RELEASES_LOADED = True
+            try:
+                stored = social_engine._kv_get("wl:releases:custom:v1")
+                if isinstance(stored, list):
+                    seen_c = {str(x.get("id") or x.get("tmdbId") or x.get("title") or "") for x in _CUSTOM_RELEASES_POOL}
+                    for raw_x in stored:
+                        if isinstance(raw_x, dict) and raw_x.get("title"):
+                            ck = str(raw_x.get("id") or raw_x.get("tmdbId") or raw_x.get("title") or "")
+                            if ck not in seen_c:
+                                seen_c.add(ck)
+                                _CUSTOM_RELEASES_POOL.append(raw_x)
+                            _register_custom_release_stream(raw_x)
+            except Exception:
+                pass
+        return [dict(x) for x in _CUSTOM_RELEASES_POOL]
+
+
 def _has_vault_stream(it_obj: dict) -> int:
     if not isinstance(it_obj, dict):
         return 0
+    if it_obj.get("customRelease") or it_obj.get("isVizyon") or it_obj.get("streamUrl"):
+        return 2
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
     tid_k = str(it_obj.get("tmdbId") or it_obj.get("id") or "")
@@ -1586,6 +1641,8 @@ def _has_vault_stream(it_obj: dict) -> int:
     best_tier = 0
     for ck in c_keys:
         if ck and ck in v_streams:
+            if v_streams[ck].get("customDirect"):
+                return 2
             c_st = v_streams[ck].get("streams") or []
             for s in c_st:
                 if not isinstance(s, (list, tuple)) or len(s) < 2:
@@ -1660,6 +1717,9 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         merged = []
         nq = _norm_title(sq)
         dom_hits = []
+        for c_rel in _load_custom_releases_sync():
+            if nq and (nq in _norm_title(c_rel.get("title") or "") or nq in _norm_title(c_rel.get("originalTitle") or "") or str(c_rel.get("tmdbId") or "") == sq.strip()):
+                dom_hits.append(dict(c_rel))
         dom_sources = [_DOMESTIC_TR_ORIGINALS[prov]] if prov in _DOMESTIC_TR_ORIGINALS else (list(_DOMESTIC_TR_ORIGINALS.values()) if (is_free_tr or prov == "all") else [])
         for dom_list in dom_sources:
             for d_it in dom_list:
@@ -1759,6 +1819,15 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     elif cat == "movies":
         p1, p2, p3 = (pg - 1) * 3 + 1, (pg - 1) * 3 + 2, (pg - 1) * 3 + 3
         eps = [("movie", f"{base_mv}&sort_by=popularity.desc&page={p1}"), ("movie", f"{base_mv}&sort_by=popularity.desc&page={p2}"), ("movie", f"{base_mv}&sort_by=vote_count.desc&page={p3}")]
+    elif cat == "vizyon":
+        p1 = max(1, pg)
+        eps = [
+            ("movie", f"https://api.themoviedb.org/3/movie/now_playing?api_key={TMDB_API_KEY}&language=tr-TR&region=TR&page={p1}"),
+            ("movie", f"https://api.themoviedb.org/3/movie/upcoming?api_key={TMDB_API_KEY}&language=tr-TR&region=TR&page={p1}"),
+            ("tv", f"https://api.themoviedb.org/3/tv/on_the_air?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
+            ("movie", f"https://api.themoviedb.org/3/trending/movie/week?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
+            ("tv", f"https://api.themoviedb.org/3/trending/tv/week?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
+        ]
     elif cat == "trend":
         p1, p2 = (pg - 1) * 2 + 1, (pg - 1) * 2 + 2
         eps = [
@@ -1800,6 +1869,11 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     it = _tmdb_item(r, dtype)
                     if cat in CAT_TMDB_GENRES and cat not in it["categories"]:
                         it["categories"].append(cat)
+                    if cat == "vizyon":
+                        it["isVizyon"] = True
+                        if "vizyon" not in it["categories"]:
+                            it["categories"].append("vizyon")
+                        it["sourceBadge"] = "🍿 Vizyonda & Yeni"
                     out_list.append(it)
         except Exception:
             pass
@@ -1964,7 +2038,15 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                     items.append(vit)
 
     # Filter out unreleased 0-rating titles, hidden unstreamable titles & enforce strict mediaType constraints
-    items = [x for x in items if not (float(x.get("rating") or 0) == 0.0 and str(x.get("year") or "") >= "2026")]
+    if pg == 1:
+        custom_rels = _load_custom_releases_sync()
+        if custom_rels:
+            filtered_custom = [
+                dict(x) for x in custom_rels
+                if cat in ("all", "vizyon", "trend", "movies", "series") or cat in (x.get("categories") or [])
+            ]
+            items = filtered_custom + items
+    items = [x for x in items if x.get("customRelease") or x.get("isVizyon") or not (float(x.get("rating") or 0) == 0.0 and str(x.get("year") or "") >= "2026")]
     if _HIDDEN_TMDB_IDS:
         items = [
             x for x in items
@@ -1978,7 +2060,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     verified_only = [x for x in items if _has_vault_stream(x)]
     vf_tv = sum(1 for x in verified_only if x.get("mediaType") == "tv")
     vf_mv = sum(1 for x in verified_only if x.get("mediaType") != "tv")
-    if verified_only and ((is_free_tr and len(verified_only) >= 12) or (vf_tv >= 10 and vf_mv >= 10)):
+    if cat != "vizyon" and verified_only and ((is_free_tr and len(verified_only) >= 12) or (vf_tv >= 10 and vf_mv >= 10)):
         items = verified_only
     if mt_flt in ("tv", "movie"):
         items = [x for x in items if x.get("mediaType") == mt_flt]
@@ -5053,7 +5135,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             or "master.txt?s=" in st_u.lower()
                         ):
                             continue
-                        if _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
+                        if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:5]
         has_non_yt = any(st != "yt" and "youtube.com/watch?v=" not in str(u) for u, st in (direct_list or []))
@@ -5459,6 +5541,176 @@ async def provider_catalog(request: Request):
         {"provider": prov, "query": q, **res},
         headers={"Cache-Control": "public, max-age=60, s-maxage=600, stale-while-revalidate=1800"},
     )
+
+
+def _ingest_custom_release_sync(payload: dict) -> dict:
+    raw_title = str(payload.get("title") or "").strip()[:160]
+    raw_tid = str(payload.get("tmdbId") or "").strip()[:30]
+    raw_imdb = str(payload.get("imdbId") or "").strip()[:30]
+    raw_mt = str(payload.get("mediaType") or payload.get("type") or "movie").strip().lower()
+    mtype = "tv" if raw_mt in ("tv", "series", "show", "dizi") else "movie"
+    raw_year = str(payload.get("year") or "").strip()[:8]
+    raw_poster = str(payload.get("poster") or "").strip()[:600]
+    raw_stream = str(payload.get("streamUrl") or "").strip()[:800]
+    raw_source = str(payload.get("sourceUrl") or "").strip()[:600]
+    raw_prov = str(payload.get("provider") or "cinema").strip().lower()[:30]
+
+    tm_hit = None
+    if raw_tid.isdigit():
+        try:
+            u = f"https://api.themoviedb.org/3/{mtype}/{raw_tid}?api_key={TMDB_API_KEY}&language=tr-TR"
+            r = _http_json(u, timeout=3.5)
+            if r and r.get("id"):
+                tm_hit = _tmdb_item(r, mtype)
+        except Exception:
+            tm_hit = None
+    if not tm_hit and raw_title:
+        try:
+            hits = _tmdb_sync(raw_title)
+            if hits:
+                same_mt = [h for h in hits if h.get("mediaType") == mtype]
+                tm_hit = same_mt[0] if same_mt else hits[0]
+        except Exception:
+            tm_hit = None
+
+    title = raw_title or (tm_hit.get("title") if tm_hit else "")
+    if not title:
+        raise ValueError("Film veya dizi başlığı gerekli")
+    orig_title = str(payload.get("originalTitle") or (tm_hit.get("originalTitle") if tm_hit else "") or title).strip()[:160]
+    tid = raw_tid or (str(tm_hit.get("tmdbId") or "") if tm_hit else "") or f"vizyon-{abs(hash(_norm_title(title))) % 10000000}"
+    year = raw_year or (str(tm_hit.get("year") or "") if tm_hit else "") or "2026"
+    poster = raw_poster or (str(tm_hit.get("poster") or "") if tm_hit else "")
+    backdrop = str(payload.get("backdrop") or (tm_hit.get("backdrop") if tm_hit else "") or poster).strip()
+    rating = float(payload.get("rating") or (tm_hit.get("rating") if tm_hit else 0) or 7.8)
+    cats = list(dict.fromkeys(((tm_hit.get("categories") if tm_hit else []) or []) + ["vizyon", "trend", "series" if mtype == "tv" else "movies"]))
+
+    new_item = {
+        "id": f"vizyon-{mtype}-{tid}",
+        "tmdbId": str(tid),
+        "imdbId": raw_imdb,
+        "title": title,
+        "originalTitle": orig_title,
+        "year": year,
+        "rating": round(rating, 1),
+        "voteCount": int((tm_hit.get("voteCount") if tm_hit else 0) or 120),
+        "mediaType": mtype,
+        "poster": poster,
+        "backdrop": backdrop or poster,
+        "categories": cats,
+        "genreLabel": f"🇹🇷 Vizyon & Yeni · {'Dizi' if mtype == 'tv' else 'Sinema 4K'}",
+        "sourceBadge": "🍿 Vizyonda & Yeni",
+        "provider": raw_prov or "cinema",
+        "streamUrl": raw_stream,
+        "sourceUrl": raw_source,
+        "officialUrl": raw_source or raw_stream,
+        "customRelease": True,
+        "isVizyon": True,
+        "addedAt": int(time.time()),
+    }
+    _load_custom_releases_sync()
+    with _CUSTOM_RELEASES_LOCK:
+        _CUSTOM_RELEASES_POOL[:] = [
+            x for x in _CUSTOM_RELEASES_POOL
+            if not (str(x.get("tmdbId") or "") == str(tid) and x.get("mediaType") == mtype)
+            and _norm_title(x.get("title") or "") != _norm_title(title)
+        ]
+        _CUSTOM_RELEASES_POOL.insert(0, new_item)
+        del _CUSTOM_RELEASES_POOL[100:]
+        _register_custom_release_stream(new_item)
+        try:
+            social_engine._kv_set("wl:releases:custom:v1", _CUSTOM_RELEASES_POOL)
+        except Exception:
+            pass
+    _CATALOG_MEM_CACHE.clear()
+    _NEW_RELEASES_MEM_CACHE["ts"] = 0.0
+    return new_item
+
+
+async def rave_new_releases(request: Request):
+    if request.method == "POST":
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400)
+        try:
+            item = await asyncio.to_thread(_ingest_custom_release_sync, payload)
+        except ValueError as ve:
+            return JSONResponse({"ok": False, "error": str(ve)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": f"İçerik eklenemedi: {exc}"}, status_code=500)
+        return JSONResponse({
+            "ok": True,
+            "item": item,
+            "totalCustom": len(_CUSTOM_RELEASES_POOL),
+        })
+
+    force_refresh = (request.query_params.get("refresh") or "").strip().lower() in ("1", "true", "yes")
+    now_t = time.time()
+    if not force_refresh and _NEW_RELEASES_MEM_CACHE.get("items") and (now_t - float(_NEW_RELEASES_MEM_CACHE.get("ts") or 0) < 300):
+        cached_items = list(_NEW_RELEASES_MEM_CACHE.get("items") or [])
+        custom_list = await asyncio.to_thread(_load_custom_releases_sync)
+        return JSONResponse({
+            "ok": True,
+            "items": cached_items,
+            "customItems": custom_list,
+            "total": len(cached_items),
+            "cached": True,
+        })
+
+    if force_refresh:
+        _CATALOG_MEM_CACHE.pop("v4:cinema:vizyon:1:", None)
+    try:
+        cat_res = await asyncio.wait_for(
+            asyncio.to_thread(_provider_catalog_page_sync, "cinema", "", 1, "vizyon", ""),
+            timeout=9.0,
+        )
+        items = list(cat_res.get("items") or [])
+    except Exception:
+        items = await asyncio.to_thread(_load_custom_releases_sync)
+
+    custom_list = await asyncio.to_thread(_load_custom_releases_sync)
+    seen_k = set()
+    merged = []
+    for it in custom_list + items:
+        k = f"{it.get('mediaType') or 'movie'}:{it.get('tmdbId') or _norm_title(it.get('title') or '')}"
+        if k in seen_k:
+            continue
+        seen_k.add(k)
+        merged.append(it)
+    _NEW_RELEASES_MEM_CACHE["ts"] = now_t
+    _NEW_RELEASES_MEM_CACHE["items"] = merged[:60]
+
+    # Warm-prefetch top 3 items in background so room playback starts instantaneously
+    async def _warm_top():
+        for w_it in merged[:3]:
+            try:
+                w_tid = str(w_it.get("tmdbId") or "")
+                w_mt = str(w_it.get("mediaType") or "movie")
+                w_t = str(w_it.get("title") or "")
+                w_ckey = f"v24|cinema|{w_mt}|{w_tid or w_t.lower()}|1|1"
+                if w_ckey not in _RESOLVE_RESP_CACHE:
+                    r_w = await asyncio.wait_for(
+                        asyncio.to_thread(_resolve_catalog_sync, "cinema", w_t, str(w_it.get("year") or ""), w_tid, w_mt, str(w_it.get("poster") or ""), 1, 1, str(w_it.get("imdbId") or ""), w_t, str(w_it.get("sourceUrl") or "")),
+                        timeout=6.0,
+                    )
+                    if r_w:
+                        _RESOLVE_RESP_CACHE[w_ckey] = (time.time(), r_w)
+            except Exception:
+                pass
+    try:
+        asyncio.create_task(_warm_top())
+    except Exception:
+        pass
+
+    return JSONResponse({
+        "ok": True,
+        "items": merged[:60],
+        "customItems": custom_list,
+        "total": len(merged),
+        "cached": False,
+    })
 
 
 async def supersearch(request: Request):
@@ -8318,6 +8570,8 @@ app = Starlette(
         Route("/api/rave/catalog", provider_catalog),
         Route("/api/rave/provider-catalog", provider_catalog),
         Route("/api/rave/platform-catalog", provider_catalog),
+        Route("/api/rave/new-releases", rave_new_releases, methods=["GET", "POST"]),
+        Route("/api/rave/vizyon", rave_new_releases, methods=["GET", "POST"]),
         Route("/api/rave/seasons", title_seasons),
         Route("/api/rave/series-info", title_seasons),
         Route("/api/rave/series-episodes", title_seasons),

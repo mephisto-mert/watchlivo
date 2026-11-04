@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v104';
-import { api, qs } from '../api.js?v=20261104_v104';
-import { parseVideoUrl } from '../providers.js?v=20261104_v104';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v104';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v104';
-import { profileSetup } from '../profile.js?v=20261104_v104';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v104';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v105';
+import { api, qs } from '../api.js?v=20261104_v105';
+import { parseVideoUrl } from '../providers.js?v=20261104_v105';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v105';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v105';
+import { profileSetup } from '../profile.js?v=20261104_v105';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v105';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261104_v104';
+} from '../store.js?v=20261104_v105';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -495,6 +495,7 @@ export function renderDesktopKind(p, body, pick) {
 
 const CATALOG_CATEGORIES = [
   { id: 'all', label: '✨ Tüm Katalog' },
+  { id: 'vizyon', label: '🍿 Vizyondakiler & Yeni (2026)' },
   { id: 'series', label: '📺 Tüm Diziler' },
   { id: 'movies', label: '🎬 Tüm Filmler' },
   { id: 'anime', label: '⛩️ Anime (Animetrix / Fansub)' },
@@ -518,6 +519,10 @@ function fmtCount(n) {
 
 function itemMatchesCat(it, catId) {
   if (catId === 'all') return true;
+  if (catId === 'vizyon') {
+    const cats = Array.isArray(it.categories) ? it.categories : [];
+    return Boolean(it.isVizyon || it.customRelease || cats.includes('vizyon') || Number(it.year || 0) >= 2025);
+  }
   if (catId === 'dublaj') {
     const cats = Array.isArray(it.categories) ? it.categories : [];
     const badge = String(it.sourceBadge || it.audioBadge || '');
@@ -816,6 +821,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }
 
     const shelves = [
+      { id: 'vizyon', title: '🍿 Vizyondakiler & Yeni Eklenenler (2026)' },
       { id: 'trend', title: `🔥 ${p.name} Trend & Top 20` },
       { id: 'series', title: `📺 Popüler ${p.name} Dizileri` },
       { id: 'movies', title: `🎬 Gişe & Popüler Filmler` },
@@ -922,11 +928,157 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     h('div', { class: 'sel-search' }, h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }), input,
       createVoiceSearchButton({ h, icons, inputEl: input, toast, onResult: (q) => { clearTimeout(debTimer); run(q); } }),
       h('button', { class: 'btn primary', onclick: () => { clearTimeout(debTimer); run(input.value); } }, 'Ara'),
+      h('button', {
+        type: 'button',
+        class: 'btn sm',
+        id: 'btn-catalog-vizyon',
+        title: 'Vizyondaki Yeni Filmleri Gör veya Yeni Film/Dizi Ekle',
+        onclick: () => openVizyonModal(pick, (newItem) => {
+          currentItems = [newItem, ...currentItems];
+          renderCategoryView();
+        }),
+      }, '🍿 Vizyon & Yeni Ekle'),
       clearBtn),
     catBar,
     contentArea);
   body.append(authHolder, mainWrap, detailWrap);
   refreshAuth();
+}
+
+export function openVizyonModal(pick, onAdded) {
+  const wrap = h('div', { class: 'wl-vizyon-modal', style: { display: 'flex', flexDirection: 'column', gap: '14px', minHeight: '360px' } });
+  const titleIn = h('input', { class: 'input', placeholder: 'Film veya Dizi Adı (örn: Dune: Part Three, Eşref Rüya...)', 'aria-label': 'Film veya Dizi Adı' });
+  const typeSel = h('select', { class: 'input', style: { maxWidth: '140px' }, 'aria-label': 'Tür Seçimi' },
+    h('option', { value: 'movie' }, '🎬 Sinema Filmi'),
+    h('option', { value: 'tv' }, '📺 Dizi / Sezon'),
+  );
+  const yearIn = h('input', { class: 'input', placeholder: 'Yıl veya TMDB ID (opsiyonel)', style: { maxWidth: '190px' }, 'aria-label': 'Yıl veya TMDB ID' });
+  const streamIn = h('input', { class: 'input', placeholder: 'Doğrudan .m3u8 / .mp4 veya Kaynak URL (opsiyonel — boşsa otomatik aranır)', 'aria-label': 'Akış veya Kaynak URL' });
+  const addForm = h('div', {
+    class: 'wl-vizyon-form hidden',
+    style: { display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '14px', background: 'rgba(15, 23, 42, 0.78)', border: '1px solid rgba(56, 189, 248, 0.28)' },
+  });
+  const gridWrap = h('div', { class: 'poster-grid', style: { minHeight: '220px' } }, spinner());
+  let closeRef = null;
+
+  const startItem = async (it) => {
+    if (!pick) return;
+    toast(`🍿 "${it.title}" odada hazırlanıyor...`);
+    const resolved = await resolveCatalogItem(it, { id: it.provider || 'cinema', name: 'Sinema+ Vizyon' });
+    if (resolved) {
+      closeRef?.close?.();
+      await pick(resolved);
+    }
+  };
+
+  const renderItems = (items) => {
+    if (!Array.isArray(items) || !items.length) {
+      gridWrap.replaceChildren(h('div', { class: 'lobby-empty' }, 'Vizyon havuzunda henüz içerik bulunamadı.'));
+      return;
+    }
+    gridWrap.replaceChildren(...items.slice(0, 36).map((it) => {
+      const isTv = it.mediaType === 'tv';
+      return h('div', {
+        class: 'poster-card',
+        tabIndex: 0,
+        role: 'button',
+        'aria-label': `${it.title} (${it.year || '2026'})`,
+        onclick: () => startItem(it),
+        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startItem(it); } },
+      },
+        h('div', { class: 'poster-img-wrap' },
+          it.poster
+            ? h('img', { src: it.poster, alt: it.title, loading: 'lazy' })
+            : h('div', { class: 'poster-fallback' }, isTv ? '📺' : '🎬'),
+          h('span', { class: 'poster-badge' }, it.customRelease ? '✨ Yeni Eklendi' : (it.sourceBadge || '🍿 Vizyonda')),
+          it.rating ? h('span', { class: 'poster-rating' }, `★ ${it.rating}`) : null,
+        ),
+        h('div', { class: 'poster-meta' },
+          h('div', { class: 'poster-title' }, it.title),
+          h('div', { class: 'poster-sub' }, `${it.year || '2026'} · ${isTv ? 'Dizi' : 'Film'}`),
+        ),
+      );
+    }));
+  };
+
+  const loadVizyon = async (refresh = false) => {
+    gridWrap.replaceChildren(spinner());
+    const res = await api(`/api/rave/new-releases${refresh ? '?refresh=1' : ''}`, { timeout: 12000 }).catch(() => null);
+    if (res?.items) {
+      renderItems(res.items);
+      if (refresh) toast(`🍿 Vizyon taraması tamamlandı (${res.items.length} film & dizi aktif)!`);
+    } else {
+      renderItems([]);
+    }
+  };
+
+  const submitNewRelease = async () => {
+    const title = titleIn.value.trim();
+    const rawYrTid = yearIn.value.trim();
+    if (!title && !/^\d+$/.test(rawYrTid)) {
+      toast('Lütfen film/dizi adını veya TMDB kimliğini girin.');
+      return;
+    }
+    const isTmdbId = /^\d{3,10}$/.test(rawYrTid) && Number(rawYrTid) > 2100;
+    const body = {
+      title,
+      mediaType: typeSel.value,
+      year: !isTmdbId && /^\d{4}$/.test(rawYrTid) ? rawYrTid : '',
+      tmdbId: isTmdbId ? rawYrTid : '',
+      streamUrl: streamIn.value.trim(),
+      sourceUrl: streamIn.value.trim(),
+    };
+    toast('⏳ Yeni içerik vizyon kataloğuna ekleniyor...');
+    const res = await api('/api/rave/new-releases', { method: 'POST', body }).catch(() => null);
+    if (res?.ok && res.item) {
+      toast(`✅ "${res.item.title}" vizyon kataloğuna eklendi!`);
+      titleIn.value = '';
+      yearIn.value = '';
+      streamIn.value = '';
+      addForm.classList.add('hidden');
+      onAdded?.(res.item);
+      await loadVizyon(true);
+    } else {
+      toast(res?.error || 'İçerik eklenirken bir sorun oluştu.');
+    }
+  };
+
+  addForm.append(
+    h('div', { style: { fontWeight: '700', fontSize: '0.9rem', color: '#38bdf8' } }, '➕ Yeni Vizyon Filmi veya Dizi Ekle (TMDB Otomatik Afiş & Akış Tanıma)'),
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, titleIn, typeSel, yearIn),
+    streamIn,
+    h('div', { style: { display: 'flex', gap: '8px', justifyContent: 'flex-end' } },
+      h('button', { type: 'button', class: 'btn sm ghost', onclick: () => addForm.classList.add('hidden') }, 'Vazgeç'),
+      h('button', { type: 'button', class: 'btn sm primary', id: 'btn-submit-vizyon', onclick: submitNewRelease }, '🚀 Kataloğa Ekle'),
+    ),
+  );
+
+  const topActions = h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' } },
+    h('div', { style: { fontSize: '0.84rem', opacity: '0.85' } }, 'Sinema salonlarındaki yeni filmler ve yeni bölüm diziler otomatik taranır veya 1 tıkla eklenir.'),
+    h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+      h('button', {
+        type: 'button',
+        class: 'btn sm',
+        id: 'btn-scan-vizyon-now',
+        onclick: () => loadVizyon(true),
+      }, '🔄 Vizyonu Şimdi Tara'),
+      h('button', {
+        type: 'button',
+        class: 'btn sm primary',
+        id: 'btn-toggle-vizyon-form',
+        onclick: () => addForm.classList.toggle('hidden'),
+      }, '➕ Yeni Film / Dizi Ekle'),
+    ),
+  );
+
+  wrap.append(topActions, addForm, gridWrap);
+  closeRef = popup({
+    title: '🍿 Vizyondakiler & Yeni Eklenen Film / Diziler (2026)',
+    content: wrap,
+    wide: true,
+    options: [{ label: 'Kapat' }],
+  });
+  loadVizyon(false);
 }
 
 

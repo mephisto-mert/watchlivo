@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v104';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v104';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v104';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v104';
-import { api } from './api.js?v=20261104_v104';
-import { h, toast } from './ui.js?v=20261104_v104';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v105';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v105';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v105';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v105';
+import { api } from './api.js?v=20261104_v105';
+import { h, toast } from './ui.js?v=20261104_v105';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -360,7 +360,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v104', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v105', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -581,6 +581,115 @@ function initRaveNotifications() {
     }
     if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
   }, 4500);
+
+  initSpatialTvNavigation();
+}
+
+function initSpatialTvNavigation() {
+  if (window.__wlSpatialTvNavInit) return;
+  window.__wlSpatialTvNavInit = true;
+  const FOCUS_SELECTOR = [
+    'button:not([disabled])',
+    'a[href]',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    '[role="button"]:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+    '.provider-tile',
+    '.poster-card',
+    '.lobby-card',
+    '.dock-item',
+    '.cat-tab-pill',
+    '.provider-cat-pill',
+  ].join(', ');
+
+  const getVisibleFocusables = () => {
+    const popupEl = document.querySelector('.popup-backdrop .popup');
+    const scope = popupEl || document;
+    const nodes = Array.from(scope.querySelectorAll(FOCUS_SELECTOR));
+    return nodes.filter((el) => {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.closest('.hidden, [aria-hidden="true"]')) return false;
+      const st = window.getComputedStyle(el);
+      if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 6 && r.height > 6;
+    });
+  };
+
+  const moveFocus = (dir) => {
+    const items = getVisibleFocusables();
+    if (!items.length) return false;
+    items.forEach((el) => {
+      if (el.tabIndex < 0 && !el.hasAttribute('tabindex')) el.tabIndex = 0;
+    });
+    const cur = document.activeElement instanceof HTMLElement && items.includes(document.activeElement)
+      ? document.activeElement
+      : null;
+    if (!cur) {
+      items[0].focus({ preventScroll: false });
+      return true;
+    }
+    const cr = cur.getBoundingClientRect();
+    const cx = cr.left + cr.width / 2;
+    const cy = cr.top + cr.height / 2;
+    let best = null;
+    let bestScore = Infinity;
+    for (const cand of items) {
+      if (cand === cur) continue;
+      const r = cand.getBoundingClientRect();
+      const tx = r.left + r.width / 2;
+      const ty = r.top + r.height / 2;
+      const dx = tx - cx;
+      const dy = ty - cy;
+      let primary = 0;
+      let secondary = 0;
+      if (dir === 'right' && dx > 6) { primary = dx; secondary = Math.abs(dy); }
+      else if (dir === 'left' && dx < -6) { primary = -dx; secondary = Math.abs(dy); }
+      else if (dir === 'down' && dy > 6) { primary = dy; secondary = Math.abs(dx); }
+      else if (dir === 'up' && dy < -6) { primary = -dy; secondary = Math.abs(dx); }
+      else continue;
+      const score = primary + secondary * 2.35;
+      if (score < bestScore) {
+        bestScore = score;
+        best = cand;
+      }
+    }
+    if (best) {
+      best.focus({ preventScroll: true });
+      try { best.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch (_) {}
+      return true;
+    }
+    return false;
+  };
+
+  window.vortexSpatialMove = moveFocus;
+
+  window.addEventListener('pointerdown', () => {
+    document.body.classList.remove('tv-nav-active');
+  }, { passive: true });
+
+  window.addEventListener('keydown', (e) => {
+    const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+    const dir = map[e.key];
+    const active = document.activeElement;
+    const isTextInput = active && (
+      (active.tagName === 'INPUT' && !['button', 'checkbox', 'radio', 'range'].includes(active.type)) ||
+      active.tagName === 'TEXTAREA' ||
+      active.isContentEditable
+    );
+    if (dir) {
+      if (isTextInput && (dir === 'left' || dir === 'right')) return;
+      if (document.querySelector('#mesh-root .video-stage:hover') && !document.body.classList.contains('tv-nav-active')) return;
+      document.body.classList.add('tv-nav-active');
+      if (moveFocus(dir)) {
+        e.preventDefault();
+      }
+    } else if (e.key === 'Enter' && document.body.classList.contains('tv-nav-active') && active instanceof HTMLElement && !isTextInput && active.tagName !== 'BUTTON' && active.tagName !== 'A') {
+      e.preventDefault();
+      active.click();
+    }
+  });
 }
 
 boot();

@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261104_v104';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v104';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v104';
+import { toast } from './ui.js?v=20261104_v105';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v105';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v105';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -744,7 +744,11 @@ export class Voice {
     }
     if (selfId) {
       const iAmActive = Boolean(this.inCall || this.micOn || this.camOn || this.screenOn);
-      for (const p of list) {
+      const prioritizedList = [...list].sort((a, b) => {
+        const score = (x) => (x?.isHost ? 8 : 0) + (x?.isCoHost ? 4 : 0) + (x?.isStageSpeaker ? 4 : 0) + ((!x?.muted || x?.cam || x?.screen || x?.speaking) ? 2 : 0);
+        return score(b) - score(a);
+      });
+      for (const p of prioritizedList) {
         if (p.id && p.id !== selfId && p.transport !== 'bot') {
           if (!p.cam && !p.screen) {
             this._removeVideoBubble(p.id);
@@ -761,7 +765,25 @@ export class Voice {
           }
           const peerActive = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
-          if (!this.peers.has(p.id) && this.peers.size >= 12) continue;
+          if (!this.peers.has(p.id) && this.peers.size >= 12) {
+            if (peerActive || p.isHost || p.isStageSpeaker) {
+              const idleEntry = [...this.peers.entries()].find(([pid]) => {
+                const meta = list.find((u) => u.id === pid);
+                return meta && !meta.isHost && !meta.isStageSpeaker && meta.muted && !meta.cam && !meta.screen && !meta.speaking;
+              });
+              if (idleEntry) {
+                const [evictId, evictSt] = idleEntry;
+                try { evictSt.pc.close(); } catch (e) { /* ignore */ }
+                evictSt.audio?.remove();
+                this._removeVideoBubble(evictId);
+                this.peers.delete(evictId);
+              } else {
+                continue;
+              }
+            } else {
+              continue;
+            }
+          }
           const had = this.peers.has(p.id);
           const st = this.peer(p.id);
           if (!had && (iAmActive || (peerActive && String(selfId) < String(p.id)))) {

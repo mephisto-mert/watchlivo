@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261104_v104';
-import { api } from './api.js?v=20261104_v104';
-import { state } from './store.js?v=20261104_v104';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v104';
+import { clock } from './sync.js?v=20261104_v105';
+import { api } from './api.js?v=20261104_v105';
+import { state } from './store.js?v=20261104_v105';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261104_v105';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -243,9 +243,10 @@ export class MeshConnection {
     clearInterval(this.pollTimer);
     const scheduleNextPoll = () => {
       if (this.closed || this.mode !== 'http') return;
-      const pCnt = this.participantCount || 1;
-      const baseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt > 25 ? 1450 : 950;
-      const jitterMs = pCnt > 25 ? Math.floor(Math.random() * 450) : Math.floor(Math.random() * 140);
+      const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
+      const rawBaseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950;
+      const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
+      const jitterMs = pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140);
       this.pollTimer = setTimeout(async () => {
         if (this.outQueue.length && !this.flushing) {
           await this._flushOutQueue();

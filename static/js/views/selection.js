@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v104';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v104';
-import { api, qs } from '../api.js?v=20261104_v104';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261104_v104';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v104';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v104';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v104';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v105';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v105';
+import { api, qs } from '../api.js?v=20261104_v105';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261104_v105';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v105';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v105';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v105';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261104_v104';
+} from '../store.js?v=20261104_v105';
 
 let _activeHomePick = null;
 
@@ -981,6 +981,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         title: 'Bulut Senkron İzleme Listem',
         onclick: () => root.openFavorites(),
       }, h('span', {}, '🔖 İzleme Listem'), h('span', { class: 'cat-count' }, String(getFavorites().length))) : null,
+      !compact ? h('button', {
+        type: 'button',
+        id: 'btn-vizyon-modal-pill',
+        class: 'provider-cat-pill trend-pill',
+        title: 'Vizyondaki Yeni Filmleri Gör veya Yeni Film / Dizi Ekle',
+        onclick: () => openVizyonModal(pickSafe),
+      }, '🍿 Vizyon & Yeni Ekle') : null,
       !compact ? h('button', {
         type: 'button',
         id: 'btn-trending-toggle',

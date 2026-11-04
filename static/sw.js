@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261104_v104
+// Watchlivo Service Worker v20261104_v105
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Push & Background OS Notifications)
 self.addEventListener('install', (event) => {
   self.skipWaiting();

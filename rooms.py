@@ -654,10 +654,14 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
         return room["_tok_val"]
     host_id = room.get("host_id")
     co_set = set(room.get("co_hosts") or [])
+    stage_set = set(room.get("stage_speakers") or [])
+    total_humans = sum(1 for p in p_map.values() if isinstance(p, dict) and p.get("transport") != "bot")
+    is_large_room = total_humans >= 25
+    p_cap = 20 if is_large_room else 24
     p_items = sorted(
         p_map.items(),
-        key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
-    )[:24]
+        key=lambda kv: (0 if kv[0] == host_id else (1 if kv[0] in co_set else (2 if kv[0] in stage_set or not kv[1].get("muted", True) or kv[1].get("cam") else 3))),
+    )[:p_cap]
     snap = {k: room.get(k) for k in ("id", "name", "privacy", "playMode", "voipMode", "isMature", "creator",
                                      "creatorId", "creatorCid", "host_id", "co_hosts", "stage_speakers", "host_transferred",
                                      "createdAt", "lastActiveAt", "media", "queue", "skip_votes", "voteEndsAt",
@@ -665,9 +669,12 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     if room.get("passwordHash"):
         snap["pwEnc"] = _encrypt_pw_hash(str(room.get("passwordHash") or ""), str(room.get("id") or ""))
     snap["sigExp"] = t + SYNC_TOKEN_TTL
+    snap["totalParticipants"] = total_humans
+    snap["largeRoomMode"] = is_large_room
     snap["participants"] = dict(p_items)
     compact_chat = []
-    for cm in (room.get("chat") or [])[-25:]:
+    chat_slice = -15 if is_large_room else -25
+    for cm in (room.get("chat") or [])[chat_slice:]:
         if isinstance(cm, dict):
             has_big_an = cm.get("audioNote") and len(str((cm.get("audioNote") or {}).get("dataUrl") or "")) > 16000
             has_big_snap = cm.get("snapshot") and len(str(cm.get("snapshot") or "")) > 4000
@@ -768,6 +775,11 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             cid: ({**sp, "lastSeen": min(_finite_float(sp.get("lastSeen"), t), t - (HTTP_PARTICIPANT_TTL - 18.0))} if sp.get("transport") != "bot" else sp)
             for cid, sp in (snap.get("participants") or {}).items() if isinstance(sp, dict)
         }
+        if snap.get("totalParticipants"):
+            try:
+                fresh["totalParticipants"] = int(snap.get("totalParticipants") or 0)
+            except (TypeError, ValueError):
+                pass
         fresh["chat"] = [m for m in (snap.get("chat") or []) if isinstance(m, dict) and (not m.get("system") or (t - float(m.get("ts") or 0.0) <= 1800.0))][-MAX_CHAT:]
         fresh["polls"] = [p for p in (snap.get("polls") or []) if isinstance(p, dict)][-10:]
         fresh["events"] = [e for e in (snap.get("events") or []) if isinstance(e, dict)]
@@ -1055,7 +1067,10 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         )
     )
     dedup_parts = list(raw_parts)
-    total_p = sum(1 for p in dedup_parts if p.get("transport") != "bot")
+    live_humans = sum(1 for p in dedup_parts if p.get("transport") != "bot")
+    snap_tot = int(room.get("totalParticipants") or 0) if live_humans >= 20 else 0
+    total_p = max(live_humans, snap_tot)
+    is_large_room = total_p >= 25
     ser_parts = []
     for p in dedup_parts:
         if p.get("transport") == "bot":
@@ -1090,7 +1105,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         "chatClearedAt": float(room.get("chatClearedAt") or 0.0),
         "voteEndsAt": room["voteEndsAt"], "media": m, "queue": room["queue"],
         "skip_votes": room["skip_votes"], "participants": ser_parts,
-        "participantCount": total_p, "count": total_p,
+        "participantCount": total_p, "count": total_p, "largeRoomMode": is_large_room,
         "chat": room["chat"][-80:], "events": recent_events, "signals": recent_signals,
         "serverNow": t, "rev": int(room.get("rev") or 1), "syncToken": pack_sync_token(room),
     }

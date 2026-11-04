@@ -6616,3 +6616,19 @@ body,
     margin: auto !important;
   }
 }
+
+/* Smart TV D-Pad Spatial Navigation & WCAG 2.2 AA Focus-Visible Ring */
+:focus-visible,
+body.tv-nav-active :focus {
+  outline: 3px solid #38bdf8 !important;
+  outline-offset: 3px !important;
+  box-shadow: 0 0 0 6px rgba(56, 189, 248, 0.26), 0 8px 24px rgba(0, 0, 0, 0.55) !important;
+  transition: outline-offset 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease !important;
+}
+body.tv-nav-active .provider-tile:focus,
+body.tv-nav-active .poster-card:focus,
+body.tv-nav-active .lobby-card:focus,
+body.tv-nav-active .dock-item:focus {
+  transform: translateY(-2px) scale(1.02) !important;
+  z-index: 12 !important;
+}

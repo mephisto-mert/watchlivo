@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v104 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261104_v105 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v104", index_html)
+        self.assertIn("20261104_v105", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1544,6 +1544,69 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("height: calc(44px + env(safe-area-inset-top, 0px)) !important;", mesh_css)
         self.assertIn("height: calc(100% - 44px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
         self.assertIn("height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
+
+    def test_v107_vizyon_new_releases_large_room_and_tv_nav(self):
+        from pathlib import Path
+        import rooms
+
+        # 1. Test POST /api/rave/new-releases & GET /api/rave/new-releases & catalog category=vizyon
+        post_res = self.client.post("/api/rave/new-releases", json={
+            "title": "Dune: Messiah Vizyon Test",
+            "mediaType": "movie",
+            "year": "2026",
+            "poster": "https://image.tmdb.org/t/p/w500/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg",
+            "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+        })
+        self.assertEqual(post_res.status_code, 200)
+        post_data = post_res.json()
+        self.assertTrue(post_data.get("ok"))
+        added_item = post_data.get("item") or {}
+        self.assertEqual(added_item.get("title"), "Dune: Messiah Vizyon Test")
+        self.assertTrue(added_item.get("customRelease"))
+        self.assertIn("vizyon", added_item.get("categories") or [])
+
+        get_res = self.client.get("/api/rave/new-releases")
+        self.assertEqual(get_res.status_code, 200)
+        get_data = get_res.json()
+        self.assertTrue(get_data.get("ok"))
+        self.assertTrue(any(x.get("title") == "Dune: Messiah Vizyon Test" for x in (get_data.get("items") or [])))
+
+        cat_res = self.client.get("/api/rave/catalog?provider=cinema&category=vizyon&page=1")
+        self.assertEqual(cat_res.status_code, 200)
+        cat_items = cat_res.json().get("items") or []
+        self.assertTrue(any(x.get("title") == "Dune: Messiah Vizyon Test" for x in cat_items))
+
+        # 2. Test 100+ Participant Large-Room Broadcast Mode & compact syncToken
+        rm = rooms.new_room("large-100", "Dev Gala Odası", "public", "leader", "HostUser", "cid-host")
+        t_now = rooms.now()
+        for idx in range(35):
+            cid_u = f"cid-u-{idx}"
+            rm["participants"][cid_u] = {
+                "id": cid_u,
+                "name": f"Izleyici {idx}",
+                "color": "#38bdf8",
+                "muted": idx > 3,
+                "cam": idx == 1,
+                "lastSeen": t_now,
+                "transport": "http",
+            }
+        ser = rooms.serialize(rm, for_cid="cid-u-30")
+        self.assertTrue(ser.get("largeRoomMode"))
+        self.assertGreaterEqual(ser.get("participantCount"), 35)
+        self.assertLess(len(ser.get("syncToken") or ""), 8192)
+        restored = rooms.merge_sync_token(None, ser["syncToken"], "large-100")
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored.get("totalParticipants"), 35)
+
+        # 3. Test Smart TV D-Pad Spatial Navigation & WCAG focus-visible hooks
+        root = Path(__file__).resolve().parent.parent
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("initSpatialTvNavigation", main_js)
+        self.assertIn("window.vortexSpatialMove", main_js)
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("body.tv-nav-active :focus", vortex_css)
+        sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        self.assertIn("openVizyonModal", sel_kinds_js)
 
 
 if __name__ == '__main__':
