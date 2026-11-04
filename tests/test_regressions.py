@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v100 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261104_v101 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v100", index_html)
+        self.assertIn("20261104_v101", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1525,6 +1525,25 @@ class RegressionTests(unittest.TestCase):
 
         mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
         self.assertIn("filter: var(--wl-composed-filter, none);", mesh_css)
+
+    def test_v106_ios_screen_fit_and_safe_area_insets(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("syncAppViewportMetrics", main_js)
+        self.assertIn("--app-height", main_js)
+        self.assertIn("navigator.standalone === true", main_js)
+
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("height: var(--app-height, 100dvh)", vortex_css)
+        self.assertIn("height: calc(50px + env(safe-area-inset-top, 0px)) !important;", vortex_css)
+        self.assertNotIn("height: calc(100vh - 60px) !important;", vortex_css)
+
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn("height: calc(44px + env(safe-area-inset-top, 0px)) !important;", mesh_css)
+        self.assertIn("height: calc(100% - 44px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
+        self.assertIn("height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
 
 
 if __name__ == '__main__':

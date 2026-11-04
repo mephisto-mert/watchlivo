@@ -620,10 +620,22 @@ video::cue {
   }
   .resize-handle { display: none; }
   .panel-side {
-    position: fixed; left: 0; right: 0; bottom: 0; top: 12%; z-index: 40;
-    border-radius: 18px 18px 0 0; transform: translateY(105%);
-    transition: transform .35s var(--ease-out); background: var(--acrylic);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: max(12%, calc(44px + env(safe-area-inset-top, 0px)));
+    max-height: calc(var(--app-height, 100dvh) - 44px - env(safe-area-inset-top, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 40;
+    border-radius: 18px 18px 0 0;
+    transform: translateY(105%);
+    transition: transform .35s var(--ease-out);
+    background: var(--acrylic);
     box-shadow: 0 -10px 40px rgba(0,0,0,.7);
+    box-sizing: border-box;
   }
   .mesh-layout.has-left .panel-left, .mesh-layout.has-right .panel-right {
     transform: none; opacity: 1; pointer-events: auto;
@@ -1343,10 +1355,13 @@ video::cue {
   flex: 1 1 0%;
   min-height: 0;
   width: 100%;
+  max-width: 100vw;
   height: 100%;
+  max-height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-sizing: border-box;
 }
 .mini-player-bar {
   display: none;
@@ -1688,11 +1703,13 @@ body.mesh-minimized #mesh-root .mini-player-bar {
 
 /* 1. Top Watch-Party Studio Header (Taverns / Hyperbeam Labeled Action Bar) */
 #mesh-root > .navbar {
-  height: 54px !important;
-  min-height: 54px !important;
-  max-height: 54px !important;
+  height: calc(54px + env(safe-area-inset-top, 0px)) !important;
+  min-height: calc(54px + env(safe-area-inset-top, 0px)) !important;
+  max-height: calc(54px + env(safe-area-inset-top, 0px)) !important;
   margin: 0 !important;
-  padding: 0 14px !important;
+  padding: env(safe-area-inset-top, 0px) max(14px, env(safe-area-inset-right, 0px)) 0 max(14px, env(safe-area-inset-left, 0px)) !important;
+  flex-shrink: 0 !important;
+  box-sizing: border-box !important;
   border-radius: 0 !important;
   background: linear-gradient(180deg, #0D111A 0%, #080A0F 100%) !important;
   border: none !important;
@@ -3146,12 +3163,17 @@ body.theater-mode .resize-handle {
     top: 0 !important;
     bottom: 0 !important;
     width: 100% !important;
+    max-width: 100vw !important;
     height: 100% !important;
-    max-height: 100% !important;
+    height: 100dvh !important;
+    height: var(--app-height, 100dvh) !important;
+    max-height: 100dvh !important;
+    max-height: var(--app-height, 100dvh) !important;
     overflow: hidden !important;
     display: flex !important;
     flex-direction: column !important;
     z-index: 20 !important;
+    box-sizing: border-box !important;
   }
   body.kb-open:not(.mesh-minimized) #mesh-root:not(.hidden) {
     bottom: auto !important;
@@ -3164,10 +3186,12 @@ body.theater-mode .resize-handle {
     max-height: min(26vh, 168px) !important;
   }
   #mesh-root > .navbar {
-    height: 44px !important;
-    min-height: 44px !important;
-    padding: 0 max(6px, env(safe-area-inset-right, 0px)) 0 max(6px, env(safe-area-inset-left, 0px)) !important;
+    height: calc(44px + env(safe-area-inset-top, 0px)) !important;
+    min-height: calc(44px + env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(44px + env(safe-area-inset-top, 0px)) !important;
+    padding: env(safe-area-inset-top, 0px) max(6px, env(safe-area-inset-right, 0px)) 0 max(6px, env(safe-area-inset-left, 0px)) !important;
     flex-shrink: 0 !important;
+    box-sizing: border-box !important;
   }
   #mesh-root > .navbar .nav-icon.room-nav-pill {
     height: 30px !important;
@@ -3205,9 +3229,10 @@ body.theater-mode .resize-handle {
   .mesh {
     flex: 1 1 0% !important;
     min-height: 0 !important;
-    height: calc(100% - 44px) !important;
-    max-height: calc(100% - 44px) !important;
+    height: calc(100% - 44px - env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(100% - 44px - env(safe-area-inset-top, 0px)) !important;
     overflow: hidden !important;
+    box-sizing: border-box !important;
   }
   .mesh-layout {
     padding: 4px max(6px, env(safe-area-inset-right, 0px)) max(6px, env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px)) !important;
@@ -4116,7 +4141,7 @@ body.vortex-fs #mesh-root .resize-handle {
 /* 9. Universal Low-End to High-End Mobile Screen Matrix (320x568 iPhone SE1 / 360x640 Budget Android -> 430x932 Ultra) */
 @media (max-width: 400px) {
   #mesh-root > .navbar {
-    padding: 0 4px !important;
+    padding: env(safe-area-inset-top, 0px) max(4px, env(safe-area-inset-right, 0px)) 0 max(4px, env(safe-area-inset-left, 0px)) !important;
     gap: 3px !important;
   }
   #mesh-root > .navbar .navbar-left,
@@ -4196,14 +4221,18 @@ body.vortex-fs #mesh-root .resize-handle {
   }
 }
 
-@media (orientation: landscape) and (max-height: 380px) {
+@media (orientation: landscape) and (max-height: 440px) {
   #mesh-root > .navbar {
-    height: 36px !important;
-    min-height: 36px !important;
+    height: calc(36px + env(safe-area-inset-top, 0px)) !important;
+    min-height: calc(36px + env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(36px + env(safe-area-inset-top, 0px)) !important;
+    padding: env(safe-area-inset-top, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)) !important;
+    box-sizing: border-box !important;
   }
   .mesh {
-    height: calc(100% - 36px) !important;
-    max-height: calc(100% - 36px) !important;
+    height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;
+    max-height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;
+    box-sizing: border-box !important;
   }
   body:not(.vortex-fs):not(.mesh-minimized) .panel-chat {
     flex: 0 0 clamp(210px, 36vw, 275px) !important;
@@ -4213,6 +4242,12 @@ body.vortex-fs #mesh-root .resize-handle {
   body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .discord-call-bar {
     margin: 2px 4px !important;
     padding: 3px 6px !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .discord-call-bar .discord-stage-btn span:not(:first-child) {
+    display: none !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .discord-call-bar .discord-stage-btn {
+    padding: 4px 6px !important;
   }
   body:not(.vortex-fs):not(.mesh-minimized) .panel-chat .chat-list {
     min-height: 54px !important;
@@ -5209,4 +5244,62 @@ html.is-android-pip .rave-subtitle-cue {
   background: rgba(239, 68, 68, 0.25) !important;
   border-color: rgba(239, 68, 68, 0.7) !important;
   color: #fecaca !important;
+}
+
+/* v101: iOS Safari & Standalone WebClip Room Header & Viewport Overflow Guard */
+#mesh-root > .navbar {
+  width: 100% !important;
+  max-width: 100vw !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+#mesh-root > .navbar .navbar-left,
+#mesh-root > .navbar .navbar-right {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+}
+#mesh-root > .navbar .navbar-center {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+#mesh-root > .navbar .room-brand-capsule {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+@media (max-width: 480px) {
+  #mesh-root > .navbar {
+    gap: 4px !important;
+  }
+  #mesh-root > .navbar .navbar-left,
+  #mesh-root > .navbar .navbar-right {
+    gap: 4px !important;
+  }
+  #mesh-root > .navbar .nav-icon.room-nav-pill {
+    height: 28px !important;
+    min-height: 28px !important;
+    min-width: 28px !important;
+    padding: 0 6px !important;
+  }
+  #mesh-root > .navbar .room-brand-capsule {
+    padding: 2px 7px !important;
+    gap: 4px !important;
+  }
+  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar #room-header-title {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: clamp(54px, 23vw, 130px) !important;
+    font-size: 0.72rem !important;
+  }
+  #mesh-root > .navbar .privacy-chip {
+    flex: 0 0 auto !important;
+    font-size: 0.58rem !important;
+    padding: 2px 5px !important;
+    max-width: 92px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
 }

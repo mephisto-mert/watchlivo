@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v100';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v100';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v100';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v100';
-import { api } from './api.js?v=20261104_v100';
-import { h, toast } from './ui.js?v=20261104_v100';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v101';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v101';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v101';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v101';
+import { api } from './api.js?v=20261104_v101';
+import { h, toast } from './ui.js?v=20261104_v101';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -137,8 +137,31 @@ export function navigate(path) {
 window.vortexNavigate = navigate;
 
 async function boot() {
-  if (navigator.userAgent.includes('WatchlivoApp') || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP || window.Android || window.matchMedia('(display-mode: standalone)').matches) {
+  if (navigator.userAgent.includes('WatchlivoApp') || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP || window.Android || navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
     document.documentElement.classList.add('is-apk', 'is-native-apk');
+  }
+  const syncAppViewportMetrics = () => {
+    const root = document.documentElement;
+    const kbOpen = document.body?.classList?.contains('kb-open');
+    const vv = window.visualViewport;
+    const w = Math.max(280, Math.round(window.innerWidth || root.clientWidth || 390));
+    const h = Math.max(240, Math.round((vv && !kbOpen ? vv.height : window.innerHeight) || root.clientHeight || 844));
+    root.style.setProperty('--app-width', `${w}px`);
+    root.style.setProperty('--app-height', `${h}px`);
+    if (!kbOpen && (window.scrollX !== 0 || window.scrollY !== 0)) {
+      window.scrollTo(0, 0);
+    }
+  };
+  syncAppViewportMetrics();
+  window.addEventListener('resize', syncAppViewportMetrics, { passive: true });
+  window.addEventListener('orientationchange', () => {
+    syncAppViewportMetrics();
+    setTimeout(syncAppViewportMetrics, 120);
+    setTimeout(syncAppViewportMetrics, 350);
+  }, { passive: true });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncAppViewportMetrics, { passive: true });
+    window.visualViewport.addEventListener('scroll', syncAppViewportMetrics, { passive: true });
   }
   window.__onWatchlivoAndroidPiP = (active) => {
     document.documentElement.classList.toggle('is-android-pip', Boolean(active));
@@ -293,7 +316,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v100', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v101', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
