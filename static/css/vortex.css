@@ -593,14 +593,37 @@ body:not(.mesh-minimized):has(main.mesh) .bg-img { display: none !important; }
 .ctl-pill { padding: .3em .7em; font-size: .75em; background: rgba(6,7,12,.72); border-color: rgba(255,255,255,.18); }
 
 /* Selection Provider Badge, Drawer Tabs & Dark Theme Studio */
+.sel-prov-head {
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
 .sel-provider-badge {
   display: inline-flex; align-items: center; gap: .55em; padding: .28em .75em;
   border-radius: 99px; background: rgba(6,7,11,.78);
   border: 1px solid color-mix(in srgb, var(--prov-accent, #6366f1) 50%, rgba(255,255,255,.12));
+  min-width: 0; max-width: 100%; flex: 0 1 auto; overflow: hidden;
 }
-.sel-provider-badge img { height: 22px; width: auto; object-fit: contain; }
-.sel-provider-badge h3 { margin: 0; font-size: .94em; font-weight: 800; }
-.sel-provider-tag { font-size: .68em; font-weight: 700; color: var(--text-dim); padding-left: .4em; border-left: 1px solid var(--border-soft); }
+.sel-provider-badge img { height: 22px; width: auto; object-fit: contain; flex-shrink: 0; }
+.sel-provider-badge h3 { margin: 0; font-size: .94em; font-weight: 800; white-space: nowrap; }
+.sel-provider-tag {
+  font-size: .68em; font-weight: 700; color: var(--text-dim); padding-left: .4em;
+  border-left: 1px solid var(--border-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+@media (max-width: 560px) {
+  .sel-prov-head { gap: 6px !important; }
+  .sel-provider-badge { flex: 1 1 0%; padding: .24em .58em; gap: .4em; }
+  .sel-provider-badge h3 { font-size: .84em; }
+  .sel-provider-tag { display: none; }
+  #btn-random-movie {
+    flex-shrink: 0;
+    padding: 5px 10px !important;
+    font-size: .74rem !important;
+    margin-left: auto;
+  }
+}
 .drawer-tabs { display: flex; gap: 4px; padding: 0 .7em .55em; border-bottom: 1px solid var(--border-soft); margin-bottom: .3em; flex-shrink: 0; }
 .drawer-tab {
   flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .35em;
@@ -2815,10 +2838,15 @@ header.navbar.top-nav-capsule {
 /* --- Compact Studio App Strip (Replaces Huge Green APK Box) --- */
 .wl-app-banner {
   display: flex !important;
+  flex-wrap: wrap !important;
   align-items: center !important;
-  gap: 12px !important;
+  gap: 10px 12px !important;
   padding: 9px 14px !important;
   margin: 0 0 14px 0 !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
   border-radius: 12px !important;
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 13%, transparent) 0%, rgba(13, 17, 29, 0.95) 100%) !important;
   border: 1px solid color-mix(in srgb, var(--accent) 26%, transparent) !important;
@@ -2841,8 +2869,9 @@ header.navbar.top-nav-capsule {
   height: 18px !important;
 }
 .wl-app-banner-text {
-  flex: 1;
+  flex: 1 1 180px;
   min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2850,8 +2879,12 @@ header.navbar.top-nav-capsule {
 }
 .wl-app-banner-title {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 6px 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   font-size: 0.85rem;
   color: #f8fafc;
 }
@@ -2867,12 +2900,29 @@ header.navbar.top-nav-capsule {
 .wl-app-banner-sub {
   font-size: 0.78rem;
   color: #94a3b8;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .wl-app-banner-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  max-width: 100%;
+}
+@media (max-width: 560px) {
+  .wl-app-banner {
+    padding: 9px 11px !important;
+    gap: 8px 10px !important;
+  }
+  .wl-app-banner-title { font-size: 0.8rem; }
+  .wl-app-banner-sub { font-size: 0.73rem; }
+  .wl-app-banner-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 .wl-banner-apk-btn {
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%) !important;
@@ -6028,7 +6078,23 @@ html.is-native-apk .wl-btn-apk-dl,
   display: flex; align-items: center; gap: 8px; padding: 5px 9px; border-radius: 9px;
   font-size: 0.74rem; color: #cbd5e1; background: rgba(255, 255, 255, 0.05); border-left: 3px solid var(--accent);
 }
-.wl-dm-composer-slot { display: flex; align-items: center; gap: 8px; }
+.wl-dm-composer-slot { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.wl-dm-composer-slot input { flex: 1 1 0%; min-width: 0; }
+.wl-dm-mic-btn.recording {
+  background: rgba(239, 68, 68, 0.22) !important;
+  border-color: #ef4444 !important;
+  color: #fecaca !important;
+}
+@media (max-width: 680px) {
+  .wl-dm-split { flex-direction: column; gap: 8px; min-height: 260px; }
+  .wl-dm-threads {
+    width: 100%; flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    padding: 0 0 6px 0; border-right: none; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .dm-thread-item { width: auto; min-width: 136px; max-width: 210px; flex-shrink: 0; padding: 6px 8px; }
+  .wl-dm-messages { min-height: 150px; max-height: 36dvh; }
+  .wl-dm-composer-slot { gap: 6px; }
+}
 .wl-dm-empty-placeholder {
   margin: auto; padding: 22px 14px; text-align: center; display: flex; flex-direction: column;
   align-items: center; gap: 8px; color: rgba(226, 232, 240, 0.72); font-size: 0.82rem; max-width: 340px;

@@ -211,3 +211,60 @@ class V95VoiceAndSiteAuditTests(unittest.TestCase):
         self.assertTrue(msgs[0]["audioNote"]["url"].startswith("/api/rave/voice-note/"))
         self.assertEqual(self.client.get(msgs[0]["audioNote"]["url"]).content, wav)
 
+    def test_06_v97_adversarial_voice_range_privacy_and_apk_ota(self):
+        # 1. Malformed JSON primitives/lists on voice-note & voice-relay -> 400 (never 500)
+        for bad_payload in (["bad"], "bad_str", {}):
+            r_vn = self.client.post("/api/rave/voice-note", json=bad_payload)
+            self.assertEqual(r_vn.status_code, 400, r_vn.text)
+            r_vr = self.client.post("/api/rave/voice-relay/qatestroom", json=bad_payload)
+            self.assertEqual(r_vr.status_code, 400, r_vr.text)
+
+        # 2. Invalid HTTP Range requests on voice-note -> 416 Range Not Satisfiable
+        wav = _make_wav_bytes(4000)
+        b64 = base64.b64encode(wav).decode("ascii")
+        up = self.client.post("/api/rave/voice-note", json={"dataUrl": f"data:audio/wav;base64,{b64}", "duration": 1.2}).json()["audioNote"]
+        for bad_rng in ("bytes=999999-1000000", "bytes=50-10", "bytes=-"):
+            rr = self.client.get(up["url"], headers={"Range": bad_rng})
+            self.assertEqual(rr.status_code, 416, bad_rng)
+            self.assertIn(f"bytes */{len(wav)}", rr.headers.get("content-range", ""))
+
+        # 3. Outsider clientId rejected on voice-relay (403)
+        cr_resp = self.client.post("/api/rooms/create", json={"name": "Priv Audit", "creator": "HostG"}).json()
+        rid = cr_resp["room"]["id"]
+        init_h = self.client.post(
+            f"/api/rooms/{rid}/sync",
+            json={"type": "init", "clientId": cr_resp["clientId"], "clientToken": cr_resp["clientToken"], "username": "HostG", "isCreator": True},
+        ).json()
+        outsider_rel = self.client.post(
+            f"/api/rave/voice-relay/{rid}",
+            json={"clientId": "intruderCid", "seq": 1, "mime": "audio/wav", "b64": b64},
+        )
+        self.assertEqual(outsider_rel.status_code, 403)
+
+        # 4. Guest 'friends' & 'private' rooms stay isolated from anonymous /api/rooms + no-store header
+        for p_mode in ("friends", "private"):
+            act_r = self.client.post(
+                f"/api/rooms/{rid}/sync",
+                json={"type": "host_action", "clientId": init_h["clientId"], "clientToken": init_h["clientToken"], "action": "set_privacy", "privacy": p_mode},
+            ).json()
+            self.assertEqual(act_r["room"]["privacy"], p_mode)
+            lobby_r = self.client.get("/api/rooms")
+            self.assertIn("no-store", lobby_r.headers.get("cache-control", ""))
+            ids = [x["id"] for x in lobby_r.json().get("rooms", [])]
+            self.assertNotIn(rid, ids, f"Room leaked in {p_mode} mode")
+
+        # 5. chat.js teardown free of undeclared activeVoiceAudio & APK v2.0.2 OTA integrity
+        root = pathlib.Path(__file__).resolve().parent.parent
+        chat_js = (root / "static/js/views/chat.js").read_text(encoding="utf-8")
+        self.assertNotIn("activeVoiceAudio", chat_js)
+        self.assertIn("stopActiveVoiceNoteGlobal", chat_js)
+
+        ver_r = self.client.get("/api/app/version")
+        self.assertEqual(ver_r.status_code, 200)
+        vj = ver_r.json()
+        self.assertGreaterEqual(int(vj["versionCode"]), 22)
+        apk_r = self.client.get("/download/apk")
+        self.assertEqual(apk_r.status_code, 200)
+        self.assertEqual(apk_r.content[:4], b"PK\x03\x04")
+
+

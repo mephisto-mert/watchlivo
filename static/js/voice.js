@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261104_v96';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v96';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v96';
+import { toast } from './ui.js?v=20261104_v97';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v97';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v97';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -41,8 +41,11 @@ export class Voice {
     this.relayPollTimer = null;
     this.relaySinceTs = 0;
     this.relaySeq = 0;
-    this.relayNextPlayAt = 0;
+    this.relayNextPlayAtByPeer = new Map();
     this.relaySeenIds = new Set();
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
     this.participants = [];
     this.peerVolumes = new Map();
     this.onStateChange = null;
@@ -534,6 +537,12 @@ export class Voice {
     if (this.destroyed || !pc || st.makingOffer || pc.signalingState !== 'stable') return;
     try {
       st.makingOffer = true;
+      if (!st.audioSender && !st.audioTransceiver && (this.inCall || this.micOn)) {
+        try {
+          st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+          st.audioSender = st.audioTransceiver.sender;
+        } catch (e) { /* ignore */ }
+      }
       const offer = await pc.createOffer();
       if (pc.signalingState !== 'stable') return;
       await pc.setLocalDescription(offer);
@@ -576,17 +585,12 @@ export class Voice {
         } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], audio, audioSender: null, videoSender: null, audioTransceiver: null };
+    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
     this.peers.set(id, st);
     if (this.stream && this.stream.getAudioTracks().length) {
       for (const t of this.stream.getAudioTracks()) {
         st.audioSender = pc.addTrack(t, this.stream);
       }
-    } else {
-      try {
-        st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
-        st.audioSender = st.audioTransceiver.sender;
-      } catch (e) { /* ignore */ }
     }
     const activeVid = this.screenStream || this.camStream;
     if (activeVid) {
@@ -661,39 +665,58 @@ export class Voice {
     }
     const st = this.peer(from);
     if (!st) return;
-    const { pc } = st;
-    const polite = String(this.getSelfId()) < String(from);
-    try {
-      if (data.type === 'webrtc_offer' || data.type === 'webrtc_answer') {
-        const desc = data.sdp;
-        if (!desc || !desc.type) return;
-        const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
-        st.ignoreOffer = !polite && collision;
-        if (st.ignoreOffer) return;
-        if (collision) {
-          try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
-        }
-        await pc.setRemoteDescription(new RTCSessionDescription(desc));
-        if (st.iceQueue?.length) {
-          const queued = st.iceQueue.splice(0, st.iceQueue.length);
-          for (const cand of queued) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+    st.sigChain = (st.sigChain || Promise.resolve()).then(async () => {
+      if (this.destroyed || this.peers.get(from) !== st) return;
+      const { pc } = st;
+      const polite = String(this.getSelfId()) < String(from);
+      try {
+        if (data.type === 'webrtc_offer' || data.type === 'webrtc_answer') {
+          const desc = data.sdp;
+          if (!desc || !desc.type) return;
+          if (desc.type === 'answer' && pc.signalingState !== 'have-local-offer') return;
+          const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
+          st.ignoreOffer = !polite && collision;
+          if (st.ignoreOffer) return;
+          if (collision) {
+            st.iceQueue = [];
+            try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
+          }
+          await pc.setRemoteDescription(new RTCSessionDescription(desc));
+          if (!st.audioTransceiver) {
+            const tr = pc.getTransceivers?.().find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+            if (tr) {
+              st.audioTransceiver = tr;
+              if (!st.audioSender) st.audioSender = tr.sender;
+              if (desc.type === 'offer' && this.micOn && this.stream?.getAudioTracks?.()[0]) {
+                const aTrack = this.stream.getAudioTracks()[0];
+                tr.direction = 'sendrecv';
+                try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
+              }
+            }
+          }
+          if (st.iceQueue?.length) {
+            const queued = st.iceQueue.splice(0, st.iceQueue.length);
+            for (const cand of queued) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+            }
+          }
+          if (desc.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+          }
+        } else if (data.type === 'webrtc_ice' && data.candidate) {
+          if (st.ignoreOffer) return;
+          if (!pc.remoteDescription || !pc.remoteDescription.type) {
+            st.iceQueue = st.iceQueue || [];
+            if (st.iceQueue.length < 60) st.iceQueue.push(data.candidate);
+          } else {
+            try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
           }
         }
-        if (desc.type === 'offer') {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
-        }
-      } else if (data.type === 'webrtc_ice' && data.candidate) {
-        if (!pc.remoteDescription || !pc.remoteDescription.type) {
-          st.iceQueue = st.iceQueue || [];
-          st.iceQueue.push(data.candidate);
-        } else {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
-        }
-      }
-    } catch (e) { console.warn('[voice] signal', e); }
+      } catch (e) { console.warn('[voice] signal', e); }
+    }).catch(() => {});
+    return st.sigChain;
   }
 
   onPeerJoined(id) {
@@ -1061,8 +1084,12 @@ export class Voice {
     for (const [id, st] of this.peers.entries()) {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
+        const effVol = this.deafened ? 0 : volPct;
         st.audio.muted = Boolean(this.deafened) || volPct === 0;
-        if (st.audio.srcObject) st.audio.play?.().catch(() => {});
+        if (st.audio.srcObject) {
+          applyStreamBoost(st.audio, st.audio.srcObject, effVol);
+          st.audio.play?.().catch(() => {});
+        }
       }
     }
     if (withCam && !this.camOn) {
@@ -1083,11 +1110,18 @@ export class Voice {
     clearInterval(this.speakTimer);
     clearInterval(this.relayPollTimer);
     this.relayPollTimer = null;
+    this.relayNextPlayAtByPeer.clear();
+    try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this._usingSynthStream = false;
     this.audioCtx?.close?.().catch(() => {});
     this.audioCtx = null;
+    this.relayPlayCtx?.close?.().catch(() => {});
+    this.relayPlayCtx = null;
     this.synthAudioCtx?.close?.().catch(() => {});
     this.synthAudioCtx = null;
     this.inCall = false;
@@ -1101,6 +1135,7 @@ export class Voice {
     }
     this.onDuckChange?.(false);
     for (const st of this.peers.values()) {
+      try { st.audioSender?.replaceTrack?.(null); } catch (_) {}
       if (st?.audio) {
         applyStreamBoost(st.audio, st.audio.srcObject, 0);
         st.audio.muted = true;
@@ -1118,17 +1153,26 @@ export class Voice {
     if (!st?.pc) return false;
     const cs = st.pc.connectionState;
     const ics = st.pc.iceConnectionState;
-    return cs === 'connected' || ics === 'connected' || ics === 'completed';
+    const pcOk = cs === 'connected' || ics === 'connected' || ics === 'completed';
+    if (!pcOk) return false;
+    const p = (this.participants || []).find((x) => x.id === peerId);
+    if (p && p.inCall && !p.muted && !st.audio?.srcObject) return false;
+    return true;
   }
 
   _hasUnconnectedCallPeers() {
     const selfId = this.getSelfId();
     for (const p of (this.participants || [])) {
       if (!p || !p.id || p.id === selfId || p.transport === 'bot') continue;
-      const active = Boolean(p.inCall || !p.muted || p.speaking);
+      const active = Boolean(p.inCall || p.speaking);
       if (active && !this._isPeerP2pConnected(p.id)) return true;
     }
     return false;
+  }
+
+  _getClientToken(roomId) {
+    if (!roomId) return '';
+    try { return sessionStorage.getItem(`vortex_ct_${roomId}`) || sessionStorage.getItem(`vortex_ctok_${roomId}`) || ''; } catch (_) { return ''; }
   }
 
   _ensureRelayPlayCtx() {
@@ -1204,14 +1248,18 @@ export class Voice {
       src.buffer = audioBuf;
       src.connect(gain);
       gain.connect(ctx.destination);
-      const startAt = Math.max(ctx.currentTime + 0.04, this.relayNextPlayAt || 0);
-      this.relayNextPlayAt = startAt + audioBuf.duration;
+      const peerKey = String(pkt.fromId || 'peer');
+      const prevNext = this.relayNextPlayAtByPeer.get(peerKey) || 0;
+      const clampedPrev = prevNext > ctx.currentTime + 1.5 ? ctx.currentTime + 0.06 : prevNext;
+      const startAt = Math.max(ctx.currentTime + 0.04, clampedPrev);
+      this.relayNextPlayAtByPeer.set(peerKey, startAt + audioBuf.duration);
       src.start(startAt);
     } catch (_) {}
   }
 
   watchSpeaking() {
     try {
+      try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
       this.audioCtx?.close?.().catch(() => {});
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const src = this.audioCtx.createMediaStreamSource(this.stream);
@@ -1223,6 +1271,9 @@ export class Voice {
       const relayProc = this.audioCtx.createScriptProcessor(4096, 1, 1);
       const relayMute = this.audioCtx.createGain();
       relayMute.gain.value = 0;
+      this._relayProc = relayProc;
+      this._relaySrc = src;
+      this._relayMute = relayMute;
       let relayChunks = [];
       let relayFrames = 0;
       let relayMaxRms = 0;
@@ -1265,10 +1316,11 @@ export class Voice {
             const selfId = this.getSelfId?.();
             if (roomId && selfId && b64.length < 70000) {
               this.relaySeq += 1;
+              const clientToken = this._getClientToken(roomId);
               fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ clientId: selfId, seq: this.relaySeq, mime: 'audio/wav', b64 }),
+                body: JSON.stringify({ clientId: selfId, clientToken, seq: this.relaySeq, mime: 'audio/wav', b64 }),
               }).catch(() => {});
             }
           }
@@ -1340,6 +1392,11 @@ export class Voice {
     this.camStream = null;
     this.screenStream = null;
     document.getElementById('vortex-cam-dock')?.remove();
+    document.getElementById('vortex-audio-host')?.remove();
+    try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
     this.audioCtx?.close?.().catch(() => {});
     this.relayPlayCtx?.close?.().catch(() => {});
     this.synthAudioCtx?.close?.().catch(() => {});

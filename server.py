@@ -172,7 +172,7 @@ class SecurityHeaders:
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
                 req_path = str(scope.get("path") or "")
-                if req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed")) or (req_path.startswith("/api/rooms/") and req_path != "/api/rooms"):
+                if req_path == "/api/rooms" or req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/voice-relay/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed", "/api/rooms/")):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
                     hdrs.append((b"cdn-cache-control", b"no-store"))
@@ -7565,21 +7565,24 @@ async def index(request: Request):
     return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
 
 
+_APK_HASH_CACHE: dict[str, object] = {"mtime": None, "sha256": "", "sizeBytes": 0}
+
+
 async def app_version_endpoint(request: Request):
     meta_file = BASE_DIR / "app_version.json"
     apk_file = STATIC_DIR / "Watchlivo-v2.0.apk"
     data = {
         "ok": True,
         "packageName": "online.watchlivo.app",
-        "versionCode": 20,
-        "versionName": "2.0.0",
+        "versionCode": 22,
+        "versionName": "2.0.2",
         "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
         "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
         "sha256": "",
         "sizeBytes": 0,
         "mandatory": True,
         "autoInstall": True,
-        "changelog": "Watchlivo Native v2.0.0 — Gerçek Android donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncelleme.",
+        "changelog": "Watchlivo Native v2.0.2 — Sesli arama (mikrofon), oda içi sesli mesaj kaydı/dinleme, donanım oynatıcı ve Rave.io tarzı otomatik güncelleme.",
     }
     if meta_file.exists():
         try:
@@ -7589,9 +7592,19 @@ async def app_version_endpoint(request: Request):
         except Exception:
             pass
     if apk_file.exists() and (not data.get("sha256") or not data.get("sizeBytes")):
-        raw = apk_file.read_bytes()
-        data["sha256"] = hashlib.sha256(raw).hexdigest()
-        data["sizeBytes"] = len(raw)
+        try:
+            st = apk_file.stat()
+            if _APK_HASH_CACHE.get("mtime") == st.st_mtime_ns and _APK_HASH_CACHE.get("sizeBytes") == st.st_size:
+                data["sha256"] = _APK_HASH_CACHE["sha256"]
+                data["sizeBytes"] = _APK_HASH_CACHE["sizeBytes"]
+            else:
+                raw = apk_file.read_bytes()
+                sha = hashlib.sha256(raw).hexdigest()
+                _APK_HASH_CACHE.update({"mtime": st.st_mtime_ns, "sha256": sha, "sizeBytes": len(raw)})
+                data["sha256"] = sha
+                data["sizeBytes"] = len(raw)
+        except Exception:
+            pass
     return JSONResponse(
         data,
         headers={

@@ -1,6 +1,6 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261104_v96';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261104_v96';
+import { SubtitleDubController } from './subtitles.js?v=20261104_v97';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261104_v97';
 
 let apiPromise = null;
 function loadYouTubeApi() {

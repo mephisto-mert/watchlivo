@@ -282,9 +282,16 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
   const rawPeaks = Array.isArray(an.peaks) && an.peaks.length ? an.peaks : [0.3, 0.65, 0.85, 0.45, 0.75, 0.55, 0.9, 0.4, 0.7, 0.5];
   const barsData = Array.from({ length: 22 }, (_, i) => Number(rawPeaks[i % rawPeaks.length] || 0.45));
   let audioEl = null;
+  let activeBlobUrl = '';
   let blobFallbackTried = false;
   let rateIdx = 0;
   const rates = [1, 1.5, 2];
+  const revokeBlob = () => {
+    if (activeBlobUrl) {
+      try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {}
+      activeBlobUrl = '';
+    }
+  };
   const fmtSec = (s) => {
     const sec = Math.max(0, Math.round(s));
     return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
@@ -318,7 +325,11 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
   };
   const ensureAudio = () => {
     if (audioEl) return audioEl;
-    const primarySrc = hasHttpUrl ? an.url : (dataUrlToBlobUrl(an.dataUrl) || an.dataUrl);
+    let primarySrc = an.url;
+    if (!hasHttpUrl) {
+      activeBlobUrl = dataUrlToBlobUrl(an.dataUrl);
+      primarySrc = activeBlobUrl || an.dataUrl;
+    }
     audioEl = new Audio();
     audioEl.playsInline = true;
     audioEl.setAttribute('playsinline', '');
@@ -338,6 +349,7 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
         activeGlobalVoiceAudio = null;
         window.vortexSetVoiceNotePlaying?.(false);
       }
+      if (!playBtn.isConnected) revokeBlob();
     };
     audioEl.onended = onStop;
     audioEl.onpause = () => {
@@ -346,12 +358,15 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
         activeGlobalVoiceAudio = null;
         window.vortexSetVoiceNotePlaying?.(false);
       }
+      if (!playBtn.isConnected) revokeBlob();
     };
     audioEl.onerror = () => {
       if (!blobFallbackTried && hasDataUrl) {
         blobFallbackTried = true;
+        revokeBlob();
         const bUrl = dataUrlToBlobUrl(an.dataUrl);
         if (bUrl) {
+          activeBlobUrl = bUrl;
           audioEl.src = bUrl;
           audioEl.play().catch(() => onStop());
           return;
@@ -426,7 +441,15 @@ export function createVoiceSearchButton({ h, icons, inputEl, onResult, toast } =
         if (inputEl) inputEl.placeholder = '🔴 Dinleniyor... Konuşun';
         btn.classList.add('is-listening');
         let finalTranscript = '';
+        const onHashAbort = () => {
+          try { rec.abort?.(); } catch (_) {}
+        };
+        if (typeof window !== 'undefined') window.addEventListener('hashchange', onHashAbort, { once: true });
         rec.onresult = (ev) => {
+          if (!btn.isConnected) {
+            try { rec.abort?.(); } catch (_) {}
+            return;
+          }
           let interim = '';
           for (let i = ev.resultIndex; i < ev.results.length; i += 1) {
             const txt = ev.results[i][0]?.transcript || '';
@@ -434,15 +457,16 @@ export function createVoiceSearchButton({ h, icons, inputEl, onResult, toast } =
             else interim += txt;
           }
           const combined = (finalTranscript || interim).trim();
-          if (inputEl && combined) {
+          if (inputEl && inputEl.isConnected && combined) {
             inputEl.value = combined;
             inputEl.dispatchEvent(new Event('input', { bubbles: true }));
           }
         };
         const cleanup = () => {
           activeRec = null;
+          if (typeof window !== 'undefined') window.removeEventListener('hashchange', onHashAbort);
           btn.classList.remove('is-listening');
-          if (inputEl) inputEl.placeholder = prevPh;
+          if (inputEl && inputEl.isConnected) inputEl.placeholder = prevPh;
         };
         rec.onerror = (ev) => {
           cleanup();
@@ -454,8 +478,9 @@ export function createVoiceSearchButton({ h, icons, inputEl, onResult, toast } =
         };
         rec.onend = () => {
           const q = (finalTranscript || inputEl?.value || '').trim();
+          const stillMounted = Boolean(btn.isConnected && (!inputEl || inputEl.isConnected));
           cleanup();
-          if (q) onResult?.(q);
+          if (q && stillMounted) onResult?.(q);
         };
         rec.start();
       } catch (_) {

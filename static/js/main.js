@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v96';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v96';
-import { renderHome, destroyHome } from './views/home.js?v=20261104_v96';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v96';
-import { api } from './api.js?v=20261104_v96';
-import { h, toast } from './ui.js?v=20261104_v96';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261104_v97';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261104_v97';
+import { renderHome, destroyHome } from './views/home.js?v=20261104_v97';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261104_v97';
+import { api } from './api.js?v=20261104_v97';
+import { h, toast } from './ui.js?v=20261104_v97';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -47,6 +47,7 @@ window.vortexMinimizeRoom = () => {
     navigate('/');
     return;
   }
+  window.__vortexCancelChatVoiceRec?.();
   document.body.classList.add('mesh-minimized');
   document.body.classList.remove('vortex-fs');
   toast('🗗 Oda sağ alta küçültüldü · Gezinmeye devam edebilirsin');
@@ -98,9 +99,16 @@ async function route() {
       }
     } else {
       window.dispatchEvent(new Event('resize'));
+      if (String(r.params.autocall || '') === '1') {
+        try { history.replaceState({}, '', `#/mesh/${encodeURIComponent(r.params.id)}`); } catch (_) {}
+        if (!window.__kinoxVoice?.inCall) {
+          setTimeout(() => window.__kinoxVoice?.joinCall?.({ withMic: true }), 180);
+        }
+      }
     }
   } else {
     if (activeMeshRoomId && state.mesh) {
+      window.__vortexCancelChatVoiceRec?.();
       document.body.classList.add('mesh-minimized');
     }
     const keepMinimized = Boolean(activeMeshRoomId && document.body.classList.contains('mesh-minimized') && state.mesh);
@@ -285,7 +293,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261104_v96', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261104_v97', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

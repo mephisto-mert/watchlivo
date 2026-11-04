@@ -2114,6 +2114,8 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                     try:
                         import social_engine as _se_vn
                         an_val = _se_vn.persist_audio_note(raw_an, fallback_id=clean_str(rm.get("id"), 24))
+                        if isinstance(an_val, dict) and an_val.get("url") and len(str(an_val.get("dataUrl") or "")) > 24000:
+                            an_val = {k: v for k, v in an_val.items() if k != "dataUrl"}
                     except Exception:
                         an_val = None
                     if an_val is None and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000:
@@ -2125,11 +2127,16 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                         an_val = {"dataUrl": str(raw_an["dataUrl"]), "duration": round(an_dur, 1), "peaks": raw_peaks or [0.3, 0.6, 0.8, 0.5, 0.7, 0.4]}
                 if not txt_val and not gif_val and not snap_val and not an_val:
                     continue
+                cand_uid = clean_str(rm.get("uid"), 64)
+                if cand_uid.startswith("u_wl_"):
+                    known_uids = {str(p.get("uid") or "") for p in (room.get("participants") or {}).values() if isinstance(p, dict)}
+                    if cand_uid not in known_uids:
+                        cand_uid = ""
                 restored_m = {
                     "id": clean_str(rm.get("id"), 24),
                     "system": False,
                     "user": clean_str(rm.get("user"), 32) or "İzleyici",
-                    "uid": clean_str(rm.get("uid"), 64),
+                    "uid": cand_uid,
                     "color": clean_str(rm.get("color"), 16) or "#27DCC8",
                     "text": txt_val,
                     "gif": gif_val,
@@ -2190,6 +2197,8 @@ def _handle_social(room, cid, data, out, name, is_host):
             try:
                 import social_engine as _se_vn
                 audio_note = _se_vn.persist_audio_note(raw_an, fallback_id=pre_msg_id)
+                if isinstance(audio_note, dict) and audio_note.get("url") and len(str(audio_note.get("dataUrl") or "")) > 24000:
+                    audio_note = {k: v for k, v in audio_note.items() if k != "dataUrl"}
             except Exception:
                 audio_note = None
             if audio_note is None:
@@ -2483,21 +2492,45 @@ def _handle_social(room, cid, data, out, name, is_host):
             out["kick"] = tid
         elif act == "close_room" and (is_host or is_creator_match) and not room.get("curated"):
             room["_close_room_now"] = True
+            _LOBBY_CACHE["ts"] = 0.0
             out["close_room"] = True
             return out
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append((_room_event(room), None))
     elif mtype in ("webrtc_offer", "webrtc_answer", "webrtc_ice"):
+        if str(room.get("voipMode") or "all") == "off":
+            return out
         target = data.get("targetId")
-        if target in room["participants"]:
-            relay = {k: v for k, v in data.items() if k in ("type", "sdp", "candidate")}
+        if target in room["participants"] and target != cid:
+            sig_hits = [ts_h for ts_h in me.get("_sig_hits", ()) if t_now - ts_h < 5.0]
+            if len(sig_hits) >= 80:
+                me["_sig_hits"] = sig_hits
+                return out
+            sig_hits.append(t_now)
+            me["_sig_hits"] = sig_hits
+            relay = {}
+            relay["type"] = mtype
+            if "sdp" in data and data["sdp"] is not None:
+                try:
+                    if len(json.dumps(data["sdp"], separators=(",", ":"))) > 49152:
+                        return out
+                except Exception:
+                    return out
+                relay["sdp"] = data["sdp"]
+            if "candidate" in data and data["candidate"] is not None:
+                try:
+                    if len(json.dumps(data["candidate"], separators=(",", ":"))) > 4096:
+                        return out
+                except Exception:
+                    return out
+                relay["candidate"] = data["candidate"]
             relay["fromId"] = cid
             relay["targetId"] = target
             req_sig_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(data.get("signalId") or ""))[:32]
             relay["id"] = req_sig_id or uuid.uuid4().hex[:10]
-            relay["ts"] = now()
-            room["signals"] = [s for s in (room.get("signals") or []) if isinstance(s, dict) and (now() - float(s.get("ts") or 0) < 30.0)][-119:] + [relay]
+            relay["ts"] = t_now
+            room["signals"] = [s for s in (room.get("signals") or []) if isinstance(s, dict) and (t_now - float(s.get("ts") or 0) < 30.0)][-119:] + [relay]
             room["rev"] = int(room.get("rev") or 1) + 1
             room["_tok_sig"] = ""
             out.setdefault("direct", []).append((target, relay))
@@ -3271,9 +3304,7 @@ async def create_room(request: Request):
 
 def _is_friend_of_creator(room: Dict[str, Any], caller_uid: str) -> bool:
     c_uid = str(room.get("creatorId") or "").strip()
-    if not c_uid.startswith("u_wl_"):
-        return True
-    if not caller_uid:
+    if not c_uid or not caller_uid:
         return False
     if caller_uid == c_uid:
         return True
@@ -3296,17 +3327,23 @@ def _render_lobby_for_caller(request: Request, raw_rooms: List[Dict[str, Any]]) 
     caller_uid = str(request.scope.get("wl_uid") or "").strip()
     filtered = [r for r in raw_rooms if r.get("privacy") != "friends" or _is_friend_of_creator(r, caller_uid)]
     visible = [lobby_entry(r) for r in filtered[:60]]
-    cc = "private, no-store" if caller_uid else "public, max-age=1, s-maxage=2, stale-while-revalidate=5"
-    return JSONResponse({"rooms": visible, "shared": STORE.shared}, headers={"Cache-Control": cc, "Vary": "Authorization"})
+    return JSONResponse(
+        {"rooms": visible, "shared": STORE.shared},
+        headers={
+            "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+            "CDN-Cache-Control": "no-store",
+            "Vary": "Authorization",
+        },
+    )
 
 
 async def list_rooms(request: Request):
     t = now()
-    if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
+    if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 0.6:
         return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
     async with _LOBBY_LOCK:
         t = now()
-        if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 1.5:
+        if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 0.6:
             return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
         all_rooms = await STORE.all()
         existing_ids = {r.get("id") for r in all_rooms if isinstance(r, dict)}

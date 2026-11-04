@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v96';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v96';
-import { avatar } from '../profile.js?v=20261104_v96';
-import { api, qs } from '../api.js?v=20261104_v96';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v96';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v96';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261104_v97';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261104_v97';
+import { avatar } from '../profile.js?v=20261104_v97';
+import { api, qs } from '../api.js?v=20261104_v97';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v97';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261104_v97';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -505,6 +505,9 @@ export function buildChat(ctx) {
     voiceRecOverlay.classList.add('hidden');
     input.classList.remove('hidden');
     st.stop?.(Boolean(sendIt));
+  }
+  if (typeof window !== 'undefined') {
+    window.__vortexCancelChatVoiceRec = () => stopVoiceRecorder(false);
   }
 
   async function toggleVoiceNoteRecording() {
@@ -1484,8 +1487,10 @@ export function buildChat(ctx) {
     },
     destroy() {
       stopVoiceRecorder(false);
-      if (activeVoiceAudio) { try { activeVoiceAudio.pause(); } catch (e) { /* ignore */ } activeVoiceAudio = null; }
-      window.vortexSetVoiceNotePlaying?.(false);
+      if (typeof window !== 'undefined') {
+        window.__vortexCancelChatVoiceRec = null;
+      }
+      stopActiveVoiceNoteGlobal();
       clearTimeout(typingTimer);
       document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
       document.removeEventListener('pointerdown', onDocOutsideTap);

@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261104_v96';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261104_v96';
-import { navIcon, logo } from './home.js?v=20261104_v96';
-import { createSelection } from './selection.js?v=20261104_v96';
-import { buildControls } from './controls.js?v=20261104_v96';
-import { buildChat } from './chat.js?v=20261104_v96';
-import { PANELS } from './panels.js?v=20261104_v96';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261104_v97';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261104_v97';
+import { navIcon, logo } from './home.js?v=20261104_v97';
+import { createSelection } from './selection.js?v=20261104_v97';
+import { buildControls } from './controls.js?v=20261104_v97';
+import { buildChat } from './chat.js?v=20261104_v97';
+import { PANELS } from './panels.js?v=20261104_v97';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -211,10 +211,10 @@ export function buildLayout(app, ctx) {
     showUnmute: (b) => controls.showUnmute(b),
     destroy: () => {
       document.body.classList.remove('theater-mode');
-      controls.destroy?.();
-      chat.destroy?.();
-      leftInst?.destroy?.();
-      rightInst?.destroy?.();
+      try { controls.destroy?.(); } catch (_) {}
+      try { chat.destroy?.(); } catch (_) {}
+      try { leftInst?.destroy?.(); } catch (_) {}
+      try { rightInst?.destroy?.(); } catch (_) {}
     },
     openSearch: () => { if (state.view.left !== 'Search') { setView('left', 'Search'); update(); } },
   };

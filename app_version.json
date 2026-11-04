@@ -1,14 +1,14 @@
 {
   "ok": true,
   "packageName": "online.watchlivo.app",
-  "versionCode": 21,
-  "versionName": "2.0.1",
+  "versionCode": 22,
+  "versionName": "2.0.2",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
-  "sha256": "539d228022c9aa24c2304b7840ad6812ad2eb03704c07419af9425e8b870ad5d",
-  "sizeBytes": 58931,
+  "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
+  "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-04T01:46:01.340364+00:00",
-  "changelog": "Watchlivo v2.0.1 Native: Gelismis SuperSearch arama sonuclari, coklu sezon ve bolum secici, sifreli odalara dogrudan giris, 7/24 Alem FM HLS canli yayin iyilestirmesi ve canli radyo sahne gostergesi eklendi."
+  "publishedAt": "2026-11-04T03:39:14.022390+00:00",
+  "changelog": "Watchlivo Native v2.0.2 — Sesli arama (mikrofon), oda içi sesli mesaj kaydı/dinleme, donanım oynatıcı ve Rave.io tarzı otomatik güncelleme."
 }

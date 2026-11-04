@@ -1022,7 +1022,7 @@ video::cue {
   background: #ef4444; color: #fff; letter-spacing: .02em;
 }
 .discord-call-controls {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)); gap: 5px;
 }
 .discord-call-bar:not(.in-call) .discord-call-controls {
   display: none;
@@ -2561,10 +2561,16 @@ body.theater-mode .resize-handle {
 
 .discord-call-bar.in-call .discord-call-controls {
   display: grid !important;
-  grid-template-columns: repeat(4, 1fr) !important;
+  grid-template-columns: repeat(auto-fit, minmax(56px, 1fr)) !important;
   gap: 5px !important;
   padding-top: 4px !important;
   border-top: 1px solid rgba(255, 255, 255, 0.05) !important;
+}
+@media (max-width: 960px) {
+  body.kb-open.kb-portrait .discord-call-bar.in-call .discord-call-participants,
+  body.kb-open.kb-portrait .discord-call-bar.in-call .discord-call-controls {
+    display: none !important;
+  }
 }
 
 .discord-live-dot {
@@ -4557,6 +4563,22 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
   background: rgba(18, 22, 34, .95);
   border: 1px solid rgba(239, 68, 68, .45);
   font-size: .78rem;
+}
+.chat-input .voice-rec-overlay {
+  flex: 1 1 0%;
+  min-width: 0;
+  margin: 0;
+  padding: 4px 7px;
+  gap: 6px;
+}
+.chat-input:has(#chat-voice-rec-overlay:not(.hidden)) .chat-tools-btn,
+.chat-input:has(#chat-voice-rec-overlay:not(.hidden)) .gif-btn,
+.chat-input:has(#chat-voice-rec-overlay:not(.hidden)) #chat-send-btn {
+  display: none !important;
+}
+.wl-dm-bubble .chat-voice-note {
+  min-width: 0;
+  width: min(210px, 100%);
 }
 .voice-rec-overlay.hidden { display: none !important; }
 .voice-rec-dot {

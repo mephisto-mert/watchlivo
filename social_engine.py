@@ -92,8 +92,9 @@ def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
 
 
 def _kv_set(key: str, val: Any, ttl_sec: int = 604800) -> None:
-    _KV_MEM[key] = val
-    _KV_READ_TS[key] = time.time()
+    if not key.startswith("wl:vn:"):
+        _KV_MEM[key] = val
+        _KV_READ_TS[key] = time.time()
     st = _get_redis_store()
     if st is not None:
         try:
@@ -2489,14 +2490,48 @@ def _detect_audio_mime(raw_bytes: bytes, declared_mime: str = "") -> str:
     return "audio/wav"
 
 
-def _save_voice_note_entry(note_id: str, entry: Dict[str, Any]) -> None:
-    _VOICE_NOTE_MEM[note_id] = entry
-    if len(_VOICE_NOTE_MEM) > 120:
+_VN_UPLOAD_HITS: Dict[str, List[float]] = {}
+_VR_POST_HITS: Dict[str, List[float]] = {}
+_RELAY_HEADERS = {
+    **_PRIVATE_HEADERS,
+    "Access-Control-Allow-Origin": "*",
+}
+
+
+def _rate_allow(bucket: Dict[str, List[float]], key: str, limit: int, window_sec: float, now_t: float) -> bool:
+    hits = [t for t in bucket.get(key, ()) if now_t - t < window_sec]
+    if len(hits) >= limit:
+        bucket[key] = hits
+        return False
+    hits.append(now_t)
+    bucket[key] = hits
+    if len(bucket) > 2000:
+        stale_k = [k for k, arr in bucket.items() if not arr or (now_t - arr[-1] >= window_sec)]
+        for sk in stale_k[:500]:
+            bucket.pop(sk, None)
+    return True
+
+
+def _bound_voice_note_mem() -> None:
+    while len(_VOICE_NOTE_MEM) > 120:
         oldest_k = min(_VOICE_NOTE_MEM, key=lambda k: float(_VOICE_NOTE_MEM[k].get("ts") or 0.0))
         _VOICE_NOTE_MEM.pop(oldest_k, None)
+
+
+def _save_voice_note_entry(note_id: str, entry: Dict[str, Any]) -> None:
+    _VOICE_NOTE_MEM[note_id] = entry
+    _bound_voice_note_mem()
     if _VN_TMP_DIR is not None:
         try:
             (_VN_TMP_DIR / f"{note_id}.json").write_text(json.dumps(entry, separators=(",", ":")), encoding="utf-8")
+            files = list(_VN_TMP_DIR.glob("*.json"))
+            if len(files) > 120:
+                files.sort(key=lambda p: p.stat().st_mtime)
+                for old_fp in files[:-120]:
+                    try:
+                        old_fp.unlink(missing_ok=True)
+                    except Exception:
+                        pass
         except Exception:
             pass
     _kv_set(f"wl:vn:{note_id}", entry, ttl_sec=86400)
@@ -2516,12 +2551,16 @@ def _load_voice_note_entry(note_id: str) -> Optional[Dict[str, Any]]:
                 loaded = json.loads(fp.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict) and loaded.get("b64"):
                     _VOICE_NOTE_MEM[clean_id] = loaded
+                    _bound_voice_note_mem()
                     return loaded
             except Exception:
                 pass
     kv_hit = _kv_get(f"wl:vn:{clean_id}", None, max_age=3600.0)
+    _KV_MEM.pop(f"wl:vn:{clean_id}", None)
+    _KV_READ_TS.pop(f"wl:vn:{clean_id}", None)
     if isinstance(kv_hit, dict) and kv_hit.get("b64"):
         _VOICE_NOTE_MEM[clean_id] = kv_hit
+        _bound_voice_note_mem()
         return kv_hit
     return None
 
@@ -2531,12 +2570,14 @@ def persist_audio_note(raw_an: Any, fallback_id: str = "") -> Optional[Dict[str,
         return None
     try:
         an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.5)))
+        if not math.isfinite(an_dur):
+            an_dur = 2.0
     except (TypeError, ValueError):
         an_dur = 2.0
     raw_peaks = [
         round(max(0.05, min(1.0, float(x))), 2)
         for x in (raw_an.get("peaks") or [])[:36]
-        if isinstance(x, (int, float))
+        if isinstance(x, (int, float)) and math.isfinite(float(x))
     ]
     norm_peaks = raw_peaks or [0.3, 0.62, 0.84, 0.48, 0.74, 0.52, 0.86, 0.42]
     existing_url = str(raw_an.get("url") or "").strip()
@@ -2567,7 +2608,7 @@ def persist_audio_note(raw_an: Any, fallback_id: str = "") -> Optional[Dict[str,
     mime = _detect_audio_mime(raw_bytes, decl_mime)
     clean_b64 = base64.b64encode(raw_bytes).decode("ascii")
     norm_du = f"data:{mime};base64,{clean_b64}"
-    nid = (m_url.group(1) if m_url else "") or re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_an.get("id") or fallback_id))[:32] or ("vn_" + uuid.uuid4().hex[:12])
+    nid = "vn_" + uuid.uuid4().hex[:16]
     _save_voice_note_entry(nid, {"id": nid, "mime": mime, "b64": clean_b64, "duration": round(an_dur, 1), "peaks": norm_peaks, "ts": _now()})
     return {
         "id": nid,
@@ -2580,15 +2621,21 @@ def persist_audio_note(raw_an: Any, fallback_id: str = "") -> Optional[Dict[str,
 
 
 async def voice_note_upload(request: Request):
+    now_t = _now()
+    ip_key = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "local")).split(",")[0].strip()[:64]
+    if not _rate_allow(_VN_UPLOAD_HITS, ip_key, limit=30, window_sec=60.0, now_t=now_t):
+        return JSONResponse({"ok": False, "error": "Çok sık ses kaydı gönderildi"}, status_code=429)
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400)
-    saved = persist_audio_note(body if isinstance(body, dict) else {})
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400)
+    saved = persist_audio_note(body)
     if not saved:
         return JSONResponse({"ok": False, "error": "Ses kaydı işlenemedi"}, status_code=400)
     resp_note = {k: v for k, v in saved.items() if k != "dataUrl"}
-    return JSONResponse({"ok": True, "audioNote": resp_note})
+    return JSONResponse({"ok": True, "audioNote": resp_note}, headers=_PRIVATE_HEADERS)
 
 
 async def voice_note_stream(request: Request):
@@ -2621,18 +2668,30 @@ async def voice_note_stream(request: Request):
     if request.method == "HEAD":
         base_headers["Content-Length"] = str(total)
         return _StarletteResponse(status_code=200, headers=base_headers)
-    rng = request.headers.get("range") or request.headers.get("Range") or ""
-    m_rng = re.match(r"bytes=(\d*)-(\d*)", rng.strip())
-    if m_rng and total > 0:
+    rng = (request.headers.get("range") or request.headers.get("Range") or "").strip()
+    if rng:
+        m_rng = re.match(r"^bytes=(\d*)-(\d*)$", rng)
+        if not m_rng or total <= 0:
+            err_hdrs = {**base_headers, "Content-Range": f"bytes */{total}"}
+            return _StarletteResponse(status_code=416, headers=err_hdrs)
         s_str, e_str = m_rng.group(1), m_rng.group(2)
-        start = int(s_str) if s_str else 0
-        end = int(e_str) if e_str else (total - 1)
+        if not s_str and not e_str:
+            err_hdrs = {**base_headers, "Content-Range": f"bytes */{total}"}
+            return _StarletteResponse(status_code=416, headers=err_hdrs)
         if not s_str and e_str:
             suffix = int(e_str)
+            if suffix <= 0:
+                err_hdrs = {**base_headers, "Content-Range": f"bytes */{total}"}
+                return _StarletteResponse(status_code=416, headers=err_hdrs)
             start = max(0, total - suffix)
             end = total - 1
-        start = max(0, min(start, total - 1))
-        end = max(start, min(end, total - 1))
+        else:
+            start = int(s_str)
+            end = int(e_str) if e_str else (total - 1)
+            if start >= total or (e_str and end < start):
+                err_hdrs = {**base_headers, "Content-Range": f"bytes */{total}"}
+                return _StarletteResponse(status_code=416, headers=err_hdrs)
+            end = min(end, total - 1)
         chunk = raw_bytes[start : end + 1]
         base_headers["Content-Range"] = f"bytes {start}-{end}/{total}"
         base_headers["Content-Length"] = str(len(chunk))
@@ -2643,23 +2702,64 @@ async def voice_note_stream(request: Request):
 
 async def voice_relay_endpoint(request: Request):
     if request.method == "OPTIONS":
-        return _StarletteResponse(status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization"})
+        return _StarletteResponse(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            },
+        )
     room_id = re.sub(r"[^a-z0-9\-]", "", str(request.path_params.get("room_id") or "").lower())[:48]
     if not room_id:
-        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400)
+        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=_RELAY_HEADERS)
     kv_key = f"wl:vrelay:{room_id}"
     now_t = _now()
+    if len(_VOICE_RELAY_MEM) > 80:
+        stale_rooms = [
+            rk for rk, rbuf in list(_VOICE_RELAY_MEM.items())
+            if not rbuf or (now_t - float(rbuf[-1].get("ts") or 0.0) > 30.0)
+        ]
+        for sr in stale_rooms:
+            _VOICE_RELAY_MEM.pop(sr, None)
     if request.method == "POST":
         try:
             body = await request.json()
         except Exception:
-            return JSONResponse({"ok": False}, status_code=400)
-        cid = re.sub(r"[^a-zA-Z0-9_]", "", str((body or {}).get("clientId") or ""))[:24]
-        b64 = re.sub(r"\s+", "", str((body or {}).get("b64") or ""))
+            return JSONResponse({"ok": False, "error": "Geçersiz JSON"}, status_code=400, headers=_RELAY_HEADERS)
+        if not isinstance(body, dict):
+            return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400, headers=_RELAY_HEADERS)
+        cid = re.sub(r"[^a-zA-Z0-9_]", "", str(body.get("clientId") or ""))[:24]
+        b64 = re.sub(r"\s+", "", str(body.get("b64") or ""))
         if not cid or not b64 or len(b64) > 80000:
-            return JSONResponse({"ok": False, "error": "Geçersiz ses paketi"}, status_code=400)
-        seq = _safe_int((body or {}).get("seq"), 0, lo=0, hi=999999999)
-        mime = _clean((body or {}).get("mime") or "audio/wav", 32)
+            return JSONResponse({"ok": False, "error": "Geçersiz ses paketi"}, status_code=400, headers=_RELAY_HEADERS)
+        if not _rate_allow(_VR_POST_HITS, f"{room_id}:{cid}", limit=25, window_sec=5.0, now_t=now_t):
+            return JSONResponse({"ok": False, "error": "Hız sınırı"}, status_code=429, headers=_RELAY_HEADERS)
+        ctok = str(body.get("clientToken") or "").strip()
+        try:
+            import rooms as _rm
+            rm_obj = await _rm.STORE.get(room_id)
+            tok_ok = bool(ctok and _rm.verify_client_token(room_id, ctok) == cid)
+            if rm_obj is not None:
+                if cid in (rm_obj.get("kicked_cids") or []):
+                    return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
+                if ctok and not tok_ok:
+                    return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
+                if not tok_ok and cid not in (rm_obj.get("participants") or {}):
+                    return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
+                vmode = str(rm_obj.get("voipMode") or "all")
+                if vmode == "off":
+                    return JSONResponse({"ok": False, "error": "Ses kanalı kapalı"}, status_code=403, headers=_RELAY_HEADERS)
+                if vmode == "leader" and cid != rm_obj.get("host_id") and cid not in (rm_obj.get("co_hosts") or []):
+                    return JSONResponse({"ok": False, "error": "Sadece oda lideri konuşabilir"}, status_code=403, headers=_RELAY_HEADERS)
+                if vmode == "stage" and cid != rm_obj.get("host_id") and cid not in (rm_obj.get("co_hosts") or []) and cid not in (rm_obj.get("stage_speakers") or []):
+                    return JSONResponse({"ok": False, "error": "Sahne konuşma izni gerekli"}, status_code=403, headers=_RELAY_HEADERS)
+            elif not tok_ok:
+                return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=_RELAY_HEADERS)
+        except Exception:
+            pass
+        seq = _safe_int(body.get("seq"), 0, lo=0, hi=999999999)
+        mime = _clean(body.get("mime") or "audio/wav", 32)
         if not mime.startswith("audio/"):
             mime = "audio/wav"
         cur = _kv_get(kv_key, None, max_age=0.12)
@@ -2670,10 +2770,12 @@ async def voice_relay_endpoint(request: Request):
         buf = buf[-16:]
         _VOICE_RELAY_MEM[room_id] = buf
         _kv_set(kv_key, buf, ttl_sec=20)
-        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_PRIVATE_HEADERS)
+        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_RELAY_HEADERS)
     cid_q = re.sub(r"[^a-zA-Z0-9_]", "", str(request.query_params.get("clientId") or ""))[:24]
     try:
         since_ts = float(request.query_params.get("sinceTs") or 0.0)
+        if not math.isfinite(since_ts):
+            since_ts = 0.0
     except (TypeError, ValueError):
         since_ts = 0.0
     cur = _kv_get(kv_key, None, max_age=0.12)
@@ -2685,6 +2787,6 @@ async def voice_relay_endpoint(request: Request):
         and float(p.get("ts") or 0.0) > since_ts
         and (now_t - float(p.get("ts") or 0.0) < 10.0)
     ]
-    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_PRIVATE_HEADERS)
+    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_RELAY_HEADERS)
 
 

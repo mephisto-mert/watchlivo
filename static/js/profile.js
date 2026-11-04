@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261104_v96';
-import { api } from './api.js?v=20261104_v96';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer } from './voice-note.js?v=20261104_v96';
+import { h, icons, popup, toast } from './ui.js?v=20261104_v97';
+import { api } from './api.js?v=20261104_v97';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261104_v97';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261104_v96';
+} from './store.js?v=20261104_v97';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -1525,7 +1525,7 @@ export async function openDmModal(initialPeerId = null) {
     dmInp.placeholder = `${activePeer.name} kişisine mesaj yaz...`;
     const dmVoiceBtn = h('button', {
       type: 'button',
-      class: 'btn sm',
+      class: 'btn sm wl-dm-mic-btn',
       id: 'btn-dm-voice-rec',
       title: 'Sesli Mesaj Gönder',
       style: { minWidth: '40px', height: '40px', padding: '0 10px' },
@@ -1542,17 +1542,21 @@ export async function openDmModal(initialPeerId = null) {
           },
           onFinish: async (audioNote) => {
             dmVoiceRec = null;
+            dmVoiceBtn.classList.remove('recording');
             dmVoiceBtn.textContent = '🎙️';
+            if (!root.isConnected) return;
             await sendDmNow({ text: '', audioNote });
           },
           onError: (msg) => {
             dmVoiceRec = null;
+            dmVoiceBtn.classList.remove('recording');
             dmVoiceBtn.textContent = '🎙️';
             toast(msg || 'Mikrofon izni gerekli');
           },
         });
         if (handle) {
           dmVoiceRec = handle;
+          dmVoiceBtn.classList.add('recording');
           dmVoiceBtn.textContent = '🔴 0:00';
         }
       },
@@ -1677,19 +1681,27 @@ export async function openDmModal(initialPeerId = null) {
 
   await refreshAll(activePeerId, true);
 
+  const cleanupDmModal = () => {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (dmVoiceRec) {
+      try { dmVoiceRec.stop(false); } catch (_) {}
+      dmVoiceRec = null;
+    }
+    stopActiveVoiceNoteGlobal();
+  };
+
   dmModal = popup({
     title: '💬 Özel Mesajlar (DM) & Arkadaş Sohbeti',
     content: root,
     dismissable: true,
     wide: true,
-    onClose: () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } },
+    onClose: cleanupDmModal,
     options: [{ label: 'Kapat', class: 'btn' }],
   });
 
   pollTimer = setInterval(() => {
     if (!root.isConnected) {
-      clearInterval(pollTimer);
-      pollTimer = null;
+      cleanupDmModal();
       return;
     }
     refreshAll(activePeerId, false).catch(() => {});

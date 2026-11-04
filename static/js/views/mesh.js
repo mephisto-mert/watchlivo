@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v96';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v96';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v96';
-import { MeshConnection } from '../realtime.js?v=20261104_v96';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v96';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v96';
-import { buildLayout } from './mesh-layout.js?v=20261104_v96';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v96';
-import { Voice } from '../voice.js?v=20261104_v96';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v96';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v97';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v97';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v97';
+import { MeshConnection } from '../realtime.js?v=20261104_v97';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v97';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v97';
+import { buildLayout } from './mesh-layout.js?v=20261104_v97';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v97';
+import { Voice } from '../voice.js?v=20261104_v97';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v97';
 
 let ctx = null;
 
@@ -1250,10 +1250,10 @@ export function leaveMeshView(explicitLeave = false) {
   if (typeof window !== 'undefined' && window.__watchlivoBgSyncTick) window.__watchlivoBgSyncTick = null;
   clearInterval(ctx.progressTimer);
   try { ctx.conn?.close(Boolean(explicitLeave), shouldClose); } catch (e) { /* ignore */ }
-  ctx.sync.stop();
-  ctx.host.destroy();
-  ctx.voice?.destroy();
-  ctx.layout?.destroy?.();
+  try { ctx.sync?.stop?.(); } catch (_) {}
+  try { ctx.host?.destroy?.(); } catch (_) {}
+  try { ctx.voice?.destroy?.(); } catch (_) {}
+  try { ctx.layout?.destroy?.(); } catch (_) {}
   ctx = null;
   set({ mesh: null, clientId: null });
   setTimeout(() => pushPresenceHeartbeat({ state: 'online', roomId: '', roomName: '', mediaTitle: '' }).catch(() => {}), 40);

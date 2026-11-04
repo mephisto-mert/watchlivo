@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v96';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v97';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -172,8 +172,8 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
   });
 }
 
-// Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable }
-export function popup({ title, message, options = [], content = null, dismissable = true, wide = false } = {}) {
+// Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable, onClose }
+export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, onClose = null } = {}) {
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   const root = document.getElementById('popup-root');
   if (fsEl && root && !fsEl.contains(root)) {
@@ -195,6 +195,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
     if (closing) return;
     closing = true;
     window.removeEventListener('keydown', onKey);
+    try { onClose?.(); } catch (_) {}
     back.classList.add('is-closing');
     setTimeout(() => back.remove(), 175);
   };
