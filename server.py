@@ -3821,35 +3821,37 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 cand_se.append((s + 1, e))
             if s == 2 and e > 7 and (3, e - 7) not in cand_se:
                 cand_se.insert(0, (3, e - 7))
-        vids = None
-        for s_try, e_try in cand_se[:4]:
-            try:
-                ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e_try}&season={s_try}"
-                v_try = _raw_get_json(ep_url, headers=hdrs, timeout=2.5)
-                if isinstance(v_try, list) and v_try:
-                    vids = v_try
-                    break
-            except Exception:
-                continue
-        if not vids and (mtype == "movie" or (s == 1 and e == 1)):
-            try:
-                v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=2.5) or {}
-                pag = v_data.get("pagination") if isinstance(v_data, dict) else None
-                raw_vids = (pag.get("data") if isinstance(pag, dict) else None) or []
-                vids = [
-                    v for v in raw_vids
-                    if isinstance(v, dict)
-                    and int(v.get("title_id") or 0) == int(ac_id)
-                    and str(v.get("category") or "").lower() != "teaser"
-                ]
-            except Exception:
-                vids = None
         fb_tau = []
         for s_try, e_try in cand_se:
             for item_fb in (_ANIMECIX_TAU_MAP.get(f"{ac_id}:{s_try}:{e_try}") or []):
                 if item_fb not in fb_tau:
                     fb_tau.append(item_fb)
         fb_by_id = {str(p[0]): (str(p[2]) if len(p) >= 3 else "") for p in fb_tau if isinstance(p, (list, tuple)) and len(p) >= 2}
+        has_fb_mp4 = any(isinstance(p, (list, tuple)) and len(p) >= 3 and str(p[2]).startswith("https://") for p in fb_tau)
+        vids = None
+        if not (IS_VERCEL and has_fb_mp4):
+            for s_try, e_try in cand_se[:3]:
+                try:
+                    ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e_try}&season={s_try}"
+                    v_try = _raw_get_json(ep_url, headers=hdrs, timeout=2.2)
+                    if isinstance(v_try, list) and v_try:
+                        vids = v_try
+                        break
+                except Exception:
+                    continue
+            if not vids and (mtype == "movie" or (s == 1 and e == 1)):
+                try:
+                    v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=2.2) or {}
+                    pag = v_data.get("pagination") if isinstance(v_data, dict) else None
+                    raw_vids = (pag.get("data") if isinstance(pag, dict) else None) or []
+                    vids = [
+                        v for v in raw_vids
+                        if isinstance(v, dict)
+                        and int(v.get("title_id") or 0) == int(ac_id)
+                        and str(v.get("category") or "").lower() != "teaser"
+                    ]
+                except Exception:
+                    vids = None
         tau_items = []
         if isinstance(vids, list) and vids:
             for v_item in vids:
@@ -3880,10 +3882,10 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 continue
             seen_tau.add(tau_id)
             try:
-                best_u = ""
-                if not tau_id.startswith("https://"):
+                best_u = fb_u if (IS_VERCEL and fb_u.startswith("https://")) else ""
+                if not best_u and not tau_id.startswith("https://"):
                     try:
-                        t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=2.8) or {}
+                        t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=2.2) or {}
                         u_list = [x for x in (t_info.get("urls") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
                         u_list.sort(key=lambda x: 0 if "1080" in str(x.get("label") or "") else (1 if "720" in str(x.get("label") or "") else 2))
                         if u_list:
@@ -5671,7 +5673,7 @@ async def resolve_catalog(request: Request):
                 _RESOLVE_RESP_CACHE.pop(next(iter(_RESOLVE_RESP_CACHE)), None)
             _RESOLVE_RESP_CACHE[ckey] = (time.time(), res)
     if not res:
-        return JSONResponse({"error": "Oynatılabilir tam içerik bulunamadı"}, status_code=404)
+        return JSONResponse({"error": "Oynatılabilir tam içerik bulunamadı"}, status_code=404, headers={"Cache-Control": "no-store"})
     return JSONResponse(social_engine.rank_servers_by_health(res), headers=cc_hdrs)
 
 

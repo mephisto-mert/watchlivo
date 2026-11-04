@@ -33,7 +33,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const res = await api(`/api/rave/resolve-catalog?${query}`, { timeout: 18000 });
+      const qTry = attempt === 1 ? `${query}&refresh=1` : query;
+      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: 18000 });
       if (res && (res.url || res.videoId)) {
         const disp = it.title || res.title || prov.name;
         if (mediaType === 'tv') {
@@ -60,7 +61,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       }
       break;
     } catch (err) {
-      if (err?.status === 404 || attempt === 1) {
+      if (attempt === 1) {
         toast(err.data?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
         break;
       }
