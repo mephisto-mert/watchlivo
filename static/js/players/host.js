@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261104_v97';
-import { Html5Adapter } from './html5.js?v=20261104_v97';
-import { VimeoAdapter } from './vimeo.js?v=20261104_v97';
-import { EmbedAdapter } from './embed.js?v=20261104_v97';
-import { WebviewAdapter } from './webview.js?v=20261104_v97';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261104_v97';
+import { YouTubeAdapter } from './youtube.js?v=20261104_v98';
+import { Html5Adapter } from './html5.js?v=20261104_v98';
+import { VimeoAdapter } from './vimeo.js?v=20261104_v98';
+import { EmbedAdapter } from './embed.js?v=20261104_v98';
+import { WebviewAdapter } from './webview.js?v=20261104_v98';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261104_v98';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -60,6 +60,10 @@ export class PlayerHost {
     const rawOnEvent = onEvent || (() => {});
     this.onEvent = (ev, arg) => {
       if ((ev === 'pause' || ev === 'play') && !this.adapter) return;
+      if (ev === 'pip-change' && typeof document !== 'undefined') {
+        const osActive = Boolean(arg) && !document.documentElement.classList.contains('is-android-pip');
+        document.body?.classList?.toggle('os-pip-active', osActive);
+      }
       rawOnEvent(ev, arg);
     };
     if (typeof window !== 'undefined') window.__kinoxHost = this;
@@ -496,6 +500,7 @@ export class PlayerHost {
 
   destroyAdapterOnly() {
     clearTimeout(this._loadFallbackTimer);
+    if (typeof document !== 'undefined') document.body?.classList?.remove('os-pip-active');
     const oldAdapter = this.adapter;
     this.adapter = null;
     this.key = '';

@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v97';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v98';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -410,14 +410,14 @@ export function openThemeModal() {
         class: 'btn primary wl-btn-ios-dl',
         href: '/download/ipa',
         download: 'Watchlivo.ipa',
-        onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
-      }, '🍎 iPhone IPA İndir (v1.2)'),
+        onclick: () => toast('🍎 iPhone IPA (v1.3.0) indiriliyor...', 4000)
+      }, '🍎 iPhone IPA İndir (v1.3)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
-      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0)'),
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.3 indiriliyor...', 4000)
+      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.3)'),
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
@@ -440,16 +440,16 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'iPhone & iPad (iOS IPA)'),
-          h('small', {}, 'v1.2.0 • iOS 15+ Arka Plan PiP & AltStore / TrollStore'),
-          h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi ve arka plan ses desteği.')
+          h('small', {}, 'v1.3.0 • HBO Max Tarzı Sistem PiP & AltStore / TrollStore'),
+          h('p', {}, 'Diğer uygulamalara (WhatsApp, Instagram, Ana Ekran) geçince tam sistem PiP penceresi ve kesintisiz ses.')
         ),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
           h('a', {
             class: 'btn primary wl-download-action',
             href: '/download/ipa',
             download: 'Watchlivo.ipa',
-            onclick: () => toast('🍎 Watchlivo iOS IPA indiriliyor...', 4000)
-          }, 'IPA İndir (.ipa)'),
+            onclick: () => toast('🍎 Watchlivo iOS IPA v1.3.0 indiriliyor...', 4000)
+          }, 'IPA İndir (v1.3.0)'),
           h('a', {
             class: 'btn wl-download-action',
             href: '/download/ios',
@@ -460,15 +460,15 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Android Uygulaması (Native APK)'),
-          h('small', {}, 'v2.0.0 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
-          h('p', {}, 'Tarayıcısız saf Android donanım oynatıcı, sistem PiP penceresi ve yeni sürüm çıktığında kendi kendini otomatik güncelleyen altyapı.')
+          h('small', {}, 'v2.0.3 • Çapraz Uygulama Sistem PiP & Otomatik Güncelleme'),
+          h('p', {}, 'Diğer uygulamalar üzerinde yüzen gerçek Android sistem PiP penceresi, donanım oynatıcı ve otomatik OTA güncelleme.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
           href: '/download/Watchlivo-v2.0.apk',
           download: 'Watchlivo-v2.0.apk',
-          onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0)')
+          onclick: () => toast('📱 Watchlivo Native APK v2.0.3 indiriliyor...', 4000)
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.3)')
       ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),

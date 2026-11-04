@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v97", index_txt)
+        self.assertIn("20261104_v98", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -277,4 +277,46 @@ class V83SocialHistoryUiTests(unittest.TestCase):
             self.assertIn(b"restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:", macho)
             self.assertIn(b"startOrSyncNativePiP:forceStart:", macho)
             plist_txt = zf.read("Payload/Watchlivo.app/Info.plist").decode("utf-8")
-            self.assertIn("<string>89</string>", plist_txt)
+            self.assertIn("<string>1.3.0</string>", plist_txt)
+            self.assertIn("<string>90</string>", plist_txt)
+
+    def test_09_v98_mobile_dock_and_cross_app_os_pip(self):
+        import json
+        import zipfile
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        proj_root = repo_root.parent
+        static_root = repo_root / "static"
+
+        # 1. Mobile .floating-dock safe-area fix & tubelight exact offsetHeight
+        vortex_css = (static_root / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn(".floating-dock > .wl-tubelight-indicator", vortex_css)
+        home_js = (static_root / "js" / "views" / "home.js").read_text(encoding="utf-8")
+        self.assertIn("act.offsetHeight", home_js)
+
+        # 2. HBO Max OS PiP stage placeholder & non-duplicated cross-app minimize
+        mesh_css = (static_root / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn(".wl-pip-stage-placeholder", mesh_css)
+        self.assertIn("html:not(.is-android-pip) body.mesh-minimized.os-pip-active #mesh-root", mesh_css)
+        controls_js = (static_root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("Bu video Pencere İçinde Pencere modunda oynatılıyor.", controls_js)
+        main_js = (static_root / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("enterPiP?.('room-minimize')", main_js)
+
+        # 3. iOS Watchlivo.ipa v1.3.0 compiled ARM64 binary has pipHostView & non-mixWithOthers PiP session
+        with zipfile.ZipFile(static_root / "Watchlivo.ipa", "r") as zf:
+            macho = zf.read("Payload/Watchlivo.app/Watchlivo")
+            self.assertEqual(macho[:8].hex(), "cffaedfe0c000001")
+            self.assertIn(b"pipHostView", macho)
+            self.assertNotIn(b"AVAudioSessionCategoryOptionMixWithOthers", macho)
+
+        # 4. Android Native APK v2.0.3 (versionCode=23) detached PiP task & seamless resize
+        apk_ver = json.loads((repo_root / "app_version.json").read_text(encoding="utf-8"))
+        self.assertEqual(apk_ver["versionCode"], 23)
+        self.assertEqual(apk_ver["versionName"], "2.0.3")
+        native_manifest = (proj_root / "watchlivo_native_apk" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        self.assertIn('android:taskAffinity="online.watchlivo.app.pip"', native_manifest)
+        self.assertIn('android:launchMode="singleTask"', native_manifest)
+        player_java = (proj_root / "watchlivo_native_apk" / "src" / "online" / "watchlivo" / "app" / "PlayerActivity.java").read_text(encoding="utf-8")
+        self.assertIn("pipActionReceiver", player_java)
+        self.assertIn("setSeamlessResizeEnabled(true)", player_java)
+        self.assertNotIn("Build.VERSION.SDK_INT < 31", player_java)

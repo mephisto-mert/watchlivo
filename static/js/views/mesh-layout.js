@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261104_v97';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261104_v97';
-import { navIcon, logo } from './home.js?v=20261104_v97';
-import { createSelection } from './selection.js?v=20261104_v97';
-import { buildControls } from './controls.js?v=20261104_v97';
-import { buildChat } from './chat.js?v=20261104_v97';
-import { PANELS } from './panels.js?v=20261104_v97';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261104_v98';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261104_v98';
+import { navIcon, logo } from './home.js?v=20261104_v98';
+import { createSelection } from './selection.js?v=20261104_v98';
+import { buildControls } from './controls.js?v=20261104_v98';
+import { buildChat } from './chat.js?v=20261104_v98';
+import { PANELS } from './panels.js?v=20261104_v98';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -144,7 +144,7 @@ export function buildLayout(app, ctx) {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');
         }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, variant: 'primary-pill', id: 'nav-search-video' }),
-        roomActionBtn('minimize', 'Küçült', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' })),
+        roomActionBtn('pip', 'PiP / Küçült', 'Sistem Pencere İçinde Pencere (Diğer Uygulamalar Üstünde) & Lobiye Dön', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' })),
       h('div', { class: 'navbar-center' },
         h('div', { class: 'room-brand-capsule' },
           logo(),

@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261104_v97';
-import { expectedPosition } from '../sync.js?v=20261104_v97';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v97';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v97';
+import { SubtitleDubController } from './subtitles.js?v=20261104_v98';
+import { expectedPosition } from '../sync.js?v=20261104_v98';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v98';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v98';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -1367,17 +1367,24 @@ export class Html5Adapter {
   }
   _syncNativeIosPip(playingOverride = null) {
     if (typeof window === 'undefined' || !window.isWatchlivoNativeIOS || typeof window.watchlivoNativePiP !== 'function') return;
+    const v = this.video;
+    const audioOnlyMusic = Boolean(this.isMusic && !(v?.videoWidth > 0));
+    // When primary <video> uses native Apple AVPlayer directly (no MSE hls.js, no WebAudio),
+    // WKWebView's built-in AVPictureInPictureController handles inline & Home-swipe Auto-PiP natively without a duplicate player.
+    if (v && !audioOnlyMusic && !this.hls && !hasWebAudioGraph(v) && !window.__kinoxHost?._nativeIosPipActive) {
+      return;
+    }
     const eff = this._nativeIosPipSourceUrl();
-    if (!this.video || !eff) return;
+    if (!v || !eff) return;
     this._lastNativeIosSyncAt = Date.now();
     try {
       const absU = new URL(eff, window.location.origin).href;
       const r = this.container?.getBoundingClientRect?.() || { left: 0, top: 80, width: 360, height: 202 };
-      const isPlaying = typeof playingOverride === 'boolean' ? playingOverride : (!this.video.paused && this.wantPlaying);
+      const isPlaying = typeof playingOverride === 'boolean' ? playingOverride : (!v.paused && this.wantPlaying);
       window.watchlivoNativePiP(isPlaying ? 'sync' : 'pause', {
         url: absU,
         time: this.getTime(),
-        rate: this.video.playbackRate || 1,
+        rate: v.playbackRate || 1,
         playing: isPlaying,
         live: Boolean(this.media?.live),
         muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0),
@@ -1936,6 +1943,25 @@ export class Html5Adapter {
       (pv && ((typeof document !== 'undefined' && document.pictureInPictureElement === pv) || pv.webkitPresentationMode === 'picture-in-picture'))
     );
   }
+  async _waitReadyForPip(el, timeoutMs = 1500) {
+    if (!el || el.readyState >= 1) return Boolean(el && el.readyState >= 1);
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        el.removeEventListener('loadedmetadata', finish);
+        el.removeEventListener('canplay', finish);
+        el.removeEventListener('error', finish);
+        resolve(el.readyState >= 1);
+      };
+      el.addEventListener('loadedmetadata', finish, { once: true });
+      el.addEventListener('canplay', finish, { once: true });
+      el.addEventListener('error', finish, { once: true });
+      setTimeout(finish, timeoutMs);
+    });
+  }
+
   async togglePiP() {
     const v = this.video;
     if (!v) return false;
@@ -1952,14 +1978,6 @@ export class Html5Adapter {
         }
       } catch (_) {}
     }
-    const nativeSrc = this._nativeIosPipSourceUrl();
-    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && nativeSrc) {
-      const absU = new URL(nativeSrc, window.location.origin).href;
-      this._lastPipEnterAt = Date.now();
-      if (window.watchlivoNativePiP('toggle', { url: absU, time: this.getTime(), rate: v.playbackRate || 1, playing: true, live: Boolean(this.media?.live), muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0) })) {
-        return 'entered';
-      }
-    }
 
     if (this.iosPipVideo && (this._iosPipActive || this.iosPipVideo.webkitPresentationMode === 'picture-in-picture')) {
       this._lastPipExitAt = Date.now();
@@ -1967,11 +1985,70 @@ export class Html5Adapter {
       return 'exited';
     }
 
+    if (typeof v.webkitSetPresentationMode === 'function' && v.webkitPresentationMode === 'picture-in-picture') {
+      this._lastPipExitAt = Date.now();
+      try { v.webkitSetPresentationMode('inline'); } catch (_) {}
+      this.subs?._disableAllNativeTextTracks?.();
+      this.events.onPipChange?.(false);
+      return 'exited';
+    }
+
+    if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
+      this._lastPipExitAt = Date.now();
+      try { await document.exitPictureInPicture(); } catch (_) {}
+      this.subs?._disableAllNativeTextTracks?.();
+      this.events.onPipChange?.(false);
+      return 'exited';
+    }
+
     const audioOnlyMusic = Boolean(this.isMusic && !(v.videoWidth > 0));
     const needsIosStandbyPip = isIosWebKit() && typeof v.webkitSetPresentationMode === 'function' && (Boolean(this.hls) || hasWebAudioGraph(v) || audioOnlyMusic);
-    if (needsIosStandbyPip && v.webkitPresentationMode !== 'picture-in-picture') {
+
+    // 1. Primary Apple WebKit / WKWebView native <video> OS-level PiP (instant HBO Max behavior over all iOS/macOS apps)
+    if (!needsIosStandbyPip && typeof v.webkitSetPresentationMode === 'function') {
+      try {
+        if (v.readyState < 1) {
+          try { v.play()?.catch?.(() => {}); } catch (_) {}
+          await this._waitReadyForPip(v, 1400);
+        }
+        if (v.readyState >= 1 && (!v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode('picture-in-picture'))) {
+          if (v.paused && this.wantPlaying !== false) {
+            try { v.play()?.catch?.(() => {}); } catch (_) {}
+          }
+          this._lastPipEnterAt = Date.now();
+          this.subs?.syncNativeTrackToElement?.(v, true);
+          v.webkitSetPresentationMode('picture-in-picture');
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+      } catch (_) { /* fall through to standby / native bridge */ }
+    }
+
+    // 2. Primary W3C <video>.requestPictureInPicture() (true OS-level floating window on Chrome/Edge/Android/Desktop)
+    if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
+      try {
+        if (v.readyState < 1) {
+          try { v.play()?.catch?.(() => {}); } catch (_) {}
+          await this._waitReadyForPip(v, 1400);
+        }
+        if (v.readyState >= 1 && (v.videoWidth > 0 || !audioOnlyMusic)) {
+          this._lastPipEnterAt = Date.now();
+          this.subs?.syncNativeTrackToElement?.(v, true);
+          await v.requestPictureInPicture();
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+      } catch (_) { /* fall through to standby / native bridge */ }
+    }
+
+    // 3. iOS Standby AVPlayer video (for MSE / audio-only / canvas music streams)
+    if (needsIosStandbyPip) {
       const pv = this._ensureIosPipStandby(this.currentUrl);
       if (pv) {
+        if (pv.readyState < 1) {
+          try { pv.load(); } catch (_) {}
+          await this._waitReadyForPip(pv, 1400);
+        }
         if (pv.readyState >= 1 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
           this._iosPipActive = true;
           this._lastPipEnterAt = Date.now();
@@ -2002,67 +2079,21 @@ export class Html5Adapter {
               if (this.wantPlaying) this.tryPlay();
             }
           }
-        } else {
-          try { pv.load(); } catch (_) {}
-          if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
-            const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
-            if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
-          }
-          return 'loading';
         }
       }
     }
 
-    if (typeof v.webkitSetPresentationMode === 'function') {
-      try {
-        if (v.webkitPresentationMode === 'picture-in-picture') {
-          this._lastPipExitAt = Date.now();
-          v.webkitSetPresentationMode('inline');
-          this.subs?._disableAllNativeTextTracks?.();
-          this.events.onPipChange?.(false);
-          return 'exited';
-        }
-        if (v.readyState >= 1 && (!v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode('picture-in-picture'))) {
-          if (v.paused && this.wantPlaying !== false) {
-            try { v.play()?.catch?.(() => {}); } catch (_) {}
-          }
-          this.subs?.syncNativeTrackToElement?.(v, true);
-          v.webkitSetPresentationMode('picture-in-picture');
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-        if (v.readyState < 1) {
-          try { v.play()?.catch?.(() => {}); } catch (_) {}
-          if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
-            const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
-            if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
-          }
-          return 'loading';
-        }
-      } catch (e) { /* try native bridge / standard PiP API below */ }
-    }
-    if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function' && this.currentUrl && !this.currentUrl.startsWith('blob:')) {
-      const absU = new URL(this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl, window.location.origin).href;
-      if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1 })) return 'entered';
-    }
-    try {
-      if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
-        this._lastPipExitAt = Date.now();
-        await document.exitPictureInPicture();
-        this.subs?._disableAllNativeTextTracks?.();
-        this.events.onPipChange?.(false);
-        return 'exited';
+    // 4. Native iOS Objective-C AVPictureInPictureController fallback bridge
+    const nativeSrc = this._nativeIosPipSourceUrl();
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && nativeSrc) {
+      const absU = new URL(nativeSrc, window.location.origin).href;
+      this._lastPipEnterAt = Date.now();
+      if (window.watchlivoNativePiP('toggle', { url: absU, time: this.getTime(), rate: v.playbackRate || 1, playing: true, live: Boolean(this.media?.live), muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0) })) {
+        return 'entered';
       }
-      if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
-        if (v.readyState >= 1) {
-          this.subs?.syncNativeTrackToElement?.(v, true);
-          await v.requestPictureInPicture();
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-        return 'loading';
-      }
-    } catch (e) { /* fallback handled by caller */ }
+    }
+
+    if (v.readyState < 1) return 'loading';
     return false;
   }
   async _requestWakeLock() {

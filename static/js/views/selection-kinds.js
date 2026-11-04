@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v97';
-import { api, qs } from '../api.js?v=20261104_v97';
-import { parseVideoUrl } from '../providers.js?v=20261104_v97';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v97';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v97';
-import { profileSetup } from '../profile.js?v=20261104_v97';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v97';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v98';
+import { api, qs } from '../api.js?v=20261104_v98';
+import { parseVideoUrl } from '../providers.js?v=20261104_v98';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v98';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v98';
+import { profileSetup } from '../profile.js?v=20261104_v98';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v98';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261104_v97';
+} from '../store.js?v=20261104_v98';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');

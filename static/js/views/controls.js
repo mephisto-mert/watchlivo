@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v97';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v97';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v97';
-import { getProvider } from '../providers.js?v=20261104_v97';
-import { expectedPosition } from '../sync.js?v=20261104_v97';
-import { thumbFor } from './lobby.js?v=20261104_v97';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v97';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v97';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v97';
-import { avatar } from '../profile.js?v=20261104_v97';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v98';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v98';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v98';
+import { getProvider } from '../providers.js?v=20261104_v98';
+import { expectedPosition } from '../sync.js?v=20261104_v98';
+import { thumbFor } from './lobby.js?v=20261104_v98';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v98';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v98';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v98';
+import { avatar } from '../profile.js?v=20261104_v98';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1039,6 +1039,39 @@ export function buildControls(frame, ctx) {
         onclick: (e) => { e.stopPropagation(); window.vortexCloseMinimizedRoom?.(); },
       }, '✕')));
 
+  const pipStagePlaceholder = h('div', {
+    class: 'wl-pip-stage-placeholder hidden',
+    id: 'wl-pip-stage-placeholder',
+  },
+    h('div', {
+      class: 'wl-pip-stage-graphic',
+      html: `<svg viewBox="0 0 180 124" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="44" y="18" width="92" height="66" rx="13" stroke="rgba(255,255,255,0.28)" stroke-width="6"/>
+        <rect x="78" y="48" width="76" height="58" rx="13" fill="#040508" stroke="rgba(255,255,255,0.34)" stroke-width="6"/>
+        <rect x="12" y="10" width="74" height="50" rx="10" fill="#171922" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+      </svg>`,
+    }),
+    h('p', { class: 'wl-pip-stage-title' }, 'Bu video Pencere İçinde Pencere modunda oynatılıyor.'),
+    h('p', { class: 'wl-pip-stage-sub' }, 'Ana ekrana veya diğer uygulamalara geçebilirsiniz.'),
+    h('button', {
+      type: 'button',
+      class: 'wl-pip-stage-restore-btn',
+      id: 'wl-pip-stage-restore',
+      onclick: (e) => {
+        e.stopPropagation();
+        togglePiP();
+      },
+    }, '⤢ Pencereyi Buraya Döndür'));
+
+  const syncPipStagePlaceholder = () => {
+    const activeOsPip = Boolean(
+      host.isPiP?.()
+      && !(typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-android-pip'))
+    );
+    pipStagePlaceholder.classList.toggle('hidden', !activeOsPip);
+    frame.classList.toggle('is-os-pip-stage', activeOsPip);
+  };
+
   const syncPill = h('div', { class: 'ctl-sync-pill', id: 'ctl-sync-pill', title: 'Canlı oda senkronizasyon durumu' }, syncDot, syncText);
   const embedTouchHudBtn = h('button', {
     type: 'button',
@@ -1080,7 +1113,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
-  frame.append(brightnessVeil, empty, loading, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, embedTouchHudBtn, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(brightnessVeil, empty, loading, pipStagePlaceholder, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, embedTouchHudBtn, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (document.body.classList.contains('mesh-minimized')) return;
@@ -2414,6 +2447,8 @@ export function buildControls(frame, ctx) {
     empty.classList.toggle('hidden', has);
     controls.classList.toggle('hidden', !has);
     if (!has) {
+      pipStagePlaceholder.classList.add('hidden');
+      frame.classList.remove('is-os-pip-stage');
       loading.classList.add('hidden');
       errorBox.classList.add('hidden');
       unmute.classList.add('hidden');
@@ -2422,6 +2457,7 @@ export function buildControls(frame, ctx) {
       castBtn.style.display = 'none';
       return;
     }
+    syncPipStagePlaceholder();
     updateUnmuteVisibility();
     const prov = getProvider(m.catalogProvider || m.provider);
     const t = thumbFor(m);
@@ -2736,6 +2772,7 @@ export function buildControls(frame, ctx) {
       }
       if (ev === 'pip-change') {
         pipBtn.classList.toggle('on', Boolean(arg));
+        syncPipStagePlaceholder();
         return;
       }
       if (ev === 'tracks-changed') {
