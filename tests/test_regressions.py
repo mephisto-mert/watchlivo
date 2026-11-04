@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v105 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261104_v106 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v105", index_html)
+        self.assertIn("20261104_v106", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1607,6 +1607,45 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("body.tv-nav-active :focus", vortex_css)
         sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
         self.assertIn("openVizyonModal", sel_kinds_js)
+
+    def test_v108_multi_season_canonical_splits_and_animecix_resolution(self):
+        from pathlib import Path
+
+        # 1. Bidirectional season/episode <-> absolute episode numbering for single-season TMDB shows
+        jjk_s2e9 = server._resolve_episode_numbering("95479", 2, 9)
+        self.assertTrue(jjk_s2e9["has_splits"])
+        self.assertEqual((jjk_s2e9["s_split"], jjk_s2e9["e_split"]), (2, 9))
+        self.assertEqual((jjk_s2e9["s_tmdb"], jjk_s2e9["e_tmdb"]), (1, 33))
+        self.assertEqual(jjk_s2e9["abs_ep"], 33)
+
+        jjk_s1e33 = server._resolve_episode_numbering("95479", 1, 33)
+        self.assertEqual((jjk_s1e33["s_split"], jjk_s1e33["e_split"]), (2, 9))
+        self.assertEqual((jjk_s1e33["s_tmdb"], jjk_s1e33["e_tmdb"]), (1, 33))
+
+        jjk_s3e1 = server._resolve_episode_numbering("95479", 3, 1)
+        self.assertEqual((jjk_s3e1["s_split"], jjk_s3e1["e_split"]), (3, 1))
+        self.assertEqual((jjk_s3e1["s_tmdb"], jjk_s3e1["e_tmdb"]), (1, 48))
+
+        solo_s2e1 = server._resolve_episode_numbering("127532", 2, 1)
+        self.assertEqual((solo_s2e1["s_split"], solo_s2e1["e_split"]), (2, 1))
+        self.assertEqual((solo_s2e1["s_tmdb"], solo_s2e1["e_tmdb"]), (1, 13))
+
+        fmab_s2e1 = server._resolve_episode_numbering("31911", 2, 1)
+        self.assertEqual((fmab_s2e1["s_split"], fmab_s2e1["e_split"]), (2, 1))
+        self.assertEqual((fmab_s2e1["s_tmdb"], fmab_s2e1["e_tmdb"]), (1, 17))
+
+        # 2. _ANIMECIX_KNOWN_TMDB corrected IDs
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("31910"), 7490)
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("37865"), 234)
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("46298"), 238)
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("85937"), 7394)
+        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("1159311"), 11793)
+
+        # 3. Frontend series picker season counts & full episode labels
+        root = Path(__file__).resolve().parent.parent
+        accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
+        self.assertIn("s.count ? ` (${s.count} Bölüm)` : ''", accounts_js)
+        self.assertIn("`${curSeason}. Sezon ${ep.episode}. Bölüm — ${rawEpName}`", accounts_js)
 
 
 if __name__ == '__main__':

@@ -1364,10 +1364,13 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
                 continue
             seen.add(cid)
             is_series_val = r.get("is_series")
-            if is_series_val is not None:
+            raw_t_type = str(r.get("type") or r.get("title_type") or "").strip().lower()
+            if raw_t_type == "movie" or bool(r.get("is_movie")) or re.search(r"\b(?:the\s+movie|movie\s*\d|gekijouban|gekijoban)\b", f"{name} {r.get('original_title') or ''}", re.I):
+                mtype = "movie"
+            elif is_series_val is not None:
                 mtype = "tv" if bool(is_series_val) else "movie"
             else:
-                mtype = "movie" if bool(r.get("is_movie")) else "tv"
+                mtype = "tv"
             poster = str(r.get("poster") or r.get("backdrop") or "").strip()
             backdrop = str(r.get("backdrop") or poster).strip()
             year = str(r.get("year") or r.get("release_date") or "2024")[:4]
@@ -2114,11 +2117,125 @@ def _provider_catalog_sync(prov: str, q: str = ""):
     return _provider_catalog_page_sync(prov, q, 1, "all").get("items", [])
 
 
+_CANONICAL_SEASON_SPLITS: dict[str, list[int]] = {
+    "95479": [24, 23, 12],          # Jujutsu Kaisen (S1: 24, S2: 23, S3: 12)
+    "127532": [12, 13],             # Solo Leveling (S1: 12, S2: 13)
+    "240411": [12, 12],             # DAN DA DAN (S1: 12, S2: 12)
+    "209867": [28, 10],             # Frieren: Beyond Journey's End (S1: 28, S2: 10)
+    "131041": [24, 14],             # Blue Lock (S1: 24, S2: 14)
+    "207468": [12, 11],             # Kaiju No. 8 (S1: 12, S2: 11)
+    "73223": [51, 51, 52, 16],      # Black Clover (S1..S4)
+    "30984": [20, 21, 22, 28, 18, 22, 20, 16, 22, 16, 7, 17, 36, 51, 26, 24, 13, 13, 14, 10],  # Bleach (S1..S20)
+    "70881": [51, 52, 52, 51, 52, 35],  # Boruto: Naruto Next Generations
+    "31911": [16, 14, 14, 10, 10],  # Fullmetal Alchemist: Brotherhood
+}
+_EPISODE_GROUP_SPLITS_CACHE: dict[str, list[int]] = {}
+
+
+def _get_canonical_season_splits_sync(tid: str, raw_seasons: list | None = None, orig_lang: str = "") -> list[int]:
+    tid_s = str(tid or "").strip()
+    if not tid_s.isdigit():
+        return []
+    if tid_s in _CANONICAL_SEASON_SPLITS:
+        return list(_CANONICAL_SEASON_SPLITS[tid_s])
+    if tid_s in _EPISODE_GROUP_SPLITS_CACHE:
+        return list(_EPISODE_GROUP_SPLITS_CACHE[tid_s])
+    if raw_seasons is not None and (len(raw_seasons) != 1 or int(raw_seasons[0].get("count") or 0) <= 20):
+        _EPISODE_GROUP_SPLITS_CACHE[tid_s] = []
+        return []
+    splits: list[int] = []
+    try:
+        eg_res = _http_json(f"https://api.themoviedb.org/3/tv/{tid_s}/episode_groups?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY}), timeout=3.5) or {}
+        picked_g = None
+        for g in (eg_res.get("results") or []):
+            g_type = int(g.get("type") or 0)
+            g_name = str(g.get("name") or "").lower()
+            if (g_type == 6 or "season" in g_name) and int(g.get("group_count") or 0) >= 2:
+                picked_g = g
+                break
+        if picked_g and picked_g.get("id"):
+            gd = _http_json(f"https://api.themoviedb.org/3/tv/episode_group/{picked_g['id']}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY}), timeout=3.5) or {}
+            groups = sorted([gg for gg in (gd.get("groups") or []) if int(gg.get("order") or 0) >= 1], key=lambda x: int(x.get("order") or 0))
+            cand_splits = [len(gg.get("episodes") or []) for gg in groups if len(gg.get("episodes") or []) > 0]
+            if len(cand_splits) >= 2:
+                splits = cand_splits
+    except Exception:
+        splits = []
+    _EPISODE_GROUP_SPLITS_CACHE[tid_s] = list(splits)
+    return splits
+
+
+def _resolve_episode_numbering(tid: str, s: int, e: int) -> dict:
+    """Translate between user/UI (season, episode), Canonical Season-Split (s_split, e_split), TMDB (s_tmdb, e_tmdb), and absolute episode number."""
+    s_in = max(1, int(s or 1))
+    e_in = max(1, int(e or 1))
+    tid_s = str(tid or "").strip()
+    splits = _CANONICAL_SEASON_SPLITS.get(tid_s) or _EPISODE_GROUP_SPLITS_CACHE.get(tid_s) or []
+    if not splits and tid_s.isdigit():
+        ep_map_now = _tv_season_ep_map(tid_s)
+        if len(ep_map_now) == 1 and ep_map_now.get(1, 0) > 20:
+            splits = _get_canonical_season_splits_sync(tid_s, [{"season": 1, "count": ep_map_now[1]}])
+    s_split, e_split = s_in, e_in
+    s_tmdb, e_tmdb = s_in, e_in
+    abs_ep = e_in
+    if splits:
+        if s_in == 1 and e_in > splits[0]:
+            abs_ep = e_in
+            rem = abs_ep
+            for idx, cnt in enumerate(splits):
+                if rem <= cnt or idx == len(splits) - 1:
+                    s_split = idx + 1
+                    e_split = max(1, rem)
+                    break
+                rem -= cnt
+        else:
+            s_clamped = min(s_in, len(splits))
+            s_split = s_clamped
+            e_split = e_in
+            abs_ep = sum(splits[:s_clamped - 1]) + e_in
+        ep_map = _tv_season_ep_map(tid_s) if tid_s.isdigit() else {}
+        if ep_map:
+            rem_t = abs_ep
+            s_tmdb, e_tmdb = 1, abs_ep
+            for t_sn in sorted(ep_map.keys()):
+                t_cnt = max(1, int(ep_map[t_sn] or 0))
+                if rem_t <= t_cnt or t_sn == max(ep_map.keys()):
+                    s_tmdb = t_sn
+                    e_tmdb = max(1, rem_t)
+                    break
+                rem_t -= t_cnt
+        else:
+            s_tmdb, e_tmdb = 1, abs_ep
+    else:
+        ep_map = _tv_season_ep_map(tid_s) if tid_s.isdigit() else {}
+        if ep_map and s_in > 1:
+            abs_ep = sum(int(ep_map.get(k) or 0) for k in range(1, s_in)) + e_in
+        elif s_in == 1:
+            abs_ep = e_in
+    return {
+        "s_split": s_split,
+        "e_split": e_split,
+        "s_tmdb": s_tmdb,
+        "e_tmdb": e_tmdb,
+        "abs_ep": abs_ep,
+        "has_splits": bool(splits),
+    }
+
+
+def _is_generic_ep_name(name: str) -> bool:
+    n = str(name or "").strip()
+    if not n:
+        return True
+    return bool(re.fullmatch(r"(?:\d+\.\s*bölüm|bölüm\s*\d+|episode\s*\d+|ep\.?\s*\d+)", n, re.I))
+
+
 def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
     tid = str(tmdb_id or "").strip()
     raw_mt = str(media_type or "").strip().lower()
     explicit_mt = raw_mt in ("tv", "series", "show", "movie", "movies", "film")
     mtype = "tv" if raw_mt in ("tv", "series", "show") else "movie"
+    if re.search(r"\b(?:the\s+movie|gekijouban|gekijoban)\b", str(title or ""), re.I) and raw_mt not in ("tv", "series", "show"):
+        mtype = "movie"
     if not tid.isdigit() and title:
         clean_t = re.sub(r"\s*\(\d{4}\)\s*$", "", title).strip() or title
         hits = _tmdb_sync(clean_t)
@@ -2130,16 +2247,27 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
                 mtype = hits[0]["mediaType"]
     s_num = max(1, int(season or 1))
     if not tid.isdigit():
-        return {"tmdbId": "", "mediaType": mtype, "title": title, "originalTitle": title, "year": "", "rating": 0.0, "overview": "", "seasons": [], "episodes": []}
+        eps_fb = [{"episode": i, "season": s_num, "name": f"{i}. Bölüm", "overview": f"{title} — {s_num}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 13)] if mtype == "tv" else []
+        return {"tmdbId": "", "mediaType": mtype, "title": title, "originalTitle": title, "year": "", "rating": 0.0, "overview": "", "seasons": [{"season": 1, "name": "1. Sezon", "count": 12}] if mtype == "tv" else [], "episodes": eps_fb}
     try:
         info = _http_json(f"https://api.themoviedb.org/3/{mtype}/{tid}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "append_to_response": "external_ids"}), timeout=5.5)
     except Exception:
         info = {}
+    if mtype == "tv" and not (info.get("name") or info.get("seasons")):
+        try:
+            mv_info = _http_json(f"https://api.themoviedb.org/3/movie/{tid}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "append_to_response": "external_ids"}), timeout=4.5)
+            if mv_info and (mv_info.get("title") or mv_info.get("original_title")):
+                info = mv_info
+                mtype = "movie"
+        except Exception:
+            pass
     imdb_id = (info.get("external_ids") or {}).get("imdb_id") or info.get("imdb_id") or ""
     poster = f"https://image.tmdb.org/t/p/w500{info['poster_path']}" if info.get("poster_path") else ""
     backdrop = f"https://image.tmdb.org/t/p/w780{info['backdrop_path']}" if info.get("backdrop_path") else poster
     t_disp = info.get("name") or info.get("title") or title
     t_orig = info.get("original_name") or info.get("original_title") or t_disp
+    orig_lang = str(info.get("original_language") or "").lower()
+    def_rt = 24 if orig_lang == "ja" else 45
     out = {
         "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype,
         "title": t_disp, "originalTitle": t_orig,
@@ -2147,29 +2275,139 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
         "rating": round(float(info.get("vote_average") or 0), 1),
         "overview": info.get("overview") or "",
         "poster": poster, "backdrop": backdrop,
-        "runtime": int((info.get("episode_run_time") or [info.get("runtime") or 45])[0] or 45),
+        "runtime": int((info.get("episode_run_time") or [info.get("runtime") or def_rt])[0] or def_rt),
         "seasons": [], "episodes": [],
     }
     if mtype == "tv":
-        seasons = [
+        raw_seasons = [
             {"season": int(s.get("season_number") or 1), "name": s.get("name") or f"{s.get('season_number')}. Sezon", "count": int(s.get("episode_count") or 0)}
             for s in (info.get("seasons") or []) if int(s.get("season_number") or 0) >= 1
         ]
-        out["seasons"] = seasons
-        try:
-            sdata = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=5.5)
-            for ep in sdata.get("episodes") or []:
-                en = int(ep.get("episode_number") or 1)
-                still = f"https://image.tmdb.org/t/p/w500{ep['still_path']}" if ep.get("still_path") else backdrop
+        splits = _get_canonical_season_splits_sync(tid, raw_seasons, orig_lang)
+        if splits:
+            out["seasons"] = [{"season": i + 1, "name": f"{i + 1}. Sezon", "count": cnt} for i, cnt in enumerate(splits)]
+            s_eff = min(max(1, s_num), len(splits))
+            abs_start = sum(splits[:s_eff - 1]) + 1
+            ep_cnt = splits[s_eff - 1]
+            abs_end = abs_start + ep_cnt - 1
+            raw_ep_map = {int(x["season"]): max(1, int(x["count"] or 0)) for x in raw_seasons} or {1: sum(splits)}
+            needed_tmdb_seasons = set()
+            abs_to_tmdb: dict[int, tuple[int, int]] = {}
+            for a_idx in range(abs_start, abs_end + 1):
+                rem = a_idx
+                t_sn, t_en = 1, a_idx
+                for r_sn in sorted(raw_ep_map.keys()):
+                    r_cnt = raw_ep_map[r_sn]
+                    if rem <= r_cnt or r_sn == max(raw_ep_map.keys()):
+                        t_sn, t_en = r_sn, max(1, rem)
+                        break
+                    rem -= r_cnt
+                abs_to_tmdb[a_idx] = (t_sn, t_en)
+                needed_tmdb_seasons.add(t_sn)
+            tmdb_ep_tr: dict[tuple[int, int], dict] = {}
+            tmdb_ep_en: dict[tuple[int, int], dict] = {}
+            for t_sn in sorted(needed_tmdb_seasons):
+                try:
+                    sd_tr = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=4.8) or {}
+                    for ep_o in (sd_tr.get("episodes") or []):
+                        tmdb_ep_tr[(t_sn, int(ep_o.get("episode_number") or 1))] = ep_o
+                except Exception:
+                    pass
+                need_en = any(
+                    _is_generic_ep_name((tmdb_ep_tr.get(abs_to_tmdb[a_i]) or {}).get("name"))
+                    or not str((tmdb_ep_tr.get(abs_to_tmdb[a_i]) or {}).get("overview") or "").strip()
+                    for a_i in range(abs_start, abs_end + 1)
+                    if abs_to_tmdb.get(a_i, (0, 0))[0] == t_sn
+                )
+                if need_en:
+                    try:
+                        sd_en = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5) or {}
+                        for ep_o in (sd_en.get("episodes") or []):
+                            tmdb_ep_en[(t_sn, int(ep_o.get("episode_number") or 1))] = ep_o
+                    except Exception:
+                        pass
+            for rel_ep in range(1, ep_cnt + 1):
+                a_idx = abs_start + rel_ep - 1
+                tk = abs_to_tmdb.get(a_idx, (1, a_idx))
+                ep_tr = tmdb_ep_tr.get(tk) or {}
+                ep_en = tmdb_ep_en.get(tk) or {}
+                tr_name = str(ep_tr.get("name") or "").strip()
+                en_name = str(ep_en.get("name") or "").strip()
+                best_name = tr_name if not _is_generic_ep_name(tr_name) else (en_name if not _is_generic_ep_name(en_name) else f"{rel_ep}. Bölüm")
+                tr_ov = str(ep_tr.get("overview") or "").strip()
+                en_ov = str(ep_en.get("overview") or "").strip()
+                best_ov = (tr_ov or en_ov or f"{t_disp} — {s_eff}. Sezon {rel_ep}. Bölüm")[:220]
+                sp = ep_tr.get("still_path") or ep_en.get("still_path")
+                still = f"https://image.tmdb.org/t/p/w500{sp}" if sp else backdrop
+                rt = int(ep_tr.get("runtime") or ep_en.get("runtime") or out["runtime"] or def_rt)
                 out["episodes"].append({
-                    "episode": en, "season": s_num,
-                    "name": ep.get("name") or f"{en}. Bölüm",
-                    "overview": (ep.get("overview") or "")[:200],
-                    "runtime": int(ep.get("runtime") or out["runtime"] or 45),
+                    "episode": rel_ep,
+                    "season": s_eff,
+                    "absEpisode": a_idx,
+                    "name": best_name,
+                    "overview": best_ov,
+                    "runtime": rt,
                     "still": still,
                 })
-        except Exception:
-            pass
+        else:
+            if not raw_seasons:
+                raw_seasons = [{"season": 1, "name": "1. Sezon", "count": 12}]
+            for rs in raw_seasons:
+                if re.fullmatch(r"Season\s*(\d+)", str(rs.get("name") or ""), re.I):
+                    rs["name"] = f"{rs['season']}. Sezon"
+            out["seasons"] = raw_seasons
+            try:
+                sdata_tr = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=5.0) or {}
+            except Exception:
+                sdata_tr = {}
+            eps_tr = sdata_tr.get("episodes") or []
+            en_by_num: dict[int, dict] = {}
+            if not eps_tr or any(_is_generic_ep_name(ep.get("name")) or not str(ep.get("overview") or "").strip() for ep in eps_tr):
+                try:
+                    sdata_en = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5) or {}
+                    for ep_e in (sdata_en.get("episodes") or []):
+                        en_by_num[int(ep_e.get("episode_number") or 1)] = ep_e
+                    if not eps_tr and sdata_en.get("episodes"):
+                        eps_tr = sdata_en["episodes"]
+                except Exception:
+                    pass
+            for ep in eps_tr:
+                en = int(ep.get("episode_number") or 1)
+                ep_en = en_by_num.get(en) or {}
+                tr_name = str(ep.get("name") or "").strip()
+                en_name = str(ep_en.get("name") or "").strip()
+                best_name = tr_name if not _is_generic_ep_name(tr_name) else (en_name if not _is_generic_ep_name(en_name) else f"{en}. Bölüm")
+                tr_ov = str(ep.get("overview") or "").strip()
+                en_ov = str(ep_en.get("overview") or "").strip()
+                best_ov = (tr_ov or en_ov or f"{t_disp} — {s_num}. Sezon {en}. Bölüm")[:220]
+                sp = ep.get("still_path") or ep_en.get("still_path")
+                still = f"https://image.tmdb.org/t/p/w500{sp}" if sp else backdrop
+                out["episodes"].append({
+                    "episode": en, "season": s_num,
+                    "name": best_name,
+                    "overview": best_ov,
+                    "runtime": int(ep.get("runtime") or ep_en.get("runtime") or out["runtime"] or def_rt),
+                    "still": still,
+                })
+            if not out["episodes"]:
+                s_cnt = next((max(1, int(x.get("count") or 0)) for x in raw_seasons if int(x.get("season") or 0) == s_num), 12)
+                for en in range(1, min(s_cnt, 100) + 1):
+                    out["episodes"].append({
+                        "episode": en, "season": s_num,
+                        "name": f"{en}. Bölüm",
+                        "overview": f"{t_disp} — {s_num}. Sezon {en}. Bölüm",
+                        "runtime": out["runtime"] or def_rt,
+                        "still": backdrop,
+                    })
+    elif explicit_mt and raw_mt in ("tv", "series", "show"):
+        out["seasons"] = [{"season": 1, "name": "1. Sezon (Tam Film)", "count": 1}]
+        out["episodes"] = [{
+            "episode": 1, "season": 1,
+            "name": t_disp or "Tam Film",
+            "overview": (out["overview"] or f"{t_disp} — Tam Film")[:220],
+            "runtime": out["runtime"] or 105,
+            "still": backdrop,
+        }]
 
     return out
 
@@ -2186,7 +2424,7 @@ async def title_seasons(request: Request):
         season = max(1, int(request.query_params.get("season") or 1))
     except (TypeError, ValueError):
         season = 1
-    ckey = f"{media_type}|{tmdb_id or title.lower()}|{season}"
+    ckey = f"v3|{media_type}|{tmdb_id or title.lower()}|{season}"
     now_t = time.time()
     cached = _SEASONS_CACHE.get(ckey)
     hdrs = {"Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400"}
@@ -3474,25 +3712,28 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
 
 _ANIMECIX_KNOWN_TMDB = {
     "35935": 7791, "66053": 7792,
-    "46260": 80, "31910": 80, "70881": 52, "37854": 66, "1429": 25, "30984": 82,
+    "46260": 80, "31910": 7490, "70881": 52, "37854": 66, "1429": 25, "30984": 82,
     "12971": 84, "65930": 90, "61374": 17, "63926": 8, "60863": 29, "45782": 60,
-    "46261": 58, "37863": 23, "31911": 235, "37865": 234, "46298": 238, "73223": 258,
-    "13916": 7585, "95479": 7352, "85937": 7394, "127532": 10995, "46299": 85,
+    "46261": 58, "37863": 23, "57041": 23, "31911": 235, "37865": 234, "46298": 238, "73223": 258,
+    "13916": 7585, "95479": 7352, "85937": 7394, "127532": 10995,
     "114410": 11884, "240411": 11737, "209867": 11130, "120089": 9383,
     "131041": 9851, "207468": 11289, "105248": 10535, "88803": 7809,
+    "94664": 7350, "203737": 11014, "45790": 7696, "129600": 9770, "138357": 10799,
+    "810693": 8718, "916224": 9940, "635302": 7457, "1159311": 11793, "1311031": 12251,
 }
 _ANIMECIX_KNOWN_NAMES = {
     "berserk": 7791, "kenpuudenkiberserk": 7791, "berserk1997": 7791, "berserk2016": 7792,
-    "naruto": 80, "narutoshippuden": 80, "boruto": 52, "onepiece": 66,
+    "naruto": 80, "narutoshippuden": 7490, "narutoshippuuden": 7490, "boruto": 52, "onepiece": 66,
     "attackontitan": 25, "shingekinokyojin": 25, "bleach": 82, "dragonballz": 84,
     "myheroacademia": 90, "bokunoheroacademia": 90, "tokyoghoul": 17, "onepunchman": 8,
     "haikyuu": 29, "swordartonline": 60, "fairytail": 58, "gintama": 23,
-    "fullmetalalchemistbrotherhood": 235, "steinsgate": 238, "blackclover": 258,
+    "fullmetalalchemistbrotherhood": 235, "steinsgate": 234, "blackclover": 258,
     "deathnote": 7585, "jujutsukaisen": 7352, "demonslayer": 7394, "kimetsunoyaiba": 7394,
-    "sololeveling": 10995, "hunterxhunter": 85,
+    "sololeveling": 10995, "oredakelevelupnaken": 10995, "hunterxhunter": 238,
     "chainsawman": 11884, "testereadam": 11884, "dandadan": 11737,
     "frieren": 11130, "sousounofrieren": 11130, "spyxfamily": 9383,
-    "bluelock": 9851, "kaijuno8": 11289, "cyberpunkedgerunners": 10535, "vinlandsaga": 7809,
+    "bluelock": 9851, "kaijuno8": 11289, "kaijuu8gou": 11289, "cyberpunkedgerunners": 10535, "vinlandsaga": 7809,
+    "mushokutensei": 7350, "oshinoko": 11014, "jojonokimyounabouken": 7696,
 }
 
 
@@ -3515,12 +3756,13 @@ except Exception:
 
 def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title: str, tmdb_id: str = "", extra_queries: list = None, source_url: str = "", orig_lang: str = "") -> list:
     res = []
-    ac_id = _ANIMECIX_KNOWN_TMDB.get(str(tmdb_id or ""))
-    if not ac_id and "animecix.tv/titles/" in str(source_url or ""):
-        m_ac = re.search(r"animecix\.tv/titles/(\d+)", str(source_url))
+    tid_str = str(tmdb_id or "").strip()
+    ac_id = _ANIMECIX_KNOWN_TMDB.get(tid_str)
+    if not ac_id and source_url:
+        m_ac = re.search(r"(?:animecix\.tv/titles/|animecix:)(\d+)", str(source_url))
         if m_ac:
             ac_id = int(m_ac.group(1))
-    q_cands = [ _clean_query_title(x) for x in ([orig_title, tr_title] + list(extra_queries or [])) if _clean_query_title(x) ]
+    q_cands = [_clean_query_title(x) for x in ([orig_title, tr_title] + list(extra_queries or [])) if _clean_query_title(x)]
     if not ac_id:
         for qc in q_cands:
             nk = _norm_title(qc).replace(" ", "")
@@ -3531,13 +3773,25 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
     if not ac_id and (orig_lang in ("ja", "ko", "zh") or "anime" in str(source_url or "").lower()):
         for qc in q_cands[:3]:
             try:
-                s_data = _raw_get_json(f"https://animecix.tv/secure/search/{urllib.parse.quote(qc)}?limit=6", headers=hdrs, timeout=2.8) or {}
-                for row in (s_data.get("results") or []):
-                    if isinstance(row, dict) and row.get("id"):
+                s_data = _raw_get_json(f"https://animecix.tv/secure/search/{urllib.parse.quote(qc)}?limit=8", headers=hdrs, timeout=2.8) or {}
+                rows = [r for r in (s_data.get("results") or []) if isinstance(r, dict) and r.get("id")]
+                nq = _norm_title(qc)
+                for row in rows:
+                    if tid_str and str(row.get("tmdb_id") or "") == tid_str:
+                        ac_id = int(row["id"])
+                        break
+                if not ac_id and nq:
+                    for row in rows:
                         rn = _norm_title(row.get("name") or "")
                         ro = _norm_title(row.get("original_title") or "")
-                        nq = _norm_title(qc)
-                        if str(row.get("tmdb_id") or "") == str(tmdb_id) or (nq and (nq == rn or nq == ro or nq in rn or rn in nq or (ro and (nq in ro or ro in nq)))):
+                        if nq in (rn, ro):
+                            ac_id = int(row["id"])
+                            break
+                if not ac_id and nq:
+                    for row in rows:
+                        rn = _norm_title(row.get("name") or "")
+                        ro = _norm_title(row.get("original_title") or "")
+                        if (rn and (nq in rn or rn in nq)) or (ro and (nq in ro or ro in nq)):
                             ac_id = int(row["id"])
                             break
                 if ac_id:
@@ -3547,19 +3801,54 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
     if not ac_id:
         return res
     try:
+        ep_num = _resolve_episode_numbering(tid_str, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1}
+        cand_se = []
+        for pair_se in [
+            (ep_num["s_split"], ep_num["e_split"]),
+            (s, e),
+            (1, ep_num["abs_ep"]),
+            (ep_num["s_tmdb"], ep_num["e_tmdb"]),
+        ]:
+            if pair_se not in cand_se and pair_se[0] >= 1 and pair_se[1] >= 1:
+                cand_se.append(pair_se)
+        if tid_str == "120089":  # SPY x FAMILY (TMDB S1 has 25 eps = Cour 1 + Cour 2; Animecix splits S1=12, S2=13, S3=12)
+            if s == 1 and e > 12 and (2, e - 12) not in cand_se:
+                cand_se.insert(0, (2, e - 12))
+            elif s >= 2 and (s + 1, e) not in cand_se:
+                cand_se.insert(0, (s + 1, e))
+        elif tid_str == "85937" and s >= 2:  # Demon Slayer arc shift fallback
+            if (s + 1, e) not in cand_se:
+                cand_se.append((s + 1, e))
+            if s == 2 and e > 7 and (3, e - 7) not in cand_se:
+                cand_se.insert(0, (3, e - 7))
         vids = None
-        try:
-            ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e}&season={s}"
-            vids = _raw_get_json(ep_url, headers=hdrs, timeout=2.5)
-        except Exception:
-            vids = None
-        if not vids and s == 1 and e == 1:
+        for s_try, e_try in cand_se[:4]:
             try:
-                t_data = _raw_get_json(f"https://animecix.tv/secure/titles/{ac_id}?titleId={ac_id}", headers=hdrs, timeout=2.5) or {}
-                vids = ((t_data.get("title") or {}).get("videos") if isinstance(t_data, dict) else None) or []
+                ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e_try}&season={s_try}"
+                v_try = _raw_get_json(ep_url, headers=hdrs, timeout=2.5)
+                if isinstance(v_try, list) and v_try:
+                    vids = v_try
+                    break
+            except Exception:
+                continue
+        if not vids and (mtype == "movie" or (s == 1 and e == 1)):
+            try:
+                v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=2.5) or {}
+                pag = v_data.get("pagination") if isinstance(v_data, dict) else None
+                raw_vids = (pag.get("data") if isinstance(pag, dict) else None) or []
+                vids = [
+                    v for v in raw_vids
+                    if isinstance(v, dict)
+                    and int(v.get("title_id") or 0) == int(ac_id)
+                    and str(v.get("category") or "").lower() != "teaser"
+                ]
             except Exception:
                 vids = None
-        fb_tau = _ANIMECIX_TAU_MAP.get(f"{ac_id}:{s}:{e}") or []
+        fb_tau = []
+        for s_try, e_try in cand_se:
+            for item_fb in (_ANIMECIX_TAU_MAP.get(f"{ac_id}:{s_try}:{e_try}") or []):
+                if item_fb not in fb_tau:
+                    fb_tau.append(item_fb)
         fb_by_id = {str(p[0]): (str(p[2]) if len(p) >= 3 else "") for p in fb_tau if isinstance(p, (list, tuple)) and len(p) >= 2}
         tau_items = []
         if isinstance(vids, list) and vids:
@@ -3582,10 +3871,12 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                     tau_items.append((str(pair[0]), bool(pair[1]), str(pair[2]) if len(pair) >= 3 else ""))
         seen_tau = set()
         for item in tau_items:
+            if len(res) >= 3:
+                break
             tau_id = item[0]
             is_dub = item[1]
             fb_u = item[2] if len(item) >= 3 else ""
-            if tau_id in seen_tau or len(res) >= 3:
+            if tau_id in seen_tau:
                 continue
             seen_tau.add(tau_id)
             try:
@@ -3686,7 +3977,10 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = "", refresh: bool = False):
-    ckey = f"v35:{mtype}:{tid}:{s}:{e}"
+    ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1, "has_splits": False}
+    s_split, e_split = ep_num["s_split"], ep_num["e_split"]
+    s_tmdb, e_tmdb = ep_num["s_tmdb"], ep_num["e_tmdb"]
+    ckey = f"v36:{mtype}:{tid}:{s_split}:{e_split}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -3756,8 +4050,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                 "title": orig_title or tr_title or title,
                 "mediaType": mtype,
                 "year": year or "",
-                "episodeId": e if mtype == "tv" else 1,
-                "seasonId": s if mtype == "tv" else 1,
+                "episodeId": e_tmdb if mtype == "tv" else 1,
+                "seasonId": s_tmdb if mtype == "tv" else 1,
                 "tmdbId": tid,
                 "imdbId": imdb_id or "",
             })
@@ -3797,7 +4091,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                 except Exception:
                     continue
         try:
-            vf_u = f"https://vidfast.vc/tv/{tid}/{s}/{e}/" if mtype == "tv" else f"https://vidfast.vc/movie/{tid}/"
+            vf_u = f"https://vidfast.vc/tv/{tid}/{s_tmdb}/{e_tmdb}/" if mtype == "tv" else f"https://vidfast.vc/movie/{tid}/"
             with urllib.request.urlopen(urllib.request.Request(vf_u, headers={"User-Agent": UA137}), timeout=3.5) as r_vf:
                 vf_html = r_vf.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             m_en = re.search(r'\\"(?:en|token)\\":\\"(.*?)\\"', vf_html)
@@ -3851,7 +4145,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     "User-Agent": UA137, "Referer": "https://hexa.su/", "Origin": "https://hexa.su",
                     "Accept": "text/plain", "X-Fingerprint-Lite": "e9136c41504646444", "X-Api-Key": key, "X-Cap-Token": tok,
                 }
-                ep = f"https://{host_dom}/api/tmdb/tv/{tid}/season/{s}/episode/{e}/images" if mtype == "tv" else f"https://{host_dom}/api/tmdb/movie/{tid}/images"
+                ep = f"https://{host_dom}/api/tmdb/tv/{tid}/season/{s_tmdb}/episode/{e_tmdb}/images" if mtype == "tv" else f"https://{host_dom}/api/tmdb/movie/{tid}/images"
                 req = urllib.request.Request(ep, headers=hdrs)
                 with urllib.request.urlopen(req, timeout=4.2) as r:
                     enc_txt = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
@@ -3889,7 +4183,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         try:
             enc_id = (_raw_get_json(f"https://enc-dec.app/api/enc-vidlink?text={tid}", timeout=4.0) or {}).get("result") or ""
             if enc_id:
-                ep = f"https://vidlink.pro/api/b/tv/{enc_id}/{s}/{e}?multiLang=0" if mtype == "tv" else f"https://vidlink.pro/api/b/movie/{enc_id}?multiLang=0"
+                ep = f"https://vidlink.pro/api/b/tv/{enc_id}/{s_tmdb}/{e_tmdb}?multiLang=0" if mtype == "tv" else f"https://vidlink.pro/api/b/movie/{enc_id}?multiLang=0"
                 st = (_raw_get_json(ep, headers={"Referer": "https://vidlink.pro/", "Origin": "https://vidlink.pro"}, timeout=4.5) or {}).get("stream") or {}
                 caps = st.get("captions") or []
                 if caps:
@@ -3943,7 +4237,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         if not str(tid or "").isdigit():
             return res
         try:
-            cj_q = f"type=tv&id={tid}&season={s}&episode={e}" if mtype == "tv" else f"type=movie&id={tid}"
+            cj_q = f"type=tv&id={tid}&season={s_tmdb}&episode={e_tmdb}" if mtype == "tv" else f"type=movie&id={tid}"
             enc_cj = (_raw_get_json(f"https://enc-dec.app/api/enc-cinejoy?{cj_q}", timeout=3.4) or {}).get("result") or ""
             if enc_cj:
                 cj_req = urllib.request.Request(f"https://api.wing.st/{enc_cj}", headers={"User-Agent": UA137, "Origin": "https://cinejoy.pk", "Referer": "https://cinejoy.pk/"})
@@ -4016,11 +4310,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     out_urls = []
     orig_lang = str(meta.get("origLang") or "").lower()
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-    f_ac = pool.submit(_extract_animecix_sync, mtype, s, e, orig_title, tr_title, tid, extra_titles, source_url, orig_lang)
-    f_pv = pool.submit(_extract_ddizimag_sync, mtype, s, e, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
-    f_dl = pool.submit(_extract_dizilife_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
-    f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s, e, extra_titles, ekey, year, imdb_id)
-    f_hf = pool.submit(_extract_hdfc_sync, mtype, s, e, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid, refresh)
+    f_ac = pool.submit(_extract_animecix_sync, mtype, s_split, e_split, orig_title, tr_title, tid, extra_titles, source_url, orig_lang)
+    f_pv = pool.submit(_extract_ddizimag_sync, mtype, s_split, e_split, orig_title, tr_title, ekey, year, extra_titles, source_url, orig_lang)
+    f_dl = pool.submit(_extract_dizilife_sync, mtype, s_split, e_split, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url)
+    f_dp = pool.submit(lambda: []) if IS_VERCEL else pool.submit(_extract_dizipal_hls_sync, mtype, s_split, e_split, extra_titles, ekey, year, imdb_id)
+    f_hf = pool.submit(_extract_hdfc_sync, mtype, s_split, e_split, orig_title, tr_title, ekey, year, imdb_id, extra_titles, source_url, tid, refresh)
     f_ve = pool.submit(_job_videasy)
     f_cj = pool.submit(_job_cinejoy)
     f_hexa = pool.submit(_job_hexa)
@@ -4043,7 +4337,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         vl_ok = f_vid.done() and not f_vid.exception() and bool(f_vid.result())
         ar_ok = f_ar.done() and not f_ar.exception() and bool(f_ar.result())
         has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 4.0))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
-        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.2):
+        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 4.2):
             time.sleep(0.08)
             continue
         primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or ((dp_ok or dl_ok or ar_ok) if orig_lang == "tr" else False)
@@ -5082,10 +5376,19 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 poster = poster or hits[0].get("backdrop") or hits[0].get("poster") or ""
                 year = year or hits[0].get("year") or ""
                 title = hits[0].get("originalTitle") or hits[0].get("title") or title
-    if mtype == "tv" and tid.isdigit() and prov != "crunchyroll" and not str(source_url or "").startswith("animecix:"):
+    ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": s, "e_split": e, "s_tmdb": s, "e_tmdb": e, "abs_ep": e, "has_splits": False}
+    if mtype == "tv" and tid.isdigit():
         ep_map = _tv_season_ep_map(tid)
-        if ep_map and (s not in ep_map or (ep_map.get(s, 0) > 0 and e > ep_map[s])):
-            return None
+        if not ep_map:
+            tv_check = _get_tmdb_meta_sync(tid, "tv")
+            mv_check = _get_tmdb_meta_sync(tid, "movie")
+            if not (tv_check.get("originalTitle") or tv_check.get("trTitle")) and (mv_check.get("originalTitle") or mv_check.get("trTitle")):
+                mtype = "movie"
+        elif prov != "crunchyroll" and not str(source_url or "").startswith("animecix:") and tid not in _ANIMECIX_KNOWN_TMDB:
+            s_chk = ep_num["s_tmdb"] if ep_num["has_splits"] else s
+            e_chk = ep_num["e_tmdb"] if ep_num["has_splits"] else e
+            if s_chk not in ep_map or (ep_map.get(s_chk, 0) > 0 and e_chk > ep_map[s_chk]):
+                return None
     eff_tid = tid if tid.isdigit() else (f"free-{_norm_title(title or disp)[:24]}" if (title or disp or source_url) else "")
     if eff_tid:
         m_cached = _get_tmdb_meta_sync(tid, mtype, title, year, imdb_id)
@@ -5109,15 +5412,24 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             v_streams = _MAIN_SITES_VAULT.get("streams") or {}
             fb_candidates = []
             cand_keys = [f"tmdb:{mtype}:{tid}:{s}:{e}"]
-            if mtype != "tv":
+            if mtype == "tv":
+                cand_keys.append(f"tmdb:{mtype}:{tid}:{ep_num['s_split']}:{ep_num['e_split']}")
+                cand_keys.append(f"tmdb:{mtype}:{tid}:{ep_num['s_tmdb']}:{ep_num['e_tmdb']}")
+                cand_keys.append(f"tmdb:{mtype}:{tid}:1:{ep_num['abs_ep']}")
+            else:
                 cand_keys.append(f"id:{tid}")
                 cand_keys.append(f"tmdb:{mtype}:{tid}:1:1")
             for tc in (tr_title, orig_title, disp, title):
                 nt = _norm_title(tc or "")
                 if nt:
                     cand_keys.append(f"{mtype}:{nt}:{s}:{e}")
-                    if mtype != "tv":
+                    if mtype == "tv":
+                        cand_keys.append(f"{mtype}:{nt}:{ep_num['s_split']}:{ep_num['e_split']}")
+                        cand_keys.append(f"{mtype}:{nt}:{ep_num['s_tmdb']}:{ep_num['e_tmdb']}")
+                        cand_keys.append(f"{mtype}:{nt}:1:{ep_num['abs_ep']}")
+                    else:
                         cand_keys.append(f"{mtype}:{nt}:1:1")
+            cand_keys = list(dict.fromkeys(cand_keys))
             for vk_try in cand_keys:
                 v_ent = v_streams.get(vk_try) or {}
                 for st_item in (v_ent.get("streams") or []):
@@ -5318,7 +5630,9 @@ async def resolve_catalog(request: Request):
     poster = (request.query_params.get("poster") or "").strip()[:600]
     raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
     source_url = ""
-    if raw_source_url and public_http_url(raw_source_url):
+    if re.fullmatch(r"animecix:\d+", raw_source_url):
+        source_url = raw_source_url
+    elif raw_source_url and public_http_url(raw_source_url):
         _su_host = (urllib.parse.urlparse(raw_source_url).hostname or "").lower()
         if _su_host in (
             "ddizimag.com", "www.ddizimag.com",
@@ -5333,7 +5647,7 @@ async def resolve_catalog(request: Request):
         episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v24|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v25|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     if not force_refresh:

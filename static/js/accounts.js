@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261104_v105';
-import { api, qs } from './api.js?v=20261104_v105';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261104_v105';
+import { h, toast, popup } from './ui.js?v=20261104_v106';
+import { api, qs } from './api.js?v=20261104_v106';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261104_v106';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -311,12 +311,13 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     const backdrop = info.backdrop || item.backdrop || item.poster || '/static/watchlivo-poster.svg';
     const poster = info.poster || item.poster || '/static/watchlivo-poster.svg';
     const rating = info.rating || item.rating || '';
+    const effMtype = info.mediaType === 'movie' && (!info.seasons || info.seasons.length <= 1) && (!info.episodes || info.episodes.length <= 1) ? 'movie' : mtype;
     const seasons = info.seasons?.length ? info.seasons : (mtype === 'tv' ? [{ season: 1, name: '1. Sezon' }] : []);
     const episodes = info.episodes?.length ? info.episodes : (mtype === 'tv' ? [{
       episode: 1, season: sNum, name: '1. Bölüm', overview: `${title} ${sNum}. Sezon 1. Bölüm`, runtime: 45, still: backdrop,
     }] : []);
 
-    const savedProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: mtype });
+    const savedProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype });
     const savedSec = Number(savedProg?.currentTime ?? savedProg?.position ?? 0) > 3 && Number(savedProg?.percent || 0) < 96
       ? Math.floor(Number(savedProg.currentTime ?? savedProg.position ?? 0))
       : 0;
@@ -331,10 +332,10 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       }
       const startSec = forceFromStart ? 0 : Math.max(0, Math.floor(Number(resumeAtSec) || 0));
       toast(startSec > 3
-        ? `⏩ ${title}${mtype === 'tv' ? ` (S${s}:B${e})` : ''} · ${fmtClock(startSec)} anından devam ediliyor...`
-        : `🎬 ${title}${mtype === 'tv' ? ` (${s}. Sezon ${e}. Bölüm)` : ''} hazırlanıyor...`);
+        ? `⏩ ${title}${effMtype === 'tv' ? ` (S${s}:B${e})` : ''} · ${fmtClock(startSec)} anından devam ediliyor...`
+        : `🎬 ${title}${effMtype === 'tv' ? ` (${s}. Sezon ${e}. Bölüm)` : ''} hazırlanıyor...`);
       try {
-        const media = await resolveFn({ ...item, tmdbId: tid, imdbId, title, originalTitle: origTitle, year, poster: backdrop || poster, mediaType: mtype }, prov, s, e, epName, { applySavedResume: !forceFromStart });
+        const media = await resolveFn({ ...item, tmdbId: tid, imdbId, title, originalTitle: origTitle, year, poster: backdrop || poster, mediaType: effMtype }, prov, s, e, epName, { applySavedResume: !forceFromStart });
         if (media) {
           if (forceFromStart) {
             media.currentTime = 0;
@@ -358,7 +359,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       class: 'btn primary',
       id: 'btn-resume-saved',
       onclick: (ev) => playEp(Number(savedProg?.season || curSeason), Number(savedProg?.episode || 1), '', ev.currentTarget, savedSec),
-    }, mtype === 'tv'
+    }, effMtype === 'tv'
       ? `▶ Kaldığın Yerden Devam Et (S${savedProg?.season || 1}:B${savedProg?.episode || 1} · ${fmtClock(savedSec)})`
       : `▶ Kaldığın Yerden Devam Et (${fmtClock(savedSec)})`) : null;
 
@@ -366,13 +367,13 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       class: resumeHeroBtn ? 'btn' : 'btn primary',
       id: 'btn-play-primary',
       onclick: (ev) => playEp(curSeason, 1, episodes[0]?.name || '', ev.currentTarget, 0, Boolean(resumeHeroBtn)),
-    }, mtype === 'tv' ? `▶ ${curSeason}. Sezon 1. Bölümü ${resumeHeroBtn ? 'Baştan ' : ''}Başlat` : `▶ Tam Filmi ${resumeHeroBtn ? 'Baştan ' : 'Odada '}Başlat (1080p)`);
+    }, effMtype === 'tv' ? `▶ ${curSeason}. Sezon 1. Bölümü ${resumeHeroBtn ? 'Baştan ' : ''}Başlat` : `▶ Tam Filmi ${resumeHeroBtn ? 'Baştan ' : 'Odada '}Başlat (1080p)`);
 
     const detail = h('div', { class: 'series-detail fade-in' },
       h('div', { class: 'series-hero', style: { backgroundImage: `linear-gradient(180deg, rgba(11,10,18,.45), rgba(11,10,18,.96)), url("${backdrop}")` } },
         h('div', { class: 'series-top-row' },
           h('button', { class: 'btn', onclick: onBack }, '← Kataloğa Dön'),
-          h('span', { class: 'series-badge' }, `${mtype === 'tv' ? '📺 DİZİ' : '🎬 FİLM'}${year ? ` • ${year}` : ''}${rating ? ` • ⭐ ${rating}` : ''}`)),
+          h('span', { class: 'series-badge' }, `${effMtype === 'tv' ? '📺 DİZİ' : '🎬 FİLM'}${year ? ` • ${year}` : ''}${rating ? ` • ⭐ ${rating}` : ''}`)),
         h('div', { class: 'series-hero-body' },
           h('img', {
             class: 'series-poster',
@@ -393,29 +394,34 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
             h('p', { class: 'series-overview' }, overview),
             h('div', { class: 'series-cta-row', style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, resumeHeroBtn, primaryPlayBtn)))));
 
-    if (mtype === 'tv') {
+    if (effMtype === 'tv') {
       const seasonBar = h('div', { class: 'season-tabs' },
-        ...seasons.map((s) => h('button', {
-          class: `btn season-tab ${s.season === curSeason ? 'primary' : ''}`,
-          onclick: (ev) => {
-            if (s.season === curSeason) return;
-            const btn = ev.currentTarget;
-            if (btn) {
-              btn.disabled = true;
-              btn.textContent = `⏳ ${s.name || `${s.season}. Sezon`}`;
-            }
-            const gridEl = container.querySelector('.episode-grid');
-            if (gridEl) gridEl.style.opacity = '0.45';
-            loadSeason(s.season);
-          },
-        }, s.name || `${s.season}. Sezon`)));
+        ...seasons.map((s) => {
+          const sLabel = `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`;
+          return h('button', {
+            class: `btn season-tab ${s.season === curSeason ? 'primary' : ''}`,
+            onclick: (ev) => {
+              if (s.season === curSeason) return;
+              const btn = ev.currentTarget;
+              if (btn) {
+                btn.disabled = true;
+                btn.textContent = `⏳ ${s.name || `${s.season}. Sezon`}`;
+              }
+              const gridEl = container.querySelector('.episode-grid');
+              if (gridEl) gridEl.style.opacity = '0.45';
+              loadSeason(s.season);
+            },
+          }, sLabel);
+        }));
 
       const epGrid = h('div', { class: 'episode-grid' },
         ...episodes.map((ep) => {
           const rawEpName = String(ep.name || '').replace(/\s*\([^)]*HD[^)]*\)/gi, '').trim();
           const isRedundantEpName = !rawEpName || new RegExp(`^(?:${ep.episode}\\.\\s*bölüm|bölüm\\s*${ep.episode}|episode\\s*${ep.episode})$`, 'i').test(rawEpName);
-          const epTitleText = isRedundantEpName ? `${ep.episode}. Bölüm` : `${ep.episode}. Bölüm — ${rawEpName}`;
-          const epProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: mtype }, curSeason, ep.episode);
+          const epTitleText = isRedundantEpName
+            ? `${curSeason}. Sezon ${ep.episode}. Bölüm`
+            : `${curSeason}. Sezon ${ep.episode}. Bölüm — ${rawEpName}`;
+          const epProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype }, curSeason, ep.episode);
           const epProgSec = Number(epProg?.currentTime ?? epProg?.position ?? 0) > 3 && Number(epProg?.percent || 0) < 96
             ? Math.floor(Number(epProg.currentTime ?? epProg.position ?? 0))
             : 0;
@@ -438,7 +444,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       detail.append(
         h('div', { class: 'section-head', style: { padding: '.8em 4px .3em' } },
           h('h2', {}, 'Sezon ve Bölümler'),
-          h('span', { class: 'dim' }, `${episodes.length} bölüm hazır`)),
+          h('span', { class: 'dim' }, `${seasons.length} sezon · ${episodes.length} bölüm hazır`)),
         seasonBar,
         epGrid);
     }
