@@ -89,7 +89,10 @@ export class Html5Adapter {
     this._healthSentSet = new Set();
     v.preload = 'auto';
     v.preservesPitch = true;
-    if (media?.thumbnail || media?.poster) v.poster = media.thumbnail || media.poster;
+    const rawPoster = String(media?.thumbnail || media?.poster || '').trim();
+    if (rawPoster) {
+      v.poster = /^https?:\/\//i.test(rawPoster) ? `/api/rave/poster?url=${encodeURIComponent(rawPoster)}` : rawPoster;
+    }
     this.video = v;
     const syncVideoCors = (targetUrl, forNativeHls = false) => {
       if ((forNativeHls || this.useNativeHls) && isIosWebKit()) {

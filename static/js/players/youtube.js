@@ -186,17 +186,20 @@ export class YouTubeAdapter {
       } catch (_) {}
     }
     const srvHls = `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(videoId)}${this.media?.live ? '&live=1' : ''}`;
-    streamCandidates.push(srvHls);
     if (!this.media?.live) {
       streamCandidates.push(`/api/rave/yt-music-stream?v=${encodeURIComponent(videoId)}&kind=muxed`);
     }
+    streamCandidates.push(srvHls);
 
     const v = document.createElement('video');
     v.className = 'yt-adfree-video';
     applyOptimalPipAttrs(v);
     v.preload = 'auto';
     v.preservesPitch = true;
-    if (this.media?.thumbnail || this.media?.poster) v.poster = this.media.thumbnail || this.media.poster;
+    const rawPoster = String(this.media?.thumbnail || this.media?.poster || '').trim();
+    if (rawPoster) {
+      v.poster = /^https?:\/\//i.test(rawPoster) ? `/api/rave/poster?url=${encodeURIComponent(rawPoster)}` : rawPoster;
+    }
     v.style.cssText = 'width:100%;height:100%;object-fit:contain;background:transparent;display:block;';
     mount.replaceChildren(v);
     this.video = v;

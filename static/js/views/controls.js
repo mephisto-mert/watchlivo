@@ -217,8 +217,9 @@ export function buildControls(frame, ctx) {
     style: { cursor: 'pointer' },
     ...tapProps(() => toggleMenu('quality')),
   }, '1080p HD');
+  const prevEpTopBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-prev-ep-top', title: 'Önceki Bölüm', ...tapProps(() => triggerPrevEpisode(true)) }, '⏮️ Önceki Bölüm');
   const epBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-ep-btn', ...tapProps(() => openEpisodeModal()) }, '📺 S1:B1');
-  const nextEpTopBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', ...tapProps(() => triggerNextEpisode(true)) }, '⏭️ Sonraki Bölüm');
+  const nextEpTopBtn = h('button', { type: 'button', class: 'btn ctl-pill hidden', id: 'ctl-next-ep-top', title: 'Sonraki Bölüm', ...tapProps(() => triggerNextEpisode(true)) }, '⏭️ Sonraki Bölüm');
   const breakTopBtn = h('button', {
     type: 'button',
     class: 'btn ctl-pill ctl-break-pill',
@@ -688,6 +689,20 @@ export function buildControls(frame, ctx) {
       .finally(() => { seasonMetaInflight.delete(cacheKey); });
     return null;
   };
+  const computePrevEpSpec = (m, sNum, eNum) => {
+    const cleanSeries = String(m?.seriesTitle || m?.title || 'Dizi').split(' — ')[0].trim() || 'Dizi';
+    if (eNum > 1) {
+      return { season: sNum, episode: eNum - 1, shortSig: `B${eNum - 1}`, fullLabel: `S${sNum}:B${eNum - 1}`, cleanSeries, isPremiere: false };
+    }
+    if (sNum > 1) {
+      const prevMeta = ensureSeasonMeta(m, cleanSeries, sNum - 1);
+      const prevEpCount = Number(prevMeta?.epCount || 0) || Number((m?.seasonsMeta || []).find((sx) => Number(sx.season) === sNum - 1)?.episodeCount || 0);
+      const targetEp = prevEpCount > 0 ? prevEpCount : 1;
+      const sig = prevEpCount > 0 ? `S${sNum - 1}:B${targetEp}` : `S${sNum - 1}`;
+      return { season: sNum - 1, episode: targetEp, shortSig: sig, fullLabel: sig, cleanSeries, isPremiere: false };
+    }
+    return { season: 1, episode: 1, shortSig: '', fullLabel: '', cleanSeries, isPremiere: true };
+  };
   const computeNextEpSpec = (m, sNum, eNum) => {
     const cleanSeries = String(m?.seriesTitle || m?.title || 'Dizi').split(' — ')[0].trim() || 'Dizi';
     const meta = ensureSeasonMeta(m, cleanSeries, sNum);
@@ -701,6 +716,84 @@ export function buildControls(frame, ctx) {
   };
 
   let nextEpBusy = false;
+  async function triggerPrevEpisode(manual = false) {
+    const m = state.mesh?.media;
+    if (!m) return;
+    const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
+    const curS = Number(m.season || parsedEp?.[1] || parsedEp?.[3] || 1);
+    const curE = Number(m.episode || parsedEp?.[2] || parsedEp?.[4] || 1);
+    const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
+    const isSeries = !isMovie && Boolean(m.mediaType === 'tv' || parsedEp);
+    if (!isSeries) return;
+    if (!isLeader() && !canSelectVideo()) {
+      if (manual) toast('Bölümü yalnızca oda başkanı değiştirebilir');
+      return;
+    }
+    if (curS <= 1 && curE <= 1) {
+      if (manual) toast('🏁 Dizinin ilk bölümündesiniz');
+      return;
+    }
+    if (nextEpBusy) return;
+    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || 'Dizi';
+    nextEpBusy = true;
+    nextEpBanner.classList.add('hidden');
+    let targetSeason = curE > 1 ? curS : Math.max(1, curS - 1);
+    let targetEp = curE > 1 ? curE - 1 : 1;
+    let epName = '';
+    try {
+      try {
+        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
+        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
+        if (r.ok) {
+          const sData = await r.json();
+          const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
+          if (curE <= 1 && eps.length > 0) {
+            targetEp = Number(eps[eps.length - 1]?.episode || eps.length);
+          }
+          const foundEp = eps.find((x) => Number(x.episode) === targetEp);
+          if (foundEp) {
+            const rawName = String(foundEp.name || '').trim();
+            const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
+            epName = isRedundant ? '' : rawName;
+          }
+        }
+      } catch (e) { /* ignore */ }
+      showOverlay(`⏮️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4000);
+      if (manual) toast(`⏮️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
+      const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
+      const safeProvId = (rawProvId === 'youtube' || rawProvId === 'web' || rawProvId === 'hls' || rawProvId === 'mp4') ? 'cinema' : rawProvId;
+      const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
+      const rawSrcUrl = String(m.sourceUrl || '').trim();
+      const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
+      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || cleanTitle;
+      const prevMedia = await resolveCatalogItem(
+        { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
+        prov,
+        targetSeason,
+        targetEp,
+        epName,
+      );
+      if (prevMedia) {
+        actions.pickMedia({
+          ...prevMedia,
+          id: prevMedia.id || m.id || '',
+          tmdbId: prevMedia.tmdbId || m.tmdbId || '',
+          imdbId: prevMedia.imdbId || m.imdbId || '',
+          catalogProvider: (prevMedia.catalogProvider && prevMedia.catalogProvider !== 'youtube') ? prevMedia.catalogProvider : safeProvId,
+          mediaType: 'tv',
+          season: targetSeason,
+          episode: targetEp,
+          seriesTitle: cleanTitle,
+          originalTitle: prevMedia.originalTitle || cleanOrigTitle,
+          sourceUrl: prevMedia.sourceUrl || safeSrcUrl || '',
+        });
+      } else {
+        toast('⚠️ Önceki bölüm kaynağı bulunamadı');
+      }
+    } finally {
+      nextEpBusy = false;
+    }
+  }
   async function triggerNextEpisode(manual = false) {
     const m = state.mesh?.media;
     if (!m) return;
@@ -1053,7 +1146,7 @@ export function buildControls(frame, ctx) {
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
-      h('div', { class: 'ctl-top-right' }, breakTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)),
+      h('div', { class: 'ctl-top-right' }, breakTopBtn, prevEpTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)),
     mid,
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
@@ -1557,16 +1650,19 @@ export function buildControls(frame, ctx) {
 
   async function refreshCurrentStreamSources() {
     const m = state.mesh?.media;
-    if (!m || (!m.tmdbId && !m.imdbId && !m.title)) return;
+    if (!m || (!m.tmdbId && !m.imdbId && !m.title && !m.url && !m.videoId)) return;
     closeMenu();
     errorBox.classList.add('hidden');
     loading.classList.remove('hidden');
     showOverlay('🔄 Yayın kaynakları canlı yenileniyor…', 3500);
+    const curPos = position();
+    const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
+    const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
     try {
       const qs = new URLSearchParams({
         provider: String(m.catalogProvider || m.provider || 'cinema'),
-        title: String(m.originalTitle || m.seriesTitle || m.title || ''),
-        displayTitle: String(m.seriesTitle || m.title || ''),
+        title: cleanOrigTitle || cleanSeriesTitle,
+        displayTitle: cleanSeriesTitle,
         year: String(m.year || ''),
         tmdbId: String(m.tmdbId || ''),
         imdbId: String(m.imdbId || ''),
@@ -1583,7 +1679,9 @@ export function buildControls(frame, ctx) {
           if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
           if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
           if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-          await host.setMedia(m, position(), true);
+          host.key = '';
+          host.loadedUrl = '';
+          await host.setMedia(m, curPos, true);
           loading.classList.add('hidden');
           showOverlay('✅ Yayın kaynağı yenilendi', 2200);
           update();
@@ -1591,6 +1689,15 @@ export function buildControls(frame, ctx) {
         }
       }
     } catch (e) { /* ignore */ }
+    if (m.url || m.videoId) {
+      host.key = '';
+      host.loadedUrl = '';
+      await host.setMedia(m, curPos, true);
+      loading.classList.add('hidden');
+      showOverlay('✅ Yayın kaynağı yeniden başlatıldı', 2200);
+      update();
+      return;
+    }
     loading.classList.add('hidden');
     errorBox.classList.remove('hidden');
     toast('Alternatif yayın kaynağı bulunamadı.');
@@ -2484,9 +2591,16 @@ export function buildControls(frame, ctx) {
         }
       }
     }
+    const prevSpecTop = isSeries ? computePrevEpSpec(m, sNum, eNum) : null;
     const nextSpecTop = isSeries ? computeNextEpSpec(m, sNum, eNum) : null;
+    prevEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(prevSpecTop?.isPremiere) || (!isLeader() && !canSelectVideo()));
     nextEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(nextSpecTop?.isFinale) || (!isLeader() && !canSelectVideo()));
     if (isSeries) {
+      const prevSig = prevSpecTop?.shortSig || (eNum > 1 ? `B${eNum - 1}` : `S${Math.max(1, sNum - 1)}`);
+      if (prevEpTopBtn.dataset.sig !== prevSig) {
+        prevEpTopBtn.dataset.sig = prevSig;
+        prevEpTopBtn.replaceChildren('⏮ ', prevSig);
+      }
       const epSig = `S${sNum}:B${eNum}`;
       if (epBtn.dataset.sig !== epSig) {
         epBtn.dataset.sig = epSig;

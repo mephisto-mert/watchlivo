@@ -4028,16 +4028,16 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(ac_1080)
             out_urls.extend(main_multi)
             out_urls.extend(main_single)
-            out_urls.extend(dp_only)
-            out_urls.extend(dl_only)
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
+            out_urls.extend(dp_only)
             out_urls.extend(ve_res)
             out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(ac_720)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
+            out_urls.extend(dl_only)
             out_urls.extend(vid_res)
             out_urls.extend(ar_res)
             out_urls.extend(vm_only)
@@ -4046,16 +4046,16 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(main_multi)
             out_urls.extend(main_single)
             out_urls.extend(ar_res)
-            out_urls.extend(dl_only)
-            out_urls.extend(dp_only)
-            out_urls.extend(ac_1080)
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
+            out_urls.extend(dp_only)
+            out_urls.extend(ac_1080)
             out_urls.extend(ve_res)
             out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
+            out_urls.extend(dl_only)
             out_urls.extend(ac_720)
             out_urls.extend(vid_res)
             out_urls.extend(vm_only)
@@ -4064,15 +4064,15 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(main_multi)
             out_urls.extend(main_single)
             out_urls.extend(ac_1080)
-            out_urls.extend(dl_only)
-            out_urls.extend(dp_only)
             out_urls.extend(fp_multi)
             out_urls.extend(pv_multi)
+            out_urls.extend(dp_only)
             out_urls.extend(ve_res)
             out_urls.extend(cj_res)
             out_urls.extend(hexa_res)
             out_urls.extend(pv_single)
             out_urls.extend(fp_other)
+            out_urls.extend(dl_only)
             out_urls.extend(ac_720)
             out_urls.extend(vid_res)
             out_urls.extend(ar_res)
@@ -4678,7 +4678,9 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             return 4 + tr_boost
         if st == "hls_dp":
             return 1.2 + tr_boost
-        return (2 if st in ("hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_dl") else 1.5) + tr_boost
+        if st == "hls_dl":
+            return 0.8 + tr_boost
+        return (2 if st in ("hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_pv", "hls_pv_multi", "hls_pv_tr") else 1.5) + tr_boost
     srcs.sort(key=_src_res_tier, reverse=True)
     by_lang: dict[str, list] = {}
     unknown: list = []
@@ -6646,12 +6648,17 @@ def _fetch_poster_sync(url: str) -> tuple[bytes, str]:
         if url in _POSTER_MEM_CACHE:
             _POSTER_MEM_CACHE.move_to_end(url)
             return _POSTER_MEM_CACHE[url]
-    ref = "https://www.fullhdfilmizlesene.now/"
-    if "hdfilmcehennemi." in url:
+    ref = ""
+    if "fullhdfilmizlesene." in url:
+        ref = "https://www.fullhdfilmizlesene.now/"
+    elif "hdfilmcehennemi." in url:
         ref = "https://www.hdfilmcehennemi.nl/"
     elif "dizibox." in url:
         ref = "https://www.dizibox.live/"
-    req = urllib.request.Request(url, headers={"User-Agent": UA137, "Referer": ref, "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"})
+    p_hdrs = {"User-Agent": UA137, "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"}
+    if ref:
+        p_hdrs["Referer"] = ref
+    req = urllib.request.Request(url, headers=p_hdrs)
     with _public_open(req, timeout=5.0) as r:
         data = r.read(1024 * 1024)
         ct = (r.headers.get("Content-Type") or "image/jpeg").split(";")[0].strip()
@@ -6753,7 +6760,11 @@ async def poster_proxy(request: Request):
     mtype = (request.query_params.get("mt") or "movie").strip()[:10]
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    is_whitelisted_poster = any(d in url.lower() for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag."))
+    is_whitelisted_poster = any(d in url.lower() for d in (
+        "fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.",
+        "image.tmdb.org", "themoviedb.org", "ytimg.com", "ggpht.com", "googleusercontent.com",
+        "mzstatic.com", "dzcdn.net", "scdn.co", "spotifycdn.com", "media-amazon.com", "media-imdb.com",
+    ))
     if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title:
         return RedirectResponse("/static/watchlivo-poster.svg")
     if url:

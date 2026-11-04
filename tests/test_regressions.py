@@ -1362,6 +1362,40 @@ class RegressionTests(unittest.TestCase):
         profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
         self.assertIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
 
+    def test_v102_series_prev_episode_poster_cors_and_youtube_muxed_playback(self):
+        from pathlib import Path
+        import music_engine
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Series previous episode button (#ctl-prev-ep-top) and boundary checks in controls.js + host.js
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("id: 'ctl-prev-ep-top'", controls_js)
+        self.assertIn("computePrevEpSpec", controls_js)
+        self.assertIn("triggerPrevEpisode", controls_js)
+        self.assertIn("Dizinin ilk bölümündesiniz", controls_js)
+        self.assertIn("host.key = '';", controls_js)
+
+        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        self.assertIn("if (!this.error && key && key === this.key", host_js)
+
+        # 2. External <video poster> URLs routed via /api/rave/poster to prevent CORS errors with crossOrigin='anonymous'
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", html5_js)
+        yt_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", yt_js)
+
+        # Verify /api/rave/poster whitelists TMDB/YouTube poster domains and serves Access-Control-Allow-Origin: *
+        with patch.object(server, "_fetch_poster_sync", return_value=(b"\xff\xd8\xff\xe0testjpeg", "image/jpeg")):
+            r_poster = self.client.get("/api/rave/poster?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Fw780%2Ftest.jpg")
+        self.assertEqual(r_poster.status_code, 200)
+        self.assertEqual(r_poster.headers.get("access-control-allow-origin"), "*")
+
+        # 3. YouTube VOD prioritizes progressive muxed MP4 (kind=muxed) and ANDROID 20.10.38 client to avoid 60s GVS 403/502
+        self.assertLess(yt_js.index("kind=muxed"), yt_js.index("streamCandidates.push(srvHls)"))
+        me_py = (root / "music_engine.py").read_text(encoding="utf-8")
+        self.assertIn('"clientName": "ANDROID"', me_py)
+        self.assertIn('"clientVersion": "20.10.38"', me_py)
+
 
 if __name__ == '__main__':
     unittest.main()

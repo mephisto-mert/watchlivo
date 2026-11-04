@@ -240,7 +240,7 @@ export class PlayerHost {
     const nextUrl = String(media?.url || media?.videoId || '');
     const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
     const nextResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog'));
-    if (key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) {
+    if (!this.error && key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) {
       if (this.loading) {
         this.loading = false;
         this.onEvent('loaded');

@@ -835,35 +835,46 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     if cached and time.time() - cached[0] < 1200:
         if not (want_live and not cached[1].get("hlsUrl")):
             return cached[1]
-    clients = (
-        (
-            UA_YT_IOS,
-            {
-                "clientName": "IOS",
-                "clientVersion": "20.03.02",
-                "deviceMake": "Apple",
-                "deviceModel": "iPhone16,2",
-                "osName": "iPhone",
-                "osVersion": "18.2.1.22C161",
-                "hl": "tr",
-                "gl": "TR",
-            },
-        ),
-        (
-            UA_YT_VR,
-            {
-                "clientName": "ANDROID_VR",
-                "clientVersion": "1.60.19",
-                "deviceMake": "Oculus",
-                "deviceModel": "Quest 3",
-                "androidSdkVersion": 32,
-                "osName": "Android",
-                "osVersion": "12L",
-                "hl": "tr",
-                "gl": "TR",
-            },
-        ),
+    ios_cli = (
+        UA_YT_IOS,
+        {
+            "clientName": "IOS",
+            "clientVersion": "20.03.02",
+            "deviceMake": "Apple",
+            "deviceModel": "iPhone16,2",
+            "osName": "iPhone",
+            "osVersion": "18.2.1.22C161",
+            "hl": "tr",
+            "gl": "TR",
+        },
     )
+    android_cli = (
+        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+        {
+            "clientName": "ANDROID",
+            "clientVersion": "20.10.38",
+            "androidSdkVersion": 34,
+            "osName": "Android",
+            "osVersion": "14",
+            "hl": "tr",
+            "gl": "TR",
+        },
+    )
+    vr_cli = (
+        UA_YT_VR,
+        {
+            "clientName": "ANDROID_VR",
+            "clientVersion": "1.60.19",
+            "deviceMake": "Oculus",
+            "deviceModel": "Quest 3",
+            "androidSdkVersion": 32,
+            "osName": "Android",
+            "osVersion": "12L",
+            "hl": "tr",
+            "gl": "TR",
+        },
+    )
+    clients = (ios_cli, android_cli, vr_cli) if want_live else (android_cli, ios_cli, vr_cli)
     for cli_ua, cli_ctx in clients:
         try:
             req = urllib.request.Request(
