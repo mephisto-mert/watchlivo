@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v94 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261104_v96 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v94", index_html)
+        self.assertIn("20261104_v96", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -987,13 +987,15 @@ class RegressionTests(unittest.TestCase):
         controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         realtime_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
         chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        voice_note_js = (root / "static" / "js" / "voice-note.js").read_text(encoding="utf-8")
         vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
         self.assertIn("epProgress", store_js)
         self.assertIn("findSavedProgress(", accounts_js)
         self.assertIn("epStartSec", accounts_js)
         self.assertIn("computeNextEpSpec", controls_js)
         self.assertIn("const shouldCloseRoom = Boolean(closeRoomForAll);", realtime_js)
-        self.assertIn("280000", chat_js)
+        self.assertIn("startUniversalVoiceRecorder", chat_js)
+        self.assertIn("/api/rave/voice-note", voice_note_js)
         self.assertIn("font-size: 16px !important;", vortex_css)
 
     def test_v81_fullscreen_pause_and_no_ghost_controls(self):

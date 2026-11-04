@@ -1,15 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v94';
-import { api, qs } from '../api.js?v=20261104_v94';
-import { parseVideoUrl } from '../providers.js?v=20261104_v94';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v94';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v94';
-import { profileSetup } from '../profile.js?v=20261104_v94';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261104_v96';
+import { api, qs } from '../api.js?v=20261104_v96';
+import { parseVideoUrl } from '../providers.js?v=20261104_v96';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261104_v96';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261104_v96';
+import { profileSetup } from '../profile.js?v=20261104_v96';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v96';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261104_v94';
+} from '../store.js?v=20261104_v96';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -352,6 +353,17 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     h('div', { class: 'sel-search' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
+      createVoiceSearchButton({
+        h,
+        icons,
+        inputEl: input,
+        toast,
+        onResult: (q) => {
+          activeTab = 'search';
+          renderTabs();
+          runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`, true);
+        },
+      }),
       h('button', {
         class: 'btn primary',
         onclick: () => {
@@ -903,6 +915,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   });
   mainWrap.append(
     h('div', { class: 'sel-search' }, h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }), input,
+      createVoiceSearchButton({ h, icons, inputEl: input, toast, onResult: (q) => { clearTimeout(debTimer); run(q); } }),
       h('button', { class: 'btn primary', onclick: () => { clearTimeout(debTimer); run(input.value); } }, 'Ara'),
       clearBtn),
     catBar,

@@ -1,6 +1,8 @@
 // Provider registry — Rave providerList parity with authentic full-color brand SVGs on dark obsidian surfaces.
-const svgRaw = (body, vb = '0 0 140 44') =>
-  `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="none">${body}</svg>`)}`;
+const svgRaw = (body, vb = '0 0 140 44') => {
+  const xmlSafe = String(body).replace(/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/g, '&amp;');
+  return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="none">${xmlSafe}</svg>`)}`;
+};
 
 export const LOGOS = {
   netflix: svgRaw(
@@ -229,7 +231,7 @@ export const LOGOS = {
     '<rect x="6" y="7" width="30" height="30" rx="9" fill="url(#chub)"/>' +
     '<path d="M16 14v16l13-8-13-8z" fill="#ffffff"/>' +
     '<text x="42" y="21" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13.2" letter-spacing="0.3">SİNEMA, DİZİ &amp; ANİME+</text>' +
-    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">4K HDR · TR DUBLAJ & ALTYAZI</text>'
+    '<text x="42" y="34" fill="#ffb703" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="10.2" letter-spacing="0.2">4K HDR · TR DUBLAJ &amp; ALTYAZI</text>'
   ),
   vk: svgRaw(
     '<rect x="8" y="8" width="28" height="28" rx="8" fill="#0077ff"/>' +

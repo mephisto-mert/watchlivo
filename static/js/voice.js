@@ -1,13 +1,20 @@
-// Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js?v=20261104_v94';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v94';
+// Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
+import { toast } from './ui.js?v=20261104_v96';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261104_v96';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261104_v96';
 
-const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
+const ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
 
 export class Voice {
-  constructor({ send, getSelfId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
+  constructor({ send, getSelfId, getRoomId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
     this.send = send;
     this.getSelfId = getSelfId;
+    this.getRoomId = getRoomId || (() => '');
     this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#6366f1' }));
     this.onDuckChange = onDuckChange;
     this.onMicLevel = onMicLevel;
@@ -30,6 +37,12 @@ export class Voice {
     this.selfSpeaking = false;
     this.speakTimer = null;
     this.audioCtx = null;
+    this.relayPlayCtx = null;
+    this.relayPollTimer = null;
+    this.relaySinceTs = 0;
+    this.relaySeq = 0;
+    this.relayNextPlayAt = 0;
+    this.relaySeenIds = new Set();
     this.participants = [];
     this.peerVolumes = new Map();
     this.onStateChange = null;
@@ -41,6 +54,9 @@ export class Voice {
       }
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         this.audioCtx.resume().catch(() => {});
+      }
+      if (this.relayPlayCtx && this.relayPlayCtx.state === 'suspended') {
+        this.relayPlayCtx.resume().catch(() => {});
       }
     };
     window.addEventListener('pointerdown', this._unlockBound, { passive: true });
@@ -560,12 +576,17 @@ export class Voice {
         } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], audio, audioSender: null, videoSender: null };
+    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], audio, audioSender: null, videoSender: null, audioTransceiver: null };
     this.peers.set(id, st);
-    if (this.stream) {
+    if (this.stream && this.stream.getAudioTracks().length) {
       for (const t of this.stream.getAudioTracks()) {
         st.audioSender = pc.addTrack(t, this.stream);
       }
+    } else {
+      try {
+        st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+        st.audioSender = st.audioTransceiver.sender;
+      } catch (e) { /* ignore */ }
     }
     const activeVid = this.screenStream || this.camStream;
     if (activeVid) {
@@ -677,7 +698,7 @@ export class Voice {
 
   onPeerJoined(id) {
     if (!id || id === this.getSelfId()) return;
-    if (!this.micOn && !this.camOn && !this.screenOn) return;
+    if (!this.inCall && !this.micOn && !this.camOn && !this.screenOn) return;
     if (!this.peers.has(id) && this.peers.size >= 12) return;
     const st = this.peer(id);
     if (st && String(this.getSelfId()) < String(id)) this._negotiate(id, st);
@@ -697,9 +718,9 @@ export class Voice {
       }
     }
     if (selfId) {
-      const iAmActive = Boolean(this.micOn || this.camOn || this.screenOn);
+      const iAmActive = Boolean(this.inCall || this.micOn || this.camOn || this.screenOn);
       for (const p of list) {
-        if (p.id && p.id !== selfId) {
+        if (p.id && p.id !== selfId && p.transport !== 'bot') {
           if (!p.cam && !p.screen) {
             this._removeVideoBubble(p.id);
           } else if (p.cam || p.screen) {
@@ -713,12 +734,14 @@ export class Voice {
               peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
             }
           }
-          const peerActive = Boolean(!p.muted || p.cam || p.screen || p.speaking);
+          const peerActive = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
           if (!this.peers.has(p.id) && this.peers.size >= 12) continue;
           const had = this.peers.has(p.id);
           const st = this.peer(p.id);
           if (!had && (iAmActive || (peerActive && String(selfId) < String(p.id)))) {
+            this._negotiate(p.id, st);
+          } else if (had && st && iAmActive && peerActive && st.pc.connectionState === 'new' && st.pc.signalingState === 'stable' && !st.makingOffer && String(selfId) < String(p.id)) {
             this._negotiate(p.id, st);
           }
         }
@@ -726,6 +749,7 @@ export class Voice {
     }
     this.participants = list;
     this._updateDuckState();
+    this._ensureRelayLoops();
   }
 
   _createAvatarCamStream() {
@@ -955,11 +979,8 @@ export class Voice {
         this.micPending = true;
         this.onStateChange?.();
         try {
-          const gumPromise = navigator.mediaDevices?.getUserMedia
-            ? navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
-            : Promise.reject(new Error('getUserMedia unavailable'));
-          const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 7500));
-          const freshStream = await Promise.race([gumPromise, timeoutPromise]);
+          const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 9000));
+          const freshStream = await Promise.race([acquireMicStreamSafe(), timeoutPromise]);
           if (this.destroyed) { freshStream?.getTracks?.().forEach((t) => t.stop()); return false; }
           if (this._usingSynthStream) {
             this.stream?.getTracks().forEach((t) => t.stop());
@@ -981,26 +1002,35 @@ export class Voice {
         this.selfSpeaking = false;
         if (this.inCall) {
           for (const p of this._orderedPeerTargets()) this.peer(p.id);
+          this._ensureRelayLoops();
           this.send('voice_state', { muted: true, speaking: false, inCall: true });
         }
         this.onStateChange?.();
-        toast('🎧 Mikrofon bulunamadı veya izin verilmedi — dinleyici modundasın');
+        toast('🎧 Mikrofon izni verilmedi veya cihaz bulunamadı — dinleyici modundasın');
         return false;
       }
       this.stream?.getTracks().forEach((t) => { t.enabled = true; });
       this.micOn = true;
       this.inCall = true;
+      this._ensureRelayPlayCtx();
       for (const p of this._orderedPeerTargets()) this.peer(p.id);
       const aTrack = this.stream?.getAudioTracks?.()[0];
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
           try {
-            if (st.audioSender) await st.audioSender.replaceTrack(aTrack);
-            else st.audioSender = st.pc.addTrack(aTrack, this.stream);
+            if (st.audioTransceiver) {
+              st.audioTransceiver.direction = 'sendrecv';
+              await st.audioTransceiver.sender.replaceTrack(aTrack);
+            } else if (st.audioSender) {
+              await st.audioSender.replaceTrack(aTrack);
+            } else {
+              st.audioSender = st.pc.addTrack(aTrack, this.stream);
+            }
             await this._negotiate(id, st);
           } catch (err) { /* ignore */ }
         }
       }
+      this._ensureRelayLoops();
       this.send('voice_state', { muted: false, inCall: true });
       this.onStateChange?.();
       toast('🎙️ Mikrofon açıldı — sesin odaya iletiliyor');
@@ -1008,33 +1038,40 @@ export class Voice {
     } catch (e) {
       this.micPending = false;
       this.onStateChange?.();
-      toast('⚠️ Mikrofon açılamadı.');
+      toast('⚠️ Mikrofon açılamadı — izinleri kontrol edin.');
       return false;
     }
   }
 
   async joinCall({ withMic = true, withCam = false } = {}) {
+    prepareAudioSessionForMic();
     this.inCall = true;
-    this._playCallChime(true);
-    for (const p of this._orderedPeerTargets()) this.peer(p.id);
-    for (const [id, st] of this.peers.entries()) {
-      if (st?.audio) {
-        const volPct = this.getPeerVolume(id);
-        st.audio.muted = Boolean(this.deafened) || volPct === 0;
-        st.audio.play?.().catch(() => {});
-      }
-    }
-    this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
     this.onStateChange?.();
     if (withMic && !this.micOn) {
       await this.toggleMic();
     }
+    this._ensureRelayPlayCtx();
+    this._playCallChime(true);
+    for (const p of this._orderedPeerTargets()) {
+      const st = this.peer(p.id);
+      if (st && st.pc.signalingState === 'stable' && st.pc.connectionState === 'new') {
+        this._negotiate(p.id, st);
+      }
+    }
+    for (const [id, st] of this.peers.entries()) {
+      if (st?.audio) {
+        const volPct = this.getPeerVolume(id);
+        st.audio.muted = Boolean(this.deafened) || volPct === 0;
+        if (st.audio.srcObject) st.audio.play?.().catch(() => {});
+      }
+    }
     if (withCam && !this.camOn) {
       await this.toggleCamera();
     }
+    this._ensureRelayLoops();
     this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
     this.onStateChange?.();
-    toast('📞 Ses & Yayın Kanalına katıldın!');
+    toast(this.micOn ? '📞 Ses Kanalına katıldın — mikrofonun açık!' : '🎧 Ses Kanalına dinleyici olarak katıldın');
     return true;
   }
 
@@ -1044,6 +1081,8 @@ export class Voice {
     if (this.camOn) await this.toggleCamera();
     if (this.screenOn) await this.toggleScreenShare();
     clearInterval(this.speakTimer);
+    clearInterval(this.relayPollTimer);
+    this.relayPollTimer = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this._usingSynthStream = false;
@@ -1074,13 +1113,174 @@ export class Voice {
     return false;
   }
 
+  _isPeerP2pConnected(peerId) {
+    const st = this.peers.get(peerId);
+    if (!st?.pc) return false;
+    const cs = st.pc.connectionState;
+    const ics = st.pc.iceConnectionState;
+    return cs === 'connected' || ics === 'connected' || ics === 'completed';
+  }
+
+  _hasUnconnectedCallPeers() {
+    const selfId = this.getSelfId();
+    for (const p of (this.participants || [])) {
+      if (!p || !p.id || p.id === selfId || p.transport === 'bot') continue;
+      const active = Boolean(p.inCall || !p.muted || p.speaking);
+      if (active && !this._isPeerP2pConnected(p.id)) return true;
+    }
+    return false;
+  }
+
+  _ensureRelayPlayCtx() {
+    if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
+      if (this.relayPlayCtx.state === 'suspended') this.relayPlayCtx.resume().catch(() => {});
+      return this.relayPlayCtx;
+    }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        this.relayPlayCtx = new Ctx();
+        if (this.relayPlayCtx.state === 'suspended') this.relayPlayCtx.resume().catch(() => {});
+      }
+    } catch (_) {}
+    return this.relayPlayCtx;
+  }
+
+  _ensureRelayLoops() {
+    if (this.destroyed || !this.inCall) {
+      if (this.relayPollTimer) {
+        clearInterval(this.relayPollTimer);
+        this.relayPollTimer = null;
+      }
+      return;
+    }
+    if (this.relayPollTimer) return;
+    this.relayPollTimer = setInterval(() => {
+      if (this.destroyed || !this.inCall || this.deafened) return;
+      if (!this._hasUnconnectedCallPeers()) return;
+      const roomId = this.getRoomId?.();
+      const selfId = this.getSelfId?.();
+      if (!roomId || !selfId || this._relayFetching) return;
+      this._relayFetching = true;
+      fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}?clientId=${encodeURIComponent(selfId)}&sinceTs=${this.relaySinceTs || 0}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(async (res) => {
+          if (!res?.ok || !Array.isArray(res.packets)) return;
+          if (!this.relaySinceTs && res.serverTime) {
+            this.relaySinceTs = Math.max(0, Number(res.serverTime) - 1.2);
+          }
+          for (const pkt of res.packets) {
+            const pts = Number(pkt.ts || 0);
+            if (pts > this.relaySinceTs) this.relaySinceTs = pts;
+            if (!pkt.id || this.relaySeenIds.has(pkt.id)) continue;
+            this.relaySeenIds.add(pkt.id);
+            if (this.relaySeenIds.size > 80) {
+              const first = this.relaySeenIds.values().next().value;
+              this.relaySeenIds.delete(first);
+            }
+            if (!pkt.fromId || pkt.fromId === selfId || this._isPeerP2pConnected(pkt.fromId)) continue;
+            await this._playRelayPacket(pkt);
+          }
+        })
+        .catch(() => {})
+        .finally(() => { this._relayFetching = false; });
+    }, 680);
+  }
+
+  async _playRelayPacket(pkt) {
+    if (this.deafened || !pkt?.b64) return;
+    const volPct = this.getPeerVolume(pkt.fromId);
+    if (volPct <= 0) return;
+    const ctx = this._ensureRelayPlayCtx();
+    if (!ctx) return;
+    try {
+      const bin = atob(pkt.b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      const audioBuf = await ctx.decodeAudioData(bytes.buffer.slice(0));
+      const src = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      gain.gain.value = Math.min(2.0, Math.max(0, volPct / 100));
+      src.buffer = audioBuf;
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      const startAt = Math.max(ctx.currentTime + 0.04, this.relayNextPlayAt || 0);
+      this.relayNextPlayAt = startAt + audioBuf.duration;
+      src.start(startAt);
+    } catch (_) {}
+  }
+
   watchSpeaking() {
     try {
+      this.audioCtx?.close?.().catch(() => {});
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const src = this.audioCtx.createMediaStreamSource(this.stream);
       const an = this.audioCtx.createAnalyser();
       an.fftSize = 256;
       src.connect(an);
+
+      const srcRate = this.audioCtx.sampleRate || 48000;
+      const relayProc = this.audioCtx.createScriptProcessor(4096, 1, 1);
+      const relayMute = this.audioCtx.createGain();
+      relayMute.gain.value = 0;
+      let relayChunks = [];
+      let relayFrames = 0;
+      let relayMaxRms = 0;
+      let relayTailCount = 0;
+      const targetFrames = Math.round(srcRate * 0.72);
+      relayProc.onaudioprocess = (ev) => {
+        if (!this.micOn || !this.inCall || this.destroyed) {
+          relayChunks = [];
+          relayFrames = 0;
+          return;
+        }
+        if (!this._hasUnconnectedCallPeers()) {
+          relayChunks = [];
+          relayFrames = 0;
+          return;
+        }
+        const ch = ev.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(ch.length);
+        let sq = 0;
+        for (let i = 0; i < ch.length; i += 1) {
+          copy[i] = ch[i];
+          sq += ch[i] * ch[i];
+        }
+        const rms = Math.sqrt(sq / Math.max(1, ch.length));
+        if (rms > relayMaxRms) relayMaxRms = rms;
+        relayChunks.push(copy);
+        relayFrames += copy.length;
+        if (relayFrames >= targetFrames) {
+          const hasSpeech = relayMaxRms > 0.008;
+          if (hasSpeech) relayTailCount = 1;
+          if (hasSpeech || relayTailCount > 0) {
+            if (!hasSpeech) relayTailCount -= 1;
+            const merged = new Float32Array(relayFrames);
+            let off = 0;
+            for (const c of relayChunks) { merged.set(c, off); off += c.length; }
+            const down = downsampleFloat32(merged, srcRate, 8000);
+            const wav = encodeWavBytes(down, 8000);
+            const b64 = uint8ToBase64(wav);
+            const roomId = this.getRoomId?.();
+            const selfId = this.getSelfId?.();
+            if (roomId && selfId && b64.length < 70000) {
+              this.relaySeq += 1;
+              fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientId: selfId, seq: this.relaySeq, mime: 'audio/wav', b64 }),
+              }).catch(() => {});
+            }
+          }
+          relayChunks = [];
+          relayFrames = 0;
+          relayMaxRms = 0;
+        }
+      };
+      src.connect(relayProc);
+      relayProc.connect(relayMute);
+      relayMute.connect(this.audioCtx.destination);
+
       const buf = new Uint8Array(an.frequencyBinCount);
       let speaking = false;
       clearInterval(this.speakTimer);
@@ -1118,6 +1318,8 @@ export class Voice {
     clearInterval(this.speakTimer);
     clearInterval(this.synthTimer);
     clearInterval(this.screenSynthTimer);
+    clearInterval(this.relayPollTimer);
+    this.relayPollTimer = null;
     window.removeEventListener('pointerdown', this._unlockBound);
     window.removeEventListener('keydown', this._unlockBound);
     if (this._onResizeBound) {
@@ -1139,6 +1341,7 @@ export class Voice {
     this.screenStream = null;
     document.getElementById('vortex-cam-dock')?.remove();
     this.audioCtx?.close?.().catch(() => {});
+    this.relayPlayCtx?.close?.().catch(() => {});
     this.synthAudioCtx?.close?.().catch(() => {});
     if (typeof window !== 'undefined') { window.__kinoxVoiceDuckFactor = 1.0; window.__kinoxSyncDuckVolume?.(); }
   }

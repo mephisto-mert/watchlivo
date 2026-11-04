@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v94';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v94';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v94';
-import { MeshConnection } from '../realtime.js?v=20261104_v94';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v94';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v94';
-import { buildLayout } from './mesh-layout.js?v=20261104_v94';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v94';
-import { Voice } from '../voice.js?v=20261104_v94';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v94';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v96';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v96';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v96';
+import { MeshConnection } from '../realtime.js?v=20261104_v96';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v96';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v96';
+import { buildLayout } from './mesh-layout.js?v=20261104_v96';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v96';
+import { Voice } from '../voice.js?v=20261104_v96';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v96';
 
 let ctx = null;
 
@@ -1098,6 +1098,15 @@ export async function enterMesh(app, params) {
     onStatus: (s) => ctx?.layout.syncStatus(s),
   });
   ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };
+  ctx.voice = new Voice({
+    send: (type, payload) => ctx.conn?.send(type, payload),
+    getSelfId: () => state.clientId,
+    getRoomId: () => state.mesh?.id || params.id,
+    getSelfProfile: () => state.self,
+    onDuckChange: (ducked) => host.setDucked(ducked),
+    onMicLevel: (lvl) => ctx?.layout?.setMicLevel?.(lvl),
+    onP2pData: (pkt) => ctx?.conn?.onP2pPacket?.(pkt),
+  });
   ctx.layout = buildLayout(app, ctx);
   const cachedRoom = getRememberedRoom(params.id);
   const initialSavedChat = loadSavedChat(params.id);
@@ -1120,15 +1129,10 @@ export async function enterMesh(app, params) {
     ctx.layout.playerEvent?.('loading');
   }
   sync.start();
-  ctx.voice = new Voice({
-    send: (type, payload) => ctx.conn.send(type, payload),
-    getSelfId: () => state.clientId,
-    getSelfProfile: () => state.self,
-    onDuckChange: (ducked) => host.setDucked(ducked),
-    onMicLevel: (lvl) => ctx?.layout?.setMicLevel?.(lvl),
-    onP2pData: (pkt) => ctx?.conn?.onP2pPacket?.(pkt),
-  });
   ctx.conn.p2pBroadcast = (pkt) => ctx?.voice?.broadcastP2p?.(pkt);
+  if (params.autocall === '1') {
+    setTimeout(() => { if (!ctx?.voice?.destroyed && !ctx?.voice?.inCall) ctx.voice.joinCall({ withMic: true }); }, 450);
+  }
   window.__watchlivoBgSyncTick = () => {
     ctx?.sync?.tickFromMedia?.();
     ctx?.conn?.nudgeIfDisconnected?.();

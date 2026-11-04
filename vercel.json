@@ -133,7 +133,7 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay)(.*)",
       "dest": "server.py"
     },
     {

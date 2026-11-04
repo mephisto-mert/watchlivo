@@ -647,7 +647,9 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
     m_obj = room.get("media") or {}
     m_upd = float(m_obj.get("updatedAt") or 0.0)
     m_url_sig = str(m_obj.get("url") or m_obj.get("videoId") or "")[:48]
-    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{m_url_sig}:{len(room.get('chat') or [])}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{str(room.get('passwordHash') or '')[:12]}:{int(t // 4)}"
+    sig_list_raw = room.get("signals") or []
+    last_sig_id = str(sig_list_raw[-1].get("id") or "") if sig_list_raw and isinstance(sig_list_raw[-1], dict) else ""
+    tok_sig = f"{room.get('rev')}:{len(p_map)}:{m_upd:.2f}:{m_url_sig}:{len(room.get('chat') or [])}:{last_sig_id}:{room.get('privacy')}:{room.get('playMode')}:{room.get('voipMode')}:{room.get('name')}:{str(room.get('passwordHash') or '')[:12]}:{int(t // 4)}"
     if room.get("_tok_sig") == tok_sig and room.get("_tok_val"):
         return room["_tok_val"]
     host_id = room.get("host_id")
@@ -701,6 +703,7 @@ def pack_sync_token(room: Dict[str, Any]) -> str:
                 continue
         compact_events.append(ev_it)
     snap["events"] = compact_events
+    snap["signals"] = [s for s in (room.get("signals") or []) if isinstance(s, dict) and (t - float(s.get("ts") or 0) < 20.0)][-24:]
     raw = zlib.compress(json.dumps(snap, separators=(",", ":"), ensure_ascii=False).encode(), 1)
     b64 = base64.urlsafe_b64encode(raw).decode().rstrip("=")
     sig = hmac.new(SYNC_SECRET, b64.encode(), hashlib.sha256).hexdigest()[:24]
@@ -818,14 +821,22 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
             mc = dict(m)
             seen_c[mid] = mc
             merged_c.append(mc)
-        elif mid and mid in seen_c and isinstance(m.get("reactions"), dict):
-            existing_r = dict(seen_c[mid].get("reactions") or {})
-            for em, ulist in m["reactions"].items():
-                if isinstance(ulist, list):
-                    merged_u = list(dict.fromkeys((existing_r.get(em) or []) + ulist))
-                    if merged_u:
-                        existing_r[em] = merged_u[:30]
-            seen_c[mid]["reactions"] = existing_r
+        elif mid and mid in seen_c:
+            if isinstance(m.get("audioNote"), dict):
+                cur_an = dict(seen_c[mid].get("audioNote") or {})
+                for ak, av in m["audioNote"].items():
+                    if av and not cur_an.get(ak):
+                        cur_an[ak] = av
+                if cur_an:
+                    seen_c[mid]["audioNote"] = cur_an
+            if isinstance(m.get("reactions"), dict):
+                existing_r = dict(seen_c[mid].get("reactions") or {})
+                for em, ulist in m["reactions"].items():
+                    if isinstance(ulist, list):
+                        merged_u = list(dict.fromkeys((existing_r.get(em) or []) + ulist))
+                        if merged_u:
+                            existing_r[em] = merged_u[:30]
+                seen_c[mid]["reactions"] = existing_r
     merged_c.sort(key=lambda x: float(x.get("ts") or 0.0))
     seen_ev = set()
     raw_evs = []
@@ -1311,6 +1322,13 @@ class RedisStore:
                     if len(by_id) > len(room.get("chat") or []):
                         room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
                         prune_chat(room)
+                if cached and cached.get("signals") and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
+                    sig_by_id = {}
+                    for sg_it in (room.get("signals") or []) + (cached.get("signals") or []):
+                        if isinstance(sg_it, dict) and sg_it.get("id") and (t - float(sg_it.get("ts") or 0.0) < 25.0):
+                            sig_by_id[sg_it["id"]] = sg_it
+                    if sig_by_id:
+                        room["signals"] = sorted(sig_by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-120:]
                 self.l1_rooms[room_id] = room
                 self.l1_read_ts[room_id] = t
                 return room
@@ -2092,13 +2110,19 @@ def _merge_recent_chat(room: Dict[str, Any], raw_recent: Any, t_now: float) -> b
                     snap_val = ""
                 raw_an = rm.get("audioNote")
                 an_val = None
-                if isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000:
+                if isinstance(raw_an, dict):
                     try:
-                        an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
-                    except (TypeError, ValueError):
-                        an_dur = 2.0
-                    raw_peaks = [max(0.05, min(1.0, float(x))) for x in (raw_an.get("peaks") or [])[:36] if isinstance(x, (int, float))]
-                    an_val = {"dataUrl": str(raw_an["dataUrl"]), "duration": round(an_dur, 1), "peaks": raw_peaks or [0.3, 0.6, 0.8, 0.5, 0.7, 0.4]}
+                        import social_engine as _se_vn
+                        an_val = _se_vn.persist_audio_note(raw_an, fallback_id=clean_str(rm.get("id"), 24))
+                    except Exception:
+                        an_val = None
+                    if an_val is None and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000:
+                        try:
+                            an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
+                        except (TypeError, ValueError):
+                            an_dur = 2.0
+                        raw_peaks = [max(0.05, min(1.0, float(x))) for x in (raw_an.get("peaks") or [])[:36] if isinstance(x, (int, float))]
+                        an_val = {"dataUrl": str(raw_an["dataUrl"]), "duration": round(an_dur, 1), "peaks": raw_peaks or [0.3, 0.6, 0.8, 0.5, 0.7, 0.4]}
                 if not txt_val and not gif_val and not snap_val and not an_val:
                     continue
                 restored_m = {
@@ -2159,25 +2183,33 @@ def _handle_social(room, cid, data, out, name, is_host):
         ):
             snap = ""
         raw_an = data.get("audioNote")
+        req_mid_pre = clean_str(data.get("id"), 24)
+        pre_msg_id = req_mid_pre if (req_mid_pre and re.match(r"^[a-zA-Z0-9_-]{4,24}$", req_mid_pre)) else uuid.uuid4().hex[:10]
         audio_note = None
         if isinstance(raw_an, dict):
-            an_du = str(raw_an.get("dataUrl") or "").strip()
-            if an_du.startswith("data:audio/") and len(an_du) <= 420000:
-                try:
-                    an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
-                except (TypeError, ValueError):
-                    an_dur = 2.0
-                raw_peaks = []
-                for pk in (raw_an.get("peaks") or [])[:36]:
+            try:
+                import social_engine as _se_vn
+                audio_note = _se_vn.persist_audio_note(raw_an, fallback_id=pre_msg_id)
+            except Exception:
+                audio_note = None
+            if audio_note is None:
+                an_du = str(raw_an.get("dataUrl") or "").strip()
+                if an_du.startswith("data:audio/") and len(an_du) <= 420000:
                     try:
-                        raw_peaks.append(round(max(0.05, min(1.0, float(pk))), 2))
+                        an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.0)))
                     except (TypeError, ValueError):
-                        pass
-                audio_note = {
-                    "dataUrl": an_du,
-                    "duration": round(an_dur, 1),
-                    "peaks": raw_peaks or [0.25, 0.55, 0.85, 0.45, 0.75, 0.35, 0.65, 0.5],
-                }
+                        an_dur = 2.0
+                    raw_peaks = []
+                    for pk in (raw_an.get("peaks") or [])[:36]:
+                        try:
+                            raw_peaks.append(round(max(0.05, min(1.0, float(pk))), 2))
+                        except (TypeError, ValueError):
+                            pass
+                    audio_note = {
+                        "dataUrl": an_du,
+                        "duration": round(an_dur, 1),
+                        "peaks": raw_peaks or [0.25, 0.55, 0.85, 0.45, 0.75, 0.35, 0.65, 0.5],
+                    }
         try:
             vid_t = float(data.get("videoTime")) if data.get("videoTime") is not None else None
             if vid_t is not None and (vid_t < 0 or vid_t > 86400):
@@ -2205,8 +2237,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                         "text": clean_str(target_m.get("text") or ("🎙️ Sesli Mesaj" if target_m.get("audioNote") else "📸 Medya" if target_m.get("snapshot") else "GIF" if target_m.get("gif") else ""), 140),
                         "color": target_m.get("color") or "#00f5d4",
                     }
-            req_mid = clean_str(data.get("id"), 24)
-            msg_id = req_mid if (req_mid and re.match(r"^[a-zA-Z0-9_-]{4,24}$", req_mid)) else uuid.uuid4().hex[:10]
+            msg_id = pre_msg_id
             msg = {"id": msg_id, "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
                    "time": now_hhmm(t_now), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
             if snap:
@@ -2466,7 +2497,9 @@ def _handle_social(room, cid, data, out, name, is_host):
             req_sig_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(data.get("signalId") or ""))[:32]
             relay["id"] = req_sig_id or uuid.uuid4().hex[:10]
             relay["ts"] = now()
-            room["signals"] = (room.get("signals") or [])[-239:] + [relay]
+            room["signals"] = [s for s in (room.get("signals") or []) if isinstance(s, dict) and (now() - float(s.get("ts") or 0) < 30.0)][-119:] + [relay]
+            room["rev"] = int(room.get("rev") or 1) + 1
+            room["_tok_sig"] = ""
             out.setdefault("direct", []).append((target, relay))
     elif mtype == "profile_update":
         me["name"] = clean_str(data.get("name"), 24) or me["name"]

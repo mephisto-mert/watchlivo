@@ -1,10 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v94';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v94';
-import { api, qs } from '../api.js?v=20261104_v94';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261104_v94';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v94';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v94';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261104_v96';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261104_v96';
+import { api, qs } from '../api.js?v=20261104_v96';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261104_v96';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261104_v96';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261104_v96';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261104_v96';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -12,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261104_v94';
+} from '../store.js?v=20261104_v96';
 
 let _activeHomePick = null;
 
@@ -1135,9 +1136,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))));
         }))) : null;
 
+    const voiceSearchBtn = createVoiceSearchButton({
+      h,
+      icons,
+      inputEl: input,
+      toast,
+      onResult: () => run(),
+    });
     const searchEl = h('div', { class: compact ? 'sel-search' : 'home-search wl-cmdk-host' },
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
+      voiceSearchBtn,
       !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
       h('button', { class: 'btn primary', onclick: run }, 'Ara'),
       !compact ? cmdkDropdown : null);

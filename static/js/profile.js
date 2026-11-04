@@ -1,11 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, popup, toast } from './ui.js?v=20261104_v94';
-import { api } from './api.js?v=20261104_v94';
+import { h, icons, popup, toast } from './ui.js?v=20261104_v96';
+import { api } from './api.js?v=20261104_v96';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer } from './voice-note.js?v=20261104_v96';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261104_v94';
+} from './store.js?v=20261104_v96';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -1279,7 +1280,7 @@ export async function openDmModal(initialPeerId = null) {
   const sendDmNow = async (extra = {}) => {
     if (!activePeerId) return;
     const txt = (extra.text !== undefined ? extra.text : dmInp.value).trim();
-    if (!txt && !extra.roomInvite && !extra.roomInviteCard) return;
+    if (!txt && !extra.audioNote && !extra.roomInvite && !extra.roomInviteCard) return;
     if (extra.text === undefined) dmInp.value = '';
     const replyPayload = replyTarget;
     setReply(null);
@@ -1309,11 +1310,15 @@ export async function openDmModal(initialPeerId = null) {
   };
   dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
 
-  const joinRoomById = (rid) => {
+  let dmVoiceRec = null;
+  const joinRoomById = (rid, autoCall = false) => {
     if (!rid) return;
+    dmVoiceRec?.stop?.(false);
+    dmVoiceRec = null;
     dmModal?.close?.();
-    if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(rid)}`);
-    else window.location.href = `/r/${encodeURIComponent(rid)}`;
+    const q = autoCall ? '?autocall=1' : '';
+    if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(rid)}${q}`);
+    else window.location.href = `/#/mesh/${encodeURIComponent(rid)}${q}`;
   };
 
   const renderParts = (forceScroll = false) => {
@@ -1408,6 +1413,44 @@ export async function openDmModal(initialPeerId = null) {
         activeDmMeta.canMessage ? h('button', {
           type: 'button',
           class: 'btn sm',
+          id: 'btn-dm-voice-call',
+          title: 'Sesli Arama Başlat',
+          style: { background: 'rgba(34,197,94,0.18)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.42)' },
+          onclick: async () => {
+            try {
+              let callRoomId = state.mesh?.id || '';
+              let callRoomName = state.mesh?.name || `${me.name || 'Watchlivo'} · Sesli Arama`;
+              if (!callRoomId) {
+                let cid = '';
+                try {
+                  cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+                  sessionStorage.setItem('vortex_cid', cid);
+                } catch (_) {}
+                const cr = await api('/api/rooms/create', {
+                  method: 'POST',
+                  body: { name: callRoomName, privacy: 'friends', creator: me.name || 'Üye', creatorId: myUid, clientId: cid },
+                });
+                callRoomId = cr?.id || cr?.room?.id || '';
+              }
+              if (!callRoomId) {
+                toast('Sesli arama odası oluşturulamadı');
+                return;
+              }
+              await sendDmNow({
+                text: `📞 ${me.name || 'Arkadaşın'} seni sesli aramaya çağırıyor!`,
+                roomInvite: callRoomId,
+                roomInviteCard: { roomId: callRoomId, roomName: callRoomName, mediaTitle: '📞 Canlı Sesli Arama' },
+              });
+              toast(`📞 ${activePeer.name} aranıyor...`);
+              joinRoomById(callRoomId, true);
+            } catch (_) {
+              toast('Sesli arama başlatılamadı');
+            }
+          },
+        }, '📞 Sesli Ara') : null,
+        activeDmMeta.canMessage ? h('button', {
+          type: 'button',
+          class: 'btn sm',
           title: 'El Salla (Anlık Bildirim)',
           onclick: async () => {
             const r = await sendRoomInvite(activePeer.uid, 'poke');
@@ -1480,14 +1523,51 @@ export async function openDmModal(initialPeerId = null) {
     }
 
     dmInp.placeholder = `${activePeer.name} kişisine mesaj yaz...`;
+    const dmVoiceBtn = h('button', {
+      type: 'button',
+      class: 'btn sm',
+      id: 'btn-dm-voice-rec',
+      title: 'Sesli Mesaj Gönder',
+      style: { minWidth: '40px', height: '40px', padding: '0 10px' },
+      onclick: async () => {
+        if (dmVoiceRec) {
+          dmVoiceRec.stop(true);
+          return;
+        }
+        const handle = await startUniversalVoiceRecorder({
+          maxSeconds: 24,
+          apiFn: api,
+          onTick: (sec) => {
+            dmVoiceBtn.textContent = `🔴 0:${String(sec).padStart(2, '0')}`;
+          },
+          onFinish: async (audioNote) => {
+            dmVoiceRec = null;
+            dmVoiceBtn.textContent = '🎙️';
+            await sendDmNow({ text: '', audioNote });
+          },
+          onError: (msg) => {
+            dmVoiceRec = null;
+            dmVoiceBtn.textContent = '🎙️';
+            toast(msg || 'Mikrofon izni gerekli');
+          },
+        });
+        if (handle) {
+          dmVoiceRec = handle;
+          dmVoiceBtn.textContent = '🔴 0:00';
+        }
+      },
+    }, '🎙️');
     composerWrap.append(
       dmInp,
+      dmVoiceBtn,
       h('button', { type: 'button', class: 'btn primary', onclick: () => sendDmNow() }, 'Gönder ➤')
     );
 
     msgListEl.replaceChildren(...(activeMessages.length ? activeMessages.map((m) => {
       const isMe = m.fromUid === myUid;
       const card = m.roomInviteCard || (m.roomInvite ? { roomId: m.roomInvite, roomName: `Oda #${m.roomInvite}` } : null);
+      const isVoiceCallCard = Boolean(card?.mediaTitle && String(card.mediaTitle).includes('Sesli Arama'));
+      const vnPlayer = m.audioNote ? buildUniversalAudioNotePlayer(m.audioNote, { h, toast }) : null;
       const reactions = m.reactions && typeof m.reactions === 'object' ? Object.entries(m.reactions).filter(([, arr]) => Array.isArray(arr) && arr.length > 0) : [];
       return h('div', { class: `wl-dm-bubble ${isMe ? 'is-me' : 'is-peer'}` },
         h('div', { class: 'wl-dm-bubble-meta' },
@@ -1495,12 +1575,13 @@ export async function openDmModal(initialPeerId = null) {
           h('span', {}, [m.time || '', isMe ? (m.readAt ? ' · ✓✓' : ' · ✓') : ''].join(''))),
         m.replyTo ? h('div', { class: 'wl-dm-reply-quote' }, `↩ ${m.replyTo.fromName || ''}: ${m.replyTo.text || ''}`) : null,
         m.text ? h('div', { class: 'wl-dm-bubble-text' }, m.text) : null,
+        vnPlayer,
         card?.roomId ? h('div', { class: 'wl-dm-invite-card' },
-          card.poster ? h('img', { src: card.poster, alt: '', class: 'wl-dm-invite-poster' }) : h('div', { class: 'wl-dm-invite-icon' }, '🎬'),
+          card.poster ? h('img', { src: card.poster, alt: '', class: 'wl-dm-invite-poster' }) : h('div', { class: 'wl-dm-invite-icon' }, isVoiceCallCard ? '📞' : '🎬'),
           h('div', { style: { flex: '1', minWidth: '0' } },
             h('strong', { style: { display: 'block', fontSize: '.8rem', color: '#fff' } }, card.mediaTitle || card.roomName || 'Canlı Sinema Odası'),
-            h('span', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.65)' } }, `${card.roomName || 'Watchlivo Odası'} · Canlı İzleme`)),
-          h('button', { type: 'button', class: 'btn primary sm', onclick: () => joinRoomById(card.roomId) }, '▶ Katıl')) : null,
+            h('span', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.65)' } }, `${card.roomName || 'Watchlivo Odası'} · ${isVoiceCallCard ? 'Ses Kanalı' : 'Canlı İzleme'}`)),
+          h('button', { type: 'button', class: 'btn primary sm', onclick: () => joinRoomById(card.roomId, isVoiceCallCard) }, isVoiceCallCard ? '📞 Katıl' : '▶ Katıl')) : null,
         reactions.length ? h('div', { class: 'wl-dm-reactions-row' },
           ...reactions.map(([emo, uids]) => h('button', {
             type: 'button',

@@ -986,12 +986,15 @@ async def social_dm_send(request: Request) -> JSONResponse:
     if snap and (len(snap) > 85000 or not re.match(r"^data:image/(?:png|jpe?g|webp);base64,", snap, re.I)):
         snap = ""
     raw_an = body.get("audioNote")
-    audio_note = raw_an if (isinstance(raw_an, dict) and str(raw_an.get("dataUrl") or "").startswith("data:audio/") and len(str(raw_an.get("dataUrl") or "")) <= 420000) else None
+    msg_id = "dm_" + uuid.uuid4().hex[:10]
+    audio_note = persist_audio_note(raw_an, fallback_id=msg_id) if isinstance(raw_an, dict) else None
+    if audio_note and len(str(audio_note.get("dataUrl") or "")) > 48000:
+        audio_note = {k: v for k, v in audio_note.items() if k != "dataUrl"}
     if not text and not snap and not audio_note and not room_invite and not raw_card:
         return JSONResponse({"ok": False, "error": "Boş mesaj gönderilemez."}, status_code=400)
     exp_sec = _get_dm_expiry(tk)
     msg: Dict[str, Any] = {
-        "id": "dm_" + uuid.uuid4().hex[:10],
+        "id": msg_id,
         "fromUid": uid,
         "fromName": u.get("name") or name,
         "color": u.get("color") or color,
@@ -1039,7 +1042,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
         _queue_notification(peer_id, {
             "type": "room_invite" if inv_r else "dm",
             "title": f"🎬 {u['name']} seni odaya davet etti!" if inv_r else f"💬 {u['name']} mesaj gönderdi",
-            "body": text or (f'"{inv_c.get("mediaTitle") or inv_c.get("roomName") or "Sinema Odası"}" — Tek tıkla katıl!' if inv_r else "Yeni mesaj"),
+            "body": text or (f'"{inv_c.get("mediaTitle") or inv_c.get("roomName") or "Sinema Odası"}" — Tek tıkla katıl!' if inv_r else ("🎙️ Sesli mesaj gönderdi" if audio_note else "Yeni mesaj")),
             "fromUid": uid,
             "fromName": u["name"],
             "fromHandle": u.get("handle", ""),
@@ -2446,3 +2449,242 @@ async def user_yt_prefs_save(request: Request) -> JSONResponse:
 
     saved = _save_user_yt_prefs(ukey, prefs)
     return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "prefs": saved, **imported_stats}, headers=_PRIVATE_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# 9. Persistent Cross-Platform Voice Notes & Live Voice Relay Fallback
+# ---------------------------------------------------------------------------
+import pathlib as _vn_pathlib
+import tempfile as _vn_tempfile
+from starlette.responses import Response as _StarletteResponse
+
+_VOICE_NOTE_MEM: Dict[str, Dict[str, Any]] = {}
+_VOICE_RELAY_MEM: Dict[str, List[Dict[str, Any]]] = {}
+_VN_TMP_DIR = _vn_pathlib.Path(_vn_tempfile.gettempdir()) / "vortex_voice_notes"
+try:
+    _VN_TMP_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    _VN_TMP_DIR = None
+
+
+def _detect_audio_mime(raw_bytes: bytes, declared_mime: str = "") -> str:
+    head = raw_bytes[:16]
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return "audio/wav"
+    if len(head) >= 8 and head[4:8] == b"ftyp":
+        return "audio/mp4"
+    if head.startswith(b"\x1a\x45\xdf\xa3"):
+        return "audio/webm"
+    if head.startswith(b"OggS"):
+        return "audio/ogg"
+    if head.startswith(b"ID3") or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0):
+        return "audio/mpeg"
+    dm = (declared_mime or "").split(";")[0].strip().lower()
+    if dm in ("video/mp4", "audio/mp4", "audio/x-m4a", "audio/aac"):
+        return "audio/mp4"
+    if dm in ("video/webm", "audio/webm"):
+        return "audio/webm"
+    if dm.startswith("audio/"):
+        return dm
+    return "audio/wav"
+
+
+def _save_voice_note_entry(note_id: str, entry: Dict[str, Any]) -> None:
+    _VOICE_NOTE_MEM[note_id] = entry
+    if len(_VOICE_NOTE_MEM) > 120:
+        oldest_k = min(_VOICE_NOTE_MEM, key=lambda k: float(_VOICE_NOTE_MEM[k].get("ts") or 0.0))
+        _VOICE_NOTE_MEM.pop(oldest_k, None)
+    if _VN_TMP_DIR is not None:
+        try:
+            (_VN_TMP_DIR / f"{note_id}.json").write_text(json.dumps(entry, separators=(",", ":")), encoding="utf-8")
+        except Exception:
+            pass
+    _kv_set(f"wl:vn:{note_id}", entry, ttl_sec=86400)
+
+
+def _load_voice_note_entry(note_id: str) -> Optional[Dict[str, Any]]:
+    clean_id = re.sub(r"[^a-zA-Z0-9_-]", "", str(note_id or ""))[:40]
+    if not clean_id:
+        return None
+    hit = _VOICE_NOTE_MEM.get(clean_id)
+    if isinstance(hit, dict) and hit.get("b64"):
+        return hit
+    if _VN_TMP_DIR is not None:
+        fp = _VN_TMP_DIR / f"{clean_id}.json"
+        if fp.exists():
+            try:
+                loaded = json.loads(fp.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and loaded.get("b64"):
+                    _VOICE_NOTE_MEM[clean_id] = loaded
+                    return loaded
+            except Exception:
+                pass
+    kv_hit = _kv_get(f"wl:vn:{clean_id}", None, max_age=3600.0)
+    if isinstance(kv_hit, dict) and kv_hit.get("b64"):
+        _VOICE_NOTE_MEM[clean_id] = kv_hit
+        return kv_hit
+    return None
+
+
+def persist_audio_note(raw_an: Any, fallback_id: str = "") -> Optional[Dict[str, Any]]:
+    if not isinstance(raw_an, dict):
+        return None
+    try:
+        an_dur = max(0.5, min(60.0, float(raw_an.get("duration") or 1.5)))
+    except (TypeError, ValueError):
+        an_dur = 2.0
+    raw_peaks = [
+        round(max(0.05, min(1.0, float(x))), 2)
+        for x in (raw_an.get("peaks") or [])[:36]
+        if isinstance(x, (int, float))
+    ]
+    norm_peaks = raw_peaks or [0.3, 0.62, 0.84, 0.48, 0.74, 0.52, 0.86, 0.42]
+    existing_url = str(raw_an.get("url") or "").strip()
+    m_url = re.match(r"^/api/rave/voice-note/([a-zA-Z0-9_-]{4,40})$", existing_url)
+    an_du = str(raw_an.get("dataUrl") or "").strip()
+    if m_url and not an_du:
+        nid = m_url.group(1)
+        return {
+            "id": nid,
+            "url": f"/api/rave/voice-note/{nid}",
+            "mime": _clean(raw_an.get("mime") or "audio/wav", 40),
+            "duration": round(an_dur, 1),
+            "peaks": norm_peaks,
+        }
+    if not an_du or len(an_du) > 1200000 or "," not in an_du:
+        return None
+    hdr, b64_part = an_du.split(",", 1)
+    if not hdr.lower().startswith(("data:audio/", "data:video/mp4", "data:video/webm", "data:application/octet-stream")):
+        return None
+    b64_clean = re.sub(r"\s+", "", b64_part)
+    try:
+        raw_bytes = base64.b64decode(b64_clean, validate=False)
+    except Exception:
+        return None
+    if len(raw_bytes) < 32 or len(raw_bytes) > 900000:
+        return None
+    decl_mime = hdr[5:].split(";")[0] if hdr.lower().startswith("data:") else ""
+    mime = _detect_audio_mime(raw_bytes, decl_mime)
+    clean_b64 = base64.b64encode(raw_bytes).decode("ascii")
+    norm_du = f"data:{mime};base64,{clean_b64}"
+    nid = (m_url.group(1) if m_url else "") or re.sub(r"[^a-zA-Z0-9_-]", "", str(raw_an.get("id") or fallback_id))[:32] or ("vn_" + uuid.uuid4().hex[:12])
+    _save_voice_note_entry(nid, {"id": nid, "mime": mime, "b64": clean_b64, "duration": round(an_dur, 1), "peaks": norm_peaks, "ts": _now()})
+    return {
+        "id": nid,
+        "url": f"/api/rave/voice-note/{nid}",
+        "mime": mime,
+        "dataUrl": norm_du,
+        "duration": round(an_dur, 1),
+        "peaks": norm_peaks,
+    }
+
+
+async def voice_note_upload(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400)
+    saved = persist_audio_note(body if isinstance(body, dict) else {})
+    if not saved:
+        return JSONResponse({"ok": False, "error": "Ses kaydı işlenemedi"}, status_code=400)
+    resp_note = {k: v for k, v in saved.items() if k != "dataUrl"}
+    return JSONResponse({"ok": True, "audioNote": resp_note})
+
+
+async def voice_note_stream(request: Request):
+    if request.method == "OPTIONS":
+        return _StarletteResponse(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Range, Content-Type",
+                "Accept-Ranges": "bytes",
+            },
+        )
+    note_id = request.path_params.get("note_id") or ""
+    entry = _load_voice_note_entry(note_id)
+    if not entry or not entry.get("b64"):
+        return JSONResponse({"ok": False, "error": "Sesli mesaj bulunamadı"}, status_code=404)
+    try:
+        raw_bytes = base64.b64decode(entry["b64"])
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Ses verisi bozuk"}, status_code=500)
+    total = len(raw_bytes)
+    mime = str(entry.get("mime") or "audio/wav")
+    base_headers = {
+        "Content-Type": mime,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
+    }
+    if request.method == "HEAD":
+        base_headers["Content-Length"] = str(total)
+        return _StarletteResponse(status_code=200, headers=base_headers)
+    rng = request.headers.get("range") or request.headers.get("Range") or ""
+    m_rng = re.match(r"bytes=(\d*)-(\d*)", rng.strip())
+    if m_rng and total > 0:
+        s_str, e_str = m_rng.group(1), m_rng.group(2)
+        start = int(s_str) if s_str else 0
+        end = int(e_str) if e_str else (total - 1)
+        if not s_str and e_str:
+            suffix = int(e_str)
+            start = max(0, total - suffix)
+            end = total - 1
+        start = max(0, min(start, total - 1))
+        end = max(start, min(end, total - 1))
+        chunk = raw_bytes[start : end + 1]
+        base_headers["Content-Range"] = f"bytes {start}-{end}/{total}"
+        base_headers["Content-Length"] = str(len(chunk))
+        return _StarletteResponse(content=chunk, status_code=206, headers=base_headers)
+    base_headers["Content-Length"] = str(total)
+    return _StarletteResponse(content=raw_bytes, status_code=200, headers=base_headers)
+
+
+async def voice_relay_endpoint(request: Request):
+    if request.method == "OPTIONS":
+        return _StarletteResponse(status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization"})
+    room_id = re.sub(r"[^a-z0-9\-]", "", str(request.path_params.get("room_id") or "").lower())[:48]
+    if not room_id:
+        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400)
+    kv_key = f"wl:vrelay:{room_id}"
+    now_t = _now()
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False}, status_code=400)
+        cid = re.sub(r"[^a-zA-Z0-9_]", "", str((body or {}).get("clientId") or ""))[:24]
+        b64 = re.sub(r"\s+", "", str((body or {}).get("b64") or ""))
+        if not cid or not b64 or len(b64) > 80000:
+            return JSONResponse({"ok": False, "error": "Geçersiz ses paketi"}, status_code=400)
+        seq = _safe_int((body or {}).get("seq"), 0, lo=0, hi=999999999)
+        mime = _clean((body or {}).get("mime") or "audio/wav", 32)
+        if not mime.startswith("audio/"):
+            mime = "audio/wav"
+        cur = _kv_get(kv_key, None, max_age=0.12)
+        buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
+        buf = [p for p in buf if isinstance(p, dict) and (now_t - float(p.get("ts") or 0.0) < 10.0)]
+        pkt = {"id": f"{cid}_{seq}_{int(now_t * 1000)}", "fromId": cid, "seq": seq, "ts": round(now_t, 4), "mime": mime, "b64": b64}
+        buf.append(pkt)
+        buf = buf[-16:]
+        _VOICE_RELAY_MEM[room_id] = buf
+        _kv_set(kv_key, buf, ttl_sec=20)
+        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_PRIVATE_HEADERS)
+    cid_q = re.sub(r"[^a-zA-Z0-9_]", "", str(request.query_params.get("clientId") or ""))[:24]
+    try:
+        since_ts = float(request.query_params.get("sinceTs") or 0.0)
+    except (TypeError, ValueError):
+        since_ts = 0.0
+    cur = _kv_get(kv_key, None, max_age=0.12)
+    buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
+    out_pkts = [
+        p for p in buf
+        if isinstance(p, dict)
+        and p.get("fromId") != cid_q
+        and float(p.get("ts") or 0.0) > since_ts
+        and (now_t - float(p.get("ts") or 0.0) < 10.0)
+    ]
+    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_PRIVATE_HEADERS)
+
+
