@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v98';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v98';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v98';
-import { getProvider } from '../providers.js?v=20261104_v98';
-import { expectedPosition } from '../sync.js?v=20261104_v98';
-import { thumbFor } from './lobby.js?v=20261104_v98';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v98';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v98';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v98';
-import { avatar } from '../profile.js?v=20261104_v98';
+import { h, icons, fmtTime, fill, popup, toast, openIosCrossAppPipSheet } from '../ui.js?v=20261104_v99';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v99';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v99';
+import { getProvider } from '../providers.js?v=20261104_v99';
+import { expectedPosition } from '../sync.js?v=20261104_v99';
+import { thumbFor } from './lobby.js?v=20261104_v99';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v99';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v99';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v99';
+import { avatar } from '../profile.js?v=20261104_v99';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -379,20 +379,29 @@ export function buildControls(frame, ctx) {
   };
   const togglePiP = async () => {
     closeMenu();
+    if (typeof window !== 'undefined') window.__watchlivoAutoPipPending = false;
+    autoPipLaunchBtn?.classList?.add('hidden');
     if (typeof document !== 'undefined' && document.body.classList.contains('mesh-minimized')) {
       window.vortexRestoreRoom?.();
       update();
       return;
     }
-    const ok = await host.togglePiP?.();
-    if (ok === 'loading') {
-      toast('⏳ Video hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
+    let ok = host.tryEnterPipSync?.();
+    if (!ok) {
+      ok = await host.togglePiP?.();
+    }
+    if (ok === 'ios-standalone-blocked') {
+      openIosCrossAppPipSheet({
+        roomId: state.mesh?.id || '',
+        onMinimizeInApp: () => {
+          window.vortexMinimizeRoom?.({ preferInAppOnly: true });
+          update();
+        },
+      });
       return;
     }
-    if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video) {
-      const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
-      update();
-      showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
+    if (ok === 'loading') {
+      toast('⏳ Video hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
       return;
     }
     if (ok === 'entered' || ok === 'exited' || ok === true) {
@@ -1063,6 +1072,40 @@ export function buildControls(frame, ctx) {
       },
     }, '⤢ Pencereyi Buraya Döndür'));
 
+  const autoPipLaunchBtn = h('button', {
+    type: 'button',
+    class: 'btn primary wl-autopip-launch-btn hidden',
+    id: 'wl-autopip-launch-btn',
+    style: {
+      position: 'absolute',
+      left: '50%',
+      top: '50%',
+      transform: 'translate(-50%, -50%)',
+      zIndex: '48',
+      maxWidth: 'calc(100% - 24px)',
+      boxSizing: 'border-box',
+      whiteSpace: 'normal',
+      textAlign: 'center',
+      lineHeight: '1.28',
+      padding: '10px 16px',
+      borderRadius: '999px',
+      fontWeight: '800',
+      fontSize: 'clamp(.76rem, 3.2vw, .88rem)',
+      boxShadow: '0 14px 36px rgba(0,0,0,0.72), 0 0 0 2px rgba(56,189,248,0.65)',
+    },
+    ...trustedTapProps(() => {
+      if (typeof window !== 'undefined') window.__watchlivoAutoPipPending = false;
+      autoPipLaunchBtn.classList.add('hidden');
+      if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
+      togglePiP();
+    }),
+  }, '⧉ Sistem PiP Başlat · Diğer Uygulamalarda İzle');
+
+  const syncAutoPipBanner = () => {
+    const showIt = Boolean(typeof window !== 'undefined' && window.__watchlivoAutoPipPending && host.adapter && !host.isPiP?.());
+    autoPipLaunchBtn.classList.toggle('hidden', !showIt);
+  };
+
   const syncPipStagePlaceholder = () => {
     const activeOsPip = Boolean(
       host.isPiP?.()
@@ -1070,6 +1113,10 @@ export function buildControls(frame, ctx) {
     );
     pipStagePlaceholder.classList.toggle('hidden', !activeOsPip);
     frame.classList.toggle('is-os-pip-stage', activeOsPip);
+    if (activeOsPip) {
+      if (typeof window !== 'undefined') window.__watchlivoAutoPipPending = false;
+      autoPipLaunchBtn.classList.add('hidden');
+    }
   };
 
   const syncPill = h('div', { class: 'ctl-sync-pill', id: 'ctl-sync-pill', title: 'Canlı oda senkronizasyon durumu' }, syncDot, syncText);
@@ -1113,7 +1160,7 @@ export function buildControls(frame, ctx) {
     }
   }, { passive: true });
   frame.prepend(stageBackdrop, ambilightCanvas);
-  frame.append(brightnessVeil, empty, loading, pipStagePlaceholder, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, embedTouchHudBtn, controls, miniBar, errorBox, unmute, overlayMsg);
+  frame.append(brightnessVeil, empty, loading, pipStagePlaceholder, autoPipLaunchBtn, danmakuLayer, cinemaSeatsBar, subOverlay, rippleLeft, rippleRight, skipIntroBtn, nextEpBanner, breakBanner, embedTouchHudBtn, controls, miniBar, errorBox, unmute, overlayMsg);
 
   const onKeyDown = (e) => {
     if (document.body.classList.contains('mesh-minimized')) return;
@@ -2793,6 +2840,7 @@ export function buildControls(frame, ctx) {
         errorBox.classList.add('hidden');
         applyVideoFilter();
         syncVideoStageBounds(true);
+        syncAutoPipBanner();
         host.adapter?.subs?.onTimeUpdate?.(position(), true);
         if ((ev === 'ready' || ev === 'loaded') && mRevealKey && mRevealKey !== lastRevealedMediaKey) {
           lastRevealedMediaKey = mRevealKey;

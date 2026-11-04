@@ -1,6 +1,6 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261104_v98';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261104_v98';
+import { SubtitleDubController } from './subtitles.js?v=20261104_v99';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosStandalonePwa, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261104_v99';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -660,7 +660,7 @@ export class YouTubeAdapter {
       applyOptimalPipAttrs(pv);
       pv.preload = 'auto';
       pv.muted = true;
-      pv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0.001;pointer-events:none;z-index:2;object-fit:contain;';
+      pv.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;opacity:0.012;pointer-events:none;z-index:2;object-fit:contain;';
       pv.addEventListener('webkitpresentationmodechanged', () => {
         if (this._destroyed || this.pipVideo !== pv) return;
         const inPipNow = pv.webkitPresentationMode === 'picture-in-picture';
@@ -739,35 +739,92 @@ export class YouTubeAdapter {
     return Boolean(this._pipActive || (this.pipVideo && this.pipVideo.webkitPresentationMode === 'picture-in-picture'));
   }
 
-  async enterAutoPiP() {
-    try { if (localStorage.getItem('vortex_auto_pip') === 'off') return false; } catch (_) {}
-    if (this.isPiP()) return 'already-pip';
+  tryEnterWebKitPipSync({ enterOnly = false } = {}) {
     if (this.video) {
-      if (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof this.video.requestPictureInPicture === 'function' && this.video.readyState >= 1) {
-        try { await this.video.requestPictureInPicture(); return 'entered'; } catch (_) {}
+      if (!enterOnly && this.video.webkitPresentationMode === 'picture-in-picture') {
+        try { this.video.webkitSetPresentationMode('inline'); return 'exited'; } catch (_) {}
       }
-      if (typeof this.video.webkitSetPresentationMode === 'function' && this.video.readyState >= 1) {
-        try { this.video.webkitSetPresentationMode('picture-in-picture'); return 'entered'; } catch (_) {}
+      if (typeof this.video.webkitSetPresentationMode === 'function' && this.video.readyState >= 1 && (!this.video.webkitSupportsPresentationMode || this.video.webkitSupportsPresentationMode('picture-in-picture'))) {
+        try {
+          ensureIosPlaybackAudioSession();
+          this.video.webkitSetPresentationMode('picture-in-picture');
+          if (this.video.webkitPresentationMode === 'picture-in-picture') {
+            this._pipActive = true;
+            setTimeout(() => { try { this.subs?.syncNativeTrackToElement?.(this.video, true); } catch (_) {} }, 0);
+            this.events.onPipChange?.(true);
+            return 'entered';
+          }
+        } catch (_) {}
       }
     }
+    if (!isIosWebKit() || !this.media?.videoId) return false;
+    ensureIosPlaybackAudioSession();
+    const pv = this._ensureIosPipBridge(this.media.videoId);
+    if (!pv || typeof pv.webkitSetPresentationMode !== 'function') return false;
+    if (!enterOnly && (this._pipActive || pv.webkitPresentationMode === 'picture-in-picture')) {
+      try { pv.webkitSetPresentationMode('inline'); } catch (_) {}
+      return 'exited';
+    }
+    if (pv.readyState >= 1 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
+      const curT = this.getTime();
+      if (!this.media?.live && curT > 0.5) { try { pv.currentTime = curT; } catch (_) {} }
+      pv.playbackRate = this.getRate() || 1;
+      pv.muted = Boolean(this._muted || this.baseVolume <= 0);
+      this._pipActive = true;
+      this._suppressYtPauseOnce = true;
+      try { this.player?.pauseVideo?.(); } catch (_) {}
+      try { this.audioEl?.pause?.(); } catch (_) {}
+      try { pv.play()?.catch?.(() => {}); } catch (_) {}
+      try {
+        pv.webkitSetPresentationMode('picture-in-picture');
+        if (pv.webkitPresentationMode === 'picture-in-picture') {
+          setTimeout(() => { try { this.subs?.syncNativeTrackToElement?.(pv, true); } catch (_) {} }, 0);
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+      } catch (_) {}
+      this._pipActive = false;
+      if (this.wantPlaying) {
+        if (this.audioEl) this.audioEl.play().catch(() => {});
+        else this.player?.playVideo?.();
+      }
+    }
+    return false;
+  }
+
+  async enterAutoPiP(reason = 'visibilitychange') {
+    try { if (reason !== 'room-minimize' && localStorage.getItem('vortex_auto_pip') === 'off') return false; } catch (_) {}
+    if (this.isPiP()) return 'already-pip';
     if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
       const ok = window.Android.enterPiP(this.video?.videoWidth || 16, this.video?.videoHeight || 9);
       if (ok !== false) return 'entered';
+    }
+    const syncWebKit = this.tryEnterWebKitPipSync({ enterOnly: true });
+    if (syncWebKit === 'entered') return 'entered';
+    if (this.video && typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof this.video.requestPictureInPicture === 'function' && this.video.readyState >= 1) {
+      try { await this.video.requestPictureInPicture(); return 'entered'; } catch (_) {}
     }
     if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && this.media?.videoId) {
       const absU = new URL(`/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(this.media.videoId)}`, window.location.origin).href;
       if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: this.getRate() || 1 })) return 'entered';
     }
+    if (reason === 'room-minimize' && isIosStandalonePwa()) return 'ios-standalone-blocked';
     return false;
   }
 
   async togglePiP() {
+    if (this.video && typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
+      const ok = window.Android.enterPiP(this.video.videoWidth || 16, this.video.videoHeight || 9);
+      if (ok !== false) {
+        this.events.onPipChange?.(true);
+        return 'entered';
+      }
+    }
+    const syncWebKit = this.tryEnterWebKitPipSync();
+    if (syncWebKit) return syncWebKit;
     if (this.video) {
       if (typeof document !== 'undefined' && document.pictureInPictureElement === this.video) {
         try { await document.exitPictureInPicture(); return 'exited'; } catch (_) {}
-      }
-      if (this.video.webkitPresentationMode === 'picture-in-picture') {
-        try { this.video.webkitSetPresentationMode('inline'); return 'exited'; } catch (_) {}
       }
       if (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof this.video.requestPictureInPicture === 'function' && this.video.readyState >= 1) {
         try {
@@ -777,64 +834,15 @@ export class YouTubeAdapter {
           return 'entered';
         } catch (_) {}
       }
-      if (typeof this.video.webkitSetPresentationMode === 'function' && this.video.readyState >= 1 && (!this.video.webkitSupportsPresentationMode || this.video.webkitSupportsPresentationMode('picture-in-picture'))) {
-        try {
-          ensureIosPlaybackAudioSession();
-          this.subs?.syncNativeTrackToElement?.(this.video, true);
-          this.video.webkitSetPresentationMode('picture-in-picture');
-          this._pipActive = true;
-          this.events.onPipChange?.(true);
-          return 'entered';
-        } catch (_) {}
-      }
-      if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
-        const ok = window.Android.enterPiP(this.video.videoWidth || 16, this.video.videoHeight || 9);
-        if (ok !== false) {
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-      }
     }
-
-    if (!isIosWebKit() || !this.media?.videoId) return false;
-    ensureIosPlaybackAudioSession();
-    const pv = this._ensureIosPipBridge(this.media.videoId);
-    if (!pv || typeof pv.webkitSetPresentationMode !== 'function') return false;
-    if (this._pipActive || pv.webkitPresentationMode === 'picture-in-picture') {
-      try { pv.webkitSetPresentationMode('inline'); } catch (_) {}
-      return 'exited';
-    }
-    if (pv.readyState >= 1 && pv.videoWidth > 0 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
-      const curT = this.getTime();
-      if (!this.media?.live && curT > 0.5) { try { pv.currentTime = curT; } catch (_) {} }
-      pv.playbackRate = this.getRate() || 1;
-      pv.muted = Boolean(this._muted || this.baseVolume <= 0);
-      this.subs?.syncNativeTrackToElement?.(pv, true);
-      this._pipActive = true;
-      this._suppressYtPauseOnce = true;
-      try { this.player?.pauseVideo?.(); } catch (_) {}
-      try { this.audioEl?.pause?.(); } catch (_) {}
-      try { pv.play()?.catch?.(() => {}); } catch (_) {}
-      try {
-        pv.webkitSetPresentationMode('picture-in-picture');
-        this.events.onPipChange?.(true);
-        return 'entered';
-      } catch (_) {
-        this._pipActive = false;
-        if (this.wantPlaying) {
-          if (this.audioEl) this.audioEl.play().catch(() => {});
-          else this.player?.playVideo?.();
-        }
-      }
-    }
-    if (typeof window !== 'undefined' && typeof window.watchlivoNativePiP === 'function') {
-      const srcForNative = pv.src || `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(this.media.videoId)}`;
-      const absU = new URL(srcForNative, window.location.origin).href;
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && this.media?.videoId) {
+      const absU = new URL(`/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(this.media.videoId)}`, window.location.origin).href;
       try { this.player?.pauseVideo?.(); } catch (_) {}
       if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: this.getRate() || 1 })) return 'entered';
     }
-    if (!pv.error) {
-      try { pv.load(); } catch (_) {}
+    if (isIosStandalonePwa()) return 'ios-standalone-blocked';
+    if (isIosWebKit() && this.pipVideo && !this.pipVideo.error && this.pipVideo.readyState < 1) {
+      try { this.pipVideo.load(); } catch (_) {}
       return 'loading';
     }
     return false;

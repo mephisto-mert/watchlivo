@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v98';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261104_v99';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -440,7 +440,7 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'iPhone & iPad (iOS IPA)'),
-          h('small', {}, 'v1.3.0 • HBO Max Tarzı Sistem PiP & AltStore / TrollStore'),
+          h('small', {}, 'v1.3.1 • HBO Max Tarzı Sistem PiP & AltStore / TrollStore'),
           h('p', {}, 'Diğer uygulamalara (WhatsApp, Instagram, Ana Ekran) geçince tam sistem PiP penceresi ve kesintisiz ses.')
         ),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
@@ -448,8 +448,8 @@ export function openDownloadModal() {
             class: 'btn primary wl-download-action',
             href: '/download/ipa',
             download: 'Watchlivo.ipa',
-            onclick: () => toast('🍎 Watchlivo iOS IPA v1.3.0 indiriliyor...', 4000)
-          }, 'IPA İndir (v1.3.0)'),
+            onclick: () => toast('🍎 Watchlivo iOS IPA v1.3.1 indiriliyor...', 4000)
+          }, 'IPA İndir (v1.3.1)'),
           h('a', {
             class: 'btn wl-download-action',
             href: '/download/ios',
@@ -490,4 +490,80 @@ export function openDownloadModal() {
     ) : null
   );
   popup({ title: 'Watchlivo İndir', content: box, options: [{ label: 'Kapat', primary: true }] });
+}
+
+export function openIosCrossAppPipSheet({ roomId = '', onMinimizeInApp = null } = {}) {
+  let rTok = '';
+  let cTok = '';
+  let cCid = '';
+  let isCreator = false;
+  try {
+    if (roomId) {
+      rTok = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
+      cTok = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
+      const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || '';
+      cCid = creatorCid || sessionStorage.getItem('vortex_cid') || '';
+      isCreator = Boolean(creatorCid && cCid === creatorCid);
+    }
+  } catch (_) {}
+  const qp = new URLSearchParams({ autopip: '1' });
+  if (rTok) qp.set('r_tok', rTok);
+  if (cTok) qp.set('c_tok', cTok);
+  if (cCid) qp.set('c_cid', cCid);
+  if (isCreator) qp.set('is_c', '1');
+  if (state.self?.name) qp.set('p_name', String(state.self.name).slice(0, 40));
+  if (state.self?.handle) qp.set('p_handle', String(state.self.handle).slice(0, 32));
+  if (state.self?.color) qp.set('p_color', String(state.self.color).slice(0, 16));
+  const origin = typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online';
+  const roomPath = roomId
+    ? `/#/mesh/${encodeURIComponent(roomId)}?${qp.toString()}`
+    : `/?${qp.toString()}`;
+  const fullHttpsUrl = `${origin}${roomPath}`;
+  const safariBreakoutUrl = `x-safari-${fullHttpsUrl}`;
+
+  const box = h('div', { class: 'wl-ios-pip-sheet', style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+    h('p', { style: { margin: '0', fontSize: '.9rem', lineHeight: '1.5', color: 'rgba(226,232,240,0.92)' } },
+      'iOS güvenlik kısıtlaması nedeniyle eski "Ana Ekrana Ekle" tam ekran kapsayıcısı videoyu uygulama içine hapseder. WhatsApp, Instagram ve Ana Ekran üzerinde HBO Max tarzı yüzen pencerede izlemek için tek dokunuşla Safari Sistem PiP moduna geçebilirsin:'
+    ),
+    h('a', {
+      id: 'btn-ios-safari-pip-breakout',
+      class: 'btn primary',
+      href: safariBreakoutUrl,
+      style: { width: '100%', height: 'auto', whiteSpace: 'normal', lineHeight: '1.32', boxSizing: 'border-box', justifyContent: 'center', fontWeight: '800', padding: '12px 14px', textDecoration: 'none', textAlign: 'center' },
+      onclick: () => {
+        try { document.querySelectorAll('#video-frame video, .player-host video').forEach((v) => v.pause?.()); } catch (_) {}
+        setTimeout(() => document.querySelector('.popup-backdrop')?.remove(), 120);
+      },
+    }, '🚀 Safari Sistem PiP Penceresinde Aç (Diğer Uygulamalarda İzle)'),
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' } },
+      h('a', {
+        id: 'btn-ios-webclip-pip',
+        class: 'btn',
+        href: '/download/ios',
+        style: { height: 'auto', whiteSpace: 'normal', lineHeight: '1.25', boxSizing: 'border-box', justifyContent: 'center', fontWeight: '700', fontSize: '.8rem', textDecoration: 'none', textAlign: 'center', padding: '10px 8px' },
+      }, '📲 PiP WebClip Kısayolu'),
+      h('a', {
+        id: 'btn-ios-ipa-pip',
+        class: 'btn',
+        href: '/download/ipa',
+        download: 'Watchlivo.ipa',
+        style: { height: 'auto', whiteSpace: 'normal', lineHeight: '1.25', boxSizing: 'border-box', justifyContent: 'center', fontWeight: '700', fontSize: '.8rem', textDecoration: 'none', textAlign: 'center', padding: '10px 8px' },
+      }, '🍎 Native IPA (v1.3.1)')
+    ),
+    typeof onMinimizeInApp === 'function' ? h('button', {
+      type: 'button',
+      id: 'btn-ios-inapp-mini-fallback',
+      class: 'btn',
+      style: { width: '100%', height: 'auto', whiteSpace: 'normal', lineHeight: '1.3', boxSizing: 'border-box', justifyContent: 'center', opacity: '0.88', fontSize: '.82rem', padding: '10px 12px' },
+      onclick: () => {
+        document.querySelector('.popup-backdrop')?.remove();
+        onMinimizeInApp();
+      },
+    }, '🗗 Şimdilik Watchlivo İçinde Sağ Alta Küçült') : null
+  );
+  popup({
+    title: '⧉ Diğer Uygulamalar Üzerinde İzle (Sistem PiP)',
+    content: box,
+    options: [{ label: 'Kapat' }],
+  });
 }

@@ -5233,6 +5233,9 @@ html.is-android-pip .rave-subtitle-cue {
 html.is-android-pip .wl-pip-stage-placeholder {
   display: none !important;
 }
+.video-frame.is-os-pip-stage .ctl-center-hud {
+  display: none !important;
+}
 .video-frame.is-os-pip-stage .unmute-pill,
 .video-frame.is-os-pip-stage #ctl-unmute {
   top: 10px !important;

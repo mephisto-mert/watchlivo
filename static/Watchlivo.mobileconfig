@@ -6,7 +6,7 @@
     <array>
         <dict>
             <key>FullScreen</key>
-            <false/>
+            <true/>
             <key>IgnoreManifestScope</key>
             <true/>
             <key>IsRemovable</key>
@@ -16,7 +16,7 @@
             <key>PayloadDescription</key>
             <string>Watchlivo iOS Tam Ekran Sinema ve Müzik Uygulaması</string>
             <key>PayloadDisplayName</key>
-            <string>Watchlivo WebClip</string>
+            <string>Watchlivo</string>
             <key>PayloadIdentifier</key>
             <string>online.watchlivo.webclip</string>
             <key>PayloadType</key>

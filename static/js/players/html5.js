@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261104_v98';
-import { expectedPosition } from '../sync.js?v=20261104_v98';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v98';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v98';
+import { SubtitleDubController } from './subtitles.js?v=20261104_v99';
+import { expectedPosition } from '../sync.js?v=20261104_v99';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261104_v99';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosStandalonePwa, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261104_v99';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -424,8 +424,17 @@ export class Html5Adapter {
         }
       }
       if (v.currentTime > 0 && !v.paused && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) reportPlay();
-      if (!v.paused && Date.now() - (this._lastNativeIosSyncAt || 0) > 25000) {
+      if (!v.paused && Date.now() - (this._lastNativeIosSyncAt || 0) > 8000) {
         this._syncNativeIosPip?.(true);
+      }
+      if (!v.paused && isIosWebKit() && !isIosStandalonePwa() && !this._iosPipActive && Date.now() - (this._lastStandbyWarmAt || 0) > 7500) {
+        if (Boolean(this.hls) || hasWebAudioGraph(v) || (this.isMusic && !(v.videoWidth > 0))) {
+          this._lastStandbyWarmAt = Date.now();
+          const pv = this._ensureIosPipStandby?.(this.currentUrl);
+          if (pv && !this._iosPipIsCanvasOnly && !this.media?.live && pv.readyState >= 1 && v.currentTime > 1 && Math.abs((pv.currentTime || 0) - v.currentTime) > 4.5) {
+            try { pv.currentTime = v.currentTime; } catch (_) {}
+          }
+        }
       }
       if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined') {
         window.__watchlivoBgSyncTick?.();
@@ -1193,7 +1202,7 @@ export class Html5Adapter {
         } else if (nativeAltIdx < alts.length) {
           loadCandidateUrl(alts[nativeAltIdx++]);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
-        } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback) {
+        } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback && (!isApple || stallChecks >= 3)) {
           triedHlsFallback = true;
           v.removeAttribute('src');
           attachHlsJs(this.currentUrl || url);
@@ -1368,12 +1377,6 @@ export class Html5Adapter {
   _syncNativeIosPip(playingOverride = null) {
     if (typeof window === 'undefined' || !window.isWatchlivoNativeIOS || typeof window.watchlivoNativePiP !== 'function') return;
     const v = this.video;
-    const audioOnlyMusic = Boolean(this.isMusic && !(v?.videoWidth > 0));
-    // When primary <video> uses native Apple AVPlayer directly (no MSE hls.js, no WebAudio),
-    // WKWebView's built-in AVPictureInPictureController handles inline & Home-swipe Auto-PiP natively without a duplicate player.
-    if (v && !audioOnlyMusic && !this.hls && !hasWebAudioGraph(v) && !window.__kinoxHost?._nativeIosPipActive) {
-      return;
-    }
     const eff = this._nativeIosPipSourceUrl();
     if (!v || !eff) return;
     this._lastNativeIosSyncAt = Date.now();
@@ -1401,16 +1404,15 @@ export class Html5Adapter {
     const vh = v?.videoHeight || 9;
     try {
       if (typeof window.Android.setVideoPlayingBounds === 'function') {
-        const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
         const r = (v || this.container)?.getBoundingClientRect?.() || { left: 0, top: 0, right: 0, bottom: 0 };
         window.Android.setVideoPlayingBounds(
           isPlaying,
           vw,
           vh,
-          Math.max(0, Math.round((r.left || 0) * dpr)),
-          Math.max(0, Math.round((r.top || 0) * dpr)),
-          Math.max(0, Math.round((r.right || 0) * dpr)),
-          Math.max(0, Math.round((r.bottom || 0) * dpr)),
+          Math.max(0, Math.round(r.left || 0)),
+          Math.max(0, Math.round(r.top || 0)),
+          Math.max(0, Math.round(r.right || 0)),
+          Math.max(0, Math.round(r.bottom || 0)),
         );
       } else {
         window.Android.setVideoPlaying?.(isPlaying, vw, vh);
@@ -1418,11 +1420,114 @@ export class Html5Adapter {
     } catch (_) {}
   }
 
+  tryEnterWebKitPipSync({ enterOnly = false } = {}) {
+    const v = this.video;
+    if (!v || this._destroyed) return false;
+    ensureIosPlaybackAudioSession();
+    v.disablePictureInPicture = false;
+    try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
+
+    if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
+      try {
+        this._syncAndroidPipState(true);
+        if (window.Android.enterPiP(v.videoWidth || 16, v.videoHeight || 9) !== false) {
+          this.events.onPipChange?.(true);
+          return 'entered';
+        }
+      } catch (_) {}
+    }
+
+    if (!enterOnly) {
+      if (this.iosPipVideo && (this._iosPipActive || this.iosPipVideo.webkitPresentationMode === 'picture-in-picture')) {
+        this._lastPipExitAt = Date.now();
+        try { this.iosPipVideo.webkitSetPresentationMode('inline'); } catch (_) {}
+        return 'exited';
+      }
+      if (typeof v.webkitSetPresentationMode === 'function' && v.webkitPresentationMode === 'picture-in-picture') {
+        this._lastPipExitAt = Date.now();
+        try { v.webkitSetPresentationMode('inline'); } catch (_) {}
+        this.subs?._disableAllNativeTextTracks?.();
+        this.events.onPipChange?.(false);
+        return 'exited';
+      }
+    }
+
+    const audioOnlyMusic = Boolean(this.isMusic && !(v.videoWidth > 0));
+    if (!audioOnlyMusic && typeof v.webkitSetPresentationMode === 'function' && v.readyState >= 1) {
+      try {
+        v.setAttribute('x-webkit-airplay', 'allow');
+        try { v.disableRemotePlayback = false; } catch (_) {}
+        const canPrimary = !v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode('picture-in-picture');
+        if (canPrimary) {
+          if (v.paused && this.wantPlaying !== false) {
+            try { v.play()?.catch?.(() => {}); } catch (_) {}
+          }
+          this._lastPipEnterAt = Date.now();
+          v.webkitSetPresentationMode('picture-in-picture');
+          if (v.webkitPresentationMode === 'picture-in-picture') {
+            setTimeout(() => { try { this.subs?.syncNativeTrackToElement?.(v, true); } catch (_) {} }, 0);
+            this.events.onPipChange?.(true);
+            return 'entered';
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (isIosWebKit() && typeof v.webkitSetPresentationMode === 'function') {
+      const pv = this.iosPipVideo || this._ensureIosPipStandby?.(this.currentUrl);
+      if (pv && pv.readyState >= 1) {
+        try {
+          const canStandby = !pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture');
+          if (canStandby) {
+            this._iosPipActive = true;
+            this._lastPipEnterAt = Date.now();
+            if (!this._iosPipIsCanvasOnly) {
+              const curT = this.getTime();
+              if (!this.media?.live && curT > 0.5 && Math.abs((pv.currentTime || 0) - curT) > 0.8) {
+                try { pv.currentTime = curT; } catch (_) {}
+              }
+              pv.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
+              pv.playbackRate = v.playbackRate || 1;
+              this._suppressInlinePauseOnce = true;
+              try { v.pause(); } catch (_) {}
+              try { this.hls?.stopLoad?.(); } catch (_) {}
+            } else if (v.paused && this.wantPlaying !== false) {
+              try { v.play()?.catch?.(() => {}); } catch (_) {}
+            }
+            try { pv.play()?.catch?.(() => {}); } catch (_) {}
+            pv.webkitSetPresentationMode('picture-in-picture');
+            if (pv.webkitPresentationMode === 'picture-in-picture') {
+              if (!this._iosPipIsCanvasOnly) {
+                setTimeout(() => { try { this.subs?.syncNativeTrackToElement?.(pv, true); } catch (_) {} }, 0);
+              }
+              this.events.onPipChange?.(true);
+              return 'entered';
+            }
+            this._iosPipActive = false;
+            if (!this._iosPipIsCanvasOnly) {
+              try { pv.pause(); pv.muted = true; } catch (_) {}
+              try { this.hls?.startLoad?.(-1); } catch (_) {}
+              if (this.wantPlaying) this.tryPlay();
+            }
+          }
+        } catch (_) {
+          this._iosPipActive = false;
+          if (!this._iosPipIsCanvasOnly) {
+            try { pv.pause(); pv.muted = true; } catch (_) {}
+            try { this.hls?.startLoad?.(-1); } catch (_) {}
+            if (this.wantPlaying) this.tryPlay();
+          }
+        }
+      }
+    }
+    return false;
+  }
+
   async enterAutoPiP(reason = 'visibilitychange') {
     const v = this.video;
-    if (!v || this._destroyed || !this.wantPlaying || this.hasEnded) return false;
+    if (!v || this._destroyed || (reason !== 'room-minimize' && !this.wantPlaying) || this.hasEnded) return false;
     try {
-      if (localStorage.getItem('vortex_auto_pip') === 'off') return false;
+      if (reason !== 'room-minimize' && localStorage.getItem('vortex_auto_pip') === 'off') return false;
     } catch (_) {}
     if (this.isPiP()) return 'already-pip';
     if (typeof document !== 'undefined' && document.documentElement?.classList?.contains('is-android-pip')) return 'already-pip';
@@ -1430,23 +1535,36 @@ export class Html5Adapter {
 
     applyOptimalPipAttributes(v, true);
     const av = this._activeMediaEl();
-    if (av && av.paused && !av.ended) {
+    if (av && av.paused && !av.ended && this.wantPlaying) {
       try { av.play()?.catch?.(() => {}); } catch (_) {}
-    }
-
-    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function') {
-      this._syncNativeIosPip(true);
-      return 'native-ios-synced';
     }
 
     if (typeof window !== 'undefined' && window.Android) {
       this._syncAndroidPipState(true);
-      if ((reason === 'userLeaveHint' || reason === 'mediaSession') && typeof window.Android.enterPiP === 'function') {
+      if ((reason === 'userLeaveHint' || reason === 'mediaSession' || reason === 'room-minimize') && typeof window.Android.enterPiP === 'function') {
         try {
           if (window.Android.enterPiP(v.videoWidth || 16, v.videoHeight || 9) !== false) return 'entered';
         } catch (_) {}
       }
       return 'native-android-synced';
+    }
+
+    // Synchronous WebKit PiP MUST run BEFORE any async await so userActivation stays intact
+    const syncWebKit = this.tryEnterWebKitPipSync({ enterOnly: true });
+    if (syncWebKit === 'entered') return 'entered';
+
+    if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function') {
+      if (reason === 'room-minimize') {
+        const nativeSrc = this._nativeIosPipSourceUrl();
+        if (nativeSrc) {
+          const absU = new URL(nativeSrc, window.location.origin).href;
+          if (window.watchlivoNativePiP('start', { url: absU, time: this.getTime(), rate: v.playbackRate || 1, playing: true, live: Boolean(this.media?.live), muted: Boolean(v.muted || this.userExplicitMuted || this.baseVolume <= 0) })) {
+            return 'entered';
+          }
+        }
+      }
+      this._syncNativeIosPip(true);
+      return 'native-ios-synced';
     }
 
     if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false) && !v.disablePictureInPicture && v.readyState >= 1) {
@@ -1455,39 +1573,11 @@ export class Html5Adapter {
         await v.requestPictureInPicture();
         this.events.onPipChange?.(true);
         return 'entered';
-      } catch (_) {
-        /* Browser requires transient MediaSession 'enterpictureinpicture' activation or WebKit presentation API */
-      }
+      } catch (_) {}
     }
 
-    const targetV = (isIosWebKit() && this.iosPipVideo && (Boolean(this.hls) || hasWebAudioGraph(v) || (this.isMusic && !(v.videoWidth > 0))))
-      ? this.iosPipVideo
-      : v;
-    if (targetV && typeof targetV.webkitSetPresentationMode === 'function' && targetV.webkitPresentationMode !== 'picture-in-picture' && targetV.readyState >= 1) {
-      try {
-        if (!targetV.webkitSupportsPresentationMode || targetV.webkitSupportsPresentationMode('picture-in-picture')) {
-          if (targetV === this.iosPipVideo) {
-            this._iosPipActive = true;
-            this._lastPipEnterAt = Date.now();
-            if (!this._iosPipIsCanvasOnly) {
-              const curT = this.getTime();
-              if (curT > 0.5 && Math.abs((targetV.currentTime || 0) - curT) > 0.8) {
-                try { targetV.currentTime = curT; } catch (_) {}
-              }
-              targetV.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
-              targetV.playbackRate = v.playbackRate || 1;
-              this._suppressInlinePauseOnce = true;
-              try { v.pause(); } catch (_) {}
-              try { this.hls?.stopLoad?.(); } catch (_) {}
-            }
-            try { targetV.play()?.catch?.(() => {}); } catch (_) {}
-          }
-          this.subs?.syncNativeTrackToElement?.(targetV, true);
-          targetV.webkitSetPresentationMode('picture-in-picture');
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-      } catch (_) {}
+    if (reason === 'room-minimize' && isIosStandalonePwa()) {
+      return 'ios-standalone-blocked';
     }
     return false;
   }
@@ -1824,10 +1914,10 @@ export class Html5Adapter {
       pv = document.createElement('video');
       pv.className = 'wl-ios-pip-standby';
       applyOptimalPipAttributes(pv, true);
-      pv.preload = 'metadata';
+      pv.preload = 'auto';
       pv.muted = true;
       pv.preservesPitch = true;
-      pv.style.cssText = 'position:fixed;right:0;bottom:0;width:2px;height:2px;opacity:0.001;pointer-events:none;z-index:-1;';
+      pv.style.cssText = 'position:fixed;right:2px;bottom:2px;width:160px;height:90px;opacity:0.012;pointer-events:none;z-index:0;object-fit:contain;';
       pv.addEventListener('webkitpresentationmodechanged', () => {
         if (this._destroyed || this.iosPipVideo !== pv) return;
         const inPipNow = pv.webkitPresentationMode === 'picture-in-picture';
@@ -1965,33 +2055,11 @@ export class Html5Adapter {
   async togglePiP() {
     const v = this.video;
     if (!v) return false;
-    ensureIosPlaybackAudioSession();
-    v.disablePictureInPicture = false;
-    try { v.removeAttribute?.('disablepictureinpicture'); } catch (_) {}
 
-    if (typeof window !== 'undefined' && typeof window.Android?.enterPiP === 'function') {
-      try {
-        this._syncAndroidPipState(true);
-        if (window.Android.enterPiP(v.videoWidth || 16, v.videoHeight || 9) !== false) {
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-      } catch (_) {}
-    }
-
-    if (this.iosPipVideo && (this._iosPipActive || this.iosPipVideo.webkitPresentationMode === 'picture-in-picture')) {
-      this._lastPipExitAt = Date.now();
-      try { this.iosPipVideo.webkitSetPresentationMode('inline'); } catch (_) {}
-      return 'exited';
-    }
-
-    if (typeof v.webkitSetPresentationMode === 'function' && v.webkitPresentationMode === 'picture-in-picture') {
-      this._lastPipExitAt = Date.now();
-      try { v.webkitSetPresentationMode('inline'); } catch (_) {}
-      this.subs?._disableAllNativeTextTracks?.();
-      this.events.onPipChange?.(false);
-      return 'exited';
-    }
+    // 1. Synchronous 0ms gesture path (Apple WebKit primary <video>, pre-warmed iOS standby <video>, Android native bridge)
+    const syncRes = this.tryEnterWebKitPipSync();
+    if (syncRes) return syncRes;
+    if (isIosStandalonePwa()) return 'ios-standalone-blocked';
 
     if (typeof document !== 'undefined' && document.pictureInPictureElement === v) {
       this._lastPipExitAt = Date.now();
@@ -2002,29 +2070,8 @@ export class Html5Adapter {
     }
 
     const audioOnlyMusic = Boolean(this.isMusic && !(v.videoWidth > 0));
-    const needsIosStandbyPip = isIosWebKit() && typeof v.webkitSetPresentationMode === 'function' && (Boolean(this.hls) || hasWebAudioGraph(v) || audioOnlyMusic);
 
-    // 1. Primary Apple WebKit / WKWebView native <video> OS-level PiP (instant HBO Max behavior over all iOS/macOS apps)
-    if (!needsIosStandbyPip && typeof v.webkitSetPresentationMode === 'function') {
-      try {
-        if (v.readyState < 1) {
-          try { v.play()?.catch?.(() => {}); } catch (_) {}
-          await this._waitReadyForPip(v, 1400);
-        }
-        if (v.readyState >= 1 && (!v.webkitSupportsPresentationMode || v.webkitSupportsPresentationMode('picture-in-picture'))) {
-          if (v.paused && this.wantPlaying !== false) {
-            try { v.play()?.catch?.(() => {}); } catch (_) {}
-          }
-          this._lastPipEnterAt = Date.now();
-          this.subs?.syncNativeTrackToElement?.(v, true);
-          v.webkitSetPresentationMode('picture-in-picture');
-          this.events.onPipChange?.(true);
-          return 'entered';
-        }
-      } catch (_) { /* fall through to standby / native bridge */ }
-    }
-
-    // 2. Primary W3C <video>.requestPictureInPicture() (true OS-level floating window on Chrome/Edge/Android/Desktop)
+    // 2. Standard W3C <video>.requestPictureInPicture() (Chrome/Edge/Android/Desktop floating OS window)
     if (typeof v.requestPictureInPicture === 'function' && (typeof document === 'undefined' || document.pictureInPictureEnabled !== false)) {
       try {
         if (v.readyState < 1) {
@@ -2038,58 +2085,29 @@ export class Html5Adapter {
           this.events.onPipChange?.(true);
           return 'entered';
         }
-      } catch (_) { /* fall through to standby / native bridge */ }
+      } catch (_) { /* fall through */ }
     }
 
-    // 3. iOS Standby AVPlayer video (for MSE / audio-only / canvas music streams)
-    if (needsIosStandbyPip) {
-      const pv = this._ensureIosPipStandby(this.currentUrl);
-      if (pv) {
-        if (pv.readyState < 1) {
-          try { pv.load(); } catch (_) {}
-          await this._waitReadyForPip(pv, 1400);
-        }
-        if (pv.readyState >= 1 && (!pv.webkitSupportsPresentationMode || pv.webkitSupportsPresentationMode('picture-in-picture'))) {
-          this._iosPipActive = true;
-          this._lastPipEnterAt = Date.now();
-          if (!this._iosPipIsCanvasOnly) {
-            const curT = this.getTime();
-            if (curT > 0.5 && Math.abs((pv.currentTime || 0) - curT) > 0.8) {
-              try { pv.currentTime = curT; } catch (_) {}
-            }
-            pv.muted = Boolean(this.userExplicitMuted || this.baseVolume <= 0);
-            pv.playbackRate = v.playbackRate || 1;
-            this.subs?.syncNativeTrackToElement?.(pv, true);
-            this._suppressInlinePauseOnce = true;
-            try { v.pause(); } catch (_) {}
-            try { this.hls?.stopLoad?.(); } catch (_) {}
-          } else if (v.paused && this.wantPlaying !== false) {
-            try { v.play()?.catch?.(() => {}); } catch (_) {}
-          }
-          try { pv.play()?.catch?.(() => {}); } catch (_) {}
-          try {
-            pv.webkitSetPresentationMode('picture-in-picture');
-            this.events.onPipChange?.(true);
-            return 'entered';
-          } catch (err) {
-            this._iosPipActive = false;
-            if (!this._iosPipIsCanvasOnly) {
-              try { pv.pause(); } catch (_) {}
-              try { this.hls?.startLoad?.(-1); } catch (_) {}
-              if (this.wantPlaying) this.tryPlay();
-            }
-          }
-        }
-      }
-    }
-
-    // 4. Native iOS Objective-C AVPictureInPictureController fallback bridge
+    // 3. Native iOS Objective-C AVPictureInPictureController fallback bridge (Watchlivo.ipa)
     const nativeSrc = this._nativeIosPipSourceUrl();
     if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && typeof window.watchlivoNativePiP === 'function' && nativeSrc) {
       const absU = new URL(nativeSrc, window.location.origin).href;
       this._lastPipEnterAt = Date.now();
       if (window.watchlivoNativePiP('toggle', { url: absU, time: this.getTime(), rate: v.playbackRate || 1, playing: true, live: Boolean(this.media?.live), muted: Boolean(this.video.muted || this.userExplicitMuted || this.baseVolume <= 0) })) {
         return 'entered';
+      }
+    }
+
+    // 4. Legacy iOS Home Screen Standalone PWA (`navigator.standalone === true`) where WebKit disables OS PiP
+    if (isIosStandalonePwa()) {
+      return 'ios-standalone-blocked';
+    }
+
+    if (isIosWebKit() && (Boolean(this.hls) || hasWebAudioGraph(v) || audioOnlyMusic)) {
+      const pv = this._ensureIosPipStandby(this.currentUrl);
+      if (pv && pv.readyState < 1) {
+        try { pv.load(); } catch (_) {}
+        return 'loading';
       }
     }
 

@@ -60,7 +60,7 @@ class V83SocialHistoryUiTests(unittest.TestCase):
     def test_01_zero_21st_dev_and_v83_ui_tokens(self):
         root = pathlib.Path(__file__).resolve().parent.parent / "static"
         index_txt = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v98", index_txt)
+        self.assertIn("20261104_v99", index_txt)
         for ext in ("*.js", "*.css", "*.html"):
             for p in root.rglob(ext):
                 txt = p.read_text(encoding="utf-8")
@@ -277,8 +277,8 @@ class V83SocialHistoryUiTests(unittest.TestCase):
             self.assertIn(b"restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:", macho)
             self.assertIn(b"startOrSyncNativePiP:forceStart:", macho)
             plist_txt = zf.read("Payload/Watchlivo.app/Info.plist").decode("utf-8")
-            self.assertIn("<string>1.3.0</string>", plist_txt)
-            self.assertIn("<string>90</string>", plist_txt)
+            self.assertIn("<string>1.3.1</string>", plist_txt)
+            self.assertIn("<string>91</string>", plist_txt)
 
     def test_09_v98_mobile_dock_and_cross_app_os_pip(self):
         import json
@@ -320,3 +320,39 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         self.assertIn("pipActionReceiver", player_java)
         self.assertIn("setSeamlessResizeEnabled(true)", player_java)
         self.assertNotIn("Build.VERSION.SDK_INT < 31", player_java)
+
+    def test_10_v99_ios_webkit_sync_pip_manifest_and_safari_breakout(self):
+        repo_root = pathlib.Path(__file__).resolve().parent.parent
+        static_root = repo_root / "static"
+
+        # 1. /manifest.json serves display='browser' to iOS so new Home Screen shortcuts keep Safari OS-level PiP
+        ios_ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
+        and_ua = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+        r_ios = self.client.get("/manifest.json", headers={"User-Agent": ios_ua})
+        r_and = self.client.get("/manifest.json", headers={"User-Agent": and_ua})
+        self.assertEqual(r_ios.status_code, 200)
+        self.assertEqual(r_ios.json().get("display"), "browser")
+        self.assertIn("user-agent", r_ios.headers.get("vary", "").lower())
+        self.assertIn("no-cache", r_ios.headers.get("cache-control", "").lower())
+        self.assertEqual(r_and.json().get("display"), "standalone")
+
+        # 2. index.html drops apple-mobile-web-app-capable='yes' to stop PiP-blocking WebApp.app container
+        idx_html = (static_root / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn('name="apple-mobile-web-app-capable"', idx_html)
+        self.assertIn('name="mobile-web-app-capable" content="yes"', idx_html)
+
+        # 3. Synchronous zero-await WebKit PiP & legacy standalone Safari breakout sheet
+        html5_js = (static_root / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        yt_js = (static_root / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        host_js = (static_root / "js" / "players" / "host.js").read_text(encoding="utf-8")
+        ui_js = (static_root / "js" / "ui.js").read_text(encoding="utf-8")
+        ctl_js = (static_root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        mesh_js = (static_root / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        self.assertIn("tryEnterWebKitPipSync(", html5_js)
+        self.assertIn("tryEnterWebKitPipSync(", yt_js)
+        self.assertIn("tryEnterPipSync(", host_js)
+        self.assertIn("openIosCrossAppPipSheet", ui_js)
+        self.assertIn("x-safari-", ui_js)
+        self.assertIn("wl-autopip-launch-btn", ctl_js)
+        self.assertIn("__watchlivoAutoPipPending", mesh_js)
+

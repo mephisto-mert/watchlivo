@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v98';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v98';
-import { resolveMusicItem } from './selection-kinds.js?v=20261104_v98';
-import { MeshConnection } from '../realtime.js?v=20261104_v98';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v98';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v98';
-import { buildLayout } from './mesh-layout.js?v=20261104_v98';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v98';
-import { Voice } from '../voice.js?v=20261104_v98';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v98';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261104_v99';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261104_v99';
+import { resolveMusicItem } from './selection-kinds.js?v=20261104_v99';
+import { MeshConnection } from '../realtime.js?v=20261104_v99';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261104_v99';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261104_v99';
+import { buildLayout } from './mesh-layout.js?v=20261104_v99';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261104_v99';
+import { Voice } from '../voice.js?v=20261104_v99';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261104_v99';
 
 let ctx = null;
 
@@ -1072,10 +1072,32 @@ export async function enterMesh(app, params) {
     if (params.r_tok && params.id) {
       sessionStorage.setItem(`vortex_st_${params.id}`, String(params.r_tok));
     }
+    if (params.c_tok && params.id) {
+      sessionStorage.setItem(`vortex_ct_${params.id}`, String(params.c_tok));
+    }
+    if (params.c_cid && params.id) {
+      sessionStorage.setItem('vortex_cid', String(params.c_cid));
+      if (params.is_c === '1') {
+        sessionStorage.setItem(`vortex_creator_${params.id}`, String(params.c_cid));
+      }
+    }
+    if (params.p_name && state.self?.isGuest) {
+      const nextSelf = {
+        ...state.self,
+        name: String(params.p_name).slice(0, 40),
+        handle: params.p_handle ? String(params.p_handle).slice(0, 32) : state.self.handle,
+        color: params.p_color ? String(params.p_color).slice(0, 16) : state.self.color,
+      };
+      set({ self: nextSelf });
+      try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(nextSelf)); } catch (_) {}
+    }
     if (params.new === '1' && params.id) {
       const existingCreatorCid = params.cid || sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
       sessionStorage.setItem('vortex_cid', existingCreatorCid);
       sessionStorage.setItem(`vortex_creator_${params.id}`, existingCreatorCid);
+    }
+    if (String(params.autopip || '') === '1' && typeof window !== 'undefined') {
+      window.__watchlivoAutoPipPending = true;
     }
     if (params.id && location.hash.includes('?')) {
       window.history.replaceState(null, '', `#/mesh/${encodeURIComponent(params.id)}`);
