@@ -1150,12 +1150,19 @@ export function buildControls(frame, ctx) {
     mid,
     h('div', { class: 'ctl-bottom' }, timeline, barRow),
     menu);
+  frame.addEventListener('pointerenter', (e) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') return;
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    revealControls(2600);
+  }, { passive: true });
   frame.addEventListener('pointermove', (e) => {
     if (e.pointerType === 'touch' || e.pointerType === 'pen' || Date.now() - Math.max(touchStartTime, lastAnyTouchAt) < 2200 || Date.now() - lastLayoutShiftAt < 700) return;
     if (window.matchMedia?.('(hover: none), (pointer: coarse)')?.matches) return;
     if (lastMouseX < 0) {
       lastMouseX = e.clientX;
       lastMouseY = e.clientY;
+      revealControls(2600);
       return;
     }
     if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) < 8) return;

@@ -1396,6 +1396,81 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"clientName": "ANDROID"', me_py)
         self.assertIn('"clientVersion": "20.10.38"', me_py)
 
+    def test_v103_watch_rooms_sync_precreated_host_claim_and_cohost_succession(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. /api/rooms/create precreated placeholder is claimed by the first real human joiner
+        cr_resp = self.client.post("/api/rooms/create", json={
+            "name": "QA4 Regresyon Odası",
+            "privacy": "public",
+            "creator": "LiderQA4Reg103",
+        })
+        self.assertEqual(cr_resp.status_code, 200)
+        cr_data = cr_resp.json()
+        room_id = cr_data["room"]["id"]
+        pre_cid = cr_data["clientId"]
+
+        # First real human joins with a different browser clientId ("h_realleader") and name ("GerçekLider")
+        join_resp = self.client.post(f"/api/rooms/{room_id}/sync", json={
+            "clientId": "h_realleader",
+            "username": "GerçekLider",
+        })
+        self.assertEqual(join_resp.status_code, 200)
+        j_room = join_resp.json()["room"]
+        part_ids = [p["id"] for p in j_room["participants"]]
+        self.assertEqual(part_ids, ["h_realleader"])
+        self.assertNotIn(pre_cid, part_ids)
+        self.assertEqual(j_room["host_id"], "h_realleader")
+
+        # 2. Anchor heartbeat from leader overrides extrapolated server clock after media load delay
+        room = rooms.new_room("qa4_anchor_test")
+        rooms.add_participant(room, "h1", {"username": "LiderQA4Reg103"}, "ws")
+        room["host_id"] = "h1"
+        rooms.set_media(room, {"url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "title": "BBB"}, "LiderQA4Reg103", 0.0)
+        # Simulate 4.5s of wall-clock load delay before leader's video actually starts at 0.35s
+        room["media"]["updatedAt"] = rooms.now() - 4.5
+        rooms.handle_action(room, "h1", {"type": "heartbeat", "currentTime": 0.35, "anchor": True})
+        self.assertAlmostEqual(float(room["media"]["currentTime"]), 0.35, places=2)
+
+        # 3. Co-Host succession priority in ensure_host() when host leaves
+        room2 = rooms.new_room("qa4_cohost_succ")
+        t0 = rooms.now()
+        room2["participants"] = {
+            "g_cohost": {"id": "g_cohost", "name": "Ayşe", "transport": "ws", "lastSeen": t0 - 5.0},
+            "g_regular": {"id": "g_regular", "name": "Mehmet", "transport": "ws", "lastSeen": t0 - 1.0},
+        }
+        room2["host_id"] = "h_departed"
+        room2["co_hosts"] = ["g_cohost"]
+        rooms.ensure_host(room2)
+        self.assertEqual(room2["host_id"], "g_cohost")
+
+        # 4. Private room hidden from /api/rooms & password room enforces 403/200
+        priv_r = self.client.post("/api/rooms/create", json={
+            "name": "QA4 Gizli Regresyon",
+            "privacy": "private",
+            "creator": "GizliLiderQA4",
+        }).json()["room"]["id"]
+        pwd_r = self.client.post("/api/rooms/create", json={
+            "name": "QA4 Şifreli Regresyon",
+            "privacy": "public",
+            "password": "7788",
+            "creator": "SifreliLiderQA4",
+        }).json()["room"]["id"]
+        lobby_ids = [r["id"] for r in self.client.get("/api/rooms").json().get("rooms", [])]
+        self.assertNotIn(priv_r, lobby_ids)
+        self.assertIn(pwd_r, lobby_ids)
+        self.assertEqual(self.client.post(f"/api/rooms/{pwd_r}/sync", json={"username": "G1", "pwd": "0000"}).status_code, 403)
+        self.assertEqual(self.client.post(f"/api/rooms/{pwd_r}/sync", json={"username": "G1", "pwd": "7788"}).status_code, 200)
+
+        # 5. Frontend sync & controls guards present
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        self.assertIn("const safeBuffered = (t, minAhead = 2.8)", sync_js)
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("frame.addEventListener('pointerenter'", controls_js)
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.04)", html5_js)
+
 
 if __name__ == '__main__':
     unittest.main()

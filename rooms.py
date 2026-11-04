@@ -1554,7 +1554,12 @@ def ensure_host(room: Dict[str, Any]) -> None:
         room["creatorCid"] = creator_candidates[0][0]
         return
     if humans:
-        humans_sorted = sorted(humans, key=lambda c: float(room["participants"][c].get("lastSeen") or 0.0), reverse=True)
+        co_set = set(room.get("co_hosts") or [])
+        humans_sorted = sorted(
+            humans,
+            key=lambda c: (1 if c in co_set else 0, float(room["participants"][c].get("lastSeen") or 0.0)),
+            reverse=True,
+        )
         room["host_id"] = humans_sorted[0]
     elif room["participants"]:
         room["host_id"] = next(iter(room["participants"]))
@@ -1614,26 +1619,42 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     t_now = now()
     p.update({"transport": transport, "lastSeen": t_now})
     replaced_precreated = False
-    if existing is None and p.get("name") and p.get("name") != "Misafir":
+    if existing is None and not data.get("_precreated"):
         live_ws = SOCKETS.get(room.get("id", ""), {})
         p_slug = _slugify_name(p.get("name") or "")
+        other_real_humans = any(
+            hp.get("transport") != "bot" and not hp.get("_precreated") and hp_cid != cid
+            for hp_cid, hp in (room.get("participants") or {}).items()
+        )
         for old_cid, old_p in list((room.get("participants") or {}).items()):
             if old_cid == cid or old_p.get("transport") == "bot":
                 continue
-            if old_p.get("_precreated") and p_slug and _slugify_name(old_p.get("name") or "") == p_slug and bool(data.get("isCreator")):
-                room["participants"].pop(old_cid, None)
-                room.setdefault("left", {})[old_cid] = t_now
-                if room.get("host_id") == old_cid:
-                    room["host_id"] = cid
-                if room.get("creatorCid") == old_cid:
-                    room["creatorCid"] = cid
-                co_l = list(room.get("co_hosts") or [])
-                if old_cid in co_l:
-                    co_l.remove(old_cid)
-                    if cid not in co_l:
-                        co_l.append(cid)
-                    room["co_hosts"] = co_l
-                replaced_precreated = True
+            if old_p.get("_precreated"):
+                old_uid = str(old_p.get("uid") or "").strip()
+                p_uid = str(p.get("uid") or "").strip()
+                uid_ok = (not old_uid.startswith(("u_", "uid_"))) or (p_uid and p_uid == old_uid)
+                explicit_cid = str(room.get("explicitCreatorCid") or "").strip()
+                if uid_ok and (
+                    (not other_real_humans and not explicit_cid)
+                    or (p_slug and _slugify_name(old_p.get("name") or "") == p_slug and bool(data.get("isCreator")))
+                ):
+                    room["participants"].pop(old_cid, None)
+                    room.setdefault("left", {})[old_cid] = t_now
+                    if room.get("host_id") == old_cid:
+                        room["host_id"] = cid
+                    if room.get("creatorCid") == old_cid:
+                        room["creatorCid"] = cid
+                    if room.get("creatorId") == old_cid:
+                        room["creatorId"] = p_uid or cid
+                    co_l = list(room.get("co_hosts") or [])
+                    if old_cid in co_l:
+                        co_l.remove(old_cid)
+                        if cid not in co_l:
+                            co_l.append(cid)
+                        room["co_hosts"] = co_l
+                    replaced_precreated = True
+                    continue
+            if not p.get("name") or p.get("name") == "Misafir":
                 continue
             if old_cid in live_ws:
                 continue
@@ -1818,15 +1839,16 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             want_play = False
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
-        if prev_playing and want_play and cur_live > 3.0 and inc_t < cur_live - 2.0:
+        is_anchor_hb = _as_bool(data.get("anchor"))
+        if prev_playing and want_play and not is_anchor_hb and cur_live > 2.0 and inc_t < cur_live - 2.0:
             room["media"]["currentTime"] = cur_live
             room["media"]["updatedAt"] = t_now
             return out
         _apply_time(room, data)
         room["media"]["playing"] = want_play
-        if prev_playing and want_play and cur_live > 2.0 and abs(inc_t - cur_live) <= 2.5 and room.get("privacy") == prev_privacy:
+        if prev_playing and want_play and not is_anchor_hb and cur_live > 5.0 and abs(inc_t - cur_live) <= 0.08 and room.get("privacy") == prev_privacy:
             return out
-        if bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 2.5:
+        if is_anchor_hb or bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 0.25:
             room["rev"] = int(room.get("rev") or 1) + 1
         hb_ev = _sync_event(room, "heartbeat", name)
         hb_ev["id"] = req_act_id or ("ev_" + uuid.uuid4().hex[:10])

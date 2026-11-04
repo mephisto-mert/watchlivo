@@ -621,7 +621,7 @@ export class Html5Adapter {
       alts.push(initialCandidate);
       initialCandidate = promoted;
     }
-    const url = initialCandidate || (alts[nativeAltIdx++] || '');
+    const url = initialCandidate || (alts[nativeAltIdx++] || '') || (!isDrmUrl(media.url) ? String(media.url || '') : '');
     this.currentUrl = url;
     if (this.isMusic) {
       const wantClip = !media.live && media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
@@ -1507,7 +1507,7 @@ export class Html5Adapter {
     if (v && (v.seeking || Math.abs((Number(v.currentTime) || 0) - this.lastSeekTarget) < 1.5) && this.lastSeekAt && Date.now() - this.lastSeekAt < 1000 && Math.abs(target - this.lastSeekTarget) < 1.2) {
       return;
     }
-    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.6) {
+    if (v && v.readyState >= 1 && Math.abs((Number(v.currentTime) || 0) - target) < 0.04) {
       return;
     }
     this.lastSeekTarget = target;

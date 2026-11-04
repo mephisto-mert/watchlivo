@@ -176,6 +176,7 @@ export class MeshConnection {
     if (this.clientId) q.set('clientId', this.clientId);
     if (this.clientToken) q.set('clientToken', this.clientToken);
     if (this.syncToken) q.set('syncToken', this.syncToken);
+    if (this.isCreator) q.set('isCreator', '1');
     let opened = false;
     let ws;
     try {

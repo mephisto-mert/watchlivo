@@ -100,16 +100,22 @@ async def main():
         after = (await dbg(A))["time"]
         check("guest seek blocked (leader-only timeline)", after > before and after - before < 6, f"A moved {after-before:.1f}s (10% would be ~{dur*0.1:.0f}s)")
         await B.hover("#video-frame"); await B.click("#ctl-play")
+        await asyncio.sleep(0.8)
+        overlay_b = await B.locator(".stage-overlay-msg").inner_text()
+        check("guest direct pause blocked with break hint", "Yalnızca oda başkanı" in overlay_b, overlay_b)
+        await B.hover("#video-frame"); await B.click("#ctl-break-btn")
+        await asyncio.sleep(0.8)
+        banner_txt = await A.locator("#ctl-break-banner-text").inner_text()
+        check("'break request' banner shown to leader", "Misafir" in banner_txt, banner_txt)
+        await A.click("#ctl-break-accept")
         await asyncio.sleep(1.5)
         da = await dbg(A)
-        check("guest pause propagates to leader", da["paused"] and da["status"] == "PAUSED")
-        overlay = await A.locator(".stage-overlay-msg").inner_text()
-        check("'paused by' overlay shown", "Misafir" in overlay, overlay)
+        check("guest break pause propagates via leader accept", da["paused"] and da["status"] == "PAUSED")
         await B.fill("#chat-input", "selam lider")
         await B.press("#chat-input", "Enter")
         await asyncio.sleep(1)
         check("chat delivered", "selam lider" in (await dbg(A))["chat"])
-        await A.click('#privacy-card [data-privacy="friends"]') if await A.locator("#privacy-card").count() else None
+        await A.click('#privacy-card [data-privacy="friends"]') if await A.locator('#privacy-card [data-privacy="friends"]').is_visible() else None
         if not await A.locator("#privacy-card").count():
             await A.evaluate("1")
         await asyncio.sleep(1)

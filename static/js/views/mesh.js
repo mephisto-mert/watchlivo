@@ -406,11 +406,19 @@ async function loadMedia(media) {
   await ctx.host.setMedia(media, finalStart, playing);
   if (!ctx || ctx.loadSeq !== mySeq) return;
   if (!isTimeKeeper()) {
-    const liveExp = expectedPosition(state.mesh?.media || media);
-    const curPos = ctx.host?.adapter?.getTime?.() || 0;
-    const vEl = ctx.host?.adapter?.video;
-    if (!resolvedFromCatalogFresh && liveExp >= 12.0 && Math.abs(liveExp - curPos) > 6.0 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 2))) {
-      ctx.host.adapter.seek?.(liveExp);
+    const ad = ctx.host?.adapter;
+    const vEl = ad?.video;
+    const snapGuestToLive = () => {
+      if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || resolvedFromCatalogFresh) return;
+      const liveExp = expectedPosition(state.mesh?.media || media);
+      const curPos = ad?.getTime?.() || 0;
+      if (liveExp >= 0.4 && Math.abs(liveExp - curPos) > 0.12 && (!vEl || (!vEl.seeking && vEl.readyState >= 2)) && (!ad?.isBuffered || ad.isBuffered(liveExp) || liveExp >= 12.0)) {
+        ad?.seek?.(liveExp);
+      }
+    };
+    snapGuestToLive();
+    if (vEl) {
+      vEl.addEventListener('playing', snapGuestToLive, { once: true });
     }
   } else {
     const k = mediaKey(media);
@@ -425,11 +433,6 @@ async function loadMedia(media) {
     };
     if (vEl) {
       vEl.addEventListener('playing', fireLeaderAnchor, { once: true });
-      vEl.addEventListener('seeked', () => {
-        if (ctx && ctx.loadSeq === mySeq && isTimeKeeper() && !ctx.host?.loading) {
-          actions.heartbeat(ad.getTime?.() ?? 0, true);
-        }
-      });
       if (vEl.readyState >= 3 && !vEl.paused) fireLeaderAnchor();
     } else {
       fireLeaderAnchor();
@@ -456,7 +459,7 @@ function onMessage(data) {
       if (data.room) applyRoom(data.room, { viaPoll: !!data.viaHttp });
       if (data.type === 'user_joined' && data.user?.id !== state.clientId) {
         ctx?.voice?.onPeerJoined(data.user.id);
-        if (isTimeKeeper()) actions.heartbeat();
+        if (isTimeKeeper()) actions.heartbeat(undefined, true);
       }
       break;
     case 'sync':
@@ -500,7 +503,7 @@ function onMessage(data) {
           if (ctx) ctx.userPaused = true;
           ctx?.host?.adapter?.pause?.();
           const target = Number(mergedMedia.meshStatePosition || 0);
-          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.35) {
+          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.05) {
             if (ctx?.sync) {
               ctx.sync.lastSeekTarget = target;
               ctx.sync.lastSeekWallAt = performance.now();
@@ -512,6 +515,9 @@ function onMessage(data) {
           if (ctx) ctx.userPaused = false;
           if (ctx?.host?.adapter?.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) {
             ctx?.host?.adapter?.play?.();
+          }
+          if (!isTimeKeeper() && ctx?.sync) {
+            ctx.sync.seekUntil = 0;
           }
         } else if (data.action === 'seek') {
           const target = Number(mergedMedia.meshStatePosition || 0);
@@ -526,7 +532,7 @@ function onMessage(data) {
           if (Number.isFinite(nextRate) && nextRate > 0) ctx?.host?.adapter?.setRate?.(nextRate);
         }
         if (ctx?.sync) {
-          ctx.sync.kick(isExplicitAction && data.action !== 'seek');
+          ctx.sync.kick((isExplicitAction && data.action !== 'seek') || (!isTimeKeeper() && (data.action === 'heartbeat' || data.action === 'poll_sync')));
         }
         ctx.layout.update();
       }
@@ -691,7 +697,7 @@ const actions = {
     ctx.lastLeaderActionAt = Date.now();
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
-    ctx.conn.send('heartbeat', { currentTime: t, playing, atTime: clock.now(), privacy: state.mesh?.privacy || undefined });
+    ctx.conn.send('heartbeat', { currentTime: t, playing, atTime: clock.now(), anchor: Boolean(forceAnchor), privacy: state.mesh?.privacy || undefined });
   },
   play() {
     if (!ctx) return;
@@ -744,7 +750,7 @@ const actions = {
     if (ctx.sync) {
       ctx.sync.lastSeekTarget = target;
       ctx.sync.lastExpected = target;
-      ctx.sync.seekUntil = performance.now() + 7500;
+      ctx.sync.seekUntil = performance.now() + 2400;
       ctx.sync.lastLeaderBroadcast = performance.now();
     }
     localState({ meshStatePosition: target });
@@ -1094,7 +1100,7 @@ export async function enterMesh(app, params) {
     getMedia: () => state.mesh?.media,
     getAdapter: () => (host.loading ? null : host.adapter),
     isLeader: () => isTimeKeeper(),
-    onLeaderSync: (t) => actions.heartbeat(t),
+    onLeaderSync: (t) => actions.heartbeat(t, true),
     onStatus: (s) => ctx?.layout.syncStatus(s),
   });
   ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };
