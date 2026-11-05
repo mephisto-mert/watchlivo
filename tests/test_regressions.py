@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v107 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v108 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v107", index_html)
+        self.assertIn("20261105_v108", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1660,6 +1660,19 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("hero-season-picker", accounts_js)
         self.assertIn("season-select-dropdown", accounts_js)
         self.assertIn("episode-season-badge", accounts_js)
+
+        # 4. iOS/Android Lock Screen MediaSession API & Background Audio Continuity
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        youtube_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        self.assertIn("bindMediaSessionHandlers", controls_js)
+        self.assertIn("updateMediaSessionPositionImmediate", controls_js)
+        self.assertIn("previoustrack", controls_js)
+        self.assertIn("nexttrack", controls_js)
+        self.assertIn("ctl-opt-bgaudio", controls_js)
+        self.assertIn("vortex_bg_audio", html5_js)
+        self.assertIn("_userPausedViaMediaSession", html5_js)
+        self.assertIn("_userPausedViaMediaSession", youtube_js)
 
 
 if __name__ == '__main__':

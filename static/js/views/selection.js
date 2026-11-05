@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v107';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v107';
-import { api, qs } from '../api.js?v=20261105_v107';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v107';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v107';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v107';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v107';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v108';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v108';
+import { api, qs } from '../api.js?v=20261105_v108';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v108';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v108';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v108';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v108';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261105_v107';
+} from '../store.js?v=20261105_v108';
 
 let _activeHomePick = null;
 

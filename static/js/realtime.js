@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261105_v107';
-import { api } from './api.js?v=20261105_v107';
-import { state } from './store.js?v=20261105_v107';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261105_v107';
+import { clock } from './sync.js?v=20261105_v108';
+import { api } from './api.js?v=20261105_v108';
+import { state } from './store.js?v=20261105_v108';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261105_v108';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 

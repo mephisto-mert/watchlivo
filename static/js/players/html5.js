@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261105_v107';
-import { expectedPosition } from '../sync.js?v=20261105_v107';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261105_v107';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261105_v107';
+import { SubtitleDubController } from './subtitles.js?v=20261105_v108';
+import { expectedPosition } from '../sync.js?v=20261105_v108';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261105_v108';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261105_v108';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -338,21 +338,33 @@ export class Html5Adapter {
     if (this._pageHideHandler && typeof window !== 'undefined') {
       window.removeEventListener('pagehide', this._pageHideHandler);
     }
+    const isBgAudioAllowed = () => {
+      try { return localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) { return true; }
+    };
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
       this._lastVisChangeAt = Date.now();
       if (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) return;
       const av = this._activeMediaEl();
       if (document.visibilityState === 'visible') {
-        if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked && !this.isPiP()) {
+        if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked && !this._userPausedViaMediaSession && !this.isPiP()) {
           this._autoResumeCount = 0;
           this._requestWakeLock?.();
           if (av && av.paused && !av.ended) this.tryPlay();
         }
-      } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded) {
-        if (av && av.paused && !av.ended) {
+      } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded && !this._userPausedViaMediaSession) {
+        ensureIosPlaybackAudioSession();
+        if (isBgAudioAllowed() && av && av.paused && !av.ended) {
           av.play?.().catch(() => {});
         }
+        [140, 420].forEach((ms) => setTimeout(() => {
+          if (this._destroyed || this.video !== v || !this.wantPlaying || this.hasEnded || this._userPausedViaMediaSession) return;
+          const curAv = this._activeMediaEl();
+          if (isBgAudioAllowed() && curAv && curAv.paused && !curAv.ended) {
+            ensureIosPlaybackAudioSession();
+            curAv.play?.().catch(() => {});
+          }
+        }, ms));
         this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
       }
     };
@@ -498,13 +510,17 @@ export class Html5Adapter {
         || this.isPiP()
         || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
       );
-      if ((enteringPipNow || visJustChanged) && this.wantPlaying && (this.isPiP() || isIosWebKit())) {
-        setTimeout(() => {
-          const av = this._activeMediaEl();
-          if (this.video === v && this.wantPlaying && av && av.paused && !av.ended && (this.isPiP() || document.visibilityState === 'visible')) {
-            av.play?.().catch?.(() => {});
-          }
-        }, 180);
+      const isHiddenNow = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if ((enteringPipNow || visJustChanged || isHiddenNow) && this.wantPlaying && !this._userPausedViaMediaSession) {
+        if (isBgAudioAllowed() || this.isPiP() || this.isMusic) {
+          [140, 420].forEach((ms) => setTimeout(() => {
+            const av = this._activeMediaEl();
+            if (this.video === v && this.wantPlaying && !this._userPausedViaMediaSession && av && av.paused && !av.ended) {
+              ensureIosPlaybackAudioSession();
+              av.play?.().catch?.(() => {});
+            }
+          }, ms));
+        }
         return;
       }
       if (inNativePlayerUi && !exitingWebkitFs && !exitingPipNow && !visJustChanged && !v.seeking && !recentSeek && v.readyState >= 2) {
@@ -537,8 +553,8 @@ export class Html5Adapter {
       }
       if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
-        const isHiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !this.isPiP() && !this.isMusic;
-        if (isHiddenNonPip || this.autoplayHardBlocked) return;
+        const isHiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !this.isPiP() && !this.isMusic && !isBgAudioAllowed();
+        if (isHiddenNonPip || this.autoplayHardBlocked || this._userPausedViaMediaSession) return;
         const nowMs = Date.now();
         if (nowMs - (this._lastAutoResumeWindowAt || 0) > 4500) {
           this._autoResumeCount = 0;

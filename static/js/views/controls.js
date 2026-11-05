@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261105_v107';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261105_v107';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261105_v107';
-import { getProvider } from '../providers.js?v=20261105_v107';
-import { expectedPosition } from '../sync.js?v=20261105_v107';
-import { thumbFor } from './lobby.js?v=20261105_v107';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261105_v107';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261105_v107';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261105_v107';
-import { avatar } from '../profile.js?v=20261105_v107';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261105_v108';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261105_v108';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261105_v108';
+import { getProvider } from '../providers.js?v=20261105_v108';
+import { expectedPosition } from '../sync.js?v=20261105_v108';
+import { thumbFor } from './lobby.js?v=20261105_v108';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261105_v108';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261105_v108';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261105_v108';
+import { avatar } from '../profile.js?v=20261105_v108';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2246,6 +2246,20 @@ export function buildControls(frame, ctx) {
     items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('effects'); } },
       optIconLbl('sparkle', 'Sinema Efektleri & Araçlar'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${(VIDEO_FILTERS[curFilter] || VIDEO_FILTERS.normal).label.replace(/^[^\s]+\s/, '').split(' ')[0]} ›`)));
+    const bgAudioOn = localStorage.getItem('vortex_bg_audio') !== 'off';
+    items.push(h('div', {
+      class: `opt ${bgAudioOn ? 'on' : ''}`,
+      id: 'ctl-opt-bgaudio',
+      onclick: (e) => {
+        e.stopPropagation();
+        const nextBg = !bgAudioOn;
+        try { localStorage.setItem('vortex_bg_audio', nextBg ? 'on' : 'off'); } catch (_) {}
+        showOverlay(nextBg ? '📱 Kilit Ekranı & Arka Plan Oynatma: Açık' : '📱 Kilit Ekranı & Arka Plan Oynatma: Kapalı', 2000);
+        renderMenuView('list');
+      },
+    },
+      optIconLbl('volume', '📱 Kilit Ekranı & Arka Plan Oynatma'),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, bgAudioOn ? 'Açık ✓' : 'Kapalı')));
     const autoDuckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
     items.push(h('div', {
       class: `opt ${autoDuckOn ? 'on' : ''}`,
@@ -2494,68 +2508,178 @@ export function buildControls(frame, ctx) {
     } catch (e) { /* ignore */ }
   }
 
+  function updateMediaSessionPositionImmediate(posOverride = null, rateOverride = null) {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || typeof navigator.mediaSession?.setPositionState !== 'function') return;
+    try {
+      const d = duration();
+      const p = Number.isFinite(posOverride) ? Number(posOverride) : position();
+      const r = Number(rateOverride || state.mesh?.media?.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
+      if (d > 0 && Number.isFinite(d) && Number.isFinite(p)) {
+        lastMediaPosSyncAt = Date.now();
+        navigator.mediaSession.setPositionState({
+          duration: d,
+          playbackRate: r > 0 ? r : 1,
+          position: Math.max(0, Math.min(d, p)),
+        });
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  let mediaSessionHandlersBound = false;
+  function bindMediaSessionHandlers() {
+    if (mediaSessionHandlersBound || typeof navigator === 'undefined' || !('mediaSession' in navigator)) return;
+    mediaSessionHandlersBound = true;
+    const ms = navigator.mediaSession;
+    const safeHandler = (act, fn) => { try { ms.setActionHandler(act, fn); } catch (e) { /* ignore */ } };
+    safeHandler('play', () => {
+      ensureIosPlaybackAudioSession();
+      resumeSharedAudioContext();
+      if (host.adapter) host.adapter._userPausedViaMediaSession = false;
+      if (isLeader()) {
+        if (actions.play) actions.play();
+        else actions.toggle?.();
+      } else {
+        const exp = expectedPosition(state.mesh?.media);
+        if (Number.isFinite(exp) && exp > 0.5 && Math.abs((position() || 0) - exp) > 2.2) {
+          host.adapter?.seek?.(exp);
+        }
+        host.adapter?.play?.();
+      }
+      ms.playbackState = 'playing';
+      updateMediaSessionPositionImmediate();
+    });
+    safeHandler('pause', () => {
+      if (host.adapter) host.adapter._userPausedViaMediaSession = true;
+      if (isLeader()) {
+        if (actions.pause) actions.pause();
+        else actions.toggle?.();
+      } else {
+        host.adapter?.pause?.();
+      }
+      ms.playbackState = 'paused';
+      updateMediaSessionPositionImmediate();
+    });
+    safeHandler('stop', () => {
+      if (host.adapter) host.adapter._userPausedViaMediaSession = true;
+      if (isLeader() && actions.pause) actions.pause();
+      else host.adapter?.pause?.();
+      ms.playbackState = 'paused';
+    });
+    safeHandler('seekbackward', (details) => {
+      const off = Math.max(1, Number(details?.seekOffset || 10));
+      const target = Math.max(0, position() - off);
+      if (isLeader()) seekStep(-off);
+      else host.adapter?.seek?.(target);
+      updateMediaSessionPositionImmediate(target);
+    });
+    safeHandler('seekforward', (details) => {
+      const off = Math.max(1, Number(details?.seekOffset || 10));
+      const d = duration();
+      const target = d > 0 ? Math.min(d, position() + off) : (position() + off);
+      if (isLeader()) seekStep(off);
+      else host.adapter?.seek?.(target);
+      updateMediaSessionPositionImmediate(target);
+    });
+    safeHandler('seekto', (details) => {
+      if (!Number.isFinite(details?.seekTime)) return;
+      const target = Math.max(0, Number(details.seekTime));
+      if (isLeader()) actions.seek(target);
+      else host.adapter?.seek?.(target);
+      updateMediaSessionPositionImmediate(target);
+    });
+    safeHandler('previoustrack', () => {
+      const curM = state.mesh?.media;
+      if (position() > 15) {
+        if (isLeader()) actions.seek(0);
+        else host.adapter?.seek?.(0);
+        updateMediaSessionPositionImmediate(0);
+        return;
+      }
+      if ((isLeader() || canSelectVideo()) && curM?.mediaType === 'tv') {
+        triggerPrevEpisode(true);
+      }
+    });
+    safeHandler('nexttrack', () => {
+      const curM = state.mesh?.media;
+      if ((isLeader() || canSelectVideo()) && curM?.mediaType === 'tv') {
+        triggerNextEpisode(true);
+      } else if (isLeader() && (state.mesh?.queue || []).length) {
+        actions.skip();
+      } else if (isLeader()) {
+        seekStep(10);
+      }
+    });
+    safeHandler('enterpictureinpicture', async () => {
+      try {
+        if (host.enterPiP) await host.enterPiP();
+        else if (!host.isPiP?.()) await host.togglePiP?.();
+        update();
+      } catch (e) { /* ignore */ }
+    });
+  }
+
+  if (typeof window !== 'undefined') {
+    window.__watchlivoBgSyncTick = () => {
+      const mBg = state.mesh?.media;
+      if (!mBg) return;
+      updateMediaSessionPositionImmediate();
+      const curP = position();
+      const curD = duration();
+      if (!state.mesh?.curated && !mBg.isMusic && !mBg.live && curP > 12 && Date.now() - lastProgressSaveAt > 12000) {
+        lastProgressSaveAt = Date.now();
+        saveWatchProgress({ ...mBg, poster: mBg.poster || thumbFor(mBg) || mBg.thumbnail || '' }, curP, curD);
+      }
+    };
+  }
+
   function syncMediaSession(m, prov, thumbUrl, playing, curRate) {
     syncDesktopPresence(m, prov, playing);
     if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
     try {
+      bindMediaSessionHandlers();
       const ms = navigator.mediaSession;
-      const metaKey = `${m?.title || ''}|${m?.channel || prov?.name || ''}|${thumbUrl || ''}`;
+      const rawPoster = String(m?.poster || thumbUrl || m?.thumbnail || '').trim();
+      const pCount = Array.isArray(state.mesh?.participants) ? state.mesh.participants.length : 1;
+      const roomLabel = state.mesh?.name || 'Sinema Odası';
+      const sNum = Number(m?.season || 0);
+      const eNum = Number(m?.episode || 0);
+      const baseTitle = String(m?.title || 'Watchlivo').trim();
+      const displayTitle = (m?.mediaType === 'tv' && sNum >= 1 && eNum >= 1 && !/Sezon|S\d+:B\d+/i.test(baseTitle))
+        ? `${baseTitle} · ${sNum}. Sezon ${eNum}. Bölüm`
+        : baseTitle;
+      const displayArtist = `${prov?.name || m?.channel || 'Watchlivo'}${roomLabel ? ` · 🍿 ${roomLabel}` : ''}`;
+      const displayAlbum = `Watchlivo · Birlikte İzle (${pCount} Kişi)`;
+      const metaKey = `${displayTitle}|${displayArtist}|${displayAlbum}|${rawPoster}`;
       if (metaKey !== lastMediaSessionKey) {
         lastMediaSessionKey = metaKey;
-        const absThumb = thumbUrl && !thumbUrl.startsWith('data:')
-          ? new URL(thumbUrl, window.location.origin).href
-          : `${window.location.origin}/static/watchlivo-icon-512.png`;
+        const artworkList = [];
+        if (rawPoster && !rawPoster.startsWith('data:')) {
+          const proxiedPoster = /^https?:\/\//i.test(rawPoster) && !rawPoster.startsWith(window.location.origin)
+            ? `${window.location.origin}/api/rave/poster?url=${encodeURIComponent(rawPoster)}`
+            : new URL(rawPoster, window.location.origin).href;
+          artworkList.push(
+            { src: proxiedPoster, sizes: '96x96' },
+            { src: proxiedPoster, sizes: '192x192' },
+            { src: proxiedPoster, sizes: '256x256' },
+            { src: proxiedPoster, sizes: '384x384' },
+            { src: proxiedPoster, sizes: '512x512' },
+          );
+        }
+        artworkList.push(
+          { src: `${window.location.origin}/static/watchlivo-icon-192.png`, sizes: '192x192', type: 'image/png' },
+          { src: `${window.location.origin}/static/watchlivo-icon-512.png`, sizes: '512x512', type: 'image/png' },
+        );
         ms.metadata = new MediaMetadata({
-          title: m?.title || 'Watchlivo',
-          artist: m?.channel || prov?.name || 'Birlikte İzle',
-          album: state.mesh?.name ? `Watchlivo · ${state.mesh.name}` : 'Watchlivo Sinema',
-          artwork: [
-            { src: absThumb, sizes: '512x512', type: 'image/png' },
-          ],
-        });
-        const safeHandler = (act, fn) => { try { ms.setActionHandler(act, fn); } catch (e) { /* ignore */ } };
-        safeHandler('play', () => {
-          if (isLeader()) { if (actions.play) actions.play(); else actions.toggle?.(); }
-          else host.adapter?.play?.();
-        });
-        safeHandler('pause', () => {
-          if (isLeader()) { if (actions.pause) actions.pause(); else actions.toggle?.(); }
-        });
-        safeHandler('seekbackward', (details) => {
-          if (isLeader()) seekStep(-(details?.seekOffset || 10));
-        });
-        safeHandler('seekforward', (details) => {
-          if (isLeader()) seekStep(details?.seekOffset || 10);
-        });
-        safeHandler('seekto', (details) => {
-          if (isLeader() && Number.isFinite(details?.seekTime)) actions.seek(details.seekTime);
-        });
-        safeHandler('nexttrack', () => {
-          if (!isLeader()) return;
-          if (m?.mediaType === 'tv') triggerNextEpisode(true);
-          else if ((state.mesh?.queue || []).length) actions.skip();
-        });
-        safeHandler('enterpictureinpicture', async () => {
-          try {
-            if (host.enterPiP) await host.enterPiP();
-            else if (!host.isPiP?.()) await host.togglePiP?.();
-            update();
-          } catch (e) { /* ignore */ }
+          title: displayTitle,
+          artist: displayArtist,
+          album: displayAlbum,
+          artwork: artworkList,
         });
       }
       ms.playbackState = playing ? 'playing' : 'paused';
       const now = Date.now();
-      if (now - lastMediaPosSyncAt > 2000 && typeof ms.setPositionState === 'function') {
-        const d = duration();
-        const p = position();
-        if (d > 0 && Number.isFinite(d) && Number.isFinite(p)) {
-          lastMediaPosSyncAt = now;
-          ms.setPositionState({
-            duration: d,
-            playbackRate: Number(curRate || 1) > 0 ? Number(curRate || 1) : 1,
-            position: Math.max(0, Math.min(d, p)),
-          });
-        }
+      if (now - lastMediaPosSyncAt > 1800) {
+        updateMediaSessionPositionImmediate(null, curRate);
       }
     } catch (e) { /* ignore */ }
   }
@@ -2619,7 +2743,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261105_v107',
+            v: '20261105_v108',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

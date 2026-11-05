@@ -1,6 +1,6 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261105_v107';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261105_v107';
+import { SubtitleDubController } from './subtitles.js?v=20261105_v108';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261105_v108';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -224,6 +224,19 @@ export class YouTubeAdapter {
         this._suppressYtPauseOnce = false;
         return;
       }
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && this.wantPlaying && !this._userPausedViaMediaSession) {
+        let bgOk = true;
+        try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
+        if (bgOk) {
+          setTimeout(() => {
+            if (!this._destroyed && this.video === v && this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
+              ensureIosPlaybackAudioSession();
+              v.play().catch(() => {});
+            }
+          }, 150);
+        }
+        return;
+      }
       this._syncPipBridgeState(false);
       this.events.onBuffering?.(false);
       this.events.onPause?.();
@@ -257,7 +270,15 @@ export class YouTubeAdapter {
 
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
-      if (document.visibilityState === 'hidden' && this.wantPlaying && !v.ended) {
+      if (document.visibilityState === 'visible') {
+        if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
+          v.play().catch(() => {});
+        }
+      } else if (document.visibilityState === 'hidden' && this.wantPlaying && !v.ended && !this._userPausedViaMediaSession) {
+        ensureIosPlaybackAudioSession();
+        let bgOk = true;
+        try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
+        if (bgOk && v.paused) v.play().catch(() => {});
         this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
       }
     };
