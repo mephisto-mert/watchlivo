@@ -137,14 +137,25 @@
     },
     {
       "src": "/api/rave/(social|notifications|voice-note|voice-relay)(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store, no-cache, must-revalidate"
+      },
       "dest": "server.py"
     },
     {
       "src": "/api/(search|rave|upload)(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff"
+      },
       "dest": "catalog_api.py"
     },
     {
       "src": "/api/(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store, no-cache, must-revalidate"
+      },
       "dest": "server.py"
     },
     {

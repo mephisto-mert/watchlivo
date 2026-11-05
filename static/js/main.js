@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v109';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v109';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v109';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v109';
-import { api } from './api.js?v=20261105_v109';
-import { h, toast } from './ui.js?v=20261105_v109';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v110';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v110';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v110';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v110';
+import { api } from './api.js?v=20261105_v110';
+import { h, toast } from './ui.js?v=20261105_v110';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -360,7 +360,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v109', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v110', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

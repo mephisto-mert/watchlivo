@@ -415,20 +415,25 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
     sub_tracks = []
     for st in (data.get("subtitleTracks") or [])[:12]:
         if isinstance(st, dict) and st.get("url"):
-            su = str(st.get("url") or "")
+            su = clean_str(st.get("url"), 2000)
+            if not su.startswith(("https://", "http://", "/api/rave/", "/uploads/", "/static/")):
+                continue
             if "rapidvid.org/407eb1ed" in su or "1952401276" in su:
                 continue
             sub_tracks.append({
                 "id": clean_str(st.get("id"), 20),
                 "lang": clean_str(st.get("lang"), 12),
                 "label": clean_str(st.get("label"), 60),
-                "url": clean_str(st.get("url"), 2000),
+                "url": su,
                 "source": clean_str(st.get("source"), 24),
                 "kind": "subtitles",
             })
     aud_tracks = []
     for at in (data.get("audioTracks") or [])[:6]:
         if isinstance(at, dict) and at.get("id"):
+            au = clean_str(at.get("url"), 1500)
+            if au and not au.startswith(("https://", "http://", "/api/rave/", "/uploads/", "/static/")):
+                au = ""
             aud_tracks.append({
                 "id": clean_str(at.get("id"), 20),
                 "lang": clean_str(at.get("lang"), 12),
@@ -436,7 +441,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
                 "audioLang": clean_str(at.get("audioLang") or at.get("lang"), 12),
                 "label": clean_str(at.get("label"), 60),
                 "mode": clean_str(at.get("mode"), 20) or "stream",
-                "url": clean_str(at.get("url"), 1500),
+                "url": au,
             })
     raw_intro = data.get("intro")
     intro = None
@@ -1136,15 +1141,17 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     is_cohost_mode = room.get("playMode") == "cohost"
     human_cnt = sum(1 for p in p_map.values() if p.get("transport") != "bot")
     parts_preview = []
-    for p in [x for x in p_map.values() if x.get("transport") != "bot"][:5]:
-        cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid")}
+    for idx_p, p in enumerate([x for x in p_map.values() if x.get("transport") != "bot"][:5]):
+        cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid", "_precreated", "_internalCreator")}
+        if pw_locked:
+            cp["id"] = f"p_{idx_p}"
         cp["isHost"] = p["id"] == host_id
         cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode
         parts_preview.append(cp)
     return {
         "id": room["id"], "name": (room.get("name") or "🔒 Şifreli Oda") if pw_locked else _effective_room_name(room), "rawName": room.get("name", ""), "privacy": room["privacy"], "playMode": room["playMode"],
         "isMature": bool(room.get("isMature")), "hasPassword": pw_locked, "creator": room.get("creator", ""),
-        "creatorCid": creator_cid, "host_id": host_id, "co_hosts": list(co_set), "rev": int(room.get("rev") or 1),
+        "creatorCid": "" if pw_locked else creator_cid, "host_id": "" if pw_locked else host_id, "co_hosts": [] if pw_locked else list(co_set), "rev": int(room.get("rev") or 1),
         "curated": bool(room.get("curated")), "media": m_summary,
         "count": human_cnt, "participantCount": human_cnt, "participants": parts_preview,
         "syncToken": "" if pw_locked else pack_sync_token(room),
@@ -2852,7 +2859,9 @@ async def ws_endpoint(websocket: WebSocket):
             await websocket.send_json({"type": "kicked"})
             await websocket.close()
             return
-        if has_password(room) and cid not in (room.get("participants") or {}):
+        existing_p = (room.get("participants") or {}).get(cid)
+        pw_trusted_member = bool(existing_p and ((signed_cid and signed_cid == cid) or existing_p.get("_precreated")))
+        if has_password(room) and not pw_trusted_member:
             ws_rl_key = f"ws:{room_id}:{client_ip(websocket)}"
             allowed, _retry = _JOIN_LIMITER.peek(ws_rl_key)
             if not allowed:
@@ -2865,6 +2874,8 @@ async def ws_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "password_required", "roomId": room_id, "roomName": room["name"]})
                 await websocket.close()
                 return
+        if existing_p and existing_p.get("_precreated"):
+            existing_p.pop("_precreated", None)
         if q.get("syncToken"):
             room = merge_sync_token(room, q.get("syncToken"), room_id)
         prune(room)
@@ -3111,7 +3122,9 @@ async def http_sync(request: Request):
         room.setdefault("kicked", [])
         if cid in room["kicked"]:
             return JSONResponse({"error": "kicked"}, status_code=410)
-        if has_password(room) and cid not in (room.get("participants") or {}):
+        existing_p = (room.get("participants") or {}).get(cid)
+        pw_trusted_member = bool(existing_p and ((signed_cid and signed_cid == cid) or existing_p.get("_precreated")))
+        if has_password(room) and not pw_trusted_member:
             http_rl_key = f"http:{room_id}:{client_ip(request)}"
             allowed, retry_after = _JOIN_LIMITER.peek(http_rl_key)
             if not allowed:
@@ -3122,6 +3135,8 @@ async def http_sync(request: Request):
                     if not allowed_hit:
                         return JSONResponse({"error": "rate_limited", "retryAfter": int(retry_hit)}, status_code=429)
                 return JSONResponse({"error": "password_required"}, status_code=403)
+        if existing_p and existing_p.get("_precreated"):
+            existing_p.pop("_precreated", None)
         if data.get("syncToken"):
             room = merge_sync_token(room, data.get("syncToken"), room_id)
         prev_host = pre_merge_host if pre_merge_host is not None else room.get("host_id")
@@ -3277,6 +3292,7 @@ async def create_room(request: Request):
                 cand_owned_by_verified = bool(verified_uid and cand.get("creatorId") == verified_uid)
                 cand_stale_guest_match = bool(
                     not cand_has_live_human
+                    and not has_password(cand)
                     and not str(cand.get("creatorId") or "").startswith("u_wl_")
                     and (
                         (creator_cid and cand.get("creatorCid") == creator_cid)

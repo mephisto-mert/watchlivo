@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v109 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v110 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v109", index_html)
+        self.assertIn("20261105_v110", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1748,6 +1748,63 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Şifreyi Doğrula & Google YouTube Hesabını Eşitle", selection_js)
         self.assertIn("const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);", selection_kinds_js)
         self.assertIn("hesap şifreniz (en az 6 karakter — zorunlu)", accounts_js)
+
+    def test_v110_thirty_subagent_security_hardening(self):
+        import security
+        import time
+
+        # 1. unsign_b64 rejects non-ASCII signatures and future/NaN iat timestamps without raising
+        key = b"watchlivo_test_secret_key_32bytes"
+        tok_valid = security.sign_b64(key, {"uid": "u_1", "iat": time.time()})
+        self.assertIsNotNone(security.unsign_b64(key, tok_valid, max_age=60))
+        self.assertIsNone(security.unsign_b64(key, tok_valid.rsplit(".", 1)[0] + ".şğüöç", max_age=60))
+        tok_future = security.sign_b64(key, {"uid": "u_1", "iat": time.time() + 86400})
+        self.assertIsNone(security.unsign_b64(key, tok_future, max_age=60))
+
+        # 2. Password-protected rooms redact creatorCid/host_id/participant IDs in public lobby & reject unsigned cid spoofing
+        r_create = self.client.post("/api/rooms/create", json={
+            "name": "Gizli Kasa",
+            "creator": "Kaptan",
+            "password": "GizliSifre!88",
+            "privacy": "public",
+        })
+        self.assertEqual(r_create.status_code, 200)
+        created_data = r_create.json()
+        rid = created_data["room"]["id"]
+        real_cid = created_data["clientId"]
+        real_token = created_data["clientToken"]
+
+        # Public lobby (/api/rooms) must never leak real_cid for password-protected rooms
+        r_lobby = self.client.get("/api/rooms")
+        self.assertEqual(r_lobby.status_code, 200)
+        lobby_room = next((x for x in (r_lobby.json().get("rooms") or []) if x.get("id") == rid), None)
+        self.assertIsNotNone(lobby_room)
+        self.assertEqual(lobby_room.get("creatorCid"), "")
+        self.assertEqual(lobby_room.get("host_id"), "")
+        for p_item in (lobby_room.get("participants") or []):
+            self.assertNotEqual(p_item.get("id"), real_cid)
+
+        # First creator join consumes _precreated flag; subsequent unauthenticated spoof with real_cid and no clientToken/pwd must be rejected with 403
+        r_first = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "cid": real_cid,
+            "clientToken": real_token,
+            "username": "Kaptan",
+        })
+        self.assertEqual(r_first.status_code, 200)
+
+        r_spoof = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "cid": real_cid,
+            "username": "HackerSpoof",
+        })
+        self.assertEqual(r_spoof.status_code, 403)
+        self.assertEqual(r_spoof.json().get("error"), "password_required")
+
+        # 3. SSRF protection on /api/rave/new-releases rejects loopback/private streamUrl
+        r_ssrf = self.client.post("/api/rave/new-releases", json={
+            "title": "Internal Probe",
+            "streamUrl": "http://127.0.0.1:8080/secret.m3u8",
+        })
+        self.assertEqual(r_ssrf.status_code, 400)
 
 
 if __name__ == '__main__':

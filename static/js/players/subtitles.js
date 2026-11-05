@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261105_v109';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261105_v110';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -74,14 +74,15 @@ export function parseVtt(vttText) {
       }
       const rawLines = textLines
         .map((l) => l
-          .replace(/<[^>]+>/g, '')
-          .replace(/\{\\[^}]*\}/g, '')
           .replace(/&amp;/g, '&')
           .replace(/&lt;/g, '<')
           .replace(/&gt;/g, '>')
           .replace(/&quot;/g, '"')
           .replace(/&#39;/g, "'")
           .replace(/&nbsp;/g, ' ')
+          .replace(/<[^>]*>/g, '')
+          .replace(/[<>]/g, '')
+          .replace(/\{\\[^}]*\}/g, '')
           .replace(/[♪♫♬♩]+/g, ' ')
           .replace(/^\s*(?:\[[^\]]*\]|\([^)]*\))\s*$/g, '')
           .trim())

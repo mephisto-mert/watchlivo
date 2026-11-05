@@ -87,11 +87,12 @@ def sign_b64(key: bytes, payload: dict) -> str:
 
 def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict]:
     import base64
+    import math
 
     if not token or not isinstance(token, str) or len(token) > 4096 or "." not in token:
         return None
     b64, sig = token.rsplit(".", 1)
-    if not hmac.compare_digest(sign_blob(key, b64)[:32], sig):
+    if not sig.isascii() or not hmac.compare_digest(sign_blob(key, b64)[:32], sig):
         return None
     try:
         pad = "=" * (-len(b64) % 4)
@@ -101,8 +102,12 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
     if not isinstance(data, dict):
         return None
     if max_age > 0:
-        issued = float(data.get("iat") or 0.0)
-        if issued <= 0 or time.time() - issued > max_age:
+        try:
+            issued = float(data.get("iat") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        now_t = time.time()
+        if not math.isfinite(issued) or issued <= 0 or issued > now_t + 60.0 or (now_t - issued > max_age):
             return None
     return data
 
@@ -190,6 +195,9 @@ class RateLimiter:
             if len(self._hits) > 20000:
                 for stale in [k for k, v in list(self._hits.items())[:5000] if not v or v[-1] < cutoff]:
                     self._hits.pop(stale, None)
+                if len(self._hits) > 20000:
+                    for old_k in list(self._hits.keys())[:4000]:
+                        self._hits.pop(old_k, None)
             if len(bucket) >= self.limit:
                 retry = max(1.0, self.window - (t - bucket[0]))
                 return False, retry
@@ -257,6 +265,7 @@ def client_ip(scope_or_request) -> str:
         try:
             val = (headers.get(hdr_name) or "").split(",")[0].strip()
             if val:
+                ipaddress.ip_address(val)
                 return val[:64]
         except Exception:
             continue

@@ -172,6 +172,10 @@ class SecurityHeaders:
                         b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
                     ))
                 req_path = str(scope.get("path") or "")
+                if req_path.startswith("/uploads/"):
+                    hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"content-security-policy", b"content-disposition")]
+                    hdrs.append((b"content-security-policy", b"default-src 'none'; sandbox"))
+                    hdrs.append((b"content-disposition", b"attachment"))
                 if req_path == "/api/rooms" or req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/voice-relay/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed", "/api/rooms/")):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
@@ -1569,7 +1573,7 @@ def _register_custom_release_stream(it_obj: dict) -> None:
     if not isinstance(it_obj, dict):
         return
     st_u = str(it_obj.get("streamUrl") or "").strip()
-    if not st_u.startswith(("http://", "https://")):
+    if not st_u.startswith(("http://", "https://")) or not public_http_url(st_u):
         return
     v_streams = _MAIN_SITES_VAULT.setdefault("streams", {})
     mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
@@ -1586,6 +1590,8 @@ def _register_custom_release_stream(it_obj: dict) -> None:
     if no_k:
         keys.append(f"{mt_k}:{no_k}:1:1")
     for k in keys:
+        if k in v_streams and isinstance(v_streams[k], dict) and not v_streams[k].get("customDirect"):
+            continue
         v_streams[k] = entry
 
 
@@ -5726,7 +5732,8 @@ async def resolve_catalog(request: Request):
     tmdb_id = (request.query_params.get("tmdbId") or "").strip()[:30]
     imdb_id = (request.query_params.get("imdbId") or "").strip()[:30]
     media_type = (request.query_params.get("mediaType") or request.query_params.get("type") or "movie").strip().lower()
-    poster = (request.query_params.get("poster") or "").strip()[:600]
+    raw_poster = (request.query_params.get("poster") or "").strip()[:600]
+    poster = raw_poster if raw_poster.startswith(("https://", "http://", "/api/rave/poster", "/static/")) else ""
     raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
     source_url = ""
     if re.fullmatch(r"animecix:\d+", raw_source_url):
@@ -5964,9 +5971,15 @@ def _ingest_custom_release_sync(payload: dict) -> dict:
     mtype = "tv" if raw_mt in ("tv", "series", "show", "dizi") else "movie"
     raw_year = str(payload.get("year") or "").strip()[:8]
     raw_poster = str(payload.get("poster") or "").strip()[:600]
+    if raw_poster and not (raw_poster.startswith(("https://", "http://")) and public_http_url(raw_poster)):
+        raw_poster = ""
     raw_stream = str(payload.get("streamUrl") or "").strip()[:800]
+    if raw_stream and not (raw_stream.startswith(("https://", "http://")) and public_http_url(raw_stream)):
+        raise ValueError("Geçersiz veya güvenli olmayan akış bağlantısı")
     raw_source = str(payload.get("sourceUrl") or "").strip()[:600]
-    raw_prov = str(payload.get("provider") or "cinema").strip().lower()[:30]
+    if raw_source and not (raw_source.startswith(("https://", "http://")) and public_http_url(raw_source)):
+        raw_source = ""
+    raw_prov = re.sub(r"[^a-z0-9_\-]", "", str(payload.get("provider") or "cinema").strip().lower())[:30] or "cinema"
 
     tm_hit = None
     if raw_tid.isdigit():
@@ -6750,15 +6763,15 @@ async def rave_stream_manifest(request: Request):
         })
     import base64
     sid = (request.query_params.get("sid") or "").strip()
-    ref_mode = (request.query_params.get("ref") or "").strip()
-    prov = (request.query_params.get("provider") or "netflix").strip()
-    tid = (request.query_params.get("tmdbId") or "").strip()
-    s_num = (request.query_params.get("s") or "1").strip()
-    e_num = (request.query_params.get("e") or "1").strip()
+    ref_mode = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("ref") or "").strip())[:16]
+    prov = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("provider") or "netflix").strip())[:24] or "netflix"
+    tid = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("tmdbId") or "").strip())[:32]
+    s_num = re.sub(r"[^0-9]", "", (request.query_params.get("s") or "1").strip())[:6] or "1"
+    e_num = re.sub(r"[^0-9]", "", (request.query_params.get("e") or "1").strip())[:6] or "1"
     raw_mtype = (request.query_params.get("mtype") or "").strip().lower()
     explicit_mtype = raw_mtype if raw_mtype in ("tv", "movie") else ""
-    fp_id = (request.query_params.get("fp_id") or "").strip()
-    sp = (request.query_params.get("sp") or "").strip()
+    fp_id = re.sub(r"[^a-zA-Z0-9_.\-]", "", (request.query_params.get("fp_id") or "").strip())[:64]
+    sp = re.sub(r"[^a-zA-Z0-9_.\-+/=]", "", (request.query_params.get("sp") or "").strip())[:128]
     try:
         spt = int(request.query_params.get("spt") or 0)
     except ValueError:
@@ -7440,17 +7453,18 @@ async def poster_proxy(request: Request):
     mtype = (request.query_params.get("mt") or "movie").strip()[:10]
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
-    _poster_host = (urllib.parse.urlparse(url).hostname or "").lower()
+    _poster_host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
     is_whitelisted_poster = any(
-        _poster_host == d.rstrip(".") or _poster_host.endswith("." + d.strip("."))
+        _poster_host == d or _poster_host.endswith("." + d)
         for d in (
-            "fullhdfilmizlesene.com", "fullhdfilmizlesene.de", "fullhdfilmizlesene.pw", "fullhdfilmizlesene.net",
-            "hdfilmcehennemi.mobi", "hdfilmcehennemi.com", "hdfilmcehennemi.de", "dizibox. arbitrary",
+            "fullhdfilmizlesene.com", "fullhdfilmizlesene.de", "fullhdfilmizlesene.pw", "fullhdfilmizlesene.net", "fullhdfilmizlesene.now",
+            "hdfilmcehennemi.mobi", "hdfilmcehennemi.com", "hdfilmcehennemi.de", "hdfilmcehennemi.nl",
+            "dizibox.live", "dizibox.com", "dizibox.tv",
             "cdnhipter.com", "ddizimag.com", "image.tmdb.org", "themoviedb.org", "ytimg.com",
             "ggpht.com", "googleusercontent.com", "mzstatic.com", "dzcdn.net", "scdn.co",
             "spotifycdn.com", "media-amazon.com", "media-imdb.com",
         )
-    ) or any(h in _poster_host for h in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag."))
+    )
     if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title:
         return RedirectResponse("/static/watchlivo-poster.svg")
     if url:
@@ -7460,9 +7474,11 @@ async def poster_proxy(request: Request):
                 _POSTER_MEM_CACHE.move_to_end(url)
         if cached_poster is not None:
             data, ct = cached_poster
-            if data and ct.startswith("image/"):
+            if data and ct.startswith("image/") and "svg" not in ct.lower():
                 return Response(data, media_type=ct, headers={
                     "Access-Control-Allow-Origin": "*",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "default-src 'none'; sandbox",
                     "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
                 })
     allowed, retry_after = await asyncio.to_thread(_POSTER_LIMIT.hit, client_ip(request))
@@ -7471,9 +7487,11 @@ async def poster_proxy(request: Request):
     if url and url.startswith(("https://", "http://")) and is_whitelisted_poster and public_http_url(url):
         try:
             data, ct = await asyncio.wait_for(asyncio.to_thread(_fetch_poster_sync, url), timeout=2.6)
-            if data and ct.startswith("image/"):
+            if data and ct.startswith("image/") and "svg" not in ct.lower():
                 return Response(data, media_type=ct, headers={
                     "Access-Control-Allow-Origin": "*",
+                    "X-Content-Type-Options": "nosniff",
+                    "Content-Security-Policy": "default-src 'none'; sandbox",
                     "Cache-Control": "public, max-age=604800, s-maxage=604800, immutable",
                 })
         except Exception:
@@ -8747,7 +8765,7 @@ async def rave_browser_proxy(request: Request):
         url: u || INIT_URL,
         title: PROV.toUpperCase() + ' İçeriği',
         provider: PROV
-      }}, '*');
+      }}, window.location.origin || '*');
     }}
     function handlePortalInput(val) {{
       const v = String(val || '').trim();
@@ -8786,7 +8804,7 @@ async def rave_browser_proxy(request: Request):
               type: 'watchlivo_portal_item',
               item: it,
               provider: PROV
-            }}, '*');
+            }}, window.location.origin || '*');
           }};
           g.appendChild(card);
         }});
@@ -8812,8 +8830,10 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     import html as _html
     raw_id = str(request.path_params.get("room_id") or "").strip()[:80]
     safe_id = re.sub(r"[^a-zA-Z0-9_-]", "", raw_id).lower()
-    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "watchlivo.online"
+    raw_scheme = (request.headers.get("x-forwarded-proto") or request.url.scheme or "https").split(",")[0].strip().lower()
+    scheme = "http" if raw_scheme == "http" else "https"
+    raw_host = (request.headers.get("x-forwarded-host") or request.headers.get("host") or "watchlivo.online").split(",")[0].strip()
+    host = raw_host if re.fullmatch(r"[a-zA-Z0-9.\-:]{1,120}", raw_host) else "watchlivo.online"
     origin = f"{scheme}://{host}"
     room = (await rooms.STORE.get(safe_id) or await rooms.ensure_curated_room(safe_id)) if safe_id else None
     is_locked = bool(room and rooms.has_password(room))

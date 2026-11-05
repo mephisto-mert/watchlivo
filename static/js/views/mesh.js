@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261105_v109';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261105_v109';
-import { resolveMusicItem } from './selection-kinds.js?v=20261105_v109';
-import { MeshConnection } from '../realtime.js?v=20261105_v109';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261105_v109';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261105_v109';
-import { buildLayout } from './mesh-layout.js?v=20261105_v109';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261105_v109';
-import { Voice } from '../voice.js?v=20261105_v109';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261105_v109';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261105_v110';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261105_v110';
+import { resolveMusicItem } from './selection-kinds.js?v=20261105_v110';
+import { MeshConnection } from '../realtime.js?v=20261105_v110';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261105_v110';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261105_v110';
+import { buildLayout } from './mesh-layout.js?v=20261105_v110';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261105_v110';
+import { Voice } from '../voice.js?v=20261105_v110';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261105_v110';
 
 let ctx = null;
 
@@ -167,7 +167,7 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       room = { ...room, privacy: ctx.lastPrivacy };
     }
   }
-  if (ctx && (isHostOnly() || isLeader())) {
+  if (ctx && isLeader()) {
     let savedPriv = ctx.lastPrivacy || '';
     if (!savedPriv && room.id) {
       try { savedPriv = sessionStorage.getItem(`vortex_priv_${room.id}`) || ''; } catch (e) { /* ignore */ }
@@ -588,7 +588,7 @@ function onMessage(data) {
         playEmojiSfx('☕');
         ctx?.layout?.floatEmoji?.('☕', senderName);
       }
-      if (isLeader() || isHostOnly()) {
+      if (isLeader()) {
         ctx?.layout?.showBreakRequestBanner?.(senderName);
         if (data.cid !== state.clientId) {
           toast(`☕ ${senderName} mola zamanı (duraklatma isteği) gönderdi!`);
@@ -601,7 +601,7 @@ function onMessage(data) {
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
     case 'hand_raised': {
-      if (data.cid && data.cid !== state.clientId && (isLeader() || isHostOnly())) {
+      if (data.cid && data.cid !== state.clientId && isLeader()) {
         const uName = data.user || 'Bir izleyici';
         toast(`✋ ${uName} konuşmak için söz istiyor!`, 6000, {
           actionLabel: '🎤 Söz Ver',
@@ -628,7 +628,10 @@ function onMessage(data) {
     case 'room_closed': {
       document.body.classList.remove('mesh-minimized');
       const closedId = data.roomId || room?.id || state.route?.params?.id;
-      if (closedId) forgetRoom(closedId);
+      if (closedId) {
+        forgetRoom(closedId);
+        clearSavedChat(closedId);
+      }
       ctx?.conn?.close(false);
       set({ mesh: null });
       toast('🚪 Oda kurucusu odayı kapattı');
@@ -642,7 +645,10 @@ function onMessage(data) {
       if (typeof document !== 'undefined' && document.pictureInPictureElement) {
         try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
       }
-      if (kickedId) forgetRoom(kickedId);
+      if (kickedId) {
+        forgetRoom(kickedId);
+        clearSavedChat(kickedId);
+      }
       ctx?.conn?.close(false);
       set({ mesh: null });
       popup({ title: 'Odadan Çıkarıldın', message: 'Bu oda kapatıldı veya oda lideri tarafından çıkarıldın.', options: [{ label: 'Ana Sayfa', primary: true, onClick: () => window.vortexNavigate('/') }], dismissable: false });

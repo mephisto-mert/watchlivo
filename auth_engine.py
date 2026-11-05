@@ -245,6 +245,14 @@ def _claim_handle(handle: str, uid: str) -> str:
     raise RuntimeError("Benzersiz kullanıcı adı ayrılamadı")
 
 
+_ALLOWED_USER_COLS = frozenset({
+    "uid", "email", "handle", "name", "password_hash", "salt",
+    "color", "avatar", "auth_provider", "verified", "created_at", "updated_at",
+    "bio", "status_text", "status_emoji", "avatar_url",
+    "hide_watching", "hide_friends", "hide_location",
+})
+
+
 def _user_create(row: Dict[str, Any]) -> bool:
     """Insert a new user. Returns False when the e-mail is already registered."""
     uid, email = row["uid"], row["email"]
@@ -263,7 +271,7 @@ def _user_create(row: Dict[str, Any]) -> bool:
     row["handle"] = _claim_handle(row["handle"], uid)
     conn = _get_db()
     try:
-        cols = list(row.keys())
+        cols = [c for c in row.keys() if c in _ALLOWED_USER_COLS]
         conn.execute(f"INSERT INTO watchlivo_users ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})", [row[c] for c in cols])
         conn.commit()
         return True
@@ -291,7 +299,7 @@ def _user_update(uid: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return cur
     conn = _get_db()
     try:
-        sets = [k for k in cur.keys() if k != "uid"]
+        sets = [k for k in cur.keys() if k != "uid" and k in _ALLOWED_USER_COLS]
         try:
             conn.execute(f"UPDATE watchlivo_users SET {', '.join(f'{k} = ?' for k in sets)} WHERE uid = ?", [cur[k] for k in sets] + [uid])
         except sqlite3.IntegrityError:
@@ -508,6 +516,9 @@ async def auth_login(request: Request) -> JSONResponse:
     password = str(body.get("password") or "")[:256]
     if not identifier or not password:
         return JSONResponse({"ok": False, "error": "E-posta / kullanıcı adı ve şifre zorunludur."}, status_code=400)
+    acct_ok, acct_retry = _LOGIN_LIMIT.hit(f"acct:{identifier[:80]}")
+    if not acct_ok:
+        return too_many_response(acct_retry)
     clean_h = identifier.lstrip("@")
     try:
         uid = _uid_for("email", identifier) if EMAIL_RE.match(identifier) else _uid_for("handle", clean_h)
@@ -599,6 +610,9 @@ PROVIDER_ICONS = {
 
 async def auth_oauth(request: Request) -> JSONResponse:
     """Multi-platform OAuth Sign-In (Google, Apple, GitHub, Microsoft, Discord, X) + Firebase idToken lookup."""
+    allowed, retry_after = _LOGIN_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     try:
         body = await request.json()
     except Exception:
@@ -624,7 +638,8 @@ async def auth_oauth(request: Request) -> JSONResponse:
     users = (lk or {}).get("users") or []
     if users:
         u0 = users[0]
-        fb_email = str(u0.get("email") or "").strip().lower()
+        if u0.get("emailVerified") is not False:
+            fb_email = str(u0.get("email") or "").strip().lower()
         fb_name = str(u0.get("displayName") or "").strip()[:24]
         fb_phone = re.sub(r"[^\d+]", "", str(u0.get("phoneNumber") or ""))
         if not fb_email and fb_phone:
@@ -913,6 +928,9 @@ async def auth_email_action(request: Request) -> JSONResponse:
             return JSONResponse({"ok": True, "message": f"Giriş bağlantısı {email} adresine gönderildi (Gelen Kutusu / Spam kontrol edin)."})
         return JSONResponse({"ok": False, "error": "E-posta bağlantısı gönderilemedi."}, status_code=400)
     if action == "complete_magic_link":
+        allowed, retry_after = _LOGIN_LIMIT.hit(client_ip(request))
+        if not allowed:
+            return too_many_response(retry_after)
         oob_code = str(body.get("oobCode") or "").strip()
         if not oob_code:
             return JSONResponse({"ok": False, "error": "Geçersiz giriş kodu."}, status_code=400)
@@ -957,12 +975,16 @@ async def auth_profile(request: Request) -> JSONResponse:
     if len(name) >= 2:
         fields["name"] = name
     if body.get("handle"):
-        fields["handle"] = _norm_handle(str(body.get("handle")), name or claims.get("name", ""))
+        cand_h = _norm_handle(str(body.get("handle")), name or claims.get("name", ""))
+        owner_uid = _uid_for("handle", cand_h)
+        if owner_uid and owner_uid != uid:
+            return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{cand_h}) zaten kullanımda."}, status_code=409)
+        fields["handle"] = cand_h
     color = str(body.get("color") or "").strip()[:16]
     if re.match(r"^#[0-9a-fA-F]{3,8}$", color):
         fields["color"] = color
     avatar_url = str(body.get("avatarUrl") or body.get("avatar") or "").strip()
-    if avatar_url and (avatar_url.startswith(("https://", "/static/", "/uploads/")) or (avatar_url.startswith("data:image/") and len(avatar_url) <= 45000)):
+    if avatar_url and not avatar_url.lower().startswith("data:image/svg") and (avatar_url.startswith(("https://", "/static/", "/uploads/")) or (avatar_url.startswith("data:image/") and len(avatar_url) <= 45000)):
         fields["avatar_url"] = avatar_url
     elif "avatarUrl" in body and not avatar_url:
         fields["avatar_url"] = ""

@@ -106,10 +106,11 @@ export function uint8ToBase64(bytes) {
 export function dataUrlToBlobUrl(dataUrl) {
   try {
     const [hdr, b64] = String(dataUrl || '').split(',', 2);
-    if (!b64) return '';
+    if (!b64 || b64.length > 12 * 1024 * 1024) return '';
     let mime = (hdr.match(/data:([^;]+)/i)?.[1] || 'audio/wav').toLowerCase();
     if (mime === 'video/mp4') mime = 'audio/mp4';
     if (mime === 'video/webm') mime = 'audio/webm';
+    if (!/^audio\/(?:wav|x-wav|mp4|mpeg|mp3|webm|ogg|aac)$/i.test(mime)) mime = 'audio/wav';
     const bin = atob(b64);
     const arr = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i += 1) arr[i] = bin.charCodeAt(i);

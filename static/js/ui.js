@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261105_v109';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261105_v110';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -98,7 +98,11 @@ export function h(tag, attrs = {}, ...children) {
       if (typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     } else if (k === 'dataset') Object.assign(el.dataset, v);
     else {
-      if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string' && /^\s*(?:javascript:|vbscript:|data:text\/html)/i.test(v)) continue;
+      if (k === 'srcdoc') continue;
+      if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
+        const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
+        if (/^(?:javascript:|vbscript:|data:text\/html|data:image\/svg|data:application\/xhtml)/i.test(cleanV)) continue;
+      }
       el.setAttribute(k, v === true ? '' : v);
     }
   }
