@@ -9603,14 +9603,14 @@ def _set_ga_measurement_id_sync(ga_id: str) -> str:
 
 
 
-def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str = "pageview", path_str: str = "/") -> None:
+def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str = "pageview", path_str: str = "/", page_title: str = "") -> None:
     """Server-side GA4 /g/collect relay so Brave Shields / DNS blockers never drop Watchlivo Realtime users."""
     import urllib.parse as _up
     import urllib.request as _ur
     cid_num = int(vid_hash[:8], 16) % 900000000 + 100000000
     now_sec = int(time.time())
     cid = f"{cid_num}.{now_sec - 30}"
-    ga_ev = "page_view" if ev in ("pageview", "pwa_launch") else ev
+    ga_ev = "page_view" if ev in ("pageview", "pwa_launch", "route_view") else ("user_engagement" if ev == "heartbeat" else ev)
     active_id = _get_ga_measurement_id_sync() or "G-HQXSREQV3R"
     tids = list(dict.fromkeys([active_id, "G-HQXSREQV3R", "G-3EGLLTB9J0", "G-82ZD4CPWEP", "G-NJ1NRNFEX6"]))
     for tid in tids:
@@ -9627,7 +9627,7 @@ def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str =
                 "ul": "tr-tr",
                 "sr": "1920x1080",
                 "dl": f"https://watchlivo.online/{path_str.lstrip('/')}",
-                "dt": "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
+                "dt": page_title or "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
                 "en": ga_ev,
                 "_fv": "1",
                 "_ss": "1",
@@ -9702,8 +9702,9 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
         q_str = str(body.get("query") or "")[:80]
         t_str = str(body.get("title") or "")[:100]
         mt_str = str(body.get("mediaType") or "")[:16]
-        await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
-        await asyncio.to_thread(_send_server_ga4_hit_sync, vid_hash, ua_str, ip_str, ev, str(body.get('path') or '/'))
+        if ev not in ('heartbeat', 'route_view'):
+            await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
+        await asyncio.to_thread(_send_server_ga4_hit_sync, vid_hash, ua_str, ip_str, ev, str(body.get('path') or '/'), t_str)
         ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
         return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store"})
     summary = await _build_analytics_summary()

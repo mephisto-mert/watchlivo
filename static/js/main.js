@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v122';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v122';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v122';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v122';
-import { api } from './api.js?v=20261105_v122';
-import { h, toast } from './ui.js?v=20261105_v122';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v123';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v123';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v123';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v123';
+import { api } from './api.js?v=20261105_v123';
+import { h, toast } from './ui.js?v=20261105_v123';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -360,7 +360,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v122', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v123', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -705,15 +705,18 @@ window.wlTrackGA4 = trackWatchlivoGA4;
 
 function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
   try {
+    const curPath = location.pathname + (location.hash || '');
+    const curTitle = document.title || 'Watchlivo';
     if (ev === 'pageview') {
       trackWatchlivoGA4('page_view', {
-        page_title: document.title,
-        page_path: location.pathname + (location.hash || ''),
+        page_title: curTitle,
+        page_path: curPath,
       });
-      if (sessionStorage.getItem('wl_session_tracked_v118') === '1') {
-        return;
+      if (sessionStorage.getItem('wl_session_tracked_v123') === '1') {
+        ev = 'route_view';
+      } else {
+        sessionStorage.setItem('wl_session_tracked_v123', '1');
       }
-      sessionStorage.setItem('wl_session_tracked_v118', '1');
     } else {
       trackWatchlivoGA4(ev, extra);
     }
@@ -723,32 +726,28 @@ function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
     fetch('/api/rave/analytics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: isPwa && ev === 'pageview' ? 'pwa_launch' : ev, device: dev, path: location.hash || '/' }),
+      body: JSON.stringify({
+        event: isPwa && ev === 'pageview' ? 'pwa_launch' : ev,
+        device: dev,
+        path: curPath,
+        title: extra.title || curTitle,
+        query: extra.query || '',
+      }),
       keepalive: true,
-    }).then(r => r.ok ? r.json() : null).then(d => {
-      if (d && d.gaMeasurementId && typeof window.__initWatchlivoGA4 === 'function') {
-        window.__initWatchlivoGA4(d.gaMeasurementId);
-      }
     }).catch(() => {});
   } catch (_) {}
 }
 
 function bootstrapGoogleAnalytics4() {
   try {
-    fetch('/api/rave/analytics', { method: 'GET', credentials: 'same-origin' })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d && d.gaMeasurementId && typeof window.__initWatchlivoGA4 === 'function') {
-          window.__initWatchlivoGA4(d.gaMeasurementId);
-        }
-      })
-      .catch(() => {});
     window.addEventListener('hashchange', () => {
-      trackWatchlivoGA4('page_view', {
-        page_title: document.title,
-        page_path: location.pathname + (location.hash || ''),
-      });
+      setTimeout(() => sendWatchlivoAnalytics('route_view'), 300);
     });
+    setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        sendWatchlivoAnalytics('heartbeat');
+      }
+    }, 45000);
   } catch (_) {}
 }
 
