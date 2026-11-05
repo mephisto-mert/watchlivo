@@ -161,7 +161,7 @@ class SecurityHeaders:
                     hdrs.append((
                         b"content-security-policy",
                         b"default-src 'self'; "
-                        b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com; "
+                        b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
                         b"worker-src 'self' blob:; "
                         b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                         b"font-src 'self' data: https://fonts.gstatic.com; "
@@ -9568,6 +9568,40 @@ async def _build_analytics_summary() -> dict:
         }
 
 
+_GA_MEASUREMENT_ID_CACHE: dict = {"id": os.environ.get("GA_MEASUREMENT_ID", "").strip(), "ts": 0.0}
+
+
+def _get_ga_measurement_id_sync() -> str:
+    env_id = os.environ.get("GA_MEASUREMENT_ID", "").strip()
+    if env_id:
+        return env_id
+    now_t = time.time()
+    if _GA_MEASUREMENT_ID_CACHE.get("id") and (now_t - float(_GA_MEASUREMENT_ID_CACHE.get("ts") or 0) < 120.0):
+        return str(_GA_MEASUREMENT_ID_CACHE["id"])
+    try:
+        saved_id = social_engine._kv_get("wl:ga_id:v1")
+        if isinstance(saved_id, str) and re.fullmatch(r"G-[A-Z0-9]{6,16}", saved_id.strip().upper()):
+            _GA_MEASUREMENT_ID_CACHE["id"] = saved_id.strip().upper()
+            _GA_MEASUREMENT_ID_CACHE["ts"] = now_t
+            return _GA_MEASUREMENT_ID_CACHE["id"]
+    except Exception:
+        pass
+    return str(_GA_MEASUREMENT_ID_CACHE.get("id") or "")
+
+
+def _set_ga_measurement_id_sync(ga_id: str) -> str:
+    clean_id = (ga_id or "").strip().upper()
+    if clean_id and not re.fullmatch(r"G-[A-Z0-9]{6,16}", clean_id):
+        raise ValueError("Geçersiz Google Analytics 4 Ölçüm Kimliği (Örn: G-XXXXXXXXXX)")
+    _GA_MEASUREMENT_ID_CACHE["id"] = clean_id
+    _GA_MEASUREMENT_ID_CACHE["ts"] = time.time()
+    try:
+        social_engine._kv_set("wl:ga_id:v1", clean_id)
+    except Exception:
+        pass
+    return clean_id
+
+
 async def rave_analytics_endpoint(request: Request) -> JSONResponse:
     ip_str = client_ip(request)
     ua_str = request.headers.get("user-agent") or ""
@@ -9579,25 +9613,30 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
             body = {}
         if not isinstance(body, dict):
             body = {}
+        if "gaMeasurementId" in body:
+            try:
+                saved_ga = await asyncio.to_thread(_set_ga_measurement_id_sync, str(body.get("gaMeasurementId") or ""))
+                if "event" not in body:
+                    return JSONResponse({"ok": True, "gaMeasurementId": saved_ga}, headers={"Cache-Control": "no-store"})
+            except ValueError as ve:
+                return JSONResponse({"ok": False, "error": str(ve)}, status_code=400, headers={"Cache-Control": "no-store"})
         ev = str(body.get("event") or "pageview").strip().lower()[:32]
         dev = _detect_device_bucket(ua_str, str(body.get("device") or ""))
         q_str = str(body.get("query") or "")[:80]
         t_str = str(body.get("title") or "")[:100]
         mt_str = str(body.get("mediaType") or "")[:16]
         await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
-        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
-    dev = _detect_device_bucket(ua_str, "")
-    await asyncio.to_thread(_track_analytics_sync, "heartbeat", vid_hash, dev)
+        ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
+        return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store"})
     summary = await _build_analytics_summary()
+    summary["gaMeasurementId"] = await asyncio.to_thread(_get_ga_measurement_id_sync)
     return JSONResponse(summary, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
 async def analytics_dashboard_page(request: Request) -> HTMLResponse:
-    ip_str = client_ip(request)
-    ua_str = request.headers.get("user-agent") or ""
-    vid_hash = hashlib.sha256(f"wl-vis|{ip_str}|{ua_str[:120]}".encode("utf-8")).hexdigest()[:16]
-    await asyncio.to_thread(_track_analytics_sync, "pageview", vid_hash, _detect_device_bucket(ua_str))
     data = await _build_analytics_summary()
+    ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
+    ga_status = f"🟢 Aktif ({html_mod.escape(ga_id)})" if ga_id else "⚪ G-XXXXXXXXXX Ölçüm Kimliği Bekleniyor"
     s_rows = "".join(
         f"<tr><td>{i}</td><td>{html_mod.escape(x['query'])}</td><td style='text-align:right;font-weight:700;color:#27dcc8;'>{x['count']}</td></tr>"
         for i, x in enumerate(data["topSearches"], 1)
@@ -9613,7 +9652,7 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>Watchlivo — Canlı Analytics & SEO Durum Paneli</title>
+  <title>Watchlivo — Google Analytics 4 & SEO Yönetim Paneli</title>
   <style>
     body {{ margin:0; background:#070b12; color:#f8fafc; font-family:Inter,system-ui,sans-serif; padding:24px; }}
     .wrap {{ max-width:1080px; margin:0 auto; }}
@@ -9628,47 +9667,62 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
     table {{ width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }}
     th, td {{ padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; }}
     th {{ color:#94a3b8; font-weight:600; }}
-    a.btn {{ color:#041014; background:#27dcc8; padding:8px 16px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px; }}
+    a.btn, button.btn {{ color:#041014; background:#27dcc8; padding:9px 16px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px; border:none; cursor:pointer; }}
+    input.inp {{ background:#070b12; border:1px solid rgba(39,220,200,.35); color:#fff; padding:9px 14px; border-radius:10px; font-size:14px; min-width:220px; }}
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="top">
       <div>
-        <h1 style="margin:0;font-size:22px;">📊 Watchlivo Canlı Analytics & SEO Durum Paneli</h1>
-        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">Tarih: {data['date']} · Gerçek Zamanlı Telemetri & Arama Motoru Durumu</div>
+        <h1 style="margin:0;font-size:22px;">📈 Watchlivo — Google Analytics 4 (`gtag.js`) & SEO Yönetimi</h1>
+        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">Bu sayfayı yenilemek sayacı ARTIRMAZ · Yalnızca gerçek tekil oturumlar ve Google Analytics 4 olayları işlenir.</div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;">
-        <span class="badge">🟢 SEO: robots.txt + sitemap.xml + JSON-LD Aktif</span>
+        <span class="badge">{ga_status}</span>
         <a class="btn" href="/">← Watchlivo Ana Sayfa</a>
       </div>
     </div>
-    <div class="grid">
-      <div class="card"><div class="lbl">Anlık Çevrimiçi</div><div class="val" style="color:#27dcc8;">{data['onlineNow']}</div><div class="sub">{data['activeRooms']} Aktif Oda · {data['roomParticipants']} Odada</div></div>
-      <div class="card"><div class="lbl">Bugün Tekil Ziyaretçi</div><div class="val">{data['todayUniqueVisitors']}</div><div class="sub">Toplam Tekil: {data['totalUniqueVisitors']}</div></div>
-      <div class="card"><div class="lbl">Bugün Sayfa Görüntüleme</div><div class="val">{data['todayPageviews']}</div><div class="sub">Toplam Görüntüleme: {data['totalPageviews']}</div></div>
-      <div class="card"><div class="lbl">Arama & İzleme Etkileşimi</div><div class="val">{data['totalSearches'] + data['totalWatches']}</div><div class="sub">{data['totalSearches']} Arama · {data['totalWatches']} Oynatma</div></div>
-    </div>
-    <div class="card" style="margin-bottom:20px;">
-      <div class="lbl">Cihaz & Platform Dağılımı</div>
-      <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;font-size:14px;font-weight:700;">
-        <span>📱 iOS: <b style="color:#27dcc8;">{devs.get('ios', 0)}</b></span>
-        <span>🤖 Android: <b style="color:#27dcc8;">{devs.get('android', 0)}</b></span>
-        <span>💻 Masaüstü: <b style="color:#27dcc8;">{devs.get('desktop', 0)}</b></span>
-        <span>⚡ PWA / Ana Ekran: <b style="color:#27dcc8;">{devs.get('pwa', 0)}</b></span>
+    <div class="card" style="margin-bottom:20px;border-color:rgba(39,220,200,.35);">
+      <div class="lbl">🔗 Resmi Google Analytics 4 (`gtag.js`) Bağlantısı</div>
+      <p style="font-size:13px;color:#cbd5e1;margin:8px 0 12px;">Google Analytics 4 mülkünüzün <b>G-XXXXXXXXXX</b> Ölçüm Kimliğini aşağıya girip kaydedin; tüm sayfa görüntülemeleri, film/dizi aramaları ve oda katılımları doğrudan resmi Google Analytics 4 panelinize (`analytics.google.com`) akar.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <input id="ga-inp" class="inp" placeholder="G-XXXXXXXXXX" value="{html_mod.escape(ga_id)}" />
+        <button class="btn" onclick="saveGaId()">Kaydet & Google Analytics'i Aktifleştir</button>
+        <span id="ga-msg" style="font-size:13px;color:#27dcc8;font-weight:700;"></span>
       </div>
     </div>
     <div class="cols">
       <div class="card">
-        <div class="lbl">🔍 En Çok Aranan İçerikler (Top 15)</div>
+        <div class="lbl">🔍 En Çok Aranan İçerikler (Sunucu İçi Top 15)</div>
         <table><thead><tr><th>#</th><th>Sorgu</th><th style="text-align:right;">Adet</th></tr></thead><tbody>{s_rows}</tbody></table>
       </div>
       <div class="card">
-        <div class="lbl">🎬 En Çok Açılan / İzlenen Yapımlar (Top 15)</div>
+        <div class="lbl">🎬 En Çok Açılan / İzlenen Yapımlar (Sunucu İçi Top 15)</div>
         <table><thead><tr><th>#</th><th>Yapım</th><th style="text-align:right;">Adet</th></tr></thead><tbody>{w_rows}</tbody></table>
       </div>
     </div>
   </div>
+  <script>
+    async function saveGaId() {{
+      const v = document.getElementById('ga-inp').value.trim().toUpperCase();
+      const msg = document.getElementById('ga-msg');
+      msg.textContent = 'Kaydediliyor...';
+      const r = await fetch('/api/rave/analytics', {{
+        method: 'POST',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify({{ gaMeasurementId: v }})
+      }});
+      const d = await r.json();
+      if (d.ok) {{
+        msg.textContent = '✅ Kaydedildi: ' + (d.gaMeasurementId || 'Temizlendi');
+        setTimeout(() => location.reload(), 600);
+      }} else {{
+        msg.style.color = '#f87171';
+        msg.textContent = '❌ ' + (d.error || 'Hata');
+      }}
+    }}
+  </script>
 </body>
 </html>"""
     return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})

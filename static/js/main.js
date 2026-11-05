@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v117';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v117';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v117';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v117';
-import { api } from './api.js?v=20261105_v117';
-import { h, toast } from './ui.js?v=20261105_v117';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v118';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v118';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v118';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v118';
+import { api } from './api.js?v=20261105_v118';
+import { h, toast } from './ui.js?v=20261105_v118';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -360,7 +360,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v117', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v118', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -694,8 +694,29 @@ function initSpatialTvNavigation() {
 
 boot();
 
-function sendWatchlivoAnalytics(ev = 'pageview') {
+function trackWatchlivoGA4(eventName, params = {}) {
   try {
+    if (typeof window.gtag === 'function' && window.__wlGaLoadedId) {
+      window.gtag('event', eventName, params);
+    }
+  } catch (_) {}
+}
+window.wlTrackGA4 = trackWatchlivoGA4;
+
+function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
+  try {
+    if (ev === 'pageview') {
+      trackWatchlivoGA4('page_view', {
+        page_title: document.title,
+        page_path: location.pathname + (location.hash || ''),
+      });
+      if (sessionStorage.getItem('wl_session_tracked_v118') === '1') {
+        return;
+      }
+      sessionStorage.setItem('wl_session_tracked_v118', '1');
+    } else {
+      trackWatchlivoGA4(ev, extra);
+    }
     const isPwa = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
     const ua = navigator.userAgent || '';
     const dev = isPwa ? 'pwa' : (/iPhone|iPad|iPod/i.test(ua) ? 'ios' : (/Android/i.test(ua) ? 'android' : 'desktop'));
@@ -704,8 +725,33 @@ function sendWatchlivoAnalytics(ev = 'pageview') {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: isPwa && ev === 'pageview' ? 'pwa_launch' : ev, device: dev, path: location.hash || '/' }),
       keepalive: true,
+    }).then(r => r.ok ? r.json() : null).then(d => {
+      if (d && d.gaMeasurementId && typeof window.__initWatchlivoGA4 === 'function') {
+        window.__initWatchlivoGA4(d.gaMeasurementId);
+      }
     }).catch(() => {});
   } catch (_) {}
 }
+
+function bootstrapGoogleAnalytics4() {
+  try {
+    fetch('/api/rave/analytics', { method: 'GET', credentials: 'same-origin' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && d.gaMeasurementId && typeof window.__initWatchlivoGA4 === 'function') {
+          window.__initWatchlivoGA4(d.gaMeasurementId);
+        }
+      })
+      .catch(() => {});
+    window.addEventListener('hashchange', () => {
+      trackWatchlivoGA4('page_view', {
+        page_title: document.title,
+        page_path: location.pathname + (location.hash || ''),
+      });
+    });
+  } catch (_) {}
+}
+
 window.vortexSendAnalytics = sendWatchlivoAnalytics;
+bootstrapGoogleAnalytics4();
 setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);

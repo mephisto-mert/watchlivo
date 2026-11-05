@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v117 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v118 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v117", index_html)
+        self.assertIn("20261105_v118", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1964,28 +1964,38 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("<loc>https://watchlivo.online/</loc>", r_map.text)
         self.assertIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
 
-        # 2. Verify index.html has PNG og:image, dimensions, and JSON-LD Schema.org
+        # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org, and Google Analytics 4 gtag.js
         idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
         self.assertIn("https://watchlivo.online/static/watchlivo-og.png", idx_html)
         self.assertIn("application/ld+json", idx_html)
+        self.assertIn("https://www.googletagmanager.com/gtag/js", idx_html)
+        self.assertIn("__initWatchlivoGA4", idx_html)
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
 
-        # 3. Verify /api/rave/analytics POST + GET and /stats HTML dashboard
-        r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios"})
+        # 3. Verify /api/rave/analytics POST + GET, GA4 gtag.js binding, and zero-increment on /stats refresh
+        r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-TESTWL2026"})
         self.assertEqual(r_post.status_code, 200)
         self.assertTrue(r_post.json().get("ok"))
+        self.assertEqual(r_post.json().get("gaMeasurementId"), "G-TESTWL2026")
 
         r_get = self.client.get("/api/rave/analytics")
         self.assertEqual(r_get.status_code, 200)
         adata = r_get.json()
         self.assertTrue(adata.get("ok"))
+        self.assertEqual(adata.get("gaMeasurementId"), "G-TESTWL2026")
+        pv_before = adata.get("todayPageviews", 0)
         self.assertGreaterEqual(adata.get("todayUniqueVisitors", 0), 1)
-        self.assertGreaterEqual(adata.get("todayPageviews", 0), 1)
+        self.assertGreaterEqual(pv_before, 1)
         self.assertGreaterEqual(adata.get("devices", {}).get("ios", 0), 1)
 
+        # Refreshing /stats or calling GET /api/rave/analytics must NEVER increment pageviews
         r_dash = self.client.get("/stats")
         self.assertEqual(r_dash.status_code, 200)
-        self.assertIn("Watchlivo Canlı Analytics", r_dash.text)
+        self.assertIn("Google Analytics 4", r_dash.text)
+        r_dash2 = self.client.get("/stats")
+        self.assertEqual(r_dash2.status_code, 200)
+        r_get_after = self.client.get("/api/rave/analytics").json()
+        self.assertEqual(r_get_after.get("todayPageviews"), pv_before)
 
 
 if __name__ == '__main__':
