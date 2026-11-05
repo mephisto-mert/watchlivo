@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v116';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v116';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v116';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v116';
-import { api } from './api.js?v=20261105_v116';
-import { h, toast } from './ui.js?v=20261105_v116';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v117';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v117';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v117';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v117';
+import { api } from './api.js?v=20261105_v117';
+import { h, toast } from './ui.js?v=20261105_v117';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -360,7 +360,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v116', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v117', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -693,3 +693,19 @@ function initSpatialTvNavigation() {
 }
 
 boot();
+
+function sendWatchlivoAnalytics(ev = 'pageview') {
+  try {
+    const isPwa = window.matchMedia?.('(display-mode: standalone)')?.matches || window.navigator?.standalone === true;
+    const ua = navigator.userAgent || '';
+    const dev = isPwa ? 'pwa' : (/iPhone|iPad|iPod/i.test(ua) ? 'ios' : (/Android/i.test(ua) ? 'android' : 'desktop'));
+    fetch('/api/rave/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: isPwa && ev === 'pageview' ? 'pwa_launch' : ev, device: dev, path: location.hash || '/' }),
+      keepalive: true,
+    }).catch(() => {});
+  } catch (_) {}
+}
+window.vortexSendAnalytics = sendWatchlivoAnalytics;
+setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);

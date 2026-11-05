@@ -51,7 +51,8 @@
           "ios_version.json",
           "animecix_tau_map.json",
           "hidden_titles.json",
-          "main_sites_vault.json"
+          "main_sites_vault.json",
+          "static/watchlivo-og.png"
         ]
       }
     }
@@ -136,7 +137,7 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications|voice-note|voice-relay)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics)(.*)",
       "headers": {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store, no-cache, must-revalidate"
@@ -163,7 +164,7 @@
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json)",
+      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|stats|analytics)",
       "dest": "server.py"
     },
     {

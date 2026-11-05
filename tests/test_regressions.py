@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v116 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v117 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v116", index_html)
+        self.assertIn("20261105_v117", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1948,6 +1948,44 @@ class RegressionTests(unittest.TestCase):
             t_n = server._norm_title(top_it.get("title") or "")
             o_n = server._norm_title(top_it.get("originalTitle") or "")
             self.assertTrue(exp_n in t_n or exp_n in o_n, f"Wrong #1 title for {q}: {top_it}")
+
+
+    def test_v117_seo_and_analytics_engine(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Verify /robots.txt and /sitemap.xml
+        r_rob = self.client.get("/robots.txt")
+        self.assertEqual(r_rob.status_code, 200)
+        self.assertIn("Sitemap: https://watchlivo.online/sitemap.xml", r_rob.text)
+
+        r_map = self.client.get("/sitemap.xml")
+        self.assertEqual(r_map.status_code, 200)
+        self.assertIn("<loc>https://watchlivo.online/</loc>", r_map.text)
+        self.assertIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
+
+        # 2. Verify index.html has PNG og:image, dimensions, and JSON-LD Schema.org
+        idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("https://watchlivo.online/static/watchlivo-og.png", idx_html)
+        self.assertIn("application/ld+json", idx_html)
+        self.assertTrue((root / "static" / "watchlivo-og.png").exists())
+
+        # 3. Verify /api/rave/analytics POST + GET and /stats HTML dashboard
+        r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios"})
+        self.assertEqual(r_post.status_code, 200)
+        self.assertTrue(r_post.json().get("ok"))
+
+        r_get = self.client.get("/api/rave/analytics")
+        self.assertEqual(r_get.status_code, 200)
+        adata = r_get.json()
+        self.assertTrue(adata.get("ok"))
+        self.assertGreaterEqual(adata.get("todayUniqueVisitors", 0), 1)
+        self.assertGreaterEqual(adata.get("todayPageviews", 0), 1)
+        self.assertGreaterEqual(adata.get("devices", {}).get("ios", 0), 1)
+
+        r_dash = self.client.get("/stats")
+        self.assertEqual(r_dash.status_code, 200)
+        self.assertIn("Watchlivo Canlı Analytics", r_dash.text)
 
 
 if __name__ == '__main__':

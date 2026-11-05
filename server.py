@@ -6026,6 +6026,10 @@ async def resolve_catalog(request: Request):
             _RESOLVE_RESP_CACHE[ckey] = (time.time(), res)
     if not res:
         return JSONResponse({"error": "Oynatılabilir tam içerik bulunamadı"}, status_code=404, headers={"Cache-Control": "no-store"})
+    try:
+        _track_analytics_sync("watch", title=(display_title or title), media_type=media_type)
+    except Exception:
+        pass
     return JSONResponse(social_engine.rank_servers_by_health(res), headers=cc_hdrs)
 
 
@@ -6205,6 +6209,11 @@ async def provider_catalog(request: Request):
                 and f"{prov}|{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
             )
         ]
+    if q and page == 1:
+        try:
+            _track_analytics_sync("search", query=q)
+        except Exception:
+            pass
     return JSONResponse(
         {"provider": prov, "query": q, **res},
         headers={"Cache-Control": "public, max-age=60, s-maxage=600, stale-while-revalidate=1800"},
@@ -6579,6 +6588,10 @@ async def supersearch(request: Request):
             )
         ]
     payload = {"query": q, "youtube": yt, "tmdb": tmdb, "justwatch": jw}
+    try:
+        _track_analytics_sync("search", query=q)
+    except Exception:
+        pass
     if len(_SUPERSEARCH_CACHE) >= 250:
         _SUPERSEARCH_CACHE.pop(next(iter(_SUPERSEARCH_CACHE)), None)
     _SUPERSEARCH_CACHE[qkey] = (time.time(), payload)
@@ -9343,9 +9356,332 @@ async def rave_meshes_compat(request: Request):
     return await rooms.list_rooms(request)
 
 
+_ANALYTICS_LOCK = threading.Lock()
+_ANALYTICS_STATE: dict = {
+    "loaded": False,
+    "last_flush": 0.0,
+    "total_pageviews": 0,
+    "total_searches": 0,
+    "total_watches": 0,
+    "visitors": set(),
+    "daily": {},
+    "devices": {"ios": 0, "android": 0, "desktop": 0, "pwa": 0},
+    "top_searches": {},
+    "top_watched": {},
+    "active_heartbeats": {},
+}
+
+
+def _detect_device_bucket(ua: str, explicit_dev: str = "") -> str:
+    ed = (explicit_dev or "").strip().lower()
+    if ed in ("ios", "android", "desktop", "pwa"):
+        return ed
+    u = (ua or "").lower()
+    if "iphone" in u or "ipad" in u or "ipod" in u:
+        return "ios"
+    if "android" in u:
+        return "android"
+    return "desktop"
+
+
+def _load_analytics_from_kv_locked() -> None:
+    if _ANALYTICS_STATE["loaded"]:
+        return
+    _ANALYTICS_STATE["loaded"] = True
+    try:
+        saved = social_engine._kv_get("wl:analytics:v1")
+        if isinstance(saved, dict):
+            _ANALYTICS_STATE["total_pageviews"] = max(_ANALYTICS_STATE["total_pageviews"], int(saved.get("total_pageviews") or 0))
+            _ANALYTICS_STATE["total_searches"] = max(_ANALYTICS_STATE["total_searches"], int(saved.get("total_searches") or 0))
+            _ANALYTICS_STATE["total_watches"] = max(_ANALYTICS_STATE["total_watches"], int(saved.get("total_watches") or 0))
+            for v in (saved.get("visitors") or [])[:5000]:
+                if isinstance(v, str):
+                    _ANALYTICS_STATE["visitors"].add(v)
+            if isinstance(saved.get("devices"), dict):
+                for dk in ("ios", "android", "desktop", "pwa"):
+                    _ANALYTICS_STATE["devices"][dk] = max(_ANALYTICS_STATE["devices"].get(dk, 0), int(saved["devices"].get(dk) or 0))
+            if isinstance(saved.get("top_searches"), dict):
+                for sk, sv in list(saved["top_searches"].items())[:200]:
+                    _ANALYTICS_STATE["top_searches"][str(sk)] = max(_ANALYTICS_STATE["top_searches"].get(str(sk), 0), int(sv or 0))
+            if isinstance(saved.get("top_watched"), dict):
+                for wk, wv in list(saved["top_watched"].items())[:200]:
+                    _ANALYTICS_STATE["top_watched"][str(wk)] = max(_ANALYTICS_STATE["top_watched"].get(str(wk), 0), int(wv or 0))
+            if isinstance(saved.get("daily"), dict):
+                for d_key, d_val in list(saved["daily"].items())[-30:]:
+                    if isinstance(d_val, dict):
+                        _ANALYTICS_STATE["daily"][str(d_key)] = {
+                            "pageviews": int(d_val.get("pageviews") or 0),
+                            "visitors": set(str(x) for x in (d_val.get("visitors") or [])[:2000]),
+                        }
+    except Exception:
+        pass
+
+
+def _flush_analytics_to_kv_locked(force: bool = False) -> None:
+    now_t = time.time()
+    if not force and (now_t - _ANALYTICS_STATE["last_flush"] < 20.0):
+        return
+    _ANALYTICS_STATE["last_flush"] = now_t
+    try:
+        top_s = dict(sorted(_ANALYTICS_STATE["top_searches"].items(), key=lambda kv: kv[1], reverse=True)[:100])
+        top_w = dict(sorted(_ANALYTICS_STATE["top_watched"].items(), key=lambda kv: kv[1], reverse=True)[:100])
+        daily_ser = {}
+        for dk, dv in list(_ANALYTICS_STATE["daily"].items())[-14:]:
+            daily_ser[dk] = {
+                "pageviews": int(dv.get("pageviews") or 0),
+                "visitors": list(dv.get("visitors") or set())[:1000],
+            }
+        payload = {
+            "total_pageviews": _ANALYTICS_STATE["total_pageviews"],
+            "total_searches": _ANALYTICS_STATE["total_searches"],
+            "total_watches": _ANALYTICS_STATE["total_watches"],
+            "visitors": list(_ANALYTICS_STATE["visitors"])[-3000:],
+            "devices": dict(_ANALYTICS_STATE["devices"]),
+            "top_searches": top_s,
+            "top_watched": top_w,
+            "daily": daily_ser,
+        }
+        social_engine._kv_set("wl:analytics:v1", payload)
+    except Exception:
+        pass
+
+
+def _track_analytics_sync(
+    event_type: str,
+    visitor_id: str = "",
+    device: str = "",
+    query: str = "",
+    title: str = "",
+    media_type: str = "",
+) -> None:
+    day_str = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 10800))
+    now_t = time.time()
+    with _ANALYTICS_LOCK:
+        _load_analytics_from_kv_locked()
+        d_ent = _ANALYTICS_STATE["daily"].setdefault(day_str, {"pageviews": 0, "visitors": set()})
+        if visitor_id:
+            _ANALYTICS_STATE["visitors"].add(visitor_id)
+            d_ent["visitors"].add(visitor_id)
+            _ANALYTICS_STATE["active_heartbeats"][visitor_id] = now_t
+            if len(_ANALYTICS_STATE["active_heartbeats"]) > 2000:
+                cutoff = now_t - 360.0
+                _ANALYTICS_STATE["active_heartbeats"] = {k: v for k, v in _ANALYTICS_STATE["active_heartbeats"].items() if v >= cutoff}
+        if event_type in ("pageview", "pwa_launch"):
+            _ANALYTICS_STATE["total_pageviews"] += 1
+            d_ent["pageviews"] += 1
+            if device in _ANALYTICS_STATE["devices"]:
+                _ANALYTICS_STATE["devices"][device] += 1
+            if event_type == "pwa_launch":
+                _ANALYTICS_STATE["devices"]["pwa"] += 1
+        elif event_type == "search" and query:
+            q_clean = re.sub(r"\s+", " ", query.strip())[:80]
+            if len(q_clean) >= 2:
+                _ANALYTICS_STATE["total_searches"] += 1
+                _ANALYTICS_STATE["top_searches"][q_clean] = _ANALYTICS_STATE["top_searches"].get(q_clean, 0) + 1
+        elif event_type == "watch" and title:
+            t_clean = re.sub(r"\s+", " ", title.strip())[:100]
+            if len(t_clean) >= 2:
+                _ANALYTICS_STATE["total_watches"] += 1
+                lbl = f"{t_clean} ({'Dizi' if media_type == 'tv' else 'Film'})" if media_type else t_clean
+                _ANALYTICS_STATE["top_watched"][lbl] = _ANALYTICS_STATE["top_watched"].get(lbl, 0) + 1
+        _flush_analytics_to_kv_locked(force=False)
+
+
+async def robots_txt_endpoint(request: Request) -> Response:
+    txt = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /r/\n"
+        "Allow: /join/\n"
+        "Disallow: /api/\n"
+        "Disallow: /uploads/\n\n"
+        "Sitemap: https://watchlivo.online/sitemap.xml\n"
+    )
+    return Response(txt, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})
+
+
+async def sitemap_xml_endpoint(request: Request) -> Response:
+    today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 10800))
+    urls = [
+        ("https://watchlivo.online/", "1.0", "daily"),
+        ("https://watchlivo.online/r/cinema-club", "0.9", "hourly"),
+        ("https://watchlivo.online/r/anime-gecesi", "0.9", "hourly"),
+        ("https://watchlivo.online/r/turk-sinemasi", "0.9", "hourly"),
+        ("https://watchlivo.online/r/yesilcam-klasik", "0.8", "daily"),
+        ("https://watchlivo.online/r/lofi-study", "0.8", "daily"),
+        ("https://watchlivo.online/r/kpop-radar", "0.8", "daily"),
+    ]
+    xml_items = "\n".join(
+        f"  <url>\n    <loc>{loc}</loc>\n    <lastmod>{today}</lastmod>\n    <changefreq>{freq}</changefreq>\n    <priority>{prio}</priority>\n  </url>"
+        for loc, prio, freq in urls
+    )
+    xml_doc = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{xml_items}\n"
+        "</urlset>\n"
+    )
+    return Response(xml_doc, media_type="application/xml; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})
+
+
+async def _build_analytics_summary() -> dict:
+    day_str = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 10800))
+    now_t = time.time()
+    try:
+        all_rooms = await rooms.STORE.all()
+    except Exception:
+        all_rooms = []
+    active_rooms = 0
+    room_users = 0
+    for r_obj in (all_rooms or []):
+        if isinstance(r_obj, dict):
+            active_rooms += 1
+            for hp in (r_obj.get("participants") or {}).values():
+                if isinstance(hp, dict) and hp.get("transport") != "bot":
+                    room_users += 1
+    with _ANALYTICS_LOCK:
+        _load_analytics_from_kv_locked()
+        d_ent = _ANALYTICS_STATE["daily"].get(day_str) or {"pageviews": 0, "visitors": set()}
+        online_hb = sum(1 for ts in _ANALYTICS_STATE["active_heartbeats"].values() if now_t - ts <= 300.0)
+        top_s = [{"query": k, "count": v} for k, v in sorted(_ANALYTICS_STATE["top_searches"].items(), key=lambda kv: kv[1], reverse=True)[:15]]
+        top_w = [{"title": k, "count": v} for k, v in sorted(_ANALYTICS_STATE["top_watched"].items(), key=lambda kv: kv[1], reverse=True)[:15]]
+        daily_hist = [
+            {"date": dk, "pageviews": int(dv.get("pageviews") or 0), "uniqueVisitors": len(dv.get("visitors") or set())}
+            for dk, dv in sorted(_ANALYTICS_STATE["daily"].items())[-14:]
+        ]
+        return {
+            "ok": True,
+            "date": day_str,
+            "onlineNow": max(online_hb, room_users, 1),
+            "activeRooms": active_rooms,
+            "roomParticipants": room_users,
+            "todayUniqueVisitors": max(len(d_ent.get("visitors") or set()), 1),
+            "totalUniqueVisitors": max(len(_ANALYTICS_STATE["visitors"]), 1),
+            "todayPageviews": max(int(d_ent.get("pageviews") or 0), 1),
+            "totalPageviews": max(int(_ANALYTICS_STATE["total_pageviews"] or 0), 1),
+            "totalSearches": int(_ANALYTICS_STATE["total_searches"] or 0),
+            "totalWatches": int(_ANALYTICS_STATE["total_watches"] or 0),
+            "devices": dict(_ANALYTICS_STATE["devices"]),
+            "topSearches": top_s,
+            "topWatched": top_w,
+            "dailyHistory": daily_hist,
+        }
+
+
+async def rave_analytics_endpoint(request: Request) -> JSONResponse:
+    ip_str = client_ip(request)
+    ua_str = request.headers.get("user-agent") or ""
+    vid_hash = hashlib.sha256(f"wl-vis|{ip_str}|{ua_str[:120]}".encode("utf-8")).hexdigest()[:16]
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        ev = str(body.get("event") or "pageview").strip().lower()[:32]
+        dev = _detect_device_bucket(ua_str, str(body.get("device") or ""))
+        q_str = str(body.get("query") or "")[:80]
+        t_str = str(body.get("title") or "")[:100]
+        mt_str = str(body.get("mediaType") or "")[:16]
+        await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+    dev = _detect_device_bucket(ua_str, "")
+    await asyncio.to_thread(_track_analytics_sync, "heartbeat", vid_hash, dev)
+    summary = await _build_analytics_summary()
+    return JSONResponse(summary, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
+
+
+async def analytics_dashboard_page(request: Request) -> HTMLResponse:
+    ip_str = client_ip(request)
+    ua_str = request.headers.get("user-agent") or ""
+    vid_hash = hashlib.sha256(f"wl-vis|{ip_str}|{ua_str[:120]}".encode("utf-8")).hexdigest()[:16]
+    await asyncio.to_thread(_track_analytics_sync, "pageview", vid_hash, _detect_device_bucket(ua_str))
+    data = await _build_analytics_summary()
+    s_rows = "".join(
+        f"<tr><td>{i}</td><td>{html_mod.escape(x['query'])}</td><td style='text-align:right;font-weight:700;color:#27dcc8;'>{x['count']}</td></tr>"
+        for i, x in enumerate(data["topSearches"], 1)
+    ) or "<tr><td colspan='3' style='color:#64748b;'>Henüz arama kaydı yok</td></tr>"
+    w_rows = "".join(
+        f"<tr><td>{i}</td><td>{html_mod.escape(x['title'])}</td><td style='text-align:right;font-weight:700;color:#10b981;'>{x['count']}</td></tr>"
+        for i, x in enumerate(data["topWatched"], 1)
+    ) or "<tr><td colspan='3' style='color:#64748b;'>Henüz izleme kaydı yok</td></tr>"
+    devs = data["devices"]
+    html = f"""<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Watchlivo — Canlı Analytics & SEO Durum Paneli</title>
+  <style>
+    body {{ margin:0; background:#070b12; color:#f8fafc; font-family:Inter,system-ui,sans-serif; padding:24px; }}
+    .wrap {{ max-width:1080px; margin:0 auto; }}
+    .top {{ display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:20px; }}
+    .badge {{ background:rgba(16,185,129,.15); border:1px solid rgba(39,220,200,.4); color:#27dcc8; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:700; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:14px; margin-bottom:22px; }}
+    .card {{ background:#0d1522; border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:18px; }}
+    .lbl {{ color:#94a3b8; font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; }}
+    .val {{ font-size:28px; font-weight:800; color:#fff; margin-top:6px; }}
+    .sub {{ font-size:12px; color:#27dcc8; margin-top:4px; }}
+    .cols {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; }}
+    table {{ width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }}
+    th, td {{ padding:8px 6px; border-bottom:1px solid rgba(255,255,255,.06); text-align:left; }}
+    th {{ color:#94a3b8; font-weight:600; }}
+    a.btn {{ color:#041014; background:#27dcc8; padding:8px 16px; border-radius:10px; text-decoration:none; font-weight:700; font-size:13px; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div>
+        <h1 style="margin:0;font-size:22px;">📊 Watchlivo Canlı Analytics & SEO Durum Paneli</h1>
+        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">Tarih: {data['date']} · Gerçek Zamanlı Telemetri & Arama Motoru Durumu</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span class="badge">🟢 SEO: robots.txt + sitemap.xml + JSON-LD Aktif</span>
+        <a class="btn" href="/">← Watchlivo Ana Sayfa</a>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="lbl">Anlık Çevrimiçi</div><div class="val" style="color:#27dcc8;">{data['onlineNow']}</div><div class="sub">{data['activeRooms']} Aktif Oda · {data['roomParticipants']} Odada</div></div>
+      <div class="card"><div class="lbl">Bugün Tekil Ziyaretçi</div><div class="val">{data['todayUniqueVisitors']}</div><div class="sub">Toplam Tekil: {data['totalUniqueVisitors']}</div></div>
+      <div class="card"><div class="lbl">Bugün Sayfa Görüntüleme</div><div class="val">{data['todayPageviews']}</div><div class="sub">Toplam Görüntüleme: {data['totalPageviews']}</div></div>
+      <div class="card"><div class="lbl">Arama & İzleme Etkileşimi</div><div class="val">{data['totalSearches'] + data['totalWatches']}</div><div class="sub">{data['totalSearches']} Arama · {data['totalWatches']} Oynatma</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <div class="lbl">Cihaz & Platform Dağılımı</div>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px;font-size:14px;font-weight:700;">
+        <span>📱 iOS: <b style="color:#27dcc8;">{devs.get('ios', 0)}</b></span>
+        <span>🤖 Android: <b style="color:#27dcc8;">{devs.get('android', 0)}</b></span>
+        <span>💻 Masaüstü: <b style="color:#27dcc8;">{devs.get('desktop', 0)}</b></span>
+        <span>⚡ PWA / Ana Ekran: <b style="color:#27dcc8;">{devs.get('pwa', 0)}</b></span>
+      </div>
+    </div>
+    <div class="cols">
+      <div class="card">
+        <div class="lbl">🔍 En Çok Aranan İçerikler (Top 15)</div>
+        <table><thead><tr><th>#</th><th>Sorgu</th><th style="text-align:right;">Adet</th></tr></thead><tbody>{s_rows}</tbody></table>
+      </div>
+      <div class="card">
+        <div class="lbl">🎬 En Çok Açılan / İzlenen Yapımlar (Top 15)</div>
+        <table><thead><tr><th>#</th><th>Yapım</th><th style="text-align:right;">Adet</th></tr></thead><tbody>{w_rows}</tbody></table>
+      </div>
+    </div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
 app = Starlette(
     routes=[
         Route("/", index),
+        Route("/robots.txt", robots_txt_endpoint, methods=["GET", "HEAD"]),
+        Route("/sitemap.xml", sitemap_xml_endpoint, methods=["GET", "HEAD"]),
+        Route("/stats", analytics_dashboard_page, methods=["GET"]),
+        Route("/analytics", analytics_dashboard_page, methods=["GET"]),
+        Route("/api/rave/analytics", rave_analytics_endpoint, methods=["GET", "POST"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
         Route("/manifest.json", manifest_json),
