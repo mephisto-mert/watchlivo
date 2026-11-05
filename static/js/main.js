@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v126';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v126';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v126';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v126';
-import { api } from './api.js?v=20261105_v126';
-import { h, toast } from './ui.js?v=20261105_v126';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v127';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v127';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v127';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v127';
+import { api } from './api.js?v=20261105_v127';
+import { h, toast } from './ui.js?v=20261105_v127';
 
 function parseRoute() {
   const legacyRoom = new URLSearchParams(location.search).get('room');
@@ -148,7 +148,7 @@ async function boot() {
       if (!safeAreaProbe) {
         safeAreaProbe = document.createElement('div');
         safeAreaProbe.id = 'wl-safe-area-probe';
-        safeAreaProbe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;pointer-events:none;visibility:hidden;z-index:-1;padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);';
+        safeAreaProbe.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;display:block !important;pointer-events:none;visibility:hidden;z-index:-1;padding-top:env(safe-area-inset-top,0px);padding-right:env(safe-area-inset-right,0px);padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);';
         document.body.appendChild(safeAreaProbe);
       }
     }
@@ -168,10 +168,37 @@ async function boot() {
     const rawH = Math.round(window.innerHeight || root.clientHeight || 844);
     const vvH = vv ? Math.round(vv.height) : rawH;
     const w = Math.max(280, rawW);
-    const h = Math.max(240, kbOpen ? Math.min(rawH, vvH || rawH) : rawH);
     const insets = readSafeAreaInsets();
-    const topSafeOffset = insets.top;
-    const bottomSafeOffset = insets.bottom;
+    const isIos = typeof navigator !== 'undefined' && (/iP(hone|ad|od)/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+    const isStandalone = typeof window !== 'undefined' && (
+      window.navigator?.standalone === true ||
+      window.matchMedia?.('(display-mode: standalone)')?.matches === true ||
+      Boolean(window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP)
+    );
+    const screenH = Math.round(window.screen?.height || 0);
+    const screenW = Math.round(window.screen?.width || 0);
+    const portraitScreenH = Math.max(screenH, screenW);
+    const statusDiff = portraitScreenH - rawH;
+    const isMobilePortrait = w <= 900 && rawH >= rawW;
+    const isIosFullBleed = isIos && (isStandalone || insets.top >= 20);
+    const isIosWebClipShort = isIosFullBleed && !kbOpen && isMobilePortrait && statusDiff >= 20 && statusDiff <= 80;
+    const fullH = isIosWebClipShort ? portraitScreenH : rawH;
+    const h = Math.max(240, kbOpen ? Math.min(rawH, vvH || rawH) : fullH);
+    let topSafeOffset = insets.top;
+    let bottomSafeOffset = insets.bottom;
+    if (isMobilePortrait) {
+      if (isIosFullBleed) {
+        const minTop = portraitScreenH >= 812 ? 52 : 28;
+        topSafeOffset = Math.max(insets.top, minTop) + 10;
+        bottomSafeOffset = 10;
+      } else if (isIos) {
+        topSafeOffset = insets.top > 0 ? insets.top + 6 : 8;
+        bottomSafeOffset = 6;
+      } else {
+        topSafeOffset = insets.top > 0 ? insets.top + 4 : 6;
+        bottomSafeOffset = Math.min(Math.max(insets.bottom, 6), 12);
+      }
+    }
     root.style.setProperty('--app-width', `${w}px`);
     root.style.setProperty('--app-height', `${h}px`);
     if (!kbOpen) {
@@ -351,7 +378,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v126', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v127', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

@@ -11,7 +11,7 @@ import { api } from '../api.js?v=20261105_v117';
 import { createSelection, openWatchHistoryModal } from './selection.js?v=20261105_v117';
 import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v117';
 import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261105_v117';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261105_v125';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261105_v127';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -474,6 +474,14 @@ export function renderHome(app) {
   const home = h('main', { class: 'home' }, homeScroll);
 
   app.replaceChildren(nav, home);
+  try {
+    homeScroll.scrollTop = 0;
+    window.scrollTo(0, 0);
+    requestAnimationFrame(() => {
+      homeScroll.scrollTop = 0;
+      window.__wlSyncViewport?.();
+    });
+  } catch (_) {}
   updateMiniPip();
   initCookieConsentBanner();
   let emptyStreak = 0;

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v126 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v127 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v126", index_html)
+        self.assertIn("20261105_v127", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -2003,6 +2003,15 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_sw_iframe.status_code, 200)
         self.assertIn("text/html", r_sw_iframe.headers.get("content-type", ""))
         self.assertGreater(len(r_sw_iframe.text), 20)
+
+        # 2d. Verify v127 iOS WebClip/Safari viewport geometry & inline footer cookie banner
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("isIosFullBleed", main_js)
+        self.assertIn("isIosWebClipShort", main_js)
+        footer_js = (root / "static" / "js" / "views" / "site-footer.js").read_text(encoding="utf-8")
+        self.assertIn("footerEl.insertBefore(banner, footerEl.firstChild)", footer_js)
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("top: calc(var(--app-height, 100dvh) - var(--dock-mobile-h, 60px)) !important;", vortex_css)
 
         # 3. Verify /api/rave/analytics POST + GET, GA4 gtag.js binding, and zero-increment on /stats refresh
         r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-HQXSREQV3R"})

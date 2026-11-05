@@ -304,7 +304,12 @@ export function initCookieConsentBanner() {
           },
         }, 'Anladım'))
     );
-    document.body.appendChild(banner);
+    const footerEl = document.getElementById('wl-institutional-footer') || document.getElementById('wl-site-footer-wrap');
+    if (footerEl) {
+      footerEl.insertBefore(banner, footerEl.firstChild);
+    } else {
+      document.body.appendChild(banner);
+    }
   } catch (_) {}
 }
 
