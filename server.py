@@ -9586,7 +9586,7 @@ def _get_ga_measurement_id_sync() -> str:
             return _GA_MEASUREMENT_ID_CACHE["id"]
     except Exception:
         pass
-    return str(_GA_MEASUREMENT_ID_CACHE.get("id") or "G-3EGLLTB9J0")
+    return str(_GA_MEASUREMENT_ID_CACHE.get("id") or "G-HQXSREQV3R")
 
 
 def _set_ga_measurement_id_sync(ga_id: str) -> str:
