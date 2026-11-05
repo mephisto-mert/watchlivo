@@ -150,7 +150,8 @@ def _get_db() -> sqlite3.Connection:
                 avatar_url TEXT DEFAULT '',
                 hide_watching INTEGER DEFAULT 0,
                 hide_friends INTEGER DEFAULT 0,
-                hide_location INTEGER DEFAULT 0
+                hide_location INTEGER DEFAULT 0,
+                password_set INTEGER DEFAULT 0
             )
         """)
         for col_def in [
@@ -161,6 +162,7 @@ def _get_db() -> sqlite3.Connection:
             "hide_watching INTEGER DEFAULT 0",
             "hide_friends INTEGER DEFAULT 0",
             "hide_location INTEGER DEFAULT 0",
+            "password_set INTEGER DEFAULT 0",
         ]:
             try:
                 conn.execute(f"ALTER TABLE watchlivo_users ADD COLUMN {col_def}")
@@ -452,14 +454,14 @@ async def auth_register(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Görünen ad en az 2 karakter olmalıdır."}, status_code=400)
     if not EMAIL_RE.match(email):
         return JSONResponse({"ok": False, "error": "Lütfen geçerli bir e-posta adresi girin."}, status_code=400)
-    if len(password) < 4:
-        return JSONResponse({"ok": False, "error": "Şifre en az 4 karakter olmalıdır."}, status_code=400)
+    if len(password) < 6:
+        return JSONResponse({"ok": False, "error": "Şifre en az 6 karakter olmalıdır."}, status_code=400)
     handle = _norm_handle(raw_handle, name)
     uid = "u_wl_" + hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
     salt = _new_salt()
     pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
-    fb_pw = password if len(password) >= 6 else (password + "_wl26")
+    fb_pw = password
     fb_signup = _firebase_auth_req("accounts:signUp", {
         "email": email,
         "password": fb_pw,
@@ -478,18 +480,15 @@ async def auth_register(request: Request) -> JSONResponse:
     })
     row = {
         "uid": uid, "email": email, "handle": handle, "name": name, "password_hash": pw_hash, "salt": salt,
-        "color": color, "avatar": avatar, "auth_provider": "email", "verified": 1, "created_at": now_ts, "updated_at": now_ts,
+        "color": color, "avatar": avatar, "auth_provider": "email", "verified": 1, "password_set": 1,
+        "created_at": now_ts, "updated_at": now_ts,
     }
     try:
         created = _user_create(row)
     except Exception:
         return JSONResponse({"ok": False, "error": "Hesap kaydı şu an yapılamıyor. Lütfen tekrar deneyin."}, status_code=503)
     if not created:
-        ex_row = _user_get(uid)
-        if ex_row and hmac.compare_digest(_hash_pw(password, ex_row["salt"]), ex_row["password_hash"]):
-            user = _row_to_user(ex_row)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user), "emailSent": True})
-        return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen giriş yapın."}, status_code=409)
+        return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen Giriş Yap sekmesinden şifrenizle giriş yapın."}, status_code=409)
     user = _row_to_user(row)
     token = sign_auth_token(user)
     return JSONResponse({"ok": True, "user": user, "authToken": token, "emailSent": True})
@@ -609,6 +608,12 @@ async def auth_oauth(request: Request) -> JSONResponse:
     provider = str(body.get("provider") or "google").strip().lower()
     if provider not in PROVIDER_ICONS:
         provider = "google"
+    password = str(body.get("password") or "")[:256]
+    if len(password) < 6:
+        return JSONResponse(
+            {"ok": False, "error": "Şifre yazmadan Google / YouTube girişi yapılamaz. Lütfen en az 6 karakterli şifrenizi girin."},
+            status_code=400,
+        )
     id_token = str(body.get("idToken") or "").strip()
     fb_email = ""
     fb_name = ""
@@ -644,6 +649,12 @@ async def auth_oauth(request: Request) -> JSONResponse:
     if not fb_email:
         return JSONResponse({"ok": False, "error": "Giriş doğrulanamadı. Oturum süresi dolmuş veya geçersiz."}, status_code=401)
     raw_email = fb_email[:120]
+    expected_email = str(body.get("email") or "").strip().lower()
+    if expected_email and EMAIL_RE.match(expected_email) and expected_email != raw_email:
+        return JSONResponse(
+            {"ok": False, "error": f"Yazdığınız e-posta ({expected_email}) ile seçilen Google hesabı ({raw_email}) eşleşmiyor."},
+            status_code=401,
+        )
     raw_name = (fb_name or str(body.get("name") or "").strip())[:24]
     color = _clean_color(body.get("color"))
     avatar = str(body.get("avatar") or PROVIDER_ICONS.get(provider, "🌐")).strip()[:8]
@@ -654,6 +665,14 @@ async def auth_oauth(request: Request) -> JSONResponse:
         uid = "u_wl_" + hashlib.sha256(raw_email.encode("utf-8")).hexdigest()[:12]
         ex = _user_get(uid)
         if ex:
+            has_pw = bool(ex.get("password_set")) or str(ex.get("auth_provider") or "") == "email"
+            if has_pw:
+                if not hmac.compare_digest(_hash_pw(password, ex["salt"]), ex["password_hash"]):
+                    return JSONResponse({"ok": False, "error": "Girdiğiniz şifre bu hesapla eşleşmiyor. Lütfen doğru şifrenizi girin."}, status_code=401)
+            else:
+                new_salt = _new_salt()
+                new_hash = _hash_pw(password, new_salt)
+                ex = _user_update(uid, {"password_hash": new_hash, "salt": new_salt, "password_set": 1}) or ex
             user = _row_to_user(ex)
             return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
     else:
@@ -661,14 +680,18 @@ async def auth_oauth(request: Request) -> JSONResponse:
         raw_email = f"{handle}@{provider}.watchlivo.online"
         ex = _user_get(uid)
         if ex:
+            has_pw = bool(ex.get("password_set")) or str(ex.get("auth_provider") or "") == "email"
+            if has_pw and not hmac.compare_digest(_hash_pw(password, ex["salt"]), ex["password_hash"]):
+                return JSONResponse({"ok": False, "error": "Girdiğiniz şifre bu hesapla eşleşmiyor. Lütfen doğru şifrenizi girin."}, status_code=401)
             user = _row_to_user(ex)
             return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
     salt = _new_salt()
-    pw_hash = _hash_pw(secrets.token_hex(12), salt)
+    pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
     row = {
         "uid": uid, "email": raw_email, "handle": handle, "name": raw_name, "password_hash": pw_hash, "salt": salt,
-        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "created_at": now_ts, "updated_at": now_ts,
+        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1,
+        "created_at": now_ts, "updated_at": now_ts,
     }
     try:
         _user_create(row)

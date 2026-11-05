@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v108 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v109 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v108", index_html)
+        self.assertIn("20261105_v109", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1360,7 +1360,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("@media (max-width: 820px)", vortex_css)
 
         profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
-        self.assertIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
+        self.assertNotIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
+        self.assertIn("Google ile Giriş Yap (Şifreli)", profile_js)
 
     def test_v102_series_prev_episode_poster_cors_and_youtube_muxed_playback(self):
         from pathlib import Path
@@ -1673,6 +1674,80 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("vortex_bg_audio", html5_js)
         self.assertIn("_userPausedViaMediaSession", html5_js)
         self.assertIn("_userPausedViaMediaSession", youtube_js)
+
+    def test_v109_strict_password_auth_google_youtube_register_and_guest_isolation(self):
+        import uuid
+        from pathlib import Path
+        from unittest.mock import patch
+
+        root = Path(__file__).resolve().parent.parent
+        suf = uuid.uuid4().hex[:8]
+        test_email = f"auth_v109_{suf}@gmail.com"
+
+        # 1. Register requires >= 6 char password and rejects empty/short passwords
+        r_short = self.client.post("/api/auth/register", json={
+            "name": "Deniz Test",
+            "email": test_email,
+            "password": "123",
+        })
+        self.assertEqual(r_short.status_code, 400)
+
+        r_ok = self.client.post("/api/auth/register", json={
+            "name": "Deniz Test",
+            "email": test_email,
+            "password": "GucluSifre!2026",
+        })
+        self.assertEqual(r_ok.status_code, 200)
+        self.assertTrue(r_ok.json().get("ok"))
+
+        # Duplicate register returns 409 (never auto-logs in from register tab)
+        r_dup = self.client.post("/api/auth/register", json={
+            "name": "Deniz Test",
+            "email": test_email,
+            "password": "GucluSifre!2026",
+        })
+        self.assertEqual(r_dup.status_code, 409)
+
+        # 2. Google / YouTube OAuth (/api/auth/oauth) strictly rejects passwordless requests
+        r_oauth_nopw = self.client.post("/api/auth/oauth", json={
+            "provider": "google",
+            "idToken": "fake_token_123",
+            "email": test_email,
+        })
+        self.assertEqual(r_oauth_nopw.status_code, 400)
+        self.assertIn("Şifre yazmadan", r_oauth_nopw.json().get("error", ""))
+
+        # Wrong password with valid Google token is rejected with 401
+        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test"}]}):
+            r_oauth_wrongpw = self.client.post("/api/auth/oauth", json={
+                "provider": "google",
+                "idToken": "valid_token_123",
+                "email": test_email,
+                "password": "YanlisSifre999",
+            })
+            self.assertEqual(r_oauth_wrongpw.status_code, 401)
+
+            # Correct password with valid Google token succeeds
+            r_oauth_good = self.client.post("/api/auth/oauth", json={
+                "provider": "google",
+                "idToken": "valid_token_123",
+                "email": test_email,
+                "password": "GucluSifre!2026",
+            })
+            self.assertEqual(r_oauth_good.status_code, 200)
+            self.assertTrue(r_oauth_good.json().get("ok"))
+
+        # 3. Frontend static verification for Google, YouTube, Register & Provider password gates
+        profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
+        selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        selection_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
+
+        self.assertIn("wl-google-pw-panel", profile_js)
+        self.assertIn("export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '')", profile_js)
+        self.assertIn("Şifreyi Doğrula & Google YouTube Hesabını Eşitle", selection_js)
+        self.assertIn("const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);", selection_kinds_js)
+        self.assertIn("hesap şifreniz (en az 6 karakter — zorunlu)", accounts_js)
 
 
 if __name__ == '__main__':

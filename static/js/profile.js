@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261105_v108';
-import { api } from './api.js?v=20261105_v108';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261105_v108';
+import { h, icons, popup, toast } from './ui.js?v=20261105_v109';
+import { api } from './api.js?v=20261105_v109';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261105_v109';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261105_v108';
+} from './store.js?v=20261105_v109';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -158,7 +158,13 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_profile_v1');
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
+    localStorage.removeItem('watchlivo_auth_pending_redirect');
+    sessionStorage.removeItem('watchlivo_auth_pending_pw');
+    sessionStorage.removeItem('watchlivo_auth_pending_email');
   } catch (e) { /* ignore */ }
+  try {
+    getFirebaseAuth().then((fb) => fb?.auth?.signOut?.()).catch(() => {});
+  } catch (_) {}
   resetCloudSyncState();
   const guest = {
     id: 'guest_' + Math.random().toString(36).slice(2, 10),
@@ -205,27 +211,6 @@ export async function verifyAndRefreshSession() {
       }
     } catch (e) { /* offline */ }
   }
-  try {
-    const fb = await getFirebaseAuth();
-    const fbUser = fb?.auth?.currentUser;
-    if (fbUser) {
-      const idToken = await fbUser.getIdToken();
-      const res = await api('/api/auth/oauth', {
-        method: 'POST',
-        body: {
-          provider: s.authProvider || 'google',
-          idToken,
-          email: fbUser.email || s.email || '',
-          name: fbUser.displayName || s.name || '',
-        },
-      });
-      if (res?.ok && res.user && res.authToken) {
-        const recovered = saveProfile({ ...s, ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-        syncCloudUserMedia(true).catch(() => {});
-        return recovered;
-      }
-    }
-  } catch (e) { /* ignore */ }
   return null;
 }
 
@@ -304,6 +289,14 @@ async function getFirebaseAuth() {
 export async function checkRedirectAuth() {
   const isPending = Boolean(localStorage.getItem('watchlivo_auth_pending_redirect'));
   if (!isPending) return null;
+  const pendingPw = sessionStorage.getItem('watchlivo_auth_pending_pw') || '';
+  const pendingEmail = sessionStorage.getItem('watchlivo_auth_pending_email') || '';
+  if (pendingPw.length < 6) {
+    localStorage.removeItem('watchlivo_auth_pending_redirect');
+    sessionStorage.removeItem('watchlivo_auth_pending_pw');
+    sessionStorage.removeItem('watchlivo_auth_pending_email');
+    return null;
+  }
 
   return Promise.race([
     (async () => {
@@ -317,10 +310,12 @@ export async function checkRedirectAuth() {
           const fbName = cred.user.displayName || '';
           const res = await api('/api/auth/oauth', {
             method: 'POST',
-            body: { provider: 'google', idToken, email: fbEmail, name: fbName },
+            body: { provider: 'google', idToken, email: pendingEmail || fbEmail, name: fbName, password: pendingPw },
           });
           if (res?.ok && res.user) {
             localStorage.removeItem('watchlivo_auth_pending_redirect');
+            sessionStorage.removeItem('watchlivo_auth_pending_pw');
+            sessionStorage.removeItem('watchlivo_auth_pending_email');
             const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
             toast('✓ ' + prof.name + ' (@' + prof.handle + ') olarak giriş yapıldı');
             return prof;
@@ -328,13 +323,18 @@ export async function checkRedirectAuth() {
         }
       } catch (e) {
         console.warn('Redirect auth check failed:', e);
+        toast(e?.message || 'Google girişi doğrulanamadı.');
       } finally {
         localStorage.removeItem('watchlivo_auth_pending_redirect');
+        sessionStorage.removeItem('watchlivo_auth_pending_pw');
+        sessionStorage.removeItem('watchlivo_auth_pending_email');
       }
       return null;
     })(),
     new Promise((resolve) => setTimeout(() => {
       localStorage.removeItem('watchlivo_auth_pending_redirect');
+      sessionStorage.removeItem('watchlivo_auth_pending_pw');
+      sessionStorage.removeItem('watchlivo_auth_pending_email');
       resolve(null);
     }, 12000))
   ]);
@@ -343,7 +343,7 @@ export async function checkRedirectAuth() {
 export function profileSetup({ current = null, initialTab = null, dismissable = true, onDone } = {}) {
   try { getFirebaseAuth().catch(() => {}); } catch (_) {}
   let isLoggedMember = Boolean(current && !current.isGuest && current.authToken && !/^Misafir/i.test(String(current.name || '')));
-  let activeTab = initialTab || (isLoggedMember ? 'account' : 'register');
+  let activeTab = initialTab || (isLoggedMember ? 'account' : 'login');
   let color = current?.color || AVATAR_COLORS[0];
   let phoneConfirmation = null;
   let phonePendingNumber = '';
@@ -358,13 +358,31 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     onDone?.(prof);
   };
 
-  const doSocialLogin = async (provider, fallbackName) => {
+  const doSocialLogin = async (provider, fallbackName, { password = '', expectedEmail = '', errEl = null } = {}) => {
+    const showErr = (msg) => {
+      if (errEl) {
+        errEl.style.color = '#fb7185';
+        errEl.textContent = msg;
+      } else {
+        toast(msg);
+      }
+    };
     try {
       let idToken = '';
       let fbEmail = '';
       let fbName = '';
       if (provider !== 'google') {
-        toast('Bu giriş yöntemi henüz etkin değil. Google veya e-posta ile giriş yapın.');
+        showErr('Bu giriş yöntemi henüz etkin değil. Google veya e-posta ile giriş yapın.');
+        return;
+      }
+      const cleanPw = String(password || '');
+      const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
+      if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
+        showErr('Lütfen geçerli bir Google e-posta adresi girin (örn. ad@gmail.com).');
+        return;
+      }
+      if (cleanPw.length < 6) {
+        showErr('Şifre yazmadan Google ile giriş yapılamaz! Lütfen en az 6 karakterli şifrenizi girin.');
         return;
       }
       if (window.isWatchlivoDesktop && window.pywebview?.api?.start_google_login) {
@@ -376,7 +394,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             finish(prof, '✓ ' + prof.name + ' (@' + prof.handle + ') olarak giriş yapıldı');
             return;
           } else if (res?.error && !/iptal|timeout|Zaman aşımı/i.test(res.error)) {
-            toast('Giriş tamamlanamadı: ' + res.error);
+            showErr('Giriş tamamlanamadı: ' + res.error);
           }
         } catch (e) {
           console.warn('Desktop login api error:', e);
@@ -385,56 +403,66 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       }
       const fb = await getFirebaseAuth();
       if (!fb?.auth || !fb?.signInWithPopup) {
-        toast('Giriş servisi yüklenemedi. Sayfayı yenileyip tekrar deneyin.');
+        showErr('Giriş servisi yüklenemedi. Sayfayı yenileyip tekrar deneyin.');
         return;
       }
+      try { await fb.auth.signOut?.(); } catch (_) {}
       const gProv = new fb.GoogleAuthProvider();
       gProv.addScope('email');
       gProv.addScope('profile');
-      gProv.setCustomParameters({ prompt: 'select_account' });
-      // Only standalone Android APK (WatchlivoApp custom WebView) uses redirect because WebView lacks multi-window popup support.
-      // Standard mobile browsers (Chrome on Android, Safari on iOS, Samsung Internet, Firefox) and PC browsers support popup!
+      const customParams = { prompt: 'select_account' };
+      if (cleanEmail) customParams.login_hint = cleanEmail;
+      gProv.setCustomParameters(customParams);
       const isStandaloneApk = /WatchlivoApp/i.test(navigator.userAgent);
       if (isStandaloneApk) {
         localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
+        sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
+        if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
         toast('Google giriş sayfasına aktarılıyorsunuz...');
         await fb.signInWithRedirect(fb.auth, gProv);
         return;
       }
       try {
-        toast('Google penceresi açılıyor...');
+        toast('Google doğrulama penceresi açılıyor...');
         const cred = await fb.signInWithPopup(fb.auth, gProv);
         if (cred?.user) {
-          idToken = await cred.user.getIdToken();
-          fbEmail = cred.user.email || '';
+          idToken = await cred.user.getIdToken(true);
+          fbEmail = (cred.user.email || '').trim().toLowerCase();
           fbName = cred.user.displayName || '';
         }
       } catch (popErr) {
         console.warn('Popup login failed, attempting fallback redirect:', popErr);
-        if (fb.signInWithRedirect) {
+        if (fb.signInWithRedirect && /popup-blocked|operation-not-supported/i.test(String(popErr?.code || popErr?.message || ''))) {
           localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
+          sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
+          if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
           toast('Google giriş sayfasına aktarılıyorsunuz...');
           await fb.signInWithRedirect(fb.auth, gProv);
           return;
         }
-        toast('Google girişi tamamlanmadı. Lütfen tekrar deneyin.');
+        showErr('Google girişi iptal edildi veya tamamlanmadı. Lütfen tekrar deneyin.');
         return;
       }
       if (!idToken) {
-        toast('Google girişi doğrulanamadı.');
+        showErr('Google girişi doğrulanamadı.');
+        return;
+      }
+      if (cleanEmail && fbEmail && cleanEmail !== fbEmail) {
+        try { await fb.auth.signOut?.(); } catch (_) {}
+        showErr(`Yazdığınız e-posta (${cleanEmail}) ile seçtiğiniz Google hesabı (${fbEmail}) eşleşmiyor!`);
         return;
       }
       const baseName = fbName || ((current && current.name && !/^Misafir/i.test(current.name)) ? current.name : fallbackName);
       const res = await api('/api/auth/oauth', {
         method: 'POST',
-        body: { provider, idToken, email: fbEmail, name: baseName, color },
+        body: { provider, idToken, email: cleanEmail || fbEmail, name: baseName, color, password: cleanPw },
       });
       if (res?.ok && res.user) {
         const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-        finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak giriş yapıldı`);
+        finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak şifreli Google girişi yapıldı`);
       }
     } catch (e) {
-      toast(e.message || 'Sosyal giriş başarısız oldu');
+      showErr(e.message || 'Google ile giriş başarısız oldu');
     }
   };
 
@@ -460,32 +488,115 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
   };
 
-  const renderSocialButtons = ({ hideGuestBtn = false } = {}) => h('div', { class: 'wl-social-stack' },
-    h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Tek Tıkla Giriş' : 'veya Hızlı Giriş Seçenekleri')),
-    h('div', { class: 'wl-social-row' },
-      !hideGuestBtn ? h('button', {
-        type: 'button',
-        id: 'wl-instant-guest-btn',
-        class: 'wl-social-btn wl-social-guest',
-        style: {
-          background: 'linear-gradient(135deg, rgba(39, 220, 200, 0.18), rgba(99, 102, 241, 0.18))',
-          border: '1px solid rgba(39, 220, 200, 0.48)',
-          color: '#5eead4',
-          fontWeight: '700',
-        },
-        onclick: () => doGuestLogin(),
+  const renderSocialButtons = ({ hideGuestBtn = false, getFormCreds = null } = {}) => {
+    const gEmailInp = h('input', {
+      class: 'input',
+      type: 'email',
+      placeholder: 'Google E-posta Adresiniz (örn. ad@gmail.com)',
+      autocomplete: 'email',
+      value: (current && !current.isGuest && current.email) ? current.email : '',
+    });
+    const gPwInp = h('input', {
+      class: 'input',
+      type: 'password',
+      placeholder: 'Hesap Şifreniz (en az 6 karakter — zorunlu)',
+      autocomplete: 'current-password',
+    });
+    const gErrBox = h('div', { class: 'wl-auth-err', style: { minHeight: '18px' } });
+    const gVerifyPanel = h('div', {
+      class: 'wl-google-pw-panel',
+      style: {
+        display: 'none',
+        flexDirection: 'column',
+        gap: '8px',
+        marginTop: '10px',
+        padding: '12px',
+        borderRadius: '12px',
+        background: 'rgba(15, 23, 42, 0.92)',
+        border: '1px solid rgba(56, 189, 248, 0.38)',
       },
-      h('span', {}, '👤 Kayıt Olmadan Misafir Olarak Gir'),
-      lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null,
+    },
+      h('div', { style: { fontSize: '.78rem', fontWeight: '700', color: '#38bdf8' } },
+        '🔐 Google ile Güvenli Giriş — Şifre Doğrulaması Zorunlu'),
+      h('div', { style: { fontSize: '.74rem', color: '#cbd5e1', lineHeight: '1.4' } },
+        'Şifre yazmadan otomatik giriş engellenmiştir. Google e-posta adresinizi ve en az 6 karakterli şifrenizi girip onaylayın:'),
+      gEmailInp,
+      gPwInp,
+      gErrBox,
       h('button', {
         type: 'button',
-        class: 'wl-social-btn wl-social-google',
-        onclick: () => doSocialLogin('google', 'GmailÜyesi'),
-      },
-      h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
-      h('span', {}, 'Google ile Devam Et'),
-      lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null)),
-    h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Kayıtsız Misafir veya Resmi Hesap ile Kesintisiz İzle'));
+        class: 'btn primary wl-btn-full',
+        onclick: () => {
+          gErrBox.textContent = '';
+          const em = gEmailInp.value.trim();
+          const pw = gPwInp.value;
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
+            gErrBox.style.color = '#fb7185';
+            gErrBox.textContent = 'Lütfen geçerli bir Google e-posta adresi girin.';
+            gEmailInp.focus();
+            return;
+          }
+          if (pw.length < 6) {
+            gErrBox.style.color = '#fb7185';
+            gErrBox.textContent = 'Şifre yazmadan Google ile giriş yapılamaz! En az 6 karakterli şifrenizi girin.';
+            gPwInp.focus();
+            return;
+          }
+          doSocialLogin('google', 'GmailÜyesi', { password: pw, expectedEmail: em, errEl: gErrBox });
+        },
+      }, '🌐 Şifreyi Doğrula & Google Penceresini Aç')
+    );
+
+    gPwInp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const btn = gVerifyPanel.querySelector('button.btn.primary');
+        btn?.click?.();
+      }
+    });
+
+    return h('div', { class: 'wl-social-stack' },
+      h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Şifreli Giriş' : 'veya Diğer Giriş Seçenekleri')),
+      h('div', { class: 'wl-social-row' },
+        h('button', {
+          type: 'button',
+          class: 'wl-social-btn wl-social-google',
+          onclick: () => {
+            const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
+            const formEmail = String(creds.email || '').trim();
+            const formPw = String(creds.password || '');
+            if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formEmail) && formPw.length >= 6) {
+              doSocialLogin('google', 'GmailÜyesi', { password: formPw, expectedEmail: formEmail, errEl: creds.errEl || gErrBox });
+              return;
+            }
+            if (formEmail && !gEmailInp.value) gEmailInp.value = formEmail;
+            if (formPw && !gPwInp.value) gPwInp.value = formPw;
+            gVerifyPanel.style.display = 'flex';
+            gErrBox.style.color = '#fbbf24';
+            gErrBox.textContent = '⚠️ Google ile giriş yapmak için lütfen e-posta ve şifrenizi girin.';
+            if (!gEmailInp.value.trim()) gEmailInp.focus();
+            else gPwInp.focus();
+          },
+        },
+        h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
+        h('span', {}, 'Google ile Giriş Yap (Şifreli)'),
+        lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null),
+        !hideGuestBtn ? h('button', {
+          type: 'button',
+          id: 'wl-instant-guest-btn',
+          class: 'wl-social-btn wl-social-guest',
+          style: {
+            background: 'rgba(148, 163, 184, 0.12)',
+            border: '1px solid rgba(148, 163, 184, 0.32)',
+            color: '#cbd5e1',
+            fontWeight: '600',
+          },
+          onclick: () => { activeTab = 'guest'; draw(); },
+        },
+        h('span', {}, '👤 Misafir Sekmesine Geç'),
+        lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null),
+      gVerifyPanel,
+      h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Şifre Doğrulamalı Güvenli Hesap veya Kayıtsız Misafir Girişi'));
+  };
 
   const draw = () => {
     root.replaceChildren();
@@ -501,7 +612,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           ['account', '🪪 Profil Kartım'],
         ];
     if (!topNavTabs.some(([id]) => id === activeTab)) {
-      activeTab = isLoggedMember ? 'account' : 'register';
+      activeTab = isLoggedMember ? 'account' : 'login';
     }
     const tabsBar = h('div', { class: 'wl-auth-tabs' },
       topNavTabs.map(([id, lbl]) =>
@@ -1047,8 +1158,8 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     }
 
     if (activeTab === 'login') {
-      const idInp = h('input', { class: 'input', placeholder: 'E-posta adresi veya @kullaniciadi', autocomplete: 'username' });
-      const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifreniz', autocomplete: 'current-password' });
+      const idInp = h('input', { class: 'input', placeholder: 'E-posta adresi veya @kullaniciadi (zorunlu)', autocomplete: 'username' });
+      const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifreniz (zorunlu)', autocomplete: 'current-password' });
       const errBox = h('div', { class: 'wl-auth-err' });
 
       const submitLogin = async () => {
@@ -1056,8 +1167,14 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         errBox.textContent = '';
         const identifier = idInp.value.trim();
         const password = pwInp.value;
-        if (!identifier || !password) {
-          errBox.textContent = 'Lütfen e-posta/kullanıcı adı ve şifrenizi girin.';
+        if (!identifier) {
+          errBox.textContent = 'Lütfen e-posta adresinizi veya @kullanıcı adınızı girin.';
+          idInp.focus();
+          return;
+        }
+        if (!password || password.length < 4) {
+          errBox.textContent = 'Şifre yazmadan giriş yapılamaz! Lütfen şifrenizi girin.';
+          pwInp.focus();
           return;
         }
         try {
@@ -1089,23 +1206,6 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
       };
 
-      const sendMagicLink = async () => {
-        const email = idInp.value.trim();
-        if (!email.includes('@')) {
-          errBox.style.color = '#fb7185';
-          errBox.textContent = 'Şifresiz giriş bağlantısı için üstteki kutuya geçerli e-posta adresinizi yazın.';
-          return;
-        }
-        try {
-          const res = await api('/api/auth/email-action', { method: 'POST', body: { action: 'magic_link', email } });
-          errBox.style.color = '#6ee7b7';
-          errBox.textContent = res?.message || `Şifresiz giriş bağlantısı ${email} adresine gönderildi!`;
-        } catch (e) {
-          errBox.style.color = '#fb7185';
-          errBox.textContent = e.message || 'Şifresiz giriş bağlantısı gönderilemedi.';
-        }
-      };
-
       pwInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
       root.append(
@@ -1116,24 +1216,24 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           h('button', { type: 'button', class: 'btn primary wl-btn-full wl-btn-primary-gradient', onclick: submitLogin }, '🔑 Hesabımla Giriş Yap'),
           h('button', {
             type: 'button',
-            class: 'btn wl-btn-full',
-            style: { background: 'rgba(139, 92, 246, 0.14)', border: '1px solid rgba(139, 92, 246, 0.35)', color: '#c4b5fd' },
-            onclick: sendMagicLink,
-          }, '🔗 Şifresiz Giriş Bağlantısı Gönder'),
-          h('button', {
-            type: 'button',
             class: 'wl-auth-link-btn',
             onclick: sendResetEmail,
           }, 'Şifrenizi mi unuttunuz? E-posta ile sıfırlayın')),
-        renderSocialButtons());
+        renderSocialButtons({
+          getFormCreds: () => ({
+            email: idInp.value.includes('@') ? idInp.value.trim() : '',
+            password: pwInp.value,
+            errEl: errBox,
+          }),
+        }));
       return;
     }
 
     // activeTab === 'register'
-    const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın (Örn: Deniz)', value: (current && current.name && !/^Misafir/i.test(current.name)) ? current.name : '' });
+    const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın (Örn: Deniz — zorunlu)', value: (current && !current.isGuest && current.name && !/^Misafir/i.test(current.name)) ? current.name : '' });
     const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi (Örn: @izleyici)' });
-    const emailInp = h('input', { class: 'input', type: 'email', placeholder: 'E-posta adresin (Örn: ad@gmail.com)', autocomplete: 'email' });
-    const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifre belirle (en az 4 karakter)', autocomplete: 'new-password' });
+    const emailInp = h('input', { class: 'input', type: 'email', placeholder: 'E-posta adresin (Örn: ad@gmail.com — zorunlu)', autocomplete: 'email' });
+    const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifre belirle (en az 6 karakter — zorunlu)', autocomplete: 'new-password' });
     const errBox = h('div', { class: 'wl-auth-err' });
 
     const submitReg = async () => {
@@ -1143,10 +1243,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       const handle = handleInp.value.trim();
       const email = emailInp.value.trim();
       const password = pwInp.value;
-      if (name.length < 2) { errBox.textContent = 'Görünen ad en az 2 karakter olmalıdır.'; return; }
-      if (!email && !password) { doGuestLogin(name); return; }
-      if (!email.includes('@')) { errBox.textContent = 'Geçerli bir e-posta adresi girin.'; return; }
-      if (password.length < 4) { errBox.textContent = 'Şifre en az 4 karakter olmalıdır.'; return; }
+      if (name.length < 2) { errBox.textContent = 'Görünen ad en az 2 karakter olmalıdır.'; nameInp.focus(); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { errBox.textContent = 'Kayıt olmak için geçerli bir e-posta adresi girmelisiniz.'; emailInp.focus(); return; }
+      if (!password || password.length < 6) { errBox.textContent = 'Şifre yazmadan kayıt olunamaz! Lütfen en az 6 karakterli bir şifre belirleyin.'; pwInp.focus(); return; }
       try {
         const res = await api('/api/auth/register', { method: 'POST', body: { name, handle, email, password, color } });
         if (res?.ok && res.user) {
@@ -1170,7 +1269,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         renderColorPicker(),
         errBox,
         h('button', { type: 'button', class: 'btn primary wl-btn-full wl-btn-primary-gradient', onclick: submitReg }, '✨ Hesap Oluştur & Başla')),
-      renderSocialButtons());
+      renderSocialButtons({
+        getFormCreds: () => ({
+          email: emailInp.value.trim(),
+          password: pwInp.value,
+          errEl: errBox,
+        }),
+      }));
   };
 
   draw();
@@ -1963,29 +2068,39 @@ export function openUserProfileModal(targetUser) {
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
-export async function syncGoogleYoutubeOAuth() {
+export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') {
+  const cleanPw = String(password || '');
+  const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
+  if (cleanPw.length < 6) {
+    throw new Error('Şifre yazmadan YouTube / Google girişi yapılamaz. Lütfen en az 6 karakterli şifrenizi girin.');
+  }
   const fb = await getFirebaseAuth();
   if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {
     throw new Error('Google kimlik doğrulama modülü yüklenemedi.');
   }
+  try { await fb.auth.signOut?.(); } catch (_) {}
   const gProv = new fb.GoogleAuthProvider();
   gProv.addScope('https://www.googleapis.com/auth/youtube.readonly');
-  gProv.setCustomParameters({ prompt: 'select_account' });
+  const customParams = { prompt: 'select_account' };
+  if (cleanEmail) customParams.login_hint = cleanEmail;
+  gProv.setCustomParameters(customParams);
   const cred = await fb.signInWithPopup(fb.auth, gProv);
   const oauthCred = fb.GoogleAuthProvider.credentialFromResult(cred);
   const ytAccessToken = oauthCred?.accessToken || '';
-  const fbEmail = cred?.user?.email || '';
+  const fbEmail = (cred?.user?.email || '').trim().toLowerCase();
   const fbName = cred?.user?.displayName || '';
-  if (!state.self || state.self.isGuest || !state.self.authToken) {
-    const idToken = await cred.user.getIdToken();
-    const authRes = await api('/api/auth/oauth', {
-      method: 'POST',
-      body: { provider: 'google', idToken, email: fbEmail, name: fbName },
-    });
-    if (authRes?.ok && authRes.user) {
-      saveProfile({ ...authRes.user, authToken: authRes.authToken, isGuest: false, verified: true });
-      await syncCloudUserMedia(true);
-    }
+  if (cleanEmail && fbEmail && cleanEmail !== fbEmail) {
+    try { await fb.auth.signOut?.(); } catch (_) {}
+    throw new Error(`Yazdığınız e-posta (${cleanEmail}) ile seçtiğiniz Google hesabı (${fbEmail}) eşleşmiyor!`);
+  }
+  const idToken = await cred.user.getIdToken(true);
+  const authRes = await api('/api/auth/oauth', {
+    method: 'POST',
+    body: { provider: 'google', idToken, email: cleanEmail || fbEmail, name: fbName, password: cleanPw },
+  });
+  if (authRes?.ok && authRes.user) {
+    saveProfile({ ...authRes.user, authToken: authRes.authToken, isGuest: false, verified: true });
+    await syncCloudUserMedia(true);
   }
   const syncRes = await pushYtPrefsAction({
     action: 'import_oauth',

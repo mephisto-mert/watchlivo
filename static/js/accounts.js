@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261105_v108';
-import { api, qs } from './api.js?v=20261105_v108';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261105_v108';
+import { h, toast, popup } from './ui.js?v=20261105_v109';
+import { api, qs } from './api.js?v=20261105_v109';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261105_v109';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -154,14 +154,21 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   const emailInp = h('input', {
     class: 'input',
     type: 'email',
-    placeholder: `${p.name} hesap e-posta adresiniz (örn. ad@gmail.com)...`,
-    value: state.self?.email || '',
+    placeholder: `${p.name} hesap e-posta adresiniz (örn. ad@gmail.com — zorunlu)...`,
+    autocomplete: 'email',
+    value: (!state.self?.isGuest && state.self?.email) ? state.self.email : '',
+  });
+  const pwInp = h('input', {
+    class: 'input',
+    type: 'password',
+    placeholder: `${p.name} hesap şifreniz (en az 6 karakter — zorunlu)...`,
+    autocomplete: 'current-password',
   });
   const profInp = h('input', {
     class: 'input',
     type: 'text',
     placeholder: 'Profil Adı (örn. Mert 4K UHD)',
-    value: acct.profileName || state.self?.name || '4K UHD',
+    value: acct.profileName || ((!state.self?.isGuest && state.self?.name) ? state.self.name : '4K UHD'),
   });
   const cookieName = (acct.authCookies || ['session'])[0] || 'session';
   const cookieInp = h('input', {
@@ -179,14 +186,15 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
       color: '#cbd5e1',
       lineHeight: '1.4',
     },
-  }, `🔒 Güvenlik gereği ${p.name} şifreniz Watchlivo üzerinde istenmez. Önce 1. Adım ile resmi ${p.name} oturum penceresinde giriş yapın, ardından 2. Adım ile bağlantıyı onaylayın.`);
+  }, `🔐 Güvenlik gereği şifre yazmadan ${p.name} oturumu bağlanamaz. Lütfen e-posta adresinizi ve en az 6 karakterli şifrenizi girin, ardından 1. Adım ve 2. Adım ile oturumu doğrulayın.`);
 
   let modalHandle = null;
   modalHandle = popup({
-    title: `🔑 ${p.name} Resmi Oturum & Portal Doğrulaması`,
+    title: `🔑 ${p.name} Şifreli Oturum & Portal Doğrulaması`,
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
       statusBox,
       emailInp,
+      pwInp,
       profInp,
       cookieInp,
       acct.loginUrl ? h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
@@ -198,7 +206,7 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
             window.open(acct.loginUrl, 'wl_provider_login', 'width=520,height=680,noopener,noreferrer');
             statusBox.style.borderColor = '#6366f1';
             statusBox.style.color = '#a5b4fc';
-            statusBox.textContent = `⏳ ${p.name} resmi giriş penceresi açıldı. Giriş yaptıktan sonra aşağıdaki "2. Adım: Oturumu Doğrula & Bağla" butonuna tıklayın.`;
+            statusBox.textContent = `⏳ ${p.name} resmi giriş penceresi açıldı. E-posta ve şifrenizi girdikten sonra "2. Adım: Şifreyi Doğrula & Bağla" butonuna tıklayın.`;
           },
         }, `🔑 1. Adım: ${p.name} Resmi Giriş Penceresini Aç`),
         onOpenBrowser ? h('button', {
@@ -214,17 +222,25 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
     ),
     options: [
       {
-        label: '✓ 2. Adım: Oturumu Doğrula & Bağla',
+        label: '✓ 2. Adım: Şifreyi Doğrula & Bağla',
         primary: true,
         onClick: async () => {
           const em = emailInp.value.trim();
-          const pr = profInp.value.trim() || state.self?.name || '4K UHD';
+          const pw = pwInp.value;
+          const pr = profInp.value.trim() || ((!state.self?.isGuest && state.self?.name) ? state.self.name : '4K UHD');
           const ck = cookieInp.value.trim();
           if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
             statusBox.style.borderColor = '#ef4444';
             statusBox.style.color = '#f87171';
             statusBox.textContent = `⚠️ Lütfen geçerli bir ${p.name} e-posta adresi girin (örn. ad@gmail.com).`;
             emailInp.focus();
+            return true;
+          }
+          if (!pw || pw.length < 6 || /^(123456|12345678|password|qwerty|111111)$/i.test(pw)) {
+            statusBox.style.borderColor = '#ef4444';
+            statusBox.style.color = '#f87171';
+            statusBox.textContent = `⚠️ Şifre yazmadan ${p.name} girişi yapılamaz! Lütfen en az 6 karakterli geçerli hesap şifrenizi girin.`;
+            pwInp.focus();
             return true;
           }
           const hasValidCookie = ck.length >= 16 && (ck.includes('=') || ck.length >= 24);
@@ -244,7 +260,7 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
           };
           saveLocalAccounts(local);
           await fetchAccounts();
-          toast(`✓ ${p.name} oturumu (${maskAccountEmail(em)}) doğrulandı ve bağlandı!`);
+          toast(`✓ ${p.name} oturumu (${maskAccountEmail(em)}) şifreyle doğrulandı ve bağlandı!`);
           onReload?.();
         },
       },
@@ -301,7 +317,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261105_v108',
+        v: '20261105_v109',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

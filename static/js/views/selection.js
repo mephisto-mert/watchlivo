@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v108';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v108';
-import { api, qs } from '../api.js?v=20261105_v108';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v108';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v108';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v108';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v108';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v109';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v109';
+import { api, qs } from '../api.js?v=20261105_v109';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v109';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v109';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v109';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v109';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261105_v108';
+} from '../store.js?v=20261105_v109';
 
 let _activeHomePick = null;
 
@@ -343,14 +343,22 @@ const QUICK_TR_CHANNELS = [
 ];
 
 export function openYtPersonalizeModal(onUpdated) {
-  if (!state.self || state.self.isGuest) {
-    profileSetup({
-      current: state.self,
-      initialTab: 'login',
-      onDone: () => { invalidateYtFeedCache(); onUpdated?.(); },
-    });
-    return;
-  }
+  const ytEmailInp = h('input', {
+    class: 'input',
+    type: 'email',
+    placeholder: 'Google / YouTube E-posta Adresiniz (örn. ad@gmail.com)',
+    autocomplete: 'email',
+    value: getYtPrefs().googleEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : ''),
+  });
+  const ytPwInp = h('input', {
+    class: 'input',
+    type: 'password',
+    placeholder: 'Hesap Şifreniz (en az 6 karakter — zorunlu)',
+    autocomplete: 'current-password',
+  });
+  const ytErrBox = h('div', {
+    style: { fontSize: '.78rem', color: '#fb7185', minHeight: '18px', fontWeight: '600' },
+  });
   const chInp = h('input', {
     class: 'input',
     type: 'text',
@@ -389,33 +397,49 @@ export function openYtPersonalizeModal(onUpdated) {
   chInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustomCh(); });
 
   const modalRef = popup({
-    title: '🔴 Kişiselleştirilmiş YouTube Akışı & Kanal Eşitleme',
+    title: '🔴 YouTube & Google Şifreli Giriş ve Kanal Eşitleme',
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
-      h('div', { class: 'yt-oauth-banner' },
+      h('div', { class: 'yt-oauth-banner', style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
         h('div', { style: { fontSize: '.82rem', lineHeight: '1.45', color: '#e2e8f0' } },
-          `Hesabın (@${state.self.handle || state.self.name}) ile izlediğin videolar, beğenilerin, aramaların ve takip ettiğin kanallar otomatik olarak bulutta saklanır ve akışını şekillendirir.`),
+          '🔐 Güvenlik gereği şifre yazmadan YouTube / Google girişi yapılamaz. Google e-posta adresinizi ve en az 6 karakterli hesap şifrenizi girerek YouTube hesabınızı bağlayın:'),
+        ytEmailInp,
+        ytPwInp,
+        ytErrBox,
         h('button', {
           type: 'button',
           class: 'btn primary',
-          style: { width: '100%', justifyContent: 'center', marginTop: '8px', background: '#ff0033', borderColor: '#ff0033', color: '#fff' },
+          style: { width: '100%', justifyContent: 'center', marginTop: '2px', background: '#ff0033', borderColor: '#ff0033', color: '#fff' },
           onclick: async (e) => {
+            ytErrBox.textContent = '';
+            const em = ytEmailInp.value.trim();
+            const pw = ytPwInp.value;
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
+              ytErrBox.textContent = '⚠️ Lütfen geçerli bir Google / YouTube e-posta adresi girin.';
+              ytEmailInp.focus();
+              return;
+            }
+            if (!pw || pw.length < 6) {
+              ytErrBox.textContent = '⚠️ Şifre yazmadan YouTube / Google girişi yapılamaz! Lütfen en az 6 karakterli şifrenizi girin.';
+              ytPwInp.focus();
+              return;
+            }
             const btn = e.currentTarget;
             btn.disabled = true;
-            btn.textContent = '⏳ Google YouTube Hesabın Eşitleniyor...';
+            btn.textContent = '⏳ Şifre Doğrulanıyor & YouTube Eşitleniyor...';
             try {
-              const res = await syncGoogleYoutubeOAuth();
-              toast(`🔴 Google YouTube eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
+              const res = await syncGoogleYoutubeOAuth(pw, em);
+              toast(`🔴 Google YouTube şifreyle doğrulandı ve eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
               renderSubsList();
               onUpdated?.();
               modalRef?.close?.();
             } catch (err) {
-              toast('Google penceresi kapatıldı veya izin verilmedi — aşağıdan dilediğin kanalı tek tıkla ekleyebilirsin.');
+              ytErrBox.textContent = err?.message || 'Google / YouTube girişi doğrulanamadı. Lütfen bilgilerinizi kontrol edin.';
             } finally {
               btn.disabled = false;
-              btn.textContent = '🔴 Google Hesabından YouTube Abonelik & Beğenileri Eşitle';
+              btn.textContent = '🔴 Şifreyi Doğrula & Google YouTube Hesabını Eşitle';
             }
           },
-        }, '🔴 Google Hesabından YouTube Abonelik & Beğenileri Eşitle')),
+        }, '🔴 Şifreyi Doğrula & Google YouTube Hesabını Eşitle')),
       h('div', { style: { display: 'flex', gap: '8px' } },
         chInp,
         h('button', { type: 'button', class: 'btn primary', onclick: addCustomCh }, '+ Takip Et')),

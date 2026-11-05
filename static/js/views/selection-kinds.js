@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v108';
-import { api, qs } from '../api.js?v=20261105_v108';
-import { parseVideoUrl } from '../providers.js?v=20261105_v108';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v108';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v108';
-import { profileSetup } from '../profile.js?v=20261105_v108';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v108';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v109';
+import { api, qs } from '../api.js?v=20261105_v109';
+import { parseVideoUrl } from '../providers.js?v=20261105_v109';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v109';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v109';
+import { profileSetup } from '../profile.js?v=20261105_v109';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v109';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261105_v108';
+} from '../store.js?v=20261105_v109';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -99,11 +99,14 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   };
 
   const refreshAuthBar = () => {
-    const signedIn = Boolean(state.self && !state.self.isGuest);
+    const signedIn = Boolean(state.self && !state.self.isGuest && state.self.authToken);
     const prefs = getYtPrefs();
-    const uLabel = signedIn
-      ? `${prefs.googleChannelTitle || state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'})`
-      : 'Giriş Yap — Kişiselleştirilmiş Akışını Aç';
+    const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);
+    const uLabel = ytConnected
+      ? `${prefs.googleChannelTitle || state.self.name || 'YouTube Hesabım'} (${prefs.googleEmail})`
+      : signedIn
+        ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'}) — YouTube Hesabı Henüz Bağlı Değil`
+        : 'YouTube / Google ile Giriş Yap (Şifre Doğrulamalı)';
     const subCount = prefs.subscriptions.length;
     const likeCount = prefs.likedVideos.length;
     authHolder.replaceChildren(
@@ -111,8 +114,8 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         style: {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px',
           padding: '10px 14px', borderRadius: '14px',
-          background: signedIn ? 'linear-gradient(135deg, rgba(255,0,51,0.14), rgba(15,23,42,0.88))' : 'rgba(15, 23, 42, 0.78)',
-          border: signedIn ? '1px solid rgba(255, 0, 51, 0.36)' : '1px solid rgba(255, 255, 255, 0.1)',
+          background: ytConnected ? 'linear-gradient(135deg, rgba(255,0,51,0.14), rgba(15,23,42,0.88))' : 'rgba(15, 23, 42, 0.78)',
+          border: ytConnected ? '1px solid rgba(255, 0, 51, 0.36)' : '1px solid rgba(255, 255, 255, 0.1)',
         },
       },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
@@ -124,23 +127,24 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           }, '▶'),
           h('div', {},
             h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
-              signedIn ? `🔴 ${uLabel}` : uLabel,
-              signedIn ? h('span', { style: { fontSize: '.68rem', background: 'rgba(39,220,200,0.16)', color: '#27DCC8', padding: '2px 7px', borderRadius: '99px' } }, '✓ Sana Özel Akış Aktif') : null,
+              ytConnected ? `🔴 ${uLabel}` : uLabel,
+              ytConnected ? h('span', { style: { fontSize: '.68rem', background: 'rgba(39,220,200,0.16)', color: '#27DCC8', padding: '2px 7px', borderRadius: '99px' } }, '✓ YouTube & Google Bağlı') : null,
               h('span', { style: { fontSize: '.68rem', background: 'rgba(34,197,94,0.16)', color: '#4ade80', padding: '2px 7px', borderRadius: '99px' } }, '🛡️ Reklamsız 1080p')),
             h('div', { style: { fontSize: '.76rem', color: '#94a3b8' } },
-              signedIn
+              ytConnected
                 ? `${subCount} takip edilen kanal · ${likeCount} beğenilen video · İzleme ve arama geçmişine göre canlı öneriler`
-                : 'Watchlivo hesabınla giriş yaptığında aynı YouTube gibi kişiselleştirilmiş videolar otomatik olarak karşına gelir.'))),
+                : 'YouTube akışını kişiselleştirmek için Google e-posta adresin ve şifrenle giriş yaparak hesabını eşitleyebilirsin.'))),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-          signedIn ? h('button', {
+          h('button', {
             type: 'button',
             class: 'btn sm primary',
             onclick: () => openYtPersonalizeModal(() => { refreshAuthBar(); loadTab(activeTab, true); }),
-          }, '🔗 Kanal & Google Eşitle') : h('button', {
+          }, ytConnected ? '🔗 Kanal & Google Eşitle' : '🔑 YouTube / Google Şifreli Giriş'),
+          !signedIn ? h('button', {
             type: 'button',
-            class: 'btn sm primary',
+            class: 'btn sm ghost',
             onclick: () => profileSetup({ current: state.self, initialTab: 'login', onDone: () => { refreshAuthBar(); loadTab('all', true); } }),
-          }, '🔑 Giriş Yap'),
+          }, '👤 Watchlivo Hesabı') : null,
           h('button', { type: 'button', class: 'btn sm ghost', onclick: () => loadTab(activeTab === 'search' ? 'all' : activeTab, true) }, '🔄 Yenile'),
           h('button', { type: 'button', class: 'btn sm ghost', onclick: () => loadTab('history') }, '🕘 Geçmişim')))
     );
