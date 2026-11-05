@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261104_v106 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v107 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261104_v106", index_html)
+        self.assertIn("20261105_v107", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1641,11 +1641,25 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("85937"), 7394)
         self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("1159311"), 11793)
 
-        # 3. Frontend series picker season counts & full episode labels
+        dn_s2e1 = server._resolve_episode_numbering("13916", 2, 1)
+        self.assertEqual((dn_s2e1["s_split"], dn_s2e1["e_split"]), (2, 1))
+        self.assertEqual(dn_s2e1["abs_ep"], 20)
+
+        fma_s3e1 = server._resolve_episode_numbering("37863", 3, 1)
+        self.assertEqual((fma_s3e1["s_split"], fma_s3e1["e_split"]), (3, 1))
+        self.assertEqual(fma_s3e1["abs_ep"], 26)
+
+        spy_s2e1 = server._resolve_episode_numbering("120089", 2, 1)
+        self.assertEqual((spy_s2e1["s_split"], spy_s2e1["e_split"]), (2, 1))
+        self.assertEqual(spy_s2e1["abs_ep"], 13)
+
+        # 3. Frontend series picker season counts, hero season selector, dropdown & episode badges
         root = Path(__file__).resolve().parent.parent
         accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
         self.assertIn("s.count ? ` (${s.count} Bölüm)` : ''", accounts_js)
-        self.assertIn("`${curSeason}. Sezon ${ep.episode}. Bölüm — ${rawEpName}`", accounts_js)
+        self.assertIn("hero-season-picker", accounts_js)
+        self.assertIn("season-select-dropdown", accounts_js)
+        self.assertIn("episode-season-badge", accounts_js)
 
 
 if __name__ == '__main__':

@@ -35,6 +35,7 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders, t
     }
     const res = await fetch(path, {
       method,
+      cache: 'no-store',
       headers: Object.keys(hdrs).length ? hdrs : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,

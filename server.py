@@ -2127,7 +2127,44 @@ _CANONICAL_SEASON_SPLITS: dict[str, list[int]] = {
     "73223": [51, 51, 52, 16],      # Black Clover (S1..S4)
     "30984": [20, 21, 22, 28, 18, 22, 20, 16, 22, 16, 7, 17, 36, 51, 26, 24, 13, 13, 14, 10],  # Bleach (S1..S20)
     "70881": [51, 52, 52, 51, 52, 35],  # Boruto: Naruto Next Generations
-    "31911": [16, 14, 14, 10, 10],  # Fullmetal Alchemist: Brotherhood
+    "31911": [16, 14, 14, 10, 10],  # Fullmetal Alchemist: Brotherhood (S1..S5)
+    "37863": [13, 12, 16, 10],      # Fullmetal Alchemist (2003) (S1..S4)
+    "13916": [19, 18],              # Death Note (S1: 19, S2: 18)
+    "35935": [13, 12],              # Berserk (1997) (S1: 13, S2: 12)
+    "117024": [12, 12],             # Sacrificial Princess and the King of Beasts (S1: 12, S2: 12)
+    "46298": [26, 12, 20, 17, 61, 12],  # Hunter x Hunter (2011) (S1..S6 Arcs)
+    "120089": [12, 13, 12, 13],     # SPY x FAMILY (S1 Cour 1: 12, S2 Cour 2: 13, S3: 12, S4: 13)
+    "76806": [40, 40, 40, 40, 40, 52, 52, 52, 52, 80],  # Tales of Demons and Gods (S1..S10)
+    "30981": [24, 25, 25],          # Monster (S1..S3)
+    "31926": [25, 25],              # Code Geass (S1: 25, S2 R2: 25)
+    "65942": [25, 25, 16],          # Re:Zero (S1: 25, S2: 25, S3: 16)
+    "82684": [24, 24, 24],          # That Time I Got Reincarnated as a Slime (S1..S3)
+    "88046": [24, 24],              # Fire Force (S1: 24, S2: 24)
+    "117933": [24, 13, 13],         # Tokyo Revengers (S1..S3)
+    "65931": [12, 12, 12, 13, 11],  # Bungou Stray Dogs (S1..S5)
+    "72517": [12, 13, 13],          # Classroom of the Elite (S1..S3)
+    "220542": [24, 24],             # The Apothecary Diaries (S1: 24, S2: 24)
+    "204832": [12, 12],             # Mashle: Magic and Muscles (S1: 12, S2: 12)
+    "211287": [25, 25],             # Shangri-La Frontier (S1: 25, S2: 25)
+    "154524": [20, 12],             # The Eminence in Shadow (S1: 20, S2: 12)
+    "100565": [11, 12],             # 86 EIGHTY-SIX (Part 1: 11, Part 2: 12)
+    "61459": [22, 25],              # Assassination Classroom (S1: 22, S2: 25)
+    "110070": [13, 13],             # Horimiya (S1: 13, S2 Piece: 13)
+    "122792": [12, 12],             # Komi Can't Communicate (S1: 12, S2: 12)
+    "60622": [12, 13],              # Noragami (S1: 12, S2 Aragoto: 13)
+    "89456": [12, 12, 12, 16],      # Kengan Ashura (S1..S4)
+    "114868": [12, 15],             # Record of Ragnarok (S1: 12, S2: 15)
+    "78173": [26, 13],              # Baki (S1: 26, S2: 13)
+    "62715": [14, 13, 19, 30, 55],  # Dragon Ball Super (S1..S5)
+    "12609": [13, 15, 17, 23, 15, 19, 17, 14, 20],  # Dragon Ball (S1..S9)
+    "30983": [25, 41, 28, 18],      # Yu Yu Hakusho (S1..S4)
+    "35613": [27, 27, 28, 28, 28, 29],  # InuYasha (S1..S6)
+    "26020": [27, 35, 32],          # Rurouni Kenshin (S1..S3)
+    "42254": [24, 25, 26, 26],      # Slam Dunk (S1..S4)
+    "31914": [13, 13, 13, 12],      # Soul Eater (S1..S4)
+    "45950": [22, 25],              # Nana (S1: 22, S2: 25)
+    "42444": [22, 21],              # Great Teacher Onizuka (S1: 22, S2: 21)
+    "210757": [12, 12],             # Undead Unluck (Part 1: 12, Part 2: 12)
 }
 _EPISODE_GROUP_SPLITS_CACHE: dict[str, list[int]] = {}
 
@@ -2137,30 +2174,88 @@ def _get_canonical_season_splits_sync(tid: str, raw_seasons: list | None = None,
     if not tid_s.isdigit():
         return []
     if tid_s in _CANONICAL_SEASON_SPLITS:
-        return list(_CANONICAL_SEASON_SPLITS[tid_s])
+        base_splits = list(_CANONICAL_SEASON_SPLITS[tid_s])
+        if raw_seasons:
+            tot_raw = sum(max(0, int(x.get("count") or 0)) for x in raw_seasons)
+            if tot_raw > sum(base_splits):
+                rem_extra = tot_raw - sum(base_splits)
+                while rem_extra > 0:
+                    chunk = min(24, rem_extra)
+                    base_splits.append(chunk)
+                    rem_extra -= chunk
+        return base_splits
     if tid_s in _EPISODE_GROUP_SPLITS_CACHE:
         return list(_EPISODE_GROUP_SPLITS_CACHE[tid_s])
-    if raw_seasons is not None and (len(raw_seasons) != 1 or int(raw_seasons[0].get("count") or 0) <= 20):
+    if raw_seasons is not None and (len(raw_seasons) != 1 or int(raw_seasons[0].get("count") or 0) < 16):
         _EPISODE_GROUP_SPLITS_CACHE[tid_s] = []
         return []
+    ep_tot = int(raw_seasons[0].get("count") or 0) if (raw_seasons and len(raw_seasons) == 1) else 0
     splits: list[int] = []
     try:
         eg_res = _http_json(f"https://api.themoviedb.org/3/tv/{tid_s}/episode_groups?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY}), timeout=3.5) or {}
-        picked_g = None
-        for g in (eg_res.get("results") or []):
-            g_type = int(g.get("type") or 0)
-            g_name = str(g.get("name") or "").lower()
-            if (g_type == 6 or "season" in g_name) and int(g.get("group_count") or 0) >= 2:
-                picked_g = g
-                break
-        if picked_g and picked_g.get("id"):
+        results = [g for g in (eg_res.get("results") or []) if isinstance(g, dict) and int(g.get("group_count") or 0) >= 2]
+        results.sort(key=lambda g: (
+            0 if int(g.get("type") or 0) == 6 else (1 if "season" in str(g.get("name") or "").lower() else (2 if int(g.get("type") or 0) in (7, 3, 5, 1) else 3)),
+            -int(g.get("group_count") or 0),
+        ))
+        for picked_g in results[:2]:
+            if not picked_g.get("id"):
+                continue
             gd = _http_json(f"https://api.themoviedb.org/3/tv/episode_group/{picked_g['id']}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY}), timeout=3.5) or {}
             groups = sorted([gg for gg in (gd.get("groups") or []) if int(gg.get("order") or 0) >= 1], key=lambda x: int(x.get("order") or 0))
             cand_splits = [len(gg.get("episodes") or []) for gg in groups if len(gg.get("episodes") or []) > 0]
-            if len(cand_splits) >= 2:
+            if len(cand_splits) >= 2 and sum(cand_splits) >= 12:
                 splits = cand_splits
+                break
     except Exception:
         splits = []
+    if not splits and ep_tot >= 16:
+        try:
+            from datetime import date
+            sd1 = _http_json(f"https://api.themoviedb.org/3/tv/{tid_s}/season/1?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=3.8) or {}
+            eps1 = sd1.get("episodes") or []
+            if len(eps1) >= 16:
+                cur_cnt = 0
+                prev_dt = None
+                date_splits = []
+                for idx_e, ep_o in enumerate(eps1):
+                    ad_s = str(ep_o.get("air_date") or "").strip()
+                    cur_dt = None
+                    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", ad_s):
+                        try:
+                            cur_dt = date.fromisoformat(ad_s)
+                        except Exception:
+                            cur_dt = None
+                    if prev_dt and cur_dt and (cur_dt - prev_dt).days >= 60 and cur_cnt >= 6 and (len(eps1) - idx_e) >= 4:
+                        date_splits.append(cur_cnt)
+                        cur_cnt = 0
+                    cur_cnt += 1
+                    if cur_dt:
+                        prev_dt = cur_dt
+                if cur_cnt > 0:
+                    date_splits.append(cur_cnt)
+                if len(date_splits) >= 2:
+                    splits = date_splits
+        except Exception:
+            pass
+    if not splits and ep_tot >= 24:
+        if ep_tot <= 38:
+            half = ep_tot // 2
+            splits = [half, ep_tot - half]
+        else:
+            rem_e = ep_tot
+            while rem_e > 0:
+                if rem_e <= 30:
+                    splits.append(rem_e)
+                    break
+                splits.append(24)
+                rem_e -= 24
+    if splits and ep_tot > sum(splits):
+        rem_extra = ep_tot - sum(splits)
+        while rem_extra > 0:
+            chunk = min(24, rem_extra)
+            splits.append(chunk)
+            rem_extra -= chunk
     _EPISODE_GROUP_SPLITS_CACHE[tid_s] = list(splits)
     return splits
 
@@ -2173,7 +2268,7 @@ def _resolve_episode_numbering(tid: str, s: int, e: int) -> dict:
     splits = _CANONICAL_SEASON_SPLITS.get(tid_s) or _EPISODE_GROUP_SPLITS_CACHE.get(tid_s) or []
     if not splits and tid_s.isdigit():
         ep_map_now = _tv_season_ep_map(tid_s)
-        if len(ep_map_now) == 1 and ep_map_now.get(1, 0) > 20:
+        if len(ep_map_now) == 1 and ep_map_now.get(1, 0) >= 16:
             splits = _get_canonical_season_splits_sync(tid_s, [{"season": 1, "count": ep_map_now[1]}])
     s_split, e_split = s_in, e_in
     s_tmdb, e_tmdb = s_in, e_in
@@ -2409,6 +2504,8 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
             "still": backdrop,
         }]
 
+    out["totalSeasons"] = len(out.get("seasons") or [])
+    out["currentSeason"] = min(max(1, s_num), max(1, len(out.get("seasons") or [1])))
     return out
 
 
@@ -2424,10 +2521,10 @@ async def title_seasons(request: Request):
         season = max(1, int(request.query_params.get("season") or 1))
     except (TypeError, ValueError):
         season = 1
-    ckey = f"v3|{media_type}|{tmdb_id or title.lower()}|{season}"
+    ckey = f"v5|{media_type}|{tmdb_id or title.lower()}|{season}"
     now_t = time.time()
     cached = _SEASONS_CACHE.get(ckey)
-    hdrs = {"Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400"}
+    hdrs = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
     if cached and now_t - cached[0] < 3600:
         return JSONResponse(cached[1], headers=hdrs)
     if len(_SEASONS_LOCKS) >= 300:

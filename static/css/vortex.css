@@ -6632,3 +6632,29 @@ body.tv-nav-active .dock-item:focus {
   transform: translateY(-2px) scale(1.02) !important;
   z-index: 12 !important;
 }
+
+/* v107 Sticky & Prominent Multi-Season Bar */
+.series-detail .season-tabs {
+  position: sticky;
+  top: 0;
+  z-index: 18;
+  background: rgba(11, 10, 18, 0.94);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 10px 6px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.28);
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.series-detail .season-tab {
+  flex: 0 0 auto;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 7px 14px;
+}
+.series-detail .season-tab.primary {
+  box-shadow: 0 0 14px rgba(99, 102, 241, 0.45);
+}

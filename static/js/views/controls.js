@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261104_v106';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261104_v106';
-import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261104_v106';
-import { getProvider } from '../providers.js?v=20261104_v106';
-import { expectedPosition } from '../sync.js?v=20261104_v106';
-import { thumbFor } from './lobby.js?v=20261104_v106';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261104_v106';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261104_v106';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261104_v106';
-import { avatar } from '../profile.js?v=20261104_v106';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261105_v107';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261105_v107';
+import { resumeSharedAudioContext } from '../players/audio-gain.js?v=20261105_v107';
+import { getProvider } from '../providers.js?v=20261105_v107';
+import { expectedPosition } from '../sync.js?v=20261105_v107';
+import { thumbFor } from './lobby.js?v=20261105_v107';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261105_v107';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261105_v107';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261105_v107';
+import { avatar } from '../profile.js?v=20261105_v107';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2619,8 +2619,9 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
+            v: '20261105_v107',
           });
-          fetch(`/api/rave/seasons?${q.toString()}`)
+          fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
             .then((inf) => {
               if (inf && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
@@ -2628,7 +2629,7 @@ export function buildControls(frame, ctx) {
                   episodeCount: Array.isArray(inf.episodes) ? inf.episodes.length : 0,
                   totalSeasons: Array.isArray(inf.seasons) ? inf.seasons.length : 0,
                   seasonsMeta: Array.isArray(inf.seasons)
-                    ? inf.seasons.map((sx) => ({ season: Number(sx.season || sx.season_number || 0), episodeCount: Number(sx.episodeCount || sx.episode_count || 0) }))
+                    ? inf.seasons.map((sx) => ({ season: Number(sx.season || sx.season_number || 0), episodeCount: Number(sx.count || sx.episodeCount || sx.episode_count || 0) }))
                     : [],
                 };
                 window.__wlSeasonsHydrated[hydKey] = payload;
