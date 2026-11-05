@@ -3683,12 +3683,13 @@ header.navbar.top-nav-capsule {
   }
   .floating-dock .dock-lbl {
     display: block !important;
-    font-size: 0.58rem !important;
-    line-height: 1 !important;
+    font-size: 0.59rem !important;
+    letter-spacing: -0.015em !important;
+    line-height: 1.05 !important;
     white-space: nowrap !important;
     overflow: hidden !important;
     text-overflow: ellipsis !important;
-    max-width: 54px !important;
+    max-width: 72px !important;
   }
 }
 
@@ -5506,9 +5507,9 @@ header.navbar.top-nav-capsule {
   }
 
   .provider-tile.rave-icon-tile .provider-logo-wrap {
-    height: 28px !important;
+    height: 24px !important;
     width: auto !important;
-    max-width: 62% !important;
+    max-width: calc(100% - 78px) !important;
     display: flex !important;
     align-items: center !important;
     justify-content: flex-start !important;
@@ -5516,10 +5517,10 @@ header.navbar.top-nav-capsule {
   }
 
   .provider-tile.rave-icon-tile .provider-logo-wrap img {
-    height: 25px !important;
-    max-height: 26px !important;
+    height: 21px !important;
+    max-height: 22px !important;
     width: auto !important;
-    max-width: 105px !important;
+    max-width: 86px !important;
     object-fit: contain !important;
     object-position: left center !important;
   }
@@ -5527,13 +5528,16 @@ header.navbar.top-nav-capsule {
   .provider-tile.rave-icon-tile .provider-corner-tag {
     display: inline-flex !important;
     position: absolute !important;
-    top: 9px !important;
-    right: 9px !important;
-    padding: 2px 7px !important;
+    top: 8px !important;
+    right: 8px !important;
+    padding: 2px 6px !important;
     border-radius: 999px !important;
-    font-size: 0.56rem !important;
+    font-size: 0.52rem !important;
     font-weight: 800 !important;
-    letter-spacing: 0.02em !important;
+    letter-spacing: 0.015em !important;
+    max-width: 74px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
     color: #f8fafc !important;
     background: color-mix(in srgb, var(--brand, var(--accent)) 26%, rgba(4, 8, 16, 0.88)) !important;
     border: 1px solid color-mix(in srgb, var(--brand, var(--accent)) 55%, rgba(255, 255, 255, 0.16)) !important;
@@ -5606,16 +5610,18 @@ html.is-native-apk .wl-btn-apk-dl,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   margin-bottom: 10px;
 }
-.wl-continue-title-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.wl-continue-heading { font-size: .88rem; font-weight: 800; color: #f8fafc; }
+.wl-continue-title-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.wl-continue-heading { font-size: .86rem; font-weight: 800; color: #f8fafc; white-space: nowrap; }
 .wl-continue-cloud-pill {
-  font-size: .66rem;
+  font-size: .64rem;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: 999px;
+  white-space: nowrap;
   color: var(--accent, #27DCC8);
   background: color-mix(in srgb, var(--accent, #27DCC8) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #27DCC8) 34%, transparent);
@@ -6658,3 +6664,114 @@ body.tv-nav-active .dock-item:focus {
 .series-detail .season-tab.primary {
   box-shadow: 0 0 14px rgba(99, 102, 241, 0.45);
 }
+
+/* v111: 30-Subagent UI, Main Menu, Room Controls, Modal & Mobile Polish */
+.popup {
+  position: relative;
+}
+.popup-close-x {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 5;
+  transition: background 0.16s ease, transform 0.16s ease, color 0.16s ease;
+}
+.popup-close-x:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #ffffff;
+  transform: scale(1.05);
+}
+.popup-close-x svg {
+  width: 15px;
+  height: 15px;
+}
+.popup h3.popup-title-pad {
+  padding-right: 38px !important;
+}
+
+.wl-theme-strip-pills {
+  min-width: 0 !important;
+  padding: 3px 8px 3px 2px !important;
+}
+
+@media (max-width: 720px) {
+  .rave-top-bar {
+    padding: 8px 10px !important;
+  }
+  .rave-top-bar .home-search {
+    padding: 0 6px 0 11px !important;
+    height: 42px !important;
+    gap: 5px !important;
+  }
+  .rave-top-bar .home-search input {
+    font-size: 0.82rem !important;
+    min-width: 0 !important;
+  }
+  .rave-top-bar .home-search .btn.primary {
+    padding: 0 13px !important;
+    height: 32px !important;
+    font-size: 0.78rem !important;
+    flex-shrink: 0 !important;
+  }
+  .wl-continue-section {
+    padding: 10px 11px !important;
+  }
+  .wl-continue-head {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px 8px !important;
+  }
+  .wl-continue-title-group {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+  }
+  .wl-continue-heading {
+    font-size: 0.81rem !important;
+    white-space: nowrap !important;
+  }
+  .wl-continue-cloud-pill {
+    font-size: 0.6rem !important;
+    padding: 2px 6px !important;
+    white-space: nowrap !important;
+  }
+  .wl-continue-actions {
+    display: flex !important;
+    align-items: center !important;
+    gap: 5px !important;
+    margin-left: auto !important;
+  }
+  .wl-continue-actions .btn.sm {
+    padding: 3px 8px !important;
+    font-size: 0.68rem !important;
+    height: 26px !important;
+    white-space: nowrap !important;
+  }
+  .rave-providers-head {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 6px 8px !important;
+  }
+  .rave-providers-title {
+    flex: 1 1 100% !important;
+    font-size: 0.92rem !important;
+  }
+}
+

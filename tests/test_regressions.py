@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v110 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v111 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v110", index_html)
+        self.assertIn("20261105_v111", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1805,6 +1805,37 @@ class RegressionTests(unittest.TestCase):
             "streamUrl": "http://127.0.0.1:8080/secret.m3u8",
         })
         self.assertEqual(r_ssrf.status_code, 400)
+
+    def test_v111_thirty_subagent_ui_and_interaction_fixes(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+        ui_js = (root / "static" / "js" / "ui.js").read_text(encoding="utf-8")
+        home_js = (root / "static" / "js" / "views" / "home.js").read_text(encoding="utf-8")
+        selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        selection_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        lobby_js = (root / "static" / "js" / "views" / "lobby.js").read_text(encoding="utf-8")
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+
+        # 1. Safe SVG data URI allowed on <img src="data:image/svg+xml..."> so 31 platform logos & 21 Live TV cards render
+        self.assertIn("const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\\/svg\\+xml[,;]/i.test(cleanV));", ui_js)
+        self.assertIn("card.classList.add('is-closing');", ui_js)
+
+        # 2. Bottom dock profile modal does not steal active tab highlight & labels fit 72px without truncating
+        self.assertIn("if (id !== 'profile') {", home_js)
+        self.assertIn("max-width: 72px !important;", vortex_css)
+
+        # 3. Mobile provider card logo & corner badge non-overlapping constraints + search & continue-watching layout
+        self.assertIn("max-width: calc(100% - 78px) !important;", vortex_css)
+        self.assertIn(".popup-close-x {", vortex_css)
+        self.assertIn("placeholder: 'Film, dizi, anime veya link ara...'", selection_js)
+        self.assertIn("🔒 Bulut Senkron", selection_js)
+        self.assertIn("const created = await api('/api/rooms/create', {", selection_js)
+
+        # 4. In-room video controls mount syncPill, qualityBadge, and subPillBtn in top bar + Vizyon TV picker + Friends timer cleanup
+        self.assertIn("h('div', { class: 'ctl-top-right' }, syncPill, qualityBadge, subPillBtn, breakTopBtn, prevEpTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)", controls_js)
+        self.assertIn("Sezon & Bölüm Seç", selection_kinds_js)
+        self.assertIn("onClose: () => clearInterval(liveTimer),", lobby_js)
 
 
 if __name__ == '__main__':

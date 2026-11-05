@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261105_v110';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261105_v111';
 
 const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -101,7 +101,8 @@ export function h(tag, attrs = {}, ...children) {
       if (k === 'srcdoc') continue;
       if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
         const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
-        if (/^(?:javascript:|vbscript:|data:text\/html|data:image\/svg|data:application\/xhtml)/i.test(cleanV)) continue;
+        const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
+        if (!isSafeSvgImg && /^(?:javascript:|vbscript:|data:text\/html|data:image\/svg|data:application\/xhtml)/i.test(cleanV)) continue;
       }
       el.setAttribute(k, v === true ? '' : v);
     }
@@ -158,6 +159,9 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
         e.preventDefault();
         if (!document.querySelector('.mesh-layout.has-left')) {
           document.getElementById('nav-search-video')?.click();
+        } else if (!document.querySelector('.panel-left input.input, .sel-search input')) {
+          const searchTabBtn = document.querySelector('.panel-left .drawer-tabs button') || document.getElementById('nav-search-video');
+          searchTabBtn?.click?.();
         }
         setTimeout(() => {
           const mInp = document.querySelector('.panel-left input.input, .sel-search input');
@@ -201,14 +205,16 @@ export function popup({ title, message, options = [], content = null, dismissabl
     window.removeEventListener('keydown', onKey);
     try { onClose?.(); } catch (_) {}
     back.classList.add('is-closing');
+    card.classList.add('is-closing');
     setTimeout(() => back.remove(), 175);
   };
   if (dismissable) window.addEventListener('keydown', onKey);
-  const drawerHandle = h('div', {
+  let touchMoved = false;
+  const drawerHandle = dismissable ? h('div', {
     class: 'wl-drawer-handle',
-    title: dismissable ? 'Kapatmak için dokun' : '',
-    onclick: () => { if (dismissable) close(); },
-  }, h('span', { class: 'wl-drawer-pill' }));
+    title: 'Kapatmak için dokun',
+    onclick: () => { if (dismissable && !touchMoved) close(); },
+  }, h('span', { class: 'wl-drawer-pill' })) : null;
   const closeBtn = dismissable
     ? h('button', {
         type: 'button',
@@ -219,6 +225,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
         html: icons.close,
       })
     : null;
+  let optBusy = false;
   const card = h('div', { class: `popup ${wide ? 'popup-wide ' : ''}acrylic wl-vaul-sheet`, role: 'dialog', 'aria-modal': 'true' },
     drawerHandle,
     closeBtn,
@@ -226,20 +233,38 @@ export function popup({ title, message, options = [], content = null, dismissabl
     message ? h('p', {}, message) : null,
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
-      h('button', { class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(), onclick: async () => { const fn = o.onClick || o.action; const keep = await fn?.(); if (keep !== true) close(); } }, o.label))) : null);
+      h('button', {
+        class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(),
+        onclick: async (e) => {
+          if (optBusy) return;
+          optBusy = true;
+          const btnEl = e?.currentTarget;
+          if (btnEl) btnEl.disabled = true;
+          try {
+            const fn = o.onClick || o.action;
+            const keep = await fn?.();
+            if (keep !== true) close();
+          } finally {
+            optBusy = false;
+            if (btnEl) btnEl.disabled = false;
+          }
+        },
+      }, o.label))) : null);
   const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
-  if (dismissable) {
+  if (dismissable && drawerHandle) {
     let startY = 0, deltaY = 0, dragging = false;
     drawerHandle.addEventListener('touchstart', (e) => {
       if (!e.touches?.[0]) return;
       startY = e.touches[0].clientY;
       deltaY = 0;
+      touchMoved = false;
       dragging = true;
       card.style.transition = 'none';
     }, { passive: true });
     drawerHandle.addEventListener('touchmove', (e) => {
       if (!dragging || !e.touches?.[0]) return;
       deltaY = Math.max(0, e.touches[0].clientY - startY);
+      if (deltaY > 6) touchMoved = true;
       card.style.transform = `translateY(${deltaY}px)`;
     }, { passive: true });
     const endDrag = () => {
@@ -251,6 +276,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
       } else {
         card.style.transform = '';
       }
+      setTimeout(() => { touchMoved = false; }, 50);
     };
     drawerHandle.addEventListener('touchend', endDrag, { passive: true });
     drawerHandle.addEventListener('touchcancel', endDrag, { passive: true });

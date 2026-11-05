@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261105_v110';
-import { avatar, openDmModal } from '../profile.js?v=20261105_v110';
-import { getProvider } from '../providers.js?v=20261105_v110';
-import { api, qs } from '../api.js?v=20261105_v110';
+import { h, icons, popup, toast } from '../ui.js?v=20261105_v111';
+import { avatar, openDmModal } from '../profile.js?v=20261105_v111';
+import { getProvider } from '../providers.js?v=20261105_v111';
+import { api, qs } from '../api.js?v=20261105_v111';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261105_v110';
-import { expectedPosition } from '../sync.js?v=20261105_v110';
+} from '../store.js?v=20261105_v111';
+import { expectedPosition } from '../sync.js?v=20261105_v111';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -516,6 +516,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
     title: '👥 Arkadaşlarım, İstekler & Çevrimiçi Durum',
     content: box,
     wide: true,
+    onClose: () => clearInterval(liveTimer),
     options: [{ label: 'Kapat', onClick: () => clearInterval(liveTimer) }],
   });
   return modalRef;

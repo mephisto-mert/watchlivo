@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v110';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v110';
-import { api, qs } from '../api.js?v=20261105_v110';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v110';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v110';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v110';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v110';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v111';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v111';
+import { api, qs } from '../api.js?v=20261105_v111';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v111';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v111';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v111';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v111';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261105_v110';
+} from '../store.js?v=20261105_v111';
 
 let _activeHomePick = null;
 
@@ -296,7 +296,7 @@ export function videoCard(media, onPick, opts = {}) {
     } finally { l.remove(); }
   };
   card.addEventListener('click', go);
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  card.addEventListener('keydown', (e) => { if (e.target === card && e.key === 'Enter') go(); });
   return card;
 }
 
@@ -857,7 +857,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   function renderGrid() {
-    const input = h('input', { placeholder: 'Film, dizi, anime veya doğrudan video bağlantısı ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;
@@ -1090,13 +1090,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('div', { class: 'wl-continue-head' },
         h('div', { class: 'wl-continue-title-group' },
           h('span', { class: 'wl-continue-heading' }, continueOnly.length ? '▶ Kaldığın Yerden Devam Et' : '🕒 Son İzlediklerim'),
-          h('span', { class: 'wl-continue-cloud-pill' }, isCloudAuthenticated() ? '🔒 Hesabına Özel Bulut Senkron' : '📱 Bu Cihaza Özel')),
-        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('span', { class: 'wl-continue-cloud-pill' }, isCloudAuthenticated() ? '🔒 Bulut Senkron' : '📱 Cihaz Senkron')),
+        h('div', { class: 'wl-continue-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
           h('button', {
             type: 'button',
             class: 'btn sm ghost',
             onclick: () => openWatchHistoryModal('all', pickSafe),
-          }, `🕒 Tüm Geçmişim (${fullHistory.length})`),
+          }, `🕒 Geçmişim (${fullHistory.length})`),
           h('button', {
             type: 'button',
             class: 'btn sm ghost continue-clear-btn',
@@ -1116,12 +1116,18 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           const pct = durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(95, Math.round(Number(item.percent || 8))));
           const remMin = durSec > resumeSec + 60 ? Math.ceil((durSec - resumeSec) / 60) : 0;
           const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
-          const subTxt = `${epTag}${resumeSec > 0 ? fmtDur(resumeSec) : '0:00'}${remMin > 0 ? ` · ${remMin} dk kaldı` : ''}`;
+          const subTxt = `${epTag}${resumeSec > 0 ? fmtDur(resumeSec) : 'Başlangıçta'}${remMin > 0 ? ` · ${remMin} dk kaldı` : ''}`;
           const itemKey = item.historyId || item.key || item.tmdbId || item.title;
           return h('div', {
             class: 'wl-continue-card',
             role: 'button',
             tabindex: '0',
+            onkeydown: (ev) => {
+              if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) {
+                ev.preventDefault();
+                ev.currentTarget.click();
+              }
+            },
             onclick: async (ev) => {
               const cardEl = ev.currentTarget;
               if (cardEl.classList.contains('busy')) return;
@@ -1604,12 +1610,13 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
   let activeTab = initialTab || 'all';
   const pickFn = customOnPick || ((state.mesh && !state.mesh.curated && typeof window.vortexActions?.pickMedia === 'function') ? async (media) => { await window.vortexActions.pickMedia(media); window.vortexRestoreRoom?.(); } : null) || _activeHomePick || (async (media) => {
     try {
-      const created = await api('/api/rave/meshes', {
+      const created = await api('/api/rooms/create', {
         method: 'POST',
         body: { name: media?.title || 'Sinema Odası', visibility: 'friends', voipMode: 'everyone', controlMode: 'all', media },
       });
-      if (created?.id && typeof window.vortexNavigate === 'function') {
-        window.vortexNavigate(`/mesh/${encodeURIComponent(created.id)}`);
+      const targetId = created?.room?.id || created?.id;
+      if (targetId && typeof window.vortexNavigate === 'function') {
+        window.vortexNavigate(`/mesh/${encodeURIComponent(targetId)}`);
       }
     } catch (_) {}
   });

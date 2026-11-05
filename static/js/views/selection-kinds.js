@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v110';
-import { api, qs } from '../api.js?v=20261105_v110';
-import { parseVideoUrl } from '../providers.js?v=20261105_v110';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v110';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v110';
-import { profileSetup } from '../profile.js?v=20261105_v110';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v110';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v111';
+import { api, qs } from '../api.js?v=20261105_v111';
+import { parseVideoUrl } from '../providers.js?v=20261105_v111';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v111';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v111';
+import { profileSetup } from '../profile.js?v=20261105_v111';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v111';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261105_v110';
+} from '../store.js?v=20261105_v111';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -662,7 +662,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       },
     }, isTv ? '📺 Sezon & Bölüm Seç' : '▶ Tam Filmi İzle');
 
-    const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => openDetail(it), onkeydown: (e) => { if (e.key === 'Enter') openDetail(it); } },
+    const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => openDetail(it), onkeydown: (e) => { if (e.target === card && e.key === 'Enter') openDetail(it); } },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
           src: it.poster || (it.title ? `/api/rave/poster?${qs({ t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
@@ -968,6 +968,17 @@ export function openVizyonModal(pick, onAdded) {
 
   const startItem = async (it) => {
     if (!pick) return;
+    if (it.mediaType === 'tv') {
+      const seriesHost = h('div', { style: { minHeight: '220px' } });
+      let pickerPopup = null;
+      await renderSeriesPicker(it, { id: it.provider || 'cinema', name: 'Sinema+ Vizyon' }, seriesHost, async (media) => {
+        pickerPopup?.close?.();
+        closeRef?.close?.();
+        await pick(media);
+      }, () => pickerPopup?.close?.());
+      pickerPopup = popup({ title: `📺 ${it.title} — Sezon & Bölüm Seç`, content: seriesHost, wide: true, options: [] });
+      return;
+    }
     toast(`🍿 "${it.title}" odada hazırlanıyor...`);
     const resolved = await resolveCatalogItem(it, { id: it.provider || 'cinema', name: 'Sinema+ Vizyon' });
     if (resolved) {
@@ -993,7 +1004,7 @@ export function openVizyonModal(pick, onAdded) {
       },
         h('div', { class: 'poster-img-wrap' },
           it.poster
-            ? h('img', { src: it.poster, alt: it.title, loading: 'lazy' })
+            ? h('img', { src: it.poster, alt: it.title, loading: 'lazy', onerror: (e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/static/watchlivo-poster.svg'; } })
             : h('div', { class: 'poster-fallback' }, isTv ? '📺' : '🎬'),
           h('span', { class: 'poster-badge' }, it.customRelease ? '✨ Yeni Eklendi' : (it.sourceBadge || '🍿 Vizyonda')),
           it.rating ? h('span', { class: 'poster-rating' }, `★ ${it.rating}`) : null,
@@ -1321,6 +1332,7 @@ export function renderDriveKind(p, body, pick) {
     placeholder: p.placeholder || 'Google Drive klasör veya video bağlantısı yapıştır (drive.google.com/drive/folders/...)',
     value: '',
     'aria-label': 'Google Drive klasör veya dosya bağlantısı',
+    onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); loadFolder(folderInp.value.trim()); } },
   });
   const qualityHolder = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } });
   const listHolder = h('div', { class: 'card-grid' });
