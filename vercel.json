@@ -137,7 +137,7 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact)(.*)",
       "headers": {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store, no-cache, must-revalidate"
@@ -164,7 +164,7 @@
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|stats|analytics)",
+      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|stats|analytics|about|privacy|terms|dmca|contact)",
       "dest": "server.py"
     },
     {

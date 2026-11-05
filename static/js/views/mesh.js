@@ -257,6 +257,14 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
     }
   }
   set({ mesh: room });
+  try {
+    const dynTitle = String(room?.media?.title || room?.name || '').trim();
+    if (dynTitle && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(dynTitle)) {
+      document.title = `🎬 ${dynTitle} — Watchlivo İzleme Odası`;
+    } else if (room?.name) {
+      document.title = `🍿 ${room.name} — Watchlivo Sinema Odası`;
+    }
+  } catch (_) {}
   if (ctx?.conn) ctx.conn.lastRoom = room;
   if (room?.media) room.media = normalizeRoomMediaState(curRoom?.media, room.media);
   saveChat(room);

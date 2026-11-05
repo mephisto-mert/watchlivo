@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v123 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v125 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v123", index_html)
+        self.assertIn("20261105_v125", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1962,15 +1962,41 @@ class RegressionTests(unittest.TestCase):
         r_map = self.client.get("/sitemap.xml")
         self.assertEqual(r_map.status_code, 200)
         self.assertIn("<loc>https://watchlivo.online/</loc>", r_map.text)
+        self.assertIn("<loc>https://watchlivo.online/privacy</loc>", r_map.text)
+        self.assertIn("<loc>https://watchlivo.online/dmca</loc>", r_map.text)
         self.assertIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
 
-        # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org, and Google Analytics 4 gtag.js
+        # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org (Organization + FAQPage), and Google Analytics 4 gtag.js
         idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
         self.assertIn("https://watchlivo.online/static/watchlivo-og.png", idx_html)
         self.assertIn("application/ld+json", idx_html)
+        self.assertIn('"FAQPage"', idx_html)
+        self.assertIn('"Organization"', idx_html)
+        self.assertIn("jokallame0@gmail.com", idx_html)
         self.assertIn("https://www.googletagmanager.com/gtag/js", idx_html)
         self.assertIn("__initWatchlivoGA4", idx_html)
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
+        self.assertTrue((root / "static" / "js" / "views" / "site-footer.js").exists())
+
+        # 2b. Verify legal & contact pages (/about, /privacy, /terms, /dmca, /contact) and /api/rave/contact
+        for l_route in ("/about", "/privacy", "/terms", "/dmca", "/contact"):
+            r_leg = self.client.get(l_route)
+            self.assertEqual(r_leg.status_code, 200, f"Failed legal route {l_route}")
+            self.assertIn("jokallame0@gmail.com", r_leg.text)
+
+        r_cpost = self.client.post("/api/rave/contact", json={
+            "category": "request",
+            "name": "Mert Can",
+            "email": "jokallame0@gmail.com",
+            "subject": "Interstellar 4K",
+            "message": "Lütfen IMAX versiyonunu da ekleyin",
+        })
+        self.assertEqual(r_cpost.status_code, 200)
+        self.assertTrue(r_cpost.json().get("ok"))
+        r_cget = self.client.get("/api/rave/contact")
+        self.assertEqual(r_cget.status_code, 200)
+        self.assertEqual(r_cget.json().get("officialEmail"), "jokallame0@gmail.com")
+        self.assertTrue(any(m.get("subject") == "Interstellar 4K" for m in (r_cget.json().get("messages") or [])))
 
         # 3. Verify /api/rave/analytics POST + GET, GA4 gtag.js binding, and zero-increment on /stats refresh
         r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-HQXSREQV3R"})

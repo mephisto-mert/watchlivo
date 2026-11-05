@@ -30,13 +30,13 @@
   <title>Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları</title>
   <link rel="canonical" href="https://watchlivo.online/" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v123" type="image/svg+xml" />
-  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v123" />
+  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v125" type="image/svg+xml" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v125" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v123" />
-  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v123" />
+  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v125" />
+  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v125" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -56,6 +56,22 @@
         }
       },
       {
+        "@type": "Organization",
+        "@id": "https://watchlivo.online/#organization",
+        "name": "Watchlivo",
+        "url": "https://watchlivo.online/",
+        "logo": "https://watchlivo.online/static/watchlivo-icon-192.png",
+        "email": "jokallame0@gmail.com",
+        "contactPoint": [
+          {
+            "@type": "ContactPoint",
+            "email": "jokallame0@gmail.com",
+            "contactType": "customer support",
+            "availableLanguage": ["Turkish", "English"]
+          }
+        ]
+      },
+      {
         "@type": "WebApplication",
         "@id": "https://watchlivo.online/#app",
         "name": "Watchlivo",
@@ -68,6 +84,36 @@
           "price": "0",
           "priceCurrency": "TRY"
         }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://watchlivo.online/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Watchlivo nedir ve nasıl çalışır?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Watchlivo, arkadaşlarınla aynı anda saliselik senkronizasyonla film, dizi, anime, YouTube videoları ve 7/24 canlı TV kanalları izleyebileceğin ücretsiz bir birlikte izleme (watch party) platformudur."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Watchlivo ücretli mi, üyelik gerekiyor mu?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Watchlivo tamamen ücretsizdir ve kayıt olmadan tek tıkla misafir olarak sinema odası kurulabilir."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Telif hakkı (DMCA) ve iletişim bildirimleri nereye yapılır?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Watchlivo kendi sunucularında medya dosyası barındırmaz. Telif bildirimleri ve destek talepleri jokallame0@gmail.com adresine veya site içi iletişim formuna iletilebilir."
+            }
+          }
+        ]
       }
     ]
   }
@@ -187,6 +233,6 @@
   <div id="app" class="app"></div>
   <div id="popup-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
-  <script type="module" src="/static/js/main.js?v=20261105_v123"></script>
+  <script type="module" src="/static/js/main.js?v=20261105_v125"></script>
 </body>
 </html>

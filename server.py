@@ -9273,7 +9273,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     elif raw_img.startswith("https://") and not raw_img.lower().endswith(".svg"):
         og_img = raw_img
     else:
-        og_img = f"{origin}/static/watchlivo-icon-512.png"
+        og_img = f"{origin}/static/watchlivo-og.png"
 
     if is_locked:
         og_title = f"🔒 {r_name} — Şifreli Watchlivo Odası"
@@ -9504,6 +9504,11 @@ async def sitemap_xml_endpoint(request: Request) -> Response:
     today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 10800))
     urls = [
         ("https://watchlivo.online/", "1.0", "daily"),
+        ("https://watchlivo.online/about", "0.8", "weekly"),
+        ("https://watchlivo.online/privacy", "0.8", "monthly"),
+        ("https://watchlivo.online/terms", "0.8", "monthly"),
+        ("https://watchlivo.online/dmca", "0.8", "monthly"),
+        ("https://watchlivo.online/contact", "0.8", "weekly"),
         ("https://watchlivo.online/r/cinema-club", "0.9", "hourly"),
         ("https://watchlivo.online/r/anime-gecesi", "0.9", "hourly"),
         ("https://watchlivo.online/r/turk-sinemasi", "0.9", "hourly"),
@@ -9714,6 +9719,151 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
     return JSONResponse(summary, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
+_CONTACT_MESSAGES_MEM: list = []
+
+
+def _get_contact_messages_sync() -> list:
+    global _CONTACT_MESSAGES_MEM
+    try:
+        saved = social_engine._kv_get("wl:contact_msgs:v1")
+        if isinstance(saved, list) and len(saved) >= len(_CONTACT_MESSAGES_MEM):
+            _CONTACT_MESSAGES_MEM = saved[-80:]
+    except Exception:
+        pass
+    return list(_CONTACT_MESSAGES_MEM)
+
+
+def _save_contact_message_sync(msg: dict) -> list:
+    global _CONTACT_MESSAGES_MEM
+    msgs = _get_contact_messages_sync()
+    msgs.insert(0, msg)
+    _CONTACT_MESSAGES_MEM = msgs[:80]
+    try:
+        social_engine._kv_set("wl:contact_msgs:v1", _CONTACT_MESSAGES_MEM)
+    except Exception:
+        pass
+    return _CONTACT_MESSAGES_MEM
+
+
+async def rave_contact_endpoint(request: Request) -> JSONResponse:
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        cat = str(body.get("category") or "contact").strip()[:24]
+        name = str(body.get("name") or "Misafir").strip()[:64]
+        email = str(body.get("email") or "").strip()[:96]
+        subj = str(body.get("subject") or "").strip()[:140]
+        msg = str(body.get("message") or "").strip()[:1200]
+        if len(subj) < 2 and len(msg) < 2:
+            return JSONResponse({"ok": False, "error": "Lütfen bir başlık veya mesaj girin."}, status_code=400)
+        entry = {
+            "id": hashlib.sha256(f"{time.time()}|{name}|{subj}".encode("utf-8")).hexdigest()[:10],
+            "ts": time.strftime("%Y-%m-%d %H:%M", time.gmtime(time.time() + 10800)),
+            "category": cat,
+            "name": name,
+            "email": email,
+            "subject": subj,
+            "message": msg,
+        }
+        await asyncio.to_thread(_save_contact_message_sync, entry)
+        return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "entry": entry}, headers={"Cache-Control": "no-store"})
+    msgs = await asyncio.to_thread(_get_contact_messages_sync)
+    return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "messages": msgs[:30]}, headers={"Cache-Control": "no-store"})
+
+
+async def legal_page_endpoint(request: Request) -> HTMLResponse:
+    path = request.url.path.strip("/").lower() or "about"
+    pages = {
+        "about": (
+            "Hakkımızda — Watchlivo Sinema & Dizi Odaları",
+            "Watchlivo (watchlivo.online) arkadaşlarla aynı anda senkronize film, dizi, anime ve canlı TV izleme platformu hakkında kurumsal bilgiler.",
+            "ℹ️ Hakkımızda — Watchlivo Sinema & Medya Platformu",
+            "<p><b>Watchlivo (watchlivo.online)</b>, insanların fiziksel olarak ayrı olsalar bile aynı anda, tek kare gecikmesiz birlikte film, dizi, anime, canlı TV ve müzik izlemesi için geliştirilmiş yeni nesil bir senkronize izleme (Watch Party) platformudur.</p>"
+            "<h3>Öne Çıkan Özelliklerimiz</h3>"
+            "<ul><li><b>Saliselik Senkronizasyon:</b> Oynatma, duraklatma ve sarma odadaki herkes için anında eşitlenir.</li>"
+            "<li><b>WebRTC Sesli & Yazılı Sohbet:</b> Oda içinde düşük gecikmeli mikrofon, sesli not ve canlı reaksiyonlar.</li>"
+            "<li><b>4K Türkçe Dublaj & Altyazı:</b> Geniş sinema, dizi, anime arşivi ve 7/24 canlı TV kanalları.</li>"
+            "<li><b>Tüm Cihazlarda Kurulumsuz Erişim:</b> Web, iOS PWA, Android Native APK v2.0 ve Windows desteği.</li></ul>"
+        ),
+        "privacy": (
+            "Gizlilik Politikası & KVKK — Watchlivo",
+            "Watchlivo kişisel verilerin korunması (KVKK), çerez politikası ve WebRTC sesli sohbet gizlilik standartları.",
+            "🔒 Gizlilik Politikası & KVKK Aydınlatma Metni",
+            "<p><b>Watchlivo (watchlivo.online)</b> olarak kullanıcılarımızın gizliliğine ve 6698 sayılı KVKK ile GDPR standartlarına en üst düzeyde önem veriyoruz.</p>"
+            "<ul><li><b>Oda İçi Sesli Sohbet (WebRTC):</b> Sesli görüşmeler anlık iletilir ve sunucularımızda kesinlikle kaydedilmez.</li>"
+            "<li><b>Üye ve Misafir Verileri:</b> Kayıtsız misafirler için yalnızca geçici oturum rumuzu kullanılır. Üye bilgileri üçüncü taraflarla paylaşılmaz.</li>"
+            "<li><b>Çerezler ve Analitik:</b> Tema, ses ve kaldığınız dakika bilgileri tarayıcınızda tutulur; performans ölçümü için anonim Google Analytics 4 kullanılır.</li></ul>"
+        ),
+        "terms": (
+            "Kullanım Koşulları & Topluluk Kuralları — Watchlivo",
+            "Watchlivo izleme odaları kullanım şartları, topluluk kuralları ve kullanıcı sorumlulukları.",
+            "📜 Kullanım Koşulları & Topluluk Kuralları",
+            "<p><b>watchlivo.online</b> platformunu kullanarak aşağıdaki kuralları kabul etmiş sayılırsınız:</p>"
+            "<ul><li>Herkese açık odalarda hakaret, taciz, nefret söylemi ve spam yasaktır.</li>"
+            "<li>Oda kurucuları (Host) kendi odalarının moderasyonundan ve şifre ayarlarından yetkilidir.</li>"
+            "<li>Platform altyapısına yönelik otomatik bot veya kötüye kullanım girişimleri engellenir.</li></ul>"
+        ),
+        "dmca": (
+            "DMCA & Telif Hakkı Bildirimi — Watchlivo",
+            "Watchlivo 5651 sayılı kanun ve DMCA kapsamında yer sağlayıcı ve içerik kaldırma (Uyar-Kaldır) prosedürü.",
+            "⚖️ Telif Hakkı (DMCA) & Uyar-Kaldır Bildirimi",
+            "<p><b>Watchlivo (watchlivo.online)</b>, 5651 sayılı Kanun ve DMCA (17 U.S.C. § 512) kapsamında kendi sunucularında hiçbir video veya medya dosyası barındırmayan (Non-Hosting Watch-Party Player) bir platformdur.</p>"
+            "<p>Telif hakkı sahipleri, ilgili içeriğin bağlantı bilgisi ve hak sahipliği belgesiyle birlikte resmi e-posta adresimiz üzerinden bildirimde bulunabilir. Geçerli başvurular en geç <b>24 saat içinde</b> dizinden kaldırılır.</p>"
+        ),
+        "contact": (
+            "İletişim, Film/Dizi İstek & Destek — Watchlivo",
+            "Watchlivo resmi iletişim e-posta adresi (jokallame0@gmail.com), film/dizi istek, hata bildirimi ve DMCA başvuru sayfası.",
+            "✉️ İletişim, Film/Dizi İstek & Destek Merkezi",
+            "<p>Görüş, öneri, işbirliği, film/dizi ekleme talebi, çalışmayan bölüm bildirimi veya telif hakkı (DMCA) başvurularınız için bize doğrudan ulaşabilirsiniz:</p>"
+            "<p style='font-size:16px;'><b>📬 Resmi E-Posta Adresimiz:</b> <a href='mailto:jokallame0@gmail.com' style='color:#27dcc8;font-weight:800;'>jokallame0@gmail.com</a></p>"
+        ),
+    }
+    title, desc, h1_txt, body_html = pages.get(path, pages["about"])
+    html_doc = f"""<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{html_mod.escape(title)}</title>
+  <meta name="description" content="{html_mod.escape(desc)}" />
+  <link rel="canonical" href="https://watchlivo.online/{html_mod.escape(path)}" />
+  <style>
+    body {{ margin:0; background:#070b12; color:#f8fafc; font-family:Inter,system-ui,sans-serif; padding:28px 18px; line-height:1.65; }}
+    .box {{ max-width:820px; margin:0 auto; background:#0d1522; border:1px solid rgba(39,220,200,.25); border-radius:20px; padding:28px; }}
+    nav {{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.08); }}
+    nav a {{ color:#94a3b8; text-decoration:none; font-size:13px; font-weight:700; padding:6px 12px; border-radius:999px; background:rgba(255,255,255,.05); }}
+    nav a.act, nav a:hover {{ color:#041014; background:#27dcc8; }}
+    h1 {{ margin:0 0 14px; font-size:22px; color:#fff; }}
+    p, li {{ color:#cbd5e1; font-size:14px; }}
+    .foot {{ margin-top:24px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08); font-size:13px; color:#94a3b8; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; }}
+  </style>
+</head>
+<body>
+  <div class="box">
+    <nav>
+      <a href="/">← Watchlivo Ana Sayfa</a>
+      <a href="/about" class="{'act' if path=='about' else ''}">Hakkımızda</a>
+      <a href="/privacy" class="{'act' if path=='privacy' else ''}">Gizlilik & KVKK</a>
+      <a href="/terms" class="{'act' if path=='terms' else ''}">Kullanım Koşulları</a>
+      <a href="/dmca" class="{'act' if path=='dmca' else ''}">DMCA / Telif</a>
+      <a href="/contact" class="{'act' if path=='contact' else ''}">İletişim</a>
+    </nav>
+    <h1>{h1_txt}</h1>
+    {body_html}
+    <div class="foot">
+      <span>📩 Resmi İletişim & Hukuk: <a href="mailto:jokallame0@gmail.com" style="color:#27dcc8;font-weight:700;">jokallame0@gmail.com</a></span>
+      <span>© 2026 Watchlivo (watchlivo.online)</span>
+    </div>
+  </div>
+</body>
+</html>"""
+    return HTMLResponse(html_doc, headers={"Cache-Control": "public, max-age=3600"})
+
+
 async def analytics_dashboard_page(request: Request) -> HTMLResponse:
     data = await _build_analytics_summary()
     ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
@@ -9726,6 +9876,11 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
         f"<tr><td>{i}</td><td>{html_mod.escape(x['title'])}</td><td style='text-align:right;font-weight:700;color:#10b981;'>{x['count']}</td></tr>"
         for i, x in enumerate(data["topWatched"], 1)
     ) or "<tr><td colspan='3' style='color:#64748b;'>Henüz izleme kaydı yok</td></tr>"
+    contact_msgs = await asyncio.to_thread(_get_contact_messages_sync)
+    c_rows = "".join(
+        f"<tr><td>{html_mod.escape(m.get('ts',''))}</td><td><b>{html_mod.escape(m.get('category',''))}</b></td><td>{html_mod.escape(m.get('name',''))} ({html_mod.escape(m.get('email',''))})</td><td><b>{html_mod.escape(m.get('subject',''))}</b> — {html_mod.escape(m.get('message',''))}</td></tr>"
+        for m in contact_msgs[:15]
+    ) or "<tr><td colspan='4' style='color:#64748b;'>Henüz gelen istek veya iletişim mesajı yok</td></tr>"
     devs = data["devices"]
     html = f"""<!doctype html>
 <html lang="tr">
@@ -9783,6 +9938,10 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
         <table><thead><tr><th>#</th><th>Yapım</th><th style="text-align:right;">Adet</th></tr></thead><tbody>{w_rows}</tbody></table>
       </div>
     </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="lbl">📩 Gelen Film/Dizi İstekleri, Hata Bildirimleri & İletişim Mesajları (Resmi E-Posta: jokallame0@gmail.com)</div>
+      <table><thead><tr><th>Tarih</th><th>Kategori</th><th>Gönderen</th><th>Başlık & Mesaj</th></tr></thead><tbody>{c_rows}</tbody></table>
+    </div>
   </div>
   <script>
     async function saveGaId() {{
@@ -9816,6 +9975,12 @@ app = Starlette(
         Route("/sitemap.xml", sitemap_xml_endpoint, methods=["GET", "HEAD"]),
         Route("/stats", analytics_dashboard_page, methods=["GET"]),
         Route("/analytics", analytics_dashboard_page, methods=["GET"]),
+        Route("/about", legal_page_endpoint, methods=["GET", "HEAD"]),
+        Route("/privacy", legal_page_endpoint, methods=["GET", "HEAD"]),
+        Route("/terms", legal_page_endpoint, methods=["GET", "HEAD"]),
+        Route("/dmca", legal_page_endpoint, methods=["GET", "HEAD"]),
+        Route("/contact", legal_page_endpoint, methods=["GET", "HEAD"]),
+        Route("/api/rave/contact", rave_contact_endpoint, methods=["GET", "POST"]),
         Route("/api/rave/analytics", rave_analytics_endpoint, methods=["GET", "POST"]),
         Route("/api/rave/ga-collect/{rest:path}", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),

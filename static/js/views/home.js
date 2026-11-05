@@ -11,6 +11,7 @@ import { api } from '../api.js?v=20261105_v117';
 import { createSelection, openWatchHistoryModal } from './selection.js?v=20261105_v117';
 import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v117';
 import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261105_v117';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261105_v125';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -393,6 +394,28 @@ export function renderHome(app) {
     }, '✨ Ambiyans'));
 
   const friendsStripEl = renderHomeFriendsStrip(openRoom);
+  try { document.title = 'Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları'; } catch (_) {}
+
+  const siteFooterEl = renderSiteFooterSection({
+    onSelectCategory: (cat) => {
+      selection.setProvider(cat === 'series' ? 'series' : (cat === 'anime' ? 'anime' : 'cinema'));
+      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    },
+    onScrollToTv: () => {
+      selection.setProvider(null);
+      filter = 'all';
+      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      draw(true);
+      setTimeout(() => {
+        const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 40);
+    },
+    onRandomMovie: () => {
+      const rndBtn = document.getElementById('btn-random-movie');
+      if (rndBtn) rndBtn.click();
+    },
+  });
 
   const glassWindow = h('div', { class: 'glass-main-window' },
     !isNativeWatchlivoApp() ? appBanner : null,
@@ -412,7 +435,8 @@ export function renderHome(app) {
         }, '👥 + Arkadaş Ekle'),
         lobbySearch,
         createVoiceSearchButton({ h, icons, inputEl: lobbySearch, toast, onResult: (q) => { query = q; draw(true); } }))),
-    lobbyBox);
+    lobbyBox,
+    siteFooterEl);
 
   const setNavBadge = (btnId, count, isRed = false) => {
     const btn = nav.querySelector(`#${btnId}`);
@@ -451,6 +475,7 @@ export function renderHome(app) {
 
   app.replaceChildren(nav, home);
   updateMiniPip();
+  initCookieConsentBanner();
   let emptyStreak = 0;
   const load = async () => {
     try {
