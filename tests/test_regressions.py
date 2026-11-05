@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v125 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v126 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v125", index_html)
+        self.assertIn("20261105_v126", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1997,6 +1997,12 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_cget.status_code, 200)
         self.assertEqual(r_cget.json().get("officialEmail"), "jokallame0@gmail.com")
         self.assertTrue(any(m.get("subject") == "Interstellar 4K" for m in (r_cget.json().get("messages") or [])))
+
+        # 2c. Verify sw_iframe.html requests never return 0-byte 204 downloads on iOS
+        r_sw_iframe = self.client.get("/api/rave/ga-collect/_/service_worker/6b40/sw_iframe.html?origin=https://watchlivo.online")
+        self.assertEqual(r_sw_iframe.status_code, 200)
+        self.assertIn("text/html", r_sw_iframe.headers.get("content-type", ""))
+        self.assertGreater(len(r_sw_iframe.text), 20)
 
         # 3. Verify /api/rave/analytics POST + GET, GA4 gtag.js binding, and zero-increment on /stats refresh
         r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-HQXSREQV3R"})

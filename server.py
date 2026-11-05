@@ -9658,8 +9658,16 @@ def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str =
 
 
 async def rave_ga_collect_proxy(request: Request) -> Response:
-    """First-party transport_url relay for Google Analytics 4 gtag.js (/api/rave/ga-collect/g/collect)."""
+    """First-party transport_url relay for Google Analytics 4 (/api/rave/ga-collect/g/collect)."""
     import urllib.request as _ur
+    path_low = str(request.url.path or "").lower()
+    sec_dest = (request.headers.get("sec-fetch-dest") or "").lower()
+    if "sw_iframe" in path_low or "service_worker" in path_low or path_low.endswith(".html") or sec_dest in ("iframe", "document"):
+        return HTMLResponse(
+            "<!doctype html><html><head><meta charset='utf-8'></head><body></body></html>",
+            status_code=200,
+            headers={"Cache-Control": "no-store", "Content-Disposition": "inline"},
+        )
     qs = str(request.url.query or "")
     body_bytes = await request.body()
     ua_str = request.headers.get("user-agent") or "Mozilla/5.0"

@@ -30,13 +30,13 @@
   <title>Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları</title>
   <link rel="canonical" href="https://watchlivo.online/" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v125" type="image/svg+xml" />
-  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v125" />
+  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v126" type="image/svg+xml" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v126" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v125" />
-  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v125" />
+  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v126" />
+  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v126" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -185,43 +185,71 @@
       }
     })();
   </script>
-  <!-- Google Analytics 4 (gtag.js) Official Tag (G-HQXSREQV3R) -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-HQXSREQV3R"></script>
+  <!-- Google Analytics 4 Zero-Iframe Native Beacon (https://www.googletagmanager.com/gtag/js compatible, prevents iOS sw_iframe.html download) -->
   <script>
-    window.__WL_GA_ID = 'G-HQXSREQV3R';
-    window.__wlGaLoadedId = 'G-HQXSREQV3R';
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    window.gtag = gtag;
-    gtag('js', new Date());
-    gtag('config', 'G-HQXSREQV3R', {
-      transport_url: location.origin + '/api/rave/ga-collect',
-      first_party_collection: true,
-      page_title: document.title,
-      page_path: location.pathname + location.hash,
-      send_page_view: true
-    });
-    gtag('config', 'G-3EGLLTB9J0', {
-      transport_url: location.origin + '/api/rave/ga-collect',
-      first_party_collection: true,
-      page_title: document.title,
-      page_path: location.pathname + location.hash,
-      send_page_view: true
-    });
-    window.__initWatchlivoGA4 = function(gaId) {
-      if (!gaId || !/^G-[A-Z0-9]{4,20}$/i.test(gaId) || window.__wlGaLoadedId === gaId) return;
-      window.__wlGaLoadedId = gaId;
-      try { localStorage.setItem('wl_ga_id', gaId); } catch (_) {}
-      var s = document.createElement('script');
-      s.async = true;
-      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(gaId);
-      document.head.appendChild(s);
-      gtag('config', gaId, {
-        page_title: document.title,
-        page_path: location.pathname + location.hash,
-        send_page_view: true
-      });
-    };
+    (function() {
+      var origAppend = Element.prototype.appendChild;
+      Element.prototype.appendChild = function(node) {
+        try {
+          if (node && node.tagName === 'IFRAME' && /sw_iframe|service_worker|googletagmanager/i.test(String(node.src || ''))) {
+            return node;
+          }
+        } catch (_) {}
+        return origAppend.call(this, node);
+      };
+      window.__WL_GA_ID = 'G-HQXSREQV3R';
+      window.__wlGaLoadedId = 'G-HQXSREQV3R';
+      window.dataLayer = window.dataLayer || [];
+      var cidKey = 'wl_ga_cid_v1';
+      var cid = '';
+      try { cid = localStorage.getItem(cidKey) || ''; } catch (_) {}
+      if (!cid) {
+        cid = Math.floor(100000000 + Math.random() * 900000000) + '.' + Math.floor(Date.now() / 1000);
+        try { localStorage.setItem(cidKey, cid); } catch (_) {}
+      }
+      var sid = String(Math.floor(Date.now() / 1000));
+      function sendGaHit(tid, evName, params) {
+        try {
+          var p = params || {};
+          var qs = new URLSearchParams({
+            v: '2',
+            tid: tid,
+            cid: cid,
+            sid: sid,
+            sct: '1',
+            seg: '1',
+            _s: '1',
+            _p: String(Date.now()),
+            ul: (navigator.language || 'tr-tr').toLowerCase(),
+            sr: (window.screen ? window.screen.width + 'x' + window.screen.height : '1920x1080'),
+            dl: location.href,
+            dt: p.page_title || document.title || 'Watchlivo',
+            en: evName || 'page_view',
+            _et: '15000',
+            _ee: '1'
+          }).toString();
+          fetch('/api/rave/ga-collect/g/collect?' + qs, { method: 'POST', keepalive: true }).catch(function(){});
+        } catch (_) {}
+      }
+      function gtag(cmd, target, params) {
+        window.dataLayer.push(arguments);
+        if (cmd === 'config' && target) {
+          if (!params || params.send_page_view !== false) {
+            sendGaHit(target, 'page_view', params);
+          }
+        } else if (cmd === 'event' && target) {
+          sendGaHit(window.__wlGaLoadedId || 'G-HQXSREQV3R', target, params);
+          sendGaHit('G-3EGLLTB9J0', target, params);
+        }
+      }
+      window.gtag = gtag;
+      window.__initWatchlivoGA4 = function(gaId) {
+        if (!gaId || !/^G-[A-Z0-9]{4,20}$/i.test(gaId)) return;
+        window.__wlGaLoadedId = gaId;
+        try { localStorage.setItem('wl_ga_id', gaId); } catch (_) {}
+        sendGaHit(gaId, 'page_view', { page_title: document.title });
+      };
+    })();
   </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js" defer></script>
 </head>
@@ -233,6 +261,6 @@
   <div id="app" class="app"></div>
   <div id="popup-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
-  <script type="module" src="/static/js/main.js?v=20261105_v125"></script>
+  <script type="module" src="/static/js/main.js?v=20261105_v126"></script>
 </body>
 </html>

@@ -5319,10 +5319,10 @@ html.is-android-pip .rave-subtitle-cue {
   #mesh-root > .navbar {
     position: relative !important;
     z-index: 95 !important;
-    height: calc(50px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
-    min-height: calc(50px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
-    max-height: calc(50px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
-    padding: calc(var(--top-safe-offset, env(safe-area-inset-top, 0px)) + 4px) max(8px, env(safe-area-inset-right, 0px)) 6px max(8px, env(safe-area-inset-left, 0px)) !important;
+    height: calc(50px + var(--top-safe-offset, 0px)) !important;
+    min-height: calc(50px + var(--top-safe-offset, 0px)) !important;
+    max-height: calc(50px + var(--top-safe-offset, 0px)) !important;
+    padding: var(--top-safe-offset, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)) !important;
     gap: 5px !important;
     background: #0b0f19 !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
