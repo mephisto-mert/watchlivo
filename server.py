@@ -2902,7 +2902,7 @@ PROV_BROWSE = {
     "cinema": "https://www.hdfilmcehennemi.nl",
     "hdfilmcehennemi": "https://www.hdfilmcehennemi.nl",
     "dizibox": "https://www.dizibox.live",
-    "dizilife": "https://dizi82.life",
+    "dizilife": "https://dizi84.life",
     "fullhdfilm": "https://www.fullhdfilmizlesene.now",
     "yabancidizi": "https://yabancidizi.tv",
     "music": "https://music.youtube.com",
@@ -2932,9 +2932,9 @@ OFFICIAL_SEARCH_URLS = {
     "cinema": "https://www.hdfilmcehennemi.nl/?s={q}",
     "hdfilmcehennemi": "https://www.hdfilmcehennemi.nl/?s={q}",
     "dizibox": "https://www.dizibox.live/?s={q}",
-    "dizilife": "https://dizi82.life/ara?q={q}",
+    "dizilife": "https://dizi84.life/ara?q={q}",
     "fullhdfilm": "https://www.fullhdfilmizlesene.now/arama/{q}",
-    "yabancidizi": "https://dizi82.life/ara?q={q}",
+    "yabancidizi": "https://dizi84.life/ara?q={q}",
 }
 
 _EMBED_SUB_CACHE = {}
@@ -3267,6 +3267,27 @@ def _norm_title(s: str) -> str:
     return " ".join(words).strip()
 
 
+try:
+    _v_streams_ref = _MAIN_SITES_VAULT.get("streams")
+    if isinstance(_v_streams_ref, dict):
+        for _vk_orig, _vent_orig in list(_v_streams_ref.items()):
+            if _vk_orig.startswith(("movie:", "tv:")):
+                _vparts = _vk_orig.split(":")
+                if len(_vparts) >= 4:
+                    _vmt = _vparts[0]
+                    _vse_tail = ":".join(_vparts[-2:])
+                    _vt_mid = ":".join(_vparts[1:-2])
+                    _vt_norm = _norm_title(_vt_mid)
+                    _vt_joined = re.sub(r"\b([a-z0-9]{3,})\s+(da|de|ta|te|dan|den|tan|ten|nin|in|un|nun|yi|yu|ya|ye)\b", r"\1\2", _vt_norm)
+                    for _vcand in (_vt_norm, _vt_joined):
+                        if _vcand:
+                            _vk_alias = f"{_vmt}:{_vcand}:{_vse_tail}"
+                            if _vk_alias not in _v_streams_ref:
+                                _v_streams_ref[_vk_alias] = _vent_orig
+except Exception:
+    pass
+
+
 def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", target_year: str = "", mtype: str = "movie") -> bool:
     cn = _norm_title(cand_title)
     if not cn:
@@ -3514,7 +3535,7 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             q_cands.append(x.replace(":", " "))
         q_cands.append(x)
     valid_titles = list(dict.fromkeys(q_cands + [disp_title, title]))
-    direct_dl = source_url if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
+    direct_dl = re.sub(r"https?://dizi\d*\.(?:life|plus)", "https://dizi84.life", source_url) if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
     steps = ([("__DIRECT__", direct_dl)] if direct_dl else []) + [("__SEARCH__", q) for q in list(dict.fromkeys(q_cands))[:3]]
     for mode, val in steps:
         try:
@@ -3523,9 +3544,9 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                 base_dom = f"{urllib.parse.urlparse(matched_url).scheme}://{urllib.parse.urlparse(matched_url).netloc}"
             else:
                 r = None
-                for _dl_host in ("https://dizi83.plus", "https://dizi82.life"):
+                for _dl_host in ("https://dizi84.life", "https://dizi82.life"):
                     try:
-                        r = urllib.request.urlopen(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=4.0)
+                        r = urllib.request.urlopen(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=3.5)
                         break
                     except Exception:
                         continue
@@ -4178,9 +4199,8 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 if item_fb not in fb_tau:
                     fb_tau.append(item_fb)
         fb_by_id = {str(p[0]): (str(p[2]) if len(p) >= 3 else "") for p in fb_tau if isinstance(p, (list, tuple)) and len(p) >= 2}
-        has_fb_mp4 = any(isinstance(p, (list, tuple)) and len(p) >= 3 and str(p[2]).startswith("https://") for p in fb_tau)
         vids = None
-        if not (IS_VERCEL and has_fb_mp4):
+        if not (IS_VERCEL and fb_tau):
             for s_try, e_try in cand_se[:3]:
                 try:
                     ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e_try}&season={s_try}"
@@ -4222,6 +4242,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                     tau_items.append((str(pair[0]), "dub" in str(pair[1]).lower(), str(pair[0])))
                 else:
                     tau_items.append((str(pair[0]), bool(pair[1]), str(pair[2]) if len(pair) >= 3 else ""))
+        tau_items.sort(key=lambda x: (0 if (len(x) >= 3 and str(x[2]).startswith("https://")) else 1, 1 if x[1] else 0))
         seen_tau = set()
         for item in tau_items:
             if len(res) >= 3:
@@ -4408,41 +4429,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                 "tmdbId": tid,
                 "imdbId": imdb_id or "",
             })
-            for ve_srv in ("miami",):
-                try:
-                    ve_api = f"https://api.wecollege.net/{ve_srv}/sources?{q_ve}"
-                    ve_req = urllib.request.Request(ve_api, headers={"User-Agent": UA137, "Origin": "https://vidy.st", "Referer": "https://vidy.st/"})
-                    with urllib.request.urlopen(ve_req, timeout=3.0) as r_ve:
-                        enc_ve = r_ve.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore").strip()
-                    if enc_ve and len(enc_ve) > 30:
-                        dec_ve = (_raw_get_json("https://enc-dec.app/api/dec-videasy", headers={"Content-Type": "application/json"}, data=json.dumps({"text": enc_ve, "id": str(tid)}).encode("utf-8"), timeout=3.0) or {}).get("result") or {}
-                        if isinstance(dec_ve, dict):
-                            ve_subs = dec_ve.get("subtitles") or []
-                            if ve_subs:
-                                es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
-                                for vs in ve_subs:
-                                    su_v = str(vs.get("url") or "").strip()
-                                    sl_v = str(vs.get("language") or vs.get("lang") or "").lower().strip()
-                                    if su_v.startswith("https://") and not any(x.get("url") == su_v for x in es_list):
-                                        es_list.append({"lang": sl_v, "url": su_v, "source": "videasy_embed"})
-                            ve_srcs = [x for x in (dec_ve.get("sources") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
-                            ve_srcs.sort(key=lambda x: 0 if "1080" in str(x.get("quality") or "").lower() else (1 if "auto" in str(x.get("quality") or "").lower() or "master.m3u8" in str(x.get("url") or "") else (2 if "720" in str(x.get("quality") or "").lower() else 3)))
-                            for vs_item in ve_srcs[:3]:
-                                u_v = str(vs_item.get("url") or "").strip()
-                                if "finalsignal.top" not in u_v and "olivewave.top" not in u_v and not any(u_v == x[0] for x in res):
-                                    try:
-                                        p_req = urllib.request.Request(u_v, headers={"User-Agent": UA137, "Referer": "https://vidy.st/", "Origin": "https://vidy.st"})
-                                        with _public_open(p_req, timeout=2.2) as p_r:
-                                            if p_r.status not in (200, 206) or "#EXTM3U" not in p_r.read(4096).decode("utf-8", errors="ignore"):
-                                                continue
-                                    except Exception:
-                                        continue
-                                    res.append((u_v, "hls_ve"))
-                                    break
-                        if res:
-                            break
-                except Exception:
-                    continue
+            _ = q_ve  # api.wecollege.net retired (HTTP 401); proceed directly to vidfast.vc
         try:
             vf_u = f"https://vidfast.vc/tv/{tid}/{s_tmdb}/{e_tmdb}/" if mtype == "tv" else f"https://vidfast.vc/movie/{tid}/"
             with urllib.request.urlopen(urllib.request.Request(vf_u, headers={"User-Agent": UA137}), timeout=3.5) as r_vf:
@@ -5802,6 +5789,16 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             continue
                         if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
                             fb_candidates.append((st_u, st_t))
+            if not fb_candidates and IS_VERCEL:
+                for vk_try in cand_keys:
+                    v_ent = v_streams.get(vk_try) or {}
+                    for st_item in (v_ent.get("streams") or []):
+                        if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
+                            st_u, st_t = str(st_item[0]), str(st_item[1])
+                            if _is_vault_url_expired(st_u):
+                                continue
+                            if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title]):
+                                fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:5]
         has_non_yt = any(st != "yt" and "youtube.com/watch?v=" not in str(u) for u, st in (direct_list or []))
         yt_vault_hit = "" if has_non_yt else next((u for u, st in (direct_list or []) if st == "yt" or "youtube.com/watch?v=" in str(u)), "")
@@ -5863,7 +5860,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             if not alive_direct:
                 if not refresh:
                     return _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, refresh=True)
-                direct_list = []
+                direct_list = direct_list[:3]
             else:
                 direct_list = alive_direct
                 late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
