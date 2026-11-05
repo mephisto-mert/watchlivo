@@ -9629,6 +9629,8 @@ def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str =
                 "dl": f"https://watchlivo.online/{path_str.lstrip('/')}",
                 "dt": page_title or "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
                 "en": ga_ev,
+                "_et": "15000",
+                "_nsi": "1",
                 "_fv": "1",
                 "_ss": "1",
                 "_ee": "1",
