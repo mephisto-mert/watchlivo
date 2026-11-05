@@ -896,6 +896,7 @@ _CJK_TITLE_MAP = {
     "進撃の巨人": "Attack on Titan",
     "呪術廻戦": "Jujutsu Kaisen",
     "鬼滅の刃": "Demon Slayer: Kimetsu no Yaiba",
+    "モンスター": "Monster",
     "Сталкер": "Stalker",
 }
 
