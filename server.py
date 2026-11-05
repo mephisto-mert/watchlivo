@@ -1619,7 +1619,7 @@ def _load_custom_releases_sync() -> list[dict]:
 def _has_vault_stream(it_obj: dict) -> int:
     if not isinstance(it_obj, dict):
         return 0
-    if it_obj.get("customRelease") or it_obj.get("isVizyon") or it_obj.get("streamUrl"):
+    if it_obj.get("customRelease") or it_obj.get("streamUrl"):
         return 2
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
@@ -1832,7 +1832,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         p1 = max(1, pg)
         eps = [
             ("movie", f"https://api.themoviedb.org/3/movie/now_playing?api_key={TMDB_API_KEY}&language=tr-TR&region=TR&page={p1}"),
-            ("movie", f"https://api.themoviedb.org/3/movie/upcoming?api_key={TMDB_API_KEY}&language=tr-TR&region=TR&page={p1}"),
+            ("tv", f"https://api.themoviedb.org/3/tv/airing_today?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
             ("tv", f"https://api.themoviedb.org/3/tv/on_the_air?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
             ("movie", f"https://api.themoviedb.org/3/trending/movie/week?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
             ("tv", f"https://api.themoviedb.org/3/trending/tv/week?api_key={TMDB_API_KEY}&language=tr-TR&page={p1}"),
@@ -6099,18 +6099,48 @@ async def rave_new_releases(request: Request):
     custom_list = await asyncio.to_thread(_load_custom_releases_sync)
     seen_k = set()
     merged = []
-    for it in custom_list + items:
+    for raw_it in custom_list + items:
+        it = dict(raw_it)
         k = f"{it.get('mediaType') or 'movie'}:{it.get('tmdbId') or _norm_title(it.get('title') or '')}"
         if k in seen_k:
             continue
         seen_k.add(k)
+        cid_s = str(it.get("id") or "")
+        vc_i = int(it.get("voteCount") or 0)
+        yr_s = str(it.get("year") or "")
+        has_v = _has_vault_stream(it) > 0 or cid_s.startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "ac-", "dp-"))
+        if it.get("customRelease") or it.get("streamUrl"):
+            it["streamReady"] = True
+            it["sourceBadge"] = "✨ Yeni Eklendi · 4K Hazır"
+        elif has_v:
+            it["streamReady"] = True
+            it["sourceBadge"] = "✅ 4K/1080p Akış Hazır"
+        elif it.get("mediaType") == "tv":
+            it["streamReady"] = True
+            it["sourceBadge"] = "📺 Yeni Bölüm & Sezon Aktif"
+        elif it.get("origLang") == "tr" or yr_s < "2026" or vc_i >= 120:
+            it["streamReady"] = True
+            it["sourceBadge"] = "✅ 1080p/4K Akış Hazır"
+        else:
+            it["streamReady"] = False
+            it["sourceBadge"] = "🎟️ Sinemalarda (Yakında Akışta)"
         merged.append(it)
+    merged.sort(
+        key=lambda x: (
+            1 if x.get("customRelease") else 0,
+            1 if x.get("streamReady") else 0,
+            1 if _has_vault_stream(x) > 0 else 0,
+            int(x.get("voteCount") or 0),
+            float(x.get("rating") or 0),
+        ),
+        reverse=True,
+    )
     _NEW_RELEASES_MEM_CACHE["ts"] = now_t
     _NEW_RELEASES_MEM_CACHE["items"] = merged[:60]
 
-    # Warm-prefetch top 3 items in background so room playback starts instantaneously
+    # Warm-prefetch top 3 streamReady items in background so room playback starts instantaneously
     async def _warm_top():
-        for w_it in merged[:3]:
+        for w_it in [x for x in merged if x.get("streamReady")][:3]:
             try:
                 w_tid = str(w_it.get("tmdbId") or "")
                 w_mt = str(w_it.get("mediaType") or "movie")
@@ -6137,6 +6167,141 @@ async def rave_new_releases(request: Request):
         "total": len(merged),
         "cached": False,
     })
+
+
+_LATEST_EPS_MEM_CACHE: dict[str, object] = {"ts": 0.0, "items": []}
+
+_CURATED_ACTIVE_SERIES_SEEDS = [
+    {"tmdbId": "95479", "title": "Jujutsu Kaisen", "originalTitle": "Jujutsu Kaisen", "season": 2, "episode": 23, "episodeTitle": "Shibuya Incident", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg", "year": "2024", "rating": 8.6},
+    {"tmdbId": "127532", "title": "Solo Leveling", "originalTitle": "Ore dake Level Up na Ken", "season": 2, "episode": 12, "episodeTitle": "Arise from the Shadow", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/4Mt7WHox67uJ1yErwTBFcV8KWgG.jpg", "year": "2025", "rating": 8.7},
+    {"tmdbId": "37854", "title": "One Piece", "originalTitle": "One Piece", "season": 1, "episode": 1122, "episodeTitle": "Egghead Arc", "sourceBadge": "⛩️ Güncel Anime", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/cMD9Ygz11zjJzAovURpO75Qg7rT.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2rmK7mnchw9Xr3XdiTFSxTTLXqv.jpg", "year": "2025", "rating": 8.8},
+    {"tmdbId": "228853", "title": "Prens", "originalTitle": "Prens", "season": 3, "episode": 1, "episodeTitle": "Yeni Sezon Bölümü", "sourceBadge": "🇹🇷 Yeni Yerli Bölüm", "provider": "blutv", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg", "year": "2025", "rating": 8.6},
+    {"tmdbId": "115678", "title": "Gibi", "originalTitle": "Gibi", "season": 5, "episode": 13, "episodeTitle": "Sezon Finali", "sourceBadge": "🇹🇷 Exxen Yeni Bölüm", "provider": "exxen", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg", "year": "2025", "rating": 8.9},
+    {"tmdbId": "280030", "title": "Gassal", "originalTitle": "Gassal", "season": 1, "episode": 10, "episodeTitle": "1. Sezon 10. Bölüm", "sourceBadge": "🇹🇷 tabii Yeni Bölüm", "provider": "tabii", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg", "year": "2025", "rating": 8.7},
+    {"tmdbId": "100088", "title": "The Last of Us", "originalTitle": "The Last of Us", "season": 2, "episode": 1, "episodeTitle": "Future Days", "sourceBadge": "🔥 Yeni Sezon Bölümü", "provider": "max", "poster": "https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg", "year": "2025", "rating": 8.8},
+    {"tmdbId": "95396", "title": "Severance", "originalTitle": "Severance", "season": 2, "episode": 10, "episodeTitle": "Cold Harbor", "sourceBadge": "🔥 Yeni Bölüm · 4K", "provider": "apple", "poster": "https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg", "year": "2025", "rating": 8.7},
+]
+
+
+def _fetch_latest_episodes_sync() -> list[dict]:
+    import concurrent.futures
+    candidates = []
+    seen_tids = set()
+    eps_urls = [
+        f"https://api.themoviedb.org/3/tv/airing_today?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
+        f"https://api.themoviedb.org/3/tv/on_the_air?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
+        f"https://api.themoviedb.org/3/trending/tv/week?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
+    ]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+        futs = [pool.submit(_http_json, u, 3.2) for u in eps_urls]
+        for f in futs:
+            try:
+                data = f.result(timeout=3.5) or {}
+                for r in (data.get("results") or [])[:12]:
+                    tid = str(r.get("id") or "").strip()
+                    if not tid or tid in seen_tids or not r.get("poster_path"):
+                        continue
+                    if str(r.get("id") or "") in _HIDDEN_TMDB_IDS:
+                        continue
+                    seen_tids.add(tid)
+                    it = _tmdb_item(r, "tv")
+                    candidates.append(it)
+            except Exception:
+                pass
+
+    def _enrich_ep(it_base: dict) -> dict | None:
+        tid = str(it_base.get("tmdbId") or "").strip()
+        if not tid.isdigit():
+            return None
+        try:
+            info = _http_json(f"https://api.themoviedb.org/3/tv/{tid}?api_key={TMDB_API_KEY}&language=tr-TR", timeout=2.8) or {}
+            last_ep = info.get("last_episode_to_air") or info.get("next_episode_to_air") or {}
+            s_num = max(1, int(last_ep.get("season_number") or info.get("number_of_seasons") or 1))
+            e_num = max(1, int(last_ep.get("episode_number") or 1))
+            ep_name = str(last_ep.get("name") or "").strip()
+            if not ep_name or _is_generic_ep_name(ep_name):
+                ep_name = f"{s_num}. Sezon {e_num}. Bölüm"
+            still_p = last_ep.get("still_path") or info.get("backdrop_path") or info.get("poster_path")
+            still_u = f"https://image.tmdb.org/t/p/w780{still_p}" if still_p else (it_base.get("backdrop") or it_base.get("poster") or "")
+            air_d = str(last_ep.get("air_date") or info.get("last_air_date") or "")[:10]
+            orig_l = str(info.get("original_language") or it_base.get("origLang") or "").lower()
+            badge = "🇹🇷 Yeni Yerli Bölüm" if orig_l == "tr" else ("⛩️ Yeni Anime Bölümü" if orig_l == "ja" else "🆕 Yeni Bölüm · 1080p")
+            return {
+                **it_base,
+                "mediaType": "tv",
+                "season": s_num,
+                "episode": e_num,
+                "episodeLabel": f"S{s_num}:B{e_num}",
+                "episodeTitle": ep_name,
+                "airDate": air_d,
+                "still": still_u,
+                "backdrop": still_u or it_base.get("backdrop") or it_base.get("poster"),
+                "sourceBadge": badge,
+                "streamReady": True,
+            }
+        except Exception:
+            return None
+
+    enriched = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ep_pool:
+        for res_ep in ep_pool.map(_enrich_ep, candidates[:12]):
+            if res_ep:
+                enriched.append(res_ep)
+
+    seen_final = set()
+    final_list = []
+    for seed in _CURATED_ACTIVE_SERIES_SEEDS + enriched:
+        tid = str(seed.get("tmdbId") or seed.get("id") or "")
+        if not tid or tid in seen_final:
+            continue
+        seen_final.add(tid)
+        s_n = max(1, int(seed.get("season") or 1))
+        e_n = max(1, int(seed.get("episode") or 1))
+        final_list.append({
+            "id": f"ep-{tid}-s{s_n}e{e_n}",
+            "tmdbId": tid,
+            "mediaType": "tv",
+            "title": seed.get("title") or "",
+            "originalTitle": seed.get("originalTitle") or seed.get("title") or "",
+            "season": s_n,
+            "episode": e_n,
+            "episodeLabel": seed.get("episodeLabel") or f"S{s_n}:B{e_n}",
+            "episodeTitle": seed.get("episodeTitle") or f"{s_n}. Sezon {e_n}. Bölüm",
+            "sourceBadge": seed.get("sourceBadge") or "🆕 Yeni Bölüm · 1080p",
+            "provider": seed.get("provider") or "cinema",
+            "poster": seed.get("poster") or "",
+            "backdrop": seed.get("backdrop") or seed.get("still") or seed.get("poster") or "",
+            "still": seed.get("still") or seed.get("backdrop") or seed.get("poster") or "",
+            "year": str(seed.get("year") or "2025"),
+            "rating": float(seed.get("rating") or 8.4),
+            "streamReady": True,
+        })
+    return final_list[:20]
+
+
+async def rave_latest_episodes(request: Request):
+    force_refresh = (request.query_params.get("refresh") or "").strip().lower() in ("1", "true", "yes")
+    now_t = time.time()
+    if not force_refresh and _LATEST_EPS_MEM_CACHE.get("items") and (now_t - float(_LATEST_EPS_MEM_CACHE.get("ts") or 0) < 600):
+        items = list(_LATEST_EPS_MEM_CACHE.get("items") or [])
+        return JSONResponse({"ok": True, "items": items, "total": len(items), "cached": True})
+    try:
+        items = await asyncio.wait_for(asyncio.to_thread(_fetch_latest_episodes_sync), timeout=6.5)
+    except Exception:
+        items = [
+            {
+                **s,
+                "id": f"ep-{s['tmdbId']}-s{s['season']}e{s['episode']}",
+                "mediaType": "tv",
+                "episodeLabel": f"S{s['season']}:B{s['episode']}",
+                "still": s["backdrop"],
+                "streamReady": True,
+            }
+            for s in _CURATED_ACTIVE_SERIES_SEEDS
+        ]
+    _LATEST_EPS_MEM_CACHE["ts"] = now_t
+    _LATEST_EPS_MEM_CACHE["items"] = items
+    return JSONResponse({"ok": True, "items": items, "total": len(items), "cached": False})
 
 
 async def supersearch(request: Request):
@@ -9005,6 +9170,7 @@ app = Starlette(
         Route("/api/rave/platform-catalog", provider_catalog),
         Route("/api/rave/new-releases", rave_new_releases, methods=["GET", "POST"]),
         Route("/api/rave/vizyon", rave_new_releases, methods=["GET", "POST"]),
+        Route("/api/rave/latest-episodes", rave_latest_episodes, methods=["GET"]),
         Route("/api/rave/seasons", title_seasons),
         Route("/api/rave/series-info", title_seasons),
         Route("/api/rave/series-episodes", title_seasons),

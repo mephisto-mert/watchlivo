@@ -6775,3 +6775,25 @@ body.tv-nav-active .dock-item:focus {
   }
 }
 
+/* v112: Live Latest Episodes Strip & Vizyon Playability Badges */
+.wl-ep-badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.55);
+  z-index: 2;
+}
+.wl-latest-ep-card {
+  border-color: rgba(56, 189, 248, 0.22);
+}
+.wl-latest-ep-card:hover {
+  border-color: rgba(56, 189, 248, 0.55);
+}
+
+

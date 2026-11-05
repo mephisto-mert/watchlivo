@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v111';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v111';
-import { api, qs } from '../api.js?v=20261105_v111';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v111';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v111';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v111';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v111';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v112';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v112';
+import { api, qs } from '../api.js?v=20261105_v112';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v112';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v112';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v112';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v112';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261105_v111';
+} from '../store.js?v=20261105_v112';
 
 let _activeHomePick = null;
 
@@ -475,6 +475,17 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let trendingItems = shuffleArray(HERO_DEFAULT_POOL);
   let trendingFetched = false;
   let trendingLoading = false;
+  let latestEpsItems = [
+    { id: 'ep-95479-s2e23', tmdbId: '95479', mediaType: 'tv', title: 'Jujutsu Kaisen', originalTitle: 'Jujutsu Kaisen', season: 2, episode: 23, episodeLabel: 'S2:B23', episodeTitle: 'Shibuya Incident', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg', year: '2024', rating: 8.6 },
+    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/4Mt7WHox67uJ1yErwTBFcV8KWgG.jpg', year: '2025', rating: 8.7 },
+    { id: 'ep-228853-s3e1', tmdbId: '228853', mediaType: 'tv', title: 'Prens', originalTitle: 'Prens', season: 3, episode: 1, episodeLabel: 'S3:B1', episodeTitle: 'Yeni Sezon Bölümü', sourceBadge: '🇹🇷 Yeni Yerli Bölüm', provider: 'blutv', poster: 'https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg', year: '2025', rating: 8.6 },
+    { id: 'ep-115678-s5e13', tmdbId: '115678', mediaType: 'tv', title: 'Gibi', originalTitle: 'Gibi', season: 5, episode: 13, episodeLabel: 'S5:B13', episodeTitle: 'Sezon Finali', sourceBadge: '🇹🇷 Exxen Yeni Bölüm', provider: 'exxen', poster: 'https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg', year: '2025', rating: 8.9 },
+    { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },
+    { id: 'ep-100088-s2e1', tmdbId: '100088', mediaType: 'tv', title: 'The Last of Us', originalTitle: 'The Last of Us', season: 2, episode: 1, episodeLabel: 'S2:B1', episodeTitle: 'Future Days', sourceBadge: '🔥 Yeni Sezon Bölümü', provider: 'max', poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg', year: '2025', rating: 8.8 },
+    { id: 'ep-95396-s2e10', tmdbId: '95396', mediaType: 'tv', title: 'Severance', originalTitle: 'Severance', season: 2, episode: 10, episodeLabel: 'S2:B10', episodeTitle: 'Cold Harbor', sourceBadge: '🔥 Yeni Bölüm · 4K', provider: 'apple', poster: 'https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg', year: '2025', rating: 8.7 },
+  ];
+  let latestEpsFetched = false;
+  let latestEpsLoading = false;
   let heroIndex = 0;
   let autoRotateEnabled = true;
   let heroHovered = false;
@@ -1173,6 +1184,80 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))));
         }))) : null;
 
+    if (!latestEpsFetched && !latestEpsLoading && !compact) {
+      latestEpsLoading = true;
+      api('/api/rave/latest-episodes', { timeout: 8000 }).then((res) => {
+        if (Array.isArray(res?.items) && res.items.length) {
+          latestEpsItems = res.items;
+          latestEpsFetched = true;
+          if (!provider && root.isConnected && !superQuery) {
+            const activeInp = root.querySelector('input');
+            if (!activeInp || (document.activeElement !== activeInp && !activeInp.value.trim())) {
+              renderGrid();
+            }
+          }
+        }
+      }).catch(() => {}).finally(() => {
+        latestEpsLoading = false;
+        latestEpsFetched = true;
+      });
+    }
+
+    const latestEpsRail = (!compact && !state.mesh && latestEpsItems.length) ? h('section', { class: 'wl-continue-section wl-latest-eps-section', id: 'wl-latest-eps-section' },
+      h('div', { class: 'wl-continue-head' },
+        h('div', { class: 'wl-continue-title-group' },
+          h('span', { class: 'wl-continue-heading' }, '🆕 Son Eklenen Yeni Bölümler'),
+          h('span', { class: 'wl-continue-cloud-pill' }, '⚡ Canlı Otomatik Takip')),
+        h('div', { class: 'wl-continue-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
+          h('button', {
+            type: 'button',
+            class: 'btn sm ghost',
+            onclick: () => openVizyonModal(pickSafe),
+          }, '🍿 Tüm Vizyon & Yeni Bölümler'))),
+      h('div', { class: 'wl-continue-strip' },
+        ...latestEpsItems.slice(0, 14).map((epItem) => {
+          const sNum = Number(epItem.season || 1);
+          const eNum = Number(epItem.episode || 1);
+          const epBadge = epItem.episodeLabel || `S${sNum}:B${eNum}`;
+          const subLabel = `${sNum}. Sezon ${eNum}. Bölüm · ${epItem.episodeTitle || epItem.sourceBadge || 'Yeni Bölüm'}`;
+          const prov = getProvider(epItem.provider || 'cinema') || { id: 'cinema', name: 'Sinema+' };
+          return h('div', {
+            class: 'wl-continue-card wl-latest-ep-card',
+            role: 'button',
+            tabindex: '0',
+            onkeydown: (ev) => {
+              if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) {
+                ev.preventDefault();
+                ev.currentTarget.click();
+              }
+            },
+            onclick: async (ev) => {
+              const cardEl = ev.currentTarget;
+              if (cardEl.classList.contains('busy')) return;
+              cardEl.classList.add('busy');
+              toast(`🆕 ${epItem.title} · ${sNum}. Sezon ${eNum}. Bölüm odada hazırlanıyor...`);
+              try {
+                const resolved = await resolveCatalogItem(epItem, prov, sNum, eNum);
+                if (resolved) await pickSafe(resolved);
+              } finally {
+                cardEl.classList.remove('busy');
+              }
+            },
+          },
+            h('div', { class: 'wl-continue-thumb' },
+              h('img', {
+                src: epItem.still || epItem.backdrop || epItem.poster || '/static/watchlivo-poster.svg',
+                alt: epItem.title || '',
+                loading: 'lazy',
+                onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
+              }),
+              h('span', { class: 'wl-ep-badge' }, epBadge),
+              h('span', { class: 'wl-continue-play-ico' }, '▶')),
+            h('div', { class: 'wl-continue-body' },
+              h('div', { class: 'wl-continue-title' }, epItem.title || 'Dizi'),
+              h('div', { class: 'wl-continue-sub' }, subLabel)));
+        }))) : null;
+
     const voiceSearchBtn = createVoiceSearchButton({
       h,
       icons,
@@ -1425,6 +1510,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       ...(heroBanner ? [heroBanner] : []),
       ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
+      ...(latestEpsRail ? [latestEpsRail] : []),
       gridSection);
     if (superQuery) runSuperSearch(superQuery, results);
   }

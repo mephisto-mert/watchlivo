@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v111 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v112 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v111", index_html)
+        self.assertIn("20261105_v112", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1836,6 +1836,38 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("h('div', { class: 'ctl-top-right' }, syncPill, qualityBadge, subPillBtn, breakTopBtn, prevEpTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)", controls_js)
         self.assertIn("Sezon & Bölüm Seç", selection_kinds_js)
         self.assertIn("onClose: () => clearInterval(liveTimer),", lobby_js)
+
+    def test_v112_vizyon_playability_and_latest_episodes_feed(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Live /api/rave/latest-episodes returns S:B episode items ready for 1-click playback
+        r_eps = self.client.get("/api/rave/latest-episodes")
+        self.assertEqual(r_eps.status_code, 200)
+        ep_data = r_eps.json()
+        self.assertTrue(ep_data.get("ok"))
+        items = ep_data.get("items") or []
+        self.assertGreaterEqual(len(items), 6)
+        first_ep = items[0]
+        self.assertEqual(first_ep.get("mediaType"), "tv")
+        self.assertGreaterEqual(int(first_ep.get("season") or 0), 1)
+        self.assertGreaterEqual(int(first_ep.get("episode") or 0), 1)
+        self.assertIn(":B", str(first_ep.get("episodeLabel") or ""))
+        self.assertTrue(first_ep.get("streamReady"))
+
+        # 2. /api/rave/new-releases annotates streamReady and prioritizes playable items first
+        r_viz = self.client.get("/api/rave/new-releases")
+        self.assertEqual(r_viz.status_code, 200)
+        viz_items = r_viz.json().get("items") or []
+        self.assertGreater(len(viz_items), 0)
+        self.assertIn("streamReady", viz_items[0])
+
+        # 3. Frontend selection.js & selection-kinds.js include latest episodes rail & vizyon filter tabs
+        selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        selection_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        self.assertIn("wl-latest-eps-section", selection_js)
+        self.assertIn("/api/rave/latest-episodes", selection_js)
+        self.assertIn("wl-vizyon-tabs", selection_kinds_js)
 
 
 if __name__ == '__main__':

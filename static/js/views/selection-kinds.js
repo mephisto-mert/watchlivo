@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v111';
-import { api, qs } from '../api.js?v=20261105_v111';
-import { parseVideoUrl } from '../providers.js?v=20261105_v111';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v111';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v111';
-import { profileSetup } from '../profile.js?v=20261105_v111';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v111';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v112';
+import { api, qs } from '../api.js?v=20261105_v112';
+import { parseVideoUrl } from '../providers.js?v=20261105_v112';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v112';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v112';
+import { profileSetup } from '../profile.js?v=20261105_v112';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v112';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261105_v111';
+} from '../store.js?v=20261105_v112';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -965,9 +965,21 @@ export function openVizyonModal(pick, onAdded) {
   });
   const gridWrap = h('div', { class: 'poster-grid', style: { minHeight: '220px' } }, spinner());
   let closeRef = null;
+  let activeVizyonFilter = 'ready';
+  let cachedVizyonItems = [];
+  let cachedLatestEps = [];
 
-  const startItem = async (it) => {
+  const startItem = async (it, directEpisode = false) => {
     if (!pick) return;
+    if (it.mediaType === 'tv' && directEpisode && it.season && it.episode) {
+      toast(`🆕 "${it.title}" ${it.season}. Sezon ${it.episode}. Bölüm odada hazırlanıyor...`);
+      const resolved = await resolveCatalogItem(it, { id: it.provider || 'cinema', name: 'Sinema+ Yeni Bölüm' }, Number(it.season) || 1, Number(it.episode) || 1);
+      if (resolved) {
+        closeRef?.close?.();
+        await pick(resolved);
+      }
+      return;
+    }
     if (it.mediaType === 'tv') {
       const seriesHost = h('div', { style: { minHeight: '220px' } });
       let pickerPopup = null;
@@ -984,34 +996,50 @@ export function openVizyonModal(pick, onAdded) {
     if (resolved) {
       closeRef?.close?.();
       await pick(resolved);
+    } else if (it.streamReady === false) {
+      toast(`🎟️ "${it.title}" şu an yalnızca sinema salonlarında — dijital akışa düştüğü anda otomatik aktifleşecek!`);
     }
   };
 
   const renderItems = (items) => {
-    if (!Array.isArray(items) || !items.length) {
-      gridWrap.replaceChildren(h('div', { class: 'lobby-empty' }, 'Vizyon havuzunda henüz içerik bulunamadı.'));
+    let list = Array.isArray(items) ? items : [];
+    const isEpMode = activeVizyonFilter === 'episodes';
+    if (!isEpMode) {
+      if (activeVizyonFilter === 'ready') {
+        const readyOnly = list.filter((x) => x.streamReady !== false);
+        if (readyOnly.length) list = readyOnly;
+      } else if (activeVizyonFilter === 'theatrical') {
+        list = list.filter((x) => x.streamReady === false);
+      }
+    }
+    if (!list.length) {
+      gridWrap.replaceChildren(h('div', { class: 'lobby-empty' }, activeVizyonFilter === 'theatrical' ? 'Şu an yalnızca sinemada olan bekleyen film bulunmuyor; tüm vizyon içeriklerinin akışı hazır!' : 'Vizyon havuzunda henüz içerik bulunamadı.'));
       return;
     }
-    gridWrap.replaceChildren(...items.slice(0, 36).map((it) => {
+    gridWrap.replaceChildren(...list.slice(0, 36).map((it) => {
       const isTv = it.mediaType === 'tv';
+      const epTag = (isEpMode && it.season && it.episode) ? `S${it.season}:B${it.episode}` : '';
+      const subLine = isEpMode && it.episodeTitle
+        ? `${epTag} · ${it.episodeTitle}`
+        : `${it.year || '2026'} · ${isTv ? 'Dizi' : 'Film'}`;
       return h('div', {
         class: 'poster-card',
         tabIndex: 0,
         role: 'button',
-        'aria-label': `${it.title} (${it.year || '2026'})`,
-        onclick: () => startItem(it),
-        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startItem(it); } },
+        'aria-label': `${it.title} (${epTag || it.year || '2026'})`,
+        onclick: () => startItem(it, isEpMode),
+        onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startItem(it, isEpMode); } },
       },
         h('div', { class: 'poster-img-wrap' },
           it.poster
             ? h('img', { src: it.poster, alt: it.title, loading: 'lazy', onerror: (e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/static/watchlivo-poster.svg'; } })
             : h('div', { class: 'poster-fallback' }, isTv ? '📺' : '🎬'),
-          h('span', { class: 'poster-badge' }, it.customRelease ? '✨ Yeni Eklendi' : (it.sourceBadge || '🍿 Vizyonda')),
+          h('span', { class: 'poster-badge' }, epTag ? `🆕 ${epTag}` : (it.customRelease ? '✨ Yeni Eklendi' : (it.sourceBadge || '🍿 Vizyonda'))),
           it.rating ? h('span', { class: 'poster-rating' }, `★ ${it.rating}`) : null,
         ),
         h('div', { class: 'poster-meta' },
           h('div', { class: 'poster-title' }, it.title),
-          h('div', { class: 'poster-sub' }, `${it.year || '2026'} · ${isTv ? 'Dizi' : 'Film'}`),
+          h('div', { class: 'poster-sub' }, subLine),
         ),
       );
     }));
@@ -1019,9 +1047,25 @@ export function openVizyonModal(pick, onAdded) {
 
   const loadVizyon = async (refresh = false) => {
     gridWrap.replaceChildren(spinner());
+    if (activeVizyonFilter === 'episodes') {
+      if (!refresh && cachedLatestEps.length) {
+        renderItems(cachedLatestEps);
+        return;
+      }
+      const epRes = await api(`/api/rave/latest-episodes${refresh ? '?refresh=1' : ''}`, { timeout: 10000 }).catch(() => null);
+      cachedLatestEps = epRes?.items || [];
+      renderItems(cachedLatestEps);
+      if (refresh) toast(`🆕 Yeni bölümler güncellendi (${cachedLatestEps.length} güncel bölüm aktif)!`);
+      return;
+    }
+    if (!refresh && cachedVizyonItems.length) {
+      renderItems(cachedVizyonItems);
+      return;
+    }
     const res = await api(`/api/rave/new-releases${refresh ? '?refresh=1' : ''}`, { timeout: 12000 }).catch(() => null);
     if (res?.items) {
-      renderItems(res.items);
+      cachedVizyonItems = res.items;
+      renderItems(cachedVizyonItems);
       if (refresh) toast(`🍿 Vizyon taraması tamamlandı (${res.items.length} film & dizi aktif)!`);
     } else {
       renderItems([]);
@@ -1087,7 +1131,26 @@ export function openVizyonModal(pick, onAdded) {
     ),
   );
 
-  wrap.append(topActions, addForm, gridWrap);
+  const filterTabs = h('div', { class: 'wl-vizyon-tabs', style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+    ...[
+      ['ready', '✅ Akışı Hazır Olanlar'],
+      ['episodes', '🆕 Yeni Eklenen Bölümler (S:B)'],
+      ['theatrical', '🎟️ Sinemalarda (Yakında)'],
+      ['all', '🌐 Tüm Vizyon Havuzu'],
+    ].map(([fid, flabel]) => h('button', {
+      type: 'button',
+      class: `btn sm ${activeVizyonFilter === fid ? 'primary' : 'ghost'}`,
+      onclick: (ev) => {
+        activeVizyonFilter = fid;
+        filterTabs.querySelectorAll('button').forEach((b) => {
+          b.className = `btn sm ${b === ev.currentTarget ? 'primary' : 'ghost'}`;
+        });
+        loadVizyon(false);
+      },
+    }, flabel)),
+  );
+
+  wrap.append(topActions, filterTabs, addForm, gridWrap);
   closeRef = popup({
     title: '🍿 Vizyondakiler & Yeni Eklenen Film / Diziler (2026)',
     content: wrap,
