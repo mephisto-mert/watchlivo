@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v119 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v120 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v119", index_html)
+        self.assertIn("20261105_v120", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1973,16 +1973,16 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
 
         # 3. Verify /api/rave/analytics POST + GET, GA4 gtag.js binding, and zero-increment on /stats refresh
-        r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-HQXSREQV3R"})
+        r_post = self.client.post("/api/rave/analytics", json={"event": "pageview", "device": "ios", "gaMeasurementId": "G-3EGLLTB9J0"})
         self.assertEqual(r_post.status_code, 200)
         self.assertTrue(r_post.json().get("ok"))
-        self.assertEqual(r_post.json().get("gaMeasurementId"), "G-HQXSREQV3R")
+        self.assertEqual(r_post.json().get("gaMeasurementId"), "G-3EGLLTB9J0")
 
         r_get = self.client.get("/api/rave/analytics")
         self.assertEqual(r_get.status_code, 200)
         adata = r_get.json()
         self.assertTrue(adata.get("ok"))
-        self.assertEqual(adata.get("gaMeasurementId"), "G-HQXSREQV3R")
+        self.assertEqual(adata.get("gaMeasurementId"), "G-3EGLLTB9J0")
         pv_before = adata.get("todayPageviews", 0)
         self.assertGreaterEqual(adata.get("todayUniqueVisitors", 0), 1)
         self.assertGreaterEqual(pv_before, 1)
