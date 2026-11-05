@@ -1770,7 +1770,7 @@ def _has_vault_stream(it_obj: dict) -> int:
     no_k = _norm_title(it_obj.get("originalTitle") or "")
     ac_tmdb = globals().get("_ANIMECIX_KNOWN_TMDB") or ()
     ac_names = globals().get("_ANIMECIX_KNOWN_NAMES") or ()
-    if tid_k and tid_k in ac_tmdb:
+    if tid_k and (tid_k in ac_tmdb or tid_k in globals().get("_CANONICAL_SEASON_SPLITS", {})):
         return 2
     if nt_k.replace(" ", "") in ac_names or no_k.replace(" ", "") in ac_names:
         return 2
@@ -6105,7 +6105,7 @@ async def provider_catalog(request: Request):
                 res["items"] = items
         except Exception:
             res = {"items": [], "totalAvailable": 0, "totalTv": 0, "totalMovies": 0, "page": page, "category": category, "hasMore": False}
-    if _HIDDEN_TMDB_IDS and res.get("items"):
+    if _HIDDEN_TMDB_IDS and res.get("items") and not q:
         res["items"] = [
             x for x in res["items"]
             if _has_vault_stream(x) or (
