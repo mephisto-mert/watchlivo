@@ -4046,7 +4046,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
         for sl in dbx_slugs[:3]:
             try:
                 ep_u = f"https://www.dizibox.live/{sl}-{s}-sezon-{e}-bolum-izle/"
-                dhtml = urllib.request.urlopen(urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": "https://www.dizibox.live/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                dhtml = urllib.request.urlopen(urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": "https://www.dizibox.live/"}), timeout=3.4).read(1200000).decode("utf-8", errors="ignore")
                 tm_d = re.search(r"<title>([^<]+)</title>", dhtml, re.I)
                 if tm_d and not (source_url and "dizibox.live" in source_url):
                     dt = re.sub(r"\s+\d+\.\s*Sezon.*$", "", html_mod.unescape(tm_d.group(1)), flags=re.I).strip()
@@ -4060,11 +4060,11 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         m_moly = re.search(r'https?://dbx\.molystream\.org/embed/([a-zA-Z0-9_-]+)', khtml)
                         if m_moly:
                             res.append((f"https://dbx.molystream.org/embed/sheila/{m_moly.group(1)}", "hls_dbx"))
-                m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?v=[^"\']+)["\']', dhtml, re.I)
+                m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?[a-z]+=[^"\']+)["\']', dhtml, re.I)
                 if not m_vm_ifr:
                     try:
-                        dhtml2 = urllib.request.urlopen(urllib.request.Request(ep_u.rstrip("/") + "/2/", headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.0).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-                        m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?v=[^"\']+)["\']', dhtml2, re.I)
+                        dhtml2 = urllib.request.urlopen(urllib.request.Request(ep_u.rstrip("/") + "/2/", headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.0).read(1200000).decode("utf-8", errors="ignore")
+                        m_vm_ifr = re.search(r'<iframe[^>]+src=["\']((?:https?:)?//www\.dizibox\.live/player/moly/moly\.php\?[a-z]+=[^"\']+)["\']', dhtml2, re.I)
                     except Exception:
                         pass
                 if m_vm_ifr:
@@ -4092,6 +4092,13 @@ _ANIMECIX_KNOWN_TMDB = {
     "131041": 9851, "207468": 11289, "105248": 10535, "88803": 7809,
     "94664": 7350, "203737": 11014, "45790": 7696, "129600": 9770, "138357": 10799,
     "810693": 8718, "916224": 9940, "635302": 7457, "1159311": 11793, "1311031": 12251,
+    "42988": 8103, "1293": 7771, "100565": 8609, "61459": 7697, "116716": 8602, "91990": 11212,
+    "30981": 8175, "83100": 7541, "72636": 225, "220542": 11131, "31724": 7257, "30991": 8177,
+    "890": 8106, "67075": 6817, "75214": 7756, "200875": 10906, "136400": 9271, "43865": 7997,
+    "34904": 8522, "94624": 7607, "112613": 7356, "114138": 9266, "80564": 7539, "83097": 7501,
+    "31562": 7762, "32315": 8074, "42823": 7822, "60809": 198, "61223": 46, "59141": 7921,
+    "31926": 8331, "65942": 7325, "63613": 70, "86031": 7258, "88046": 7259, "61663": 21,
+    "85249": 7544, "206559": 11266, "138502": 8092,
 }
 _ANIMECIX_KNOWN_NAMES = {
     "berserk": 7791, "kenpuudenkiberserk": 7791, "berserk1997": 7791, "berserk2016": 7792,
@@ -4106,6 +4113,20 @@ _ANIMECIX_KNOWN_NAMES = {
     "frieren": 11130, "sousounofrieren": 11130, "spyxfamily": 9383,
     "bluelock": 9851, "kaijuno8": 11289, "kaijuu8gou": 11289, "cyberpunkedgerunners": 10535, "vinlandsaga": 7809,
     "mushokutensei": 7350, "oshinoko": 11014, "jojonokimyounabouken": 7696,
+    "serialexperimentslain": 8103, "lain": 8103, "ergoproxy": 7771, "86eightysix": 8609, "86": 8609, "eightysix": 8609,
+    "parasyte": 7697, "parasytethemaxim": 7697, "kiseijuu": 7697, "kiseijuuseinokakuritsu": 7697,
+    "oddtaxi": 8602, "pluto": 11212, "monster": 8175, "dororo": 7541, "madeinabyss": 225,
+    "theapothecarydiaries": 11131, "kusuriyanohitorigoto": 11131, "codegeass": 7257, "codegeasshangyakunolelouch": 7257,
+    "cowboybebop": 8177, "neongenesisevangelion": 8106, "evangelion": 8106, "mobpsycho100": 6817, "mobpsycho": 6817,
+    "violetevergarden": 7756, "bocchitherock": 10906, "summertimerendering": 9271, "summertimerender": 9271,
+    "psychopass": 7997, "samuraichamploo": 8522, "dorohedoro": 7607, "toyoureternity": 7356, "fumetsunoanatae": 7356,
+    "rankingofkings": 9266, "ousamaranking": 9266, "bananafish": 7539, "thepromisedneverland": 7501, "yakusokunoneverland": 7501,
+    "blacklagoon": 7762, "elfenlied": 8074, "another": 7822, "terrorinresonance": 198, "zankyounerror": 198,
+    "akamegakill": 46, "killlakill": 7921, "gurrenlagann": 8331, "tengentoppagurrenlagann": 8331,
+    "rezero": 7325, "rezerokarahajimeruisekaiseikatsu": 7325, "overlord": 70, "drstone": 7258,
+    "fireforce": 7259, "enenoshouboutai": 7259, "yourlieinapril": 21, "shigatsuwakiminouso": 21,
+    "kaguyasama": 7544, "kaguyasamaloveiswar": 7544, "deliciousindungeon": 11266, "dungeonmeshi": 11266,
+    "hellsparadise": 8092, "jigokuraku": 8092,
 }
 
 
@@ -4118,6 +4139,7 @@ except Exception:
     _HIDDEN_TMDB_IDS = set()
 
 _ANIMECIX_TAU_MAP: dict = {}
+_TAU_URL_CACHE: dict[str, str] = {}
 try:
     _tau_map_path = BASE_DIR / "animecix_tau_map.json"
     if _tau_map_path.exists():
@@ -4244,6 +4266,8 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                     tau_items.append((str(pair[0]), bool(pair[1]), str(pair[2]) if len(pair) >= 3 else ""))
         tau_items.sort(key=lambda x: (0 if (len(x) >= 3 and str(x[2]).startswith("https://")) else 1, 1 if x[1] else 0))
         seen_tau = set()
+        has_sub_ac = False
+        has_dub_ac = False
         for item in tau_items:
             if len(res) >= 3:
                 break
@@ -4252,22 +4276,36 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
             fb_u = item[2] if len(item) >= 3 else ""
             if tau_id in seen_tau:
                 continue
+            if (is_dub and has_dub_ac) or (not is_dub and has_sub_ac and not (IS_VERCEL and fb_u.startswith("https://"))):
+                continue
             seen_tau.add(tau_id)
             try:
-                best_u = fb_u if (IS_VERCEL and fb_u.startswith("https://")) else ""
+                best_u = (fb_u if (IS_VERCEL and fb_u.startswith("https://")) else "") or _TAU_URL_CACHE.get(tau_id, "")
                 if not best_u and not tau_id.startswith("https://"):
-                    try:
-                        t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=2.2) or {}
-                        u_list = [x for x in (t_info.get("urls") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
-                        u_list.sort(key=lambda x: 0 if "1080" in str(x.get("label") or "") else (1 if "720" in str(x.get("label") or "") else 2))
-                        if u_list:
-                            best_u = str(u_list[0]["url"]).strip()
-                    except Exception:
-                        best_u = ""
+                    for _try_tau in range(2):
+                        try:
+                            t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=3.6) or {}
+                            u_list = [x for x in (t_info.get("urls") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
+                            u_list.sort(key=lambda x: 0 if "1080" in str(x.get("label") or "") else (1 if "720" in str(x.get("label") or "") else 2))
+                            if u_list:
+                                best_u = str(u_list[0]["url"]).strip()
+                                _TAU_URL_CACHE[tau_id] = best_u
+                            break
+                        except urllib.error.HTTPError as he_tau:
+                            if he_tau.code == 429 and _try_tau == 0:
+                                time.sleep(0.55)
+                                continue
+                            break
+                        except Exception:
+                            break
                 if not best_u and fb_u.startswith("https://"):
                     best_u = fb_u
                 if best_u:
                     res.append((best_u, "mp4_ac_dub" if is_dub else "mp4_ac_sub"))
+                    if is_dub:
+                        has_dub_ac = True
+                    else:
+                        has_sub_ac = True
             except Exception:
                 continue
         res.sort(key=lambda x: (1 if "_720p" in x[0].lower() else 0, 1 if x[1] == "mp4_ac_dub" else 0))
@@ -4333,6 +4371,7 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
         elif "1024" in net_ids or any("amazon" in x or "prime video" in x for x in (net_names | prod_names)):
             primary_prov = "prime"
         res = {
+            "tmdbId": tid,
             "title": orig_t or tr_t,
             "trTitle": tr_t or orig_t,
             "originalTitle": orig_t or tr_t,
@@ -4347,7 +4386,19 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
         _TMDB_META_CACHE[ck] = res
         return res
     except Exception:
-        return {"title": fallback_title, "trTitle": fallback_title, "originalTitle": fallback_title, "altTitles": [], "year": fallback_year, "imdbId": fallback_imdb, "origLang": "en", "transLangs": ["tr", "en"], "runtime": 48 if mtype == "tv" else 120, "primaryProv": ""}
+        if fallback_title and len(_norm_title(fallback_title)) >= 3:
+            try:
+                hits_fb = _tmdb_sync(fallback_title)
+                match_fb = next((h for h in (hits_fb or []) if h.get("mediaType") == mtype and _norm_title(h.get("title") or "") == _norm_title(fallback_title)), (hits_fb[0] if hits_fb else None))
+                if match_fb and str(match_fb.get("tmdbId") or "") and str(match_fb.get("tmdbId") or "") != tid:
+                    return _get_tmdb_meta_sync(str(match_fb["tmdbId"]), mtype, fallback_title, fallback_year, fallback_imdb)
+            except Exception:
+                pass
+        fb_lang = "tr" if any(c in (fallback_title or "") for c in "çğıöşüÇĞİÖŞÜ") else "en"
+        return {"tmdbId": tid, "title": fallback_title, "trTitle": fallback_title, "originalTitle": fallback_title, "altTitles": [fallback_title] if fallback_title else [], "year": fallback_year, "imdbId": fallback_imdb, "origLang": fb_lang, "transLangs": ["tr", "en"], "runtime": 48 if mtype == "tv" else 120, "primaryProv": ""}
+
+
+_HEXA_CAP: dict = {"token": "", "uses": 0, "exp": 0.0}
 
 
 def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str = "", year: str = "", imdb_id: str = "", disp_title: str = "", source_url: str = "", refresh: bool = False):
@@ -4409,6 +4460,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     pass
 
     meta = _get_tmdb_meta_sync(tid, mtype, title or disp_title, year, imdb_id)
+    if meta.get("tmdbId") and str(meta.get("tmdbId")).isdigit() and str(meta.get("tmdbId")) != str(tid):
+        tid = str(meta["tmdbId"])
     orig_title = meta.get("originalTitle") or title or disp_title
     tr_title = meta.get("trTitle") or disp_title or orig_title
     year = meta.get("year") or year
@@ -4476,10 +4529,21 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         res = []
         for host_dom in ("theemoviedb.hexa.su",):
             try:
-                cap = _raw_get_json(f"https://enc-dec.app/api/enc-hexa?_={int(time.time()*1000)}", timeout=3.8)
-                tok = (cap.get("result") or {}).get("token") or ""
+                now_hx = time.time()
+                tok = _HEXA_CAP.get("token") or ""
+                if not tok or int(_HEXA_CAP.get("uses") or 0) >= 18 or now_hx > float(_HEXA_CAP.get("exp") or 0):
+                    hx_cap_hdrs = {"User-Agent": UA137, "Origin": "https://hexa.su", "Referer": "https://hexa.su/", "Content-Type": "application/json"}
+                    ch = _raw_get_json("https://cap.hexa.su/15d2cf0395/challenge", headers=hx_cap_hdrs, data=b"{}", timeout=3.4)
+                    if isinstance(ch, dict) and ch.get("token"):
+                        sol = (_raw_get_json("https://enc-dec.app/api/enc-hexa", headers={"Content-Type": "application/json"}, data=json.dumps({"challenge_data": ch}).encode("utf-8"), timeout=4.0) or {}).get("result")
+                        if isinstance(sol, dict) and sol.get("token"):
+                            red = _raw_get_json("https://cap.hexa.su/15d2cf0395/redeem", headers=hx_cap_hdrs, data=json.dumps(sol).encode("utf-8"), timeout=3.4) or {}
+                            tok = str(red.get("token") or "").strip()
+                            if tok:
+                                _HEXA_CAP.update({"token": tok, "uses": 0, "exp": now_hx + 540.0})
                 if not tok:
                     continue
+                _HEXA_CAP["uses"] = int(_HEXA_CAP.get("uses") or 0) + 1
                 key = os.urandom(32).hex()
                 hdrs = {
                     "User-Agent": UA137, "Referer": "https://hexa.su/", "Origin": "https://hexa.su",
@@ -4540,28 +4604,16 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                     picked_vl = []
                     for prefer_h264 in (True, False):
                         for qk in ("1080", "720", "1440", "2160", "4k", "480", "360"):
-                            qu = (quals.get(qk) or {}).get("url") or ""
+                            q_obj = quals.get(qk) or {}
+                            qu = (q_obj.get("url") or "").strip()
                             if not qu.startswith("https://") or any(qu == x[0] for x in picked_vl):
                                 continue
                             if prefer_h264 and "/resource/h265/" in qu.lower():
                                 continue
-                            try:
-                                is_hk = "hakunaymatata.com" in qu.lower()
-                                hk_hdrs = {
-                                    "User-Agent": (
-                                        "com.community.oneroom/50020115 (Linux; U; Android 15; en_US; OPPO CPH2579; Build/AP3A.240905.015.A2; Cronet/140.0.7339.51)"
-                                        if is_hk else UA137
-                                    ),
-                                    "Range": "bytes=0-1023",
-                                }
-                                if not is_hk:
-                                    hk_hdrs["Referer"] = "https://filmboom.top/"
-                                with _public_open(urllib.request.Request(qu, headers=hk_hdrs), timeout=2.4) as hk_r:
-                                    if hk_r.status not in (200, 206):
-                                        continue
-                            except Exception:
-                                continue
-                            st_tag = "mp4_vl_1080" if qk in ("2160", "4k", "1440", "1080") else ("mp4_vl_720" if qk == "720" else "mp4_vl_sd")
+                            q_hdrs = q_obj.get("headers") or {}
+                            q_ref = str(q_hdrs.get("referer") or q_hdrs.get("Referer") or "").lower()
+                            fb_p = "mp4_vl_fb" if "filmboom.top" in q_ref else "mp4_vl"
+                            st_tag = f"{fb_p}_1080" if qk in ("2160", "4k", "1440", "1080") else (f"{fb_p}_720" if qk == "720" else f"{fb_p}_sd")
                             picked_vl.append((qu, st_tag))
                             if len(picked_vl) >= 2:
                                 break
@@ -4577,26 +4629,18 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         if not str(tid or "").isdigit():
             return res
         try:
-            cj_q = f"type=tv&id={tid}&season={s_tmdb}&episode={e_tmdb}" if mtype == "tv" else f"type=movie&id={tid}"
-            enc_cj = (_raw_get_json(f"https://enc-dec.app/api/enc-cinejoy?{cj_q}", timeout=3.4) or {}).get("result") or ""
-            if enc_cj:
-                cj_req = urllib.request.Request(f"https://api.wing.st/{enc_cj}", headers={"User-Agent": UA137, "Origin": "https://cinejoy.pk", "Referer": "https://cinejoy.pk/"})
-                with urllib.request.urlopen(cj_req, timeout=3.4) as r_cj:
-                    cj_enc_txt = r_cj.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore").strip()
-                if cj_enc_txt and len(cj_enc_txt) > 20:
-                    dec_cj = (_raw_get_json("https://enc-dec.app/api/dec-cinejoy", headers={"Content-Type": "application/json"}, data=json.dumps({"text": cj_enc_txt}).encode("utf-8"), timeout=3.4) or {}).get("result") or {}
-                    if isinstance(dec_cj, dict):
-                        cj_subs = dec_cj.get("tracks") or dec_cj.get("subtitles") or []
-                        if cj_subs:
-                            es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
-                            for cs in cj_subs:
-                                su_c = str(cs.get("file") or cs.get("url") or "").strip()
-                                sl_c = str(cs.get("label") or cs.get("lang") or "").lower().strip()
-                                if su_c.startswith("https://") and not any(x.get("url") == su_c for x in es_list):
-                                    es_list.append({"lang": sl_c, "url": su_c, "source": "cinejoy_embed"})
-                        st_cj = str(dec_cj.get("stream") or dec_cj.get("url") or "").strip()
-                        if st_cj.startswith("https://"):
-                            res.append((st_cj, "hls_cj"))
+            nx_u = f"https://providers.nexa.mov/?platform=tmdb&id={tid}&server=nova&season={s_tmdb}&episode={e_tmdb}" if mtype == "tv" else f"https://providers.nexa.mov/?platform=tmdb&id={tid}&server=nova"
+            enc_nx = (_raw_get_json(f"https://enc-dec.app/api/enc-nexa?url={urllib.parse.quote(nx_u)}", timeout=3.2) or {}).get("result") or ""
+            if enc_nx:
+                nx_req = urllib.request.Request("https://providers.nexa.mov/v1/playlist", data=base64.b64decode(enc_nx), headers={"User-Agent": UA137, "Referer": "https://nexa.mov/", "Content-Type": "application/octet-stream"})
+                with urllib.request.urlopen(nx_req, timeout=3.2) as r_nx:
+                    nx_hex = r_nx.read(MAX_PAGE_BYTES).hex()
+                if nx_hex and len(nx_hex) > 20:
+                    dec_nx = (_raw_get_json("https://enc-dec.app/api/dec-nexa", headers={"Content-Type": "application/json"}, data=json.dumps({"text": nx_hex, "server": "nova"}).encode("utf-8"), timeout=3.2) or {}).get("result") or {}
+                    if isinstance(dec_nx, dict):
+                        st_nx = str(dec_nx.get("url") or dec_nx.get("stream") or "").strip()
+                        if st_nx.startswith("https://") and ".mpd" not in st_nx.lower():
+                            res.append((st_nx, "hls"))
         except Exception:
             pass
         return res
@@ -4662,7 +4706,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     f_ar = pool.submit(_job_archive_org)
     t_start = time.time()
     t_first_hf = 0.0
-    is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower()
+    is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower() or str(tid or "") in _ANIMECIX_KNOWN_TMDB
     _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     while time.time() - t_start < 5.6:
         ac_ok = f_ac.done() and not f_ac.exception() and bool(f_ac.result())
@@ -4875,7 +4919,8 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     if stype in ("mp4_ar_tr", "mp4_ar"):
         return _proxy_u(u, "https://archive.org/", ".mp4")
     if str(stype).startswith("mp4_vl"):
-        return _proxy_u(u, "" if "hakunaymatata.com" in u else "https://filmboom.top/", ".mp4")
+        use_fb_ref = str(stype).startswith("mp4_vl_fb") or "hakunaymatata.com" not in u
+        return _proxy_u(u, "https://filmboom.top/" if use_fb_ref else "", ".mp4")
     if stype == "hls_vm" or any(d in u.lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}{mt_q}&sid={sid}&ref=vm&proxy_segs=1&ext=.m3u8"
@@ -5720,18 +5765,22 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
     if mtype == "tv" and tid.isdigit():
         ep_map = _tv_season_ep_map(tid)
         if not ep_map:
-            tv_check = _get_tmdb_meta_sync(tid, "tv")
-            mv_check = _get_tmdb_meta_sync(tid, "movie")
-            if not (tv_check.get("originalTitle") or tv_check.get("trTitle")) and (mv_check.get("originalTitle") or mv_check.get("trTitle")):
-                mtype = "movie"
+            if s == 1 and e == 1:
+                tv_check = _get_tmdb_meta_sync(tid, "tv", title or disp)
+                mv_check = _get_tmdb_meta_sync(tid, "movie", title or disp)
+                if not (tv_check.get("originalTitle") or tv_check.get("trTitle")) and (mv_check.get("originalTitle") or mv_check.get("trTitle")):
+                    mtype = "movie"
         elif prov != "crunchyroll" and not str(source_url or "").startswith("animecix:") and tid not in _ANIMECIX_KNOWN_TMDB:
             s_chk = ep_num["s_tmdb"] if ep_num["has_splits"] else s
             e_chk = ep_num["e_tmdb"] if ep_num["has_splits"] else e
-            if s_chk not in ep_map or (ep_map.get(s_chk, 0) > 0 and e_chk > ep_map[s_chk]):
+            if s_chk > 40 or e_chk > 2500:
                 return None
     eff_tid = tid if tid.isdigit() else (f"free-{_norm_title(title or disp)[:24]}" if (title or disp or source_url) else "")
     if eff_tid:
         m_cached = _get_tmdb_meta_sync(tid, mtype, title, year, imdb_id)
+        if m_cached.get("tmdbId") and str(m_cached.get("tmdbId")).isdigit() and str(m_cached.get("tmdbId")) != str(tid):
+            tid = str(m_cached["tmdbId"])
+            eff_tid = tid
         orig_title = m_cached.get("originalTitle") or title
         tr_title = m_cached.get("trTitle") or disp or orig_title
         year = m_cached.get("year") or year or ""
@@ -5863,64 +5912,64 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 direct_list = direct_list[:3]
             else:
                 direct_list = alive_direct
-                late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
-                if late_embeds:
-                    meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
-                    for esub in late_embeds:
-                        eu = str(esub.get("url") or "").strip()
-                        raw_l = str(esub.get("lang") or esub.get("label") or "").lower().strip()
-                        base_l = re.split(r"[\s(\[-]", raw_l)[0].strip()
-                        linfo = SUB_LANG_MAP.get(raw_l) or SUB_LANG_MAP.get(base_l)
-                        if eu.startswith("http") and linfo and not any(urllib.parse.quote(eu, safe="") in str(st_item.get("url") or "") for st_item in sub_tracks):
-                            lcode, llabel, _ = linfo
-                            vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(eu, safe='')}&lang={lcode}{meta_q_late}"
-                            sub_tracks.insert(0, {"id": f"{lcode}-hls", "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
-                if not intro_seg and sub_tracks:
-                    intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
-                sub_tracks = _filter_live_subs(sub_tracks)
-                alive_wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
-                if not audio_tracks:
-                    audio_tracks = [{"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({label})", "mode": "stream", "url": alive_wrapped[0][0]}]
-                stream_url = audio_tracks[0]["url"] if audio_tracks else alive_wrapped[0][0]
-                stype = "mp4" if ("&ext=.mp4" in stream_url or ".mp4" in stream_url) else alive_wrapped[0][1]
-                alt_urls = list(dict.fromkeys([t["url"] for t in audio_tracks if t.get("url")] + [u for u, _ in alive_wrapped]))
-                servers = []
-                seen_srv_u = set()
-                for u_raw, st_raw in direct_list:
-                    wu_srv = _wrap_first_party_stream(u_raw, st_raw, eff_prov, eff_tid, s, e, mtype)
-                    if not wu_srv or wu_srv in seen_srv_u:
-                        continue
-                    seen_srv_u.add(wu_srv)
-                    idx_srv = len(servers) + 1
-                    servers.append({
-                        "id": f"srv-{idx_srv}",
-                        "label": _server_label_for_stream(u_raw, st_raw, idx_srv),
-                        "url": wu_srv,
-                        "streamType": "mp4" if str(st_raw).startswith("mp4") else "hls",
-                    })
-                full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
-                dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
-                off_tpl = OFFICIAL_SEARCH_URLS.get(eff_prov, "https://www.netflix.com/search?q={q}")
-                official_url = source_url or pmeta.get("officialUrl") or off_tpl.format(q=urllib.parse.quote(disp or orig_title))
-                is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd", "hls_fhd_multi", "hls_fhd_tr") for _, st in (direct_list or []))
-                res_str = "720p HD" if is_720_likely else "1080p HD"
-                return {
-                    "id": eff_tid or tid,
-                    "provider": eff_prov,
-                    "catalogProvider": eff_prov,
-                    "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
-                    "seriesTitle": disp or tr_title or orig_title,
-                    "originalTitle": orig_title, "year": year, "origLang": orig_lang,
-                    "sourceUrl": source_url or "",
-                    "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:6], "servers": servers[:8],
-                    "subtitleTracks": sub_tracks, "audioTracks": audio_tracks, "intro": intro_seg,
-                    "platformAudioLangs": pmeta.get("audioLangs") or [],
-                    "platformSubLangs": pmeta.get("subLangs") or [],
-                    "officialUrl": official_url, "providerUrl": official_url,
-                    "title": full_title, "thumbnail": poster,
-                    "channel": f"{label} · {'Tam Bölüm' if mtype == 'tv' else 'Tam Film'} ({res_str})",
-                    "duration": dur,
-                }
+            late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
+            if late_embeds:
+                meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
+                for esub in late_embeds:
+                    eu = str(esub.get("url") or "").strip()
+                    raw_l = str(esub.get("lang") or esub.get("label") or "").lower().strip()
+                    base_l = re.split(r"[\s(\[-]", raw_l)[0].strip()
+                    linfo = SUB_LANG_MAP.get(raw_l) or SUB_LANG_MAP.get(base_l)
+                    if eu.startswith("http") and linfo and not any(urllib.parse.quote(eu, safe="") in str(st_item.get("url") or "") for st_item in sub_tracks):
+                        lcode, llabel, _ = linfo
+                        vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(eu, safe='')}&lang={lcode}{meta_q_late}"
+                        sub_tracks.insert(0, {"id": f"{lcode}-hls", "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
+            if not intro_seg and sub_tracks:
+                intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
+            sub_tracks = _filter_live_subs(sub_tracks)
+            alive_wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
+            if not audio_tracks:
+                audio_tracks = [{"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({label})", "mode": "stream", "url": alive_wrapped[0][0]}]
+            stream_url = audio_tracks[0]["url"] if audio_tracks else alive_wrapped[0][0]
+            stype = "mp4" if ("&ext=.mp4" in stream_url or ".mp4" in stream_url) else alive_wrapped[0][1]
+            alt_urls = list(dict.fromkeys([t["url"] for t in audio_tracks if t.get("url")] + [u for u, _ in alive_wrapped]))
+            servers = []
+            seen_srv_u = set()
+            for u_raw, st_raw in direct_list:
+                wu_srv = _wrap_first_party_stream(u_raw, st_raw, eff_prov, eff_tid, s, e, mtype)
+                if not wu_srv or wu_srv in seen_srv_u:
+                    continue
+                seen_srv_u.add(wu_srv)
+                idx_srv = len(servers) + 1
+                servers.append({
+                    "id": f"srv-{idx_srv}",
+                    "label": _server_label_for_stream(u_raw, st_raw, idx_srv),
+                    "url": wu_srv,
+                    "streamType": "mp4" if str(st_raw).startswith("mp4") else "hls",
+                })
+            full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
+            dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
+            off_tpl = OFFICIAL_SEARCH_URLS.get(eff_prov, "https://www.netflix.com/search?q={q}")
+            official_url = source_url or pmeta.get("officialUrl") or off_tpl.format(q=urllib.parse.quote(disp or orig_title))
+            is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd", "hls_fhd_multi", "hls_fhd_tr") for _, st in (direct_list or []))
+            res_str = "720p HD" if is_720_likely else "1080p HD"
+            return {
+                "id": eff_tid or tid,
+                "provider": eff_prov,
+                "catalogProvider": eff_prov,
+                "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
+                "seriesTitle": disp or tr_title or orig_title,
+                "originalTitle": orig_title, "year": year, "origLang": orig_lang,
+                "sourceUrl": source_url or "",
+                "streamType": stype, "url": stream_url, "embedUrl": "", "altUrls": alt_urls[:6], "servers": servers[:8],
+                "subtitleTracks": sub_tracks, "audioTracks": audio_tracks, "intro": intro_seg,
+                "platformAudioLangs": pmeta.get("audioLangs") or [],
+                "platformSubLangs": pmeta.get("subLangs") or [],
+                "officialUrl": official_url, "providerUrl": official_url,
+                "title": full_title, "thumbnail": poster,
+                "channel": f"{label} · {'Tam Bölüm' if mtype == 'tv' else 'Tam Film'} ({res_str})",
+                "duration": dur,
+            }
         is_tr_yt_eligible = (
             orig_lang == "tr"
             or prov in ("exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv", "youtube")
@@ -6996,7 +7045,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
     is_hakuna = "hakunaymatata.com" in url
-    eff_ref = "" if is_hakuna else (ref or "").strip()
+    eff_ref = (ref or "").strip()
     if not eff_ref and not is_hakuna:
         if "filmboom" in url:
             eff_ref = "https://filmboom.top/"
@@ -7037,7 +7086,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             else UA137
         )
     }
-    if eff_ref and not is_hakuna:
+    if eff_ref:
         p = urllib.parse.urlparse(eff_ref)
         orig = f"{p.scheme}://{p.netloc}" if p.scheme and p.netloc else ""
         hdrs["Referer"] = eff_ref
