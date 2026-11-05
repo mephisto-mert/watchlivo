@@ -9602,6 +9602,83 @@ def _set_ga_measurement_id_sync(ga_id: str) -> str:
     return clean_id
 
 
+
+def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str = "pageview", path_str: str = "/") -> None:
+    """Server-side GA4 /g/collect relay so Brave Shields / DNS blockers never drop Watchlivo Realtime users."""
+    import urllib.parse as _up
+    import urllib.request as _ur
+    cid_num = int(vid_hash[:8], 16) % 900000000 + 100000000
+    now_sec = int(time.time())
+    cid = f"{cid_num}.{now_sec - 30}"
+    ga_ev = "page_view" if ev in ("pageview", "pwa_launch") else ev
+    active_id = _get_ga_measurement_id_sync() or "G-HQXSREQV3R"
+    tids = list(dict.fromkeys([active_id, "G-HQXSREQV3R", "G-3EGLLTB9J0", "G-82ZD4CPWEP", "G-NJ1NRNFEX6"]))
+    for tid in tids:
+        try:
+            q = _up.urlencode({
+                "v": "2",
+                "tid": tid,
+                "cid": cid,
+                "sid": str(now_sec),
+                "sct": "1",
+                "seg": "1",
+                "_s": "1",
+                "_p": str(int(time.time() * 1000)),
+                "ul": "tr-tr",
+                "sr": "1920x1080",
+                "dl": f"https://watchlivo.online/{path_str.lstrip('/')}",
+                "dt": "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
+                "en": ga_ev,
+                "_fv": "1",
+                "_ss": "1",
+                "_ee": "1",
+                "_uip": ip_str if ip_str and ip_str != "127.0.0.1" else "",
+            })
+            url = f"https://www.google-analytics.com/g/collect?{q}"
+            req = _ur.Request(
+                url,
+                data=b"",
+                headers={
+                    "User-Agent": ua_str or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36",
+                    "X-Forwarded-For": ip_str,
+                },
+                method="POST",
+            )
+            with _ur.urlopen(req, timeout=4.0) as _:
+                pass
+        except Exception:
+            pass
+
+
+async def rave_ga_collect_proxy(request: Request) -> Response:
+    """First-party transport_url relay for Google Analytics 4 gtag.js (/api/rave/ga-collect/g/collect)."""
+    import urllib.request as _ur
+    qs = str(request.url.query or "")
+    body_bytes = await request.body()
+    ua_str = request.headers.get("user-agent") or "Mozilla/5.0"
+    ip_str = client_ip(request)
+    if ip_str and ip_str != "127.0.0.1" and "_uip=" not in qs:
+        qs = f"{qs}&_uip={ip_str}" if qs else f"_uip={ip_str}"
+
+    def _forward():
+        for host in ("https://www.google-analytics.com/g/collect", "https://www.google.com/g/collect"):
+            try:
+                req = _ur.Request(
+                    f"{host}?{qs}",
+                    data=body_bytes if request.method == "POST" else None,
+                    headers={"User-Agent": ua_str, "X-Forwarded-For": ip_str},
+                    method=request.method,
+                )
+                with _ur.urlopen(req, timeout=4.0) as r:
+                    return r.status
+            except Exception:
+                continue
+        return 204
+
+    await asyncio.to_thread(_forward)
+    return Response(b"", status_code=204, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
+
+
 async def rave_analytics_endpoint(request: Request) -> JSONResponse:
     ip_str = client_ip(request)
     ua_str = request.headers.get("user-agent") or ""
@@ -9626,6 +9703,7 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
         t_str = str(body.get("title") or "")[:100]
         mt_str = str(body.get("mediaType") or "")[:16]
         await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
+        await asyncio.to_thread(_send_server_ga4_hit_sync, vid_hash, ua_str, ip_str, ev, str(body.get('path') or '/'))
         ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
         return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store"})
     summary = await _build_analytics_summary()
@@ -9736,6 +9814,8 @@ app = Starlette(
         Route("/stats", analytics_dashboard_page, methods=["GET"]),
         Route("/analytics", analytics_dashboard_page, methods=["GET"]),
         Route("/api/rave/analytics", rave_analytics_endpoint, methods=["GET", "POST"]),
+        Route("/api/rave/ga-collect/{rest:path}", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
+        Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
         Route("/manifest.json", manifest_json),

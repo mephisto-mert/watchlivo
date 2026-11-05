@@ -137,7 +137,7 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect)(.*)",
       "headers": {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store, no-cache, must-revalidate"
