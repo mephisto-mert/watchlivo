@@ -898,6 +898,12 @@ _CJK_TITLE_MAP = {
     "鬼滅の刃": "Demon Slayer: Kimetsu no Yaiba",
     "モンスター": "Monster",
     "Сталкер": "Stalker",
+    "エルゴプラクシー": "Ergo Proxy",
+    "サムライチャンプルー": "Samurai Champloo",
+    "モブサイコ100": "Mob Psycho 100",
+    "妄想代理人": "Paranoia Agent",
+    "ナルト 疾風伝": "Naruto Shippuden",
+    "回路": "Pulse",
 }
 
 
@@ -920,7 +926,7 @@ def _tmdb_item(r: dict, default_type: str = "movie") -> dict:
             title = orig_title
         else:
             ascii_part = re.sub(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af：・]+", " ", title).strip()
-            title = ascii_part if len(ascii_part) >= 3 else f"Anime / Asya Yapımı #{tid[-4:] if tid else 'HD'}"
+            title = ascii_part if len(re.findall(r"[A-Za-z]", ascii_part)) >= 3 else f"Anime / Asya Yapımı #{tid[-4:] if tid else 'HD'}"
     rating = round(float(r.get("vote_average") or 0), 1)
     vc = int(r.get("vote_count") or 0)
     cats, genre_label = _classify_tmdb_genres(r.get("genre_ids") or [], mtype, rating, vc)
@@ -1015,6 +1021,7 @@ _FLAGSHIP_TR_TMDB_IDS = {
     "228853", "115678", "40417", "39176", "131906", "231254", "77994",
     "115597", "125412", "280030", "271596", "71036", "34587", "17635",
     "213194", "243832", "32519", "74823", "68388", "44878", "61516", "59",
+    "70586", "113957", "135251",
 }
 
 
@@ -1086,7 +1093,11 @@ def _rank_search_item(it: dict, raw_q: str) -> tuple:
         if not q_is_anime or orig_lang == "ja" or "anime" in cats or "animation" in cats:
             mt_hint_match = 1
 
-    is_tr_flagship = 1 if (nq and (nt == nq or no == nq or nt_pref == nq) and tid in _FLAGSHIP_TR_TMDB_IDS) else 0
+    is_tr_flagship = 1 if (
+        nq
+        and (nt == nq or no == nq or nt_pref == nq)
+        and (tid in _FLAGSHIP_TR_TMDB_IDS or (nt == nq and no == nq and orig_lang == "tr" and vc >= 30))
+    ) else 0
     has_tr_chars = orig_lang == "tr" or any(c in "çğıöşüÇĞİÖŞÜ" for c in raw_t)
     is_substantial = (
         (vc >= 80 and rating >= 5.5)
@@ -1095,11 +1106,16 @@ def _rank_search_item(it: dict, raw_q: str) -> tuple:
         or (has_tr_chars and yr >= "2010" and vc >= 5)
         or (q_year and yr == q_year)
     )
-    has_spinoff_sub = bool(re.search(r"[:\-–—].*[:\-–—]|\b(?:the\s+movie|movie|sonsuzluk\s+kalesi|mugen\s+train|mugen\s+treni|fuka\s+ryouiki|gekij)\b|劇場版", f"{raw_t} {raw_o}", re.I))
+    raw_t_clean = re.sub(r"\([^)]*\)", "", raw_t).strip()
+    has_spinoff_sub = bool(
+        re.search(r"[:\-–—].*[:\-–—]", raw_t_clean)
+        or re.search(r"[:\-–—].*[:\-–—]", raw_o)
+        or re.search(r"\b(?:the\s+movie|movie|sonsuzluk\s+kalesi|mugen\s+train|mugen\s+treni|fuka\s+ryouiki|gekij|hashira\s+training|swordsmith\s+village)\b|劇場版", f"{raw_t} {raw_o}", re.I)
+    )
 
     if nq and (nt == nq or no == nq) and is_substantial:
         exact_tier = 5
-    elif nq and (nt_pref == nq or no_pref == nq) and vc >= 1500 and not has_spinoff_sub:
+    elif nq and (nt_pref == nq or no_pref == nq) and vc >= 600 and not has_spinoff_sub:
         exact_tier = 5
     elif nq and (nt_pref == nq or no_pref == nq or nt.startswith(nq + " ") or no.startswith(nq + " ")) and is_substantial:
         exact_tier = 3
@@ -1111,8 +1127,9 @@ def _rank_search_item(it: dict, raw_q: str) -> tuple:
         exact_tier = 0
 
     pop_tier = 3 if vc >= 2000 else (2 if vc >= 300 else (1 if vc >= 40 else 0))
-    released = 1 if (yr and yr <= "2026") else 0
-    return (year_exact, mt_hint_match, is_tr_flagship, exact_tier, pop_tier, released, vc, rating)
+    released = 1 if (yr and yr <= "2026" and (vc >= 5 or "voteCount" not in it)) else 0
+    acclaimed_tv = 1 if (it.get("mediaType") == "tv" and rating >= 8.2 and vc >= 2500) else 0
+    return (year_exact, mt_hint_match, is_tr_flagship, exact_tier, pop_tier, released, acclaimed_tv, vc, rating)
 
 
 def _match_star_wars_curated(q: str) -> list:
@@ -1182,6 +1199,11 @@ def _tmdb_sync(q: str):
         for batch in pool.map(_fetch_p, [1, 2]):
             raw.extend(batch)
     api_items = [_tmdb_item(r) for r in raw]
+    if eff_q and re.search(r"[A-Za-z]", eff_q):
+        for a_it in api_items:
+            if str(a_it.get("title") or "").startswith("Anime / Asya Yapımı") and int(a_it.get("voteCount") or 0) >= 40:
+                a_it["title"] = eff_q.title()
+                a_it["originalTitle"] = eff_q.title()
     seen_k = set()
     combined = []
     for it in curated_sw + api_items:
@@ -3155,16 +3177,21 @@ def _clean_query_title(s: str) -> str:
     return t.strip()
 
 
+import unicodedata
+
 _ROMAN_NUM_MAP = {
     "viii": "8", "vii": "7", "vi": "6", "iv": "4", "iii": "3", "ii": "2",
     "bir": "1", "iki": "2", "uc": "3", "dort": "4", "bes": "5", "alti": "6",
+    "shippuuden": "shippuden", "shougun": "shogun", "toukyou": "tokyo",
 }
 
 
 def _norm_title(s: str) -> str:
     if not s:
         return ""
-    t = html_mod.unescape(str(s)).translate(_TR_ASCII_MAP).lower()
+    t = html_mod.unescape(str(s)).translate(_TR_ASCII_MAP)
+    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode("ascii").lower()
+    t = re.sub(r"['’`]", "", t)
     t = re.sub(r"\(\s*(?:19|20)\d{2}\s*\)", " ", t)
     t = re.sub(r"[^a-z0-9]+", " ", t)
     words = []

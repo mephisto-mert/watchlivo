@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v114 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v115 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v114", index_html)
+        self.assertIn("20261105_v115", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1901,6 +1901,44 @@ class RegressionTests(unittest.TestCase):
             ("Dark", "Dark", "tv"),
             ("Twin Peaks", "Twin Peaks", "tv"),
             ("Utopia", "Utopia", "tv"),
+        ]:
+            cat_items = (server._provider_catalog_page_sync("cinema", q, 1, "all", "") or {}).get("items") or []
+            self.assertTrue(cat_items, f"No catalog items returned for {q}")
+            top_it = cat_items[0]
+            self.assertEqual(top_it.get("mediaType"), exp_mt, f"Wrong mediaType for {q}: {top_it}")
+            exp_n = server._norm_title(exp_sub)
+            t_n = server._norm_title(top_it.get("title") or "")
+            o_n = server._norm_title(top_it.get("originalTitle") or "")
+            self.assertTrue(exp_n in t_n or exp_n in o_n, f"Wrong #1 title for {q}: {top_it}")
+
+
+    def test_v115_hundred_query_search_accuracy(self):
+        # 1. Verify macron, apostrophe, and romaji vowel normalization in _norm_title
+        self.assertEqual(server._norm_title("Shōgun"), "shogun")
+        self.assertEqual(server._norm_title("Bir Zamanlar Anadolu'da"), "1 zamanlar anadoluda")
+        self.assertEqual(server._norm_title("Naruto: Shippuuden"), "naruto shippuden")
+
+        # 2. Verify CJK title mapping & ASCII letter threshold for Mob Psycho 100, Ergo Proxy, Samurai Champloo, Paranoia Agent, Pulse
+        it_mob = server._tmdb_item({"id": 67075, "media_type": "tv", "name": "モブサイコ100", "original_name": "モブサイコ100", "poster_path": "/x.jpg", "vote_average": 8.5, "vote_count": 1400}, "tv")
+        self.assertEqual(it_mob["title"], "Mob Psycho 100")
+        it_par = server._tmdb_item({"id": 2368, "media_type": "tv", "name": "Paranoya Ajanı", "original_name": "妄想代理人", "poster_path": "/x.jpg", "vote_average": 8.0, "vote_count": 480}, "tv")
+        self.assertIn("Paranoia Agent", it_par["title"])
+        self.assertEqual(it_par["originalTitle"], "Paranoia Agent")
+
+        # 3. Verify all 11 previously mismatched queries in the 100-query benchmark resolve to #1
+        for q, exp_sub, exp_mt in [
+            ("Fargo", "Fargo", "tv"),
+            ("Shogun", "Shōgun", "tv"),
+            ("Hannibal", "Hannibal", "tv"),
+            ("masum", "Masum", "tv"),
+            ("bir zamanlar anadoluda", "Bir Zamanlar Anadolu'da", "movie"),
+            ("Naruto Shippuden", "Naruto Shippuden", "tv"),
+            ("Code Geass", "Code Geass", "tv"),
+            ("Ergo Proxy", "Ergo Proxy", "tv"),
+            ("Paranoia Agent", "Paranoia Agent", "tv"),
+            ("Samurai Champloo", "Samurai Champloo", "tv"),
+            ("Mob Psycho 100", "Mob Psycho 100", "tv"),
+            ("Pulse 2001", "Pulse", "movie"),
         ]:
             cat_items = (server._provider_catalog_page_sync("cinema", q, 1, "all", "") or {}).get("items") or []
             self.assertTrue(cat_items, f"No catalog items returned for {q}")
