@@ -30,13 +30,13 @@
   <title>Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları</title>
   <link rel="canonical" href="https://watchlivo.online/" />
   <link rel="manifest" href="/manifest.json" />
-  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v118" type="image/svg+xml" />
-  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v118" />
+  <link rel="icon" href="/static/watchlivo-logo.svg?v=20261105_v119" type="image/svg+xml" />
+  <link rel="apple-touch-icon" sizes="192x192" href="/static/watchlivo-icon-192.png?v=20261105_v119" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v118" />
-  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v118" />
+  <link rel="stylesheet" href="/static/css/vortex.css?v=20261105_v119" />
+  <link rel="stylesheet" href="/static/css/mesh.css?v=20261105_v119" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -139,11 +139,20 @@
       }
     })();
   </script>
-  <!-- Google Analytics 4 (gtag.js) Official Bootstrap -->
+  <!-- Google Analytics 4 (gtag.js) Official Tag (G-HQXSREQV3R) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-HQXSREQV3R"></script>
   <script>
+    window.__WL_GA_ID = 'G-HQXSREQV3R';
+    window.__wlGaLoadedId = 'G-HQXSREQV3R';
     window.dataLayer = window.dataLayer || [];
     function gtag(){dataLayer.push(arguments);}
     window.gtag = gtag;
+    gtag('js', new Date());
+    gtag('config', 'G-HQXSREQV3R', {
+      page_title: document.title,
+      page_path: location.pathname + location.hash,
+      send_page_view: true
+    });
     window.__initWatchlivoGA4 = function(gaId) {
       if (!gaId || !/^G-[A-Z0-9]{4,20}$/i.test(gaId) || window.__wlGaLoadedId === gaId) return;
       window.__wlGaLoadedId = gaId;
@@ -152,17 +161,12 @@
       s.async = true;
       s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(gaId);
       document.head.appendChild(s);
-      gtag('js', new Date());
       gtag('config', gaId, {
         page_title: document.title,
         page_path: location.pathname + location.hash,
         send_page_view: true
       });
     };
-    try {
-      var cachedGa = window.__WL_GA_ID || localStorage.getItem('wl_ga_id');
-      if (cachedGa) window.__initWatchlivoGA4(cachedGa);
-    } catch (_) {}
   </script>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js" defer></script>
 </head>
@@ -174,6 +178,6 @@
   <div id="app" class="app"></div>
   <div id="popup-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
-  <script type="module" src="/static/js/main.js?v=20261105_v118"></script>
+  <script type="module" src="/static/js/main.js?v=20261105_v119"></script>
 </body>
 </html>
