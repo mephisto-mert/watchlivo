@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v113 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v114 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v113", index_html)
+        self.assertIn("20261105_v114", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1868,6 +1868,48 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("wl-latest-eps-section", selection_js)
         self.assertIn("/api/rave/latest-episodes", selection_js)
         self.assertIn("wl-vizyon-tabs", selection_kinds_js)
+
+    def test_v114_fifty_query_search_accuracy(self):
+        # 1. Verify query parser extracts trailing release years and media-type hints cleanly
+        self.assertEqual(server._parse_search_query("Triangle 2009"), ("Triangle", "2009", "", False))
+        self.assertEqual(server._parse_search_query("Stalker 1979"), ("Stalker", "1979", "", False))
+        self.assertEqual(server._parse_search_query("Monster anime"), ("Monster", "", "tv", True))
+        self.assertEqual(server._parse_search_query("1917"), ("1917", "", "", False))
+
+        # 2. Verify curated matching never lets single-word substrings ("Dark", "prens") hijack exact titles
+        cur_dark = server._match_star_wars_curated("Dark")
+        self.assertFalse(any(x.get("tmdbId") == "155" for x in cur_dark))
+        cur_prens = server._match_star_wars_curated("prens")
+        self.assertTrue(cur_prens and cur_prens[0].get("tmdbId") == "228853")
+        self.assertFalse(any(x.get("tmdbId") == "767" for x in cur_prens))
+
+        # 3. Verify vault substring matcher blocks short reverse-substring false positives ("Talker" in "Stalker")
+        self.assertFalse(server._vault_title_matches_query("stalker", "talker", "the most notorious talker"))
+        self.assertTrue(server._vault_title_matches_query("stalker", "stalker", "stalker"))
+
+        # 4. Verify unified ranker prioritizes flagship & substantial exact matches over B-movies and spin-offs
+        for q, exp_sub, exp_mt in [
+            ("Yüzüklerin Efendisi", "Yüzüklerin Efendisi", "movie"),
+            ("Severance", "Severance", "tv"),
+            ("prens", "Prens", "tv"),
+            ("gassal", "Gassal", "tv"),
+            ("Demon Slayer", "Demon Slayer", "tv"),
+            ("Steins Gate", "Steins;Gate", "tv"),
+            ("Monster anime", "Monster", "tv"),
+            ("Triangle 2009", "Triangle", "movie"),
+            ("Stalker 1979", "Stalker", "movie"),
+            ("Dark", "Dark", "tv"),
+            ("Twin Peaks", "Twin Peaks", "tv"),
+            ("Utopia", "Utopia", "tv"),
+        ]:
+            cat_items = (server._provider_catalog_page_sync("cinema", q, 1, "all", "") or {}).get("items") or []
+            self.assertTrue(cat_items, f"No catalog items returned for {q}")
+            top_it = cat_items[0]
+            self.assertEqual(top_it.get("mediaType"), exp_mt, f"Wrong mediaType for {q}: {top_it}")
+            exp_n = server._norm_title(exp_sub)
+            t_n = server._norm_title(top_it.get("title") or "")
+            o_n = server._norm_title(top_it.get("originalTitle") or "")
+            self.assertTrue(exp_n in t_n or exp_n in o_n, f"Wrong #1 title for {q}: {top_it}")
 
 
 if __name__ == '__main__':

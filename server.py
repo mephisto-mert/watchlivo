@@ -896,6 +896,7 @@ _CJK_TITLE_MAP = {
     "進撃の巨人": "Attack on Titan",
     "呪術廻戦": "Jujutsu Kaisen",
     "鬼滅の刃": "Demon Slayer: Kimetsu no Yaiba",
+    "Сталкер": "Stalker",
 }
 
 
@@ -906,7 +907,12 @@ def _tmdb_item(r: dict, default_type: str = "movie") -> dict:
     backdrop = f"https://image.tmdb.org/t/p/w780{r['backdrop_path']}" if r.get("backdrop_path") else poster
     title = (r.get("title") or r.get("name") or "Yapım").strip()
     orig_title = (r.get("original_title") or r.get("original_name") or title).strip()
-    if title in _CJK_TITLE_MAP:
+    if orig_title in _CJK_TITLE_MAP:
+        mapped_ot = _CJK_TITLE_MAP[orig_title]
+        if title == orig_title or _norm_title(mapped_ot) not in _norm_title(title):
+            title = f"{title} ({mapped_ot})" if title and title != orig_title else mapped_ot
+        orig_title = mapped_ot
+    elif title in _CJK_TITLE_MAP:
         title = _CJK_TITLE_MAP[title]
     elif re.search(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]", title):
         if not re.search(r"[\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7af]", orig_title):
@@ -1004,8 +1010,113 @@ _EXTRA_CURATED_CATALOG = [
 ]
 
 
+_FLAGSHIP_TR_TMDB_IDS = {
+    "228853", "115678", "40417", "39176", "131906", "231254", "77994",
+    "115597", "125412", "280030", "271596", "71036", "34587", "17635",
+    "213194", "243832", "32519", "74823", "68388", "44878", "61516", "59",
+}
+
+
+def _parse_search_query(q: str) -> tuple[str, str, str, bool]:
+    raw_s = (q or "").strip()
+    if not raw_s:
+        return "", "", "", False
+    q_year = ""
+    q_mt_hint = ""
+    q_is_anime = False
+    clean_q = raw_s
+    m_yr = re.search(r"^(.*\S)\s+\(?((?:19\d{2}|20[0-2]\d))\)?\s*$", clean_q)
+    if m_yr and len(_norm_title(m_yr.group(1))) >= 2:
+        clean_q = m_yr.group(1).strip()
+        q_year = m_yr.group(2)
+    m_mt = re.search(r"^(.*\S)\s+\b(anime|dizi|dizisi|film|filmi|series|movie|tv)\b\s*$", clean_q, re.I)
+    if m_mt and len(_norm_title(m_mt.group(1))) >= 2:
+        kw = m_mt.group(2).lower()
+        clean_q = m_mt.group(1).strip()
+        if kw == "anime":
+            q_mt_hint = "tv"
+            q_is_anime = True
+        elif kw in ("dizi", "dizisi", "series", "tv"):
+            q_mt_hint = "tv"
+        else:
+            q_mt_hint = "movie"
+    return clean_q, q_year, q_mt_hint, q_is_anime
+
+
+def _vault_title_matches_query(nq: str, nt: str, no: str) -> bool:
+    if not nq:
+        return False
+    for cand in (nt, no):
+        if not cand:
+            continue
+        if cand == nq or cand.startswith(nq + " ") or cand.endswith(" " + nq) or f" {nq} " in f" {cand} ":
+            return True
+        if len(nq) >= 5 and nq in cand:
+            return True
+        if len(cand) >= 6 and (nq.startswith(cand + " ") or nq.endswith(" " + cand)):
+            return True
+    return False
+
+
+def _rank_search_item(it: dict, raw_q: str) -> tuple:
+    clean_q, q_year, q_mt_hint, q_is_anime = _parse_search_query(raw_q)
+    nq = _norm_title(clean_q) or _norm_title(raw_q)
+    raw_t = str(it.get("title") or "")
+    raw_o = str(it.get("originalTitle") or "")
+    nt = _norm_title(raw_t)
+    no = _norm_title(raw_o)
+    nt_pref = _norm_title(re.split(r"[:\-–—]", raw_t)[0])
+    no_pref = _norm_title(re.split(r"[:\-–—]", raw_o)[0])
+    cid = str(it.get("id") or "")
+    tid = str(it.get("tmdbId") or "")
+    yr = str(it.get("year") or "")[:4]
+    vc = int(it.get("voteCount") or 0)
+    if cid.startswith("ac-") and not it.get("_tmdb_vc_merged"):
+        vc = min(max(100, vc // 20), 4000)
+    elif cid.startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "dp-")) and not it.get("_tmdb_vc_merged"):
+        vc = min(vc, 600)
+    rating = float(it.get("rating") or 0.0)
+    orig_lang = str(it.get("origLang") or "").lower()
+    cats = it.get("categories") or []
+
+    year_exact = 1 if (q_year and yr == q_year and nq and (nq in nt or nq in no)) else 0
+    mt_hint_match = 0
+    if q_mt_hint and it.get("mediaType") == q_mt_hint and nq and (nt == nq or no == nq or nt_pref == nq):
+        if not q_is_anime or orig_lang == "ja" or "anime" in cats or "animation" in cats:
+            mt_hint_match = 1
+
+    is_tr_flagship = 1 if (nq and (nt == nq or no == nq or nt_pref == nq) and tid in _FLAGSHIP_TR_TMDB_IDS) else 0
+    has_tr_chars = orig_lang == "tr" or any(c in "çğıöşüÇĞİÖŞÜ" for c in raw_t)
+    is_substantial = (
+        (vc >= 80 and rating >= 5.5)
+        or bool(it.get("curatedFranchise"))
+        or is_tr_flagship == 1
+        or (has_tr_chars and yr >= "2010" and vc >= 5)
+        or (q_year and yr == q_year)
+    )
+    has_spinoff_sub = bool(re.search(r"[:\-–—].*[:\-–—]|\b(?:the\s+movie|movie|sonsuzluk\s+kalesi|mugen\s+train|mugen\s+treni|fuka\s+ryouiki|gekij)\b|劇場版", f"{raw_t} {raw_o}", re.I))
+
+    if nq and (nt == nq or no == nq) and is_substantial:
+        exact_tier = 5
+    elif nq and (nt_pref == nq or no_pref == nq) and vc >= 1500 and not has_spinoff_sub:
+        exact_tier = 5
+    elif nq and (nt_pref == nq or no_pref == nq or nt.startswith(nq + " ") or no.startswith(nq + " ")) and is_substantial:
+        exact_tier = 3
+    elif nq and (nt == nq or no == nq):
+        exact_tier = 2
+    elif nq and (nq in nt or nq in no):
+        exact_tier = 1
+    else:
+        exact_tier = 0
+
+    pop_tier = 3 if vc >= 2000 else (2 if vc >= 300 else (1 if vc >= 40 else 0))
+    released = 1 if (yr and yr <= "2026") else 0
+    return (year_exact, mt_hint_match, is_tr_flagship, exact_tier, pop_tier, released, vc, rating)
+
+
 def _match_star_wars_curated(q: str) -> list:
-    ql = (q or "").strip().replace("İ", "i").replace("I", "ı").lower()
+    clean_q, _, _, _ = _parse_search_query(q)
+    ql = (clean_q or q or "").strip().replace("İ", "i").replace("I", "ı").lower()
     if not ql:
         return []
     out = []
@@ -1017,29 +1128,52 @@ def _match_star_wars_curated(q: str) -> list:
             matched = [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if ql in x["title"].lower() or ql in x["originalTitle"].lower()]
             out.extend(matched + [dict(x, curatedFranchise=True) for x in _STAR_WARS_CURATED if x not in matched])
     nq = _norm_title(ql)
-    for item_c in _EXTRA_CURATED_CATALOG:
-        nt_c = _norm_title(item_c.get("title") or "")
-        no_c = _norm_title(item_c.get("originalTitle") or "")
-        if nq and (nq in nt_c or nq in no_c or nt_c in nq or (ql in ("yeşilçam", "yesilcam", "kemal sunal", "şener şen", "sener sen") and item_c.get("origLang") == "tr")):
-            out.append(dict(item_c, curatedFranchise=True))
     for _dom_p, _dom_items in globals().get("_DOMESTIC_TR_ORIGINALS", {}).items():
         for item_d in _dom_items:
             nt_d = _norm_title(item_d.get("title") or "")
-            if nq and (nq in nt_d or nt_d in nq):
+            nt_d_pref = _norm_title(re.split(r"[:\-–—]", item_d.get("title") or "")[0])
+            if nq and (nq == nt_d or nq == nt_d_pref or (len(nq) >= 4 and nt_d.startswith(nq))):
                 if not any(x.get("tmdbId") == item_d.get("tmdbId") for x in out):
                     out.append(dict(item_d, curatedFranchise=True))
+    for item_c in _EXTRA_CURATED_CATALOG:
+        nt_c = _norm_title(item_c.get("title") or "")
+        no_c = _norm_title(item_c.get("originalTitle") or "")
+        if nq and (
+            nq == nt_c
+            or nq == no_c
+            or (len(nq) >= 5 and (nt_c.startswith(nq) or no_c.startswith(nq)))
+            or (ql in ("yeşilçam", "yesilcam", "kemal sunal", "şener şen", "sener sen") and item_c.get("origLang") == "tr")
+        ):
+            if not any(x.get("tmdbId") == item_c.get("tmdbId") and x.get("mediaType") == item_c.get("mediaType") for x in out):
+                out.append(dict(item_c, curatedFranchise=True))
     return out
 
 
 def _tmdb_sync(q: str):
+    clean_q, q_year, q_mt_hint, _ = _parse_search_query(q)
+    eff_q = clean_q or q
     curated_sw = _match_star_wars_curated(q)
     if not TMDB_API_KEY:
+        curated_sw.sort(key=lambda x: _rank_search_item(x, q), reverse=True)
         return curated_sw[:40]
     import concurrent.futures
-    def _fetch_p(pg):
+    def _fetch_p(task_idx):
         try:
-            d = _http_json("https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": q, "page": pg}), timeout=4.5)
-            return [r for r in d.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
+            if task_idx == 1:
+                u = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 1})
+                d = _http_json(u, timeout=4.5)
+                return [r for r in d.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
+            if q_year:
+                u_m = "https://api.themoviedb.org/3/search/movie?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "year": q_year, "page": 1})
+                d_m = _http_json(u_m, timeout=4.5)
+                return [dict(r, media_type="movie") for r in d_m.get("results", []) if r.get("poster_path")]
+            if q_mt_hint in ("tv", "movie"):
+                u_t = f"https://api.themoviedb.org/3/search/{q_mt_hint}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 1})
+                d_t = _http_json(u_t, timeout=4.5)
+                return [dict(r, media_type=q_mt_hint) for r in d_t.get("results", []) if r.get("poster_path")]
+            u2 = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 2})
+            d2 = _http_json(u2, timeout=4.5)
+            return [r for r in d2.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
         except Exception:
             return []
     raw = []
@@ -1055,6 +1189,7 @@ def _tmdb_sync(q: str):
             continue
         seen_k.add(k)
         combined.append(it)
+    combined.sort(key=lambda x: _rank_search_item(x, q), reverse=True)
     return combined[:45]
 
 
@@ -1117,17 +1252,18 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -> l
     seen = set()
     v_cat = (_MAIN_SITES_VAULT.get("catalog") or {})
     if q.strip():
-        nq = _norm_title(q.strip())
+        clean_q, _, _, _ = _parse_search_query(q)
+        nq = _norm_title(clean_q or q.strip())
         for src_list in (v_cat.get("fhd") or [], v_cat.get("hfnl") or []):
             for it in src_list:
                 nt = _norm_title(it.get("title") or "")
                 no = _norm_title(it.get("originalTitle") or "")
-                if nq and ((nt and (nq in nt or nt in nq)) or (no and (nq in no or no in nq))):
+                if _vault_title_matches_query(nq, nt, no):
                     if it["id"] not in seen:
                         seen.add(it["id"])
                         out.append(dict(it))
         try:
-            fhd_su = f"https://www.fullhdfilmizlesene.now/arama/{urllib.parse.quote(q.strip())}"
+            fhd_su = f"https://www.fullhdfilmizlesene.now/arama/{urllib.parse.quote((clean_q or q).strip())}"
             fhd_raw = urllib.request.urlopen(urllib.request.Request(fhd_su, headers={"User-Agent": UA137, "Referer": "https://www.fullhdfilmizlesene.now/"}), timeout=3.5).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             for card in re.findall(r'<li class="film"[^>]*>(.*?)</li>', fhd_raw, re.S):
                 hm = re.search(r'<a[^>]+class="tt"[^>]+href=["\'](https://www\.fullhdfilmizlesene\.now/film/([^"\'/]+)/?)["\']', card)
@@ -1284,11 +1420,12 @@ def _scrape_dizilife_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
     seen = set()
     v_cat = (_MAIN_SITES_VAULT.get("catalog") or {})
     if q.strip():
-        nq = _norm_title(q.strip())
+        clean_q, _, _, _ = _parse_search_query(q)
+        nq = _norm_title(clean_q or q.strip())
         for it in (v_cat.get("dbx") or []) + [x for x in (v_cat.get("hfnl") or []) if x.get("mediaType") == "tv"]:
             nt = _norm_title(it.get("title") or "")
             no = _norm_title(it.get("originalTitle") or "")
-            if nq and ((nt and (nq in nt or nt in nq)) or (no and (nq in no or no in nq))):
+            if _vault_title_matches_query(nq, nt, no):
                 if it["id"] not in seen:
                     seen.add(it["id"])
                     out.append(dict(it))
@@ -1334,11 +1471,12 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
     seen = set()
     v_cat = (_MAIN_SITES_VAULT.get("catalog") or {})
     if q.strip():
-        nq = _norm_title(q.strip())
+        clean_q, _, _, _ = _parse_search_query(q)
+        nq = _norm_title(clean_q or q.strip())
         for it in (v_cat.get("ac") or []):
             nt = _norm_title(it.get("title") or "")
             no = _norm_title(it.get("originalTitle") or "")
-            if nq and ((nt and (nq in nt or nt in nq)) or (no and (nq in no or no in nq))):
+            if _vault_title_matches_query(nq, nt, no):
                 if it["id"] not in seen:
                     seen.add(it["id"])
                     out.append(dict(it))
@@ -1350,7 +1488,8 @@ def _scrape_animecix_catalog_sync(cat: str = "all", page: int = 1, q: str = "") 
     hdrs = {"User-Agent": UA137, "Referer": "https://animecix.tv/", "Accept": "application/json", "X-Requested-With": "XMLHttpRequest"}
     try:
         if q.strip():
-            u = f"https://animecix.tv/secure/search/{urllib.parse.quote(q.strip())}?limit=14"
+            clean_q, _, _, _ = _parse_search_query(q)
+            u = f"https://animecix.tv/secure/search/{urllib.parse.quote((clean_q or q).strip())}?limit=14"
             data = _raw_get_json(u, headers=hdrs, timeout=3.5) or {}
             rows = data.get("results") or []
         else:
@@ -1713,18 +1852,45 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                 jw_items = _justwatch_sync(sq, pkgs, country, 24)
             except Exception:
                 jw_items = []
-        tmdb_by_norm = {_norm_title(x.get("title") or ""): x for x in tmdb_items if _norm_title(x.get("title") or "")}
+        tmdb_by_norm = {}
+        tmdb_by_id = {}
+        for x in tmdb_items:
+            xm = x.get("mediaType") or "movie"
+            xtid = str(x.get("tmdbId") or "")
+            if xtid and (xm, xtid) not in tmdb_by_id:
+                tmdb_by_id[(xm, xtid)] = x
+            for k_t in (_norm_title(x.get("title") or ""), _norm_title(x.get("originalTitle") or "")):
+                if k_t and (xm, k_t) not in tmdb_by_norm:
+                    tmdb_by_norm[(xm, k_t)] = x
         for s_it in scraped_q:
-            m_tm = tmdb_by_norm.get(_norm_title(s_it.get("title") or ""))
+            sm = s_it.get("mediaType") or "movie"
+            stid = str(s_it.get("tmdbId") or "")
+            m_tm = (
+                (tmdb_by_id.get((sm, stid)) if stid else None)
+                or tmdb_by_norm.get((sm, _norm_title(s_it.get("title") or "")))
+                or tmdb_by_norm.get((sm, _norm_title(s_it.get("originalTitle") or "")))
+            )
             if m_tm:
                 s_it["tmdbId"] = m_tm.get("tmdbId") or s_it.get("tmdbId") or ""
                 s_it["poster"] = m_tm.get("poster") or s_it.get("poster") or ""
                 s_it["backdrop"] = m_tm.get("backdrop") or s_it.get("backdrop") or ""
                 s_it["origLang"] = m_tm.get("origLang") or s_it.get("origLang") or ""
+                if m_tm.get("title") and _norm_title(m_tm["title"]) != _norm_title(s_it.get("title") or ""):
+                    s_it["title"] = m_tm["title"]
+                if m_tm.get("originalTitle"):
+                    s_it["originalTitle"] = m_tm["originalTitle"]
+                if m_tm.get("year"):
+                    s_it["year"] = m_tm["year"]
+                if m_tm.get("voteCount"):
+                    s_it["voteCount"] = m_tm["voteCount"]
+                    s_it["_tmdb_vc_merged"] = True
+                if m_tm.get("rating"):
+                    s_it["rating"] = m_tm["rating"]
                 s_it["categories"] = list(dict.fromkeys((s_it.get("categories") or []) + (m_tm.get("categories") or [])))
         seen_ids = set()
         merged = []
-        nq = _norm_title(sq)
+        clean_q, _, _, _ = _parse_search_query(sq)
+        nq = _norm_title(clean_q or sq)
         dom_hits = []
         for c_rel in _load_custom_releases_sync():
             if nq and (nq in _norm_title(c_rel.get("title") or "") or nq in _norm_title(c_rel.get("originalTitle") or "") or str(c_rel.get("tmdbId") or "") == sq.strip()):
@@ -1732,7 +1898,9 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         dom_sources = [_DOMESTIC_TR_ORIGINALS[prov]] if prov in _DOMESTIC_TR_ORIGINALS else (list(_DOMESTIC_TR_ORIGINALS.values()) if (is_free_tr or prov == "all") else [])
         for dom_list in dom_sources:
             for d_it in dom_list:
-                if nq and (nq in _norm_title(d_it["title"]) or _norm_title(d_it["title"]) in nq):
+                nt_d = _norm_title(d_it["title"])
+                nt_d_pref = _norm_title(re.split(r"[:\-–—]", d_it["title"])[0])
+                if nq and (nq == nt_d or nq == nt_d_pref or (len(nq) >= 4 and nt_d.startswith(nq))):
                     dom_hits.append(dict(d_it))
         for item in dom_hits + scraped_q + tmdb_items + jw_items:
             p_u = str(item.get("poster") or "").strip()
@@ -1753,19 +1921,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
                 continue
             seen_ids.add(dedup_k)
             merged.append(item)
-        def _rank(it):
-            nt = _norm_title(it.get("title") or "")
-            no = _norm_title(it.get("originalTitle") or "")
-            vc = int(it.get("voteCount") or 0)
-            yr = str(it.get("year") or "")
-            is_curated_fr = 1 if it.get("curatedFranchise") else 0
-            is_tr_exact = 1 if ((nt == nq or no == nq) and (it.get("origLang") == "tr" or str(it.get("tmdbId")) in ("228853", "115678", "40417", "39176", "131906", "231254", "77994", "115597", "125412", "280030", "271596", "71036"))) else 0
-            is_scr = 1 if str(it.get("id") or "").startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "ac-", "dp-")) else 0
-            released = 1 if (yr and yr <= "2026" and (vc >= 5 or "voteCount" not in it)) else 0
-            exact = 2 if ((nt == nq or no == nq) and released) else (1 if (nq and (nq in nt or nq in no)) else 0)
-            pop_tier = 2 if vc >= 1000 else (1 if vc >= 50 else 0)
-            return (is_tr_exact, is_curated_fr, exact, is_scr, released, pop_tier, vc, float(it.get("rating") or 0))
-        merged.sort(key=_rank, reverse=True)
+        merged.sort(key=lambda x: _rank_search_item(x, sq), reverse=True)
         if mt_flt in ("tv", "movie"):
             merged = [x for x in merged if x.get("mediaType") == mt_flt]
         elif cat == "series" or prov in ("dizibox", "dizilife", "yabancidizi"):
