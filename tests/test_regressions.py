@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v127 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261105_v130 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v127", index_html)
+        self.assertIn("20261105_v130", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -2037,6 +2037,73 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_dash2.status_code, 200)
         r_get_after = self.client.get("/api/rave/analytics").json()
         self.assertEqual(r_get_after.get("todayPageviews"), pv_before)
+
+    def test_v130_room_invites_posters_and_10_agent_audit(self):
+        # 1. Room share link (/r/{room_id}) forwards pwd, t, tmdbId, s, e, and r_tok; restores on cold instance
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Sinema Gece Odasi",
+            "privacy": "private",
+            "password": "gizli",
+            "creator": "TrisHost",
+            "creatorId": "u_tris_v130",
+            "clientId": "c_tris_v130",
+            "media": {
+                "provider": "hls",
+                "url": "https://cdn.example.com/movie.m3u8",
+                "title": "Amerikan Pastasi 1",
+                "tmdbId": "2105",
+                "mediaType": "movie",
+                "poster": "https://image.tmdb.org/t/p/w500/pNzarHZjSGo6NgotluiAG3U2nwy.jpg",
+                "playing": True,
+                "currentTime": 120.0,
+            }
+        }).json()
+        rid = cr["room"]["id"]
+        stok = cr["room"]["syncToken"]
+        r_share = self.client.get(f"/r/{rid}?pwd=gizli&t=Amerikan+Pastasi+1&r_tok={stok}")
+        self.assertEqual(r_share.status_code, 200)
+        self.assertIn(f"/#/mesh/{rid}?", r_share.text)
+        self.assertIn("pwd=gizli", r_share.text)
+        self.assertIn("r_tok=", r_share.text)
+
+        # Simulate cold instance wipe and restore via syncToken
+        import rooms as rooms_mod
+        rooms_mod.STORE.rooms.pop(rid, None)
+        if getattr(rooms_mod.STORE, "tmp_dir", None):
+            (rooms_mod.STORE.tmp_dir / f"{rid}.json").unlink(missing_ok=True)
+        r_sync = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "c_guest_v130",
+            "username": "Misafir",
+            "pwd": "gizli",
+            "syncToken": stok,
+        })
+        self.assertEqual(r_sync.status_code, 200)
+        self.assertEqual(r_sync.json()["room"]["media"]["tmdbId"], "2105")
+
+        # 2. Underscore room IDs accepted
+        r_under = self.client.post("/api/rooms/call_room_v130/sync", json={
+            "type": "join",
+            "clientId": "c_call_v130",
+            "name": "Caller",
+        })
+        self.assertEqual(r_under.status_code, 200)
+
+        # 3. Broadcast room notification targetUid='*' succeeds
+        r_notif = self.client.post("/api/rave/notifications/send", json={
+            "targetUid": "*",
+            "type": "room_invite",
+            "title": "Oda Daveti",
+            "body": "Davet!",
+            "roomId": rid,
+        })
+        self.assertEqual(r_notif.status_code, 200)
+        self.assertTrue(r_notif.json().get("ok"))
+
+        # 4. Exact TMDB ID poster proxy resolution & vault poster accuracy
+        r_p = self.client.get("/api/rave/poster?title=Amerikan+Pastasi+1&tid=2105&mt=movie", follow_redirects=False)
+        self.assertIn(r_p.status_code, (302, 307))
+        self.assertIn("pNzarHZjSGo6NgotluiAG3U2nwy.jpg", r_p.headers.get("location", ""))
 
 
 if __name__ == '__main__':

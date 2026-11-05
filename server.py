@@ -945,9 +945,9 @@ def _tmdb_item(r: dict, default_type: str = "movie") -> dict:
 
 
 _STAR_WARS_CURATED = [
-    {"id": "11", "tmdbId": "11", "mediaType": "movie", "title": "Star Wars: Bölüm IV - Yeni Bir Umut", "originalTitle": "Star Wars", "year": "1977", "rating": 8.2, "voteCount": 20500, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Prenses Leia, İmparatorluk güçleri tarafından rehin alınır. Luke Skywalker ve Han Solo galaksiyi kurtarmak için direnişe katılır.", "poster": "https://image.tmdb.org/t/p/w500/6FfCtAuVAW8XJjZ7eWeLibRLWTw.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/6FfCtAuVAW8XJjZ7eWeLibRLWTw.jpg"},
-    {"id": "1891", "tmdbId": "1891", "mediaType": "movie", "title": "Star Wars: Bölüm V - İmparator", "originalTitle": "The Empire Strikes Back", "year": "1980", "rating": 8.4, "voteCount": 16800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Luke Skywalker, Jedi ustası Yoda'dan eğitim alırken Darth Vader, Asi İttifakı'nı galaksi boyunca amansızca takip eder.", "poster": "https://image.tmdb.org/t/p/w500/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg"},
-    {"id": "1892", "tmdbId": "1892", "mediaType": "movie", "title": "Star Wars: Bölüm VI - Jedi'ın Dönüşü", "originalTitle": "Return of the Jedi", "year": "1983", "rating": 7.9, "voteCount": 15400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluk ikinci Ölüm Yıldızı'nı inşa ederken Luke Skywalker, babası Darth Vader'ı karanlık taraftan döndürmeye çalışır.", "poster": "https://image.tmdb.org/t/p/w500/jQYlydvHm3kUix1f8prMucrplhm.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/jQYlydvHm3kUix1f8prMucrplhm.jpg"},
+    {"id": "11", "tmdbId": "11", "mediaType": "movie", "title": "Star Wars: Bölüm IV - Yeni Bir Umut", "originalTitle": "Star Wars", "year": "1977", "rating": 8.2, "voteCount": 20500, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Prenses Leia, İmparatorluk güçleri tarafından rehin alınır. Luke Skywalker ve Han Solo galaksiyi kurtarmak için direnişe katılır.", "poster": "https://image.tmdb.org/t/p/w500/6FfCtAuVAW8XJjZ7eWeLibRLWTw.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/4qCqAdHcNKeAHcK8tJ8wNJZa9cx.jpg"},
+    {"id": "1891", "tmdbId": "1891", "mediaType": "movie", "title": "Star Wars: Bölüm V - İmparator", "originalTitle": "The Empire Strikes Back", "year": "1980", "rating": 8.4, "voteCount": 16800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Luke Skywalker, Jedi ustası Yoda'dan eğitim alırken Darth Vader, Asi İttifakı'nı galaksi boyunca amansızca takip eder.", "poster": "https://image.tmdb.org/t/p/w500/nNAeTmF4CtdSgMDplXTDPOpYzsX.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/aJCtkxLLzkk1pECehVjKHA2lBgw.jpg"},
+    {"id": "1892", "tmdbId": "1892", "mediaType": "movie", "title": "Star Wars: Bölüm VI - Jedi'ın Dönüşü", "originalTitle": "Return of the Jedi", "year": "1983", "rating": 7.9, "voteCount": 15400, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "İmparatorluk ikinci Ölüm Yıldızı'nı inşa ederken Luke Skywalker, babası Darth Vader'ı karanlık taraftan döndürmeye çalışır.", "poster": "https://image.tmdb.org/t/p/w500/jQYlydvHm3kUix1f8prMucrplhm.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/r2IO2e2daN7H7cbvCaEba0kceea.jpg"},
     {"id": "1893", "tmdbId": "1893", "mediaType": "movie", "title": "Star Wars: Bölüm I - Gizli Tehlike", "originalTitle": "Star Wars: Episode I - The Phantom Menace", "year": "1999", "rating": 6.6, "voteCount": 14500, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Jedi Şövalyeleri Qui-Gon Jinn ve Obi-Wan Kenobi, Tatooine gezegeninde Güç'te olağanüstü yetenekli genç Anakin Skywalker'ı keşfeder.", "poster": "https://image.tmdb.org/t/p/w500/6wkfovpn7Eq8dYNKaG5PY3q2oq6.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/6wkfovpn7Eq8dYNKaG5PY3q2oq6.jpg"},
     {"id": "1894", "tmdbId": "1894", "mediaType": "movie", "title": "Star Wars: Bölüm II - Klonların Saldırısı", "originalTitle": "Star Wars: Episode II - Attack of the Clones", "year": "2002", "rating": 6.6, "voteCount": 13200, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Galaktik Cumhuriyet parçalanmanın eşiğindeyken Anakin Skywalker, Senatör Padmé Amidala'yı korumakla görevlendirilir.", "poster": "https://image.tmdb.org/t/p/w500/oZNPzxqM2s5DyVWab09NTQScDQt.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/oZNPzxqM2s5DyVWab09NTQScDQt.jpg"},
     {"id": "1895", "tmdbId": "1895", "mediaType": "movie", "title": "Star Wars: Bölüm III - Sith'in İntikamı", "originalTitle": "Star Wars: Episode III - Revenge of the Sith", "year": "2005", "rating": 7.4, "voteCount": 13800, "origLang": "en", "categories": ["scifi", "action"], "genreLabel": "Bilim Kurgu • Aksiyon", "overview": "Klon Savaşları'nın üçüncü yılında Anakin Skywalker, Darth Sidious'un etkisiyle karanlık tarafa çekilerek Darth Vader'a dönüşür.", "poster": "https://image.tmdb.org/t/p/w500/xfSAoBEm9MNBjmlNcDYLvLSMlnq.jpg", "backdrop": "https://image.tmdb.org/t/p/w500/xfSAoBEm9MNBjmlNcDYLvLSMlnq.jpg"},
@@ -1254,18 +1254,6 @@ def _tmdb_sync(q: str):
         elif eff_q and re.search(r"[A-Za-z]", eff_q) and str(a_it.get("title") or "").startswith("Anime / Asya Yapımı") and int(a_it.get("voteCount") or 0) >= 40:
             a_it["title"] = eff_q.title()
             a_it["originalTitle"] = eff_q.title()
-    nq_eff = _norm_title(eff_q)
-    if nq_eff and api_items and re.search(r"[A-Za-z]", eff_q):
-        has_any_direct = any(
-            nq_eff in _norm_title(f"{x.get('title','')} {x.get('originalTitle','')} {x.get('enTitle','')}")
-            or nq_eff.replace(" ", "") in _norm_title(f"{x.get('title','')} {x.get('originalTitle','')} {x.get('enTitle','')}").replace(" ", "")
-            for x in api_items
-        )
-        top_api = api_items[0]
-        if not has_any_direct and int(top_api.get("voteCount") or 0) >= 30 and float(top_api.get("rating") or 0) >= 6.0:
-            top_api["enTitle"] = eff_q.title()
-            if _norm_title(eff_q) not in _norm_title(top_api.get("title") or ""):
-                top_api["title"] = f"{top_api.get('title')} ({eff_q.title()})"
     seen_k = set()
     combined = []
     for it in curated_sw + api_items:
@@ -2186,6 +2174,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         if (not u_img and meta_it and meta_it.get("title")) or any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.")):
             qp = urllib.parse.urlencode({
                 "u": u_img,
+                "tid": str((meta_it or {}).get("tmdbId") or "")[:30],
                 "t": str((meta_it or {}).get("title") or "")[:100],
                 "ot": str((meta_it or {}).get("originalTitle") or "")[:100],
                 "y": str((meta_it or {}).get("year") or "")[:8],
@@ -2282,8 +2271,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             paged_vault = [dict(x) for x in vault_pool[start_i:start_i + slice_sz]]
             seen_p = {_norm_title(x.get("title") or "") for x in items if _norm_title(x.get("title") or "")}
             for vit in paged_vault:
-                vit["poster"] = _safe_poster_url(vit.get("poster") or "")
-                vit["backdrop"] = _safe_poster_url(vit.get("backdrop") or vit.get("poster") or "")
+                vit["poster"] = _safe_poster_url(vit.get("poster") or "", vit)
+                vit["backdrop"] = _safe_poster_url(vit.get("backdrop") or vit.get("poster") or "", vit)
                 vk = _norm_title(vit.get("title") or "")
                 if vk and vk not in seen_p:
                     seen_p.add(vk)
@@ -2327,8 +2316,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     seen_final_ids = set()
     seen_final_titles = set()
     for it_x in items:
-        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "")
-        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "")
+        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "", it_x)
+        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "", it_x)
         mt_x = "tv" if it_x.get("mediaType") == "tv" else "movie"
         tid_x = str(it_x.get("tmdbId") or "").strip()
         nt_x = _norm_title(it_x.get("title") or "")
@@ -2556,6 +2545,15 @@ def _resolve_episode_numbering(tid: str, s: int, e: int) -> dict:
             abs_ep = sum(int(ep_map.get(k) or 0) for k in range(1, s_in)) + e_in
         elif s_in == 1:
             abs_ep = e_in
+            if ep_map and e_in > max(1, int(ep_map.get(1) or 0)):
+                rem_t = abs_ep
+                for t_sn in sorted(ep_map.keys()):
+                    t_cnt = max(1, int(ep_map[t_sn] or 0))
+                    if rem_t <= t_cnt or t_sn == max(ep_map.keys()):
+                        s_tmdb = t_sn
+                        e_tmdb = max(1, rem_t)
+                        break
+                    rem_t -= t_cnt
     return {
         "s_split": s_split,
         "e_split": e_split,
@@ -6101,6 +6099,7 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
         if (not u_img and meta_it and meta_it.get("title")) or any(d in u_img for d in ("fullhdfilmizlesene.", "hdfilmcehennemi.", "dizibox.", "cdnhipter.", "ddizimag.")):
             qp = urllib.parse.urlencode({
                 "u": u_img,
+                "tid": str((meta_it or {}).get("tmdbId") or "")[:30],
                 "t": str((meta_it or {}).get("title") or "")[:100],
                 "ot": str((meta_it or {}).get("originalTitle") or "")[:100],
                 "y": str((meta_it or {}).get("year") or "")[:8],
@@ -7442,7 +7441,10 @@ async def rave_stream_manifest(request: Request):
                     req = urllib.request.Request(cur_target, headers=hdrs)
                     with _public_open(req, timeout=4.2 if is_probe else 5.5) as r:
                         raw = r.read(512 * 1024).decode("utf-8", errors="ignore")
+                        eff_r_url = str(getattr(r, "url", "") or r.geturl() or "").strip()
                     if raw and "#EXTM3U" in raw:
+                        if eff_r_url.startswith("http"):
+                            cur_target = eff_r_url
                         break
                     raw = ""
                 except Exception as err:
@@ -7840,13 +7842,32 @@ _POSTER_LIMIT = RateLimiter(900, 60.0, name="poster")
 _POSTER_REDIRECT_CACHE: "collections.OrderedDict[str, str]" = collections.OrderedDict()
 
 
-def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title: str = "", year: str = "", mtype: str = "movie") -> str:
-    ck = f"{url}|{title.lower()}|{orig_title.lower()}|{year}|{mtype}"
+def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title: str = "", year: str = "", mtype: str = "movie", tmdb_id: str = "") -> str:
+    tid_clean = str(tmdb_id or "").strip()
+    ck = f"{tid_clean}|{url}|{title.lower()}|{orig_title.lower()}|{year}|{mtype}"
     with _POSTER_CACHE_LOCK:
         hit = _POSTER_REDIRECT_CACHE.get(ck)
         if hit:
             _POSTER_REDIRECT_CACHE.move_to_end(ck)
             return hit
+    ep_primary = "tv" if mtype in ("tv", "series", "show", "anime") else "movie"
+    resolved = ""
+    if tid_clean.isdigit():
+        for ep_try in (ep_primary, "tv" if ep_primary == "movie" else "movie"):
+            for lang in ("tr-TR", "en-US"):
+                try:
+                    d_tm = _http_json(f"https://api.themoviedb.org/3/{ep_try}/{tid_clean}?api_key={TMDB_API_KEY}&language={lang}", timeout=3.0)
+                    if d_tm.get("poster_path"):
+                        resolved = f"https://image.tmdb.org/t/p/w500{d_tm['poster_path']}"
+                        break
+                except Exception:
+                    pass
+            if resolved:
+                break
+        if resolved:
+            with _POSTER_CACHE_LOCK:
+                _POSTER_REDIRECT_CACHE[ck] = resolved
+            return resolved
     cands: list[str] = []
     for raw_t in (orig_title, title):
         s = re.sub(r"\(\d{4}\)", "", str(raw_t or "")).strip()
@@ -7919,6 +7940,7 @@ def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title
 
 async def poster_proxy(request: Request):
     url = (request.query_params.get("url") or request.query_params.get("u") or "").strip()
+    tmdb_id = (request.query_params.get("tid") or request.query_params.get("tmdbId") or "").strip()[:30]
     title = (request.query_params.get("t") or request.query_params.get("title") or "").strip()[:120]
     orig_title = (request.query_params.get("ot") or "").strip()[:120]
     year = (request.query_params.get("y") or "").strip()[:8]
@@ -7937,7 +7959,7 @@ async def poster_proxy(request: Request):
             "spotifycdn.com", "media-amazon.com", "media-imdb.com",
         )
     )
-    if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title:
+    if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title and not tmdb_id:
         return RedirectResponse("/static/watchlivo-poster.svg")
     if url:
         with _POSTER_CACHE_LOCK:
@@ -7970,7 +7992,7 @@ async def poster_proxy(request: Request):
             pass
     try:
         cdn_u = await asyncio.wait_for(
-            asyncio.to_thread(_resolve_fallback_poster_cdn_sync, url, title, orig_title, year, mtype),
+            asyncio.to_thread(_resolve_fallback_poster_cdn_sync, url, title, orig_title, year, mtype, tmdb_id),
             timeout=5.5,
         )
         if cdn_u:
@@ -8833,10 +8855,7 @@ async def download_windows_endpoint(request: Request):
                 filename="Watchlivo.exe",
                 headers={"Content-Disposition": 'attachment; filename="Watchlivo.exe"'},
             )
-    return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/releases/download/v1.2.0/Watchlivo.exe",
-        status_code=302,
-    )
+    return RedirectResponse("/static/Watchlivo-v2.0.apk", status_code=302)
 
 
 async def download_ipa_endpoint(request: Request):
@@ -8852,10 +8871,7 @@ async def download_ipa_endpoint(request: Request):
                 "X-Content-Type-Options": "nosniff",
             },
         )
-    return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/releases/download/v1.2.0/Watchlivo.ipa",
-        status_code=302,
-    )
+    return RedirectResponse("/static/Watchlivo.ipa", status_code=302)
 
 
 async def ios_version_endpoint(request: Request):
@@ -8987,10 +9003,11 @@ async def download_ios_endpoint(request: Request):
             filename="Watchlivo.mobileconfig",
             headers={"Content-Disposition": 'inline; filename="Watchlivo.mobileconfig"', "Cache-Control": "no-cache"},
         )
-    return RedirectResponse(
-        "https://github.com/mephisto-mert/watchlivo/raw/main/static/Watchlivo.mobileconfig",
-        status_code=302,
-    )
+    return RedirectResponse("/static/Watchlivo.mobileconfig", status_code=302)
+
+
+async def indexnow_key_endpoint(request: Request):
+    return PlainTextResponse("b8f4e2a9c1d74e36a5b09f82c4e1d3a7")
 
 
 _AI_LIMIT = RateLimiter(30, 3600.0, name="ai_chat")
@@ -9308,11 +9325,19 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     host = raw_host if re.fullmatch(r"[a-zA-Z0-9.\-:]{1,120}", raw_host) else "watchlivo.online"
     origin = f"{scheme}://{host}"
     room = (await rooms.STORE.get(safe_id) or await rooms.ensure_curated_room(safe_id)) if safe_id else None
+    incoming_rtok = str(request.query_params.get("r_tok") or "").strip()[:32000]
+    if room is None and safe_id and incoming_rtok:
+        try:
+            room = rooms.merge_sync_token(None, incoming_rtok, safe_id)
+            if room:
+                await rooms.STORE.put(room)
+        except Exception:
+            pass
     is_locked = bool(room and rooms.has_password(room))
     p_count = sum(1 for hp in ((room or {}).get("participants") or {}).values() if isinstance(hp, dict) and hp.get("transport") != "bot")
-    r_name = str((room or {}).get("name") or safe_id or "Watchlivo Sinema Odası").strip()
+    r_name = str((room or {}).get("name") or request.query_params.get("t") or safe_id or "Watchlivo Sinema Odası").strip()
     media = ((room or {}).get("media") or {}) if (room and not is_locked) else {}
-    m_title = str(media.get("title") or "").strip()
+    m_title = str(media.get("title") or request.query_params.get("t") or "").strip()
     raw_img = str(media.get("backdrop") or media.get("poster") or media.get("thumbnail") or "").strip()
     if raw_img.startswith("/") and not raw_img.lower().endswith(".svg"):
         og_img = f"{origin}{raw_img}"
@@ -9338,9 +9363,21 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     esc_title = _html.escape(og_title, quote=True)
     esc_desc = _html.escape(og_desc, quote=True)
     esc_img = _html.escape(og_img, quote=True)
-    pwd_q = str(request.query_params.get("pwd") or "").strip()[:64]
-    pwd_suffix = f"?pwd={urllib.parse.quote(pwd_q, safe='')}" if pwd_q else ""
-    target_hash = f"/#/mesh/{urllib.parse.quote(safe_id)}{pwd_suffix}" if safe_id else "/#/"
+    fwd_params = []
+    for qp_k in ("pwd", "t", "m", "tmdbId", "mt", "s", "e", "autocall"):
+        qp_v = str(request.query_params.get(qp_k) or "").strip()[:500]
+        if qp_v:
+            fwd_params.append((qp_k, qp_v))
+    eff_rtok = incoming_rtok
+    if not eff_rtok and room:
+        try:
+            eff_rtok = rooms.pack_sync_token(room)
+        except Exception:
+            eff_rtok = ""
+    if eff_rtok:
+        fwd_params.append(("r_tok", eff_rtok))
+    qs_suffix = ("?" + urllib.parse.urlencode(fwd_params)) if fwd_params else ""
+    target_hash = f"/#/mesh/{urllib.parse.quote(safe_id)}{qs_suffix}" if safe_id else "/#/"
     esc_url = _html.escape(f"{origin}/r/{urllib.parse.quote(safe_id)}", quote=True)
     html_doc = f"""<!doctype html>
 <html lang="tr">
@@ -10128,6 +10165,7 @@ app = Starlette(
         Route("/api/rave/stream", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream-manifest", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream_manifest", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
+        Route("/api/rave/hls-proxy", rave_stream_manifest, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream-proxy", stream_proxy, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/stream_chunk", stream_proxy, methods=["GET", "HEAD", "OPTIONS"]),
         Route("/api/rave/poster-proxy", poster_proxy, methods=["GET", "HEAD"]),
@@ -10150,6 +10188,7 @@ app = Starlette(
         Route("/api/rave/extract-video", extract_video, methods=["GET", "POST"]),
         Route("/api/upload", upload_file, methods=["POST"]),
         Route("/api/rooms", rooms.list_rooms),
+        Route("/b8f4e2a9c1d74e36a5b09f82c4e1d3a7.txt", indexnow_key_endpoint),
         Route("/api/rooms/create", rooms.create_room, methods=["POST"]),
         Route("/api/rooms/{room_id}", rooms.room_info),
         Route("/api/rooms/{room_id}/sync", rooms.http_sync, methods=["GET", "POST"]),

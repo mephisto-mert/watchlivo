@@ -343,6 +343,7 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
       timeEl.textContent = fmtSec(Math.max(0, Math.ceil(d - audioEl.currentTime)));
     };
     const onStop = () => {
+      try { audioEl.currentTime = 0; } catch (_) {}
       playBtn.textContent = '▶';
       syncBars(0);
       timeEl.textContent = fmtSec(totalDur);

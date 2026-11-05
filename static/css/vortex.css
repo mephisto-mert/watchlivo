@@ -486,14 +486,14 @@ body:not(.mesh-minimized):has(main.mesh) .bg-img { display: none !important; }
 .poster .offers span { font-size: .6em; padding: .1em .4em; border-radius: 99px; background: rgba(255,255,255,.08); }
 
 /* Popup (Rave PopUp: centered acrylic card with option buttons) */
-.popup-backdrop { position: fixed; inset: 0; z-index: 10005; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; animation: fade-in .15s ease; }
+.popup-backdrop { position: fixed; inset: 0; z-index: 100050; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; animation: fade-in .15s ease; }
 .popup { width: min(440px, 92vw); max-height: 86vh; overflow: auto; border-radius: 18px; padding: 1.3em; }
 .popup h3 { margin: 0 0 .5em; font-size: 1.1em; }
 .popup p { margin: 0 0 1em; opacity: .85; line-height: 1.45; }
 .popup-options { display: flex; flex-direction: column; gap: .5em; }
 .popup-options .btn { width: 100%; padding: .75em 1em; }
 .popup-row { display: flex; gap: .5em; justify-content: flex-end; margin-top: .6em; }
-.toast-root { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 10010; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast-root { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 100060; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
 .toast { padding: .6em 1.1em; border-radius: 99px; font-size: .88em; font-weight: 600; animation: fade-in .2s ease; pointer-events: auto; }
 
 /* Profile setup */
@@ -2587,8 +2587,8 @@ html.is-apk #nav-download-btn,
 html.is-apk .wl-btn-apk {
   display: none !important;
 }
-.popup-backdrop { z-index: 10000 !important; }
-.toast-root { z-index: 10100 !important; }
+.popup-backdrop { z-index: 100050 !important; }
+.toast-root { z-index: 100060 !important; }
 @media (max-width: 440px) {
   .floating-dock {
     gap: 4px;

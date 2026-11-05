@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261105_v117';
-import { api } from './api.js?v=20261105_v117';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261105_v117';
+import { h, icons, popup, toast } from './ui.js?v=20261105_v130';
+import { api } from './api.js?v=20261105_v130';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261105_v130';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261105_v117';
+} from './store.js?v=20261105_v130';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -207,6 +207,14 @@ export async function verifyAndRefreshSession() {
           });
           syncCloudUserMedia(true).catch(() => {});
           return refreshed;
+        } else if (d && d.authenticated === false) {
+          saveProfile({
+            ...s,
+            authToken: '',
+            isGuest: true,
+            verified: false,
+          });
+          return null;
         }
       }
     } catch (e) { /* offline */ }
@@ -1418,14 +1426,21 @@ export async function openDmModal(initialPeerId = null) {
   dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
 
   let dmVoiceRec = null;
-  const joinRoomById = (rid, autoCall = false) => {
-    if (!rid) return;
+  const joinRoomById = (rid, autoCall = false, rawUrl = '') => {
+    if (!rid && !rawUrl) return;
     dmVoiceRec?.stop?.(false);
     dmVoiceRec = null;
     dmModal?.close?.();
-    const q = autoCall ? '?autocall=1' : '';
-    if (typeof window.vortexNavigate === 'function') window.vortexNavigate(`/mesh/${encodeURIComponent(rid)}${q}`);
-    else window.location.href = `/#/mesh/${encodeURIComponent(rid)}${q}`;
+    let navTarget = `/mesh/${encodeURIComponent(rid)}`;
+    if (rawUrl) {
+      const cleanHash = String(rawUrl).replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
+      if (cleanHash.startsWith('/mesh/')) navTarget = cleanHash;
+    }
+    if (autoCall && !navTarget.includes('autocall=1')) {
+      navTarget += (navTarget.includes('?') ? '&' : '?') + 'autocall=1';
+    }
+    if (typeof window.vortexNavigate === 'function') window.vortexNavigate(navTarget);
+    else window.location.href = `/#${navTarget}`;
   };
 
   const renderParts = (forceScroll = false) => {
@@ -1538,18 +1553,25 @@ export async function openDmModal(initialPeerId = null) {
                   body: { name: callRoomName, privacy: 'friends', creator: me.name || 'Üye', creatorId: myUid, clientId: cid },
                 });
                 callRoomId = cr?.id || cr?.room?.id || '';
+                try {
+                  if (callRoomId && cr?.clientToken) sessionStorage.setItem('vortex_ct_' + callRoomId, cr.clientToken);
+                  if (callRoomId && (cr?.clientId || cid)) sessionStorage.setItem('vortex_creator_' + callRoomId, cr?.clientId || cid);
+                  if (callRoomId && cr?.room?.syncToken) sessionStorage.setItem('vortex_st_' + callRoomId, cr.room.syncToken);
+                } catch (_) {}
               }
               if (!callRoomId) {
                 toast('Sesli arama odası oluşturulamadı');
                 return;
               }
+              const callSyncTok = state.mesh?.syncToken || (typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('vortex_st_' + callRoomId) : '') || '';
+              const callUrl = `/#/mesh/${encodeURIComponent(callRoomId)}?autocall=1${callSyncTok && callSyncTok.length < 6000 ? '&r_tok=' + encodeURIComponent(callSyncTok) : ''}`;
               await sendDmNow({
                 text: `📞 ${me.name || 'Arkadaşın'} seni sesli aramaya çağırıyor!`,
                 roomInvite: callRoomId,
-                roomInviteCard: { roomId: callRoomId, roomName: callRoomName, mediaTitle: '📞 Canlı Sesli Arama' },
+                roomInviteCard: { roomId: callRoomId, roomName: callRoomName, mediaTitle: '📞 Canlı Sesli Arama', url: callUrl },
               });
               toast(`📞 ${activePeer.name} aranıyor...`);
-              joinRoomById(callRoomId, true);
+              joinRoomById(callRoomId, true, callUrl);
             } catch (_) {
               toast('Sesli arama başlatılamadı');
             }
@@ -1688,11 +1710,11 @@ export async function openDmModal(initialPeerId = null) {
         m.text ? h('div', { class: 'wl-dm-bubble-text' }, m.text) : null,
         vnPlayer,
         card?.roomId ? h('div', { class: 'wl-dm-invite-card' },
-          card.poster ? h('img', { src: card.poster, alt: '', class: 'wl-dm-invite-poster' }) : h('div', { class: 'wl-dm-invite-icon' }, isVoiceCallCard ? '📞' : '🎬'),
+          (card.poster || card.mediaPoster) ? h('img', { src: card.poster || card.mediaPoster, alt: '', class: 'wl-dm-invite-poster' }) : h('div', { class: 'wl-dm-invite-icon' }, isVoiceCallCard ? '📞' : '🎬'),
           h('div', { style: { flex: '1', minWidth: '0' } },
             h('strong', { style: { display: 'block', fontSize: '.8rem', color: '#fff' } }, card.mediaTitle || card.roomName || 'Canlı Sinema Odası'),
             h('span', { style: { fontSize: '.71rem', color: 'rgba(255,255,255,0.65)' } }, `${card.roomName || 'Watchlivo Odası'} · ${isVoiceCallCard ? 'Ses Kanalı' : 'Canlı İzleme'}`)),
-          h('button', { type: 'button', class: 'btn primary sm', onclick: () => joinRoomById(card.roomId, isVoiceCallCard) }, isVoiceCallCard ? '📞 Katıl' : '▶ Katıl')) : null,
+          h('button', { type: 'button', class: 'btn primary sm', onclick: () => joinRoomById(card.roomId, isVoiceCallCard, card.url || '') }, isVoiceCallCard ? '📞 Katıl' : '▶ Katıl')) : null,
         reactions.length ? h('div', { class: 'wl-dm-reactions-row' },
           ...reactions.map(([emo, uids]) => h('button', {
             type: 'button',

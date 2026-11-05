@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261105_v125';
-import { api } from '../api.js?v=20261105_v125';
-import { state } from '../store.js?v=20261105_v125';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261105_v130';
+import { api } from '../api.js?v=20261105_v130';
+import { state } from '../store.js?v=20261105_v130';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -355,13 +355,49 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
         'Rave, Teleparty ve Kosmi gibi uygulamalara kıyasla ekstra eklenti kurulumu gerektirmeyen Watchlivo; doğrudan Chrome, Brave, Safari, iOS, Android ve masaüstü tarayıcılarında çalışır. Oda içi düşük gecikmeli WebRTC sesli sohbet, sesli mesaj (voice note), gerçek zamanlı çeviri destekli yazılı sohbet ve akıllı TV kumanda navigasyonu ile sinema salonunu ekranına taşır.'),
       h('div', { class: 'wl-seo-tags' },
         ...['#BirlikteFilmİzle', '#WatchPartyTürkiye', '#ArkadaşlarlaDiziİzle', '#SevgiliyleFilmİzlemeSitesi', '#OnlineSinemaOdası', '#TürkçeDublajFilm', '#AnimeWatchParty', '#RaveAlternatif', '#CanlıTVOdaları'].map((tag) =>
-          h('span', { class: 'wl-seo-tag' }, tag)))),
+          h('span', { class: 'wl-seo-tag' }, tag))),
+      h('div', {
+        class: 'wl-social-share-bar',
+        style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(148,163,184,0.14)' },
+      },
+        h('span', { style: { fontSize: '0.82rem', fontWeight: '700', color: '#e2e8f0', marginRight: '4px' } }, '🚀 Watchlivo\'yu Paylaş:'),
+        ...[
+          ['💬 WhatsApp', 'https://api.whatsapp.com/send?text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte film, dizi, anime ve canlı TV izle! https://watchlivo.online')],
+          ['✈️ Telegram', 'https://t.me/share/url?url=' + encodeURIComponent('https://watchlivo.online') + '&text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla senkronize film, dizi, anime ve sesli sohbet odaları!')],
+          ['𝕏 X (Twitter)', 'https://twitter.com/intent/tweet?text=' + encodeURIComponent('🎬 Arkadaşlarla uzaktan aynı anda film, dizi, anime ve canlı TV izleme platformu: Watchlivo 🍿✨') + '&url=' + encodeURIComponent('https://watchlivo.online')],
+          ['🔥 Reddit', 'https://www.reddit.com/submit?url=' + encodeURIComponent('https://watchlivo.online') + '&title=' + encodeURIComponent('Watchlivo — Arkadaşlarla Senkronize Film, Dizi, Anime & Sesli Sohbet Odaları (Rave Alternatifi)')],
+        ].map(([lbl, href]) =>
+          h('a', {
+            href,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            class: 'btn sm',
+            style: { textDecoration: 'none', fontSize: '0.78rem', padding: '5px 10px' },
+          }, lbl)
+        ),
+        h('button', {
+          type: 'button',
+          class: 'btn sm primary',
+          style: { fontSize: '0.78rem', padding: '5px 10px' },
+          onclick: () => {
+            if (navigator.share) {
+              navigator.share({
+                title: 'Watchlivo — Birlikte Sinema, Dizi & Anime Odaları',
+                text: 'Arkadaşlarınla aynı anda, tek kare gecikmesiz film, dizi, anime ve canlı TV izle!',
+                url: 'https://watchlivo.online',
+              }).catch(() => {});
+            } else {
+              navigator.clipboard?.writeText('https://watchlivo.online').catch(() => {});
+              toast('📋 Bağlantı kopyalandı: https://watchlivo.online');
+            }
+          },
+        }, '🔗 Davet Linkini Kopyala'))),
 
     h('footer', { class: 'wl-institutional-footer', id: 'wl-institutional-footer' },
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261105_v125', alt: 'Watchlivo', class: 'wl-footer-logo' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261105_v130', alt: 'Watchlivo', class: 'wl-footer-logo' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

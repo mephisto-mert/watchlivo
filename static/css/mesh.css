@@ -3206,7 +3206,6 @@ body.theater-mode .resize-handle {
   #mesh-root > .navbar .mesh-title .mesh-title-code,
   .room-header-sep,
   #mesh-root > .navbar .nav-icon.room-nav-pill#nav-toggle-chat,
-  #mesh-root > .navbar .nav-icon.room-nav-pill#nav-vote,
   #nav-toggle-chat,
   #ctl-theater,
   #ctl-skip,
@@ -5330,10 +5329,10 @@ html.is-android-pip .rave-subtitle-cue {
   }
 
   #mesh-root > .navbar .nav-icon.room-nav-pill {
-    width: 34px !important;
-    height: 34px !important;
-    min-width: 34px !important;
-    min-height: 34px !important;
+    width: 31px !important;
+    height: 31px !important;
+    min-width: 31px !important;
+    min-height: 31px !important;
     padding: 0 !important;
     border-radius: 9px !important;
     background: rgba(255, 255, 255, 0.08) !important;
@@ -5343,6 +5342,11 @@ html.is-android-pip .rave-subtitle-cue {
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
+  }
+
+  #mesh-root > .navbar .logo-wordmark,
+  #mesh-root > .navbar .room-header-sep {
+    display: none !important;
   }
 
   #mesh-root > .navbar .nav-icon.room-nav-pill.primary-pill,
@@ -5505,7 +5509,7 @@ html.is-android-pip .rave-subtitle-cue {
     width: min(192px, 50vw) !important;
     height: 108px !important;
     border-radius: 14px !important;
-    z-index: 900 !important;
+    z-index: 9600 !important;
   }
 }
 

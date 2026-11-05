@@ -1114,14 +1114,33 @@ async def social_invite(request: Request) -> JSONResponse:
     media_poster = _clean(body.get("mediaPoster"), 800)
     media_provider = _clean(body.get("mediaProvider") or "cinema", 32)
     pwd_q = _clean(body.get("password"), 64)
+    sync_tok = str(body.get("syncToken") or body.get("r_tok") or "").strip()[:32000]
     if not room_id:
         return JSONResponse({"ok": False, "error": "Oda kimliği (roomId) gerekli."}, status_code=400)
 
+    if not sync_tok:
+        try:
+            import rooms as _rm
+            rm_live = await _rm.STORE.get(room_id)
+            if rm_live:
+                sync_tok = _rm.pack_sync_token(rm_live)
+                if not media_title and isinstance(rm_live.get("media"), dict):
+                    media_title = _clean(rm_live["media"].get("title"), 140)
+                if not media_poster and isinstance(rm_live.get("media"), dict):
+                    media_poster = _clean(rm_live["media"].get("poster") or rm_live["media"].get("thumbnail") or rm_live["media"].get("backdrop"), 800)
+        except Exception:
+            pass
+
     targets: List[str] = []
     if action == "invite_all_online":
-        for fr in [_enrich_friend_entry(f, uid) for f in (u.get("friends") or []) if isinstance(f, dict)]:
+        enriched_friends = [_enrich_friend_entry(f, uid) for f in (u.get("friends") or []) if isinstance(f, dict)]
+        for fr in enriched_friends:
             if fr.get("online") and fr.get("uid"):
                 targets.append(fr["uid"])
+        if not targets:
+            for fr in enriched_friends:
+                if fr.get("uid"):
+                    targets.append(fr["uid"])
     else:
         raw_t = body.get("targetUids")
         if isinstance(raw_t, list):
@@ -1132,8 +1151,14 @@ async def social_invite(request: Request) -> JSONResponse:
     if not targets:
         return JSONResponse({"ok": False, "error": "Davet edilecek arkadaş seçilmedi."}, status_code=400)
 
-    pwd_sfx = f"?pwd={urllib.parse.quote(pwd_q, safe='')}" if pwd_q else ""
-    join_url = f"/#/mesh/{urllib.parse.quote(room_id)}{pwd_sfx}"
+    q_parts = []
+    if pwd_q:
+        q_parts.append(f"pwd={urllib.parse.quote(pwd_q, safe='')}")
+    if media_title:
+        q_parts.append(f"t={urllib.parse.quote(media_title, safe='')}")
+    if sync_tok:
+        q_parts.append(f"r_tok={urllib.parse.quote(sync_tok, safe='')}")
+    join_url = f"/#/mesh/{urllib.parse.quote(room_id)}" + (f"?{'&'.join(q_parts)}" if q_parts else "")
     sent_invites = []
     for t_uid in targets[:25]:
         if not t_uid or t_uid == uid:
@@ -1159,7 +1184,7 @@ async def social_invite(request: Request) -> JSONResponse:
             "mediaProvider": media_provider,
             "url": join_url,
             "ts": now_t,
-            "expiresAt": now_t + 60.0,
+            "expiresAt": now_t + 1800.0,
         })
         # Also drop a rich roomInviteCard in their mutual DM thread
         tk = _thread_key(uid, t_uid)
@@ -1180,6 +1205,7 @@ async def social_invite(request: Request) -> JSONResponse:
                 "roomName": room_name,
                 "mediaTitle": media_title,
                 "mediaPoster": media_poster,
+                "poster": media_poster,
                 "mediaProvider": media_provider,
                 "url": join_url,
             },
@@ -1757,19 +1783,38 @@ async def notifications_send(request: Request) -> JSONResponse:
     room_id = _clean(body.get("roomId"), 80)
     room_title = _clean(body.get("roomTitle") or "Sinema Odası", 120)
     target_uid = _clean(body.get("targetUid"), 64).lower()
-    if not target_uid or target_uid == "*":
+    if not target_uid:
         return JSONResponse({"ok": False, "error": "Geçerli bir hedef kullanıcı belirtilmelidir."}, status_code=400)
+    raw_url = str(body.get("url") or "").strip()[:16000]
+    default_url = f"/#/mesh/{urllib.parse.quote(room_id)}" if room_id else "/#/"
+    url = raw_url if (raw_url.startswith("/#/") or raw_url == "/") else default_url
+    title = _clean(body.get("title") or f"🎬 {from_name} seni odaya çağırıyor!", 120)
+    msg_body = _clean(body.get("body") or f'"{room_title}" odası şu an canlı. Tek tıkla katıl!', 240)
+    if target_uid == "*":
+        delivered = 0
+        if verified_uid:
+            sender_u = _ensure_user_social(verified_uid, from_name)
+            for f in (sender_u.get("friends") or [])[:50]:
+                f_uid = _clean(f.get("uid") if isinstance(f, dict) else f, 64).lower()
+                if f_uid and f_uid != verified_uid:
+                    _queue_notification(f_uid, {
+                        "type": _clean(body.get("type") or "room_invite", 32),
+                        "title": title,
+                        "body": msg_body,
+                        "fromUid": verified_uid,
+                        "fromName": from_name,
+                        "roomId": room_id,
+                        "url": url,
+                        "expiresAt": _now() + 1800.0,
+                    })
+                    delivered += 1
+        return JSONResponse({"ok": True, "broadcast": True, "sentCount": delivered})
     if target_uid.startswith("u_wl_") or auth_engine.resolve_public_user(target_uid) is not None:
         if not verified_uid:
             return JSONResponse({"ok": False, "error": "Oturum doğrulaması gerekli."}, status_code=401)
         sender_u = _ensure_user_social(verified_uid, from_name)
         if _friendship_state(sender_u, target_uid) != "FRIENDS":
             return JSONResponse({"ok": False, "error": "Yalnızca arkadaşlarınıza bildirim gönderebilirsiniz."}, status_code=403)
-    raw_url = _clean(body.get("url") or "", 240)
-    default_url = f"/#/mesh/{urllib.parse.quote(room_id)}" if room_id else "/#/"
-    url = raw_url if (raw_url.startswith("/#/") or raw_url == "/") else default_url
-    title = _clean(body.get("title") or f"🎬 {from_name} seni odaya çağırıyor!", 120)
-    msg_body = _clean(body.get("body") or f'"{room_title}" odası şu an canlı. Tek tıkla katıl!', 240)
     item = _queue_notification(target_uid, {
         "type": _clean(body.get("type") or "room_invite", 32),
         "title": title,
@@ -1778,6 +1823,7 @@ async def notifications_send(request: Request) -> JSONResponse:
         "fromName": from_name,
         "roomId": room_id,
         "url": url,
+        "expiresAt": _now() + 1800.0,
     })
     return JSONResponse({"ok": True, "notification": item})
 
@@ -2741,7 +2787,7 @@ async def voice_relay_endpoint(request: Request):
             rm_obj = await _rm.STORE.get(room_id)
             tok_ok = bool(ctok and _rm.verify_client_token(room_id, ctok) == cid)
             if rm_obj is not None:
-                if cid in (rm_obj.get("kicked_cids") or []):
+                if cid in (rm_obj.get("kicked") or rm_obj.get("kicked_cids") or []):
                     return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
                 if ctok and not tok_ok:
                     return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)

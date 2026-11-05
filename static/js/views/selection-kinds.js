@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v117';
-import { api, qs } from '../api.js?v=20261105_v117';
-import { parseVideoUrl } from '../providers.js?v=20261105_v117';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v117';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v117';
-import { profileSetup } from '../profile.js?v=20261105_v117';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v117';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261105_v130';
+import { api, qs } from '../api.js?v=20261105_v130';
+import { parseVideoUrl } from '../providers.js?v=20261105_v130';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261105_v130';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261105_v130';
+import { profileSetup } from '../profile.js?v=20261105_v130';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v130';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261105_v117';
+} from '../store.js?v=20261105_v130';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -449,7 +449,9 @@ export function renderUploadKind(body, pick) {
     const fd = new FormData();
     fd.append('file', f);
     try {
-      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const upHeaders = {};
+      if (state.self?.authToken) upHeaders.Authorization = `Bearer ${state.self.authToken}`;
+      const res = await fetch('/api/upload', { method: 'POST', headers: upHeaders, body: fd });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Yükleme başarısız');
       status.textContent = 'Yüklendi.';
@@ -665,14 +667,14 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => openDetail(it), onkeydown: (e) => { if (e.target === card && e.key === 'Enter') openDetail(it); } },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
-          src: it.poster || (it.title ? `/api/rave/poster?${qs({ t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          src: it.poster || (it.title ? `/api/rave/poster?${qs({ tid: it.tmdbId || it.id || '', t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
           alt: it.title || '',
           loading: 'lazy',
           onerror: (e) => {
             const el = e.currentTarget || e.target;
-            if (!el.dataset.healed && it.title) {
+            if (!el.dataset.healed && (it.title || it.tmdbId)) {
               el.dataset.healed = '1';
-              el.src = `/api/rave/poster?${qs({ t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}`;
+              el.src = `/api/rave/poster?${qs({ tid: it.tmdbId || it.id || '', t: it.title || '', ot: it.originalTitle || '', y: it.year || '', mt: isTv ? 'tv' : 'movie' })}`;
             } else {
               el.src = '/static/watchlivo-poster.svg';
             }

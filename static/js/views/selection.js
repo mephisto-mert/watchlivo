@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v117';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v117';
-import { api, qs } from '../api.js?v=20261105_v117';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v117';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v117';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v117';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v117';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261105_v130';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261105_v130';
+import { api, qs } from '../api.js?v=20261105_v130';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261105_v130';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261105_v130';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261105_v130';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261105_v130';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261105_v117';
+} from '../store.js?v=20261105_v130';
 
 let _activeHomePick = null;
 
@@ -1542,14 +1542,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0' },
       h('div', { class: 'poster-thumb-wrap' },
         h('img', {
-          src: t.poster || (t.title ? `/api/rave/poster?${qs({ t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
+          src: t.poster || (t.title ? `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
           alt: t.title || '',
           loading: 'lazy',
           onerror: (e) => {
             const el = e.currentTarget || e.target;
-            if (!el.dataset.healed && t.title) {
+            if (!el.dataset.healed && (t.title || t.tmdbId)) {
               el.dataset.healed = '1';
-              el.src = `/api/rave/poster?${qs({ t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}`;
+              el.src = `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}`;
             } else {
               el.src = '/static/watchlivo-poster.svg';
             }
@@ -1696,13 +1696,38 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
   let activeTab = initialTab || 'all';
   const pickFn = customOnPick || ((state.mesh && !state.mesh.curated && typeof window.vortexActions?.pickMedia === 'function') ? async (media) => { await window.vortexActions.pickMedia(media); window.vortexRestoreRoom?.(); } : null) || _activeHomePick || (async (media) => {
     try {
+      let cid = state.clientId || '';
+      try {
+        if (!cid) {
+          cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+          sessionStorage.setItem('vortex_cid', cid);
+        }
+      } catch (_) {}
       const created = await api('/api/rooms/create', {
         method: 'POST',
-        body: { name: media?.title || 'Sinema Odası', visibility: 'friends', voipMode: 'everyone', controlMode: 'all', media },
+        body: {
+          name: media?.title || 'Sinema Odası',
+          privacy: 'friends',
+          voipMode: 'all',
+          playMode: 'all',
+          creator: state.self?.name || 'Misafir',
+          creatorId: state.self?.uid || state.self?.id || cid,
+          clientId: cid,
+          color: state.self?.color || '#27dcc8',
+          avatarUrl: state.self?.avatarUrl || '',
+          media,
+        },
       });
       const targetId = created?.room?.id || created?.id;
-      if (targetId && typeof window.vortexNavigate === 'function') {
-        window.vortexNavigate(`/mesh/${encodeURIComponent(targetId)}`);
+      if (targetId) {
+        try {
+          if (created?.clientToken) sessionStorage.setItem('vortex_ct_' + targetId, created.clientToken);
+          if (created?.clientId || cid) sessionStorage.setItem('vortex_creator_' + targetId, created?.clientId || cid);
+          if (created?.room?.syncToken) sessionStorage.setItem('vortex_st_' + targetId, created.room.syncToken);
+        } catch (_) {}
+        if (typeof window.vortexNavigate === 'function') {
+          window.vortexNavigate(`/mesh/${encodeURIComponent(targetId)}?new=1&cid=${encodeURIComponent(created?.clientId || cid)}`);
+        }
       }
     } catch (_) {}
   });

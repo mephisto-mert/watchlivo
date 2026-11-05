@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261105_v117';
-import { avatar, openDmModal } from '../profile.js?v=20261105_v117';
-import { getProvider } from '../providers.js?v=20261105_v117';
-import { api, qs } from '../api.js?v=20261105_v117';
+import { h, icons, popup, toast } from '../ui.js?v=20261105_v130';
+import { avatar, openDmModal } from '../profile.js?v=20261105_v130';
+import { getProvider } from '../providers.js?v=20261105_v130';
+import { api, qs } from '../api.js?v=20261105_v130';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261105_v117';
-import { expectedPosition } from '../sync.js?v=20261105_v117';
+} from '../store.js?v=20261105_v130';
+import { expectedPosition } from '../sync.js?v=20261105_v130';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -42,10 +42,11 @@ function makeLiveBrandSvg({ label, sub, c1, c2 }) {
 export function thumbFor(media, roomId = '') {
   if (!media) return '';
   const brand = LIVE_BRANDS[roomId];
-  if (brand && (!media.thumbnail || media.thumbnail.includes('watchlivo-poster.svg'))) {
+  const primaryImg = media.thumbnail || media.poster || media.backdrop || media.still || '';
+  if (brand && (!primaryImg || primaryImg.includes('watchlivo-poster.svg'))) {
     return makeLiveBrandSvg(brand);
   }
-  if (media.thumbnail) return media.thumbnail;
+  if (primaryImg) return primaryImg;
   if (media.provider === 'youtube' && media.videoId) return `https://i.ytimg.com/vi/${media.videoId}/hqdefault.jpg`;
   return '';
 }
@@ -247,9 +248,10 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
   };
 
   const renderFriendRow = (f) => {
+    const fUid = f.uid || f.id || '';
     const activeRoom = findFriendActiveRoom(f);
     const inMyRoom = Boolean(state.mesh?.id && activeRoom?.id !== state.mesh.id);
-    const invId = sentRoomInvites.get(f.uid);
+    const invId = sentRoomInvites.get(fUid);
     const pState = f.presenceState || (f.online ? 'online' : 'offline');
     const dotClass = `wl-pres-dot is-${pState}`;
     return h('div', { class: `wl-friend-row is-${pState}` },
@@ -266,7 +268,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
               class: `wl-best-star ${f.bestFriend ? 'on' : ''}`,
               title: f.bestFriend ? 'Yakın arkadaşlardan çıkar' : 'Yakın arkadaş olarak işaretle',
               onclick: async () => {
-                await updateFriendAction('toggle_best', { targetUid: f.uid });
+                await updateFriendAction('toggle_best', { targetUid: fUid });
                 renderModalContent();
               },
             }, f.bestFriend ? '⭐' : '☆')),
@@ -287,14 +289,16 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
           class: `btn sm ${invId ? '' : 'primary'}`,
           onclick: async () => {
             if (invId) {
-              await sendRoomInvite({ action: 'cancel', inviteId: invId, targetUid: f.uid, roomId: state.mesh?.id });
-              sentRoomInvites.delete(f.uid);
+              await sendRoomInvite({ action: 'cancel', inviteId: invId, targetUid: fUid, roomId: state.mesh?.id });
+              sentRoomInvites.delete(fUid);
               toast('Davet geri çekildi');
             } else {
-              const res = await sendRoomInvite({ action: 'send', targetUid: f.uid });
-              if (res?.ok && res.invites?.[0]?.id) {
-                sentRoomInvites.set(f.uid, res.invites[0].id);
+              const res = await sendRoomInvite({ action: 'send', targetUid: fUid });
+              if (res?.ok && (res.invites?.[0]?.id || Number(res.sentCount ?? 0) > 0)) {
+                sentRoomInvites.set(fUid, res.invites?.[0]?.id || 'sent');
                 toast(`📩 ${f.name} odaya davet edildi!`);
+              } else {
+                toast(res?.error || 'Davet gönderilemedi');
               }
             }
             renderModalContent();

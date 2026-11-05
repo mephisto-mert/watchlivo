@@ -399,7 +399,7 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
     if thumb and not thumb.startswith(("https://", "http://", "/")):
         thumb = ""
     duration = max(0.0, _finite_float(data.get("duration"), 0.0))
-    is_tv = clean_str(data.get("mediaType"), 16) == "tv"
+    is_tv = clean_str(data.get("mediaType"), 16).lower() in ("tv", "series", "show", "anime")
     season = max(1, _safe_int(data.get("season"), 1)) if is_tv else 0
     episode = max(1, _safe_int(data.get("episode"), 1)) if is_tv else 0
     alt_urls = [clean_str(u, 1500) for u in (data.get("altUrls") or []) if isinstance(u, str) and u.startswith(("https://", "/api/rave/"))][:6]
@@ -792,7 +792,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         # A cold instance restores from the signed snapshot, so the currently
         # playing media has to come with it (the token is HMAC-signed + expiring).
         snap_media = snap.get("media")
-        if isinstance(snap_media, dict) and (snap_media.get("url") or snap_media.get("videoId")):
+        if isinstance(snap_media, dict) and (snap_media.get("url") or snap_media.get("videoId") or snap_media.get("tmdbId") or snap_media.get("title")):
             md = dict(snap_media)
             if md.get("url") and not re.match(r"^(https?://|/uploads/|/api/rave/)", str(md["url"])):
                 md["url"] = ""
@@ -1217,13 +1217,15 @@ class MemoryStore:
 
     async def all(self) -> List[Dict[str, Any]]:
         if self.tmp_dir:
-            try:
-                for fp in self.tmp_dir.glob("*.json"):
-                    rid = fp.stem
-                    if rid not in self.rooms:
-                        self.rooms[rid] = json.loads(fp.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            for fp in self.tmp_dir.glob("*.json"):
+                rid = fp.stem
+                if rid not in self.rooms:
+                    try:
+                        content = fp.read_text(encoding="utf-8")
+                        if content.strip():
+                            self.rooms[rid] = json.loads(content)
+                    except Exception:
+                        continue
         return list(self.rooms.values())
 
 
@@ -2707,7 +2709,7 @@ from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 from starlette.websockets import WebSocket, WebSocketDisconnect  # noqa: E402
 
-ROOM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9\-]{1,47}$")
+ROOM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,47}$")
 
 _LIVE_TV = [
     ("trt1", "TRT 1", "https://tv-trt1.medya.trt.com.tr/master.m3u8"),
@@ -3360,20 +3362,21 @@ async def create_room(request: Request):
 
 
 def _is_friend_of_creator(room: Dict[str, Any], caller_uid: str) -> bool:
-    c_uid = str(room.get("creatorId") or "").strip()
+    c_uid = str(room.get("creatorId") or room.get("creator_cid") or "").strip()
     if not c_uid or not caller_uid:
         return False
-    if caller_uid == c_uid:
+    if caller_uid.lower() == c_uid.lower():
         return True
     for p in (room.get("participants") or {}).values():
-        if isinstance(p, dict) and p.get("uid") == caller_uid:
+        if isinstance(p, dict) and str(p.get("uid") or "").lower() == caller_uid.lower():
             return True
     try:
         import social_engine
-        su = social_engine._SOCIAL_USERS.get(c_uid) or social_engine._kv_get(f"wl:soc:u:{c_uid}", None, max_age=30.0)
+        su = social_engine._SOCIAL_USERS.get(c_uid) or social_engine._SOCIAL_USERS.get(c_uid.lower()) or social_engine._kv_get(f"wl:soc:u:{c_uid}", None, max_age=30.0)
         if isinstance(su, dict):
             for f in (su.get("friends") or []):
-                if isinstance(f, dict) and f.get("uid") == caller_uid:
+                f_uid = str(f.get("uid") if isinstance(f, dict) else f or "").strip()
+                if f_uid.lower() == caller_uid.lower():
                     return True
     except Exception:
         pass
@@ -3450,7 +3453,7 @@ async def list_rooms(request: Request):
                 if idle_sec > EMPTY_ROOM_TTL:
                     await STORE.delete(rid_item, mark_closed=False)
                 continue
-            if room["privacy"] == "private" or not p_cnt:
+            if room.get("privacy", "public") == "private" or not p_cnt:
                 continue
             candidates.append(room)
         # Deduplicate non-curated rooms by BOTH creatorId and creator slug so a user switching episodes/movies never leaves ghost rooms behind

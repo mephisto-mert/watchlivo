@@ -1,20 +1,26 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v127';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v127';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v127';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v127';
-import { api } from './api.js?v=20261105_v127';
-import { h, toast } from './ui.js?v=20261105_v127';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v130';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v130';
+import { renderHome, destroyHome } from './views/home.js?v=20261105_v130';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v130';
+import { api } from './api.js?v=20261105_v130';
+import { h, toast } from './ui.js?v=20261105_v130';
 
 function parseRoute() {
-  const legacyRoom = new URLSearchParams(location.search).get('room');
+  const searchParams = new URLSearchParams(location.search);
+  const legacyRoom = searchParams.get('room');
   if (legacyRoom && !location.hash) {
-    history.replaceState({}, '', `/#/mesh/${encodeURIComponent(legacyRoom)}`);
+    searchParams.delete('room');
+    const rem = searchParams.toString();
+    history.replaceState({}, '', `/#/mesh/${encodeURIComponent(legacyRoom)}${rem ? '?' + rem : ''}`);
   }
   const hash = location.hash.replace(/^#/, '') || '/';
   const [path, query = ''] = hash.split('?');
   const parts = path.split('/').filter(Boolean);
-  const params = Object.fromEntries(new URLSearchParams(query));
+  const params = {
+    ...Object.fromEntries(new URLSearchParams(location.search)),
+    ...Object.fromEntries(new URLSearchParams(query)),
+  };
   if (parts[0] === 'mesh' && parts[1]) {
     let roomId = parts[1];
     try { roomId = decodeURIComponent(parts[1]); } catch (_) {}
@@ -94,6 +100,9 @@ async function route() {
       enteringMeshRoomId = r.params.id;
       try {
         await enterMesh(meshRoot, r.params);
+      } catch (err) {
+        console.error('[Route] enterMesh error:', err);
+        toast('Odaya bağlanırken hata oluştu, tekrar deneniyor...');
       } finally {
         if (enteringMeshRoomId === r.params.id) enteringMeshRoomId = null;
       }
@@ -107,6 +116,7 @@ async function route() {
       }
     }
   } else {
+    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => el.remove());
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
       document.body.classList.add('mesh-minimized');
@@ -378,7 +388,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v127', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261105_v130', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -455,11 +465,14 @@ function initRaveNotifications() {
           class: 'btn sm primary',
           onclick: () => {
             closeCard();
-            if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
-            else if (targetUrl) {
+            if (targetUrl) {
               const cleanHash = targetUrl.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
-              if (cleanHash) navigate(cleanHash);
+              if (cleanHash && cleanHash !== '/') {
+                navigate(cleanHash);
+                return;
+              }
             }
+            if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
           },
         }, '▶ Odaya Katıl')
       );
@@ -530,11 +543,25 @@ function initRaveNotifications() {
     return false;
   };
 
-  window.vortexSendRoomNotification = async (extra = {}) => {
+  window.vortexSendRoomNotification = async (extraOrRoomId = {}, maybeRoomTitle = '') => {
+    const extra = typeof extraOrRoomId === 'string'
+      ? { roomId: extraOrRoomId, roomTitle: maybeRoomTitle }
+      : (extraOrRoomId || {});
     const rid = extra.roomId || state.mesh?.id || '';
     if (!rid) return null;
     const rTitle = extra.roomTitle || state.mesh?.media?.title || state.mesh?.name || 'Sinema Odası';
     const sender = state.self?.name || 'Arkadaşın';
+    const qp = new URLSearchParams();
+    let pwd = state.route?.params?.pwd || '';
+    let rtok = state.mesh?.syncToken || '';
+    try {
+      if (!pwd) pwd = sessionStorage.getItem('vortex_pwd_' + rid) || '';
+      if (!rtok) rtok = sessionStorage.getItem('vortex_st_' + rid) || '';
+    } catch (_) {}
+    if (pwd) qp.set('pwd', pwd);
+    if (rTitle) qp.set('t', rTitle);
+    if (rtok && rtok.length < 6000) qp.set('r_tok', rtok);
+    const qs = qp.toString();
     const res = await api('/api/rave/notifications/send', {
       method: 'POST',
       body: {
@@ -543,7 +570,7 @@ function initRaveNotifications() {
         roomId: rid,
         roomTitle: rTitle,
         targetUid: extra.targetUid || '*',
-        url: `${location.origin}/#/mesh/${encodeURIComponent(rid)}`,
+        url: `/#/mesh/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`,
       },
     }).catch(() => null);
     if (res?.ok) {

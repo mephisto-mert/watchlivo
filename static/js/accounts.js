@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261105_v117';
-import { api, qs } from './api.js?v=20261105_v117';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261105_v117';
+import { h, toast, popup } from './ui.js?v=20261105_v130';
+import { api, qs } from './api.js?v=20261105_v130';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261105_v130';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -446,13 +446,13 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         h('div', { class: 'series-hero-body' },
           h('img', {
             class: 'series-poster',
-            src: poster || `/api/rave/poster?${qs({ t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
+            src: poster || `/api/rave/poster?${qs({ tid: tmdbId || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
             alt: title,
             onerror: (e) => {
               const el = e.currentTarget || e.target;
-              if (!el.dataset.healed && title) {
+              if (!el.dataset.healed && (title || tmdbId)) {
                 el.dataset.healed = '1';
-                el.src = `/api/rave/poster?${qs({ t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
+                el.src = `/api/rave/poster?${qs({ tid: tmdbId || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
               } else {
                 el.src = '/static/watchlivo-poster.svg';
               }

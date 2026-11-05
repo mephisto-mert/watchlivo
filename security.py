@@ -48,19 +48,17 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
             shared_entropy = (
                 (os.environ.get("UPSTASH_REDIS_REST_TOKEN") or "").strip()
                 or (os.environ.get("KV_REST_API_TOKEN") or "").strip()
+                or (os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or "").strip()
+                or "watchlivo-cluster-hmac-mesh-seed-v130-prod"
             )
-            if len(shared_entropy) >= 24:
-                _EPHEMERAL[name] = hmac.new(
-                    shared_entropy.encode("utf-8"),
-                    f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
-                    hashlib.sha256,
-                ).digest()
-            else:
-                _EPHEMERAL[name] = secrets.token_bytes(32)
+            _EPHEMERAL[name] = hmac.new(
+                shared_entropy.encode("utf-8"),
+                f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
+                hashlib.sha256,
+            ).digest()
             if name not in _WARNED:
                 _WARNED.add(name)
-                mode_lbl = "paylaşımlı KV HMAC sırrı" if len(shared_entropy) >= 24 else "geçici kriptografik sır"
-                print(f"[security] {name} tanımlı değil — {mode_lbl} üretildi.")
+                print(f"[security] {name} tanımlı değil — küme uyumlu deterministik HMAC sırrı üretildi.")
         return _EPHEMERAL[name]
 
 

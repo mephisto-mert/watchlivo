@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261105_v117';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261105_v117';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261105_v117';
-import { getProvider } from '../providers.js?v=20261105_v117';
-import { expectedPosition } from '../sync.js?v=20261105_v117';
-import { thumbFor } from './lobby.js?v=20261105_v117';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261105_v117';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261105_v117';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261105_v117';
-import { avatar } from '../profile.js?v=20261105_v117';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261105_v130';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261105_v130';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261105_v130';
+import { getProvider } from '../providers.js?v=20261105_v130';
+import { expectedPosition } from '../sync.js?v=20261105_v130';
+import { thumbFor } from './lobby.js?v=20261105_v130';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261105_v130';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261105_v130';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261105_v130';
+import { avatar } from '../profile.js?v=20261105_v130';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -714,7 +714,7 @@ export function buildControls(frame, ctx) {
   const computeNextEpSpec = (m, sNum, eNum) => {
     const cleanSeries = String(m?.seriesTitle || m?.title || 'Dizi').split(' — ')[0].trim() || 'Dizi';
     const meta = ensureSeasonMeta(m, cleanSeries, sNum);
-    if (meta && meta.epCount > 0 && eNum >= meta.epCount) {
+    if (meta && meta.epCount > 0 && eNum === meta.epCount) {
       if (meta.hasNextSeason) {
         return { season: sNum + 1, episode: 1, shortSig: `S${sNum + 1}:B1`, fullLabel: `S${sNum + 1}:B1`, cleanSeries, isFinale: false };
       }
@@ -843,7 +843,7 @@ export function buildControls(frame, ctx) {
             const rawName = String(foundEp.name || '').trim();
             const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
             epName = isRedundant ? '' : rawName;
-          } else if (eps.length > 0 && targetEp > eps.length) {
+          } else if (eps.length > 0 && targetEp === eps.length + 1) {
             const hasNextSeason = seasons.some((s) => Number(s.season) === targetSeason + 1);
             if (hasNextSeason) {
               targetSeason += 1;
@@ -1735,6 +1735,7 @@ export function buildControls(frame, ctx) {
           host.key = '';
           host.loadedUrl = '';
           await host.setMedia(m, curPos, true);
+          ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
           loading.classList.add('hidden');
           showOverlay('✅ Yayın kaynağı yenilendi', 2200);
           update();

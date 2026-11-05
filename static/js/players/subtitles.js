@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261105_v117';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261105_v130';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -829,7 +829,7 @@ export class SubtitleDubController {
         this._prevSubBeforeDub = this.selectedSubId;
         await this.setSubtitleTrack('off', true);
       }
-    } else if (!isInit && (track.id === 'orig' || (track.lang !== 'tr' && track.audioLang !== 'tr'))) {
+    } else if (!isInit && this.media?.origLang !== 'tr' && (track.id === 'orig' || (track.lang !== 'tr' && track.audioLang !== 'tr'))) {
       if (!this.selectedSubId || this.selectedSubId === 'off') {
         const trFallback = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
         const restoreId = this._prevSubBeforeDub || trFallback?.id || '';

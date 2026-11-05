@@ -919,6 +919,13 @@ export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
     : (targetOrPayload || {});
   const s = state.self || {};
   const m = state.mesh;
+  const rid = payload.roomId || m?.id || state.route?.params?.id || '';
+  let pwd = payload.password || state.route?.params?.pwd || '';
+  let syncTok = payload.syncToken || m?.syncToken || '';
+  try {
+    if (!pwd && rid) pwd = sessionStorage.getItem('vortex_pwd_' + rid) || '';
+    if (!syncTok && rid) syncTok = sessionStorage.getItem('vortex_st_' + rid) || '';
+  } catch (_) {}
   const r = await fetch('/api/rave/social/invite', {
     method: 'POST',
     credentials: 'same-origin',
@@ -927,11 +934,13 @@ export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
       action: payload.action || actionArg || 'send',
       uid: _socialUidParam(),
       fromName: s.name || 'İzleyici',
-      roomId: payload.roomId || m?.id || '',
+      roomId: rid,
       roomName: payload.roomName || m?.name || 'Watchlivo Odası',
       mediaTitle: payload.mediaTitle || m?.media?.title || '',
-      mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.thumbnail || '',
+      mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.backdrop || m?.media?.thumbnail || '',
       mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
+      password: pwd,
+      syncToken: syncTok,
       ...payload,
     }),
   });

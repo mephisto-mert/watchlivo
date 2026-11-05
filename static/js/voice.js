@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261105_v117';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261105_v117';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261105_v117';
+import { toast } from './ui.js?v=20261105_v130';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261105_v130';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261105_v130';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -658,7 +658,7 @@ export class Voice {
       const old = this.peers.get(from);
       const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (newU && oldU && newU !== oldU) {
+      if ((newU && oldU && newU !== oldU) || (!old.pc.remoteDescription && old.pc.signalingState === 'stable')) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
@@ -675,7 +675,10 @@ export class Voice {
         if (data.type === 'webrtc_offer' || data.type === 'webrtc_answer') {
           const desc = data.sdp;
           if (!desc || !desc.type) return;
-          if (desc.type === 'answer' && pc.signalingState !== 'have-local-offer') return;
+          if (desc.type === 'answer') {
+            st.ignoreOffer = false;
+            if (pc.signalingState !== 'have-local-offer') return;
+          }
           const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
           st.ignoreOffer = !polite && collision;
           if (st.ignoreOffer) return;
@@ -1021,8 +1024,9 @@ export class Voice {
       return false;
     }
     try {
-      let realMicAcquired = Boolean(this.stream && !this._usingSynthStream);
-      if (!this.stream || this._usingSynthStream) {
+      const hasLiveTrack = Boolean(this.stream?.getAudioTracks?.().some((t) => t.readyState === 'live'));
+      let realMicAcquired = Boolean(this.stream && !this._usingSynthStream && hasLiveTrack);
+      if (!this.stream || this._usingSynthStream || !hasLiveTrack) {
         this.micPending = true;
         this.onStateChange?.();
         try {

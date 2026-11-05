@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261105_v117';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261105_v117';
-import { resolveMusicItem } from './selection-kinds.js?v=20261105_v117';
-import { MeshConnection } from '../realtime.js?v=20261105_v117';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261105_v117';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261105_v117';
-import { buildLayout } from './mesh-layout.js?v=20261105_v117';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261105_v117';
-import { Voice } from '../voice.js?v=20261105_v117';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261105_v117';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261105_v130';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261105_v130';
+import { resolveMusicItem } from './selection-kinds.js?v=20261105_v130';
+import { MeshConnection } from '../realtime.js?v=20261105_v130';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261105_v130';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261105_v130';
+import { buildLayout } from './mesh-layout.js?v=20261105_v130';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261105_v130';
+import { Voice } from '../voice.js?v=20261105_v130';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261105_v130';
 
 let ctx = null;
 
@@ -256,6 +256,39 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
       };
     }
   }
+  if (!room?.media?.url && !room?.media?.videoId && (state.route?.params?.tmdbId || state.route?.params?.t)) {
+    const rp = state.route.params;
+    const isTvParam = rp.mt === 'tv' || Number(rp.s || 0) > 0 || Number(rp.e || 0) > 0;
+    const sNum = Math.max(1, Number(rp.s || 1));
+    const eNum = Math.max(1, Number(rp.e || 1));
+    const qStr = new URLSearchParams({
+      provider: 'cinema',
+      title: rp.t || '',
+      origTitle: rp.t || '',
+      tmdbId: rp.tmdbId || '',
+      mediaType: isTvParam ? 'tv' : 'movie',
+      season: isTvParam ? String(sNum) : '',
+      episode: isTvParam ? String(eNum) : '',
+    }).toString();
+    room = {
+      ...room,
+      media: {
+        provider: 'hls',
+        streamType: 'hls',
+        url: `/api/rave/resolve-catalog?${qStr}`,
+        title: rp.t || room.name || 'Sinema Odası',
+        tmdbId: rp.tmdbId || '',
+        mediaType: isTvParam ? 'tv' : 'movie',
+        season: isTvParam ? sNum : 0,
+        episode: isTvParam ? eNum : 0,
+        playing: true,
+        currentTime: 0,
+        meshStateStatus: 'PLAYING',
+        meshStatePosition: 0,
+        meshStateTime: clock.now(),
+      },
+    };
+  }
   set({ mesh: room });
   try {
     const dynTitle = String(room?.media?.title || room?.name || '').trim();
@@ -364,6 +397,11 @@ async function loadMedia(media) {
                 provider: res.provider || 'hls',
                 streamType: res.streamType || 'hls',
                 url: res.url,
+                videoId: res.videoId || media.videoId || '',
+                embedUrl: res.embedUrl || media.embedUrl || '',
+                title: res.title || media.title || '',
+                channel: res.channel || media.channel || '',
+                thumbnail: res.thumbnail || media.thumbnail || '',
                 altUrls: res.altUrls || [],
                 servers: (res.servers && res.servers.length) ? res.servers : (media.servers || []),
                 audioTracks: (res.audioTracks && res.audioTracks.length) ? res.audioTracks : media.audioTracks,

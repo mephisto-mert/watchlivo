@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261105_v117';
-import { api } from './api.js?v=20261105_v117';
-import { state } from './store.js?v=20261105_v117';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261105_v117';
+import { clock } from './sync.js?v=20261105_v130';
+import { api } from './api.js?v=20261105_v130';
+import { state } from './store.js?v=20261105_v130';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261105_v130';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -497,9 +497,11 @@ export class MeshConnection {
         this.close(false);
         this.onMessage?.({ type: 'room_closed', roomId: this.roomId });
       } else if (e.status === 403) {
-        this.emitStatus('denied');
-        this.close(false);
-        this.onMessage?.({ type: 'password_required', roomId: this.roomId });
+        if (!e.data?.error || e.data?.error === 'password_required') {
+          this.emitStatus('denied');
+          this.close(false);
+          this.onMessage?.({ type: 'password_required', roomId: this.roomId });
+        }
       } else {
         this.httpFailCount = (this.httpFailCount || 0) + 1;
         if (!this.lastRoom || this.httpFailCount >= 5) {

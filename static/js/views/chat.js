@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261105_v117';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261105_v117';
-import { avatar } from '../profile.js?v=20261105_v117';
-import { api, qs } from '../api.js?v=20261105_v117';
-import { resolveMusicItem } from './selection-kinds.js?v=20261105_v117';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261105_v117';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261105_v130';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261105_v130';
+import { avatar } from '../profile.js?v=20261105_v130';
+import { api, qs } from '../api.js?v=20261105_v130';
+import { resolveMusicItem } from './selection-kinds.js?v=20261105_v130';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261105_v130';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -173,7 +173,25 @@ const PRIVACY = [
 
 export const inviteUrl = () => {
   const rid = state.mesh?.id || state.route.params.id || '';
-  return `${location.origin}/r/${encodeURIComponent(rid)}`;
+  const qp = new URLSearchParams();
+  let pwd = state.route?.params?.pwd || '';
+  if (!pwd && rid) {
+    try { pwd = sessionStorage.getItem('vortex_pwd_' + rid) || ''; } catch (_) {}
+  }
+  if (pwd) qp.set('pwd', pwd);
+  const m = state.mesh?.media;
+  if (m?.title) qp.set('t', m.title);
+  if (m?.tmdbId) qp.set('tmdbId', String(m.tmdbId));
+  if (m?.mediaType) qp.set('mt', m.mediaType);
+  if (m?.season) qp.set('s', String(m.season));
+  if (m?.episode) qp.set('e', String(m.episode));
+  let rtok = state.mesh?.syncToken || '';
+  if (!rtok && rid) {
+    try { rtok = sessionStorage.getItem('vortex_st_' + rid) || ''; } catch (_) {}
+  }
+  if (rtok && rtok.length < 6000) qp.set('r_tok', rtok);
+  const qs = qp.toString();
+  return `${location.origin}/r/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`;
 };
 
 export async function copyInvite() {
@@ -362,6 +380,8 @@ export function buildChat(ctx) {
     id: 'btn-discord-share-toggle',
     title: 'Hızlı Davet Linki, WhatsApp, QR & Oda Gizliliği',
     onclick: () => {
+      onboarding = true;
+      quickAccessZone.replaceChildren(quickRoomBar());
       const hiddenNow = quickAccessZone.classList.toggle('hidden');
       dShareQuickBtn.classList.toggle('on', !hiddenNow);
     },
@@ -850,7 +870,7 @@ export function buildChat(ctx) {
       h('div', { class: 'chat-poll-opts' }, ...(poll.options || []).map((opt, idx) => {
         const count = (opt.votes || []).length;
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-        const voted = (opt.votes || []).includes(myName);
+        const voted = (opt.votes || []).some((u) => u === myName || String(u).startsWith(myName + '#'));
         return h('button', {
           type: 'button',
           class: `chat-poll-opt ${voted ? 'voted' : ''}`,
@@ -963,7 +983,7 @@ export function buildChat(ctx) {
     }
     wrap.classList.remove('empty');
     wrap.replaceChildren(...entries.map(([em, users]) => {
-      const mine = users.includes(myName);
+      const mine = users.some((u) => u === myName || String(u).startsWith(myName + '#'));
       return h('button', {
         type: 'button',
         class: `msg-react-pill ${mine ? 'mine' : ''}`,

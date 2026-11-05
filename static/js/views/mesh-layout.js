@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261105_v117';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261105_v117';
-import { navIcon, logo } from './home.js?v=20261105_v117';
-import { createSelection } from './selection.js?v=20261105_v117';
-import { buildControls } from './controls.js?v=20261105_v117';
-import { buildChat } from './chat.js?v=20261105_v117';
-import { PANELS } from './panels.js?v=20261105_v117';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261105_v130';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261105_v130';
+import { navIcon, logo } from './home.js?v=20261105_v130';
+import { createSelection } from './selection.js?v=20261105_v130';
+import { buildControls } from './controls.js?v=20261105_v130';
+import { buildChat } from './chat.js?v=20261105_v130';
+import { PANELS } from './panels.js?v=20261105_v130';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -143,7 +143,7 @@ export function buildLayout(app, ctx) {
         roomActionBtn('searchVideo', 'İçerik Seç', 'Video & Katalog Ara', () => {
           if (selDisabled) { popup({ message: "Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider video seçebilir.", options: [{ label: 'Tamam' }] }); return; }
           openSide('left', 'Search');
-        }, { selected: L !== 'Collapsed' && L !== 'Settings', disabled: selDisabled, variant: 'primary-pill', id: 'nav-search-video' }),
+        }, { selected: L === 'Search', disabled: selDisabled, variant: 'primary-pill', id: 'nav-search-video' }),
         roomActionBtn('minimize', 'Küçült', 'Odayı Küçült & Gezin', () => window.vortexMinimizeRoom?.(), { id: 'nav-minimize-room' })),
       h('div', { class: 'navbar-center' },
         h('div', { class: 'room-brand-capsule' },
@@ -169,7 +169,7 @@ export function buildLayout(app, ctx) {
             : null)),
       h('div', { class: 'navbar-right' },
         roomActionBtn('vote', 'Sıra', 'Sıra ve Oylama', () => openSide('right', 'Vote'), { selected: R === 'Vote', badge: voteCount, id: 'nav-vote' }),
-        roomActionBtn('addUser', 'Davet Et', 'Arkadaş Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends', variant: 'invite-pill' }),
+        roomActionBtn('addUser', 'Davet Et', 'Arkadaş Davet Et', () => openSide('right', 'Friends'), { selected: R === 'Friends', variant: 'invite-pill', id: 'nav-invite' }),
         roomActionBtn('users', 'Kişiler', 'Katılımcılar', () => openSide('right', 'Participants'), { selected: R === 'Participants', badge: people, id: 'nav-participants' }),
         theaterMode
           ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(), { selected: true, id: 'nav-toggle-chat' })
