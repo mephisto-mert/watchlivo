@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261106_v131';
-import { api } from './api.js?v=20261106_v131';
-import { state } from './store.js?v=20261106_v131';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v131';
+import { clock } from './sync.js?v=20261106_v132';
+import { api } from './api.js?v=20261106_v132';
+import { state } from './store.js?v=20261106_v132';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v132';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -234,7 +234,7 @@ export class MeshConnection {
       clearInterval(this.pingTimer);
       clearTimeout(this.wsRetryTimer);
       if (this.closed) return;
-      if (!opened && this.retry >= 1) { this.startHttp(); return; }
+      if (!opened) { this.startHttp(); return; }
       this.emitStatus('connecting');
       this.retry += 1;
       this.wsRetryTimer = setTimeout(() => !this.closed && this.startWs(), Math.min(8000, 600 * this.retry));
@@ -396,7 +396,8 @@ export class MeshConnection {
           try { sessionStorage.setItem('vortex_cid', this.clientId); } catch (e) { /* ignore */ }
         }
       }
-      if (res.serverTime) clock.sample(t0, Number(res.serverTime));
+      const srvClockNow = Number(res.serverTime || res.room?.serverNow || res.media?.serverNow || 0);
+      if (srvClockNow > 0) clock.sample(t0, srvClockNow);
       this.emitStatus('online');
       if (Array.isArray(res.errors) && res.errors.length) {
         for (const err of res.errors) {

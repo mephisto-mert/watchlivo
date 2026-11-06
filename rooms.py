@@ -929,6 +929,15 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
     same_m_key = bool(s_has_media and r_has_media and media_key(s_media) == media_key(r_media))
     s_unresolved = str(s_media.get("url") or "").startswith("/api/rave/resolve-catalog")
     r_unresolved = str(r_media.get("url") or "").startswith("/api/rave/resolve-catalog")
+    r_live_pos = r_pos + (max(0.0, t - r_m_time) * float(r_media.get("rate") or 1.0) if (r_media.get("playing") and r_m_time > 0.0 and (not r_unresolved or r_media.get("playbackAnchored") or r_media.get("_playbackAnchored") or r_pos > 0.5)) else 0.0)
+    s_live_pos = s_pos + (max(0.0, t - s_m_time) * float(s_media.get("rate") or 1.0) if (s_media.get("playing") and s_m_time > 0.0 and (not s_unresolved or s_media.get("playbackAnchored") or s_media.get("_playbackAnchored") or s_pos > 0.5)) else 0.0)
+    stale_snap_regression = bool(
+        same_m_key
+        and cur_h_alive
+        and r_live_pos > 15.0
+        and s_live_pos < r_live_pos - 8.0
+        and s_m_time < t - 3.0
+    )
     pause_protected = bool(
         same_m_key
         and not r_media.get("playing", True)
@@ -936,7 +945,7 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         and (t - float(r_media.get("lastExplicitPauseAt") or 0.0) < 15.0)
         and s_m_time <= float(r_media.get("lastExplicitPauseAt") or 0.0) + 2.0
     )
-    if (s_has_media and not r_has_media) or (s_has_media and not pause_protected and s_m_time > r_m_time + 0.01 and not (r_pos > 25.0 and s_pos < 10.0 and same_m_key)):
+    if (s_has_media and not r_has_media) or (s_has_media and not pause_protected and not stale_snap_regression and s_m_time > r_m_time + 0.01 and not (r_live_pos > 25.0 and s_live_pos < 10.0 and same_m_key)):
         if same_m_key and s_unresolved and not r_unresolved:
             merged_m = dict(s_media)
             for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
@@ -1038,7 +1047,11 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         room["media"]["updatedAt"] = t
         m["currentTime"] = 0.0
         m["updatedAt"] = t
-    is_unresolved_catalog = str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+    is_unresolved_catalog = (
+        str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        and float(m.get("currentTime") or 0.0) <= 0.5
+        and not bool(room.get("media", {}).get("playbackAnchored") or room.get("media", {}).get("_playbackAnchored"))
+    )
     if is_unresolved_catalog:
         m["updatedAt"] = t
     elapsed_wall = 0.0 if is_unresolved_catalog else max(0.0, t - float(m.get("updatedAt") or t))
@@ -1122,7 +1135,11 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     p_map = room.get("participants") or {}
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     raw_m = _media_defaults(room)
-    is_unresolved_cat = str(raw_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+    is_unresolved_cat = (
+        str(raw_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        and float(raw_m.get("currentTime") or 0.0) <= 0.5
+        and not bool((room.get("media") or {}).get("playbackAnchored") or (room.get("media") or {}).get("_playbackAnchored"))
+    )
     playing = bool(raw_m.get("playing")) and has_humans and not is_unresolved_cat
     rate = float(raw_m.get("rate") or 1.0)
     updated_at = t if is_unresolved_cat else float(raw_m.get("updatedAt") or t)
@@ -1132,7 +1149,13 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     pw_locked = has_password(room)
     m_summary = dict(raw_m)
     m_summary["currentTime"] = cur_time
-    m_summary["liveTime"] = round(raw_live, 1)
+    m_summary["updatedAt"] = updated_at
+    m_summary["liveTime"] = round(raw_live, 2)
+    m_summary["meshStateStatus"] = "PLAYING" if (bool(raw_m.get("playing")) and has_humans) else "PAUSED"
+    m_summary["meshStatePosition"] = float(cur_time)
+    m_summary["meshStateTime"] = float(updated_at)
+    m_summary["meshStatePlaybackSpeed"] = float(rate)
+    m_summary["serverNow"] = t
     if pw_locked:
         m_summary.update({"url": "", "altUrls": [], "servers": [], "subtitleTracks": [], "audioTracks": [], "videoId": "", "embedUrl": "", "title": "🔒 Şifreli Oda", "thumbnail": "/static/watchlivo-poster.svg", "poster": "/static/watchlivo-poster.svg"})
     host_id = room.get("host_id")
@@ -1881,10 +1904,25 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             return out
         inc_t = _finite_float(data.get("currentTime"), 0.0, 0.0, 864000.0)
         cur_m = room["media"]
-        if str(cur_m.get("url") or "").startswith("/api/rave/resolve-catalog"):
+        if isinstance(data.get("activeMedia"), dict):
+            inc_hb_clean = clean_media(data["activeMedia"])
+            inc_hb_url = str(inc_hb_clean.get("url") or "")
+            if inc_hb_url and not inc_hb_url.startswith("/api/rave/resolve-catalog"):
+                cur_hb_url = str(cur_m.get("url") or "")
+                if (not cur_hb_url or cur_hb_url.startswith("/api/rave/resolve-catalog")) and (not media_key(cur_m) or media_key(cur_m) == media_key(inc_hb_clean)):
+                    for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "poster", "thumbnail"):
+                        if inc_hb_clean.get(k):
+                            cur_m[k] = inc_hb_clean[k]
+                    room["_tok_sig"] = ""
+        cur_unres_hb = (
+            str(cur_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+            and float(cur_m.get("currentTime") or 0.0) <= 0.5
+            and not bool(cur_m.get("playbackAnchored"))
+        )
+        if cur_unres_hb and inc_t <= 0.25:
             return out
-        cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if cur_m.get("playing") else 0.0)
-        if cur_live > 30.0 and inc_t <= 0.15:
+        cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if (cur_m.get("playing") and not cur_unres_hb) else 0.0)
+        if cur_live > 30.0 and inc_t <= 0.5:
             return out
         prev_playing = bool(cur_m.get("playing"))
         prev_privacy = room.get("privacy")
@@ -1898,9 +1936,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if prev_playing and want_play and not is_anchor_hb and cur_live > 2.0 and inc_t < cur_live - 2.0:
             room["media"]["currentTime"] = cur_live
             room["media"]["updatedAt"] = t_now
+            room["media"]["playbackAnchored"] = True
+            room["_tok_sig"] = ""
             return out
         _apply_time(room, data)
         room["media"]["playing"] = want_play
+        room["media"]["playbackAnchored"] = True
+        room["_tok_sig"] = ""
         if prev_playing and want_play and not is_anchor_hb and cur_live > 5.0 and abs(inc_t - cur_live) <= 0.08 and room.get("privacy") == prev_privacy:
             return out
         if is_anchor_hb or bool(room["media"].get("playing")) != prev_playing or room.get("privacy") != prev_privacy or abs(inc_t - cur_live) > 0.25:
@@ -1928,17 +1970,29 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 raw_inc_ct = data.get("currentTime") if data.get("currentTime") is not None else incoming.get("currentTime")
                 inc_ct = max(0.0, _finite_float(raw_inc_ct, 0.0))
                 cur_ct = max(0.0, float(cur_m.get("currentTime") or 0.0))
-                if cur_unresolved:
+                was_anchored = bool(cur_m.get("playbackAnchored") or cur_ct > 0.5 or not cur_unresolved)
+                elapsed_live = (
+                    max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
+                    if (cur_m.get("playing") and was_anchored)
+                    else 0.0
+                )
+                cur_live_pos = max(0.0, cur_ct + elapsed_live)
+                if not can_control:
+                    if was_anchored or cur_live_pos > 1.5:
+                        cur_m["currentTime"] = cur_live_pos
+                    else:
+                        cur_m["currentTime"] = max(cur_ct, inc_ct)
+                elif cur_live_pos > 5.0 and inc_ct < 2.0:
+                    cur_m["currentTime"] = cur_live_pos
+                elif cur_unresolved and not was_anchored:
                     cur_m["currentTime"] = max(cur_ct, inc_ct) if (cur_ct > 2.0 or inc_ct > 2.0) else inc_ct
-                elif cur_ct <= 5.0 and inc_ct <= 2.0:
-                    cur_m["currentTime"] = inc_ct
-                elif cur_m.get("playing"):
-                    elapsed = max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0)
-                    cur_m["currentTime"] = max(cur_ct + elapsed, inc_ct)
+                else:
+                    cur_m["currentTime"] = max(cur_live_pos, inc_ct)
                 for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                     if incoming.get(k):
                         cur_m[k] = incoming[k]
                 cur_m["updatedAt"] = t_now
+                cur_m["playbackAnchored"] = True
                 room["media"] = cur_m
                 room["rev"] = int(room.get("rev") or 1) + 1
                 room["_tok_sig"] = ""
@@ -1966,6 +2020,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             room["host_id"] = cid
             is_host = True
         _apply_time(room, data)
+        room["media"]["playbackAnchored"] = True
+        room["_tok_sig"] = ""
         if mtype == "play":
             room["media"]["playing"] = True
             room["media"]["lastExplicitPauseAt"] = 0.0
@@ -3238,6 +3294,20 @@ async def http_sync(request: Request):
         p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid}, "http")
         if is_new:
             sys_msg(room, "odaya katıldı", p["name"])
+            t_ev = now()
+            join_map = room.setdefault("_lastHttpJoinMap", {})
+            if len(join_map) > 60:
+                join_map.clear()
+            if t_ev - float(join_map.get(cid) or 0.0) > 0.3:
+                join_map[cid] = t_ev
+                join_ev = {
+                    "id": "uj_" + uuid.uuid4().hex[:10],
+                    "ts": t_ev,
+                    "type": "user_joined",
+                    "user": {"id": cid, "name": p["name"], "uid": p.get("uid", "")},
+                    "cid": cid,
+                }
+                room["events"] = (room.get("events") or [])[-34:] + [join_ev]
         active_m = data.get("activeMedia")
         restored_active_media = False
         if data.get("type") not in ("resolve_media", "change_media") and not room.get("curated") and isinstance(active_m, dict) and (active_m.get("url") or active_m.get("videoId")):
@@ -3253,12 +3323,21 @@ async def http_sync(request: Request):
             should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (cur_unresolved and inc_resolved and media_key(room["media"]) == media_key(incoming_clean))
             if should_sync_active:
                 if cur_unresolved and inc_resolved and not room_empty_media and media_key(room["media"]) == media_key(incoming_clean):
+                    t_sync_now = now()
+                    was_anc = bool(room["media"].get("playbackAnchored") or float(room["media"].get("currentTime") or 0.0) > 0.5)
+                    cur_ct_val = float(room["media"].get("currentTime") or 0.0)
+                    cur_el = max(0.0, t_sync_now - float(room["media"].get("updatedAt") or t_sync_now)) * float(room["media"].get("rate") or 1.0) if (room["media"].get("playing") and was_anc) else 0.0
+                    cur_live_val = max(0.0, cur_ct_val + cur_el)
                     for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "bgVideoUrl", "bgYoutubeId", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                         if incoming_clean.get(k):
                             room["media"][k] = incoming_clean[k]
-                    if float(room["media"].get("currentTime") or 0.0) <= 12.0:
+                    if was_anc or cur_live_val > 2.0:
+                        room["media"]["currentTime"] = cur_live_val
+                        room["media"]["updatedAt"] = t_sync_now
+                    else:
                         room["media"]["currentTime"] = 0.0
-                        room["media"]["updatedAt"] = now()
+                        room["media"]["updatedAt"] = t_sync_now
+                    room["media"]["playbackAnchored"] = True
                     room["rev"] = int(room.get("rev") or 1) + 1
                     room["_tok_sig"] = ""
                     restored_active_media = True

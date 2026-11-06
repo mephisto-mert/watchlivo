@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v131';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v131';
-import { resolveMusicItem } from './selection-kinds.js?v=20261106_v131';
-import { MeshConnection } from '../realtime.js?v=20261106_v131';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v131';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v131';
-import { buildLayout } from './mesh-layout.js?v=20261106_v131';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v131';
-import { Voice } from '../voice.js?v=20261106_v131';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v131';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v132';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v132';
+import { resolveMusicItem } from './selection-kinds.js?v=20261106_v132';
+import { MeshConnection } from '../realtime.js?v=20261106_v132';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v132';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v132';
+import { buildLayout } from './mesh-layout.js?v=20261106_v132';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v132';
+import { Voice } from '../voice.js?v=20261106_v132';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v132';
 
 let ctx = null;
 
@@ -79,7 +79,7 @@ const deviceLabel = () => {
   return window.vortexDesktop ? 'Masaüstü' : 'Web';
 };
 
-function applyRoom(room, { reload = false, viaPoll = false } = {}) {
+function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } = {}) {
   if (!room) return;
   if (!room.curated && room.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(room.media.title))) {
     room = { ...room, name: String(room.media.title).trim().slice(0, 80) };
@@ -309,18 +309,27 @@ function applyRoom(room, { reload = false, viaPoll = false } = {}) {
   if (reload || key !== prevKey || urlResolved) {
     loadMedia(room.media);
   } else {
-    if (!isTimeKeeper() && ctx?.host?.adapter && !ctx.host.loading && room.media) {
-      const isPaused = !isRoomMediaPlaying(room.media);
-      if (isPaused) {
-        ctx.userPaused = true;
-        ctx.host.adapter.pause?.();
-        const target = expectedPosition(room.media);
-        if (Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 0.35) {
-          ctx.host.adapter.seek?.(target);
+    if (!isTimeKeeper() && ctx?.host?.adapter && room.media) {
+      const target = expectedPosition(room.media);
+      if (ctx.host.loading) {
+        if (!room.curated && !room.media.live && target >= 0.8) {
+          ctx.host.adapter.updateInitialSeek?.(target);
         }
       } else {
-        ctx.userPaused = false;
-        if (ctx.host.adapter.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
+        const isPaused = !isRoomMediaPlaying(room.media);
+        if (isPaused) {
+          ctx.userPaused = true;
+          ctx.host.adapter.pause?.();
+          if (!room.curated && !room.media.live && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 0.35) {
+            ctx.host.adapter.seek?.(target);
+          }
+        } else {
+          ctx.userPaused = false;
+          if (ctx.host.adapter.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
+          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 1.5) {
+            ctx.host.adapter.seek?.(target);
+          }
+        }
       }
     }
     ctx?.sync.kick();
@@ -350,32 +359,37 @@ async function loadMedia(media) {
       ctx.host.loading = false;
       ctx.layout?.playerEvent?.('loaded');
     }
+    if (!isTimeKeeper() && !state.mesh?.curated && !media?.live) {
+      const liveExp = expectedPosition(state.mesh?.media || media);
+      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 1.5) {
+        ctx.host.adapter.seek?.(liveExp);
+      }
+    }
+    ctx.sync?.kick();
     return;
   }
   ctx.loadingSig = sig;
   ctx.loadSeq = (ctx.loadSeq || 0) + 1;
   const mySeq = ctx.loadSeq;
   ctx.userPaused = false;
+  if (ctx.sync) ctx.sync.didInitialSync = false;
+  const wasNewCreatorRoom = Boolean(ctx.isNew && isTimeKeeper());
   const initialPos = Math.max(0, Number(media?.meshStatePosition ?? media?.currentTime ?? 0));
   const exp = expectedPosition(media);
-  const start = initialPos >= 3.0
-    ? ((exp > initialPos && exp - initialPos < 10.0) ? initialPos : Math.max(initialPos, exp))
-    : ((ctx.isNew && exp < 3.0) ? 0 : (exp > 0.5 ? Math.max(0, exp) : 0));
+  const start = !isTimeKeeper()
+    ? (media?.live ? 0 : (exp >= 0.8 ? exp : initialPos))
+    : ((wasNewCreatorRoom && initialPos < 3.0 && exp < 3.0) ? 0 : Math.max(initialPos, exp >= 0.8 ? exp : 0));
   ctx.isNew = false;
   const playing = isRoomMediaPlaying(media);
-  let resolvedFromCatalogFresh = initialPos < 3.0 && exp < 12.0;
   if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
     ctx.layout?.playerEvent?.('loading');
     if (!isTimeKeeper()) {
-      for (let w = 0; w < 12; w += 1) {
-        await new Promise((r) => setTimeout(r, 250));
+      for (let w = 0; w < 6; w += 1) {
+        await new Promise((r) => setTimeout(r, 200));
         if (!ctx || ctx.loadSeq !== mySeq) return;
         const latest = state.mesh?.media;
         if (latest?.url && !String(latest.url).startsWith('/api/rave/resolve-catalog') && mediaKey(latest) === mKey) {
           media = latest;
-          if (Number(latest.meshStatePosition ?? latest.currentTime ?? 0) < 3.0) {
-            resolvedFromCatalogFresh = true;
-          }
           break;
         }
       }
@@ -389,9 +403,12 @@ async function loadMedia(media) {
             const res = await r.json();
             if (!ctx || ctx.loadSeq !== mySeq) return;
             if (res && res.url) {
-              const freshExp = expectedPosition(state.mesh?.media || media);
-              const resolvedStart = initialPos >= 3.0 ? initialPos : (freshExp >= 10.0 ? freshExp : 0);
-              resolvedFromCatalogFresh = resolvedStart < 3.0;
+              const refMedia = state.mesh?.media || media;
+              const freshExp = expectedPosition(refMedia);
+              const resolvedStart = (wasNewCreatorRoom && initialPos < 3.0 && freshExp < 3.0)
+                ? 0
+                : Math.max(initialPos, freshExp >= 0.8 ? freshExp : 0);
+              const keepServerClockAnchor = !isTimeKeeper() && Number(refMedia?.meshStateTime || refMedia?.updatedAt || 0) > 1000000000;
               media = {
                 ...media,
                 provider: res.provider || 'hls',
@@ -408,8 +425,8 @@ async function loadMedia(media) {
                 subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
                 intro: res.intro || media.intro,
                 duration: res.duration || media.duration,
-                meshStatePosition: resolvedStart,
-                meshStateTime: clock.now(),
+                meshStatePosition: keepServerClockAnchor ? Number(refMedia.meshStatePosition ?? refMedia.currentTime ?? resolvedStart) : resolvedStart,
+                meshStateTime: keepServerClockAnchor ? Number(refMedia.meshStateTime ?? refMedia.updatedAt ?? clock.now()) : clock.now(),
               };
               if (state.mesh) {
                 const updatedMesh = { ...state.mesh, media };
@@ -435,12 +452,13 @@ async function loadMedia(media) {
   }
   ctx.loadingSig = `${mediaKey(media)}|${media.url || ''}`;
   const finalExp = expectedPosition(state.mesh?.media || media);
-  const isFreshRoomLoad = Boolean(resolvedFromCatalogFresh && (ctx?.isNew || initialPos < 3.0) && finalExp < 12.0);
-  const finalStart = isFreshRoomLoad
+  const finalStart = media?.live
     ? 0
-    : ((initialPos >= 3.0 && Math.abs(finalExp - initialPos) < 12.0)
-      ? initialPos
-      : (finalExp >= 1.5 ? finalExp : (start >= 0.5 ? start : 0)));
+    : (!isTimeKeeper()
+      ? (finalExp >= 0.8 ? finalExp : (start >= 0.5 ? start : 0))
+      : ((wasNewCreatorRoom && initialPos < 3.0 && finalExp < 5.0)
+        ? 0
+        : (finalExp >= 1.5 ? finalExp : (start >= 0.5 ? start : 0))));
   if (!state.mesh?.curated && !media?.live) {
     if (media?.isMusic || media?.mediaType === 'music') {
       saveMusicHistory(media);
@@ -455,15 +473,17 @@ async function loadMedia(media) {
     const ad = ctx.host?.adapter;
     const vEl = ad?.video;
     const snapGuestToLive = () => {
-      if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || resolvedFromCatalogFresh) return;
+      if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || media?.live) return;
       const liveExp = expectedPosition(state.mesh?.media || media);
       const curPos = ad?.getTime?.() || 0;
-      if (liveExp >= 0.4 && Math.abs(liveExp - curPos) > 0.12 && (!vEl || (!vEl.seeking && vEl.readyState >= 2)) && (!ad?.isBuffered || ad.isBuffered(liveExp) || liveExp >= 12.0)) {
+      if (liveExp >= 0.6 && Math.abs(liveExp - curPos) > 1.0 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
         ad?.seek?.(liveExp);
       }
     };
     snapGuestToLive();
     if (vEl) {
+      vEl.addEventListener('loadedmetadata', snapGuestToLive, { once: true });
+      vEl.addEventListener('canplay', snapGuestToLive, { once: true });
       vEl.addEventListener('playing', snapGuestToLive, { once: true });
     }
   } else {
@@ -496,9 +516,14 @@ function onMessage(data) {
   const room = state.mesh;
   switch (data.type) {
     case 'init': {
+      if (ctx?.initFallbackTimer) {
+        clearTimeout(ctx.initFallbackTimer);
+        ctx.initFallbackTimer = null;
+      }
+      if (ctx) ctx.initReceived = true;
       set({ clientId: data.clientId });
       const needReload = !ctx?.host?.adapter || mediaKey(data.room?.media) !== mediaKey(room?.media);
-      applyRoom(data.room, { reload: needReload });
+      applyRoom(data.room, { reload: needReload, fromInit: true });
       break;
     }
     case 'room_state': case 'media_changed': case 'user_joined': case 'user_left':
@@ -744,12 +769,34 @@ const actions = {
     const t = Math.max(0, Number.isFinite(explicitTime) ? explicitTime : (ad.getTime?.() ?? 0));
     const expNow = expectedPosition(state.mesh?.media);
     if ((!forceAnchor && t < 0.15) || (expNow > 30 && t < 2 && ad.initialSeekPending > 5)) return;
-    if (!forceAnchor && !ctx.userPaused && expNow > 3.0 && t < expNow - 2.0) return;
     const playing = !ctx.userPaused;
     ctx.lastLeaderActionAt = Date.now();
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
-    ctx.conn.send('heartbeat', { currentTime: t, playing, atTime: clock.now(), anchor: Boolean(forceAnchor), privacy: state.mesh?.privacy || undefined });
+    const curM = state.mesh?.media;
+    const resolvedActive = (curM?.url && !String(curM.url).startsWith('/api/rave/resolve-catalog'))
+      ? {
+          url: curM.url,
+          provider: curM.provider || 'hls',
+          streamType: curM.streamType || 'hls',
+          duration: curM.duration || ad.getDuration?.() || 0,
+          title: curM.title || '',
+          tmdbId: curM.tmdbId || '',
+          imdbId: curM.imdbId || '',
+          mediaType: curM.mediaType || '',
+          season: curM.season || 0,
+          episode: curM.episode || 0,
+          videoId: curM.videoId || '',
+        }
+      : undefined;
+    ctx.conn.send('heartbeat', {
+      currentTime: t,
+      playing,
+      atTime: clock.now(),
+      anchor: Boolean(forceAnchor),
+      privacy: state.mesh?.privacy || undefined,
+      activeMedia: resolvedActive,
+    });
   },
   play() {
     if (!ctx) return;
@@ -1178,7 +1225,21 @@ export async function enterMesh(app, params) {
     if (initialSavedChat.length && !(cachedRoom.chat && cachedRoom.chat.length)) {
       cachedRoom.chat = initialSavedChat;
     }
-    applyRoom(cachedRoom, { reload: true });
+    if (params.new === '1') {
+      applyRoom(cachedRoom, { reload: true });
+    } else {
+      set({ mesh: cachedRoom });
+      ctx.seenChatIds = new Set((cachedRoom.chat || []).map((m) => m?.id).filter(Boolean));
+      for (const m of (cachedRoom.chat || [])) ctx.layout?.chatAppended?.(m);
+      setBackground(thumbFor(cachedRoom.media));
+      ctx.layout?.playerEvent?.('loading');
+      ctx.layout?.update?.();
+      ctx.initFallbackTimer = setTimeout(() => {
+        if (ctx && !ctx.initReceived && !ctx.host?.adapter && cachedRoom.media) {
+          applyRoom(cachedRoom, { reload: true });
+        }
+      }, 2800);
+    }
   } else {
     if (initialSavedChat.length) {
       ctx.conn.lastRoom = { id: params.id, chat: initialSavedChat };
@@ -1231,18 +1292,23 @@ export async function enterMesh(app, params) {
 
 function onPlayerEvent(ev, arg) {
   if (!ctx) return;
-  if (ev === 'loaded' || ev === 'play') {
+  if (ev === 'ready' || ev === 'loaded' || ev === 'play') {
     if (!isTimeKeeper()) {
       const m = state.mesh?.media;
-      if (ev === 'loaded' && m && (m.meshStateStatus === 'PLAYING' || m.playing)) {
+      if (m && !state.mesh?.curated && !m.live) {
         const liveExp = expectedPosition(m);
         const curTime = ctx.host?.adapter?.getTime?.() || 0;
         const vEl = ctx.host?.adapter?.video;
-        if (liveExp >= 12.0 && Math.abs(curTime - liveExp) > 6.0 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 2))) {
+        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 1.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
           ctx.host.adapter.seek?.(liveExp);
+          if (ctx.sync) {
+            ctx.sync.lastSeekTarget = liveExp;
+            ctx.sync.lastSeekWallAt = performance.now();
+            ctx.sync.seekUntil = performance.now() + 1800;
+            ctx.sync.deferStartedAt = 0;
+          }
         }
         if (ctx.sync) {
-          ctx.sync.seekUntil = performance.now() + 2400;
           ctx.sync.deferStartedAt = 0;
           ctx.sync.kick(false);
         }
@@ -1307,6 +1373,10 @@ export function leaveMeshView(explicitLeave = false) {
     forgetRoom(state.mesh.id);
   }
   if (typeof window !== 'undefined' && window.__watchlivoBgSyncTick) window.__watchlivoBgSyncTick = null;
+  if (ctx.initFallbackTimer) {
+    clearTimeout(ctx.initFallbackTimer);
+    ctx.initFallbackTimer = null;
+  }
   clearInterval(ctx.progressTimer);
   try { ctx.conn?.close(Boolean(explicitLeave), shouldClose); } catch (e) { /* ignore */ }
   try { ctx.sync?.stop?.(); } catch (_) {}

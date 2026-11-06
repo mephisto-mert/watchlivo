@@ -1,6 +1,6 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261106_v131';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261106_v131';
+import { SubtitleDubController } from './subtitles.js?v=20261106_v132';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261106_v132';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -329,9 +329,11 @@ export class YouTubeAdapter {
         settled = true;
         cleanup();
         if (ok && !this._destroyed && this.video === v) {
-          if (validStart > 0.5 && !this.media?.live && Math.abs((v.currentTime || 0) - validStart) > 1.2) {
-            try { v.currentTime = validStart; } catch (_) {}
+          const effTarget = (this.initialSeekPending && this.initialSeekPending > 0.5) ? this.initialSeekPending : validStart;
+          if (effTarget > 0.5 && !this.media?.live && Math.abs((v.currentTime || 0) - effTarget) > 1.2) {
+            try { v.currentTime = effTarget; } catch (_) {}
           }
+          this.initialSeekPending = 0;
           this.ready = true;
           this.subs?.syncVideoVolume?.();
           this.events.onBuffering?.(false);
@@ -884,11 +886,26 @@ export class YouTubeAdapter {
 
   seek(t) {
     const target = Math.max(0, Number(t) || 0);
-    if (this.video) { try { this.video.currentTime = target; } catch (_) {} }
-    else if (this._pipActive && this.pipVideo) { try { this.pipVideo.currentTime = target; } catch (_) {} }
+    if (this.video) {
+      if (this.video.readyState < 1) {
+        this.initialSeekPending = target;
+        if (this.hls) { try { this.hls.startLoad?.(target >= 0.5 ? target : -1); } catch (_) {} }
+      } else {
+        try { this.video.currentTime = target; } catch (_) {}
+      }
+    } else if (this._pipActive && this.pipVideo) { try { this.pipVideo.currentTime = target; } catch (_) {} }
     else if (this.audioEl) { try { this.audioEl.currentTime = target; } catch (_) {} }
-    else this.player?.seekTo?.(target, true);
+    else if (this.ready && this.player) this.player?.seekTo?.(target, true);
+    else this.initialSeekPending = target;
     this.subs?.onTimeUpdate(target, true);
+  }
+
+  updateInitialSeek(targetPos) {
+    const target = Math.max(0, Number(targetPos) || 0);
+    if (target < 0.5 || this.media?.live) return;
+    this.initialSeekPending = target;
+    if (this.ready) this.seek(target);
+    else if (this.hls) { try { this.hls.startLoad?.(target); } catch (_) {} }
   }
 
   getTime() {

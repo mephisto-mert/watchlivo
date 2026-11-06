@@ -1,8 +1,8 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261106_v131';
-import { expectedPosition } from '../sync.js?v=20261106_v131';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261106_v131';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261106_v131';
+import { SubtitleDubController } from './subtitles.js?v=20261106_v132';
+import { expectedPosition } from '../sync.js?v=20261106_v132';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261106_v132';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261106_v132';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -739,7 +739,7 @@ export class Html5Adapter {
       const clearInitSeekListeners = () => {
         this.initialSeekPending = 0;
         if (v._wlInitSeekFn) {
-          ['loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+          ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
             v.removeEventListener(evName, v._wlInitSeekFn);
           });
           v._wlInitSeekFn = null;
@@ -747,7 +747,7 @@ export class Html5Adapter {
         v._wlInitSeekBound = false;
       };
       const enforceInitialSeek = () => {
-        if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 10000) {
+        if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 16000) {
           clearInitSeekListeners();
           return;
         }
@@ -755,22 +755,29 @@ export class Html5Adapter {
         if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
         const targetPos = this.initialSeekPending;
         const curT = Number(v.currentTime || 0);
-        if (curT >= targetPos - 1.2) {
+        if (curT >= targetPos - 1.5) {
           clearInitSeekListeners();
           return;
         }
         try {
           v.currentTime = targetPos;
-          clearInitSeekListeners();
+          if (Number(v.currentTime || 0) >= targetPos - 1.5) {
+            clearInitSeekListeners();
+          }
         } catch (e) { /* ignore */ }
       };
-      if (resumePos >= 0.5 && !v._wlInitSeekBound) {
-        v._wlInitSeekBound = true;
-        v._wlInitSeekFn = enforceInitialSeek;
-        ['loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
-          v.addEventListener(evName, enforceInitialSeek);
-        });
-      }
+      this._enforceInitialSeekFn = enforceInitialSeek;
+      const bindInitSeekIfNeeded = () => {
+        if (this.initialSeekPending >= 0.5 && !v._wlInitSeekBound) {
+          v._wlInitSeekBound = true;
+          v._wlInitSeekFn = enforceInitialSeek;
+          ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+            v.addEventListener(evName, enforceInitialSeek);
+          });
+        }
+      };
+      bindInitSeekIfNeeded();
+      this._bindInitSeekIfNeeded = bindInitSeekIfNeeded;
       const restorePosOnLoad = () => {
         if (this.video !== v) return;
         enforceInitialSeek();
@@ -1564,6 +1571,13 @@ export class Html5Adapter {
       if (v.readyState < 1) {
         this.initialSeekPending = target;
         this.loadedAtMs = Date.now();
+        this._bindInitSeekIfNeeded?.();
+        if (this.hls) {
+          try {
+            if (this.hls.config) this.hls.config.startPosition = target >= 0.5 ? target : -1;
+            this.hls.startLoad?.(target >= 0.5 ? target : -1);
+          } catch (_) {}
+        }
         if (!this._pendingMetaSeekBound) {
           this._pendingMetaSeekBound = true;
           v.addEventListener('loadedmetadata', () => {
@@ -1574,13 +1588,44 @@ export class Html5Adapter {
           }, { once: true });
         }
       } else {
-        this.initialSeekPending = 0;
         try { v.currentTime = target; } catch (e) { /* ignore */ }
+        if (target >= 0.5 && Math.abs(Number(v.currentTime || 0) - target) > 1.8) {
+          this.initialSeekPending = target;
+          this.loadedAtMs = Date.now();
+          this._bindInitSeekIfNeeded?.();
+          if (this.hls) {
+            try { this.hls.startLoad?.(target); } catch (_) {}
+          }
+        } else {
+          this.initialSeekPending = 0;
+        }
       }
     }
     this.subs?.clearActiveCue?.();
     if (v && v.readyState >= 2 && (v.videoWidth > 0 || this.isMusic)) {
       this.subs?.onTimeUpdate?.(target, true);
+    }
+  }
+  updateInitialSeek(targetPos) {
+    const target = Math.max(0, Number(targetPos) || 0);
+    if (target < 0.5) return;
+    const v = this._activeMediaEl();
+    if (!v || v.readyState < 2) {
+      this.initialSeekPending = target;
+      this.lastSeekTarget = target;
+      this.highestPlayedPos = Math.max(this.highestPlayedPos || 0, target);
+      this.lastSeekAt = Date.now();
+      this.loadedAtMs = Date.now();
+      this._bindInitSeekIfNeeded?.();
+      if (this.hls) {
+        try {
+          if (this.hls.config) this.hls.config.startPosition = target;
+          this.hls.startLoad?.(target);
+        } catch (_) {}
+      }
+      this._enforceInitialSeekFn?.();
+    } else if (Math.abs(Number(v.currentTime || 0) - target) > 1.5) {
+      this.seek(target);
     }
   }
   getTime() {

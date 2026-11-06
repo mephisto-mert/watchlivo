@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261106_v131';
-import { avatar, openDmModal } from '../profile.js?v=20261106_v131';
-import { getProvider } from '../providers.js?v=20261106_v131';
-import { api, qs } from '../api.js?v=20261106_v131';
+import { h, icons, popup, toast } from '../ui.js?v=20261106_v132';
+import { avatar, openDmModal } from '../profile.js?v=20261106_v132';
+import { getProvider } from '../providers.js?v=20261106_v132';
+import { api, qs } from '../api.js?v=20261106_v132';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261106_v131';
-import { expectedPosition } from '../sync.js?v=20261106_v131';
+} from '../store.js?v=20261106_v132';
+import { expectedPosition } from '../sync.js?v=20261106_v132';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -158,14 +158,36 @@ export function rememberRoom(room) {
     if (room.syncToken) {
       sessionStorage.setItem(`vortex_st_${room.id}`, room.syncToken);
     }
-    if (room.media || room.name) {
-      const savedPos = Number(room.media?.meshStatePosition ?? room.media?.currentTime ?? 0);
+    const hasPlayableMedia = Boolean(room.media && (room.media.url || room.media.videoId || room.media.tmdbId));
+    if (hasPlayableMedia || (room.name && !room.media)) {
+      let cachedMedia = room.media;
+      if (room.media && hasPlayableMedia) {
+        const nowEpoch = Date.now() / 1000;
+        const rawLive = Number(room.media.liveTime);
+        const rawAnchorPos = Number(room.media.meshStatePosition ?? room.media.currentTime ?? 0);
+        const rawAnchorTime = Number(room.media.meshStateTime ?? room.media.updatedAt ?? 0);
+        const anchorTimeSec = rawAnchorTime > 1e11 ? rawAnchorTime / 1000 : rawAnchorTime;
+        const srvNow = Number(room.serverNow ?? room.media.serverNow ?? 0);
+        const hasValidAnchor = Number.isFinite(anchorTimeSec) && anchorTimeSec > 1000000000;
+        const computedLive = Number.isFinite(rawLive) && rawLive >= 0
+          ? rawLive
+          : (Number.isFinite(rawAnchorPos) && rawAnchorPos > 0 ? rawAnchorPos : 0);
+        cachedMedia = {
+          ...room.media,
+          currentTime: hasValidAnchor ? Math.max(0, rawAnchorPos) : Math.max(0, computedLive),
+          updatedAt: hasValidAnchor ? anchorTimeSec : (srvNow > 1000000000 ? srvNow : nowEpoch),
+          meshStatePosition: hasValidAnchor ? Math.max(0, rawAnchorPos) : Math.max(0, computedLive),
+          meshStateTime: hasValidAnchor ? anchorTimeSec : (srvNow > 1000000000 ? srvNow : nowEpoch),
+          meshStateStatus: room.media.meshStateStatus || (room.media.playing === false ? 'PAUSED' : 'PLAYING'),
+          meshStatePlaybackSpeed: Number(room.media.meshStatePlaybackSpeed ?? room.media.rate ?? 1) || 1,
+        };
+      }
       const cleanSnap = {
         ...room,
         chat: [],
         polls: [],
         syncToken: undefined,
-        media: room.media ? { ...room.media, currentTime: Number.isFinite(savedPos) && savedPos > 0 ? savedPos : 0, updatedAt: Date.now() / 1000 } : room.media,
+        media: cachedMedia,
       };
       sessionStorage.setItem(`vortex_room_${room.id}`, JSON.stringify(cleanSnap));
       if (!room.curated) {
@@ -237,6 +259,11 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
   let liveTimer = null;
 
   const findFriendActiveRoom = (f) => {
+    const wId = f.watchingRoom?.roomId || f.roomId || '';
+    if (wId) {
+      const liveMatch = (lastLobbyRooms || []).find((r) => r && r.id === wId);
+      if (liveMatch) return liveMatch;
+    }
     if (f.watchingRoom?.roomId) {
       return { id: f.watchingRoom.roomId, name: f.watchingRoom.roomName, media: { title: f.watchingRoom.mediaTitle, poster: f.watchingRoom.mediaPoster } };
     }
@@ -581,7 +608,8 @@ export function renderHomeFriendsStrip(onOpenRoom) {
             class: `wl-hfs-chip is-${pState}`,
             onclick: () => {
               if (wRoom?.roomId && onOpenRoom) {
-                onOpenRoom({ id: wRoom.roomId, name: wRoom.roomName });
+                const liveMatch = (lastLobbyRooms || []).find((r) => r && r.id === wRoom.roomId);
+                onOpenRoom(liveMatch || { id: wRoom.roomId, name: wRoom.roomName });
               } else {
                 openDmModal(f.uid);
               }

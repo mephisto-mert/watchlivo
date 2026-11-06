@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261106_v131 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261106_v132 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261106_v131", index_html)
+        self.assertIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -2281,6 +2281,139 @@ class RegressionTests(unittest.TestCase):
         upd_p = next(p for p in r_pupd.json()["room"]["participants"] if p["id"] == f"h_guest_{sfx}")
         self.assertEqual(upd_p["name"], "Ömer Kaptan")
         self.assertEqual(upd_p["handle"], f"omerkaptan_{sfx}")
+
+    def test_v132_viewer_leave_rejoin_host_live_sync(self):
+        from pathlib import Path
+        import uuid
+        import rooms
+
+        sfx = uuid.uuid4().hex[:6]
+        host_cid = f"h_host_{sfx}"
+        viewer_cid = f"h_view_{sfx}"
+
+        # 1. Host creates a room with an initially unresolved catalog stream (/api/rave/resolve-catalog)
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Breaking Bad Maratonu",
+            "privacy": "public",
+            "playMode": "leader",
+            "creator": "KaptanLider",
+            "creatorId": f"guest_host_{sfx}",
+            "clientId": host_cid,
+            "media": {
+                "provider": "hls",
+                "streamType": "hls",
+                "url": "/api/rave/resolve-catalog?provider=cinema&title=Breaking+Bad&tmdbId=1396&mediaType=tv&season=3&episode=7",
+                "title": "Breaking Bad — 3. Sezon 7. Bölüm",
+                "tmdbId": "1396",
+                "mediaType": "tv",
+                "season": 3,
+                "episode": 7,
+                "duration": 2880,
+                "playing": True,
+                "currentTime": 0,
+            },
+        }).json()
+        rid = cr["room"]["id"]
+
+        # Host joins and sends heartbeat at 2450.0s (40m 50s) even BEFORE/WITH activeMedia upgrade
+        r_h_init = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": host_cid, "username": "KaptanLider", "uid": f"guest_host_{sfx}", "isCreator": True,
+        }).json()
+        host_tok = r_h_init["clientToken"]
+
+        r_hb = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "heartbeat",
+            "clientId": host_cid,
+            "clientToken": host_tok,
+            "username": "KaptanLider",
+            "currentTime": 2450.0,
+            "playing": True,
+            "anchor": True,
+            "activeMedia": {
+                "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                "provider": "hls",
+                "streamType": "hls",
+                "duration": 2880,
+                "title": "Breaking Bad — 3. Sezon 7. Bölüm",
+                "tmdbId": "1396",
+                "mediaType": "tv",
+                "season": 3,
+                "episode": 7,
+            },
+        })
+        self.assertEqual(r_hb.status_code, 200)
+        hb_room = r_hb.json()["room"]
+        self.assertEqual(hb_room["media"]["url"], "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+        self.assertGreaterEqual(hb_room["media"]["liveTime"], 2449.5)
+        self.assertGreaterEqual(hb_room["media"]["meshStatePosition"], 2449.5)
+
+        # 2. Viewer joins, sees 2450s+, then leaves the room
+        r_v_join1 = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": viewer_cid, "username": "GezginIzleyici", "uid": f"guest_view_{sfx}",
+        })
+        self.assertEqual(r_v_join1.status_code, 200)
+        v_tok1 = r_v_join1.json()["clientToken"]
+        self.assertGreaterEqual(r_v_join1.json()["room"]["media"]["liveTime"], 2449.5)
+
+        r_v_leave = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "leave", "clientId": viewer_cid, "clientToken": v_tok1, "username": "GezginIzleyici", "uid": f"guest_view_{sfx}",
+        })
+        self.assertEqual(r_v_leave.status_code, 200)
+
+        # 3. Lobby entry MUST expose liveTime + meshStatePosition + meshStateTime (never 0:00!)
+        rooms._LOBBY_CACHE["ts"] = 0.0
+        lobby_rooms = self.client.get("/api/rooms").json().get("rooms", [])
+        lobby_hit = next((x for x in lobby_rooms if x["id"] == rid), None)
+        self.assertIsNotNone(lobby_hit)
+        self.assertGreaterEqual(lobby_hit["media"]["liveTime"], 2449.5)
+        self.assertGreaterEqual(lobby_hit["media"]["meshStatePosition"], 2449.5)
+        self.assertGreater(lobby_hit["media"]["meshStateTime"], 1000000000)
+
+        # 4. Non-leader viewer re-enters (even sending an old/zero resolve_media or stale syncToken) -> NEVER resets room to 0:00!
+        viewer_cid2 = f"h_view2_{sfx}"
+        r_v_rejoin = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": viewer_cid2, "username": "GezginIzleyici", "uid": f"guest_view_{sfx}",
+        })
+        self.assertEqual(r_v_rejoin.status_code, 200)
+        rejoin_room = r_v_rejoin.json()["room"]
+        v_tok2 = r_v_rejoin.json()["clientToken"]
+        self.assertGreaterEqual(rejoin_room["media"]["liveTime"], 2449.5)
+        self.assertEqual(rejoin_room["host_id"], host_cid)
+        # HTTP user_joined event must be emitted so HTTP-polling Host immediately fires a fresh heartbeat anchor
+        self.assertTrue(any(ev.get("type") == "user_joined" and ev.get("cid") == viewer_cid2 for ev in rejoin_room.get("events", [])))
+
+        # Non-leader attempting resolve_media with currentTime=0 must NOT reset playback
+        r_v_res0 = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "resolve_media",
+            "clientId": viewer_cid2,
+            "clientToken": v_tok2,
+            "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+            "tmdbId": "1396",
+            "mediaType": "tv",
+            "season": 3,
+            "episode": 7,
+            "currentTime": 0,
+        })
+        self.assertEqual(r_v_res0.status_code, 200)
+        self.assertGreaterEqual(r_v_res0.json()["room"]["media"]["liveTime"], 2449.5)
+
+        # 5. Cold serverless instance restore via syncToken keeps 2450s+ live position
+        fresh_sync_tok = r_v_res0.json()["room"]["syncToken"]
+        restored_cold = rooms.merge_sync_token(None, fresh_sync_tok, rid)
+        self.assertIsNotNone(restored_cold)
+        ser_cold = rooms.serialize(restored_cold, for_cid=viewer_cid2)
+        self.assertGreaterEqual(ser_cold["media"]["liveTime"], 2449.5)
+
+        # 6. Verify frontend guards exist in lobby.js, mesh.js, sync.js, html5.js
+        root = Path(__file__).resolve().parent.parent
+        lobby_js = (root / "static" / "js" / "views" / "lobby.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("hasValidAnchor", lobby_js)
+        self.assertIn("ctx.initFallbackTimer", mesh_js)
+        self.assertIn("this.didInitialSync", sync_js)
+        self.assertIn("updateInitialSeek(targetPos)", html5_js)
 
 
 if __name__ == '__main__':
