@@ -1,14 +1,15 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v133';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v133';
-import { resolveMusicItem } from './selection-kinds.js?v=20261106_v133';
-import { MeshConnection } from '../realtime.js?v=20261106_v133';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v133';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v133';
-import { buildLayout } from './mesh-layout.js?v=20261106_v133';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v133';
-import { Voice } from '../voice.js?v=20261106_v133';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v133';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v134';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v134';
+import { resolveMusicItem } from './selection-kinds.js?v=20261106_v134';
+import { MeshConnection } from '../realtime.js?v=20261106_v134';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v134';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v134';
+import { buildLayout } from './mesh-layout.js?v=20261106_v134';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v134';
+import { Voice } from '../voice.js?v=20261106_v134';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v134';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261106_v134';
 
 let ctx = null;
 
@@ -1191,6 +1192,9 @@ const actions = {
 };
 
 export async function enterMesh(app, params) {
+  if (typeof window !== 'undefined' && !window.Hls && !(typeof navigator !== 'undefined' && (/iP(hone|ad|od)/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)))) {
+    ensureHlsJs().catch(() => {});
+  }
   leaveMeshView();
   const targetRoot = (!app || app.id === 'app') ? (document.getElementById('mesh-root') || app) : app;
   if (targetRoot) targetRoot.classList.remove('hidden');

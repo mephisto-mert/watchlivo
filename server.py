@@ -147,6 +147,9 @@ class SecurityHeaders:
             await self.app(scope, receive, send)
             return
 
+        csp_nonce = secrets.token_urlsafe(16)
+        scope["csp_nonce"] = csp_nonce
+
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
                 raw_hdrs = list(message.get("headers") or [])
@@ -166,21 +169,24 @@ class SecurityHeaders:
                     hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
                 if b"content-security-policy" not in existing_keys:
                     if scope.get("path") == "/api/rave/browser-proxy":
-                        hdrs.append((b"content-security-policy", b"sandbox allow-scripts allow-forms; frame-ancestors 'self'; object-src 'none'; base-uri 'none'"))
-                    else:
                         hdrs.append((
                             b"content-security-policy",
-                            b"default-src 'self'; "
-                            b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
-                            b"worker-src 'self' blob:; "
-                            b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                            b"font-src 'self' data: https://fonts.gstatic.com; "
-                            b"img-src 'self' data: blob: https:; "
-                            b"media-src 'self' data: blob: https:; "
-                            b"connect-src 'self' https: wss: ws:; "
-                            b"frame-src 'self' https:; "
-                            b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+                            f"sandbox allow-scripts allow-forms; script-src 'self' 'nonce-{csp_nonce}'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'".encode("ascii"),
                         ))
+                    else:
+                        csp_val = (
+                            "default-src 'self'; "
+                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
+                            "worker-src 'self' blob:; "
+                            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                            "font-src 'self' data: https://fonts.gstatic.com; "
+                            "img-src 'self' data: blob: https:; "
+                            "media-src 'self' data: blob: https:; "
+                            "connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; "
+                            "frame-src 'self' https:; "
+                            "frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'"
+                        ).encode("ascii")
+                        hdrs.append((b"content-security-policy", csp_val))
                 req_path = str(scope.get("path") or "")
                 if req_path.startswith("/uploads/"):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"content-security-policy", b"content-disposition")]
@@ -9230,6 +9236,7 @@ async def rave_browser_proxy(request: Request):
 
     prov_upper = html.escape(prov.upper())
     safe_target = html.escape(target_url)
+    csp_nonce = html.escape(str(request.scope.get("csp_nonce") or ""), quote=True)
 
     portal_html = f"""<!DOCTYPE html>
 <html lang="tr">
@@ -9292,13 +9299,13 @@ async def rave_browser_proxy(request: Request):
     </div>
     <div class="portal-login-row">
       <input id="q-inp" class="portal-inp" placeholder="{prov_upper} içinde film, dizi ara veya bağlantı yapıştır..." />
-      <button class="portal-btn" onclick="handlePortalInput(document.getElementById('q-inp').value)">🔍 Ara / Aç</button>
-      <button class="portal-btn sec" onclick="launchDirectUrl(INIT_URL)">▶ Bu Sayfayı Odada Başlat</button>
-      <button class="portal-btn sec" onclick="window.open(INIT_URL, '_blank', 'noopener')">↗ {prov_upper} Resmi Site</button>
+      <button id="btn-portal-search" type="button" class="portal-btn">🔍 Ara / Aç</button>
+      <button id="btn-portal-launch" type="button" class="portal-btn sec">▶ Bu Sayfayı Odada Başlat</button>
+      <button id="btn-portal-ext" type="button" class="portal-btn sec">↗ {prov_upper} Resmi Site</button>
     </div>
   </div>
   <div id="grid" class="portal-grid">Yükleniyor...</div>
-  <script>
+  <script nonce="{csp_nonce}">
     const PROV = {json.dumps(prov).replace("</", "<\\/")};
     const INIT_URL = {json.dumps(target_url).replace("</", "<\\/")};
     function escHtml(s) {{
@@ -9320,8 +9327,17 @@ async def rave_browser_proxy(request: Request):
       }}
       loadCatalog(v);
     }}
-    document.getElementById('q-inp').addEventListener('keydown', (e) => {{
+    document.getElementById('q-inp')?.addEventListener('keydown', (e) => {{
       if (e.key === 'Enter') handlePortalInput(e.target.value);
+    }});
+    document.getElementById('btn-portal-search')?.addEventListener('click', () => {{
+      handlePortalInput(document.getElementById('q-inp')?.value || '');
+    }});
+    document.getElementById('btn-portal-launch')?.addEventListener('click', () => {{
+      launchDirectUrl(INIT_URL);
+    }});
+    document.getElementById('btn-portal-ext')?.addEventListener('click', () => {{
+      window.open(INIT_URL, '_blank', 'noopener');
     }});
     async function loadCatalog(q = '') {{
       const g = document.getElementById('grid');
@@ -9437,6 +9453,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     qs_suffix = ("?" + urllib.parse.urlencode(fwd_params)) if fwd_params else ""
     target_hash = f"/#/mesh/{urllib.parse.quote(safe_id)}{qs_suffix}" if safe_id else "/#/"
     esc_url = _html.escape(f"{origin}/r/{urllib.parse.quote(safe_id)}", quote=True)
+    csp_nonce = _html.escape(str(request.scope.get("csp_nonce") or ""), quote=True)
     html_doc = f"""<!doctype html>
 <html lang="tr">
 <head>
@@ -9454,7 +9471,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
   <meta name="twitter:title" content="{esc_title}" />
   <meta name="twitter:description" content="{esc_desc}" />
   <meta name="twitter:image" content="{esc_img}" />
-  <script>window.location.replace({json.dumps(target_hash)});</script>
+  <script nonce="{csp_nonce}">window.location.replace({json.dumps(target_hash)});</script>
 </head>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#06090e;color:#f8fafc;font-family:system-ui,sans-serif;text-align:center;padding:24px;">
   <div style="max-width:440px;padding:28px;border-radius:20px;background:#0e1522;border:1px solid rgba(39,220,200,.3);">
@@ -10019,6 +10036,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
         ),
     }
     title, desc, h1_txt, body_html = pages.get(path, pages["about"])
+    csp_nonce = html_mod.escape(str(request.scope.get("csp_nonce") or ""), quote=True)
     form_html = ""
     if path in ("contact", "dmca"):
         def_cat = "dmca" if path == "dmca" else "request"
@@ -10051,7 +10069,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
         <span id="wlc-status" role="status" aria-live="polite" style="font-size:13px;color:#27dcc8;font-weight:700;"></span>
       </div>
     </form>
-    <script>
+    <script nonce="{csp_nonce}">
       document.getElementById('wl-page-contact-form')?.addEventListener('submit', async (ev) => {{
         ev.preventDefault();
         const st = document.getElementById('wlc-status');
@@ -10124,10 +10142,12 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
   </div>
 </body>
 </html>"""
-    return HTMLResponse(html_doc, headers={"Cache-Control": "public, max-age=3600"})
+    cache_hdr = "private, no-store, must-revalidate" if form_html else "public, max-age=3600"
+    return HTMLResponse(html_doc, headers={"Cache-Control": cache_hdr})
 
 
 async def analytics_dashboard_page(request: Request) -> HTMLResponse:
+    csp_nonce = html_mod.escape(str(request.scope.get("csp_nonce") or ""), quote=True)
     data = await _build_analytics_summary()
     ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
     ga_status = f"🟢 Aktif ({html_mod.escape(ga_id)})" if ga_id else "⚪ G-XXXXXXXXXX Ölçüm Kimliği Bekleniyor"
@@ -10188,7 +10208,7 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
       <p style="font-size:13px;color:#cbd5e1;margin:8px 0 12px;">Google Analytics 4 mülkünüzün <b>G-XXXXXXXXXX</b> Ölçüm Kimliğini aşağıya girip kaydedin; tüm sayfa görüntülemeleri, film/dizi aramaları ve oda katılımları doğrudan resmi Google Analytics 4 panelinize (`analytics.google.com`) akar.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <input id="ga-inp" class="inp" placeholder="G-XXXXXXXXXX" value="{html_mod.escape(ga_id)}" />
-        <button class="btn" onclick="saveGaId()">Kaydet & Google Analytics'i Aktifleştir</button>
+        <button id="btn-save-ga" type="button" class="btn">Kaydet & Google Analytics'i Aktifleştir</button>
         <span id="ga-msg" style="font-size:13px;color:#27dcc8;font-weight:700;"></span>
       </div>
     </div>
@@ -10207,7 +10227,7 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
       <table><thead><tr><th>Tarih</th><th>Kategori</th><th>Gönderen</th><th>Başlık & Mesaj</th></tr></thead><tbody>{c_rows}</tbody></table>
     </div>
   </div>
-  <script>
+  <script nonce="{csp_nonce}">
     async function saveGaId() {{
       const v = document.getElementById('ga-inp').value.trim().toUpperCase();
       const msg = document.getElementById('ga-msg');
@@ -10226,6 +10246,7 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
         msg.textContent = '❌ ' + (d.error || 'Hata');
       }}
     }}
+    document.getElementById('btn-save-ga')?.addEventListener('click', saveGaId);
   </script>
 </body>
 </html>"""

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261106_v133 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261106_v134 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261106_v133", index_html)
+        self.assertIn("20261106_v134", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -1969,13 +1969,14 @@ class RegressionTests(unittest.TestCase):
 
         # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org (Organization + FAQPage), and Google Analytics 4 gtag.js
         idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        boot_js = (root / "static" / "js" / "bootstrap.js").read_text(encoding="utf-8")
         self.assertIn("https://watchlivo.online/static/watchlivo-og.png", idx_html)
         self.assertIn("application/ld+json", idx_html)
         self.assertIn('"FAQPage"', idx_html)
         self.assertIn('"Organization"', idx_html)
         self.assertIn("jokallame0@gmail.com", idx_html)
         self.assertIn("https://www.googletagmanager.com/gtag/js", idx_html)
-        self.assertIn("__initWatchlivoGA4", idx_html)
+        self.assertIn("__initWatchlivoGA4", boot_js)
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
         self.assertTrue((root / "static" / "js" / "views" / "site-footer.js").exists())
 
@@ -2527,10 +2528,90 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261106_v133", sw_js)
+        self.assertIn("v20261106_v134", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
+
+    def test_v134_code_splitting_strict_csp_and_atomic_ratelimit(self):
+        import json as _json
+        import os as _os
+        import re as _re
+        from pathlib import Path
+        from unittest.mock import patch
+        import security
+
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Strict script-src CSP: zero 'unsafe-inline' in script-src across server.py and vercel.json
+        vercel_cfg = _json.loads((root / "vercel.json").read_text(encoding="utf-8"))
+        csp_routes = [
+            r for r in vercel_cfg.get("routes", [])
+            if isinstance(r.get("headers"), dict) and "Content-Security-Policy" in r["headers"]
+        ]
+        self.assertGreaterEqual(len(csp_routes), 4)
+        for r in csp_routes:
+            csp_str = r["headers"]["Content-Security-Policy"]
+            script_dir = next((d.strip() for d in csp_str.split(";") if d.strip().startswith("script-src")), "")
+            self.assertTrue(script_dir.startswith("script-src 'self'"))
+            self.assertNotIn("unsafe-inline", script_dir)
+
+        # 2. Dynamic HTML routes emit per-request cryptographic CSP nonce matching <script nonce="...">
+        for dyn_path in ("/r/cinema-club", "/contact", "/stats"):
+            resp = self.client.get(dyn_path)
+            self.assertEqual(resp.status_code, 200)
+            csp_h = resp.headers.get("content-security-policy", "")
+            script_h = next((d.strip() for d in csp_h.split(";") if d.strip().startswith("script-src")), "")
+            self.assertNotIn("unsafe-inline", script_h)
+            m_nonce = _re.search(r"'nonce-([A-Za-z0-9_-]{16,})'", script_h)
+            self.assertIsNotNone(m_nonce, f"Missing script-src nonce on {dyn_path}: {script_h}")
+            nonce_val = m_nonce.group(1)
+            self.assertIn(f'<script nonce="{nonce_val}">', resp.text)
+            self.assertNotIn("onclick=", resp.text)
+
+        # Two consecutive requests MUST produce distinct nonces
+        n1 = _re.search(r"'nonce-([A-Za-z0-9_-]{16,})'", self.client.get("/contact").headers.get("content-security-policy", "")).group(1)
+        n2 = _re.search(r"'nonce-([A-Za-z0-9_-]{16,})'", self.client.get("/contact").headers.get("content-security-policy", "")).group(1)
+        self.assertNotEqual(n1, n2)
+        self.assertIn("no-store", self.client.get("/contact").headers.get("cache-control", ""))
+
+        # 3. Externalized bootstrap + dynamic import() code-splitting + on-demand hls.js loader
+        index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        desktop_auth_html = (root / "static" / "desktop-auth.html").read_text(encoding="utf-8")
+        main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
+        hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
+
+        self.assertIn('/static/js/bootstrap.js?v=20261106_v134', index_html)
+        self.assertNotIn('hls.min.js', index_html)
+        self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
+        self.assertIn('/static/js/desktop-auth.js?v=20261106_v134', desktop_auth_html)
+        self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
+        self.assertIn("import('./views/mesh.js?v=20261106_v134')", main_js)
+        self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
+        self.assertIn("export function ensureHlsJs", hls_loader_js)
+
+        # 4. Atomic single-RTT Upstash Redis Lua EVAL RateLimiter
+        rl = security.RateLimiter(2, 30.0, name="v134_lua_test")
+        calls = []
+
+        def fake_kv(*cmd):
+            calls.append(cmd)
+            if cmd[0] == "EVAL":
+                n = sum(1 for c in calls if c[0] == "EVAL")
+                return [n, 29500]
+            return None
+
+        with patch.dict(_os.environ, {"UPSTASH_REDIS_REST_URL": "https://fake-upstash.example", "UPSTASH_REDIS_REST_TOKEN": "tok"}):
+            with patch.object(rl, "_kv", side_effect=fake_kv):
+                ok1, r1 = rl.hit("198.51.100.7")
+                ok2, r2 = rl.hit("198.51.100.7")
+                ok3, r3 = rl.hit("198.51.100.7")
+        self.assertTrue(ok1 and r1 == 0.0)
+        self.assertTrue(ok2 and r2 == 0.0)
+        self.assertFalse(ok3)
+        self.assertGreaterEqual(r3, 29.0)
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(all(c[0] == "EVAL" for c in calls))
 
 
 if __name__ == '__main__':

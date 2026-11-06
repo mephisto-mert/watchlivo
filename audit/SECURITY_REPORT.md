@@ -1,8 +1,8 @@
-# Watchlivo (`watchlivo.online`) — Güvenlik Denetimi ve Sıkılaştırma Raporu (`v133`)
+# Watchlivo (`watchlivo.online`) — Güvenlik Denetimi ve Sıkılaştırma Raporu (`v134`)
 
 - **Denetim Tarihi:** 6 Kasım 2026
-- **Hedef Sürüm:** `20261106_v133`
-- **Kapsam:** Kimlik doğrulama, oturum yönetimi, oda yetkilendirmesi, SSRF, XSS, dosya yükleme güvenliği, HTTP başlıkları, sunucusuz sırlar, istemci depolama ve Electron masaüstü güvenliği.
+- **Hedef Sürüm:** `20261106_v134`
+- **Kapsam:** Kimlik doğrulama, oturum yönetimi, oda yetkilendirmesi, SSRF, XSS, sıkı nonce tabanlı `script-src` CSP, tek-RTT Redis Lua hız sınırlama, dosya yükleme güvenliği, HTTP başlıkları, sunucusuz sırlar (`VORTEX_SECRET`, `ADMIN_SECRET`), istemci depolama ve Electron masaüstü güvenliği.
 
 ---
 
@@ -33,6 +33,8 @@ Denetim başlangıcında kimlik doğrulama sırrı (`server_secret`), yeni oluş
 | `WL-BUG-016` | **P1** | Electron `BrowserWindow` yapılandırmasında `sandbox: true` eksikliği | Ana pencere ve OAuth pencerelerinde `sandbox: true`, `nodeIntegration: false`, `contextIsolation: true` ve `https:` kilitlendi (`desktop/main.js`). | Çözüldü |
 | `WL-BUG-033` | **P2** | Gömülü oynatıcı `postMessage` dinleyicisinde kaynak (`event.source`) kontrolü olmaması | Yalnızca aktif `iframe.contentWindow` kaynağından gelen mesajlar işleniyor (`players/embed.js`). | Çözüldü |
 | `WL-BUG-036` | **P2** | `Permissions-Policy` başlığında geçersiz sözdizimi ve `.vercelignore` eksikliği | W3C uyumlu `Permissions-Policy` başlığı yazıldı; `.env*`, `*.db`, `tests/`, `audit/` `.vercelignore` ile dışlandı. | Çözüldü |
+| `WL-BUG-043` | **P3** | `script-src` CSP içinde `'unsafe-inline'` ve satır içi betikler/`onclick=` | Satır içi betikler `bootstrap.js` ve `desktop-auth.js` dosyalarına taşındı; sunucu HTML rotalarına istek bazlı `'nonce-...'` eklendi ve `script-src` içinden `'unsafe-inline'` tamamen kaldırıldı (`server.py`, `vercel.json`). | Çözüldü (`v134`) |
+| `WL-BUG-045` | **P3** | Çoklu RTT Redis `RateLimiter` ve Vercel `ADMIN_SECRET` eksikliği | `security.py` `RateLimiter.hit()` tek-RTT atomik Lua `EVAL` (`INCR`+`PEXPIRE`+`PTTL`) yapısına geçirildi; Vercel `Production`/`Preview`/`Development` ortamlarına CSPRNG `ADMIN_SECRET` tanımlandı. | Çözüldü (`v134`) |
 
 ---
 
@@ -56,8 +58,8 @@ Denetim başlangıcında kimlik doğrulama sırrı (`server_secret`), yeni oluş
 
 ---
 
-## 4. Kalan Mimari Riskler ve Üretim Önerileri
+## 4. Üretim Ortamı Güvenlik Durumu (`v134` Faz-2 Tamamlandı)
 
-1. **Üretim Ortam Değişkenleri (`VORTEX_SECRET`, `ADMIN_SECRET`):** Çoklu sunucusuz örnek (multi-instance Vercel) arasında oturum jetonlarının soğuk başlangıçlarda da kesintisiz doğrulanması için Vercel üretim ortamında güçlü bir `VORTEX_SECRET` ve yönetim işlemleri için `ADMIN_SECRET` tanımlı tutulmalıdır.
-2. **İçerik Güvenlik Politikası (`CSP` `'unsafe-inline'`):** `static/index.html` içindeki JSON-LD ve GA4 önyükleme betikleri ile üçüncü taraf embed oynatıcı uyumluluğu nedeniyle `script-src` ve `style-src` içinde `'unsafe-inline'` korunmaktadır. İlerleyen sürümde satır içi betikler SHA-256 hash veya dış modül dosyasına taşınarak nonce tabanlı CSP'ye geçilmesi önerilir.
-3. **Dağıtık Hız Sınırlama (`RateLimiter`):** Mevcut bellek içi kayan pencere hız sınırlayıcısı tekil örnek içinde tam koruma sağlar; yoğun dağıtık bot trafiğine karşı Upstash Redis `INCR`/`EXPIRE` tabanlı küresel sayaç katmanı eklenmesi önerilir.
+1. **Üretim Ortam Sırları Doğrulandı (`VORTEX_SECRET`, `ADMIN_SECRET`, `KV_REST_API_URL`, `REDIS_URL`):** Vercel üretim, önizleme ve geliştirme ortamlarında yüksek entropili `VORTEX_SECRET`, `ADMIN_SECRET` ve Upstash Redis bağlantı sırlarının tamamı aktif ve doğrulanmıştır.
+2. **Sıkı `script-src` CSP (`'unsafe-inline'` Kaldırıldı):** Hem Vercel Edge (`vercel.json`) hem de Starlette (`server.py` `SecurityHeaders`) katmanında `script-src` içerisinden `'unsafe-inline'` tamamen çıkarılmış; dinamik sunucu sayfalarında (`/r/{id}`, `/contact`, `/dmca`, `/stats`, `/api/rave/browser-proxy`) istek başına üretilen kriptografik `'nonce-...'` ve `no-store` önbellek koruması devreye alınmıştır (`0` CSP ihlali).
+3. **Atomik Küresel Hız Sınırlama (`RateLimiter` Lua `EVAL`):** Dağıtık sunucusuz örnekler arasında tek HTTP turunda (`1 RTT`) atomik sayaç artırma ve milisaniye bazlı TTL (`PEXPIRE`/`PTTL`) garantisi sağlanmıştır.

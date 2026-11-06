@@ -1,7 +1,7 @@
-# Watchlivo (`watchlivo.online`) — Kapsamlı Mimari ve Tam Yığın Denetim Raporu (`v133`)
+# Watchlivo (`watchlivo.online`) — Kapsamlı Mimari ve Tam Yığın Denetim Raporu (`v134`)
 
 - **Denetim Tarihi:** 6 Kasım 2026
-- **Hedef Sürüm:** `20261106_v133`
+- **Hedef Sürüm:** `20261106_v134`
 - **Çalışma Alanı:** `c:\Users\pc\Documents\projelerim\rave_web_platform`
 - **Canlı Ortam:** `https://watchlivo.online` (Özel GitHub Deposu: `mephisto-mert/watchlivo`)
 - **Denetim Kapsamı:** Mimari, Backend API, Gerçek Zamanlı Oda Senkronizasyonu, WebRTC Ses/Kamera, Medya Oynatıcılar, Frontend SPA, UI/UX, WCAG 2.1 AA Erişilebilirlik, 21 Ekran Çözünürlüğü (Responsive), Çoklu Tarayıcı & Masaüstü/Mobil Uyumluluk, Performans ve Güvenlik.
@@ -79,11 +79,11 @@ flowchart LR
 
 Denetim başlangıcında 5 paralel uzman alt ajan ve canlı tarayıcı/API taramalarıyla **toplam 45 bulgu** (`7 P0 Kritik`, `14 P1 Yüksek`, `16 P2 Orta`, `8 P3 Düşük`) tespit edilmiştir:
 
-| Alan | Başlangıç Durumu (Önce) | `v133` Onarım Sonrası (Sonra) |
+| Alan | Başlangıç Durumu (Önce) | `v133`–`v134` Onarım Sonrası (Sonra) |
 | :--- | :--- | :--- |
-| **Kriptografi & Oturum** | Tahmin edilebilir yedek sır riski; çıkışta (`logout`) jeton sunucuda geçerli kalıyordu; paylaşımlı cihazda `VAULT_KEY` kalıntısı vardı. | Yalnızca gerçek entropi/CSPRNG sırları; `/api/auth/logout` sunucu taraflı jeton iptali; `VAULT_KEY` temizliği. |
+| **Kriptografi, Sıkı CSP & Oturum** | Tahmin edilebilir yedek sır riski; `script-src` içinde `'unsafe-inline'`; çıkışta (`logout`) jeton sunucuda geçerli kalıyordu; paylaşımlı cihazda `VAULT_KEY` kalıntısı vardı. | Yalnızca gerçek entropi/CSPRNG sırları (`ADMIN_SECRET` + `VORTEX_SECRET`); `script-src` `'unsafe-inline'` kaldırıldı + istek bazlı `'nonce-...'` CSP; tek-RTT Lua `RateLimiter`; `/api/auth/logout` jeton iptali. |
 | **Oda Güvenliği & Senkron** | Bozuk JSON `200 OK` ile oda açıyordu; `_precreated` oda dışarıdan kapatılabiliyordu; P2P `sync` paketi lider taklidi yapabiliyordu; `sync.stop()` bayrağı sıfırlamıyordu. | Bozuk JSON `400`; `_precreated` yetki gaspı engellendi; P2P `sync` yalnızca lider/co-host kabul ediyor; UID bazlı `kick` yasağı eklendi. |
-| **Performans & Ağ** | GZip kapalıydı (`~1.39 MB` JS + `~438 KB` CSS ham transfer); `music_engine` ve `server` içinde sınırsız büyüyen önbellek sözlükleri vardı. | `SelectiveGZipMiddleware` ile metin/JSON/JS/CSS sıkıştırıldı, medya akışları tamponsuz bırakıldı; tüm önbelleklere LRU sınırları kondu. |
+| **Performans, Kod Bölme & Ağ** | GZip kapalıydı (`~1.39 MB` JS + `~438 KB` CSS ham transfer); oda/oynatıcı modülleri ve `hls.min.js` ana sayfada peşin indiriliyordu; sınırsız büyüyen önbellek sözlükleri vardı. | `SelectiveGZipMiddleware` + dinamik `import('./views/mesh.js')` + isteğe bağlı `hls-loader.js` ile ana sayfa ilk JS yükü **`165.1 KB` GZip** (**-%88.1**); tüm önbelleklere LRU sınırları kondu. |
 | **WCAG 2.1 AA & Klavye** | `maximum-scale=1, user-scalable=no` yakınlaştırmayı kilitliyordu; `indigo`/`graphite` tema kontrastı `3.68:1` idi; modallarda odak tuzağı yoktu; zaman çizelgesi klavyesizdi. | Yakınlaştırma kilidi kaldırıldı; tüm 8 temada kontrast `>= 4.5:1`; `popup()` odak tuzağı + `Escape` + odak geri yükleme; `#ctl-timeline` `role="slider"` + klavye sarma. |
 | **Mobil, Safari & Çoklu Cihaz** | Mobil girdiler `10.8px–11px` (iOS otomatik yakınlaştırma hatası); 12 noktada eksik `-webkit-backdrop-filter`; `320px` ve yatay modda taşma riskleri. | Dokunmatik ekranlarda tüm girdiler `16px`, hedefler `>= 32px`; tüm cam yüzeylerde `-webkit-backdrop-filter`; 21 çözünürlükte `0px` yatay taşma. |
 | **Masaüstü (Electron) & Yükleme** | `sandbox` kapalı, tekil örnek kilidi yok, sabit Windows UA; `/api/upload` yalnızca uzantıya bakıyordu. | `sandbox: true`, `requestSingleInstanceLock`, dinamik OS UA; `/api/upload` sihirli bayt (magic-byte) doğrulaması. |

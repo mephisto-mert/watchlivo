@@ -1,10 +1,32 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v133';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v133';
-import { renderHome, destroyHome } from './views/home.js?v=20261106_v133';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261106_v133';
-import { api } from './api.js?v=20261106_v133';
-import { h, toast } from './ui.js?v=20261106_v133';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v134';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v134';
+import { renderHome, destroyHome } from './views/home.js?v=20261106_v134';
+import { api } from './api.js?v=20261106_v134';
+import { h, toast } from './ui.js?v=20261106_v134';
+
+let _meshMod = null;
+let _meshModPromise = null;
+
+function loadMeshModule() {
+  if (_meshMod) return Promise.resolve(_meshMod);
+  if (!_meshModPromise) {
+    _meshModPromise = import('./views/mesh.js?v=20261106_v134')
+      .then((mod) => {
+        _meshMod = mod;
+        return mod;
+      })
+      .catch((err) => {
+        _meshModPromise = null;
+        throw err;
+      });
+  }
+  return _meshModPromise;
+}
+
+function leaveMeshSafe(full = true) {
+  _meshMod?.leaveMeshView?.(full);
+}
 
 function parseRoute() {
   const searchParams = new URLSearchParams(location.search);
@@ -72,7 +94,7 @@ window.vortexCloseMinimizedRoom = () => {
   document.body.classList.remove('mesh-minimized', 'vortex-fs', 'theater-mode');
   document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
   activeMeshRoomId = null;
-  leaveMeshView(true);
+  leaveMeshSafe(true);
   const meshRoot = document.getElementById('mesh-root');
   if (meshRoot) {
     meshRoot.replaceChildren();
@@ -100,11 +122,12 @@ async function route() {
       if (hasMeshDom) window.dispatchEvent(new Event('resize'));
     } else if (activeMeshRoomId !== r.params.id || !state.mesh || !hasMeshDom) {
       if (activeMeshRoomId && activeMeshRoomId !== r.params.id) {
-        leaveMeshView(true);
+        leaveMeshSafe(true);
       }
       activeMeshRoomId = r.params.id;
       enteringMeshRoomId = r.params.id;
       try {
+        const { enterMesh } = await loadMeshModule();
         await enterMesh(meshRoot, r.params);
       } catch (err) {
         console.error('[Route] enterMesh error:', err);
@@ -135,7 +158,7 @@ async function route() {
       document.body.classList.remove('mesh-minimized');
       if (activeMeshRoomId) {
         activeMeshRoomId = null;
-        leaveMeshView(true);
+        leaveMeshSafe(true);
       }
       meshRoot.replaceChildren();
       meshRoot.classList.add('hidden');
@@ -432,7 +455,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261106_v133', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261106_v134', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

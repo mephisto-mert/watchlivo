@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261106_v133';
-import { api } from './api.js?v=20261106_v133';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v133';
+import { h, icons, popup, toast } from './ui.js?v=20261106_v134';
+import { api } from './api.js?v=20261106_v134';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v134';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261106_v133';
+} from './store.js?v=20261106_v134';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -493,7 +493,6 @@ export async function checkRedirectAuth() {
 }
 
 export function profileSetup({ current = null, initialTab = null, dismissable = true, onDone } = {}) {
-  try { getFirebaseAuth().catch(() => {}); } catch (_) {}
   let isLoggedMember = Boolean(current && !current.isGuest && current.authToken && !/^Misafir/i.test(String(current.name || '')));
   let activeTab = initialTab || (isLoggedMember ? 'account' : 'login');
   let color = current?.color || AVATAR_COLORS[0];

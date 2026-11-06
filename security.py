@@ -123,9 +123,17 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
 class RateLimiter:
     """Token-free sliding window limiter.
 
-    Uses Upstash Redis when configured (works across serverless instances),
-    otherwise an in-process ordered mapping.
+    Uses Upstash Redis single-RTT Lua EVAL when configured (atomic across serverless
+    instances), otherwise an in-process ordered mapping.
     """
+
+    _LUA_HIT = (
+        "local c = redis.call('INCR', KEYS[1]); "
+        "if c == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end; "
+        "local ttl = redis.call('PTTL', KEYS[1]); "
+        "if ttl < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]); ttl = tonumber(ARGV[1]) end; "
+        "return {c, ttl}"
+    )
 
     def __init__(self, limit: int, window: float, *, name: str = "rl") -> None:
         self.limit = max(1, int(limit))
@@ -161,6 +169,20 @@ class RateLimiter:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
         if url:
+            win_ms = max(1000, int(round(self.window * 1000)))
+            eval_res = self._kv("EVAL", self._LUA_HIT, "1", key, str(win_ms))
+            if isinstance(eval_res, list) and len(eval_res) >= 2:
+                try:
+                    count_int = int(eval_res[0])
+                    pttl_ms = float(eval_res[1])
+                except (TypeError, ValueError):
+                    count_int = None
+                    pttl_ms = -1.0
+                if count_int is not None:
+                    if count_int > self.limit:
+                        retry = (pttl_ms / 1000.0) if pttl_ms > 0 else self.window
+                        return False, max(1.0, retry)
+                    return True, 0.0
             win_sec = int(self.window) or 1
             count = self._kv("INCR", key)
             try:
@@ -180,13 +202,6 @@ class RateLimiter:
                         self._kv("EXPIRE", key, win_sec)
                         retry = self.window
                     return False, max(1.0, retry)
-                elif count_int == 2:
-                    ttl = self._kv("TTL", key)
-                    try:
-                        if float(ttl) < 0:  # type: ignore[arg-type]
-                            self._kv("EXPIRE", key, win_sec)
-                    except (TypeError, ValueError):
-                        pass
                 return True, 0.0
         t = time.time()
         with self._lock:
