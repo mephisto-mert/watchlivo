@@ -2869,6 +2869,16 @@ def _mark_delivered_map(bucket: Dict[str, float], item_id: Any, t_now: float) ->
                 bucket.pop(k, None)
 
 
+def _mark_room_local_events_delivered(room: Dict[str, Any]) -> None:
+    t_m = now()
+    for ev_i in (room.get("events") or []):
+        if isinstance(ev_i, dict) and ev_i.get("id"):
+            _mark_delivered_map(_DELIVERED_EV_IDS, ev_i["id"], t_m)
+    for sig_i in (room.get("signals") or []):
+        if isinstance(sig_i, dict) and sig_i.get("id"):
+            _mark_delivered_map(_DELIVERED_SIG_IDS, sig_i["id"], t_m)
+
+
 async def _ws_redis_fanout_step() -> None:
     if not getattr(STORE, "shared", False) or not hasattr(STORE, "cmd"):
         return
@@ -3200,9 +3210,7 @@ async def ws_endpoint(websocket: WebSocket):
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
         SOCKETS.setdefault(room_id, {})[cid] = websocket
         _LAST_FANOUT_REV[room_id] = int(room.get("rev") or 1)
-        for ev_init in (room.get("events") or []):
-            if isinstance(ev_init, dict) and ev_init.get("id"):
-                _mark_delivered_map(_DELIVERED_EV_IDS, ev_init["id"], now())
+        _mark_room_local_events_delivered(room)
         _ensure_ws_fanout_task()
         await STORE.put(room, force_disk=True)
     await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
@@ -3236,6 +3244,8 @@ async def ws_endpoint(websocket: WebSocket):
                 explicit_ws_leave = True
                 explicit_ws_close = data.get("type") == "close_room"
                 break
+            if data.get("type") == "init" and (data.get("username") or data.get("name")):
+                data = {**data, "type": "profile_update"}
             async with STORE.lock(room_id, remote=True):
                 room = await STORE.get(room_id, force_fresh=True)
                 if not room or cid not in room["participants"]:
@@ -3248,6 +3258,7 @@ async def ws_endpoint(websocket: WebSocket):
                     _LOBBY_CACHE["ts"] = 0.0
                     await broadcast(room_id, {"type": "room_closed", "roomId": room_id})
                     break
+                _mark_room_local_events_delivered(room)
                 await STORE.put(room, force_disk=bool(int(room.get("rev") or 1) != prev_rev_ws or out.get("broadcast")))
                 _LAST_FANOUT_REV[room_id] = int(room.get("rev") or 1)
             await deliver(room_id, out, websocket)
@@ -3301,6 +3312,7 @@ async def ws_endpoint(websocket: WebSocket):
                         room["lastActiveAt"] = t_disc
                         room["rev"] = int(room.get("rev") or 1) + 1
                         _LOBBY_CACHE["ts"] = 0.0
+                        _mark_room_local_events_delivered(room)
                         await STORE.put(room, force_disk=True)
                         await broadcast(room_id, _room_event(room))
                 else:
@@ -3584,6 +3596,8 @@ async def http_sync(request: Request):
             room["rev"] = int(room.get("rev") or 1) + 1
         t_cur = now()
         if mutated or is_new or (t_cur - prev_seen > 15.0):
+            if out and SOCKETS.get(room_id):
+                _mark_room_local_events_delivered(room)
             await STORE.put(room, force_disk=bool(mutated or is_new))
         cur_rev = int(room.get("rev") or 1)
         m = room["media"]

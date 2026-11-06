@@ -2848,6 +2848,18 @@ console.log('HA_UNIT_TESTS_PASSED');
                 _aio.run(rooms._ws_redis_fanout_step())
             matching = [p for p in sent_payloads if "ev_cross_cloud_test_1" in p]
             self.assertEqual(len(matching), 1)
+            # Local event marked before STORE.put must NOT fanout a second time
+            r_room["events"].append({
+                "id": "ev_local_ws_chat_no_dup",
+                "type": "chat",
+                "ts": rooms.now(),
+                "message": {"id": "m_loc_1", "user": "Yerel", "text": "Tek sefer!"},
+            })
+            rooms._mark_room_local_events_delivered(r_room)
+            with patch.object(rooms, "STORE", FakeSharedStore(r_room)):
+                _aio.run(rooms._ws_redis_fanout_step())
+            dup_local = [p for p in sent_payloads if "ev_local_ws_chat_no_dup" in p]
+            self.assertEqual(len(dup_local), 0)
         finally:
             rooms.SOCKETS.pop(rid, None)
 
