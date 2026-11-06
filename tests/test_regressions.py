@@ -2648,6 +2648,83 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("isPublicHttpUrl", worker_js)
         self.assertIn("FALLBACK_ORIGIN", worker_js)
 
+    def test_v135_ha_gateway_failover_and_keepalive_cron(self):
+        """v135 Part 3: Cloudflare HA Gateway fails over on DEPLOYMENT_PAUSED, routes WebSockets & APK, and runs keep-alive cron."""
+        import pathlib as _pl
+        import subprocess as _sp
+
+        root = _pl.Path(server.__file__).resolve().parent
+        ha_dir = root / "workers" / "ha-gateway"
+        wrangler_toml = (ha_dir / "wrangler.toml").read_text(encoding="utf-8")
+        self.assertIn('pattern = "watchlivo.online/*"', wrangler_toml)
+        self.assertIn('pattern = "www.watchlivo.online/*"', wrangler_toml)
+        self.assertIn('crons = ["*/10 * * * *"]', wrangler_toml)
+        self.assertIn('service = "watchlivo-stream-proxy"', wrangler_toml)
+
+        worker_url = (ha_dir / "worker.js").as_uri()
+        harness = f"""
+import gw from {worker_url!r};
+import assert from 'node:assert/strict';
+
+const calls = [];
+globalThis.fetch = async (input, init = {{}}) => {{
+  const u = typeof input === 'string' ? input : input.url;
+  calls.push({{ url: u, method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers || {{}}).entries()) }});
+  if (u.startsWith('https://watchlivo.online/api/rooms')) {{
+    return new Response('Paused', {{ status: 503, headers: {{ 'x-vercel-error': 'DEPLOYMENT_PAUSED' }} }});
+  }}
+  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/rooms')) {{
+    return new Response(JSON.stringify({{ rooms: [{{ id: 'tv-trt1' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
+  }}
+  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/ws/room1')) {{
+    return new Response('ws-ok', {{ status: 200 }});
+  }}
+  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/health')) {{
+    return new Response(JSON.stringify({{ ok: true }}), {{ status: 200 }});
+  }}
+  return new Response('ok', {{ status: 200 }});
+}};
+
+const env = {{
+  SECONDARY_ORIGIN: 'https://watchlivo-origin-eu.onrender.com',
+  STREAM_PROXY_ORIGIN: 'https://watchlivo-stream-proxy.watchlivo-edge.workers.dev',
+  FORCE_SECONDARY: '0',
+  STREAM_PROXY: {{ fetch: async () => new Response('APK_BYTES', {{ status: 200 }}) }},
+}};
+
+// 1. www -> apex 308
+const rWww = await gw.fetch(new Request('https://www.watchlivo.online/room/abc'), env, {{}});
+assert.equal(rWww.status, 308);
+assert.equal(rWww.headers.get('location'), 'https://watchlivo.online/room/abc');
+
+// 2. Service binding APK offload
+const rApk = await gw.fetch(new Request('https://watchlivo.online/download/apk'), env, {{}});
+assert.equal(rApk.status, 200);
+assert.equal(await rApk.text(), 'APK_BYTES');
+
+// 3. WebSocket upgrade routes directly to Secondary Render
+const rWs = await gw.fetch(new Request('https://watchlivo.online/ws/room1', {{ headers: {{ Upgrade: 'websocket' }} }}), env, {{}});
+assert.equal(rWs.status, 200);
+assert.ok(calls.some(c => c.url === 'https://watchlivo-origin-eu.onrender.com/ws/room1'));
+
+// 4. Primary Vercel DEPLOYMENT_PAUSED -> automatic failover to Secondary Render
+const rFail = await gw.fetch(new Request('https://watchlivo.online/api/rooms'), env, {{}});
+assert.equal(rFail.status, 200);
+assert.equal(rFail.headers.get('X-Watchlivo-Origin'), 'render-eu-failover');
+const jFail = await rFail.json();
+assert.equal(jFail.rooms[0].id, 'tv-trt1');
+
+// 5. Scheduled keep-alive cron pings Render /api/health
+let waited = null;
+await gw.scheduled({{}}, env, {{ waitUntil: (p) => {{ waited = p; }} }});
+await waited;
+assert.ok(calls.some(c => c.url === 'https://watchlivo-origin-eu.onrender.com/api/health'));
+console.log('HA_UNIT_TESTS_PASSED');
+"""
+        proc = _sp.run(["node", "--input-type=module", "-e", harness], capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("HA_UNIT_TESTS_PASSED", proc.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

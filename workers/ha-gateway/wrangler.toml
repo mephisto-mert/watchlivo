@@ -1,0 +1,21 @@
+name = "watchlivo-ha-gateway"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = true
+
+routes = [
+  { pattern = "watchlivo.online/*", zone_name = "watchlivo.online" },
+  { pattern = "www.watchlivo.online/*", zone_name = "watchlivo.online" }
+]
+
+[[services]]
+binding = "STREAM_PROXY"
+service = "watchlivo-stream-proxy"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
+STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
+FORCE_SECONDARY = "0"
