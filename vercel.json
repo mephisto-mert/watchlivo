@@ -12,30 +12,12 @@
       "use": "@vercel/static"
     },
     {
-      "src": "catalog_api.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb",
-        "maxDuration": 60,
-        "includeFiles": [
-          "server.py",
-          "rooms.py",
-          "auth_engine.py",
-          "security.py",
-          "music_engine.py",
-          "social_engine.py",
-          "animecix_tau_map.json",
-          "hidden_titles.json",
-          "main_sites_vault.json"
-        ]
-      }
-    },
-    {
       "src": "server.py",
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "50mb",
         "maxDuration": 60,
+        "excludeFiles": "{tests/**,desktop/**,audit/**,rave_extracted/**,uploads/**,workers/**,static/Watchlivo*,static/js/**,static/css/**,*.db,*.bak}",
         "includeFiles": [
           "rooms.py",
           "auth_engine.py",
@@ -44,15 +26,12 @@
           "social_engine.py",
           "static/index.html",
           "static/sw.js",
-          "static/Watchlivo-v2.0.apk",
-          "static/Watchlivo.ipa",
           "static/Watchlivo.mobileconfig",
           "app_version.json",
           "ios_version.json",
           "animecix_tau_map.json",
           "hidden_titles.json",
-          "main_sites_vault.json",
-          "static/watchlivo-og.png"
+          "main_sites_vault.json"
         ]
       }
     }
@@ -149,7 +128,7 @@
       "headers": {
         "X-Content-Type-Options": "nosniff"
       },
-      "dest": "catalog_api.py"
+      "dest": "server.py"
     },
     {
       "src": "/api/(.*)",

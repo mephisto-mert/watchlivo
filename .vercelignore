@@ -10,6 +10,9 @@ static/Watchlivo.exe
 rave_extracted/
 desktop/
 audit/
+workers/
+static/Watchlivo.ipa
+static/Watchlivo-v2.0.apk
 .env
 .env.*
 *.bak

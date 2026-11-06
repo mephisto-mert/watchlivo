@@ -59,6 +59,8 @@ ACC_DB_PATH = pathlib.Path("/tmp/vortex_accounts.db") if IS_VERCEL else BASE_DIR
 # secret is safe and never leaks a global one.
 _PROXY_SECRET = server_secret("PROXY_SECRET")
 PROXY_URL_TTL = 21600.0
+STREAM_PROXY_BASE_URL = (os.environ.get("STREAM_PROXY_BASE_URL") or "").strip().rstrip("/")
+_WORKER_BYPASS_HOSTS = ("hakunaymatata.com",)
 
 
 def _proxy_sig(url: str, ref: str = "") -> str:
@@ -82,7 +84,11 @@ def _proxy_sig_ok(url: str, ref: str, sig: str) -> bool:
 
 
 def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
-    q = f"/api/rave/stream-proxy?url={urllib.parse.quote(url, safe='')}"
+    base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    u_low = (url or "").lower()
+    if base and any(h in u_low for h in _WORKER_BYPASS_HOSTS):
+        base = ""
+    q = f"{base}/api/rave/stream-proxy?url={urllib.parse.quote(url, safe='')}"
     if ref:
         q += f"&referer={urllib.parse.quote(ref, safe='')}"
     q += f"&sig={_proxy_sig(url, ref)}"
@@ -8899,6 +8905,12 @@ async def download_apk_endpoint(request: Request):
                 "X-Content-Type-Options": "nosniff",
             },
         )
+    ext_apk = (os.environ.get("WATCHLIVO_APK_DOWNLOAD_URL") or "").strip()
+    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    if ext_apk.startswith("https://"):
+        return RedirectResponse(ext_apk, status_code=302)
+    if edge_base.startswith("https://"):
+        return RedirectResponse(f"{edge_base}/download/Watchlivo-v2.0.apk", status_code=302)
     return RedirectResponse("/static/Watchlivo-v2.0.apk", status_code=302)
 
 
@@ -8933,6 +8945,12 @@ async def download_ipa_endpoint(request: Request):
                 "X-Content-Type-Options": "nosniff",
             },
         )
+    ext_ipa = (os.environ.get("WATCHLIVO_IPA_DOWNLOAD_URL") or "").strip()
+    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    if ext_ipa.startswith("https://"):
+        return RedirectResponse(ext_ipa, status_code=302)
+    if edge_base.startswith("https://"):
+        return RedirectResponse(f"{edge_base}/download/Watchlivo.ipa", status_code=302)
     return RedirectResponse("/static/Watchlivo.ipa", status_code=302)
 
 

@@ -2613,6 +2613,41 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(c[0] == "EVAL" for c in calls))
 
+    def test_v135_zero_egress_stream_proxy_and_bundle_slimming(self):
+        """v135: STREAM_PROXY_BASE_URL routes streams to Cloudflare Worker, bypasses CF-blocked hosts, and slims Lambda bundle."""
+        import json as _json
+        import os as _os
+        import pathlib as _pl
+
+        root = _pl.Path(server.__file__).resolve().parent
+
+        # 1. Default local behavior (no STREAM_PROXY_BASE_URL) stays relative /api/rave/stream-proxy
+        with patch.dict(_os.environ, {"STREAM_PROXY_BASE_URL": ""}, clear=False):
+            local_u = server._proxy_u("https://s26.cdnimg1399.shop/seg01.ts", "https://rapidvid.org/", ".ts")
+            self.assertTrue(local_u.startswith("/api/rave/stream-proxy?url="))
+
+        # 2. Production STREAM_PROXY_BASE_URL routes normal HLS/MP4 CDNs to Cloudflare Worker, while bypassing hakunaymatata.com
+        edge = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
+        with patch.dict(_os.environ, {"STREAM_PROXY_BASE_URL": edge + "/"}, clear=False):
+            edge_u = server._proxy_u("https://s26.cdnimg1399.shop/seg01.ts", "https://rapidvid.org/", ".ts")
+            self.assertTrue(edge_u.startswith(edge + "/api/rave/stream-proxy?url="))
+            hakuna_u = server._proxy_u("https://bcdn.hakunaymatata.com/resource/movie.mp4?sign=abc", "", ".mp4")
+            self.assertTrue(hakuna_u.startswith("/api/rave/stream-proxy?url="))
+
+        # 3. vercel.json builds a single Python Lambda and excludes binary APK/IPA bloat from Lambda bundle
+        vcfg = _json.loads((root / "vercel.json").read_text(encoding="utf-8"))
+        py_builds = [b for b in vcfg.get("builds", []) if b.get("use") == "@vercel/python"]
+        self.assertEqual(len(py_builds), 1)
+        inc_files = py_builds[0].get("config", {}).get("includeFiles", [])
+        self.assertNotIn("static/Watchlivo-v2.0.apk", inc_files)
+        self.assertNotIn("static/Watchlivo.ipa", inc_files)
+
+        # 4. Cloudflare Worker source exists and implements timing-safe HMAC-SHA256 + SSRF guard
+        worker_js = (root / "workers" / "stream-proxy" / "worker.js").read_text(encoding="utf-8")
+        self.assertIn("verifyProxySig", worker_js)
+        self.assertIn("isPublicHttpUrl", worker_js)
+        self.assertIn("FALLBACK_ORIGIN", worker_js)
+
 
 if __name__ == '__main__':
     unittest.main()
