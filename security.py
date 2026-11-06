@@ -274,12 +274,22 @@ def client_ip(scope_or_request) -> str:
             headers = scope_or_request.headers  # type: ignore[assignment]
         except Exception:
             pass
+    edge_secret = (os.environ.get("EDGE_ORIGIN_SECRET") or os.environ.get("ADMIN_SECRET") or "").strip()
+    req_edge_secret = (headers.get("x-watchlivo-edge-secret") or "").strip()
+    if edge_secret and req_edge_secret and constant_time_eq(req_edge_secret, edge_secret):
+        edge_ip = (headers.get("x-watchlivo-client-ip") or "").split(",")[0].strip()
+        if edge_ip:
+            try:
+                ipaddress.ip_address(edge_ip)
+                return edge_ip[:64]
+            except Exception:
+                pass
     trust_vercel = os.environ.get("VERCEL") == "1"
-    trust_proxy = os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
+    trust_proxy = os.environ.get("WATCHLIVO_TRUST_PROXY") == "1" or bool(os.environ.get("RENDER"))
     trusted_hdrs = (
-        ("x-vercel-forwarded-for",)
+        ("cf-connecting-ip", "x-vercel-forwarded-for")
         if (trust_vercel and not trust_proxy)
-        else (("x-vercel-forwarded-for", "cf-connecting-ip", "x-real-ip", "x-forwarded-for") if trust_proxy else ())
+        else (("cf-connecting-ip", "x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for") if trust_proxy else ())
     )
     for hdr_name in trusted_hdrs:
         try:

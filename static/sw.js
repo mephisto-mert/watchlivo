@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261106_v134
+// Watchlivo Service Worker v20261107_v136
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">
@@ -18,7 +18,7 @@ const OFFLINE_HTML = `<!doctype html>
   <main class="card">
     <h1>📡 İnternet Bağlantısı Yok</h1>
     <p>Watchlivo canlı senkronizasyon odalarına bağlanmak için internet bağlantınızı kontrol edip tekrar deneyin.</p>
-    <button onclick="location.reload()">Yeniden Dene</button>
+    <a href="" style="display:inline-block;text-decoration:none;border-radius:12px;padding:12px 22px;background:#27dcc8;color:#041014;font-weight:800;font-size:.95rem;">Yeniden Dene</a>
   </main>
 </body>
 </html>`;
@@ -53,7 +53,15 @@ self.addEventListener('fetch', (event) => {
 function buildNotificationOptions(payload = {}) {
   const title = String(payload.title || 'Watchlivo — Birlikte İzle');
   const body = String(payload.body || 'Arkadaşın seni sinema odasına davet ediyor!');
-  const roomUrl = String(payload.url || (payload.roomId ? `/#/mesh/${encodeURIComponent(payload.roomId)}` : '/#/'));
+  let fallbackRoomUrl = '/#/';
+  if (payload.roomId) {
+    const rawR = String(payload.roomId);
+    const qIdx = rawR.indexOf('?');
+    fallbackRoomUrl = qIdx >= 0
+      ? `/#/mesh/${encodeURIComponent(rawR.slice(0, qIdx))}${rawR.slice(qIdx)}`
+      : `/#/mesh/${encodeURIComponent(rawR)}`;
+  }
+  const roomUrl = String(payload.url || fallbackRoomUrl);
   return {
     title,
     options: {

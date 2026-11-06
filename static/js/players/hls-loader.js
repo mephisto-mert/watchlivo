@@ -1,7 +1,34 @@
 // On-demand singleton loader for hls.js so initial Home route avoids downloading 135 KB GZip upfront.
-const HLS_CDN_URL = 'https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js';
+const HLS_CDN_URLS = [
+  'https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.15/hls.min.js',
+];
 
 let _hlsLoadPromise = null;
+
+function _loadScriptUrl(url, perTryTimeoutMs) {
+  return new Promise((resolve) => {
+    let done = false;
+    const s = document.createElement('script');
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      if (!ok) {
+        try { s.remove(); } catch (_) {}
+      }
+      resolve(Boolean(ok && window.Hls));
+    };
+    const timer = setTimeout(() => finish(Boolean(window.Hls)), perTryTimeoutMs);
+    s.src = url;
+    s.async = true;
+    s.crossOrigin = 'anonymous';
+    s.dataset.wlHls = '1';
+    s.onload = () => finish(true);
+    s.onerror = () => finish(false);
+    (document.head || document.documentElement).appendChild(s);
+  });
+}
 
 export function ensureHlsJs(timeoutMs = 7000) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
@@ -13,41 +40,24 @@ export function ensureHlsJs(timeoutMs = 7000) {
   if (_hlsLoadPromise) {
     return _hlsLoadPromise;
   }
-  _hlsLoadPromise = new Promise((resolve) => {
-    let settled = false;
-    const finish = (ok) => {
-      if (settled) return;
-      settled = true;
-      if (!ok) _hlsLoadPromise = null;
-      resolve(Boolean(ok && window.Hls));
-    };
-    const timer = setTimeout(() => finish(Boolean(window.Hls)), Math.max(1000, Number(timeoutMs) || 7000));
+  _hlsLoadPromise = (async () => {
     const existing = document.querySelector('script[data-wl-hls="1"], script[src*="hls.min.js"]');
     if (existing) {
-      if (window.Hls) {
-        clearTimeout(timer);
-        finish(true);
-        return;
-      }
-      existing.addEventListener('load', () => { clearTimeout(timer); finish(true); }, { once: true });
-      existing.addEventListener('error', () => { clearTimeout(timer); finish(false); }, { once: true });
-      return;
+      if (window.Hls) return true;
+      const okExisting = await new Promise((resolve) => {
+        const t = setTimeout(() => resolve(Boolean(window.Hls)), 3500);
+        existing.addEventListener('load', () => { clearTimeout(t); resolve(Boolean(window.Hls)); }, { once: true });
+        existing.addEventListener('error', () => { clearTimeout(t); resolve(false); }, { once: true });
+      });
+      if (okExisting) return true;
+      try { existing.remove(); } catch (_) {}
     }
-    const s = document.createElement('script');
-    s.src = HLS_CDN_URL;
-    s.async = true;
-    s.crossOrigin = 'anonymous';
-    s.dataset.wlHls = '1';
-    s.onload = () => {
-      clearTimeout(timer);
-      finish(true);
-    };
-    s.onerror = () => {
-      clearTimeout(timer);
-      try { s.remove(); } catch (_) {}
-      finish(false);
-    };
-    (document.head || document.documentElement).appendChild(s);
-  });
+    const perTry = Math.max(2500, Math.round((Number(timeoutMs) || 7000) / HLS_CDN_URLS.length));
+    for (const url of HLS_CDN_URLS) {
+      if (await _loadScriptUrl(url, perTry)) return true;
+    }
+    _hlsLoadPromise = null;
+    return Boolean(window.Hls);
+  })();
   return _hlsLoadPromise;
 }

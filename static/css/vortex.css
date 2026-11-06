@@ -3906,6 +3906,18 @@ header.navbar.top-nav-capsule {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px !important;
   }
+  .floating-dock .dock-item span,
+  .floating-dock .dock-btn span {
+    font-size: clamp(9.5px, 2.7vw, 11px) !important;
+    letter-spacing: -0.01em !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .tv-channels-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
 }
 
 /* ============================================================================
@@ -4380,7 +4392,25 @@ header.navbar.top-nav-capsule {
   }
 }
 
-@media (max-width: 1280px) {
+@media (min-width: 901px) and (max-width: 1480px) {
+  body:not(.in-room) .floating-dock {
+    padding: 8px 12px !important;
+    gap: 6px !important;
+  }
+  body:not(.in-room) .floating-dock .dock-item,
+  body:not(.in-room) .floating-dock .dock-btn {
+    padding: 0 12px !important;
+    font-size: 0.81rem !important;
+    gap: 6px !important;
+  }
+  .dock-quick-pill,
+  .dock-quick-btn {
+    padding: 0 10px !important;
+    font-size: 0.74rem !important;
+  }
+}
+
+@media (max-width: 1640px) {
   .dock-studio-badge,
   .dock-archive-pill {
     display: none !important;
@@ -4432,6 +4462,9 @@ header.navbar.top-nav-capsule {
 }
 
 .rave-top-bar .provider-cat-bar {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  overflow-x: auto !important;
   gap: 8px !important;
   justify-content: flex-start !important;
   flex-wrap: nowrap !important;
@@ -4439,7 +4472,10 @@ header.navbar.top-nav-capsule {
 
 @media (min-width: 901px) {
   .rave-top-bar .provider-cat-bar {
-    justify-content: flex-end !important;
+    justify-content: flex-start !important;
+  }
+  .rave-top-bar .provider-cat-bar > .provider-cat-pill:first-child {
+    margin-left: auto !important;
   }
 }
 
@@ -6983,7 +7019,7 @@ body.tv-nav-active .dock-item:focus {
 }
 .wl-faq-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
   align-items: start;
   gap: 10px;
 }

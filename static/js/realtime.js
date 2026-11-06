@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261106_v134';
-import { api } from './api.js?v=20261106_v134';
-import { state } from './store.js?v=20261106_v134';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v134';
+import { clock } from './sync.js?v=20261107_v136';
+import { api } from './api.js?v=20261107_v136';
+import { state } from './store.js?v=20261107_v136';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261107_v136';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -215,6 +215,8 @@ export class MeshConnection {
       let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.type === 'pong' && data.t0Epoch) clock.sample(Number(data.t0Epoch), Number(data.serverTime));
       if (data.type === 'init') {
+        const initSrvNow = Number(data.serverTime || data.room?.serverNow || data.room?.media?.serverNow || 0);
+        if (initSrvNow > 0) clock.seedServerNow(initSrvNow);
         this._rememberToken(data.clientToken, data.clientId);
         this._markRoomEventsSeen(data.room);
       }

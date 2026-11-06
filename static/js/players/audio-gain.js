@@ -62,7 +62,7 @@ export function isCorsSafeMediaElement(el, opts = {}) {
   if (typeof window !== 'undefined') {
     try {
       const u = new URL(src, window.location.origin);
-      if (u.origin === window.location.origin) {
+      if (u.origin === window.location.origin && !/^\/api\/rave\//i.test(u.pathname)) {
         return true;
       }
     } catch (e) { /* ignore */ }

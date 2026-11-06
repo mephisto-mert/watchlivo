@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261106_v134';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261106_v134';
-import { navIcon, logo } from './home.js?v=20261106_v134';
-import { createSelection } from './selection.js?v=20261106_v134';
-import { buildControls } from './controls.js?v=20261106_v134';
-import { buildChat } from './chat.js?v=20261106_v134';
-import { PANELS } from './panels.js?v=20261106_v134';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261107_v136';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261107_v136';
+import { navIcon, logo } from './home.js?v=20261107_v136';
+import { createSelection } from './selection.js?v=20261107_v136';
+import { buildControls } from './controls.js?v=20261107_v136';
+import { buildChat } from './chat.js?v=20261107_v136';
+import { PANELS } from './panels.js?v=20261107_v136';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -120,23 +120,21 @@ export function buildLayout(app, ctx) {
           isCreatorOrHost ? 'Odayı Kapat' : 'Ayrıl',
           isCreatorOrHost ? 'Odayı Kapat ve Herkesi Çıkar' : 'Odadan Ayrıl',
           async () => {
-            if (isCreatorOrHost && !m?.curated && people > 1) {
+            if (isCreatorOrHost && !m?.curated) {
               popup({
                 title: 'Odadan Ayrıl veya Kapat',
-                message: `Odada şu an ${people} kişi var. Sadece kendiniz ayrılıp odayı diğer izleyicilere devredebilir veya odayı herkes için kapatabilirsiniz.`,
+                message: people > 1
+                  ? `Odada şu an ${people} kişi var. Sadece kendiniz ayrılıp odayı diğer izleyicilere devredebilir veya odayı herkes için kapatabilirsiniz.`
+                  : 'Odadan geçici olarak ayrılıp kaldığınız dakikayı koruyabilir veya odayı tamamen kapatabilirsiniz.',
                 options: [
-                  { label: 'Sadece Ben Ayrıl (Oda Açık Kalsın)', primary: true, onClick: () => actions.leave(false) },
-                  { label: 'Odayı Herkes İçin Kapat', danger: true, onClick: () => actions.leave(true) },
+                  { label: people > 1 ? 'Sadece Ben Ayrıl (Oda Açık Kalsın)' : 'Sadece Ayrıl (Kaldığım Yer Korunsun)', primary: true, onClick: () => actions.leave(false) },
+                  { label: people > 1 ? 'Odayı Herkes İçin Kapat' : 'Odayı Tamamen Kapat', danger: true, onClick: () => actions.leave(true) },
                   { label: 'Kal' },
                 ],
               });
               return;
             }
-            const msg = isCreatorOrHost && !m?.curated
-              ? 'Odayı kapatıp çıkmak istediğinize emin misiniz?'
-              : 'Odadan ayrılmak istediğinize emin misiniz?';
-            const okLbl = isCreatorOrHost && !m?.curated ? 'Odayı Kapat' : 'Ayrıl';
-            if (await confirmPopup(msg, okLbl, 'Kal')) actions.leave(Boolean(isCreatorOrHost && !m?.curated));
+            if (await confirmPopup('Odadan ayrılmak istediğinize emin misiniz?', 'Ayrıl', 'Kal')) actions.leave(false);
           },
           { variant: 'leave-pill', id: 'nav-leave-room' }
         ),
@@ -222,7 +220,10 @@ export function buildLayout(app, ctx) {
 
 function initResize(handle, chatPanel) {
   const saved = Number(localStorage.getItem('vortex_chat_w'));
-  if (saved > 200) chatPanel.style.setProperty('--chat-w', `${saved}px`);
+  if (saved > 200) {
+    const maxSaved = typeof window !== 'undefined' ? Math.max(260, Math.round((window.innerWidth || 1280) * 0.5)) : 640;
+    chatPanel.style.setProperty('--chat-w', `${Math.max(240, Math.min(maxSaved, saved))}px`);
+  }
   handle.style.touchAction = 'none';
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();

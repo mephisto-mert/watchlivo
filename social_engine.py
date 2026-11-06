@@ -116,7 +116,7 @@ def _queue_notification(target_key: str, payload: Dict[str, Any]) -> Dict[str, A
         "fromName": _clean(payload.get("fromName") or "Arkadaşın", 40),
         "fromHandle": _clean(payload.get("fromHandle"), 36),
         "fromColor": _clean(payload.get("fromColor") or payload.get("color") or "#27DCC8", 16),
-        "fromAvatarUrl": _clean(payload.get("fromAvatarUrl") or payload.get("avatarUrl"), 600),
+        "fromAvatarUrl": _clean_avatar(payload.get("fromAvatarUrl") or payload.get("avatarUrl")),
         "requestId": _clean(payload.get("requestId"), 48),
         "roomId": _clean(payload.get("roomId"), 80),
         "roomName": _clean(payload.get("roomName") or payload.get("roomTitle"), 120),
@@ -148,6 +148,23 @@ def _hhmm(ts: Optional[float] = None) -> str:
 
 def _clean(v: Any, limit: int = 200) -> str:
     return str(v or "").strip()[:limit]
+
+
+_SAFE_DATA_AVATAR_RE = re.compile(r"^data:image/(?:png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=\s]+$", re.I)
+
+
+def _clean_avatar(v: Any) -> str:
+    s = str(v or "").strip()
+    if not s:
+        return ""
+    low = s.lower()
+    if low.startswith("data:image/svg") or low.startswith("javascript:"):
+        return ""
+    if s.startswith(("https://", "/static/", "/uploads/")):
+        return s[:800]
+    if low.startswith("data:image/") and len(s) <= 45000 and _SAFE_DATA_AVATAR_RE.match(s):
+        return re.sub(r"\s+", "", s)
+    return ""
 
 
 def _finite_float(v: Any, default: float = 0.0, lo: Optional[float] = None, hi: Optional[float] = None) -> float:
@@ -252,7 +269,7 @@ def _load_social_dir() -> Dict[str, Dict[str, Any]]:
     return _SOCIAL_DIR
 
 
-def _register_social_dir(card: Dict[str, Any]) -> None:
+def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
     uid_c = _clean(card.get("uid"), 64)
     if not uid_c or uid_c in _LEGACY_BOT_UIDS or uid_c in ("guest_default", "guest_local") or uid_c.startswith("unauth_"):
         return
@@ -266,13 +283,16 @@ def _register_social_dir(card: Dict[str, Any]) -> None:
     prev_hd = _clean(prev.get("handle"), 32)
     if prev_hd and prev_hd.lower() not in ("@izleyici", "izleyici", "@misafir", "misafir") and raw_hd.lower() in ("", "@izleyici", "izleyici", "@misafir", "misafir"):
         raw_hd = prev_hd
+    av_url_c = _clean_avatar(card.get("avatarUrl")) or _clean_avatar(prev.get("avatarUrl"))
+    raw_av_sym = card.get("avatar") or prev.get("avatar") or "🎬"
+    av_sym = _clean_avatar(raw_av_sym) or (_clean(raw_av_sym, 16) if not str(raw_av_sym).startswith("data:") else "🎬")
     merged = {
         "uid": uid_c,
         "name": raw_nm or prev_nm or "İzleyici",
         "handle": _norm_handle_tag(raw_hd or prev_hd or "", raw_nm or prev_nm or ""),
         "color": _clean(card.get("color") or prev.get("color") or "#27DCC8", 16),
-        "avatar": _clean(card.get("avatar") or prev.get("avatar") or "🎬", 600),
-        "avatarUrl": _clean(card.get("avatarUrl") or prev.get("avatarUrl") or "", 600),
+        "avatar": av_sym or "🎬",
+        "avatarUrl": av_url_c,
         "bio": _clean(card.get("bio") if "bio" in card else prev.get("bio", ""), 160),
         "statusEmoji": _clean(card.get("statusEmoji") or prev.get("statusEmoji") or "🍿", 12),
         "statusText": _clean(card.get("statusText") if "statusText" in card else prev.get("statusText", ""), 80),
@@ -287,7 +307,8 @@ def _register_social_dir(card: Dict[str, Any]) -> None:
         )[:120]
         for ok, _ in oldest:
             d.pop(ok, None)
-    _kv_set("wl:soc:dir", d, ttl_sec=2592000)
+    if persist:
+        _kv_set("wl:soc:dir", d, ttl_sec=2592000)
 
 
 def _ensure_user_social(
@@ -297,9 +318,10 @@ def _ensure_user_social(
     color: str = "",
     avatar_url: str = "",
     claims: Optional[Dict[str, Any]] = None,
+    persist: bool = True,
 ) -> Dict[str, Any]:
     uid_clean = _clean(uid, 64) or "guest_default"
-    persisted_u = _kv_get(f"wl:soc:u:{uid_clean}", None, max_age=3.0)
+    persisted_u = _kv_get(f"wl:soc:u:{uid_clean}", None, max_age=(0.5 if persist else 3.0))
     if isinstance(persisted_u, dict) and persisted_u.get("uid"):
         _SOCIAL_USERS[uid_clean] = persisted_u
     auth_card: Optional[Dict[str, Any]] = None
@@ -324,7 +346,7 @@ def _ensure_user_social(
     eff_name = _clean((auth_card or {}).get("name") or name, 32)
     eff_handle = _clean((auth_card or {}).get("handle") or handle, 32)
     eff_color = _clean((auth_card or {}).get("color") or color, 16)
-    eff_av = _clean((auth_card or {}).get("avatarUrl") or avatar_url, 600)
+    eff_av = _clean_avatar((auth_card or {}).get("avatarUrl")) or _clean_avatar(avatar_url)
     if uid_clean not in _SOCIAL_USERS:
         _SOCIAL_USERS[uid_clean] = {
             "uid": uid_clean,
@@ -378,8 +400,9 @@ def _ensure_user_social(
         "bio": (auth_card or {}).get("bio", ""),
         "statusEmoji": (auth_card or {}).get("statusEmoji", "🍿"),
         "statusText": (auth_card or {}).get("statusText", ""),
-    })
-    _kv_set(f"wl:soc:u:{uid_clean}", u, ttl_sec=2592000)
+    }, persist=persist)
+    if persist:
+        _kv_set(f"wl:soc:u:{uid_clean}", u, ttl_sec=2592000)
     return u
 
 
@@ -466,6 +489,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
     room_name = _clean(pres.get("roomName"), 100)
     media_poster = _clean(pres.get("mediaPoster"), 800)
     media_prov = _clean(pres.get("mediaProvider") or "cinema", 32)
+    room_locked = bool(pres.get("roomLocked"))
     try:
         import rooms as rooms_mod
         closed_map = getattr(rooms_mod, "_CLOSED_ROOMS", {}) or {}
@@ -474,26 +498,27 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
         elif not room_id and isinstance(active_room_hit, dict):
             room_id = _clean(active_room_hit.get("id"), 80)
             room_priv = _clean(active_room_hit.get("privacy") or "public", 16).lower()
+            room_locked = bool(rooms_mod.has_password(active_room_hit))
             room_name = _clean(active_room_hit.get("name"), 100)
             rm_m = active_room_hit.get("media") or {}
             if isinstance(rm_m, dict):
                 media_title = _clean(rm_m.get("title"), 140)
                 media_poster = _clean(rm_m.get("poster") or rm_m.get("thumbnail"), 800)
                 media_prov = _clean(rm_m.get("provider") or "cinema", 32)
-    except Exception:
-        pass
-    if room_id and not hide_watch and (is_self or room_priv != "private"):
-        try:
-            import rooms as rooms_mod
+        if room_id:
             rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
             live_rm = rm_dict.get(room_id)
             if isinstance(live_rm, dict):
+                room_priv = _clean(live_rm.get("privacy") or room_priv or "public", 16).lower()
+                if rooms_mod.has_password(live_rm):
+                    room_locked = True
                 room_name = _clean(live_rm.get("name") or room_name, 100)
                 rm_media = live_rm.get("media") or {}
                 if isinstance(rm_media, dict) and rm_media.get("title"):
                     media_title = _clean(rm_media.get("title"), 140)
-        except Exception:
-            pass
+    except Exception:
+        pass
+    if room_id and not hide_watch and (is_self or (room_priv != "private" and not room_locked)):
         label = media_title or room_name or "Sinema Odası"
         return {
             "online": True,
@@ -595,9 +620,9 @@ def _resolve_social_target(identifier: str, target_uid_hint: str = "") -> Option
                             "name": _clean(p_obj.get("name") or "İzleyici", 32),
                             "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
                             "color": _clean(p_obj.get("color") or "#27DCC8", 16),
-                            "avatarUrl": _clean(p_obj.get("avatarUrl") or "", 600),
+                            "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
                         }
-                        _register_social_dir(card_rm)
+                        _register_social_dir(card_rm, persist=False)
                         return card_rm
         except Exception:
             pass
@@ -615,7 +640,7 @@ def _enrich_friend_entry(fr: Dict[str, Any], viewer_uid: str) -> Dict[str, Any]:
         "name": _clean(d_card.get("name") or fr.get("name") or "İzleyici", 32),
         "handle": _norm_handle_tag(d_card.get("handle") or fr.get("handle") or "", d_card.get("name") or fr.get("name") or ""),
         "color": _clean(d_card.get("color") or fr.get("color") or "#27DCC8", 16),
-        "avatarUrl": _clean(d_card.get("avatarUrl") or fr.get("avatarUrl") or "", 600),
+        "avatarUrl": _clean_avatar(d_card.get("avatarUrl")) or _clean_avatar(fr.get("avatarUrl")),
         "online": pres["online"],
         "presenceState": pres["presenceState"],
         "status": pres["status"],
@@ -640,7 +665,7 @@ def _enrich_req_item(r: Dict[str, Any], uid_field: str, name_field: str, handle_
         name_field: nm,
         handle_field: hd,
         "color": _clean(d_card.get("color") or r.get("color") or "#27DCC8", 16),
-        "avatarUrl": _clean(d_card.get("avatarUrl") or r.get("avatarUrl") or "", 600),
+        "avatarUrl": _clean_avatar(d_card.get("avatarUrl")) or _clean_avatar(r.get("avatarUrl")),
     }
 
 
@@ -657,7 +682,7 @@ async def social_guest_provision(request: Request) -> JSONResponse:
     name = _clean(body.get("name"), 32) or "Misafir"
     raw_handle = _clean(body.get("handle"), 32)
     color = _clean(body.get("color"), 16) or "#00f5d4"
-    avatar_url = _clean(body.get("avatarUrl"), 600)
+    avatar_url = _clean_avatar(body.get("avatarUrl"))
     if raw_handle:
         cand_h = re.sub(r"[^a-z0-9_.\-]", "", _tr_fold_soc(_strip_soc_tag(raw_handle.lstrip("@"))))[:24].strip("._-")
         if len(cand_h) < 2:
@@ -711,7 +736,7 @@ async def social_state(request: Request) -> JSONResponse:
     uid = _caller_uid(request, q.get("uid"), "guest_default")
     name = _clean(q.get("name"), 32)
     handle = _clean(q.get("handle"), 32)
-    u = _ensure_user_social(uid, name, handle, claims=request.scope.get("wl_claims"))
+    u = _ensure_user_social(uid, name, handle, claims=request.scope.get("wl_claims"), persist=False)
     enriched_friends = [_enrich_friend_entry(fr, uid) for fr in (u.get("friends") or []) if isinstance(fr, dict)]
     # Sort: bestFriends & watching/online first
     enriched_friends.sort(key=lambda f: (
@@ -761,7 +786,7 @@ async def social_user_search(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
     query = _strip_soc_tag(_clean(q.get("q") or q.get("query"), 64))
-    u = _ensure_user_social(uid, claims=request.scope.get("wl_claims"))
+    u = _ensure_user_social(uid, claims=request.scope.get("wl_claims"), persist=False)
     if not query:
         return JSONResponse({"ok": True, "users": []})
     found: Dict[str, Dict[str, Any]] = {}
@@ -769,7 +794,7 @@ async def social_user_search(request: Request) -> JSONResponse:
         import auth_engine
         for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
             if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
-                _register_social_dir(ac)
+                _register_social_dir(ac, persist=False)
                 found[ac["uid"]] = ac
     except Exception:
         pass
@@ -802,9 +827,9 @@ async def social_user_search(request: Request) -> JSONResponse:
                         "name": _clean(p_obj.get("name") or "İzleyici", 32),
                         "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
                         "color": _clean(p_obj.get("color") or "#27DCC8", 16),
-                        "avatarUrl": _clean(p_obj.get("avatarUrl") or "", 600),
+                        "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
                     }
-                    _register_social_dir(card_rm)
+                    _register_social_dir(card_rm, persist=False)
                     found[p_uid] = card_rm
     except Exception:
         pass
@@ -818,7 +843,7 @@ async def social_user_search(request: Request) -> JSONResponse:
             "name": _clean(card.get("name") or "İzleyici", 32),
             "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
             "color": _clean(card.get("color") or "#27DCC8", 16),
-            "avatarUrl": _clean(card.get("avatarUrl") or "", 600),
+            "avatarUrl": _clean_avatar(card.get("avatarUrl")),
             "bio": _clean(card.get("bio") or "", 160),
             "isGuest": bool(str(t_uid).startswith("guest_")),
             "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
@@ -835,7 +860,7 @@ async def social_presence(request: Request) -> JSONResponse:
         q = request.query_params
         uid = _caller_uid(request, q.get("uid"), "guest_default")
         target_uid = _clean(q.get("targetUid") or uid, 64)
-        u = _ensure_user_social(uid)
+        u = _ensure_user_social(uid, persist=False)
         is_fr = _friendship_state(u, target_uid) == "FRIENDS"
         return JSONResponse({"ok": True, "uid": target_uid, "presence": _compute_live_presence(target_uid, uid, is_friend=is_fr)})
     try:
@@ -848,7 +873,7 @@ async def social_presence(request: Request) -> JSONResponse:
     name = _clean(body.get("name"), 32)
     handle = _clean(body.get("handle"), 32)
     color = _clean(body.get("color"), 16)
-    avatar_url = _clean(body.get("avatarUrl"), 600)
+    avatar_url = _clean_avatar(body.get("avatarUrl"))
     u = _ensure_user_social(uid, name, handle, color, avatar_url, claims=request.scope.get("wl_claims"))
     now_t = _now()
     raw_st = _clean(body.get("state") or "online", 16).lower()
@@ -898,7 +923,7 @@ async def social_friends_action(request: Request) -> JSONResponse:
     name = _clean(body.get("fromName") or body.get("name"), 32) or "İzleyici"
     handle = _clean(body.get("fromHandle") or body.get("handle"), 32)
     color = _clean(body.get("color"), 16)
-    avatar_url = _clean(body.get("avatarUrl"), 600)
+    avatar_url = _clean_avatar(body.get("avatarUrl"))
     u = _ensure_user_social(uid, name, handle, color, avatar_url, claims=request.scope.get("wl_claims"))
     action = _clean(body.get("action"), 24).lower()
     now_t = _now()
@@ -1219,7 +1244,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "messages": _DM_THREADS[tk][-80:]})
 
     text = _clean(body.get("text"), 1000)
-    room_invite = _clean(body.get("roomInvite"), 80)
+    room_invite = _clean(body.get("roomInvite"), 180)
     raw_card = body.get("roomInviteCard") if isinstance(body.get("roomInviteCard"), dict) else None
     snap = str(body.get("snapshot") or "").strip()
     if snap and (len(snap) > 85000 or not re.match(r"^data:image/(?:png|jpe?g|webp);base64,", snap, re.I)):
@@ -1251,7 +1276,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
             "text": _clean(raw_reply.get("text"), 140),
         }
     if room_invite or raw_card:
-        r_id = _clean((raw_card or {}).get("roomId") or room_invite, 80)
+        r_id = _clean((raw_card or {}).get("roomId") or room_invite, 180)
         msg["roomInvite"] = r_id
         msg["roomInviteCard"] = {
             "roomId": r_id,
@@ -1278,6 +1303,15 @@ async def social_dm_send(request: Request) -> JSONResponse:
         _kv_set(f"wl:soc:u:{peer_id}", peer_u, ttl_sec=2592000)
         inv_r = msg.get("roomInvite") or ""
         inv_c = msg.get("roomInviteCard") or {}
+        if inv_r:
+            if "?" in inv_r:
+                r_base, r_qs = inv_r.split("?", 1)
+                safe_qs = re.sub(r"[^a-zA-Z0-9_=&.%-]", "", r_qs)[:120]
+                inv_url = f"/#/mesh/{urllib.parse.quote(r_base)}" + (f"?{safe_qs}" if safe_qs else "")
+            else:
+                inv_url = f"/#/mesh/{urllib.parse.quote(inv_r)}"
+        else:
+            inv_url = "/#/"
         _queue_notification(peer_id, {
             "type": "room_invite" if inv_r else "dm",
             "title": f"🎬 {u['name']} seni odaya davet etti!" if inv_r else f"💬 {u['name']} mesaj gönderdi",
@@ -1291,7 +1325,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
             "roomName": inv_c.get("roomName", ""),
             "mediaTitle": inv_c.get("mediaTitle", ""),
             "mediaPoster": inv_c.get("mediaPoster", ""),
-            "url": f"/#/mesh/{urllib.parse.quote(inv_r)}" if inv_r else "/#/",
+            "url": inv_url,
             "expiresAt": (t_now + 60.0) if inv_r else 0.0,
         })
     return JSONResponse({"ok": True, "canMessage": True, "message": msg, "messages": _DM_THREADS[tk][-80:]})
@@ -2118,7 +2152,7 @@ async def notifications_poll(request: Request) -> JSONResponse:
             seen_ids.add(item["id"])
             out.append(item)
     out.sort(key=lambda x: float(x.get("ts") or 0))
-    u_rec = _SOCIAL_USERS.get(uid) or _kv_get(f"wl:soc:u:{uid}", None, max_age=4.0) or {}
+    u_rec = _kv_get(f"wl:soc:u:{uid}", None, max_age=2.0) or _SOCIAL_USERS.get(uid) or {}
     req_cnt = len(u_rec.get("requests") or []) if isinstance(u_rec, dict) else 0
     unr_cnt = sum(_safe_int(v, 0, lo=0) for v in ((u_rec.get("unread") or {}).values() if isinstance(u_rec, dict) else []))
     return JSONResponse({"ok": True, "notifications": out[-12:], "requestCount": req_cnt, "totalUnread": unr_cnt, "serverTs": now_t})
@@ -3074,16 +3108,45 @@ async def voice_relay_endpoint(request: Request):
         mime = _clean(body.get("mime") or "audio/wav", 32)
         if not mime.startswith("audio/"):
             mime = "audio/wav"
-        cur = _kv_get(kv_key, None, max_age=0.12)
-        buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
-        buf = [p for p in buf if isinstance(p, dict) and (now_t - float(p.get("ts") or 0.0) < 10.0)]
-        pkt = {"id": f"{cid}_{seq}_{int(now_t * 1000)}", "fromId": cid, "seq": seq, "ts": round(now_t, 4), "mime": mime, "b64": b64}
-        buf.append(pkt)
-        buf = buf[-16:]
-        _VOICE_RELAY_MEM[room_id] = buf
-        _kv_set(kv_key, buf, ttl_sec=20)
+        import asyncio as _aio
+        lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
+        if len(lock_map) > 120:
+            lock_map.clear()
+        rlock = lock_map.get(room_id)
+        if rlock is None:
+            rlock = _aio.Lock()
+            lock_map[room_id] = rlock
+        async with rlock:
+            cur = _kv_get(kv_key, None, max_age=0.12)
+            buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
+            buf = [p for p in buf if isinstance(p, dict) and (now_t - float(p.get("ts") or 0.0) < 10.0)]
+            pkt = {"id": f"{cid}_{seq}_{int(now_t * 1000)}", "fromId": cid, "seq": seq, "ts": round(now_t, 4), "mime": mime, "b64": b64}
+            buf.append(pkt)
+            buf = buf[-16:]
+            _VOICE_RELAY_MEM[room_id] = buf
+            _kv_set(kv_key, buf, ttl_sec=20)
         return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_RELAY_HEADERS)
     cid_q = re.sub(r"[^a-zA-Z0-9_]", "", str(request.query_params.get("clientId") or ""))[:24]
+    ctok_q = str(request.query_params.get("clientToken") or "").strip()
+    if not cid_q:
+        return JSONResponse({"ok": False, "error": "İstemci kimliği gerekli"}, status_code=400, headers=_RELAY_HEADERS)
+    try:
+        import rooms as _rm
+        rm_obj_g = await _rm.STORE.get(room_id)
+        tok_ok_g = bool(ctok_q and _rm.verify_client_token(room_id, ctok_q) == cid_q)
+        if rm_obj_g is not None:
+            if cid_q in (rm_obj_g.get("kicked") or rm_obj_g.get("kicked_cids") or []):
+                return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
+            if ctok_q and not tok_ok_g:
+                return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
+            if not tok_ok_g and cid_q not in (rm_obj_g.get("participants") or {}):
+                return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
+            if str(rm_obj_g.get("voipMode") or "all") == "off":
+                return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=_RELAY_HEADERS)
+        elif not tok_ok_g:
+            return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=_RELAY_HEADERS)
+    except Exception:
+        pass
     try:
         since_ts = float(request.query_params.get("sinceTs") or 0.0)
         if not math.isfinite(since_ts):

@@ -1,9 +1,9 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v134';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v134';
-import { renderHome, destroyHome } from './views/home.js?v=20261106_v134';
-import { api } from './api.js?v=20261106_v134';
-import { h, toast } from './ui.js?v=20261106_v134';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261107_v136';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261107_v136';
+import { renderHome, destroyHome } from './views/home.js?v=20261107_v136';
+import { api } from './api.js?v=20261107_v136';
+import { h, toast } from './ui.js?v=20261107_v136';
 
 let _meshMod = null;
 let _meshModPromise = null;
@@ -11,7 +11,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261106_v134')
+    _meshModPromise = import('./views/mesh.js?v=20261107_v136')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -455,7 +455,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261106_v134', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261107_v136', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

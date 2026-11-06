@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261106_v134';
-import { Html5Adapter } from './html5.js?v=20261106_v134';
-import { VimeoAdapter } from './vimeo.js?v=20261106_v134';
-import { EmbedAdapter } from './embed.js?v=20261106_v134';
-import { WebviewAdapter } from './webview.js?v=20261106_v134';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261106_v134';
+import { YouTubeAdapter } from './youtube.js?v=20261107_v136';
+import { Html5Adapter } from './html5.js?v=20261107_v136';
+import { VimeoAdapter } from './vimeo.js?v=20261107_v136';
+import { EmbedAdapter } from './embed.js?v=20261107_v136';
+import { WebviewAdapter } from './webview.js?v=20261107_v136';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v136';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -262,7 +262,7 @@ export class PlayerHost {
     const events = {
       onReady: guard(() => { if (settledReady) return; settledReady = true; this.loading = false; this.onEvent('ready'); }),
       onPlay: guard((arg) => { settledReady = true; this.loading = false; this.onEvent('play', arg); }),
-      onPause: (arg) => this.onEvent('pause', arg),
+      onPause: guard((arg) => this.onEvent('pause', arg)),
       onEnded: guard(() => this.onEvent('ended')),
       onBuffering: guard((b) => this.onEvent('buffering', b)),
       onSubtitleCue: guard((txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' })),

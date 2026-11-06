@@ -1149,9 +1149,9 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     playing = bool(raw_m.get("playing")) and has_humans and not is_unresolved_cat
     rate = float(raw_m.get("rate") or 1.0)
     updated_at = t if is_unresolved_cat else float(raw_m.get("updatedAt") or t)
-    cur_time = float(raw_m.get("currentTime") or 0.0) if has_humans else 0.0
+    cur_time = 0.0 if (not has_humans and room.get("curated")) else float(raw_m.get("currentTime") or 0.0)
     dur = float(raw_m.get("duration") or 0.0)
-    raw_live = max(0.0, cur_time + ((t - updated_at) * rate if playing else 0.0)) if has_humans else 0.0
+    raw_live = max(0.0, cur_time + ((t - updated_at) * rate if playing else 0.0))
     pw_locked = has_password(room)
     m_summary = dict(raw_m)
     m_summary["currentTime"] = cur_time
@@ -1354,14 +1354,26 @@ class RedisStore:
             try:
                 room = json.loads(raw)
                 r_has_media = bool(isinstance(room.get("media"), dict) and (room["media"].get("url") or room["media"].get("videoId")))
-                if cached_has_media and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
+                c_rev = int((cached or {}).get("rev") or 0)
+                r_rev = int(room.get("rev") or 0)
+                cleared_c_at = max(
+                    float(room.get("chatClearedAt") or 0.0),
+                    float((cached or {}).get("chatClearedAt") or 0.0),
+                )
+                if cleared_c_at > 0.0:
+                    room["chatClearedAt"] = cleared_c_at
+                allow_l1_merge = cached_has_media and (
+                    (not force_fresh and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0))
+                    or (c_rev > r_rev and (t - self.l1_write_ts.get(room_id, 0.0) < 5.0))
+                )
+                if allow_l1_merge:
                     c_m = cached.get("media") or {}
                     r_m = room.get("media") or {}
                     c_upd = float(c_m.get("updatedAt") or 0.0)
                     r_upd = float(r_m.get("updatedAt") or 0.0)
-                    if not r_has_media or c_upd > r_upd + 0.01:
+                    if (not r_has_media and not room.get("_explicit_media_clear")) or (c_rev >= r_rev and c_upd > r_upd + 0.01):
                         room["media"] = c_m
-                        room["rev"] = max(int(room.get("rev") or 1), int(cached.get("rev") or 1))
+                        room["rev"] = max(r_rev, c_rev, 1)
                     if cached.get("events"):
                         ev_by_id = {}
                         for ev_item in (room.get("events") or []) + (cached.get("events") or []):
@@ -1369,8 +1381,7 @@ class RedisStore:
                                 ev_by_id[ev_item["id"]] = ev_item
                         if ev_by_id:
                             room["events"] = sorted(ev_by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-35:]
-                if cached and cached.get("chat") and not room.get("_explicit_chat_clear") and (t - self.l1_write_ts.get(room_id, 0.0) < 60.0):
-                    cleared_c_at = max(float(room.get("chatClearedAt") or 0.0), float(cached.get("chatClearedAt") or 0.0))
+                if cached and cached.get("chat") and not room.get("_explicit_chat_clear") and not force_fresh and (t - self.l1_write_ts.get(room_id, 0.0) < 15.0):
                     by_id = {}
                     for cm in (cached.get("chat") or []) + (room.get("chat") or []):
                         if isinstance(cm, dict) and cm.get("id") and (cleared_c_at <= 0.0 or float(cm.get("ts") or 0.0) > cleared_c_at):
@@ -1378,7 +1389,7 @@ class RedisStore:
                     if len(by_id) > len(room.get("chat") or []):
                         room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
                         prune_chat(room)
-                if cached and cached.get("signals") and (t - self.l1_write_ts.get(room_id, 0.0) < 30.0):
+                if cached and cached.get("signals") and not force_fresh and (t - self.l1_write_ts.get(room_id, 0.0) < 10.0):
                     sig_by_id = {}
                     for sg_it in (room.get("signals") or []) + (cached.get("signals") or []):
                         if isinstance(sg_it, dict) and sg_it.get("id") and (t - float(sg_it.get("ts") or 0.0) < 25.0):
@@ -1397,12 +1408,16 @@ class RedisStore:
         _CLOSED_ROOMS.pop(rid, None)
         t = now()
         prev_cached = self.l1_rooms.get(rid)
+        if room.get("_explicit_chat_clear"):
+            room["chatClearedAt"] = max(t, float(room.get("chatClearedAt") or 0.0))
         if prev_cached and isinstance(prev_cached.get("media"), dict) and (prev_cached["media"].get("url") or prev_cached["media"].get("videoId")):
             cur_m = room.get("media") or {}
             if not cur_m.get("url") and not cur_m.get("videoId") and not room.get("_explicit_media_clear"):
                 room["media"] = prev_cached["media"]
         if prev_cached and prev_cached.get("chat") and not room.get("_explicit_chat_clear"):
             cleared_c_at = max(float(room.get("chatClearedAt") or 0.0), float(prev_cached.get("chatClearedAt") or 0.0))
+            if cleared_c_at > 0.0:
+                room["chatClearedAt"] = cleared_c_at
             by_id = {}
             for cm in (prev_cached.get("chat") or []) + (room.get("chat") or []):
                 if isinstance(cm, dict) and cm.get("id") and (cleared_c_at <= 0.0 or float(cm.get("ts") or 0.0) > cleared_c_at):
@@ -1410,10 +1425,12 @@ class RedisStore:
             room["chat"] = sorted(by_id.values(), key=lambda x: float(x.get("ts") or 0.0))[-MAX_CHAT:]
             prune_chat(room)
         room.pop("_explicit_chat_clear", None)
+        room.pop("_explicit_media_clear", None)
         self.l1_rooms[rid] = room
         self.l1_read_ts[rid] = t
         await self.fallback.put(room, force_disk=force_disk)
-        if not force_disk and (t - self.l1_write_ts.get(rid, 0.0) < 0.8):
+        is_serverless = os.environ.get("VERCEL") == "1"
+        if not force_disk and not is_serverless and (t - self.l1_write_ts.get(rid, 0.0) < 0.25):
             return
         self.l1_write_ts[rid] = t
         clean_r = {k: v for k, v in room.items() if not k.startswith("_")}
@@ -1474,6 +1491,27 @@ STORE = make_store()
 SOCKETS: Dict[str, Dict[str, Any]] = {}  # room_id -> {cid: WebSocket} (per process)
 
 
+def _freeze_empty_room_playback(room: Dict[str, Any], t_now: float) -> None:
+    room["emptySince"] = float(room.get("emptySince") or t_now)
+    if room.get("curated"):
+        return
+    m = room.get("media")
+    if not isinstance(m, dict) or (not m.get("url") and not m.get("videoId")):
+        return
+    is_unres = (
+        str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        and float(m.get("currentTime") or 0.0) <= 0.5
+        and not bool(m.get("playbackAnchored") or m.get("_playbackAnchored"))
+    )
+    if m.get("playing") and not is_unres:
+        elapsed = max(0.0, t_now - float(m.get("updatedAt") or t_now)) * float(m.get("rate") or 1.0)
+        m["currentTime"] = round(max(0.0, float(m.get("currentTime") or 0.0) + elapsed), 3)
+        m["playing"] = False
+        m["updatedAt"] = t_now
+        m["playbackAnchored"] = True
+        room["_tok_sig"] = ""
+
+
 def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
     """Drop HTTP participants that stopped polling; returns removed participants."""
     t = now()
@@ -1488,10 +1526,7 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
             continue
         if p.get("transport") == "http" and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL:
             gone.append(room["participants"].pop(cid))
-        elif p.get("transport") == "ws" and (
-            (STORE.shared and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL)
-            or (not STORE.shared and cid not in live_ws and t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL)
-        ):
+        elif p.get("transport") == "ws" and cid not in live_ws and (t - p.get("lastSeen", 0) > HTTP_PARTICIPANT_TTL):
             gone.append(room["participants"].pop(cid))
             left_map[cid] = t
     room["left"] = {k: v for k, v in left_map.items() if t - float(v or 0) < HTTP_PARTICIPANT_TTL + 60.0}
@@ -1511,7 +1546,7 @@ def prune(room: Dict[str, Any], force: bool = False) -> List[Dict[str, Any]]:
     prune_chat(room)
     has_humans = any(p.get("transport") != "bot" for p in room["participants"].values())
     if not has_humans:
-        room.setdefault("emptySince", t)
+        _freeze_empty_room_playback(room, t)
         if room.get("curated") or (t - float(room.get("emptySince") or t) > 3600.0):
             room["_explicit_chat_clear"] = True
             room["chat"] = []
@@ -1930,7 +1965,7 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if cur_unres_hb and inc_t <= 0.25:
             return out
         cur_live = float(cur_m.get("currentTime") or 0.0) + (max(0.0, t_now - float(cur_m.get("updatedAt") or t_now)) * float(cur_m.get("rate") or 1.0) if (cur_m.get("playing") and not cur_unres_hb) else 0.0)
-        if cur_live > 30.0 and inc_t <= 0.5:
+        if (cur_live > 30.0 and inc_t <= 0.5) or (bool(cur_m.get("playbackAnchored")) and cur_live > 20.0 and inc_t < 12.0):
             return out
         prev_playing = bool(cur_m.get("playing"))
         prev_privacy = room.get("privacy")
@@ -2014,8 +2049,9 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         return out
 
     if mtype in ("play", "pause", "seek", "rate"):
-        if room.get("curated") and mtype in ("pause", "seek", "rate"):
-            deny("7/24 canlı yayın odalarında yayın duraklatılamaz veya sarılamaz.")
+        if room.get("curated") and mtype in ("play", "pause", "seek", "rate"):
+            if mtype in ("pause", "seek", "rate"):
+                deny("7/24 canlı yayın odalarında yayın duraklatılamaz veya sarılamaz.")
             out["reply"].append(_sync_event(room, "correct", "server"))
             return out
         if not can_control:
@@ -2815,10 +2851,135 @@ async def broadcast(room_id: str, message: Dict[str, Any], exclude: Optional[str
     await asyncio.gather(*(_send_one(c, w) for c, w in targets), return_exceptions=True)
 
 
+_DELIVERED_EV_IDS: Dict[str, float] = {}
+_DELIVERED_SIG_IDS: Dict[str, float] = {}
+_LAST_FANOUT_REV: Dict[str, int] = {}
+_WS_FANOUT_TASK: Optional[asyncio.Task] = None
+
+
+def _mark_delivered_map(bucket: Dict[str, float], item_id: Any, t_now: float) -> None:
+    sid = str(item_id or "").strip()
+    if not sid:
+        return
+    bucket[sid] = t_now
+    if len(bucket) > 2500:
+        cutoff = t_now - 45.0
+        for k, ts_v in list(bucket.items())[:800]:
+            if ts_v < cutoff:
+                bucket.pop(k, None)
+
+
+async def _ws_redis_fanout_step() -> None:
+    if not getattr(STORE, "shared", False) or not hasattr(STORE, "cmd"):
+        return
+    active_rids = [rid for rid, m in list(SOCKETS.items()) if m]
+    if not active_rids:
+        return
+    keys = [f"vortex:room:{rid}" for rid in active_rids] + [f"vortex:closed:{rid}" for rid in active_rids]
+    raws = await STORE.cmd("MGET", *keys)
+    if not isinstance(raws, list) or len(raws) < len(active_rids) * 2:
+        return
+    t_now = now()
+    n = len(active_rids)
+    for idx, rid in enumerate(active_rids):
+        if not SOCKETS.get(rid):
+            continue
+        is_closed = bool(raws[n + idx]) and not any(s["id"] == rid for s in CURATED_LIVE_SPECS)
+        if is_closed:
+            _CLOSED_ROOMS[rid] = t_now
+            if hasattr(STORE, "l1_rooms"):
+                STORE.l1_rooms.pop(rid, None)
+            await broadcast(rid, {"type": "room_closed", "roomId": rid})
+            continue
+        raw_room = raws[idx]
+        if not raw_room:
+            continue
+        try:
+            remote_room = json.loads(raw_room)
+        except Exception:
+            continue
+        if not isinstance(remote_room, dict):
+            continue
+        live_map = SOCKETS.get(rid, {})
+        prev_l1 = STORE.l1_rooms.get(rid) if hasattr(STORE, "l1_rooms") else None
+        if isinstance(prev_l1, dict):
+            for l_cid in list(live_map.keys()):
+                if l_cid in (remote_room.get("participants") or {}) and l_cid in (prev_l1.get("participants") or {}):
+                    remote_room["participants"][l_cid]["lastSeen"] = max(
+                        float(remote_room["participants"][l_cid].get("lastSeen") or 0.0),
+                        float(prev_l1["participants"][l_cid].get("lastSeen") or 0.0),
+                    )
+        if hasattr(STORE, "l1_rooms"):
+            STORE.l1_rooms[rid] = remote_room
+            STORE.l1_read_ts[rid] = t_now
+        rem_rev = int(remote_room.get("rev") or 1)
+        prev_rev = _LAST_FANOUT_REV.get(rid, rem_rev)
+        _LAST_FANOUT_REV[rid] = rem_rev
+        sent_any_ev = False
+        for ev in (remote_room.get("events") or []):
+            if not isinstance(ev, dict):
+                continue
+            ev_id = str(ev.get("id") or "").strip()
+            ev_ts = float(ev.get("ts") or 0.0)
+            if not ev_id or (t_now - ev_ts > 20.0) or ev_id in _DELIVERED_EV_IDS:
+                continue
+            _mark_delivered_map(_DELIVERED_EV_IDS, ev_id, t_now)
+            sent_any_ev = True
+            await broadcast(rid, ev, exclude=ev.get("cid"))
+        for sig in (remote_room.get("signals") or []):
+            if not isinstance(sig, dict):
+                continue
+            sig_id = str(sig.get("id") or "").strip()
+            sig_ts = float(sig.get("ts") or 0.0)
+            target_cid = str(sig.get("targetId") or "").strip()
+            if not sig_id or not target_cid or (t_now - sig_ts > 25.0) or sig_id in _DELIVERED_SIG_IDS:
+                continue
+            ws_target = SOCKETS.get(rid, {}).get(target_cid)
+            if ws_target:
+                _mark_delivered_map(_DELIVERED_SIG_IDS, sig_id, t_now)
+                try:
+                    await asyncio.wait_for(ws_target.send_json(sig), timeout=1.5)
+                except Exception:
+                    pass
+        if rem_rev > prev_rev and not sent_any_ev:
+            await broadcast(rid, _room_event(remote_room))
+
+
+async def _ws_redis_fanout_loop() -> None:
+    while True:
+        try:
+            if not SOCKETS:
+                await asyncio.sleep(1.0)
+                continue
+            await _ws_redis_fanout_step()
+        except asyncio.CancelledError:
+            break
+        except Exception:
+            pass
+        await asyncio.sleep(0.45)
+
+
+def _ensure_ws_fanout_task() -> None:
+    global _WS_FANOUT_TASK
+    if not getattr(STORE, "shared", False) or os.environ.get("VERCEL") == "1":
+        return
+    if _WS_FANOUT_TASK is None or _WS_FANOUT_TASK.done():
+        try:
+            loop = asyncio.get_running_loop()
+            _WS_FANOUT_TASK = loop.create_task(_ws_redis_fanout_loop())
+        except RuntimeError:
+            pass
+
+
 async def deliver(room_id: str, out: Dict[str, Any], sender_ws=None) -> None:
+    t_now = now()
     for msg, exclude in out.get("broadcast", []):
+        if isinstance(msg, dict) and msg.get("id"):
+            _mark_delivered_map(_DELIVERED_EV_IDS, msg.get("id"), t_now)
         await broadcast(room_id, msg, exclude)
     for target, msg in out.get("direct", []):
+        if isinstance(msg, dict) and msg.get("id"):
+            _mark_delivered_map(_DELIVERED_SIG_IDS, msg.get("id"), t_now)
         ws = SOCKETS.get(room_id, {}).get(target)
         if ws:
             try:
@@ -2889,7 +3050,7 @@ def _tv_spec(rid: str, name: str, url: str) -> Dict[str, Any]:
     play_u = _wrap_live_cors_url(url)
     alt_u = [url] if (play_u != url and url.startswith("https://")) else []
     return {
-        "id": f"tv-{rid}", "name": f"7/24 {name} Canlı Yayın", "creator": "Watchlivo Canlı TV", "privacy": "public", "playMode": "cohost",
+        "id": f"tv-{rid}", "name": f"7/24 {name} Canlı Yayın", "creator": "Watchlivo Canlı TV", "privacy": "public", "playMode": "leader",
         "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": play_u, "altUrls": alt_u, "channel": "Canlı TV · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "mediaType": "live", "duration": 0.0},
     }
@@ -2899,7 +3060,7 @@ def _radio_spec(rid: str, name: str, url: str, kind: str) -> Dict[str, Any]:
     play_u = _wrap_live_cors_url(url) if kind == "hls" else url
     alt_u = [url] if (play_u != url and url.startswith("https://")) else []
     return {
-        "id": rid, "name": f"7/24 {name} Canlı Radyo", "creator": "Watchlivo Canlı Radyo", "privacy": "public", "playMode": "cohost",
+        "id": rid, "name": f"7/24 {name} Canlı Radyo", "creator": "Watchlivo Canlı Radyo", "privacy": "public", "playMode": "leader",
         "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": play_u, "altUrls": alt_u, "channel": "Canlı Radyo · 7/24",
                   "thumbnail": "/static/watchlivo-poster.svg", "live": True, "isMusic": True, "mediaType": "music", "artist": name,
                   "songTitle": "Canlı Yayın", "musicPlatformLabel": "Canlı Radyo", "duration": 0.0},
@@ -3031,17 +3192,26 @@ async def ws_endpoint(websocket: WebSocket):
                 room["media"]["currentTime"] = 0.0
                 room["media"]["updatedAt"] = now()
                 room["media"]["playing"] = True
+        elif was_empty_humans and not room.get("curated") and isinstance(room.get("media"), dict) and (room["media"].get("url") or room["media"].get("videoId")):
+            room["media"]["updatedAt"] = now()
+            room["media"]["playing"] = True
         room.pop("emptySince", None)
         p, is_new_ws = add_participant(room, cid, {**join_data, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "ws")
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
         SOCKETS.setdefault(room_id, {})[cid] = websocket
-        await STORE.put(room, force_disk=bool(is_new_ws))
+        _LAST_FANOUT_REV[room_id] = int(room.get("rev") or 1)
+        for ev_init in (room.get("events") or []):
+            if isinstance(ev_init, dict) and ev_init.get("id"):
+                _mark_delivered_map(_DELIVERED_EV_IDS, ev_init["id"], now())
+        _ensure_ws_fanout_task()
+        await STORE.put(room, force_disk=True)
     await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
     await broadcast(room_id, {"type": "user_joined", "user": {"id": cid, "name": p["name"]}, "room": serialize(room)}, exclude=cid)
     if join_msg:
         await broadcast(room_id, {"type": "chat", "message": join_msg}, exclude=cid)
     explicit_ws_leave = False
     explicit_ws_close = False
+    last_redis_ping_sync = now()
     try:
         while True:
             raw_ws_data = await websocket.receive_json()
@@ -3053,6 +3223,13 @@ async def ws_endpoint(websocket: WebSocket):
                 r_mem = (STORE.l1_rooms if hasattr(STORE, "l1_rooms") else getattr(STORE, "rooms", {})).get(room_id)
                 if isinstance(r_mem, dict) and cid in (r_mem.get("participants") or {}):
                     r_mem["participants"][cid]["lastSeen"] = t_ping
+                if getattr(STORE, "shared", False) and (t_ping - last_redis_ping_sync >= 20.0):
+                    last_redis_ping_sync = t_ping
+                    async with STORE.lock(room_id, remote=False):
+                        r_sync = await STORE.get(room_id)
+                        if isinstance(r_sync, dict) and cid in (r_sync.get("participants") or {}):
+                            r_sync["participants"][cid]["lastSeen"] = t_ping
+                            await STORE.put(r_sync, force_disk=True)
                 await websocket.send_json({"type": "pong", "t0": data.get("t0", 0), "t0Epoch": data.get("t0Epoch", 0), "serverTime": t_ping})
                 continue
             if data.get("type") in ("leave", "close_room"):
@@ -3072,6 +3249,7 @@ async def ws_endpoint(websocket: WebSocket):
                     await broadcast(room_id, {"type": "room_closed", "roomId": room_id})
                     break
                 await STORE.put(room, force_disk=bool(int(room.get("rev") or 1) != prev_rev_ws or out.get("broadcast")))
+                _LAST_FANOUT_REV[room_id] = int(room.get("rev") or 1)
             await deliver(room_id, out, websocket)
             _after(room_id, out)
     except (WebSocketDisconnect, RuntimeError):
@@ -3082,6 +3260,7 @@ async def ws_endpoint(websocket: WebSocket):
         SOCKETS.get(room_id, {}).pop(cid, None)
         if room_id in SOCKETS and not SOCKETS[room_id]:
             SOCKETS.pop(room_id, None)
+            _LAST_FANOUT_REV.pop(room_id, None)
         async with STORE.lock(room_id):
             room = await STORE.get(room_id)
             if room:
@@ -3101,21 +3280,27 @@ async def ws_endpoint(websocket: WebSocket):
                         )
                     )
                     has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-                    if not room.get("curated") and (is_creator_close or not has_humans):
+                    if not room.get("curated") and is_creator_close:
                         await STORE.delete(room_id)
                         _LOBBY_CACHE["ts"] = 0.0
                         await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
                     else:
-                        if cid == room.get("creatorCid") or cid == prev_h:
+                        if has_humans and (cid == room.get("creatorCid") or cid == prev_h):
                             room["host_transferred"] = True
                         if cur_p and cur_p.get("transport") != "bot":
                             left_name_ws = cur_p.get("name", "Misafir")
                             if not any(hp.get("transport") != "bot" and hp.get("name") == left_name_ws for hp in (room.get("participants") or {}).values()):
                                 leave_m_ws = sys_msg(room, "odadan ayrıldı", left_name_ws)
                                 await broadcast(room_id, {"type": "chat", "message": leave_m_ws}, cid)
+                        if not has_humans:
+                            _freeze_empty_room_playback(room, t_disc)
+                            if room.get("curated"):
+                                room["chat"] = []
+                                room["polls"] = []
                         ensure_host(room)
                         room["lastActiveAt"] = t_disc
                         room["rev"] = int(room.get("rev") or 1) + 1
+                        _LOBBY_CACHE["ts"] = 0.0
                         await STORE.put(room, force_disk=True)
                         await broadcast(room_id, _room_event(room))
                 else:
@@ -3123,12 +3308,10 @@ async def ws_endpoint(websocket: WebSocket):
                         cur_p["transport"] = "http"
                         cur_p["lastSeen"] = min(float(cur_p.get("lastSeen") or 0.0), t_disc - 16.0)
                     ensure_host(room)
-                    if cur_p and room.get("host_id") == prev_h:
-                        cur_p["lastSeen"] = t_disc
                     room["lastActiveAt"] = t_disc
                     if room.get("host_id") != prev_h:
                         room["rev"] = int(room.get("rev") or 1) + 1
-                    await STORE.put(room)
+                    await STORE.put(room, force_disk=True)
                     if room.get("host_id") != prev_h:
                         await broadcast(room_id, _room_event(room))
 
@@ -3231,13 +3414,19 @@ async def http_sync(request: Request):
                     )
                 )
                 has_humans = any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
-                if not room.get("curated") and (is_creator_close or not has_humans):
+                if not room.get("curated") and is_creator_close:
                     await STORE.delete(room_id)
                     _LOBBY_CACHE["ts"] = 0.0
                     await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
                     return JSONResponse({"ok": True, "roomClosed": True})
-                if cid == room.get("creatorCid") or cid == prev_h:
+                if has_humans and (cid == room.get("creatorCid") or cid == prev_h):
                     room["host_transferred"] = True
+                t_leave = now()
+                if not has_humans:
+                    _freeze_empty_room_playback(room, t_leave)
+                    if room.get("curated"):
+                        room["chat"] = []
+                        room["polls"] = []
                 if left_p:
                     if left_p.get("transport") != "bot":
                         left_name = left_p.get("name", "Misafir")
@@ -3245,15 +3434,18 @@ async def http_sync(request: Request):
                         if not still_here_http:
                             leave_msg = sys_msg(room, "odadan ayrıldı", left_name)
                             await broadcast(room_id, {"type": "chat", "message": leave_msg}, cid)
-                    if not has_humans:
-                        room["emptySince"] = now()
-                        if room.get("curated"):
-                            room["chat"] = []
-                            room["polls"] = []
                     ensure_host(room)
+                    room["lastActiveAt"] = t_leave
                     room["rev"] = int(room.get("rev") or 1) + 1
+                    _LOBBY_CACHE["ts"] = 0.0
                     await STORE.put(room, force_disk=True)
                     await broadcast(room_id, _room_event(room, "user_left", by=left_p.get("name", "")), cid)
+                elif not has_humans:
+                    ensure_host(room)
+                    room["lastActiveAt"] = t_leave
+                    room["rev"] = int(room.get("rev") or 1) + 1
+                    _LOBBY_CACHE["ts"] = 0.0
+                    await STORE.put(room, force_disk=True)
             return JSONResponse({"ok": True})
         room = room or await ensure_curated_room(room_id) or new_room(room_id, creator=data.get("username", ""), creator_id=verified_uid)
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
@@ -3305,6 +3497,9 @@ async def http_sync(request: Request):
                         room["participants"]["kinox_bot"]["name"] = room["creator"]
                     if (room.get("media") or {}).get("url") != spec["media"]["url"]:
                         set_media(room, spec["media"], room["creator"], start=0.0)
+        elif was_empty_humans and not room.get("curated") and isinstance(room.get("media"), dict) and (room["media"].get("url") or room["media"].get("videoId")):
+            room["media"]["updatedAt"] = now()
+            room["media"]["playing"] = True
         room.pop("emptySince", None)
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now())
         if stale_empty_wipe and not restored_recent_chat:
@@ -3623,7 +3818,13 @@ async def list_rooms(request: Request):
                     needs_save = True
             if needs_save:
                 async with STORE.lock(rid_item):
-                    await STORE.put(room)
+                    fresh_r = await STORE.get(rid_item, force_fresh=True) if room.get("curated") else None
+                    if isinstance(fresh_r, dict) and any(hp.get("transport") != "bot" for hp in (fresh_r.get("participants") or {}).values()):
+                        room = fresh_r
+                        p_map = room.get("participants") or {}
+                        has_humans = True
+                    else:
+                        await STORE.put(room, force_disk=True)
             p_cnt = len(p_map)
             if (not p_cnt or not has_humans) and not room.get("curated"):
                 idle_sec = t - float(room.get("lastActiveAt") or room.get("createdAt") or 0.0)

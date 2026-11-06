@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261106_v134';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261107_v136';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -473,6 +473,32 @@ if (typeof document !== 'undefined' && isNativeWatchlivoApp()) {
   document.documentElement.classList.add('is-native-apk');
 }
 
+async function handleWindowsAppDownload(ev) {
+  ev?.preventDefault?.();
+  try {
+    const r = await fetch('/download/windows?check=1', { cache: 'no-store' });
+    const d = r.ok ? await r.json().catch(() => null) : null;
+    if (d?.available) {
+      toast('💻 Windows Masaüstü paketi indiriliyor...', 4000);
+      window.location.href = d.url || '/download/windows';
+      return;
+    }
+  } catch (_) {}
+  if (typeof window !== 'undefined' && window.__deferredInstallPrompt) {
+    try {
+      window.__deferredInstallPrompt.prompt();
+      await window.__deferredInstallPrompt.userChoice;
+      window.__deferredInstallPrompt = null;
+      return;
+    } catch (_) {}
+  }
+  popup({
+    title: '💻 Watchlivo Windows Masaüstü Kurulumu',
+    message: 'Watchlivo Windows 10/11 üzerinde imzasız EXE uyarısı olmadan doğrudan yerel WebView2 / PWA masaüstü uygulaması olarak kurulur: Tarayıcı adres çubuğunun sağındaki "Watchlivo Uygulamasını Yükle (⊕)" simgesine tıklayarak tek tıkla başlat menüsüne ve görev çubuğuna sabitleyebilirsiniz.',
+    options: [{ label: 'Tamam', primary: true }],
+  });
+}
+
 export function openThemeModal() {
   const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'theme-modal-body' },
@@ -494,9 +520,8 @@ export function openThemeModal() {
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
-        download: 'Watchlivo.exe',
-        onclick: () => toast('💻 Windows Masaüstü indiriliyor...', 4000)
-      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows İndir (EXE)')) : null
+        onclick: handleWindowsAppDownload
+      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows Masaüstü Kur')) : null
   );
   popup({ title: inApk ? 'Görünüm & Tema Ayarları' : 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
 }
@@ -553,9 +578,8 @@ export function openDownloadModal() {
         h('a', {
           class: 'btn wl-download-action',
           href: '/download/windows',
-          download: 'Watchlivo.exe',
-          onclick: () => toast('💻 Windows Masaüstü indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows İndir (.exe)')
+          onclick: handleWindowsAppDownload
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows Masaüstü Kur')
       )
     ),
     !inApk ? h('div', { class: 'wl-download-footer-note' },

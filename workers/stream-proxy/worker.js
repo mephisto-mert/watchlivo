@@ -190,20 +190,90 @@ function resolveMediaContentType(url, extHint, upstreamCt) {
 async function serveBinaryAsset(request, env, assetPath, filename, contentType) {
   if (!env.ASSETS) return jsonResponse({ error: "Asset store unavailable" }, 404);
   const assetUrl = new URL(assetPath, request.url);
-  const resp = await env.ASSETS.fetch(new Request(assetUrl.toString(), { method: request.method, headers: request.headers }));
+  const rangeHdr = request.headers.get("Range") || "";
+  const fetchHeaders = new Headers();
+  if (rangeHdr && request.method === "GET") {
+    fetchHeaders.set("Range", rangeHdr);
+  }
+  const resp = await env.ASSETS.fetch(
+    new Request(assetUrl.toString(), { method: "GET", headers: fetchHeaders })
+  );
   if (!resp.ok && resp.status !== 206) {
     return jsonResponse({ error: "Dosya bulunamadı" }, 404);
   }
-  const hdrs = new Headers(resp.headers);
+  const hdrs = new Headers();
   hdrs.set("Content-Type", contentType);
   hdrs.set("Content-Disposition", `attachment; filename="${filename}"`);
+  hdrs.set("Accept-Ranges", "bytes");
   hdrs.set("Cache-Control", "public, max-age=300");
   hdrs.set("X-Content-Type-Options", "nosniff");
   for (const [k, v] of Object.entries(CORS_HEADERS)) hdrs.set(k, v);
-  return new Response(request.method === "HEAD" ? null : resp.body, {
+
+  const upCl = resp.headers.get("Content-Length") || "";
+  const upCr = resp.headers.get("Content-Range") || "";
+  if (request.method === "HEAD") {
+    if (upCl) {
+      hdrs.set("Content-Length", upCl);
+    } else if (resp.body) {
+      const buf = await resp.arrayBuffer();
+      hdrs.set("Content-Length", String(buf.byteLength));
+    }
+    return new Response(null, { status: 200, headers: hdrs });
+  }
+
+  if (rangeHdr && resp.status === 200) {
+    const m = rangeHdr.match(/^bytes=(\d*)-(\d*)$/i);
+    if (m) {
+      const fullBuf = await resp.arrayBuffer();
+      const total = fullBuf.byteLength;
+      let start = m[1] ? parseInt(m[1], 10) : 0;
+      let end = m[2] ? parseInt(m[2], 10) : total - 1;
+      if (!m[1] && m[2]) {
+        const suffix = parseInt(m[2], 10);
+        start = Math.max(0, total - suffix);
+        end = total - 1;
+      }
+      if (start >= total || start < 0 || end < start) {
+        hdrs.set("Content-Range", `bytes */${total}`);
+        return new Response(null, { status: 416, headers: hdrs });
+      }
+      end = Math.min(end, total - 1);
+      const slice = fullBuf.slice(start, end + 1);
+      hdrs.set("Content-Range", `bytes ${start}-${end}/${total}`);
+      hdrs.set("Content-Length", String(slice.byteLength));
+      return new Response(slice, { status: 206, headers: hdrs });
+    }
+  }
+
+  if (upCl) hdrs.set("Content-Length", upCl);
+  if (upCr && resp.status === 206) hdrs.set("Content-Range", upCr);
+  return new Response(resp.body, {
     status: resp.status,
     headers: hdrs,
   });
+}
+
+async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4) {
+  let curUrl = initialUrl;
+  for (let hop = 0; hop <= maxHops; hop++) {
+    if (!isPublicHttpUrl(curUrl)) {
+      throw new Error("Blocked redirect target");
+    }
+    const resp = await fetch(curUrl, {
+      method: "GET",
+      headers: baseHeaders,
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if ([301, 302, 303, 307, 308].includes(resp.status)) {
+      const loc = resp.headers.get("Location");
+      if (!loc) return resp;
+      curUrl = new URL(loc, curUrl).toString();
+      continue;
+    }
+    return resp;
+  }
+  throw new Error("Too many redirects");
 }
 
 export default {
@@ -293,11 +363,7 @@ export default {
 
     let upResp;
     try {
-      upResp = await fetch(targetUrl, {
-        method: "GET",
-        headers: upHeaders,
-        redirect: "follow",
-      });
+      upResp = await fetchPublicWithRedirects(targetUrl, upHeaders, 4);
     } catch {
       return jsonResponse({ error: "Akış kaynağına ulaşılamadı." }, 502);
     }

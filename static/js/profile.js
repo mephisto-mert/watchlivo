@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261106_v134';
-import { api } from './api.js?v=20261106_v134';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v134';
+import { h, icons, popup, toast } from './ui.js?v=20261107_v136';
+import { api } from './api.js?v=20261107_v136';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261107_v136';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261106_v134';
+} from './store.js?v=20261107_v136';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -654,8 +654,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       autocomplete: 'current-password',
     });
     const gErrBox = h('div', { class: 'wl-auth-err', style: { minHeight: '18px' } });
-    const gVerifyPanel = h('div', {
+    const gVerifyPanel = h('form', {
       class: 'wl-google-pw-panel',
+      onsubmit: (e) => {
+        e.preventDefault();
+        gVerifyPanel.querySelector('button.btn.primary')?.click?.();
+      },
       style: {
         display: 'none',
         flexDirection: 'column',
@@ -1413,11 +1417,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       pwInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLogin(); });
 
       root.append(
-        h('div', { class: 'wl-auth-form' },
+        h('form', { class: 'wl-auth-form', onsubmit: (e) => { e.preventDefault(); submitLogin(); } },
           idInp,
           pwInp,
           errBox,
-          h('button', { type: 'button', class: 'btn primary wl-btn-full wl-btn-primary-gradient', onclick: submitLogin }, '🔑 Hesabımla Giriş Yap'),
+          h('button', { type: 'submit', class: 'btn primary wl-btn-full wl-btn-primary-gradient' }, '🔑 Hesabımla Giriş Yap'),
           h('button', {
             type: 'button',
             class: 'wl-auth-link-btn',
@@ -1465,7 +1469,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     pwInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitReg(); });
 
     root.append(
-      h('div', { class: 'wl-auth-form' },
+      h('form', { class: 'wl-auth-form', onsubmit: (e) => { e.preventDefault(); submitReg(); } },
         nameInp,
         handleInp,
         emailInp,
@@ -1473,7 +1477,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         h('label', { class: 'wl-field-label' }, 'Profil Neon Rengin'),
         renderColorPicker(),
         errBox,
-        h('button', { type: 'button', class: 'btn primary wl-btn-full wl-btn-primary-gradient', onclick: submitReg }, '✨ Hesap Oluştur & Başla')),
+        h('button', { type: 'submit', class: 'btn primary wl-btn-full wl-btn-primary-gradient' }, '✨ Hesap Oluştur & Başla')),
       renderSocialButtons({
         getFormCreds: () => ({
           email: emailInp.value.trim(),
@@ -2154,7 +2158,10 @@ export function openUserProfileModal(targetUser) {
   const uHideFriends = asBool(targetUser.hideFriends);
   const uMedal = targetUser.medal || '🍿 İzleyici';
   const uMins = Math.max(0, Number(targetUser.watchMinutes || 0));
-  const activeMediaTitle = state.mesh?.media?.title || targetUser.nowWatching || '';
+  const inCurrentMesh = Boolean(state.mesh && Array.isArray(state.mesh.participants) && state.mesh.participants.some((p) =>
+    (targetUser.id && p.id === targetUser.id) || (safeSocialUid && p.uid && p.uid === safeSocialUid)
+  ));
+  const activeMediaTitle = targetUser.nowWatching || targetUser.watchingRoom?.mediaTitle || targetUser.mediaTitle || (inCurrentMesh ? (state.mesh?.media?.title || '') : '');
   const friendList = Array.isArray(targetUser.friendsPreview) ? targetUser.friendsPreview : [];
 
   const root = h('div', { class: 'wl-auth-modal', style: { width: '100%' } },

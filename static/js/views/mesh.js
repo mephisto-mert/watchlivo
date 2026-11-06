@@ -1,15 +1,15 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v134';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v134';
-import { resolveMusicItem } from './selection-kinds.js?v=20261106_v134';
-import { MeshConnection } from '../realtime.js?v=20261106_v134';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v134';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v134';
-import { buildLayout } from './mesh-layout.js?v=20261106_v134';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v134';
-import { Voice } from '../voice.js?v=20261106_v134';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v134';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261106_v134';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261107_v136';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261107_v136';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v136';
+import { MeshConnection } from '../realtime.js?v=20261107_v136';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261107_v136';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261107_v136';
+import { buildLayout } from './mesh-layout.js?v=20261107_v136';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261107_v136';
+import { Voice } from '../voice.js?v=20261107_v136';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261107_v136';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261107_v136';
 
 let ctx = null;
 
@@ -110,10 +110,13 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
     }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.url && !String(curRoom.media.url).startsWith('/api/rave/resolve-catalog') && String(room.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
-    const livePos = (ctx?.host?.adapter && !ctx.host.loading)
+    const useLocalClock = Boolean(!fromInit && isTimeKeeper() && ctx?.host?.adapter && !ctx.host.loading);
+    const livePos = useLocalClock
       ? (ctx.host.adapter.getTime?.() ?? expectedPosition(curRoom.media))
-      : expectedPosition(curRoom.media);
-    const keepPaused = Boolean(ctx?.userPaused || curRoom.media.meshStateStatus === 'PAUSED' || curRoom.media.playing === false);
+      : Number(room.media.meshStatePosition ?? room.media.currentTime ?? 0);
+    const keepPaused = useLocalClock
+      ? Boolean(ctx?.userPaused || curRoom.media.meshStateStatus === 'PAUSED' || curRoom.media.playing === false)
+      : !isRoomMediaPlaying(room.media);
     room = {
       ...room,
       media: {
@@ -127,17 +130,20 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
         subtitleTracks: (curRoom.media.subtitleTracks && curRoom.media.subtitleTracks.length) ? curRoom.media.subtitleTracks : room.media.subtitleTracks,
         intro: curRoom.media.intro || room.media.intro,
         duration: curRoom.media.duration || room.media.duration,
-        playing: !keepPaused,
-        currentTime: livePos,
-        meshStateStatus: keepPaused ? 'PAUSED' : 'PLAYING',
-        meshStatePosition: livePos,
-        meshStateTime: clock.now(),
+        ...(useLocalClock ? {
+          playing: !keepPaused,
+          currentTime: livePos,
+          meshStateStatus: keepPaused ? 'PAUSED' : 'PLAYING',
+          meshStatePosition: livePos,
+          meshStateTime: clock.now(),
+        } : {}),
       },
     };
     if (ctx && isTimeKeeper() && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
       ctx.lastResolvePushAt = Date.now();
       const pushMedia = room.media;
-      setTimeout(() => ctx?.conn?.send('resolve_media', { ...pushMedia, currentTime: livePos }), 60);
+      const pushPos = useLocalClock ? livePos : expectedPosition(room.media);
+      setTimeout(() => ctx?.conn?.send('resolve_media', { ...pushMedia, currentTime: pushPos }), 60);
     }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
@@ -994,12 +1000,16 @@ const actions = {
     if (!msgId || !emoji) return;
     const room = state.mesh;
     const myName = state.self?.name || 'Misafir';
+    const myBaseName = String(myName).replace(/\s*#\d{3,6}$/, '').trim();
     if (room && Array.isArray(room.chat)) {
       const chatList = room.chat.map((m) => {
         if (m.id !== msgId) return m;
         const reacts = { ...(m.reactions || {}) };
         const users = Array.isArray(reacts[emoji]) ? [...reacts[emoji]] : [];
-        const idx = users.indexOf(myName);
+        let idx = users.indexOf(myName);
+        if (idx < 0 && myBaseName) {
+          idx = users.findIndex((u) => String(u || '').replace(/\s*#\d{3,6}$/, '').trim() === myBaseName);
+        }
         if (idx >= 0) users.splice(idx, 1);
         else users.push(myName);
         if (users.length) reacts[emoji] = users;
@@ -1230,7 +1240,7 @@ export async function enterMesh(app, params) {
     getAdapter: () => (host.loading ? null : host.adapter),
     isLeader: () => isTimeKeeper(),
     isSolo: () => !state.mesh?.curated && (state.mesh?.participants || []).length <= 1,
-    onLeaderSync: (t) => actions.heartbeat(t, true),
+    onLeaderSync: (t) => actions.heartbeat(t, false),
     onStatus: (s) => ctx?.layout.syncStatus(s),
   });
   ctx = { host, sync, actions, conn: null, layout: null, voice: null, isNew: params.new === '1' };

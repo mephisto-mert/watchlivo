@@ -30,6 +30,33 @@ const VERCEL_PAUSE_TOKENS = [
 ];
 
 let primaryCircuitOpenUntil = 0;
+let secondaryCircuitOpenUntil = 0;
+
+const MAX_BUFFER_BYTES = Math.floor(4.2 * 1024 * 1024);
+
+function timingSafeEq(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || !a || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function isAdminEdge(request, env) {
+  const secret = (env.ADMIN_SECRET || env.EDGE_ORIGIN_SECRET || "").trim();
+  if (!secret) return false;
+  const hdr = (request.headers.get("x-admin-secret") || "").trim();
+  const bearer = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  return timingSafeEq(hdr, secret) || timingSafeEq(bearer, secret);
+}
+
+function isAppManagedError(resp) {
+  if (!resp) return false;
+  const ct = (resp.headers.get("content-type") || "").toLowerCase();
+  const nosniff = (resp.headers.get("x-content-type-options") || "").toLowerCase() === "nosniff";
+  return ct.includes("application/json") || nosniff;
+}
 
 function shouldFailoverResponse(resp) {
   if (!resp) return true;
@@ -37,51 +64,73 @@ function shouldFailoverResponse(resp) {
   if (vercelErr && VERCEL_PAUSE_TOKENS.some((tok) => vercelErr.includes(tok))) {
     return true;
   }
-  if (resp.status === 429 || resp.status === 500) {
-    const ct = (resp.headers.get("content-type") || "").toLowerCase();
-    if (vercelErr || !ct.includes("application/json")) {
-      return true;
-    }
+  if (!vercelErr && [429, 500, 502, 503, 504].includes(resp.status) && isAppManagedError(resp)) {
     return false;
   }
   return FAILOVER_STATUSES.has(resp.status);
 }
 
-function buildForwardHeaders(originalHeaders, clientIp, originalHost, targetHost) {
+function buildForwardHeaders(originalHeaders, clientIp, originalHost, targetHost, env, keepHost = false) {
   const h = new Headers(originalHeaders);
-  h.set("Host", targetHost);
+  if (!keepHost && targetHost) {
+    h.set("Host", targetHost);
+  }
   h.set("X-Forwarded-Host", originalHost);
   h.set("X-Forwarded-Proto", "https");
-  if (clientIp) {
-    h.set("X-Real-IP", clientIp);
-  }
+  h.delete("x-forwarded-for");
+  h.delete("x-vercel-forwarded-for");
+  h.delete("x-real-ip");
+  h.delete("x-watchlivo-client-ip");
+  h.delete("x-watchlivo-edge-secret");
   h.delete("cf-connecting-ip");
   h.delete("cf-ipcountry");
   h.delete("cf-ray");
   h.delete("cf-visitor");
+  if (clientIp) {
+    h.set("X-Real-IP", clientIp);
+    h.set("X-Forwarded-For", clientIp);
+    h.set("X-Watchlivo-Client-IP", clientIp);
+    const edgeSecret = (env?.EDGE_ORIGIN_SECRET || env?.ADMIN_SECRET || "").trim();
+    if (edgeSecret) {
+      h.set("X-Watchlivo-Edge-Secret", edgeSecret);
+    }
+  }
   return h;
 }
 
-async function fetchSecondary(request, url, bodyBuf, env) {
+function originTimeoutMs(pathname) {
+  if (
+    pathname.startsWith("/api/rave/resolve") ||
+    pathname.startsWith("/api/rave/subtitles") ||
+    pathname.startsWith("/api/rave/stream") ||
+    pathname === "/api/upload"
+  ) {
+    return 25_000;
+  }
+  return 8_500;
+}
+
+async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu-failover") {
   const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
   const cleanSearch = new URLSearchParams(url.search);
   cleanSearch.delete("__simulate_vercel_pause");
   const qs = cleanSearch.toString();
   const secUrl = new URL(url.pathname + (qs ? `?${qs}` : ""), secondaryBase);
   const clientIp = request.headers.get("CF-Connecting-IP") || "";
-  const headers = buildForwardHeaders(request.headers, clientIp, "watchlivo.online", secUrl.host);
+  const headers = buildForwardHeaders(request.headers, clientIp, "watchlivo.online", secUrl.host, env, false);
 
   const init = {
     method: request.method,
     headers,
     redirect: "manual",
+    signal: AbortSignal.timeout(originTimeoutMs(url.pathname)),
   };
   if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
     init.body = bodyBuf;
   }
   const resp = await fetch(secUrl.toString(), init);
   const outHeaders = new Headers(resp.headers);
-  outHeaders.set("X-Watchlivo-Origin", "render-eu-failover");
+  outHeaders.set("X-Watchlivo-Origin", originTag);
   return new Response(resp.body, {
     status: resp.status,
     statusText: resp.statusText,
@@ -101,35 +150,49 @@ export default {
 
     // 2. Gateway diagnostic endpoint
     if (url.pathname === "/api/ha-status") {
-      return new Response(
-        JSON.stringify({
-          ok: true,
-          gateway: "watchlivo-ha-gateway-v135",
-          primaryCircuitOpen: Date.now() < primaryCircuitOpenUntil,
-          secondaryOrigin: env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN,
-          streamProxyOrigin: env.STREAM_PROXY_ORIGIN || DEFAULT_STREAM_PROXY_ORIGIN,
-          hasStreamBinding: Boolean(env.STREAM_PROXY),
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Cache-Control": "no-store",
-          },
-        }
-      );
+      const adminOk = isAdminEdge(request, env);
+      const statusPayload = {
+        ok: true,
+        gateway: "watchlivo-ha-gateway-v136",
+        primaryCircuitOpen: Date.now() < primaryCircuitOpenUntil,
+        secondaryCircuitOpen: Date.now() < secondaryCircuitOpenUntil,
+        hasStreamBinding: Boolean(env.STREAM_PROXY),
+      };
+      if (adminOk) {
+        statusPayload.secondaryOrigin = env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN;
+        statusPayload.streamProxyOrigin = env.STREAM_PROXY_ORIGIN || DEFAULT_STREAM_PROXY_ORIGIN;
+      }
+      return new Response(JSON.stringify(statusPayload), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
     // 3. Direct zero-egress offload via Service Binding (0ms RPC) for APK/IPA and stream-proxy
-    if (
+    const isBinaryDownload =
       url.pathname === "/download/apk" ||
       url.pathname === "/download/ipa" ||
-      url.pathname === "/api/rave/stream-proxy"
-    ) {
-      const targetParam = (url.searchParams.get("url") || "").toLowerCase();
-      const bypassWorker =
-        url.pathname === "/api/rave/stream-proxy" &&
-        BYPASS_WORKER_HOSTS.some((h) => targetParam.includes(h));
+      /^\/download\/Watchlivo.*\.(apk|ipa)$/i.test(url.pathname);
+    const isStreamProxyPath =
+      url.pathname === "/api/rave/stream-proxy" ||
+      url.pathname === "/api/rave/stream_chunk";
+    if (isBinaryDownload || isStreamProxyPath) {
+      const cfFallback = url.searchParams.get("cf_fb") === "1";
+      let bypassWorker = cfFallback;
+      if (!bypassWorker && isStreamProxyPath) {
+        const rawTarget = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
+        try {
+          const parsedHost = new URL(rawTarget).hostname.toLowerCase();
+          bypassWorker = BYPASS_WORKER_HOSTS.some(
+            (h) => parsedHost === h || parsedHost.endsWith(`.${h}`)
+          );
+        } catch {
+          bypassWorker = false;
+        }
+      }
       if (!bypassWorker) {
         if (env.STREAM_PROXY) {
           return env.STREAM_PROXY.fetch(request);
@@ -145,45 +208,105 @@ export default {
     if (upgrade === "websocket") {
       const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
       const wsTarget = new URL(url.pathname + url.search, secondaryBase);
-      const wsHeaders = new Headers(request.headers);
-      wsHeaders.set("Host", wsTarget.host);
-      wsHeaders.set("X-Forwarded-Host", "watchlivo.online");
-      wsHeaders.set("X-Forwarded-Proto", "https");
+      const clientIp = request.headers.get("CF-Connecting-IP") || "";
+      const wsHeaders = buildForwardHeaders(
+        request.headers,
+        clientIp,
+        "watchlivo.online",
+        wsTarget.host,
+        env,
+        false
+      );
+      wsHeaders.set("Upgrade", "websocket");
       return fetch(wsTarget.toString(), {
         method: request.method,
         headers: wsHeaders,
       });
     }
 
-    // 5. Buffer non-streaming request bodies (< 10 MB) so POST/PUT/DELETE can failover cleanly
+    // 5. Buffer non-streaming request bodies (<= 4.2 MB) so POST/PUT/DELETE can failover cleanly
     let bodyBuf = null;
     if (request.method !== "GET" && request.method !== "HEAD") {
       const contentLen = parseInt(request.headers.get("content-length") || "0", 10);
-      if (!Number.isNaN(contentLen) && contentLen > 10 * 1024 * 1024) {
-        if (Date.now() < primaryCircuitOpenUntil || env.FORCE_SECONDARY === "1") {
-          const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-          const secUrl = new URL(url.pathname + url.search, secondaryBase);
-          const headers = buildForwardHeaders(
-            request.headers,
-            request.headers.get("CF-Connecting-IP") || "",
-            "watchlivo.online",
-            secUrl.host
-          );
-          return fetch(secUrl.toString(), { method: request.method, headers, body: request.body });
-        }
-        return fetch(request);
+      if (!Number.isNaN(contentLen) && contentLen > MAX_BUFFER_BYTES) {
+        const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
+        const secUrl = new URL(url.pathname + url.search, secondaryBase);
+        const headers = buildForwardHeaders(
+          request.headers,
+          request.headers.get("CF-Connecting-IP") || "",
+          "watchlivo.online",
+          secUrl.host,
+          env,
+          false
+        );
+        return fetch(secUrl.toString(), {
+          method: request.method,
+          headers,
+          body: request.body,
+          redirect: "manual",
+          signal: AbortSignal.timeout(25_000),
+        });
       }
       bodyBuf = await request.arrayBuffer();
+      if (bodyBuf.byteLength > MAX_BUFFER_BYTES) {
+        const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
+        const secUrl = new URL(url.pathname + url.search, secondaryBase);
+        const headers = buildForwardHeaders(
+          request.headers,
+          request.headers.get("CF-Connecting-IP") || "",
+          "watchlivo.online",
+          secUrl.host,
+          env,
+          false
+        );
+        return fetch(secUrl.toString(), {
+          method: request.method,
+          headers,
+          body: bodyBuf,
+          redirect: "manual",
+          signal: AbortSignal.timeout(25_000),
+        });
+      }
     }
 
-    // 6. Deterministic failover chaos-test hook (?__simulate_vercel_pause=1) or workers.dev direct test
-    if (url.searchParams.get("__simulate_vercel_pause") === "1") {
+    // 6. Deterministic failover chaos-test hook (admin-gated) or workers.dev direct test
+    if (url.searchParams.get("__simulate_vercel_pause") === "1" && isAdminEdge(request, env)) {
       const simulatedPaused = new Response("Deployment is paused", {
         status: 503,
         headers: { "x-vercel-error": "DEPLOYMENT_PAUSED" },
       });
       if (shouldFailoverResponse(simulatedPaused)) {
         return fetchSecondary(request, url, bodyBuf, env);
+      }
+    }
+
+    // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads) -> Render EU primary with instant Vercel fallback
+    const prefersStatefulOrigin =
+      url.pathname === "/api/rooms" ||
+      url.pathname.startsWith("/api/rooms/") ||
+      url.pathname.startsWith("/api/rave/voice-relay/") ||
+      url.pathname === "/api/upload" ||
+      url.pathname.startsWith("/uploads/");
+
+    if (prefersStatefulOrigin && Date.now() >= secondaryCircuitOpenUntil) {
+      try {
+        const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
+        if (statefulResp.status < 502 && statefulResp.status !== 429) {
+          return statefulResp;
+        }
+        if (statefulResp.status >= 502 && !isAppManagedError(statefulResp)) {
+          secondaryCircuitOpenUntil = Date.now() + 20_000;
+        } else {
+          return statefulResp;
+        }
+      } catch {
+        secondaryCircuitOpenUntil = Date.now() + 20_000;
+      }
+      if (url.pathname === "/api/upload" || url.pathname.startsWith("/uploads/")) {
+        return new Response(JSON.stringify({ ok: false, error: "Yükleme servisi geçici olarak meşgul." }), {
+          status: 503,
+          headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+        });
       }
     }
 
@@ -197,10 +320,20 @@ export default {
 
     // 7. Try Primary (Vercel via Cloudflare Zone DNS -> 216.198.79.1), failover to Render on pause/5xx
     try {
+      const clientIp = request.headers.get("CF-Connecting-IP") || "";
+      const primaryHeaders = buildForwardHeaders(
+        request.headers,
+        clientIp,
+        "watchlivo.online",
+        url.host,
+        env,
+        true
+      );
       const primaryInit = {
         method: request.method,
-        headers: request.headers,
+        headers: primaryHeaders,
         redirect: "manual",
+        signal: AbortSignal.timeout(originTimeoutMs(url.pathname)),
       };
       if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
         primaryInit.body = bodyBuf;
@@ -225,11 +358,14 @@ export default {
 
   async scheduled(_event, env, ctx) {
     const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-    ctx.waitUntil(
+    const pingOnce = () =>
       fetch(`${secondaryBase}/api/health`, {
         method: "GET",
-        headers: { "User-Agent": "Watchlivo-KeepAlive-Cron/1.0" },
-      }).catch(() => null)
+        headers: { "User-Agent": "Watchlivo-KeepAlive-Cron/1.1" },
+        signal: AbortSignal.timeout(12_000),
+      });
+    ctx.waitUntil(
+      pingOnce().catch(() => pingOnce()).catch(() => null)
     );
   },
 };

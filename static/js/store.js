@@ -979,7 +979,9 @@ export async function pushPresenceHeartbeat(override = {}) {
   const m = state.mesh;
   const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
   const hideWatchFlag = Boolean(s.hideWatching ?? state.social?.privacy?.hideWatching);
-  const defState = override.state || ((m?.id && !hideWatchFlag) ? 'watching' : (hidden ? 'idle' : 'online'));
+  const visMode = state.social?.privacy?.presenceVisibility || 'friends';
+  const shareWatch = Boolean(m?.id && !hideWatchFlag && visMode !== 'nobody' && (m?.privacy || 'public') !== 'private' && !m?.hasPassword);
+  const defState = override.state || (shareWatch ? 'watching' : (hidden ? 'idle' : 'online'));
   try {
     const r = await fetch('/api/rave/social/presence', {
       method: 'POST',
@@ -993,16 +995,16 @@ export async function pushPresenceHeartbeat(override = {}) {
         color: s.color || '#27DCC8',
         avatarUrl: s.avatarUrl || '',
         state: defState,
-        roomId: m?.id || '',
-        roomName: m?.name || '',
-        roomPrivacy: m?.privacy || 'public',
-        mediaTitle: m?.media?.title || '',
-        mediaPoster: m?.media?.poster || m?.media?.thumbnail || '',
-        mediaProvider: m?.media?.provider || '',
+        roomId: shareWatch ? (m?.id || '') : '',
+        roomName: shareWatch ? (m?.name || '') : '',
+        roomPrivacy: shareWatch ? (m?.privacy || 'public') : 'private',
+        mediaTitle: shareWatch ? (m?.media?.title || '') : '',
+        mediaPoster: shareWatch ? (m?.media?.poster || m?.media?.thumbnail || '') : '',
+        mediaProvider: shareWatch ? (m?.media?.provider || '') : '',
         statusText: s.statusText || '',
         statusEmoji: s.statusEmoji || '🍿',
-        hideWatching: Boolean(s.hideWatching ?? state.social?.privacy?.hideWatching),
-        visibility: state.social?.privacy?.presenceVisibility || 'friends',
+        hideWatching: Boolean(hideWatchFlag || !shareWatch),
+        visibility: visMode,
         ...override,
       }),
     });

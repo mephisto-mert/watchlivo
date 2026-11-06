@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261106_v134';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261106_v134';
-import { ensureHlsJs } from './hls-loader.js?v=20261106_v134';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v136';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261107_v136';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v136';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -344,12 +344,13 @@ export class YouTubeAdapter {
 
       if (isHls && !useNative && window.Hls?.isSupported?.()) {
         let mediaRecovered = false;
+        const effHlsStart = (this.initialSeekPending && this.initialSeekPending > 0.5) ? this.initialSeekPending : validStart;
         const hls = new window.Hls({
           enableWorker: true,
           lowLatencyMode: Boolean(this.media?.live),
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
-          startPosition: validStart > 0.5 ? validStart : -1,
+          startPosition: effHlsStart > 0.5 ? effHlsStart : -1,
         });
         this.hls = hls;
         hls.on(window.Hls.Events.MANIFEST_PARSED, () => {

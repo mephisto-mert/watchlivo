@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261106_v134';
-import { expectedPosition } from '../sync.js?v=20261106_v134';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261106_v134';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261106_v134';
-import { ensureHlsJs } from './hls-loader.js?v=20261106_v134';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v136';
+import { expectedPosition } from '../sync.js?v=20261107_v136';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v136';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v136';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v136';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');

@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261106_v134';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v136';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -57,14 +57,14 @@ export function parseVtt(vttText) {
       }
     }
   } else {
-  const timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{3})/;
+  const timeRe = /(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[.,](\d{1,3})/;
   let i = 0;
   while (i < lines.length) {
     const ln = lines[i].trim();
     const m = timeRe.exec(ln);
     if (m) {
-      const start = parseTimeSec(m[1], m[2], m[3], m[4]);
-      const rawEnd = parseTimeSec(m[5], m[6], m[7], m[8]);
+      const start = parseTimeSec(m[1], m[2], m[3], String(m[4] || '0').padEnd(3, '0'));
+      const rawEnd = parseTimeSec(m[5], m[6], m[7], String(m[8] || '0').padEnd(3, '0'));
       const end = Math.min(rawEnd, start + 22.0);
       i += 1;
       const textLines = [];
@@ -857,7 +857,7 @@ export class SubtitleDubController {
     if (typeof track.hlsIndex === 'number' && hlsHasMulti && (!track.url || cleanUrl(track.url) === cleanUrl(this.adapter.currentUrl))) {
       this._applyHlsAudioSelection();
     } else if (!isInit && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
-      this.adapter.switchStreamSource(track.url);
+      await this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();
       this._applyNativeAudioSelection();

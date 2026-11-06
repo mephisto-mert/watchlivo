@@ -182,7 +182,7 @@ class SecurityHeaders:
                     else:
                         csp_val = (
                             "default-src 'self'; "
-                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
+                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
                             "worker-src 'self' blob:; "
                             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                             "font-src 'self' data: https://fonts.gstatic.com; "
@@ -2574,7 +2574,8 @@ def _resolve_episode_numbering(tid: str, s: int, e: int) -> dict:
     else:
         ep_map = _tv_season_ep_map(tid_s) if tid_s.isdigit() else {}
         if ep_map and s_in > 1:
-            abs_ep = sum(int(ep_map.get(k) or 0) for k in range(1, s_in)) + e_in
+            s_cap = min(s_in, max(ep_map.keys()) + 1)
+            abs_ep = sum(int(ep_map.get(k) or 0) for k in range(1, s_cap)) + e_in
         elif s_in == 1:
             abs_ep = e_in
             if ep_map and e_in > max(1, int(ep_map.get(1) or 0)):
@@ -4919,7 +4920,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
 
 
 def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e: int, mtype: str = "") -> str:
-    if u.startswith("/api/rave/"):
+    if u.startswith("/api/rave/") or "/api/rave/stream" in u:
         return u
     import base64
     tid = urllib.parse.quote(str(tid or ""), safe="")
@@ -4958,6 +4959,8 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
         sid = base64.urlsafe_b64encode(u.encode("utf-8")).decode("ascii").rstrip("=")
         ref_q = "&ref=ve" if stype in ("hls_ve", "hls_ve_multi") else ("&ref=cj" if stype == "hls_cj" else ("&ref=dl" if stype == "hls_dl" else ("&ref=hx" if "dragonballzfans" in u else "")))
         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s}&e={e}{mt_q}&sid={sid}{ref_q}&ext=.m3u8"
+    if u.startswith("http://") and public_http_url(u):
+        return _proxy_u(u, "", ".mp4" if ".mp4" in u.lower() else ".m3u8")
     return u
 
 
@@ -6063,7 +6066,14 @@ async def resolve_catalog(request: Request):
     year = (request.query_params.get("year") or "").strip()[:10]
     tmdb_id = (request.query_params.get("tmdbId") or "").strip()[:30]
     imdb_id = (request.query_params.get("imdbId") or "").strip()[:30]
-    media_type = (request.query_params.get("mediaType") or request.query_params.get("type") or "movie").strip().lower()
+    raw_mtype_q = (request.query_params.get("mediaType") or request.query_params.get("type") or "").strip().lower()
+    has_ep_q = bool((request.query_params.get("season") or request.query_params.get("s") or "").strip()) or bool((request.query_params.get("episode") or request.query_params.get("e") or "").strip())
+    if raw_mtype_q:
+        media_type = raw_mtype_q
+    elif prov in ("dizi", "anime", "cizgifilm") or (has_ep_q and str(request.query_params.get("episode") or request.query_params.get("e") or "1").strip() != "1") or (has_ep_q and str(request.query_params.get("season") or request.query_params.get("s") or "1").strip() != "1"):
+        media_type = "tv"
+    else:
+        media_type = "movie"
     raw_poster = (request.query_params.get("poster") or "").strip()[:600]
     poster = raw_poster if raw_poster.startswith(("https://", "http://", "/api/rave/poster", "/static/")) else ""
     raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
@@ -6081,8 +6091,8 @@ async def resolve_catalog(request: Request):
             source_url = raw_source_url
     force_refresh = (request.query_params.get("refresh") or "").strip().lower() in ("1", "true", "yes")
     try:
-        season = max(1, int(request.query_params.get("season") or request.query_params.get("s") or 1))
-        episode = max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1))
+        season = min(100, max(1, int(request.query_params.get("season") or request.query_params.get("s") or 1)))
+        episode = min(5000, max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1)))
     except (TypeError, ValueError):
         season, episode = 1, 1
     ckey = f"v25|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
@@ -7312,7 +7322,7 @@ async def rave_stream_manifest(request: Request):
         except Exception:
             target = ""
     if not target:
-        target = (request.query_params.get("u") or "").strip()
+        target = (request.query_params.get("u") or request.query_params.get("url") or "").strip()
     if not target or not public_http_url(target):
         return JSONResponse({"error": "Geçersiz akış"}, status_code=400)
     is_live_tv = any(d in target for d in ("ercdn.net", "daioncdn.net", "radyotvonline.", "trt.com.tr", "ensonhaber.com", "powerapp.com.tr"))
@@ -8171,7 +8181,8 @@ def _srt_to_vtt(raw_bytes) -> str:
     if isinstance(raw_bytes, str):
         txt = raw_bytes
     else:
-        for enc in ("utf-8-sig", "utf-16", "utf-8", "cp1254", "latin-1"):
+        encs = ("utf-8-sig", "utf-16", "cp1254", "latin-1") if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")) else ("utf-8-sig", "utf-8", "cp1254", "latin-1")
+        for enc in encs:
             try:
                 txt = raw_bytes.decode(enc)
                 break
@@ -8232,7 +8243,7 @@ def _srt_to_vtt(raw_bytes) -> str:
     txt = re.sub(r"(\d{1,2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}),(\d{3})", r"\1.\2 --> \3.\4", txt)
     txt = re.sub(r"(?m)^(\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}[.,]\d{3})", lambda m: f"00:{m.group(1).replace(',', '.')} --> 00:{m.group(2).replace(',', '.')}", txt)
     txt = re.sub(
-        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|dizipal|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|deneme\s*bonusu|freespin|bahis|casino|t\.me/|telegram|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
+        r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|dizipal|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|deneme\s*bonusu|freespin|t\.me/|(?:bahis|casino|telegram)[^\n]*(?:https?://|www\.|@[a-z0-9_]{3,}|\.(?:com|net|org|xyz|bet|io)|bonus|güncel\s*giriş)|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
         "",
         txt,
     )
@@ -8727,13 +8738,18 @@ _UPLOAD_LIMIT = RateLimiter(20, 3600.0, name="upload")
 MAX_UPLOADS_TOTAL_BYTES = int(os.environ.get("MAX_UPLOADS_TOTAL_BYTES") or 5 * 1024 ** 3)
 
 
-def _uploads_dir_size() -> int:
+def _uploads_dir_size(prune_ttl_sec: float = 86400.0) -> int:
     total = 0
+    now_t = time.time()
     try:
         for entry in UPLOADS_DIR.iterdir():
             try:
                 if entry.is_file():
-                    total += entry.stat().st_size
+                    st = entry.stat()
+                    if prune_ttl_sec > 0 and (now_t - st.st_mtime) > prune_ttl_sec:
+                        entry.unlink(missing_ok=True)
+                        continue
+                    total += st.st_size
             except OSError:
                 continue
     except OSError:
@@ -8817,8 +8833,12 @@ async def service_worker(request: Request):
 
 
 async def health(request: Request):
-    mem_rooms = getattr(rooms.STORE, "rooms", {}) or {}
-    total_p = sum(len((r.get("participants") or {})) for r in mem_rooms.values() if isinstance(r, dict))
+    mem_rooms = getattr(rooms.STORE, "l1_rooms", None) or getattr(rooms.STORE, "rooms", {}) or {}
+    total_p = sum(
+        sum(1 for p in (r.get("participants") or {}).values() if isinstance(p, dict) and p.get("transport") != "bot")
+        for r in mem_rooms.values()
+        if isinstance(r, dict)
+    )
     return JSONResponse({
         "ok": True,
         "sharedStore": rooms.STORE.shared,
@@ -8916,6 +8936,18 @@ async def download_apk_endpoint(request: Request):
 
 async def download_windows_endpoint(request: Request):
     exe_file = STATIC_DIR / "Watchlivo.exe"
+    ext_win = os.environ.get("WATCHLIVO_WINDOWS_DOWNLOAD_URL", "").strip()
+    if request.query_params.get("check") == "1":
+        has_native = bool(exe_file.exists() or ext_win.startswith("https://"))
+        dl_url = ext_win if ext_win.startswith("https://") else ("/download/windows" if exe_file.exists() else "")
+        return JSONResponse({
+            "ok": True,
+            "available": has_native,
+            "nativeAvailable": has_native,
+            "url": dl_url,
+            "downloadUrl": dl_url,
+            "fallback": "pwa",
+        }, headers={"Cache-Control": "no-store"})
     if exe_file.exists():
         return FileResponse(
             exe_file,
@@ -8926,7 +8958,6 @@ async def download_windows_endpoint(request: Request):
                 "X-Content-Type-Options": "nosniff",
             },
         )
-    ext_win = os.environ.get("WATCHLIVO_WINDOWS_DOWNLOAD_URL", "").strip()
     if ext_win.startswith("https://"):
         return RedirectResponse(ext_win, status_code=302)
     return RedirectResponse("/#/?platform=windows", status_code=302)
@@ -9420,7 +9451,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
         try:
             room = rooms.merge_sync_token(None, incoming_rtok, safe_id)
             if room:
-                await rooms.STORE.put(room)
+                await rooms.STORE.put(room, force_disk=True)
         except Exception:
             pass
     is_locked = bool(room and rooms.has_password(room))
@@ -10050,7 +10081,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
             "Watchlivo resmi iletişim e-posta adresi (jokallame0@gmail.com), film/dizi istek, hata bildirimi ve DMCA başvuru sayfası.",
             "✉️ İletişim, Film/Dizi İstek & Destek Merkezi",
             "<p>Görüş, öneri, işbirliği, film/dizi ekleme talebi, çalışmayan bölüm bildirimi veya telif hakkı (DMCA) başvurularınız için bize doğrudan ulaşabilirsiniz:</p>"
-            "<p style='font-size:16px;'><b>📬 Resmi E-Posta Adresimiz:</b> <a href='mailto:jokallame0@gmail.com' style='color:#27dcc8;font-weight:800;'>jokallame0@gmail.com</a></p>"
+            "<!--email_off--><p style='font-size:16px;'><b>📬 Resmi E-Posta Adresimiz:</b> <a href='mailto:jokallame0@gmail.com' style='color:#27dcc8;font-weight:800;'>jokallame0@gmail.com</a></p><!--/email_off-->"
         ),
     }
     title, desc, h1_txt, body_html = pages.get(path, pages["about"])
@@ -10154,7 +10185,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
       {form_html}
     </main>
     <div class="foot">
-      <span>📩 Resmi İletişim & Hukuk: <a href="mailto:jokallame0@gmail.com" style="color:#27dcc8;font-weight:700;">jokallame0@gmail.com</a></span>
+      <!--email_off--><span>📩 Resmi İletişim & Hukuk: <a href="mailto:jokallame0@gmail.com" style="color:#27dcc8;font-weight:700;">jokallame0@gmail.com</a></span><!--/email_off-->
       <span>© 2026 Watchlivo (watchlivo.online)</span>
     </div>
   </div>
@@ -10296,9 +10327,27 @@ class SelectiveGZipMiddleware:
         await self.gzip_app(scope, receive, send)
 
 
+async def _favicon_endpoint(request: Request):
+    svg = STATIC_DIR / "watchlivo-logo.svg"
+    if svg.exists():
+        return FileResponse(svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+    return Response(status_code=204)
+
+
+async def _apple_touch_icon_endpoint(request: Request):
+    png = STATIC_DIR / "watchlivo-icon-192.png"
+    if png.exists():
+        return FileResponse(png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+    return Response(status_code=204)
+
+
 app = Starlette(
     routes=[
         Route("/", index),
+        Route("/index.html", index),
+        Route("/favicon.ico", _favicon_endpoint, methods=["GET", "HEAD"]),
+        Route("/apple-touch-icon.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
+        Route("/apple-touch-icon-precomposed.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
         Route("/robots.txt", robots_txt_endpoint, methods=["GET", "HEAD"]),
         Route("/sitemap.xml", sitemap_xml_endpoint, methods=["GET", "HEAD"]),
         Route("/stats", analytics_dashboard_page, methods=["GET"]),

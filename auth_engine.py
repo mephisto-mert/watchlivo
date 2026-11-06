@@ -452,6 +452,7 @@ def _candidate_auth_secrets() -> list[bytes]:
 
 
 _REVOKED_AUTH_SIGS: "OrderedDict[str, float]" = OrderedDict()
+_REVOKED_NEG_CACHE: "OrderedDict[str, float]" = OrderedDict()
 
 
 def revoke_auth_token(token: str) -> None:
@@ -462,19 +463,41 @@ def revoke_auth_token(token: str) -> None:
         return
     exp_ts = time.time() + TOKEN_TTL
     _REVOKED_AUTH_SIGS[sig] = exp_ts
+    _REVOKED_NEG_CACHE.pop(sig, None)
     while len(_REVOKED_AUTH_SIGS) > 5000:
         _REVOKED_AUTH_SIGS.popitem(last=False)
+    if store_backend() == "redis":
+        try:
+            _kv("SET", f"{_kp()}rev:{sig}", str(int(exp_ts)), "EX", TOKEN_TTL)
+        except Exception:
+            pass
 
 
 def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or "." not in token or len(token) > 4096:
         return None
     b64, sig = token.rsplit(".", 1)
+    now_ts = time.time()
     rev_exp = _REVOKED_AUTH_SIGS.get(sig)
     if rev_exp:
-        if rev_exp > time.time():
+        if rev_exp > now_ts:
             return None
         _REVOKED_AUTH_SIGS.pop(sig, None)
+    elif store_backend() == "redis":
+        neg_until = _REVOKED_NEG_CACHE.get(sig, 0.0)
+        if neg_until <= now_ts:
+            try:
+                raw_rev = _kv("GET", f"{_kp()}rev:{sig}")
+                if raw_rev:
+                    r_exp = float(raw_rev)
+                    if r_exp > now_ts:
+                        _REVOKED_AUTH_SIGS[sig] = r_exp
+                        return None
+                _REVOKED_NEG_CACHE[sig] = now_ts + 15.0
+                while len(_REVOKED_NEG_CACHE) > 5000:
+                    _REVOKED_NEG_CACHE.popitem(last=False)
+            except Exception:
+                pass
     b64_bytes = b64.encode("ascii")
     matched = any(
         hmac.compare_digest(hmac.new(sec, b64_bytes, hashlib.sha256).hexdigest()[:32], sig)
@@ -687,6 +710,13 @@ async def auth_login(request: Request) -> JSONResponse:
                 except Exception:
                     pass
     reset_allowed = bool(target_email and _PASSWORD_RESET_PENDING.get(target_email, 0.0) > time.time())
+    if not reset_allowed and target_email and store_backend() == "redis":
+        try:
+            raw_rst = _kv("GET", f"{_kp()}pwreset:{target_email}")
+            if raw_rst and float(raw_rst) > time.time():
+                reset_allowed = True
+        except Exception:
+            pass
     if not fb_verified and (not row or reset_allowed) and target_email and EMAIL_RE.match(target_email):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
@@ -699,6 +729,11 @@ async def auth_login(request: Request) -> JSONResponse:
                 if fb_email == target_email:
                     fb_verified = True
                     _PASSWORD_RESET_PENDING.pop(target_email, None)
+                    if store_backend() == "redis":
+                        try:
+                            _kv("DEL", f"{_kp()}pwreset:{target_email}")
+                        except Exception:
+                            pass
                     salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
                     if row:
@@ -1071,7 +1106,13 @@ async def auth_email_action(request: Request) -> JSONResponse:
         })
         res = _firebase_auth_req("accounts:sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
         if res and res.get("email"):
-            _PASSWORD_RESET_PENDING[email] = time.time() + 3600.0
+            rst_exp = time.time() + 3600.0
+            _PASSWORD_RESET_PENDING[email] = rst_exp
+            if store_backend() == "redis":
+                try:
+                    _kv("SET", f"{_kp()}pwreset:{email}", str(int(rst_exp)), "EX", 3600)
+                except Exception:
+                    pass
             return JSONResponse({"ok": True, "message": f"Şifre sıfırlama bağlantısı {email} adresine gönderildi."})
         return JSONResponse({"ok": False, "error": "Sıfırlama e-postası gönderilemedi. Lütfen adresi kontrol edin."}, status_code=400)
     if action == "magic_link":
@@ -1178,11 +1219,15 @@ async def auth_profile(request: Request) -> JSONResponse:
     if "hideLocation" in body:
         fields["hide_location"] = 1 if _as_bool(body.get("hideLocation")) else 0
     pwh_keep = str(claims.get("pwh") or "")
+    upd_failed = False
     try:
         row = _user_update(uid, fields)
     except Exception:
         row = None
+        upd_failed = True
     if not row:
+        if store_backend() == "redis" and not upd_failed:
+            return JSONResponse({"ok": False, "error": "Hesap bulunamadı. Lütfen tekrar giriş yapın."}, status_code=401)
         user = {
             "uid": uid,
             "email": claims.get("email", ""),
@@ -1265,14 +1310,18 @@ async def auth_me(request: Request) -> JSONResponse:
     if not claims:
         return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
     pwh_keep = str(claims.get("pwh") or "")
+    lookup_failed = False
     try:
         row = _user_get(claims["uid"])
     except Exception:
         row = None
+        lookup_failed = True
     if row:
         u_obj = _row_to_user(row)
         _sync_user_to_social(u_obj)
         return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj, pw_verifier=pwh_keep)}, headers=priv_hdrs)
+    if store_backend() == "redis" and not lookup_failed:
+        return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],
         "email": claims.get("email", ""),

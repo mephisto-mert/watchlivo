@@ -376,7 +376,7 @@ class RegressionTests(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parent.parent
         host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
         self.assertIn("this.onEvent('play', arg)", host_js)
-        self.assertIn("onPause: (arg) => this.onEvent('pause', arg)", host_js)
+        self.assertIn("onPause: guard((arg) => this.onEvent('pause', arg))", host_js)
         room = rooms.new_room("test-v37-room", "Test V37", "public", "leader", "Mert Can Yıldız", "u_mert", "")
         rooms.add_participant(room, "h_mert", {"username": "Mert Can Yıldız", "userId": "u_mert", "_internalCreator": True}, "http")
         # Subsequent guest fallback must not overwrite real name
@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261106_v134 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v136 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261106_v134", index_html)
+        self.assertIn("20261107_v136", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261106_v134", sw_js)
+        self.assertIn("v20261107_v136", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261106_v134', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v136', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261106_v134', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v136', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261106_v134')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v136')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -2670,8 +2670,11 @@ const calls = [];
 globalThis.fetch = async (input, init = {{}}) => {{
   const u = typeof input === 'string' ? input : input.url;
   calls.push({{ url: u, method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers || {{}}).entries()) }});
-  if (u.startsWith('https://watchlivo.online/api/rooms')) {{
+  if (u.startsWith('https://watchlivo.online/api/rave/catalog')) {{
     return new Response('Paused', {{ status: 503, headers: {{ 'x-vercel-error': 'DEPLOYMENT_PAUSED' }} }});
+  }}
+  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/rave/catalog')) {{
+    return new Response(JSON.stringify({{ items: [{{ id: 'cat-1' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
   }}
   if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/rooms')) {{
     return new Response(JSON.stringify({{ rooms: [{{ id: 'tv-trt1' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
@@ -2707,12 +2710,19 @@ const rWs = await gw.fetch(new Request('https://watchlivo.online/ws/room1', {{ h
 assert.equal(rWs.status, 200);
 assert.ok(calls.some(c => c.url === 'https://watchlivo-origin-eu.onrender.com/ws/room1'));
 
-// 4. Primary Vercel DEPLOYMENT_PAUSED -> automatic failover to Secondary Render
-const rFail = await gw.fetch(new Request('https://watchlivo.online/api/rooms'), env, {{}});
+// 4. Primary Vercel DEPLOYMENT_PAUSED -> automatic failover to Secondary Render on stateless routes
+const rFail = await gw.fetch(new Request('https://watchlivo.online/api/rave/catalog'), env, {{}});
 assert.equal(rFail.status, 200);
 assert.equal(rFail.headers.get('X-Watchlivo-Origin'), 'render-eu-failover');
 const jFail = await rFail.json();
-assert.equal(jFail.rooms[0].id, 'tv-trt1');
+assert.equal(jFail.items[0].id, 'cat-1');
+
+// 4b. Stateful /api/rooms routes directly to Render EU to eliminate HTTP/WS split-brain
+const rStateful = await gw.fetch(new Request('https://watchlivo.online/api/rooms'), env, {{}});
+assert.equal(rStateful.status, 200);
+assert.equal(rStateful.headers.get('X-Watchlivo-Origin'), 'render-eu-stateful');
+const jStateful = await rStateful.json();
+assert.equal(jStateful.rooms[0].id, 'tv-trt1');
 
 // 5. Scheduled keep-alive cron pings Render /api/health
 let waited = null;
@@ -2724,6 +2734,152 @@ console.log('HA_UNIT_TESTS_PASSED');
         proc = _sp.run(["node", "--input-type=module", "-e", harness], capture_output=True, text=True, timeout=15)
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertIn("HA_UNIT_TESTS_PASSED", proc.stdout)
+
+    def test_v136_audit_remediations_and_rejoin_sync(self):
+        """v136: Solo/guest leave-rejoin preserves playback, near-zero heartbeat guard, edge IP auth, 45KB avatar, voice-relay auth, and Windows check."""
+        import asyncio as _aio
+        import os as _os
+        import security
+        import social_engine
+
+        # 1. Solo creator creates room, plays to 1845s, leaves (without close_room), and rejoins -> currentTime preserved!
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Solo Rejoin Test",
+            "creator": "Kaptan",
+            "clientId": "h_solo_cap",
+            "creatorCid": "h_solo_cap",
+            "media": {
+                "provider": "hls",
+                "url": "https://cdn.example.com/movie.m3u8",
+                "title": "Uzay Yolu",
+                "currentTime": 1845.0,
+                "playing": True,
+            },
+        })
+        self.assertEqual(cr.status_code, 200)
+        rid = cr.json()["room"]["id"]
+
+        init1 = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_solo_cap",
+            "username": "Kaptan",
+            "isCreator": True,
+        }).json()
+        ctok = init1["clientToken"]
+        self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "seek",
+            "clientId": "h_solo_cap",
+            "clientToken": ctok,
+            "currentTime": 1845.0,
+        })
+        # Creator leaves temporarily (not close_room)
+        lv = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "leave",
+            "clientId": "h_solo_cap",
+            "clientToken": ctok,
+        })
+        self.assertEqual(lv.status_code, 200)
+        # Lobby snapshot and rejoin must NOT reset currentTime to 0 or return 410
+        rejoin = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init",
+            "clientId": "h_solo_cap",
+            "clientToken": ctok,
+            "username": "Kaptan",
+            "isCreator": True,
+        })
+        self.assertEqual(rejoin.status_code, 200)
+        rejoin_pos = float(rejoin.json()["room"]["media"]["currentTime"])
+        self.assertGreaterEqual(rejoin_pos, 1840.0)
+
+        # 2. Near-zero leader heartbeat rewind guard when playbackAnchored is true
+        hb_rewind = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "heartbeat",
+            "clientId": "h_solo_cap",
+            "clientToken": ctok,
+            "currentTime": 1.2,
+            "playing": True,
+            "forceAnchor": True,
+        })
+        self.assertEqual(hb_rewind.status_code, 200)
+        after_hb_pos = float(hb_rewind.json()["room"]["media"]["currentTime"])
+        self.assertGreaterEqual(after_hb_pos, 1840.0)
+
+        # 3. Voice relay GET rejects non-participant outsider (403) and allows verified participant (200)
+        outsider_vr = self.client.get(f"/api/rave/voice-relay/{rid}?clientId=h_outsider_999&sinceTs=0")
+        self.assertEqual(outsider_vr.status_code, 403)
+        member_vr = self.client.get(f"/api/rave/voice-relay/{rid}?clientId=h_solo_cap&clientToken={ctok}&sinceTs=0")
+        self.assertEqual(member_vr.status_code, 200)
+        self.assertTrue(member_vr.json().get("ok"))
+
+        # 4. Cross-cloud WS fanout delivers remote Redis events once without duplicates
+        sent_payloads = []
+
+        class DummyWs:
+            async def send_json(self, obj):
+                sent_payloads.append(rooms.json.dumps(obj))
+
+            async def send_text(self, txt):
+                sent_payloads.append(txt)
+
+        rooms.SOCKETS[rid] = {"h_ws_listener": DummyWs()}
+        try:
+            r_room = dict(_aio.run(rooms.STORE.get(rid)))
+            r_room["events"] = list(r_room.get("events") or []) + [{
+                "id": "ev_cross_cloud_test_1",
+                "type": "chat",
+                "ts": rooms.now(),
+                "message": {"id": "m_cc_1", "user": "Bulut", "text": "Merhaba!"},
+            }]
+
+            class FakeSharedStore:
+                shared = True
+
+                def __init__(self, payload_dict):
+                    self.l1_rooms = {}
+                    self.l1_read_ts = {}
+                    self._raw = rooms.json.dumps(payload_dict)
+
+                async def cmd(self, op, *keys):
+                    half = len(keys) // 2
+                    return [self._raw] * half + [None] * (len(keys) - half)
+
+            with patch.object(rooms, "STORE", FakeSharedStore(r_room)):
+                _aio.run(rooms._ws_redis_fanout_step())
+                _aio.run(rooms._ws_redis_fanout_step())
+            matching = [p for p in sent_payloads if "ev_cross_cloud_test_1" in p]
+            self.assertEqual(len(matching), 1)
+        finally:
+            rooms.SOCKETS.pop(rid, None)
+
+        # 5. Edge authenticated X-Watchlivo-Client-IP vs spoofed header
+        class FakeReq:
+            def __init__(self, headers, peer="203.0.113.50"):
+                self.headers = headers
+                self.client = type("C", (), {"host": peer})()
+
+        with patch.dict(_os.environ, {"EDGE_ORIGIN_SECRET": "edge_sec_v136", "VERCEL": "1"}):
+            ip_valid = security.client_ip(FakeReq({
+                "x-watchlivo-client-ip": "198.51.100.42",
+                "x-watchlivo-edge-secret": "edge_sec_v136",
+                "x-forwarded-for": "1.2.3.4",
+            }))
+            ip_spoof = security.client_ip(FakeReq({
+                "x-watchlivo-client-ip": "198.51.100.42",
+                "x-watchlivo-edge-secret": "wrong_secret",
+                "cf-connecting-ip": "198.51.100.99",
+            }))
+        self.assertEqual(ip_valid, "198.51.100.42")
+        self.assertEqual(ip_spoof, "198.51.100.99")
+
+        # 6. 45KB raster data:image avatar preserved; SVG data URI blocked
+        big_png = "data:image/png;base64," + ("A" * 12000)
+        self.assertEqual(social_engine._clean_avatar(big_png), big_png)
+        self.assertEqual(social_engine._clean_avatar("data:image/svg+xml;base64,PHN2Zz4="), "")
+
+        # 7. /download/windows?check=1 returns JSON capability metadata while plain GET redirects/serves cleanly
+        chk = self.client.get("/download/windows?check=1")
+        self.assertEqual(chk.status_code, 200)
+        self.assertIn("available", chk.json())
 
 
 if __name__ == '__main__':

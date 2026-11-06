@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261106_v134';
+import { isRoomMediaPlaying } from './store.js?v=20261107_v136';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -12,6 +12,10 @@ const SEEK_SETTLE_MS = 12000;
 export const clock = {
   offset: 0, bestRtt: Infinity, samples: 0,
   now() { return Date.now() / 1000 + this.offset; },
+  seedServerNow(serverTime) {
+    if (this.samples > 0 || !Number.isFinite(serverTime) || serverTime <= 0) return;
+    this.offset = serverTime - Date.now() / 1000;
+  },
   sample(t0, serverTime, t1 = Date.now() / 1000) {
     if (!Number.isFinite(t0) || !Number.isFinite(serverTime) || t0 <= 0 || serverTime <= 0) return;
     const rtt = Math.max(0, t1 - t0);
@@ -29,6 +33,9 @@ export const clock = {
 
 export function expectedPosition(media) {
   if (!media) return 0;
+  if (clock.samples === 0 && Number(media.serverNow) > 0) {
+    clock.seedServerNow(Number(media.serverNow));
+  }
   const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
   const pos = Number(media.meshStatePosition ?? media.currentTime ?? 0);
   const rawT0 = Number(media.meshStateTime ?? media.updatedAt ?? clock.now());

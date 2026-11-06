@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261106_v134';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261106_v134';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261106_v134';
+import { toast } from './ui.js?v=20261107_v136';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261107_v136';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261107_v136';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -1239,7 +1239,8 @@ export class Voice {
       const selfId = this.getSelfId?.();
       if (!roomId || !selfId || this._relayFetching) return;
       this._relayFetching = true;
-      fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}?clientId=${encodeURIComponent(selfId)}&sinceTs=${this.relaySinceTs || 0}`, { cache: 'no-store' })
+      const ctok = this._getClientToken(roomId);
+      fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}?clientId=${encodeURIComponent(selfId)}&sinceTs=${this.relaySinceTs || 0}${ctok ? `&clientToken=${encodeURIComponent(ctok)}` : ''}`, { cache: 'no-store' })
         .then((r) => (r.ok ? r.json() : null))
         .then(async (res) => {
           if (!res?.ok || !Array.isArray(res.packets)) return;

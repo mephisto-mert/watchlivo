@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261106_v134';
-import { api, qs } from './api.js?v=20261106_v134';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261106_v134';
+import { h, toast, popup } from './ui.js?v=20261107_v136';
+import { api, qs } from './api.js?v=20261107_v136';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261107_v136';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -200,7 +200,7 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   let modalHandle = null;
   modalHandle = popup({
     title: `🔑 ${p.name} Şifreli Oturum & Portal Doğrulaması`,
-    content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+    content: h('form', { onsubmit: (e) => e.preventDefault(), style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
       statusBox,
       emailInp,
       pwInp,

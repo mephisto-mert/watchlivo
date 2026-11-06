@@ -49,6 +49,9 @@ async function sendToDesktop(user, authToken) {
   }
 }
 
+const formEl = document.getElementById('desktop-auth-form');
+const pwEl = document.getElementById('desktop-pw');
+
 try {
   const saved = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
   if (port && state && saved && saved.authToken && saved.name && !saved.isGuest) {
@@ -61,12 +64,20 @@ try {
       confirmBtn.disabled = true;
       sendToDesktop(saved, saved.authToken);
     });
-    btn.parentNode.insertBefore(confirmBtn, btn);
+    const anchor = formEl || btn;
+    anchor?.parentNode?.insertBefore(confirmBtn, anchor);
     setStatus('Mevcut hesabınızla devam etmek için yukarıdaki onay butonuna tıklayın veya farklı bir Google hesabı seçin.');
   }
 } catch (_) {}
 
-btn?.addEventListener('click', async () => {
+formEl?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const pw = String(pwEl?.value || '');
+  if (pw.length < 6) {
+    setStatus('Lütfen en az 6 karakterli Watchlivo hesap şifrenizi girin.', 'err');
+    pwEl?.focus?.();
+    return;
+  }
   btn.disabled = true;
   setStatus('Google penceresi açılıyor...', '', true);
   try {
@@ -91,6 +102,7 @@ btn?.addEventListener('click', async () => {
         idToken,
         email: cred.user.email || '',
         name: cred.user.displayName || 'Google Üyesi',
+        password: pw,
       }),
     });
     const data = await apiRes.json();
