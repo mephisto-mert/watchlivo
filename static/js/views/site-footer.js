@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261105_v130';
-import { api } from '../api.js?v=20261105_v130';
-import { state } from '../store.js?v=20261105_v130';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261106_v131';
+import { api } from '../api.js?v=20261106_v131';
+import { state } from '../store.js?v=20261106_v131';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -397,7 +397,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261105_v130', alt: 'Watchlivo', class: 'wl-footer-logo' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261106_v131', alt: 'Watchlivo', class: 'wl-footer-logo' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

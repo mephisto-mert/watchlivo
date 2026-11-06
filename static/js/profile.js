@@ -1,24 +1,87 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261105_v130';
-import { api } from './api.js?v=20261105_v130';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261105_v130';
+import { h, icons, popup, toast } from './ui.js?v=20261106_v131';
+import { api } from './api.js?v=20261106_v131';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v131';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261105_v130';
+} from './store.js?v=20261106_v131';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
 const LAST_PROVIDER_KEY = 'watchlivo_last_auth_provider';
 export const AVATAR_COLORS = ['#6366f1', '#8b5cf6', '#f43f5e', '#f59e0b', '#22c55e', '#38bdf8', '#ec4899', '#eab308', '#a3e635', '#fb923c'];
 
+const _TR_FOLD_MAP = {
+  'İ': 'i', 'I': 'i', 'ı': 'i',
+  'Ş': 's', 'ş': 's',
+  'Ğ': 'g', 'ğ': 'g',
+  'Ü': 'u', 'ü': 'u',
+  'Ö': 'o', 'ö': 'o',
+  'Ç': 'c', 'ç': 'c',
+};
+
+export function foldTurkish(raw = '') {
+  return String(raw || '').replace(/[İIıŞşĞğÜüÖöÇç]/g, (ch) => _TR_FOLD_MAP[ch] || ch).replace(/\u0307/g, '').toLowerCase();
+}
+
+export function normalizeHandle(raw = '', fallbackName = '') {
+  const cleanRaw = foldTurkish(String(raw || '').trim().replace(/^@+/, '').replace(/#\d{2,6}$/, '')).replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
+  if (cleanRaw.length >= 2) return cleanRaw;
+  const cleanFb = foldTurkish(String(fallbackName || '').trim().replace(/^@+/, '').replace(/#\d{2,6}$/, '')).replace(/[^a-z0-9_.-]/g, '').slice(0, 20);
+  if (cleanFb.length >= 2) return cleanFb;
+  return cleanRaw || cleanFb || 'uye';
+}
+
+function _syncLiveSelfEverywhere(p) {
+  if (!p || typeof document === 'undefined') return;
+  try {
+    const navLbl = document.querySelector('#nav-account-btn .account-pill-name, #nav-account-btn span:not(.avatar)');
+    if (navLbl && p.name) navLbl.textContent = p.name;
+  } catch (_) {}
+  try {
+    if (state.mesh && Array.isArray(state.mesh.participants)) {
+      const mePart = state.mesh.participants.find((x) =>
+        (state.clientId && x.id === state.clientId) ||
+        (p.uid && x.uid && x.uid === p.uid)
+      );
+      if (mePart) {
+        mePart.name = p.name;
+        mePart.handle = p.handle;
+        mePart.color = p.color;
+        mePart.avatarUrl = p.avatarUrl || '';
+        mePart.bio = p.bio || '';
+        mePart.statusText = p.statusText || '';
+        mePart.statusEmoji = p.statusEmoji || '🍿';
+      }
+    }
+    const conn = typeof window !== 'undefined' ? window.__vortexActiveConn : null;
+    if (conn && !conn.closed) {
+      conn.profile = { ...(conn.profile || {}), ...p };
+      conn.send?.('profile_update', {
+        username: p.name,
+        handle: p.handle,
+        color: p.color,
+        avatarUrl: p.avatarUrl || '',
+        bio: p.bio || '',
+        statusText: p.statusText || '',
+        statusEmoji: p.statusEmoji || '🍿',
+        hideWatching: Boolean(p.hideWatching),
+        hideFriends: Boolean(p.hideFriends),
+        hideLocation: Boolean(p.hideLocation),
+        medal: p.medal || '',
+      });
+    }
+  } catch (_) {}
+}
+
 function saveToAccountVault(prof) {
   if (!prof || !prof.authToken) return;
   try {
     const vault = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}') || {};
     if (prof.email) vault[String(prof.email).toLowerCase()] = prof.authToken;
-    if (prof.handle) vault[String(prof.handle).toLowerCase().replace(/^@+/, '')] = prof.authToken;
+    if (prof.handle) vault[normalizeHandle(prof.handle)] = prof.authToken;
     localStorage.setItem(VAULT_KEY, JSON.stringify(vault));
   } catch (e) { /* ignore */ }
 }
@@ -27,8 +90,9 @@ function getVaultToken(identifier) {
   if (!identifier) return '';
   try {
     const vault = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}') || {};
-    const k = String(identifier).trim().toLowerCase().replace(/^@+/, '');
-    return vault[k] || vault[String(identifier).trim().toLowerCase()] || '';
+    const raw = String(identifier).trim();
+    const k = raw.includes('@') && !raw.startsWith('@') ? raw.toLowerCase() : normalizeHandle(raw);
+    return vault[k] || vault[raw.toLowerCase().replace(/^@+/, '')] || vault[raw.toLowerCase()] || '';
   } catch (e) {
     return '';
   }
@@ -63,7 +127,7 @@ export function saveGuestProfile(data = {}) {
   const name = String(data.name || defaultGuestName).trim().slice(0, 24) || defaultGuestName;
   const resolvedId = data.uid || data.id || (prev.isGuest && (prev.id || prev.uid)) || ('guest_' + Math.random().toString(36).slice(2, 10));
   const guestPrev = prev.isGuest ? prev : {};
-  const handle = String(data.handle || guestPrev.handle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || `misafir${randSuffix}`);
+  const handle = normalizeHandle(data.handle || guestPrev.handle || '', name || `misafir${randSuffix}`);
   const p = {
     id: resolvedId,
     uid: resolvedId,
@@ -89,7 +153,30 @@ export function saveGuestProfile(data = {}) {
   };
   localStorage.setItem(KEY, JSON.stringify(p));
   localStorage.setItem(LAST_PROVIDER_KEY, 'guest');
+  try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p)); } catch (_) {}
   try { set({ self: p }); } catch (_) {}
+  _syncLiveSelfEverywhere(p);
+  if (!data._skipProvision && typeof fetch === 'function') {
+    setTimeout(() => {
+      fetch('/api/rave/social/guest', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: p.uid,
+          name: p.name,
+          handle: p.handle,
+          color: p.color,
+          avatarUrl: p.avatarUrl,
+          bio: p.bio,
+          statusText: p.statusText,
+          statusEmoji: p.statusEmoji,
+        }),
+      }).catch(() => {});
+      syncSocialState(true).catch(() => {});
+      pushPresenceHeartbeat().catch(() => {});
+    }, 30);
+  }
   return p;
 }
 
@@ -101,9 +188,9 @@ export function saveProfile(data = {}) {
   })();
   const cleanPrevName = /^Misafir/i.test(String(prev.name || '')) ? '' : prev.name;
   const name = String(data.name || cleanPrevName || 'Üye').trim().slice(0, 24) || 'Üye';
-  const rawHandle = String(data.handle ?? prev.handle ?? '').trim().replace(/^@+/, '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').slice(0, 24);
-  const resolvedId = data.uid || data.id || prev.id || prev.uid || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2));
+  const resolvedId = data.uid || data.id || ((!prev.isGuest && (prev.id || prev.uid)) ? (prev.id || prev.uid) : '') || (crypto.randomUUID ? `u_wl_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}` : `u_wl_${String(Date.now()).slice(-6)}${Math.random().toString(16).slice(2, 8)}`);
   const sameAccount = Boolean(!prev.isGuest && (prev.uid || prev.id) && String(prev.uid || prev.id) === String(resolvedId));
+  const rawHandle = normalizeHandle(data.handle ?? (sameAccount ? prev.handle : '') ?? '', name);
   const watchMinutes = Math.max(0, Number(data.watchMinutes ?? (sameAccount ? prev.watchMinutes : 0) ?? 0) || 0);
   const computedMedal = data.medal || (sameAccount ? prev.medal : '') || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : watchMinutes >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
   const avatarUrl = String(data.avatarUrl ?? data.avatar ?? (sameAccount ? (prev.avatarUrl ?? prev.avatar) : '') ?? '').trim();
@@ -117,8 +204,8 @@ export function saveProfile(data = {}) {
     id: resolvedId,
     uid: resolvedId,
     name,
-    handle: rawHandle || name.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 16) || 'uye',
-    email: String(data.email ?? prev.email ?? '').trim().toLowerCase(),
+    handle: rawHandle,
+    email: String(data.email ?? (sameAccount ? prev.email : '') ?? '').trim().toLowerCase(),
     color: data.color || prev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
     avatar: avatarUrl,
     avatarUrl,
@@ -130,8 +217,8 @@ export function saveProfile(data = {}) {
     hideFriends,
     watchMinutes,
     medal: computedMedal,
-    authProvider: data.authProvider || prev.authProvider || 'email',
-    authToken: data.authToken ?? prev.authToken ?? '',
+    authProvider: data.authProvider || (sameAccount ? prev.authProvider : '') || 'email',
+    authToken: data.authToken ?? (sameAccount ? prev.authToken : '') ?? '',
     verified: true,
     isGuest: false,
   };
@@ -141,6 +228,7 @@ export function saveProfile(data = {}) {
     localStorage.setItem(LAST_PROVIDER_KEY, p.authProvider);
   }
   try { set({ self: p }); } catch (_) {}
+  _syncLiveSelfEverywhere(p);
   if (!p.isGuest && p.authToken) {
     setTimeout(() => {
       syncCloudUserMedia(true).catch(() => {});
@@ -152,36 +240,76 @@ export function saveProfile(data = {}) {
 }
 
 export function logoutProfile() {
+  const prevSelf = state.self || (() => {
+    try { return JSON.parse(localStorage.getItem(KEY) || 'null') || {}; } catch (_) { return {}; }
+  })();
+  const prevUid = String(prevSelf?.uid || prevSelf?.id || '').trim();
+  const prevTok = String(prevSelf?.authToken || '').trim();
+  if (typeof fetch === 'function' && (prevUid || prevTok)) {
+    const hdrs = { 'Content-Type': 'application/json' };
+    if (prevTok) hdrs.Authorization = `Bearer ${prevTok}`;
+    try {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: hdrs,
+        body: JSON.stringify({ uid: prevUid }),
+      }).catch(() => {});
+      fetch('/api/rave/social/presence', {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: hdrs,
+        body: JSON.stringify({ uid: prevUid, state: 'offline' }),
+      }).catch(() => {});
+    } catch (_) {}
+  }
   try {
     localStorage.removeItem(KEY);
-    localStorage.removeItem(VAULT_KEY);
     localStorage.removeItem('vortex_profile_v1');
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
     localStorage.removeItem('watchlivo_auth_pending_redirect');
     sessionStorage.removeItem('watchlivo_auth_pending_pw');
     sessionStorage.removeItem('watchlivo_auth_pending_email');
+    sessionStorage.removeItem('vortex_temp_guest_v1');
   } catch (e) { /* ignore */ }
   try {
     getFirebaseAuth().then((fb) => fb?.auth?.signOut?.()).catch(() => {});
   } catch (_) {}
   resetCloudSyncState();
+  const gTag = Math.floor(1000 + Math.random() * 9000);
+  const gid = 'guest_' + Math.random().toString(36).slice(2, 10);
   const guest = {
-    id: 'guest_' + Math.random().toString(36).slice(2, 10),
-    uid: '',
-    name: 'Misafir İzleyici',
-    handle: 'misafir',
-    color: AVATAR_COLORS[0],
+    id: gid,
+    uid: gid,
+    name: `Misafir #${gTag}`,
+    handle: `misafir${gTag}`,
+    color: AVATAR_COLORS[gTag % AVATAR_COLORS.length],
     isGuest: true,
     verified: false,
     authToken: '',
   };
+  try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guest)); } catch (_) {}
   try {
     set({
       self: guest,
-      social: { friends: [], requests: [], outgoing: [], blocked: [], unreadDm: {}, totalUnread: 0, presence: {}, loadedAt: 0 },
+      social: {
+        friends: [],
+        onlineCount: 0,
+        requests: [],
+        requestCount: 0,
+        outgoingRequests: [],
+        blocked: [],
+        totalUnread: 0,
+        privacy: { presenceVisibility: 'friends', hideWatching: false, allowInvites: 'friends' },
+        threads: [],
+        loaded: false,
+      },
     });
   } catch (_) {}
+  _syncLiveSelfEverywhere(guest);
   return guest;
 }
 
@@ -208,11 +336,9 @@ export async function verifyAndRefreshSession() {
           syncCloudUserMedia(true).catch(() => {});
           return refreshed;
         } else if (d && d.authenticated === false) {
-          saveProfile({
-            ...s,
-            authToken: '',
-            isGuest: true,
-            verified: false,
+          saveGuestProfile({
+            name: (s.name && s.name !== 'Üye' && !/^Misafir/i.test(s.name)) ? s.name : '',
+            color: s.color,
           });
           return null;
         }
@@ -634,7 +760,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     if (activeTab === 'account') {
       const profObj = current || state.self || loadProfile() || { name: 'Misafir İzleyici', handle: 'misafir', color: AVATAR_COLORS[0], isGuest: true };
       const nameInp = h('input', { class: 'input', id: 'wl-profile-name-input', maxlength: '24', placeholder: 'İsim / Görünen Adın', value: profObj.name || '' });
-      const handleInp = h('input', { class: 'input', id: 'wl-profile-handle-input', maxlength: '24', placeholder: '@kullaniciadi', value: profObj.handle ? `@${String(profObj.handle).replace(/^@+/, '')}` : '' });
+      const handleInp = h('input', { class: 'input', id: 'wl-profile-handle-input', maxlength: '25', placeholder: '@kullaniciadi', value: profObj.handle ? `@${String(profObj.handle).replace(/^@+/, '')}` : '' });
       const bioInp = h('textarea', {
         class: 'input',
         id: 'wl-profile-bio-input',
@@ -1081,8 +1207,23 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
             id: 'wl-profile-save-btn',
             class: 'btn primary wl-btn-full wl-btn-primary-gradient',
             onclick: async () => {
-              const name = nameInp.value.trim() || profObj.name || 'İzleyici';
-              const handle = handleInp.value.trim().replace(/^@+/, '') || profObj.handle || 'uye';
+              errBox.style.color = '#fb7185';
+              errBox.textContent = '';
+              const typedName = nameInp.value.trim();
+              const typedHandleRaw = handleInp.value.trim().replace(/^@+/, '');
+              if (typedName.length > 0 && typedName.length < 2) {
+                errBox.textContent = 'Görünen ad en az 2 karakter olmalıdır.';
+                nameInp.focus();
+                return;
+              }
+              const name = typedName || profObj.name || 'İzleyici';
+              const normTypedHandle = typedHandleRaw ? normalizeHandle(typedHandleRaw) : '';
+              if (typedHandleRaw && normTypedHandle.length < 2) {
+                errBox.textContent = 'Kullanıcı adı en az 2 geçerli karakter olmalıdır.';
+                handleInp.focus();
+                return;
+              }
+              const handle = normTypedHandle || normalizeHandle(profObj.handle || '', name);
               const avatarUrl = selectedAvatarUrl || avatarInp.value.trim();
               const bio = bioInp.value.trim();
               const statusText = statusInp.value.trim();
@@ -1099,14 +1240,52 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     method: 'POST',
                     body: { ...payload, authToken: profObj.authToken },
                   });
-                  const updated = saveProfile({ ...(res?.user || profObj), ...payload, authToken: res?.authToken || profObj.authToken, isGuest: false });
-                  finish(updated, '✓ Profilin ve gizlilik ayarların kaydedildi!');
+                  const srvUser = res?.user || {};
+                  const updated = saveProfile({
+                    ...profObj,
+                    ...payload,
+                    ...srvUser,
+                    authToken: res?.authToken || profObj.authToken,
+                    isGuest: false,
+                  });
+                  finish(updated, `✓ Profilin kaydedildi (@${updated.handle})!`);
                   return;
-                } catch (e) { /* fallback to local save */ }
+                } catch (e) {
+                  if (e && (e.status === 409 || e.status === 400 || e.status === 401)) {
+                    errBox.textContent = e.message || 'Bu kullanıcı adı başka bir hesap tarafından kullanılıyor.';
+                    handleInp.focus();
+                    return;
+                  }
+                }
                 const updated = saveProfile({ ...profObj, ...payload, isGuest: false });
                 finish(updated, '✓ Profil bilgilerin güncellendi!');
               } else {
-                const updated = saveGuestProfile({ ...profObj, ...payload });
+                const guestId = profObj.uid || profObj.id || ('guest_' + Math.random().toString(36).slice(2, 10));
+                try {
+                  const gRes = await api('/api/rave/social/guest', {
+                    method: 'POST',
+                    body: { uid: guestId, ...payload },
+                  });
+                  const gUser = gRes?.user || {};
+                  const updated = saveGuestProfile({
+                    ...profObj,
+                    ...payload,
+                    uid: gUser.uid || guestId,
+                    handle: gUser.handle || handle,
+                    _skipProvision: true,
+                  });
+                  syncSocialState(true).catch(() => {});
+                  pushPresenceHeartbeat().catch(() => {});
+                  finish(updated, `✓ Profil kartın kaydedildi (@${updated.handle})!`);
+                  return;
+                } catch (e) {
+                  if (e && (e.status === 409 || e.status === 400)) {
+                    errBox.textContent = e.message || 'Bu kullanıcı adı şu an kullanımda.';
+                    handleInp.focus();
+                    return;
+                  }
+                }
+                const updated = saveGuestProfile({ ...profObj, ...payload, uid: guestId });
                 finish(updated, '✓ Profil kartın ve gizlilik ayarların kaydedildi!');
               }
             },
@@ -1239,7 +1418,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
 
     // activeTab === 'register'
     const nameInp = h('input', { class: 'input', maxlength: '24', placeholder: 'Görünen Adın (Örn: Deniz — zorunlu)', value: (current && !current.isGuest && current.name && !/^Misafir/i.test(current.name)) ? current.name : '' });
-    const handleInp = h('input', { class: 'input', maxlength: '24', placeholder: '@kullaniciadi (Örn: @izleyici)' });
+    const handleInp = h('input', { class: 'input', maxlength: '25', placeholder: '@kullaniciadi (Örn: @izleyici)' });
     const emailInp = h('input', { class: 'input', type: 'email', placeholder: 'E-posta adresin (Örn: ad@gmail.com — zorunlu)', autocomplete: 'email' });
     const pwInp = h('input', { class: 'input', type: 'password', placeholder: 'Şifre belirle (en az 6 karakter — zorunlu)', autocomplete: 'new-password' });
     const errBox = h('div', { class: 'wl-auth-err' });
@@ -1252,6 +1431,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       const email = emailInp.value.trim();
       const password = pwInp.value;
       if (name.length < 2) { errBox.textContent = 'Görünen ad en az 2 karakter olmalıdır.'; nameInp.focus(); return; }
+      if (handle && normalizeHandle(handle).length < 2) { errBox.textContent = 'Kullanıcı adı en az 2 geçerli karakter olmalıdır.'; handleInp.focus(); return; }
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { errBox.textContent = 'Kayıt olmak için geçerli bir e-posta adresi girmelisiniz.'; emailInp.focus(); return; }
       if (!password || password.length < 6) { errBox.textContent = 'Şifre yazmadan kayıt olunamaz! Lütfen en az 6 karakterli bir şifre belirleyin.'; pwInp.focus(); return; }
       try {
@@ -1948,7 +2128,8 @@ export function openUserProfileModal(targetUser) {
     return;
   }
   const uName = targetUser.name || 'İzleyici';
-  const uHandle = String(targetUser.handle || uName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'uye').replace(/^@+/, '');
+  const uHandle = normalizeHandle(targetUser.handle || '', uName);
+  const safeSocialUid = String(targetUser.uid || (/^(u_wl_|guest_|u_)/i.test(String(targetUser.id || '')) ? targetUser.id : '') || '').trim();
   const uBio = String(targetUser.bio || '').trim();
   const uStatusEmoji = targetUser.statusEmoji || '🍿';
   const uStatusText = String(targetUser.statusText || '').trim();
@@ -2024,9 +2205,17 @@ export function openUserProfileModal(targetUser) {
           : h('div', { style: { fontSize: '.75rem', color: 'rgba(255,255,255,0.5)' } }, 'Açık arkadaş listesi boş.')),
     h('div', { style: { display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' } },
       (() => {
-        const targetUid = targetUser.uid || targetUser.id || '';
-        const isMutual = Boolean((state.social?.friends || []).some((f) => (f.uid && f.uid === targetUid) || (f.handle && String(f.handle).replace(/^@+/, '').toLowerCase() === uHandle.toLowerCase()))) || isFriend(targetUser);
-        const isPendingOut = Boolean((state.social?.outgoingRequests || []).some((o) => (o.toUid && o.toUid === targetUid) || String(o.toHandle || '').replace(/^@+/, '').toLowerCase() === uHandle.toLowerCase()));
+        const matchedFriend = (state.social?.friends || []).find((f) =>
+          (safeSocialUid && f.uid === safeSocialUid) ||
+          (f.handle && normalizeHandle(f.handle) === uHandle)
+        );
+        const matchedOutReq = (state.social?.outgoingRequests || []).find((o) =>
+          (safeSocialUid && o.toUid === safeSocialUid) ||
+          (o.toHandle && normalizeHandle(o.toHandle) === uHandle)
+        );
+        const targetUid = safeSocialUid || matchedFriend?.uid || matchedOutReq?.toUid || '';
+        const isMutual = Boolean(matchedFriend) || isFriend(targetUser);
+        const isPendingOut = Boolean(matchedOutReq);
         return h('button', {
           type: 'button',
           class: `btn ${isMutual || isPendingOut ? '' : 'primary'}`,
@@ -2061,7 +2250,7 @@ export function openUserProfileModal(targetUser) {
         style: { flex: '1', justifyContent: 'center', background: 'rgba(39,220,200,0.14)', border: '1px solid rgba(39,220,200,0.35)', color: '#5eead4' },
         onclick: async (e) => {
           const btn = e.currentTarget;
-          const r = await sendRoomInvite(targetUser.uid || targetUser.id || `@${uHandle}`, 'send');
+          const r = await sendRoomInvite(safeSocialUid || `@${uHandle}`, 'send');
           if (r?.ok) {
             btn.textContent = '✓ Odaya Davet Edildi';
             toast(`📩 ${uName} kişisine oda daveti gönderildi!`);
@@ -2076,7 +2265,7 @@ export function openUserProfileModal(targetUser) {
         style: { flex: '1', justifyContent: 'center' },
         onclick: () => {
           userModal?.close?.();
-          openDmModal(targetUser.uid || targetUser.id || `@${uHandle}`);
+          openDmModal(safeSocialUid || `@${uHandle}`);
         },
       }, '💬 Özel Mesaj')));
 

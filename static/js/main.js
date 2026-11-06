@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261105_v130';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261105_v130';
-import { renderHome, destroyHome } from './views/home.js?v=20261105_v130';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261105_v130';
-import { api } from './api.js?v=20261105_v130';
-import { h, toast } from './ui.js?v=20261105_v130';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v131';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v131';
+import { renderHome, destroyHome } from './views/home.js?v=20261106_v131';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261106_v131';
+import { api } from './api.js?v=20261106_v131';
+import { h, toast } from './ui.js?v=20261106_v131';
 
 function parseRoute() {
   const searchParams = new URLSearchParams(location.search);
@@ -285,8 +285,26 @@ async function boot() {
   };
   const initialProfile = loadProfile();
   if (initialProfile) {
+    if (initialProfile.isGuest && !initialProfile.uid && initialProfile.id) {
+      initialProfile.uid = initialProfile.id;
+    }
     start(initialProfile);
-    if (!initialProfile.isGuest) verifyAndRefreshSession().catch(() => {});
+    if (!initialProfile.isGuest) {
+      verifyAndRefreshSession().catch(() => {});
+    } else if (typeof fetch === 'function' && (initialProfile.uid || initialProfile.id)) {
+      fetch('/api/rave/social/guest', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: initialProfile.uid || initialProfile.id,
+          name: initialProfile.name || '',
+          handle: initialProfile.handle || '',
+          color: initialProfile.color || '#27DCC8',
+          avatarUrl: initialProfile.avatarUrl || '',
+        }),
+      }).catch(() => {});
+    }
   } else {
     let guestFallback = null;
     try {
@@ -295,17 +313,34 @@ async function boot() {
     if (!guestFallback || !guestFallback.id || !guestFallback.name || guestFallback.name === 'Misafir İzleyici') {
       const gTag = Math.floor(1000 + Math.random() * 9000);
       const gColors = ['#27DCC8', '#6366f1', '#8b5cf6', '#f43f5e', '#f59e0b', '#22c55e', '#38bdf8', '#ec4899'];
+      const gid = 'guest_' + Math.random().toString(36).slice(2, 10);
       guestFallback = {
-        id: 'guest_' + Math.random().toString(36).slice(2, 10),
-        uid: '',
+        id: gid,
+        uid: gid,
         name: `Misafir #${gTag}`,
         handle: `misafir${gTag}`,
         color: gColors[gTag % gColors.length],
         isGuest: true,
       };
       try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (e) { /* ignore */ }
+    } else if (!guestFallback.uid && guestFallback.id) {
+      guestFallback.uid = guestFallback.id;
+      try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (e) { /* ignore */ }
     }
     start(guestFallback);
+    if (typeof fetch === 'function' && guestFallback.uid) {
+      fetch('/api/rave/social/guest', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: guestFallback.uid,
+          name: guestFallback.name,
+          handle: guestFallback.handle,
+          color: guestFallback.color,
+        }),
+      }).catch(() => {});
+    }
     if (!isRedirectPending && (!location.hash || location.hash === '#/' || location.hash === '#')) {
       profileSetup({ dismissable: true, onDone: start });
     }
@@ -388,7 +423,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261105_v130', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261106_v131', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -448,6 +483,18 @@ function initRaveNotifications() {
         }, 'Reddet')
       );
     } else if ((nType === 'dm' || nType === 'poke' || nType === 'friend_accepted') && payload.fromUid && !roomId) {
+      if (nType === 'friend_accepted') {
+        actionBtns.push(
+          h('button', {
+            type: 'button',
+            class: 'btn sm',
+            onclick: () => {
+              closeCard();
+              window.vortexOpenFriendsModal?.(null, 'friends');
+            },
+          }, '👥 Arkadaşlar')
+        );
+      }
       actionBtns.push(
         h('button', {
           type: 'button',
@@ -485,7 +532,19 @@ function initRaveNotifications() {
 
     const card = h('div', { class: `rave-notif-card is-${nType}` },
       leadVisual,
-      h('div', { class: 'rave-notif-body' },
+      h('div', {
+        class: 'rave-notif-body',
+        style: (nType === 'friend_request' || nType === 'friend_accepted' || nType === 'dm') ? { cursor: 'pointer' } : null,
+        onclick: () => {
+          if (nType === 'friend_request' || nType === 'friend_accepted') {
+            closeCard();
+            window.vortexOpenFriendsModal?.(null, nType === 'friend_request' ? 'requests' : 'friends');
+          } else if (nType === 'dm' && payload.fromUid) {
+            closeCard();
+            openDmModal(payload.fromUid);
+          }
+        },
+      },
         h('div', { class: 'rave-notif-title' }, title),
         h('div', { class: 'rave-notif-text' }, body)),
       payload.poster ? h('img', { src: payload.poster, alt: '', class: 'rave-notif-poster', onerror: (e) => e.currentTarget.remove() }) : null,

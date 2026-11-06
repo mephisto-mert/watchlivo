@@ -108,11 +108,29 @@ applyUiPrefs(state.uiPrefs);
 let _activeAccountScope = '';
 
 export function set(patch) {
+  const prevScope = _activeAccountScope || getAccountStorageScope();
   const resolvedPatch = typeof patch === 'function' ? patch(state) : patch;
   Object.assign(state, resolvedPatch);
   if (resolvedPatch && Object.prototype.hasOwnProperty.call(resolvedPatch, 'self')) {
     const nextScope = getAccountStorageScope();
     if (nextScope !== _activeAccountScope) {
+      if (prevScope && prevScope.startsWith('guest_') && nextScope.startsWith('acct_')) {
+        try {
+          for (const keyFn of [_historyKey, _favKey, _musicKey, _ytPrefsKey]) {
+            const gVal = localStorage.getItem(keyFn(prevScope));
+            const aKey = keyFn(nextScope);
+            const aVal = localStorage.getItem(aKey);
+            if (gVal && gVal !== '[]' && gVal !== '{}' && (!aVal || aVal === '[]' || aVal === '{}')) {
+              localStorage.setItem(aKey, gVal);
+            }
+          }
+          const gAcc = localStorage.getItem('vortex_accounts_v7:guest');
+          const sUid = String(state.self?.uid || state.self?.id || '').trim().toLowerCase();
+          if (gAcc && gAcc !== '{}' && sUid && !localStorage.getItem(`vortex_accounts_v7:${sUid}`)) {
+            localStorage.setItem(`vortex_accounts_v7:${sUid}`, gAcc);
+          }
+        } catch (_) {}
+      }
       _activeAccountScope = nextScope;
       _lastCloudSyncAt = 0;
       _lastCloudProgPush.clear();
@@ -845,6 +863,8 @@ export async function syncSocialState(force = false) {
       uid: _socialUidParam(),
       name: s.name || '',
       handle: s.handle || '',
+      color: s.color || '',
+      avatarUrl: s.avatarUrl || '',
     });
     const r = await fetch(`/api/rave/social/state?${qs}`, { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() });
     if (r.ok) {
@@ -859,7 +879,13 @@ export async function searchUsersServer(query) {
   const q = String(query || '').trim();
   if (!q || typeof fetch !== 'function') return [];
   try {
-    const qs = new URLSearchParams({ q, uid: _socialUidParam() });
+    const s = state.self || {};
+    const qs = new URLSearchParams({
+      q,
+      uid: _socialUidParam(),
+      name: s.name || '',
+      handle: s.handle || '',
+    });
     const r = await fetch(`/api/rave/social/search?${qs}`, { credentials: 'same-origin', cache: 'no-store', headers: _authHdrs() });
     if (!r.ok) return [];
     const data = await r.json();
@@ -1002,15 +1028,20 @@ export function getFriends() {
   try { return JSON.parse(localStorage.getItem(_friendsKey()) || '[]'); } catch (e) { return []; }
 }
 
+const _foldTrStore = (s = '') => String(s || '')
+  .replace(/[İIı]/g, 'i').replace(/[Şş]/g, 's').replace(/[Ğğ]/g, 'g')
+  .replace(/[Üü]/g, 'u').replace(/[Öö]/g, 'o').replace(/[Çç]/g, 'c')
+  .replace(/\u0307/g, '').toLowerCase();
+
 export function isFriend(userOrName) {
   if (!userOrName) return false;
-  const name = typeof userOrName === 'string' ? userOrName.trim().toLowerCase() : String(userOrName.name || '').trim().toLowerCase();
-  const handle = typeof userOrName === 'object' ? String(userOrName.handle || '').trim().toLowerCase() : '';
-  const id = typeof userOrName === 'object' ? String(userOrName.uid || userOrName.id || '') : '';
+  const name = _foldTrStore(typeof userOrName === 'string' ? userOrName.trim() : String(userOrName.name || '').trim());
+  const handle = typeof userOrName === 'object' ? _foldTrStore(String(userOrName.handle || '').trim().replace(/^@+/, '').replace(/#\d{2,6}$/, '')) : '';
+  const rawId = typeof userOrName === 'object' ? String(userOrName.uid || (!/^h_/i.test(String(userOrName.id || '')) ? userOrName.id : '') || '').trim() : '';
   return getFriends().some((f) =>
-    (id && (f.uid === id || f.id === id)) ||
-    (handle && String(f.handle || '').toLowerCase() === handle) ||
-    (name && String(f.name || '').toLowerCase() === name)
+    (rawId && (f.uid === rawId || f.id === rawId)) ||
+    (handle && _foldTrStore(String(f.handle || '').replace(/^@+/, '').replace(/#\d{2,6}$/, '')) === handle) ||
+    (name && !rawId && !handle && _foldTrStore(String(f.name || '')) === name)
   );
 }
 

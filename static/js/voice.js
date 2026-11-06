@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261105_v130';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261105_v130';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261105_v130';
+import { toast } from './ui.js?v=20261106_v131';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261106_v131';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261106_v131';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },

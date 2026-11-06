@@ -191,26 +191,32 @@ IDENTITY_HEADER = b"authorization"
 _UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
 
 
-def _uid_from_token(token: str) -> str:
-    """Resolve a bearer token to a verified uid (small TTL cache, 5000 entries)."""
+def _claims_from_token(token: str) -> dict:
+    """Resolve a bearer token to verified claims (small TTL cache, 5000 entries)."""
     if not token:
-        return ""
+        return {}
     now_ts = time.time()
     hit = _UID_CACHE.get(token)
     if hit and hit[1] > now_ts:
-        return hit[0]
+        val = hit[0]
+        return val if isinstance(val, dict) else {"uid": str(val or "")}
     try:
         import auth_engine
         claims = auth_engine.verify_auth_token(token)
     except Exception:
         claims = None
-    uid = str((claims or {}).get("uid") or "")
-    if uid:
-        _UID_CACHE[token] = (uid, now_ts + 60.0)
+    if isinstance(claims, dict) and claims.get("uid"):
+        _UID_CACHE[token] = (claims, now_ts + 60.0)
         _UID_CACHE.move_to_end(token)
         while len(_UID_CACHE) > 5000:
             _UID_CACHE.popitem(last=False)
-    return uid
+        return claims
+    return {}
+
+
+def _uid_from_token(token: str) -> str:
+    """Resolve a bearer token to a verified uid (small TTL cache, 5000 entries)."""
+    return str(_claims_from_token(token).get("uid") or "")
 
 
 class IdentityMiddleware:
@@ -232,7 +238,9 @@ class IdentityMiddleware:
                     if val.lower().startswith("bearer "):
                         token = val[7:].strip()
                     break
-            scope["wl_uid"] = _uid_from_token(token) if token else ""
+            claims = _claims_from_token(token) if token else {}
+            scope["wl_uid"] = str(claims.get("uid") or "")
+            scope["wl_claims"] = claims
         await self.app(scope, receive, send)
 
 
@@ -10103,7 +10111,9 @@ app = Starlette(
         Route("/api/auth/phone/verify-code", auth_engine.auth_phone_verify_code, methods=["POST"]),
         Route("/api/auth/email-action", auth_engine.auth_email_action, methods=["POST"]),
         Route("/api/auth/profile", auth_engine.auth_profile, methods=["POST"]),
+        Route("/api/auth/logout", auth_engine.auth_logout, methods=["POST"]),
         Route("/api/auth/me", auth_engine.auth_me, methods=["GET"]),
+        Route("/api/rave/social/guest", social_engine.social_guest_provision, methods=["POST"]),
         Route("/api/rave/social/state", social_engine.social_state, methods=["GET"]),
         Route("/api/rave/social/search", social_engine.social_user_search, methods=["GET"]),
         Route("/api/rave/social/presence", social_engine.social_presence, methods=["GET", "POST"]),

@@ -1082,7 +1082,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
             continue
         if len(ser_parts) >= 60:
             break
-        cp = {k: v for k, v in p.items() if not str(k).startswith("_") and k not in ("lastSeen", "uid")}
+        cp = {k: v for k, v in p.items() if not str(k).startswith("_") and k != "lastSeen"}
         p_is_creator = _is_creator_of_room(room, p["id"], p)
         cp["isCreator"] = p_is_creator
         cp["isHost"] = p["id"] == host_id
@@ -1091,7 +1091,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         ser_parts.append(cp)
     if for_cid and for_cid in p_map and not any(x["id"] == for_cid for x in ser_parts):
         me_p = p_map[for_cid]
-        cp_me = {k: v for k, v in me_p.items() if k not in ("lastSeen", "uid")}
+        cp_me = {k: v for k, v in me_p.items() if not str(k).startswith("_") and k != "lastSeen"}
         me_is_creator = _is_creator_of_room(room, for_cid, me_p)
         cp_me["isCreator"] = me_is_creator
         cp_me["isHost"] = for_cid == host_id
@@ -1142,9 +1142,11 @@ def lobby_entry(room: Dict[str, Any]) -> Dict[str, Any]:
     human_cnt = sum(1 for p in p_map.values() if p.get("transport") != "bot")
     parts_preview = []
     for idx_p, p in enumerate([x for x in p_map.values() if x.get("transport") != "bot"][:5]):
-        cp = {k: v for k, v in p.items() if k not in ("lastSeen", "uid", "_precreated", "_internalCreator")}
+        cp = {k: v for k, v in p.items() if not str(k).startswith("_") and k != "lastSeen"}
         if pw_locked:
             cp["id"] = f"p_{idx_p}"
+            cp.pop("uid", None)
+            cp.pop("handle", None)
         cp["isHost"] = p["id"] == host_id
         cp["isCoHost"] = (p["id"] in co_set) or is_cohost_mode
         parts_preview.append(cp)
@@ -1595,6 +1597,16 @@ def ensure_host(room: Dict[str, Any]) -> None:
         room["host_id"] = None
 
 
+def _safe_participant_uid(verified_uid: str, raw_uid: Any = "") -> str:
+    v_clean = clean_str(verified_uid, 64)
+    if v_clean:
+        return v_clean
+    cand = clean_str(raw_uid, 48).lower()
+    if cand.startswith("guest_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"guest_[a-z0-9_-]{3,44}", cand):
+        return cand
+    return ""
+
+
 def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transport: str) -> Tuple[Dict[str, Any], bool]:
     if isinstance(room.get("left"), dict):
         room["left"].pop(cid, None)
@@ -1646,6 +1658,21 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         p["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
     t_now = now()
     p.update({"transport": transport, "lastSeen": t_now})
+    if p.get("uid") and transport != "bot":
+        try:
+            import social_engine as _se_dir
+            _se_dir._register_social_dir({
+                "uid": p["uid"],
+                "name": p.get("name") or "İzleyici",
+                "handle": p.get("handle") or "",
+                "color": p.get("color") or "#27DCC8",
+                "avatarUrl": p.get("avatarUrl") or "",
+                "bio": p.get("bio") or "",
+                "statusEmoji": p.get("statusEmoji") or "🍿",
+                "statusText": p.get("statusText") or "",
+            })
+        except Exception:
+            pass
     replaced_precreated = False
     if existing is None and not data.get("_precreated"):
         live_ws = SOCKETS.get(room.get("id", ""), {})
@@ -2297,8 +2324,11 @@ def _handle_social(room, cid, data, out, name, is_host):
                         "color": target_m.get("color") or "#00f5d4",
                     }
             msg_id = pre_msg_id
-            msg = {"id": msg_id, "user": name, "uid": me.get("uid", ""), "color": me["color"], "text": text, "gif": gif,
-                   "time": now_hhmm(t_now), "ts": t_now, "replyTo": reply_obj, "reactions": {}}
+            msg = {
+                "id": msg_id, "user": name, "uid": me.get("uid", ""), "handle": me.get("handle", ""),
+                "avatarUrl": me.get("avatarUrl", ""), "cid": cid, "color": me["color"], "text": text, "gif": gif,
+                "time": now_hhmm(t_now), "ts": t_now, "replyTo": reply_obj, "reactions": {},
+            }
             if snap:
                 msg["snapshot"] = snap
                 if data.get("isExplicit"):
@@ -2317,6 +2347,45 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["events"] = (room.get("events") or [])[-34:] + [ev]
             room["rev"] = int(room.get("rev") or 1) + 1
             out["broadcast"].append(({"type": "chat", "message": msg}, None))
+    elif mtype == "profile_update":
+        upd_name = clean_str(data.get("username") or data.get("name"), 24)
+        if len(upd_name) >= 2:
+            me["name"] = upd_name
+        upd_handle = clean_str(data.get("handle"), 24)
+        if upd_handle:
+            me["handle"] = upd_handle
+        upd_color = clean_str(data.get("color"), 16)
+        if re.match(r"^#[0-9a-fA-F]{3,8}$", upd_color):
+            me["color"] = upd_color
+        if "bio" in data:
+            me["bio"] = clean_str(data.get("bio"), 160)
+        if "statusText" in data:
+            me["statusText"] = clean_str(data.get("statusText"), 60)
+        if "statusEmoji" in data:
+            me["statusEmoji"] = clean_str(data.get("statusEmoji"), 12) or "🍿"
+        raw_av_upd = str(data.get("avatarUrl") or "").strip()
+        if raw_av_upd and (raw_av_upd.startswith(("https://", "/static/", "/uploads/")) or (raw_av_upd.startswith("data:image/") and len(raw_av_upd) <= 45000)):
+            me["avatarUrl"] = raw_av_upd
+        elif "avatarUrl" in data and not raw_av_upd:
+            me["avatarUrl"] = ""
+        if me.get("uid"):
+            try:
+                import social_engine as _se_upd
+                _se_upd._register_social_dir({
+                    "uid": me["uid"],
+                    "name": me.get("name") or "İzleyici",
+                    "handle": me.get("handle") or "",
+                    "color": me.get("color") or "#27DCC8",
+                    "avatarUrl": me.get("avatarUrl") or "",
+                    "bio": me.get("bio") or "",
+                    "statusEmoji": me.get("statusEmoji") or "🍿",
+                    "statusText": me.get("statusText") or "",
+                })
+            except Exception:
+                pass
+        room["rev"] = int(room.get("rev") or 1) + 1
+        room["_tok_sig"] = ""
+        out["broadcast"].append((_room_event(room), None))
     elif mtype == "clear_chat":
         if room.get("curated"):
             out["reply"].append({"type": "error", "message": "7/24 canlı yayın odalarında sohbet geçmişi silinemez."})
@@ -2833,11 +2902,12 @@ async def ws_endpoint(websocket: WebSocket):
     requested_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(q.get("clientId") or ""))[:24]
     signed_cid = verify_client_token(room_id, q.get("clientToken"))
     verified_uid = _ws_verified_uid(websocket.scope, q)
+    safe_p_uid = _safe_participant_uid(verified_uid, q.get("uid") or q.get("userId"))
     join_data = {
         k: v for k, v in q.items()
         if not str(k).startswith("_") and k not in ("pwd", "uid", "userId", "clientId", "clientToken", "syncToken")
     }
-    join_data["uid"] = verified_uid
+    join_data["uid"] = safe_p_uid
     async with STORE.lock(room_id):
         is_curated_ws = any(s["id"] == room_id for s in CURATED_LIVE_SPECS)
         if not is_curated_ws and room_id in _CLOSED_ROOMS and (now() - float(_CLOSED_ROOMS.get(room_id) or 0.0) < 7200.0):
@@ -3164,7 +3234,8 @@ async def http_sync(request: Request):
                         set_media(room, spec["media"], room["creator"], start=0.0)
         room.pop("emptySince", None)
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now())
-        p, is_new = add_participant(room, cid, {**data, "uid": verified_uid}, "http")
+        safe_http_uid = _safe_participant_uid(verified_uid, data.get("uid") or data.get("userId"))
+        p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid}, "http")
         if is_new:
             sys_msg(room, "odaya katıldı", p["name"])
         active_m = data.get("activeMedia")
@@ -3331,9 +3402,15 @@ async def create_room(request: Request):
             "country": "XX" if _as_bool(payload.get("hideLocation")) else (payload.get("country") or "TR"),
             "hideLocation": _as_bool(payload.get("hideLocation")),
             "avatarUrl": payload.get("avatarUrl") or "",
+            "handle": clean_str(payload.get("handle"), 24),
+            "bio": clean_str(payload.get("bio"), 160),
+            "statusText": clean_str(payload.get("statusText"), 60),
+            "statusEmoji": clean_str(payload.get("statusEmoji"), 12),
+            "hideWatching": _as_bool(payload.get("hideWatching")),
+            "hideFriends": _as_bool(payload.get("hideFriends")),
             "medal": payload.get("medal") or "",
             "watchMinutes": payload.get("watchMinutes") or 0,
-            "uid": verified_uid or clean_str(payload.get("creatorId"), 40),
+            "uid": _safe_participant_uid(verified_uid, payload.get("creatorId") or payload.get("uid")),
             "_internalCreator": True,
             "_precreated": True,
         },

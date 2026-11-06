@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261105_v130';
-import { api, qs } from './api.js?v=20261105_v130';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261105_v130';
+import { h, toast, popup } from './ui.js?v=20261106_v131';
+import { api, qs } from './api.js?v=20261106_v131';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261106_v131';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -26,7 +26,16 @@ function readLocalAccounts() {
     localStorage.removeItem('vortex_accounts_v4');
     localStorage.removeItem('vortex_accounts_v5');
     localStorage.removeItem('vortex_accounts_v6');
-    return _zkDecode(localStorage.getItem(_scopedAccountsKey()) || '');
+    const scopedKey = _scopedAccountsKey();
+    let raw = localStorage.getItem(scopedKey) || '';
+    if ((!raw || raw === '{}') && scopedKey !== `${LS_KEY}:guest`) {
+      const guestRaw = localStorage.getItem(`${LS_KEY}:guest`) || '';
+      if (guestRaw && guestRaw !== '{}') {
+        raw = guestRaw;
+        localStorage.setItem(scopedKey, guestRaw);
+      }
+    }
+    return _zkDecode(raw);
   } catch (e) { return {}; }
 }
 

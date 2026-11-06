@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261105_v130';
-import { avatar, openDmModal } from '../profile.js?v=20261105_v130';
-import { getProvider } from '../providers.js?v=20261105_v130';
-import { api, qs } from '../api.js?v=20261105_v130';
+import { h, icons, popup, toast } from '../ui.js?v=20261106_v131';
+import { avatar, openDmModal } from '../profile.js?v=20261106_v131';
+import { getProvider } from '../providers.js?v=20261106_v131';
+import { api, qs } from '../api.js?v=20261106_v131';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261105_v130';
-import { expectedPosition } from '../sync.js?v=20261105_v130';
+} from '../store.js?v=20261106_v131';
+import { expectedPosition } from '../sync.js?v=20261106_v131';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -240,10 +240,19 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
     if (f.watchingRoom?.roomId) {
       return { id: f.watchingRoom.roomId, name: f.watchingRoom.roomName, media: { title: f.watchingRoom.mediaTitle, poster: f.watchingRoom.mediaPoster } };
     }
+    if (f.roomId) {
+      return { id: f.roomId, name: f.roomName || 'Canlı Oda', media: { title: f.mediaTitle || '', poster: f.mediaPoster || '' } };
+    }
+    const fUid = String(f.uid || '').trim();
+    const fh = String(f.handle || '').replace(/^@+/, '').toLowerCase();
     const fn = String(f.name || '').toLowerCase();
     return (lastLobbyRooms || []).find((r) => !r.curated && (
-      String(r.creator || '').toLowerCase() === fn ||
-      (r.participants || []).some((p) => String(p.name || '').toLowerCase() === fn)
+      (r.participants || []).some((p) =>
+        (fUid && p.uid && p.uid === fUid) ||
+        (fh && p.handle && String(p.handle).replace(/^@+/, '').toLowerCase() === fh) ||
+        (!fUid && fn && String(p.name || '').toLowerCase() === fn)
+      ) ||
+      (!fUid && fn && String(r.creator || '').toLowerCase() === fn)
     ));
   };
 
@@ -338,8 +347,9 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
   const renderModalContent = () => {
     const soc = state.social || {};
     const friends = getFriends();
-    const onlineFriends = friends.filter((f) => f.online);
-    const offlineFriends = friends.filter((f) => !f.online);
+    const isFriendLive = (f) => Boolean(f.online || f.roomId || findFriendActiveRoom(f));
+    const onlineFriends = friends.filter(isFriendLive);
+    const offlineFriends = friends.filter((f) => !isFriendLive(f));
     const inReqs = soc.requests || [];
     const outReqs = soc.outgoingRequests || [];
     const blocked = soc.blocked || [];
@@ -528,6 +538,9 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
 
 export function openRoomInviteModal() {
   return openFriendsManagerModal(null, 'friends');
+}
+if (typeof window !== 'undefined') {
+  window.vortexOpenFriendsModal = openFriendsManagerModal;
 }
 
 export function renderHomeFriendsStrip(onOpenRoom) {

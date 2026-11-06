@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261105_v130';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261105_v130';
-import { avatar } from '../profile.js?v=20261105_v130';
-import { api, qs } from '../api.js?v=20261105_v130';
-import { resolveMusicItem } from './selection-kinds.js?v=20261105_v130';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261105_v130';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261106_v131';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261106_v131';
+import { avatar } from '../profile.js?v=20261106_v131';
+import { api, qs } from '../api.js?v=20261106_v131';
+import { resolveMusicItem } from './selection-kinds.js?v=20261106_v131';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261106_v131';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -743,6 +743,14 @@ export function buildChat(ctx) {
         else badges.push(h('span', { class: 'd-peer-badge mic-off', html: icons.micOff }));
         const av = avatar(p, 26);
         if (p.speaking) av.classList.add('speaking');
+        if (p.id !== selfId && !String(p.id || '').startsWith('bot_')) {
+          av.style.cursor = 'pointer';
+          av.title = `${labelText} profilini aç / arkadaş ekle`;
+          av.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            window.vortexOpenUserProfile?.(p);
+          });
+        }
         return h('div', {
           class: `discord-peer-chip ${isAct ? 'in-call' : ''} ${p.speaking ? 'is-speaking' : ''} ${p.screen ? 'has-screen' : ''}`.trim(),
           title: p.screen ? `${labelText} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${labelText}`,
@@ -1184,10 +1192,52 @@ export function buildChat(ctx) {
         if (!wasOpen) row.classList.add('msg-active');
       },
     },
-      avatar({ name: m.user, color: m.color }, 30),
+      (() => {
+        const msgPeer = (state.mesh?.participants || []).find((x) =>
+          (m.cid && x.id === m.cid) ||
+          (m.uid && x.uid && x.uid === m.uid) ||
+          (m.user && x.name === m.user)
+        ) || {
+          uid: m.uid || '',
+          name: m.user,
+          handle: m.handle || '',
+          color: m.color,
+          avatarUrl: m.avatarUrl || '',
+        };
+        const msgAv = avatar(msgPeer, 30);
+        if (!String(msgPeer.id || '').startsWith('bot_')) {
+          msgAv.style.cursor = 'pointer';
+          msgAv.title = `${m.user} profilini aç / arkadaş ekle`;
+          msgAv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            window.vortexOpenUserProfile?.(msgPeer);
+          });
+        }
+        return msgAv;
+      })(),
       h('div', { class: 'msg-body' },
         h('div', { class: 'msg-head-row' },
-          h('div', { class: 'msg-name' }, h('span', { style: { color: m.color } }, m.user), h('time', {}, dispTime)),
+          h('div', { class: 'msg-name' },
+            h('span', {
+              style: { color: m.color, cursor: 'pointer' },
+              title: `${m.user} profilini aç / arkadaş ekle`,
+              onclick: (ev) => {
+                ev.stopPropagation();
+                const msgPeer = (state.mesh?.participants || []).find((x) =>
+                  (m.cid && x.id === m.cid) ||
+                  (m.uid && x.uid && x.uid === m.uid) ||
+                  (m.user && x.name === m.user)
+                ) || {
+                  uid: m.uid || '',
+                  name: m.user,
+                  handle: m.handle || '',
+                  color: m.color,
+                  avatarUrl: m.avatarUrl || '',
+                };
+                window.vortexOpenUserProfile?.(msgPeer);
+              },
+            }, m.user),
+            h('time', {}, dispTime)),
           actionBar),
         buildQuoteBlock(m.replyTo),
         m.pollId

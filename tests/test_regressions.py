@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261105_v130 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261106_v131 with zero stale v79/v87/v88 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261105_v130", index_html)
+        self.assertIn("20261106_v131", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -2104,6 +2104,183 @@ class RegressionTests(unittest.TestCase):
         r_p = self.client.get("/api/rave/poster?title=Amerikan+Pastasi+1&tid=2105&mt=movie", follow_redirects=False)
         self.assertIn(r_p.status_code, (302, 307))
         self.assertIn("pNzarHZjSGo6NgotluiAG3U2nwy.jpg", r_p.headers.get("location", ""))
+
+    def test_v131_accounts_usernames_and_friends_audit(self):
+        import uuid
+        import auth_engine
+        import social_engine
+
+        sfx = uuid.uuid4().hex[:6]
+        # 1. Turkish handle normalization & strict 409 handle collision on register + profile update
+        r_reg1 = self.client.post("/api/auth/register", json={
+            "name": "Çağrı Işık",
+            "handle": f"@Çağrı_{sfx}",
+            "email": f"cagri_{sfx}@watchlivo.test",
+            "password": "Password131!",
+            "color": "#27DCC8",
+        })
+        self.assertEqual(r_reg1.status_code, 200, r_reg1.text)
+        u1 = r_reg1.json()["user"]
+        tok1 = r_reg1.json()["authToken"]
+        self.assertEqual(u1["handle"], f"cagri_{sfx}")
+        self.assertTrue(u1["uid"].startswith("u_wl_"))
+
+        # Duplicate handle registration -> 409 Conflict
+        r_dup = self.client.post("/api/auth/register", json={
+            "name": "Başka Çağrı",
+            "handle": f"@CAGRI_{sfx}",
+            "email": f"other_{sfx}@watchlivo.test",
+            "password": "Password131!",
+        })
+        self.assertEqual(r_dup.status_code, 409)
+
+        # Second account registration + profile rename collision (409) + valid rename (200)
+        r_reg2 = self.client.post("/api/auth/register", json={
+            "name": "Şeyma Öztürk",
+            "handle": f"@Şeyma_{sfx}",
+            "email": f"seyma_{sfx}@watchlivo.test",
+            "password": "Password131!",
+        })
+        self.assertEqual(r_reg2.status_code, 200)
+        u2 = r_reg2.json()["user"]
+        tok2 = r_reg2.json()["authToken"]
+        self.assertEqual(u2["handle"], f"seyma_{sfx}")
+
+        r_prof_col = self.client.post(
+            "/api/auth/profile",
+            headers={"Authorization": f"Bearer {tok2}"},
+            json={"name": "Şeyma Öztürk", "handle": f"cagri_{sfx}"},
+        )
+        self.assertEqual(r_prof_col.status_code, 409)
+
+        r_prof_ok = self.client.post(
+            "/api/auth/profile",
+            headers={"Authorization": f"Bearer {tok2}"},
+            json={"name": "Şeyma Sinema", "handle": f"@ŞeymaSinema_{sfx}", "bio": "Gece sineması"},
+        )
+        self.assertEqual(r_prof_ok.status_code, 200)
+        tok2 = r_prof_ok.json()["authToken"]
+        self.assertEqual(r_prof_ok.json()["user"]["handle"], f"seymasinema_{sfx}")
+
+        # 2. Cold-instance login via vaultToken (pwh) & /api/auth/me self-healing
+        if auth_engine.store_backend() != "redis":
+            conn = auth_engine._get_db()
+            try:
+                conn.execute("DELETE FROM watchlivo_users WHERE uid = ?", (u1["uid"],))
+                conn.commit()
+            finally:
+                conn.close()
+
+        r_bad_pw = self.client.post("/api/auth/login", json={
+            "identifier": f"@Çağrı_{sfx}",
+            "password": "WrongPassword!",
+            "vaultToken": tok1,
+        })
+        self.assertEqual(r_bad_pw.status_code, 401)
+
+        r_cold_login = self.client.post("/api/auth/login", json={
+            "identifier": f"@Çağrı_{sfx}",
+            "password": "Password131!",
+            "vaultToken": tok1,
+        })
+        self.assertEqual(r_cold_login.status_code, 200, r_cold_login.text)
+        self.assertEqual(r_cold_login.json()["user"]["uid"], u1["uid"])
+
+        r_me = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {tok2}"})
+        self.assertEqual(r_me.status_code, 200)
+        self.assertTrue(r_me.json()["authenticated"])
+        self.assertEqual(r_me.json()["user"]["handle"], f"seymasinema_{sfx}")
+
+        # 3. Turkish & #tag user search (cagri, çağrı, @ÇAĞRI, #1234)
+        for q_variant in (f"cagri_{sfx}", f"çağrı_{sfx}", f"@ÇAĞRI_{sfx}", f"cagri_{sfx}#4821"):
+            r_srch = self.client.get(
+                f"/api/rave/social/search?q={q_variant}&uid={u2['uid']}",
+                headers={"Authorization": f"Bearer {tok2}"},
+            )
+            self.assertEqual(r_srch.status_code, 200)
+            uids_found = [x["uid"] for x in r_srch.json().get("users", [])]
+            self.assertIn(u1["uid"], uids_found, f"Query {q_variant} missed {u1['uid']}")
+
+        # 4. Guest provisioning, collision check, mutual friend request/accept & DM
+        guest_uid = f"guest_v131{sfx}"
+        r_gcol = self.client.post("/api/rave/social/guest", json={
+            "uid": guest_uid, "name": "Misafir Test", "handle": f"cagri_{sfx}",
+        })
+        self.assertEqual(r_gcol.status_code, 409)
+
+        r_gok = self.client.post("/api/rave/social/guest", json={
+            "uid": guest_uid, "name": "Misafir Ömer", "handle": f"@ÖmerMisafir_{sfx}", "color": "#f43f5e",
+        })
+        self.assertEqual(r_gok.status_code, 200)
+        self.assertEqual(r_gok.json()["user"]["handle"], f"omermisafir_{sfx}")
+
+        # Member searches guest by Turkish query & sends friend request -> Guest accepts -> DM works
+        r_gs = self.client.get(
+            f"/api/rave/social/search?q=ömermisafir_{sfx}&uid={u1['uid']}",
+            headers={"Authorization": f"Bearer {tok1}"},
+        )
+        self.assertIn(guest_uid, [x["uid"] for x in r_gs.json().get("users", [])])
+
+        r_freq = self.client.post(
+            "/api/rave/social/friends",
+            headers={"Authorization": f"Bearer {tok1}"},
+            json={"action": "request", "uid": u1["uid"], "target": f"@omermisafir_{sfx}"},
+        )
+        self.assertEqual(r_freq.status_code, 200)
+        self.assertEqual(r_freq.json().get("status"), "OUTGOING_PENDING")
+
+        r_facc = self.client.post("/api/rave/social/friends", json={
+            "action": "accept", "uid": guest_uid, "targetUid": u1["uid"],
+        })
+        self.assertEqual(r_facc.status_code, 200)
+        self.assertIn(u1["uid"], [f["uid"] for f in r_facc.json().get("friends", [])])
+
+        r_dm = self.client.post("/api/rave/social/dm", json={
+            "action": "send", "uid": guest_uid, "peerUid": u1["uid"], "text": "Selam Çağrı!",
+        })
+        self.assertEqual(r_dm.status_code, 200)
+        self.assertTrue(r_dm.json().get("ok"))
+
+        # 5. In-room participant uid/handle serialization, spoof blocking, and live profile_update
+        cr_room = self.client.post(
+            "/api/rooms/create",
+            headers={"Authorization": f"Bearer {tok1}"},
+            json={
+                "name": "Sosyal Test Odası",
+                "privacy": "public",
+                "creator": u1["name"],
+                "creatorId": u1["uid"],
+                "clientId": f"h_cagri_{sfx}",
+            },
+        ).json()
+        rid = cr_room["room"]["id"]
+        # Unauthenticated client trying to spoof u_wl_* in room sync gets scrubbed to empty uid, while guest_* is kept
+        r_spoof = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": f"h_spoof_{sfx}", "uid": u1["uid"], "username": "Taklitci",
+        })
+        self.assertEqual(r_spoof.status_code, 200)
+        spoof_p = next(p for p in r_spoof.json()["room"]["participants"] if p["id"] == f"h_spoof_{sfx}")
+        self.assertEqual(spoof_p.get("uid", ""), "")
+
+        r_gjoin = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "init", "clientId": f"h_guest_{sfx}", "uid": guest_uid, "username": "Misafir Ömer", "handle": f"omermisafir_{sfx}",
+        })
+        self.assertEqual(r_gjoin.status_code, 200)
+        guest_p = next(p for p in r_gjoin.json()["room"]["participants"] if p["id"] == f"h_guest_{sfx}")
+        self.assertEqual(guest_p.get("uid"), guest_uid)
+        self.assertEqual(guest_p.get("handle"), f"omermisafir_{sfx}")
+
+        r_pupd = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "profile_update",
+            "clientId": f"h_guest_{sfx}",
+            "clientToken": r_gjoin.json()["clientToken"],
+            "username": "Ömer Kaptan",
+            "handle": f"omerkaptan_{sfx}",
+        })
+        self.assertEqual(r_pupd.status_code, 200)
+        upd_p = next(p for p in r_pupd.json()["room"]["participants"] if p["id"] == f"h_guest_{sfx}")
+        self.assertEqual(upd_p["name"], "Ömer Kaptan")
+        self.assertEqual(upd_p["handle"], f"omerkaptan_{sfx}")
 
 
 if __name__ == '__main__':

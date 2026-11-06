@@ -1,16 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261105_v130';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261106_v131';
 import {
   state, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261105_v130';
-import { avatar } from '../profile.js?v=20261105_v130';
-import { clock } from '../sync.js?v=20261105_v130';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261105_v130';
-import { copyInvite, inviteUrl } from './chat.js?v=20261105_v130';
-import { parseVideoUrl } from '../providers.js?v=20261105_v130';
-import { resolveMedia } from './selection.js?v=20261105_v130';
+} from '../store.js?v=20261106_v131';
+import { avatar } from '../profile.js?v=20261106_v131';
+import { clock } from '../sync.js?v=20261106_v131';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261106_v131';
+import { copyInvite, inviteUrl } from './chat.js?v=20261106_v131';
+import { parseVideoUrl } from '../providers.js?v=20261106_v131';
+import { resolveMedia } from './selection.js?v=20261106_v131';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -388,24 +388,34 @@ function Participants(ctx) {
               })) : null),
           (p.isHost || p.isCreator) ? h('span', { class: 'crown', title: p.isHost ? 'Oda Lideri' : 'Oda Kurucusu', html: icons.crown }) : null,
           !isMe && !isBot ? (() => {
-            const pTarget = p.uid || (p.handle ? `@${String(p.handle).replace(/^@+/, '')}` : p.name);
+            const safePUid = String(p.uid || (/^(u_wl_|guest_|u_)/i.test(String(p.id || '')) ? p.id : '') || '').trim();
             const pHandleClean = String(p.handle || '').replace(/^@+/, '').toLowerCase();
-            const isMut = friendAdded || Boolean((state.social?.friends || []).some((f) => (p.uid && f.uid === p.uid) || (pHandleClean && String(f.handle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)));
-            const isPend = Boolean((state.social?.outgoingRequests || []).some((o) => (p.uid && o.toUid === p.uid) || (pHandleClean && String(o.toHandle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)));
+            const pTarget = safePUid || (pHandleClean ? `@${pHandleClean}` : p.name);
+            const matchedFriend = (state.social?.friends || []).find((f) =>
+              (safePUid && f.uid === safePUid) ||
+              (pHandleClean && String(f.handle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)
+            );
+            const matchedOutReq = (state.social?.outgoingRequests || []).find((o) =>
+              (safePUid && o.toUid === safePUid) ||
+              (pHandleClean && String(o.toHandle || '').replace(/^@+/, '').toLowerCase() === pHandleClean)
+            );
+            const resolvedTargetUid = safePUid || matchedFriend?.uid || matchedOutReq?.toUid || '';
+            const isMut = friendAdded || Boolean(matchedFriend);
+            const isPend = Boolean(matchedOutReq);
             return h('button', {
               type: 'button',
               class: `btn sm friend-toggle-btn ${isMut ? 'on' : ''}`,
               title: isMut ? 'Karşılıklı arkadaşsınız' : (isPend ? 'Onay bekleniyor' : 'Arkadaşlık isteği gönder'),
               onclick: async () => {
-                if (isMut && p.uid) {
-                  await updateFriendAction('remove', { targetUid: p.uid });
+                if (isMut && resolvedTargetUid) {
+                  await updateFriendAction('remove', { targetUid: resolvedTargetUid });
                   toast(`${p.name} arkadaş listesinden çıkarıldı`);
-                } else if (isPend && p.uid) {
-                  await updateFriendAction('cancel', { targetUid: p.uid });
+                } else if (isPend && resolvedTargetUid) {
+                  await updateFriendAction('cancel', { targetUid: resolvedTargetUid });
                   toast('Arkadaşlık isteği geri çekildi');
                 } else {
                   const r = await sendFriendRequest(pTarget);
-                  toast(r?.ok ? `📩 ${p.name} kişisine arkadaşlık isteği gönderildi` : (r?.error || 'Kayıtlı kullanıcı bulunamadı'));
+                  toast(r?.ok ? (r.status === 'FRIENDS' ? `🎉 ${p.name} ile artık arkadaşsınız!` : `📩 ${p.name} kişisine arkadaşlık isteği gönderildi`) : (r?.error || 'Kayıtlı kullanıcı bulunamadı'));
                 }
                 update();
               },

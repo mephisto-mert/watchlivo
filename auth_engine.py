@@ -35,8 +35,8 @@ from security import RateLimiter, client_ip, constant_time_eq, server_secret, to
 # unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
 AUTH_SECRET = server_secret("AUTH_SECRET") if len((os.environ.get("AUTH_SECRET") or "").strip()) >= 16 else server_secret("VORTEX_SECRET")
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL") or 60 * 60 * 24 * 7)
-_LOGIN_LIMIT = RateLimiter(10, 300.0, name="login")
-_REGISTER_LIMIT = RateLimiter(5, 3600.0, name="register")
+_LOGIN_LIMIT = RateLimiter(20, 300.0, name="login")
+_REGISTER_LIMIT = RateLimiter(15, 900.0, name="register")
 _OTP_LIMIT = RateLimiter(5, 600.0, name="otp_send")
 _OTP_VERIFY_LIMIT = RateLimiter(10, 600.0, name="otp_verify")
 _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
@@ -311,14 +311,30 @@ def _user_update(uid: str, fields: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
+def _tr_fold(s: str) -> str:
+    return (
+        str(s or "")
+        .replace("İ", "i").replace("I", "i").replace("ı", "i")
+        .replace("Ş", "s").replace("ş", "s")
+        .replace("Ğ", "g").replace("ğ", "g")
+        .replace("Ü", "u").replace("ü", "u")
+        .replace("Ö", "o").replace("ö", "o")
+        .replace("Ç", "c").replace("ç", "c")
+        .lower()
+        .replace("\u0307", "")
+    )
+
+
+def _strip_discrim_tag(s: str) -> str:
+    return re.sub(r"#[a-zA-Z0-9]{1,8}$", "", str(s or "").strip()).strip()
+
+
 def _norm_handle(raw: str, fallback_name: str = "") -> str:
-    h = re.sub(r"[^a-z0-9_.\-]", "", (raw or "").strip().lower().lstrip("@")
-               .replace("ı", "i").replace("ş", "s").replace("ğ", "g")
-               .replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24]
+    cleaned_raw = _strip_discrim_tag(str(raw or "").strip().lstrip("@"))
+    h = re.sub(r"[^a-z0-9_.\-]", "", _tr_fold(cleaned_raw))[:24].strip("._-")
     if len(h) < 2 and fallback_name:
-        h = re.sub(r"[^a-z0-9_.\-]", "", fallback_name.lower()
-                   .replace(" ", "_").replace("ı", "i").replace("ş", "s")
-                   .replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:20]
+        cleaned_fb = _strip_discrim_tag(str(fallback_name or "").strip()).replace(" ", "_")
+        h = re.sub(r"[^a-z0-9_.\-]", "", _tr_fold(cleaned_fb))[:20].strip("._-")
     if len(h) < 2:
         h = "uye_" + secrets.token_hex(3)
     return h
@@ -328,12 +344,52 @@ def _hash_pw(password: str, salt: str) -> str:
     return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 120_000).hex()
 
 
+def _pw_verifier(uid: str, password: str) -> str:
+    return hmac.new(AUTH_SECRET, f"wl-pw-v1:{uid}:{password}".encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
 def _new_salt() -> str:
     """Cryptographically random per-account salt (never derived from the uid)."""
     return secrets.token_hex(16)
 
 
-def sign_auth_token(user: Dict[str, Any]) -> str:
+def _sync_user_to_social(user: Dict[str, Any]) -> None:
+    try:
+        import social_engine
+        uid = str(user.get("uid") or "").strip()
+        if not uid:
+            return
+        raw_h = str(user.get("handle") or "").strip().lstrip("@")
+        social_engine._register_social_dir({
+            "uid": uid,
+            "name": str(user.get("name") or "Üye"),
+            "handle": f"@{raw_h}" if raw_h else "@uye",
+            "color": str(user.get("color") or "#00f5d4"),
+            "avatar": str(user.get("avatar") or "🎬"),
+            "avatarUrl": str(user.get("avatarUrl") or ""),
+            "bio": str(user.get("bio") or ""),
+            "statusEmoji": str(user.get("statusEmoji") or "🍿"),
+            "statusText": str(user.get("statusText") or ""),
+        })
+        su = social_engine._SOCIAL_USERS.get(uid) or social_engine._kv_get(f"wl:soc:u:{uid}", None, max_age=3.0)
+        if isinstance(su, dict) and su.get("uid"):
+            su["name"] = str(user.get("name") or su.get("name") or "Üye")[:32]
+            if raw_h:
+                su["handle"] = f"@{raw_h}"
+            if user.get("color"):
+                su["color"] = str(user.get("color"))[:16]
+            if "avatarUrl" in user:
+                su["avatarUrl"] = str(user.get("avatarUrl") or "")[:600]
+            priv = su.setdefault("privacy", {"presenceVisibility": "friends", "hideWatching": False, "allowInvites": "friends"})
+            if "hideWatching" in user:
+                priv["hideWatching"] = bool(user.get("hideWatching"))
+            social_engine._SOCIAL_USERS[uid] = su
+            social_engine._kv_set(f"wl:soc:u:{uid}", su, ttl_sec=2592000)
+    except Exception:
+        pass
+
+
+def sign_auth_token(user: Dict[str, Any], pw_verifier: str = "") -> str:
     """Mint a short-lived HMAC session token.
 
     The password hash never enters the token: a leaked token must not help an
@@ -342,19 +398,31 @@ def sign_auth_token(user: Dict[str, Any]) -> str:
     issued = int(time.time())
     raw_av = str(user.get("avatar") or "🎬")
     safe_av = "📷" if (raw_av.startswith("data:image/") or len(raw_av) > 120) else raw_av
+    raw_av_url = str(user.get("avatarUrl") or "").strip()
+    safe_av_url = raw_av_url if (raw_av_url and not raw_av_url.startswith("data:") and len(raw_av_url) <= 500) else ""
     payload = {
         "uid": user["uid"],
         "email": user.get("email", ""),
-        "handle": user.get("handle", ""),
+        "handle": str(user.get("handle") or "").lstrip("@"),
         "name": user.get("name", ""),
         "color": user.get("color", "#00f5d4"),
         "avatar": safe_av,
+        "avatarUrl": safe_av_url,
+        "bio": str(user.get("bio") or "")[:160],
+        "statusText": str(user.get("statusText") or "")[:60],
+        "statusEmoji": str(user.get("statusEmoji") or "🍿")[:12],
+        "hideWatching": bool(user.get("hideWatching", False)),
+        "hideFriends": bool(user.get("hideFriends", False)),
+        "hideLocation": bool(user.get("hideLocation", False)),
         "provider": user.get("authProvider", "email"),
         "verified": bool(user.get("verified", True)),
         "iat": issued,
         "exp": issued + TOKEN_TTL,
         "jti": secrets.token_hex(8),
     }
+    pwh_val = str(pw_verifier or user.get("_pwh") or "").strip()
+    if pwh_val:
+        payload["pwh"] = pwh_val[:32]
     raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
     sig = hmac.new(AUTH_SECRET, b64.encode("ascii"), hashlib.sha256).hexdigest()[:32]
@@ -371,9 +439,10 @@ def _candidate_auth_secrets() -> list[bytes]:
         ).strip()
         if len(ent) >= 24:
             for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
-                cand_v4 = hmac.new(ent.encode("utf-8"), f"watchlivo-hmac-secret-v4:{nm}".encode("utf-8"), hashlib.sha256).digest()
-                if cand_v4 not in out:
-                    out.append(cand_v4)
+                for tag in ("watchlivo-shared-secret-v4", "watchlivo-hmac-secret-v4"):
+                    cand_v4 = hmac.new(ent.encode("utf-8"), f"{tag}:{nm}".encode("utf-8"), hashlib.sha256).digest()
+                    if cand_v4 not in out:
+                        out.append(cand_v4)
                 cand_v2 = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:default".encode("utf-8")).digest()
                 if cand_v2 not in out:
                     out.append(cand_v2)
@@ -443,9 +512,6 @@ def _row_to_user(row: Any) -> Dict[str, Any]:
 
 
 async def auth_register(request: Request) -> JSONResponse:
-    allowed, retry_after = _REGISTER_LIMIT.hit(client_ip(request))
-    if not allowed:
-        return too_many_response(retry_after)
     try:
         body = await request.json()
     except Exception:
@@ -464,8 +530,30 @@ async def auth_register(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Lütfen geçerli bir e-posta adresi girin."}, status_code=400)
     if len(password) < 6:
         return JSONResponse({"ok": False, "error": "Şifre en az 6 karakter olmalıdır."}, status_code=400)
-    handle = _norm_handle(raw_handle, name)
     uid = "u_wl_" + hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
+    try:
+        existing_em = _uid_for("email", email)
+    except Exception:
+        existing_em = None
+    if existing_em:
+        return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen Giriş Yap sekmesinden şifrenizle giriş yapın."}, status_code=409)
+    explicit_h_input = _strip_discrim_tag(raw_handle.lstrip("@").strip())
+    if explicit_h_input:
+        explicit_norm = re.sub(r"[^a-z0-9_.\-]", "", _tr_fold(explicit_h_input))[:24].strip("._-")
+        if len(explicit_norm) < 2:
+            return JSONResponse({"ok": False, "error": "Kullanıcı adı en az 2 geçerli harf veya rakam içermelidir."}, status_code=400)
+        try:
+            owner_h = _uid_for("handle", explicit_norm)
+        except Exception:
+            owner_h = None
+        if owner_h and owner_h != uid:
+            return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{explicit_norm}) zaten kullanımda. Lütfen farklı bir kullanıcı adı seçin."}, status_code=409)
+        handle = explicit_norm
+    else:
+        handle = _norm_handle("", name)
+    allowed, retry_after = _REGISTER_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     salt = _new_salt()
     pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
@@ -498,7 +586,8 @@ async def auth_register(request: Request) -> JSONResponse:
     if not created:
         return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen Giriş Yap sekmesinden şifrenizle giriş yapın."}, status_code=409)
     user = _row_to_user(row)
-    token = sign_auth_token(user)
+    _sync_user_to_social(user)
+    token = sign_auth_token(user, pw_verifier=_pw_verifier(uid, password))
     return JSONResponse({"ok": True, "user": user, "authToken": token, "emailSent": True})
 
 
@@ -512,20 +601,23 @@ async def auth_login(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
     if not isinstance(body, dict):
         return JSONResponse({"ok": False, "error": "Geçersiz istek verisi."}, status_code=400)
-    identifier = str(body.get("identifier") or body.get("email") or body.get("handle") or "").strip().lower()[:120]
+    raw_ident = str(body.get("identifier") or body.get("email") or body.get("handle") or "").strip()[:120]
+    identifier = raw_ident.lower()
     password = str(body.get("password") or "")[:256]
     if not identifier or not password:
         return JSONResponse({"ok": False, "error": "E-posta / kullanıcı adı ve şifre zorunludur."}, status_code=400)
-    acct_ok, acct_retry = _LOGIN_LIMIT.hit(f"acct:{identifier[:80]}")
+    acct_ok, acct_retry = _LOGIN_LIMIT.hit(f"acct:{_tr_fold(raw_ident)[:80]}")
     if not acct_ok:
         return too_many_response(acct_retry)
-    clean_h = identifier.lstrip("@")
+    is_email = bool(EMAIL_RE.match(identifier))
+    clean_h = _norm_handle(raw_ident) if not is_email else ""
+    row = None
     try:
-        uid = _uid_for("email", identifier) if EMAIL_RE.match(identifier) else _uid_for("handle", clean_h)
+        uid = _uid_for("email", identifier) if is_email else (_uid_for("handle", clean_h) or _uid_for("handle", _strip_discrim_tag(identifier.lstrip("@"))))
         row = _user_get(uid) if uid else None
     except Exception:
         row = None
-    target_email = identifier if EMAIL_RE.match(identifier) else (row.get("email", "") if row else "")
+    target_email = identifier if is_email else (row.get("email", "") if row else "")
     fb_verified = False
     local_verified = bool(
         row
@@ -535,7 +627,44 @@ async def auth_login(request: Request) -> JSONResponse:
     )
     if local_verified:
         fb_verified = True
-    elif not row and target_email and EMAIL_RE.match(target_email):
+    if not row:
+        vault_tok = str(body.get("vaultToken") or "").strip()
+        v_claims = verify_auth_token(vault_tok) if vault_tok else None
+        if v_claims and v_claims.get("uid") and v_claims.get("pwh"):
+            v_uid = str(v_claims["uid"])
+            v_email = str(v_claims.get("email") or "").strip().lower()
+            v_handle = _norm_handle(str(v_claims.get("handle") or ""))
+            ident_matches = (is_email and v_email == identifier) or (not is_email and clean_h and v_handle == clean_h)
+            if ident_matches and hmac.compare_digest(str(v_claims["pwh"]), _pw_verifier(v_uid, password)):
+                fb_verified = True
+                salt = _new_salt()
+                pw_hash = _hash_pw(password, salt)
+                row = {
+                    "uid": v_uid,
+                    "email": v_email or (identifier if is_email else f"{v_uid}@watchlivo.online"),
+                    "handle": v_handle or _norm_handle("", str(v_claims.get("name") or "uye")),
+                    "name": str(v_claims.get("name") or "Üye")[:24],
+                    "password_hash": pw_hash,
+                    "salt": salt,
+                    "color": _clean_color(v_claims.get("color")),
+                    "avatar": str(v_claims.get("avatar") or "🎬")[:120],
+                    "avatar_url": str(v_claims.get("avatarUrl") or "")[:500],
+                    "bio": str(v_claims.get("bio") or "")[:160],
+                    "status_text": str(v_claims.get("statusText") or "")[:60],
+                    "status_emoji": str(v_claims.get("statusEmoji") or "🍿")[:12],
+                    "hide_watching": 1 if _as_bool(v_claims.get("hideWatching")) else 0,
+                    "hide_friends": 1 if _as_bool(v_claims.get("hideFriends")) else 0,
+                    "hide_location": 1 if _as_bool(v_claims.get("hideLocation")) else 0,
+                    "auth_provider": str(v_claims.get("provider") or "email"),
+                    "verified": 1,
+                    "created_at": time.time(),
+                    "updated_at": time.time(),
+                }
+                try:
+                    _user_create(row)
+                except Exception:
+                    pass
+    if not row and target_email and EMAIL_RE.match(target_email):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
@@ -543,10 +672,8 @@ async def auth_login(request: Request) -> JSONResponse:
                 "returnSecureToken": True,
             })
             if fb_res and fb_res.get("idToken"):
-                lk_res = _firebase_auth_req("accounts:lookup", {"idToken": fb_res["idToken"]})
-                lk_users = (lk_res or {}).get("users") or []
-                lk_u0 = lk_users[0] if lk_users else {}
-                if lk_u0.get("emailVerified") is True and str(lk_u0.get("email") or "").strip().lower() == target_email:
+                fb_email = str(fb_res.get("email") or target_email).strip().lower()
+                if fb_email == target_email:
                     fb_verified = True
                     uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
                     salt = _new_salt()
@@ -564,14 +691,15 @@ async def auth_login(request: Request) -> JSONResponse:
                     except Exception:
                         pass
                 break
-    if not row and EMAIL_RE.match(identifier):
+    if not row and is_email:
         sb_res = _supabase_auth_req("/auth/v1/token?grant_type=password", {
             "email": identifier,
             "password": password if len(password) >= 6 else (password + "_wl26"),
         })
-        if sb_res and isinstance(sb_res.get("user"), dict) and sb_res["user"].get("email_confirmed_at"):
+        if sb_res and isinstance(sb_res.get("user"), dict):
             sb_u = sb_res["user"]
             meta = sb_u.get("user_metadata") or {}
+            fb_verified = True
             uid = "u_wl_" + hashlib.sha256(identifier.encode("utf-8")).hexdigest()[:12]
             salt = _new_salt()
             pw_hash = _hash_pw(password, salt)
@@ -593,7 +721,8 @@ async def auth_login(request: Request) -> JSONResponse:
     if not fb_verified and not hmac.compare_digest(expected, row["password_hash"]):
         return JSONResponse({"ok": False, "error": "Hesap bulunamadı veya bilgiler hatalı."}, status_code=401)
     user = _row_to_user(row)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+    _sync_user_to_social(user)
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(user["uid"], password))})
 
 
 PROVIDER_ICONS = {
@@ -972,14 +1101,28 @@ async def auth_profile(request: Request) -> JSONResponse:
     uid = claims["uid"]
     fields = {}
     name = str(body.get("name") or "").strip()[:24]
-    if len(name) >= 2:
+    if "name" in body and body.get("name") is not None:
+        if len(name) < 2:
+            return JSONResponse({"ok": False, "error": "Görünen ad en az 2 karakter olmalıdır."}, status_code=400)
         fields["name"] = name
-    if body.get("handle"):
-        cand_h = _norm_handle(str(body.get("handle")), name or claims.get("name", ""))
-        owner_uid = _uid_for("handle", cand_h)
+    raw_h_body = str(body.get("handle") or "").strip()
+    if raw_h_body:
+        clean_explicit_h = re.sub(r"[^a-z0-9_.\-]", "", _tr_fold(_strip_discrim_tag(raw_h_body.lstrip("@"))))[:24].strip("._-")
+        if len(clean_explicit_h) < 2:
+            return JSONResponse({"ok": False, "error": "Kullanıcı adı en az 2 geçerli harf veya rakam içermelidir."}, status_code=400)
+        owner_uid = _uid_for("handle", clean_explicit_h)
         if owner_uid and owner_uid != uid:
-            return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{cand_h}) zaten kullanımda."}, status_code=409)
-        fields["handle"] = cand_h
+            return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{clean_explicit_h}) zaten kullanımda."}, status_code=409)
+        try:
+            import social_engine
+            for s_uid, s_card in social_engine._load_social_dir().items():
+                if s_uid and s_uid != uid and isinstance(s_card, dict):
+                    s_h = str(s_card.get("handle") or "").lstrip("@").strip().lower()
+                    if s_h == clean_explicit_h and s_uid.startswith("u_wl_"):
+                        return JSONResponse({"ok": False, "error": f"Bu kullanıcı adı (@{clean_explicit_h}) zaten kullanımda."}, status_code=409)
+        except Exception:
+            pass
+        fields["handle"] = clean_explicit_h
     color = str(body.get("color") or "").strip()[:16]
     if re.match(r"^#[0-9a-fA-F]{3,8}$", color):
         fields["color"] = color
@@ -1000,6 +1143,7 @@ async def auth_profile(request: Request) -> JSONResponse:
         fields["hide_friends"] = 1 if _as_bool(body.get("hideFriends")) else 0
     if "hideLocation" in body:
         fields["hide_location"] = 1 if _as_bool(body.get("hideLocation")) else 0
+    pwh_keep = str(claims.get("pwh") or "")
     try:
         row = _user_update(uid, fields)
     except Exception:
@@ -1012,13 +1156,13 @@ async def auth_profile(request: Request) -> JSONResponse:
             "name": fields.get("name") or claims.get("name", "Üye"),
             "color": fields.get("color") or claims.get("color", "#00f5d4"),
             "avatar": fields.get("avatar_url") or claims.get("avatar", "🎬"),
-            "avatarUrl": fields.get("avatar_url", ""),
-            "bio": fields.get("bio", ""),
-            "statusText": fields.get("status_text", ""),
-            "statusEmoji": fields.get("status_emoji", "🍿"),
-            "hideWatching": bool(fields.get("hide_watching", 0)),
-            "hideFriends": bool(fields.get("hide_friends", 0)),
-            "hideLocation": bool(fields.get("hide_location", 0)),
+            "avatarUrl": fields.get("avatar_url") if "avatar_url" in fields else str(claims.get("avatarUrl") or ""),
+            "bio": fields.get("bio") if "bio" in fields else str(claims.get("bio") or ""),
+            "statusText": fields.get("status_text") if "status_text" in fields else str(claims.get("statusText") or ""),
+            "statusEmoji": fields.get("status_emoji") if "status_emoji" in fields else str(claims.get("statusEmoji") or "🍿"),
+            "hideWatching": bool(fields["hide_watching"]) if "hide_watching" in fields else bool(claims.get("hideWatching", False)),
+            "hideFriends": bool(fields["hide_friends"]) if "hide_friends" in fields else bool(claims.get("hideFriends", False)),
+            "hideLocation": bool(fields["hide_location"]) if "hide_location" in fields else bool(claims.get("hideLocation", False)),
             "authProvider": claims.get("provider", "email"),
             "verified": True,
             "isGuest": False,
@@ -1048,9 +1192,28 @@ async def auth_profile(request: Request) -> JSONResponse:
             })
         except Exception:
             pass
-        return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+        _sync_user_to_social(user)
+        return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_keep)})
     user = _row_to_user(row)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+    _sync_user_to_social(user)
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_keep)})
+
+
+async def auth_logout(request: Request) -> JSONResponse:
+    auth_hdr = request.headers.get("Authorization", "")
+    token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
+    claims = verify_auth_token(token) if token else None
+    uid = str((claims or {}).get("uid") or "").strip()
+    if uid:
+        try:
+            import social_engine
+            pres = social_engine._PRESENCE_MAP.get(uid) or {}
+            pres.update({"uid": uid, "state": "offline", "roomId": "", "lastSeen": time.time()})
+            social_engine._PRESENCE_MAP[uid] = pres
+            social_engine._kv_set(f"wl:soc:pres:{uid}", pres, ttl_sec=86400)
+        except Exception:
+            pass
+    return JSONResponse({"ok": True, "loggedOut": True})
 
 
 async def auth_me(request: Request) -> JSONResponse:
@@ -1060,25 +1223,60 @@ async def auth_me(request: Request) -> JSONResponse:
     claims = verify_auth_token(token)
     if not claims:
         return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
+    pwh_keep = str(claims.get("pwh") or "")
     try:
         row = _user_get(claims["uid"])
     except Exception:
         row = None
     if row:
         u_obj = _row_to_user(row)
-        return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj)}, headers=priv_hdrs)
+        _sync_user_to_social(u_obj)
+        return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj, pw_verifier=pwh_keep)}, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],
         "email": claims.get("email", ""),
-        "handle": claims.get("handle", ""),
-        "name": claims.get("name", ""),
+        "handle": str(claims.get("handle") or "").lstrip("@") or _norm_handle("", str(claims.get("name") or "uye")),
+        "name": claims.get("name") or "Üye",
         "color": claims.get("color", "#00f5d4"),
-        "avatar": claims.get("avatar", "🎬"),
+        "avatar": claims.get("avatarUrl") or claims.get("avatar", "🎬"),
+        "avatarUrl": str(claims.get("avatarUrl") or ""),
+        "bio": str(claims.get("bio") or ""),
+        "statusText": str(claims.get("statusText") or ""),
+        "statusEmoji": str(claims.get("statusEmoji") or "🍿"),
+        "hideWatching": bool(claims.get("hideWatching", False)),
+        "hideFriends": bool(claims.get("hideFriends", False)),
+        "hideLocation": bool(claims.get("hideLocation", False)),
         "authProvider": claims.get("provider", "email"),
         "verified": bool(claims.get("verified", True)),
         "isGuest": False,
     }
-    return JSONResponse({"ok": True, "authenticated": True, "user": user, "authToken": sign_auth_token(user)}, headers=priv_hdrs)
+    try:
+        salt = _new_salt()
+        _user_create({
+            "uid": user["uid"],
+            "email": user["email"] or f"{user['uid']}@watchlivo.online",
+            "handle": user["handle"],
+            "name": user["name"],
+            "password_hash": _hash_pw(secrets.token_hex(12), salt),
+            "salt": salt,
+            "color": user["color"],
+            "avatar": str(claims.get("avatar") or "🎬"),
+            "avatar_url": user["avatarUrl"],
+            "bio": user["bio"],
+            "status_text": user["statusText"],
+            "status_emoji": user["statusEmoji"],
+            "hide_watching": 1 if user["hideWatching"] else 0,
+            "hide_friends": 1 if user["hideFriends"] else 0,
+            "hide_location": 1 if user["hideLocation"] else 0,
+            "auth_provider": user["authProvider"],
+            "verified": 1 if user["verified"] else 0,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+        })
+    except Exception:
+        pass
+    _sync_user_to_social(user)
+    return JSONResponse({"ok": True, "authenticated": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_keep)}, headers=priv_hdrs)
 
 
 def public_user_card(row: Any) -> Dict[str, Any]:
@@ -1118,26 +1316,44 @@ def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
                 row = _user_get(uid_em)
                 if row:
                     return public_user_card(row)
-        clean_h = raw.lstrip("@").strip().lower()
-        for h_cand in dict.fromkeys([clean_h, _norm_handle(clean_h)]):
-            if not h_cand:
+        stripped = _strip_discrim_tag(raw.lstrip("@").strip())
+        clean_h = stripped.lower()
+        folded_h = _tr_fold(stripped)
+        norm_h = re.sub(r"[^a-z0-9_.\-]", "", folded_h)[:24].strip("._-")
+        for h_cand in dict.fromkeys([clean_h, folded_h, norm_h]):
+            if not h_cand or len(h_cand) < 2:
                 continue
             uid_h = _uid_for("handle", h_cand)
             if uid_h:
                 row = _user_get(uid_h)
                 if row:
                     return public_user_card(row)
+        raw_stripped = _strip_discrim_tag(raw)
+        raw_folded = _tr_fold(raw_stripped)
         if store_backend() == "sqlite":
             conn = _get_db()
             try:
                 row = conn.execute(
                     "SELECT * FROM watchlivo_users WHERE lower(handle) = ? OR lower(name) = ? OR lower(email) = ? LIMIT 1",
-                    (clean_h, raw.lower(), raw.lower()),
+                    (clean_h, raw_stripped.lower(), raw.lower()),
                 ).fetchone()
                 if row:
                     return public_user_card(row)
+                for cand_row in conn.execute("SELECT * FROM watchlivo_users ORDER BY updated_at DESC LIMIT 300").fetchall():
+                    d_r = dict(cand_row)
+                    if _tr_fold(d_r.get("handle") or "") in (folded_h, norm_h) or _tr_fold(d_r.get("name") or "") == raw_folded:
+                        return public_user_card(d_r)
             finally:
                 conn.close()
+        else:
+            uids = _kv("SMEMBERS", f"{_kp()}uids") or []
+            if isinstance(uids, list):
+                for u_id in uids[:200]:
+                    row = _user_get(str(u_id))
+                    if not row:
+                        continue
+                    if _tr_fold(row.get("handle") or "") in (folded_h, norm_h) or _tr_fold(row.get("name") or "") == raw_folded:
+                        return public_user_card(row)
     except Exception:
         return None
     return None
@@ -1145,11 +1361,13 @@ def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
 
 def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> list[Dict[str, Any]]:
     """Search registered Watchlivo accounts by @handle or display name (never enumerates private emails)."""
-    q = str(query or "").strip()
+    q = _strip_discrim_tag(str(query or "").strip())
     if not q:
         return []
     q_low = re.sub(r"[%_\\]", "", q.lower().lstrip("@")).strip()
-    if not q_low:
+    q_fold = _tr_fold(q_low)
+    q_norm = re.sub(r"[^a-z0-9_.\-]", "", q_fold)
+    if not q_low and not q_fold:
         return []
     results: Dict[str, Dict[str, Any]] = {}
     if "@" not in q or q.startswith("@"):
@@ -1170,19 +1388,33 @@ def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> l
                     card = public_user_card(r)
                     if card.get("uid") and card["uid"] != exclude_uid:
                         results[card["uid"]] = card
+                if len(results) < limit:
+                    for r in conn.execute("SELECT * FROM watchlivo_users ORDER BY updated_at DESC LIMIT 300").fetchall():
+                        card = public_user_card(r)
+                        c_uid = card.get("uid") or ""
+                        if not c_uid or c_uid == exclude_uid or c_uid in results:
+                            continue
+                        h_f = _tr_fold(card["handle"].lstrip("@"))
+                        n_f = _tr_fold(card["name"])
+                        if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
+                            results[c_uid] = card
+                            if len(results) >= limit:
+                                break
             finally:
                 conn.close()
         else:
             uids = _kv("SMEMBERS", f"{_kp()}uids") or []
             if isinstance(uids, list):
-                for u_id in uids[:150]:
+                for u_id in uids[:200]:
                     if len(results) >= limit or str(u_id) == exclude_uid:
                         continue
                     row = _user_get(str(u_id))
                     if not row:
                         continue
                     card = public_user_card(row)
-                    if q_low in card["handle"].lower() or q_low in card["name"].lower():
+                    h_f = _tr_fold(card["handle"].lstrip("@"))
+                    n_f = _tr_fold(card["name"])
+                    if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
                         results[card["uid"]] = card
     except Exception:
         pass

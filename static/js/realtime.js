@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261105_v130';
-import { api } from './api.js?v=20261105_v130';
-import { state } from './store.js?v=20261105_v130';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261105_v130';
+import { clock } from './sync.js?v=20261106_v131';
+import { api } from './api.js?v=20261106_v131';
+import { state } from './store.js?v=20261106_v131';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v131';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -132,6 +132,7 @@ export class MeshConnection {
   }
 
   start() {
+    if (typeof window !== 'undefined') window.__vortexActiveConn = this;
     if (!this._visHandler) {
       this._visHandler = () => {
         if (this.closed || document.hidden) return;
@@ -172,7 +173,24 @@ export class MeshConnection {
     this.mode = 'ws';
     this.emitStatus('connecting');
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const q = new URLSearchParams({ username: this.profile.name, color: this.profile.color, device: this.device, pwd: this.password, country: COUNTRY });
+    const q = new URLSearchParams({
+      username: this.profile.name,
+      uid: this.profile.uid || this.profile.id || '',
+      handle: this.profile.handle || '',
+      avatarUrl: this.profile.avatarUrl || this.profile.avatar || '',
+      bio: this.profile.bio || '',
+      statusText: this.profile.statusText || '',
+      statusEmoji: this.profile.statusEmoji || '🍿',
+      medal: this.profile.medal || '',
+      watchMinutes: String(this.profile.watchMinutes || 0),
+      hideWatching: this.profile.hideWatching ? '1' : '0',
+      hideFriends: this.profile.hideFriends ? '1' : '0',
+      hideLocation: this.profile.hideLocation ? '1' : '0',
+      color: this.profile.color,
+      device: this.device,
+      pwd: this.password,
+      country: COUNTRY,
+    });
     if (this.profile.authToken) q.set('authToken', this.profile.authToken);
     if (this.clientId) q.set('clientId', this.clientId);
     if (this.clientToken) q.set('clientToken', this.clientToken);
@@ -322,6 +340,7 @@ export class MeshConnection {
         ...payload,
         clientId: this.clientId,
         clientToken: this.clientToken,
+        uid: this.profile.uid || this.profile.id || '',
         username: this.profile.name,
         handle: this.profile.handle || '',
         avatarUrl: this.profile.avatarUrl || this.profile.avatar || '',
@@ -398,8 +417,8 @@ export class MeshConnection {
         this.participantCount = newCnt;
         let stateMutated = false;
         if (Array.isArray(res.participants)) {
-          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
-          const nextPIds = res.participants.map((p) => `${p.id}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const prevPIds = (this.lastRoom.participants || []).map((p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
+          const nextPIds = res.participants.map((p) => `${p.id}:${p.uid || ''}:${p.name || ''}:${p.handle || ''}:${p.color || ''}:${p.avatarUrl || ''}:${p.isHost}:${p.isCoHost}:${p.isCreator}:${p.muted}:${p.speaking}:${p.cam}:${p.screen}`).join('|');
           if (prevPIds !== nextPIds) {
             this.lastRoom.participants = res.participants;
             stateMutated = true;
@@ -624,6 +643,9 @@ export class MeshConnection {
       } catch (e) { /* ignore */ }
     }
     this.closed = true;
+    if (typeof window !== 'undefined' && window.__vortexActiveConn === this) {
+      window.__vortexActiveConn = null;
+    }
     if (this._visHandler) {
       document.removeEventListener('visibilitychange', this._visHandler);
       window.removeEventListener('pageshow', this._visHandler);
