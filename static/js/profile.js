@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261106_v132';
-import { api } from './api.js?v=20261106_v132';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v132';
+import { h, icons, popup, toast } from './ui.js?v=20261106_v133';
+import { api } from './api.js?v=20261106_v133';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261106_v133';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261106_v132';
+} from './store.js?v=20261106_v133';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -266,6 +266,24 @@ export function logoutProfile() {
     } catch (_) {}
   }
   try {
+    const prevEmail = String(prevSelf?.email || '').trim().toLowerCase();
+    const prevHandle = String(prevSelf?.handle || '').trim().toLowerCase();
+    try {
+      const vaultRaw = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
+      if (vaultRaw && typeof vaultRaw === 'object') {
+        for (const k of Object.keys(vaultRaw)) {
+          const entry = vaultRaw[k];
+          if (!entry || typeof entry !== 'object') continue;
+          const eUid = String(entry.uid || entry.id || '').trim();
+          const eMail = String(entry.email || '').trim().toLowerCase();
+          const eHnd = String(entry.handle || '').trim().toLowerCase();
+          if ((prevUid && eUid === prevUid) || (prevEmail && eMail === prevEmail) || (prevHandle && eHnd === prevHandle) || (prevTok && entry.authToken === prevTok)) {
+            delete vaultRaw[k];
+          }
+        }
+        localStorage.setItem(VAULT_KEY, JSON.stringify(vaultRaw));
+      }
+    } catch (_) {}
     localStorage.removeItem(KEY);
     localStorage.removeItem('vortex_profile_v1');
     localStorage.removeItem('vortex_self');

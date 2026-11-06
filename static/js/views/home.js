@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261106_v132';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261106_v133';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261106_v132';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261106_v132';
-import { api } from '../api.js?v=20261106_v132';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261106_v132';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v132';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261106_v132';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261106_v132';
+} from '../store.js?v=20261106_v133';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261106_v133';
+import { api } from '../api.js?v=20261106_v133';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261106_v133';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v133';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261106_v133';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261106_v133';
 
 let refreshTimer = null;
 let unsubHomeStore = null;
@@ -22,6 +22,10 @@ function attachTubelight(container, itemSel, activeCls) {
   container.style.position = 'relative';
   container.prepend(ind);
   const sync = () => {
+    if (!container.isConnected) {
+      window.removeEventListener('resize', sync);
+      return;
+    }
     const act = container.querySelector(`${itemSel}.${activeCls}`);
     if (!act || !act.offsetWidth) {
       ind.style.opacity = '0';
@@ -54,7 +58,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261106_v132', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261106_v133', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -224,7 +228,7 @@ export function renderHome(app) {
   let filter = 'all';
   let query = '';
   const lobbyBox = h('div', { id: 'lobby-box' });
-  const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', style: { maxWidth: '360px' } });
+  const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', 'aria-label': 'Katılacak yeni odalar keşfet', style: { maxWidth: '360px' } });
   const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık']].map(([k, label]) =>
     h('button', {
       class: `lobby-tab ${k === filter ? 'on' : ''}`,
@@ -398,7 +402,7 @@ export function renderHome(app) {
 
   const siteFooterEl = renderSiteFooterSection({
     onSelectCategory: (cat) => {
-      selection.setProvider(cat === 'series' ? 'series' : (cat === 'anime' ? 'anime' : 'cinema'));
+      selection.setProvider(cat === 'series' ? 'series' : (cat === 'anime' ? 'anime' : (cat === 'movie' ? 'movies' : 'cinema')));
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     },
     onScrollToTv: () => {
@@ -471,7 +475,7 @@ export function renderHome(app) {
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
     h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
-  const home = h('main', { class: 'home' }, homeScroll);
+  const home = h('main', { class: 'home', id: 'home-main', tabindex: '-1' }, homeScroll);
 
   app.replaceChildren(nav, home);
   try {

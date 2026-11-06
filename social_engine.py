@@ -28,7 +28,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import auth_engine
-from security import is_safe_public_url
+from security import RateLimiter, client_ip, is_safe_public_url, too_many_response
 
 UA_CHROME = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -208,7 +208,7 @@ def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_defa
     if cand and not cand.startswith("u_wl_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"[a-z0-9_-]{3,48}", cand):
         if auth_engine.resolve_public_user(cand) is None:
             return cand
-    ip_seed = str((request.client.host if request.client else "") or "anon")
+    ip_seed = str(client_ip(request) or "anon")
     ua_seed = str(request.headers.get("user-agent") or "")[:80]
     return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{cand or fallback}".encode("utf-8")).hexdigest()[:12]
 
@@ -1361,11 +1361,20 @@ async def social_invite(request: Request) -> JSONResponse:
             import rooms as _rm
             rm_live = await _rm.STORE.get(room_id)
             if rm_live:
-                sync_tok = _rm.pack_sync_token(rm_live)
-                if not media_title and isinstance(rm_live.get("media"), dict):
-                    media_title = _clean(rm_live["media"].get("title"), 140)
-                if not media_poster and isinstance(rm_live.get("media"), dict):
-                    media_poster = _clean(rm_live["media"].get("poster") or rm_live["media"].get("thumbnail") or rm_live["media"].get("backdrop"), 800)
+                is_rm_locked = _rm.has_password(rm_live) or rm_live.get("privacy") == "private"
+                caller_in_rm = (
+                    str(rm_live.get("creatorId") or "").lower() == uid
+                    or any(
+                        isinstance(p, dict) and str(p.get("uid") or "").lower() == uid
+                        for p in (rm_live.get("participants") or {}).values()
+                    )
+                )
+                if not is_rm_locked or caller_in_rm:
+                    sync_tok = _rm.pack_sync_token(rm_live)
+                    if not media_title and isinstance(rm_live.get("media"), dict):
+                        media_title = _clean(rm_live["media"].get("title"), 140)
+                    if not media_poster and isinstance(rm_live.get("media"), dict):
+                        media_poster = _clean(rm_live["media"].get("poster") or rm_live["media"].get("thumbnail") or rm_live["media"].get("backdrop"), 800)
         except Exception:
             pass
 
@@ -1461,10 +1470,18 @@ async def social_invite(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 # 2. Rich Link Previews (LinkPreview OpenGraph Unfurling)
 # ---------------------------------------------------------------------------
+_LINK_PREVIEW_LIMIT = RateLimiter(60, 60.0, name="link_preview")
+
+
 async def link_preview(request: Request) -> JSONResponse:
+    allowed_lp, retry_lp = _LINK_PREVIEW_LIMIT.hit(client_ip(request))
+    if not allowed_lp:
+        return too_many_response(retry_lp)
     raw_url = _clean(request.query_params.get("url"), 1200)
     if not raw_url or not re.match(r"^https?://", raw_url, re.I):
         return JSONResponse({"ok": False, "error": "Geçersiz bağlantı"}, status_code=400)
+    if not is_safe_public_url(raw_url):
+        return JSONResponse({"ok": False, "error": "Güvenli olmayan bağlantı"}, status_code=400)
     if raw_url in _LINK_PREVIEW_CACHE:
         return JSONResponse({"ok": True, "preview": _LINK_PREVIEW_CACHE[raw_url]})
 
@@ -2033,6 +2050,10 @@ async def notifications_send(request: Request) -> JSONResponse:
     title = _clean(body.get("title") or f"🎬 {from_name} seni odaya çağırıyor!", 120)
     msg_body = _clean(body.get("body") or f'"{room_title}" odası şu an canlı. Tek tıkla katıl!', 240)
     if target_uid == "*":
+        import rooms as _rm_bcast
+        live_rm = (await _rm_bcast.STORE.get(room_id) or await _rm_bcast.ensure_curated_room(room_id)) if room_id else None
+        if not live_rm:
+            return JSONResponse({"ok": False, "error": "Geçerli bir aktif oda belirtilmelidir."}, status_code=400)
         delivered = 0
         if sender_uid and sender_uid != "guest_default":
             sender_u = _ensure_user_social(sender_uid, from_name, claims=request.scope.get("wl_claims"))
@@ -2910,7 +2931,7 @@ def persist_audio_note(raw_an: Any, fallback_id: str = "") -> Optional[Dict[str,
 
 async def voice_note_upload(request: Request):
     now_t = _now()
-    ip_key = (request.headers.get("x-forwarded-for") or (request.client.host if request.client else "local")).split(",")[0].strip()[:64]
+    ip_key = str(client_ip(request) or "local")[:64]
     if not _rate_allow(_VN_UPLOAD_HITS, ip_key, limit=30, window_sec=60.0, now_t=now_t):
         return JSONResponse({"ok": False, "error": "Çok sık ses kaydı gönderildi"}, status_code=429)
     try:
@@ -2952,6 +2973,9 @@ async def voice_note_stream(request: Request):
         "Accept-Ranges": "bytes",
         "Cache-Control": "public, max-age=86400",
         "Access-Control-Allow-Origin": "*",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "Content-Disposition": 'inline; filename="voice-note"',
     }
     if request.method == "HEAD":
         base_headers["Content-Length"] = str(total)

@@ -98,7 +98,7 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
     eqLow.frequency.value = 180;
     eqLow.gain.value = 0;
     const gain = ctx.createGain();
-    gain.gain.value = Math.max(0, Math.min(1, Number.isFinite(initialGain) ? initialGain : 1.0));
+    gain.gain.value = Math.max(0, Math.min(1.5, Number.isFinite(initialGain) ? initialGain : 1.0));
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -2.5;
     limiter.knee.value = 10;
@@ -149,7 +149,8 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
 
   // Keep <video> on iOS WebKit strictly on native AVPlayer (never attach createMediaElementSource).
   const wantIosAudioGraph = isIosWebKit() && el.tagName !== 'VIDEO' && !isMuted && pct > 0 && pct < 99.5 && !opts.forbidWebAudio && !opts.inPip;
-  const needWebAudio = _mediaNodes.has(el) || wantIosAudioGraph || Boolean(opts.enableDjEq && !isIosWebKit());
+  const wantBoostGraph = !isIosWebKit() && !isMuted && pct > 100 && !opts.forbidWebAudio && !opts.inPip;
+  const needWebAudio = _mediaNodes.has(el) || wantIosAudioGraph || wantBoostGraph || Boolean(opts.enableDjEq && !isIosWebKit());
   const graph = needWebAudio ? _attachElementGraph(el, opts, targetGain) : _mediaNodes.get(el);
 
   if (graph) {
@@ -172,7 +173,7 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
 
   el.muted = isMuted;
   try {
-    el.volume = targetGain;
+    el.volume = Math.max(0, Math.min(1, targetGain));
     return !isIosWebKit() || isMuted || pct >= 99.5;
   } catch (e) {
     return false;

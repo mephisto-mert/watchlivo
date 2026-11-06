@@ -1,5 +1,28 @@
-// Watchlivo Service Worker v20261106_v132
-// Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Push & Background OS Notifications)
+// Watchlivo Service Worker v20261106_v133
+// Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
+const OFFLINE_HTML = `<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Çevrimdışı — Watchlivo</title>
+  <style>
+    body { margin:0; min-height:100vh; display:grid; place-items:center; background:#070a10; color:#f8fafc; font-family:system-ui,-apple-system,sans-serif; padding:24px; text-align:center; }
+    .card { max-width:420px; padding:28px; border-radius:20px; background:#0e1522; border:1px solid rgba(39,220,200,.28); }
+    h1 { margin:0 0 10px; font-size:1.25rem; }
+    p { margin:0 0 18px; font-size:.92rem; color:#94a3b8; line-height:1.55; }
+    button { border:none; border-radius:12px; padding:12px 22px; background:#27dcc8; color:#041014; font-weight:800; font-size:.95rem; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>📡 İnternet Bağlantısı Yok</h1>
+    <p>Watchlivo canlı senkronizasyon odalarına bağlanmak için internet bağlantınızı kontrol edip tekrar deneyin.</p>
+    <button onclick="location.reload()">Yeniden Dene</button>
+  </main>
+</body>
+</html>`;
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -13,6 +36,17 @@ self.addEventListener('activate', (event) => {
       .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
       .catch(() => {})
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (!req || req.method !== 'GET' || req.mode !== 'navigate') return;
+  event.respondWith(
+    fetch(req).catch(() => new Response(OFFLINE_HTML, {
+      status: 503,
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    }))
   );
 });
 
@@ -50,14 +84,14 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '' };
   }
   const { title, options } = buildNotificationOptions(data);
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(self.registration.showNotification(title, options).catch(() => {}));
 });
 
 self.addEventListener('message', (event) => {
   const msg = event.data || {};
   if (msg.type === 'WATCHLIVO_SHOW_NOTIFICATION') {
     const { title, options } = buildNotificationOptions(msg.payload || {});
-    event.waitUntil(self.registration.showNotification(title, options));
+    event.waitUntil(self.registration.showNotification(title, options).catch(() => {}));
   }
 });
 
@@ -81,6 +115,6 @@ self.addEventListener('notificationclick', (event) => {
       if (self.clients.openWindow) {
         return self.clients.openWindow(targetUrl);
       }
-    })
+    }).catch(() => {})
   );
 });

@@ -899,9 +899,10 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261106_v132 with zero stale v79/v87/v88 references
+        # 1. Cache-bust bumped cleanly to 20261106_v133 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261106_v132", index_html)
+        self.assertIn("20261106_v133", index_html)
+        self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
         self.assertNotIn("20261103_v88", index_html)
@@ -1156,7 +1157,7 @@ class RegressionTests(unittest.TestCase):
 
         # 3. Verify Permissions-Policy picture-in-picture & index no-store
         r_idx = self.client.get("/")
-        self.assertIn("picture-in-picture=(self *)", r_idx.headers.get("permissions-policy", ""))
+        self.assertIn("picture-in-picture=*", r_idx.headers.get("permissions-policy", ""))
         self.assertIn("no-store", r_idx.headers.get("cache-control", ""))
 
         # 4. Verify Real Volume/Brightness, Multi-Phone HUD Lock & OS PiP static invariants
@@ -2414,6 +2415,122 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("ctx.initFallbackTimer", mesh_js)
         self.assertIn("this.didInitialSync", sync_js)
         self.assertIn("updateInitialSeek(targetPos)", html5_js)
+
+    def test_v133_full_autonomous_audit_remediations(self):
+        import uuid
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+        sfx = uuid.uuid4().hex[:6]
+
+        # 1. Malformed & non-dict JSON on /api/rooms/create returns 400 (never silently creates room)
+        r_bad_json = self.client.post(
+            "/api/rooms/create",
+            content=b"{malformed_json",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(r_bad_json.status_code, 400)
+        r_list_json = self.client.post("/api/rooms/create", json=["not", "a", "dict"])
+        self.assertEqual(r_list_json.status_code, 400)
+
+        # 2. Newly created room blocks unauthenticated outsider from hijacking _precreated slot via close_room
+        cr = self.client.post("/api/rooms/create", json={
+            "name": "Korunan Oda v133",
+            "privacy": "public",
+            "creator": "KaptanV133",
+            "creatorId": f"u_wl_v133_{sfx}",
+            "clientId": f"h_cap_{sfx}",
+        }).json()
+        rid = cr["room"]["id"]
+        r_hijack = self.client.post(f"/api/rooms/{rid}/sync", json={
+            "type": "host_action",
+            "action": "close_room",
+            "clientId": f"h_evil_{sfx}",
+        })
+        self.assertFalse(bool(r_hijack.json().get("roomClosed")))
+        self.assertEqual(self.client.get(f"/api/rooms/{rid}").status_code, 200)
+
+        # 3. Auth token server-side revocation on /api/auth/logout
+        r_reg = self.client.post("/api/auth/register", json={
+            "name": "Revoke Test",
+            "email": f"rev_{sfx}@watchlivo.test",
+            "password": "SafePassword133!",
+        })
+        self.assertEqual(r_reg.status_code, 200)
+        tok = r_reg.json()["authToken"]
+        self.assertTrue(self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {tok}"}).json().get("authenticated"))
+        r_out = self.client.post("/api/auth/logout", headers={"Authorization": f"Bearer {tok}"})
+        self.assertEqual(r_out.status_code, 200)
+        self.assertFalse(self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {tok}"}).json().get("authenticated"))
+
+        # 4. Locked room share landing suppresses syncToken (r_tok) unless valid password is supplied
+        cr_pwd = self.client.post("/api/rooms/create", json={
+            "name": "Kilitli Oda v133",
+            "privacy": "public",
+            "password": "sifre133",
+            "creator": "KilitHost",
+        }).json()
+        pwd_rid = cr_pwd["room"]["id"]
+        pwd_stok = cr_pwd["room"]["syncToken"]
+        r_no_pwd = self.client.get(f"/r/{pwd_rid}?r_tok={pwd_stok}")
+        self.assertNotIn("r_tok=", r_no_pwd.text)
+        r_with_pwd = self.client.get(f"/r/{pwd_rid}?pwd=sifre133&r_tok={pwd_stok}")
+        self.assertIn("r_tok=", r_with_pwd.text)
+
+        # 5. Upload auth gate (401) + magic-byte verification blocks SVG/HTML disguised as .png (415)
+        r_unauth_up = self.client.post(
+            "/api/upload",
+            files={"file": ("disguised.png", b"<svg onload=alert(1)></svg>", "image/png")},
+        )
+        self.assertEqual(r_unauth_up.status_code, 401)
+        r_up_user = self.client.post("/api/auth/register", json={
+            "name": "Upload Guard",
+            "email": f"up_{sfx}@watchlivo.test",
+            "password": "SafePassword133!",
+        })
+        self.assertEqual(r_up_user.status_code, 200)
+        tok_up = r_up_user.json()["authToken"]
+        r_bad_ext = self.client.post(
+            "/api/upload",
+            headers={"Authorization": f"Bearer {tok_up}"},
+            files={"file": ("disguised.png", b"<svg onload=alert(1)></svg>", "image/png")},
+        )
+        self.assertEqual(r_bad_ext.status_code, 400)
+        r_fake_mp4 = self.client.post(
+            "/api/upload",
+            headers={"Authorization": f"Bearer {tok_up}"},
+            files={"file": ("disguised.mp4", b"<svg onload=alert(1)></svg>", "video/mp4")},
+        )
+        self.assertEqual(r_fake_mp4.status_code, 415)
+
+        # 6. GA4 Measurement ID overwrite blocked for non-admin (403) & contact email masked
+        r_ga_hijack = self.client.post("/api/rave/analytics", json={"gaMeasurementId": "G-EVILHACK99"})
+        self.assertEqual(r_ga_hijack.status_code, 403)
+        self.client.post("/api/rave/contact", json={
+            "name": "Gizli Kullanici",
+            "email": "secretuser@example.com",
+            "subject": "Maskeleme Testi",
+            "message": "E-posta maskelenmeli",
+        })
+        msgs = self.client.get("/api/rave/contact").json().get("messages", [])
+        hit_msg = next((m for m in msgs if m.get("subject") == "Maskeleme Testi"), None)
+        self.assertIsNotNone(hit_msg)
+        self.assertEqual(hit_msg.get("email"), "s***@example.com")
+
+        # 7. SelectiveGZipMiddleware compresses HTML/JSON while keeping APK binary unbuffered
+        r_gz = self.client.get("/", headers={"Accept-Encoding": "gzip"})
+        self.assertEqual(r_gz.headers.get("content-encoding"), "gzip")
+        r_apk = self.client.get("/download/apk", headers={"Accept-Encoding": "gzip"})
+        self.assertIsNone(r_apk.headers.get("content-encoding"))
+
+        # 8. Static v133 accessibility, security & Electron contracts
+        sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
+        self.assertIn("v20261106_v133", sw_js)
+        self.assertIn("role: 'slider'", ctl_js)
+        self.assertIn("sandbox: true", elec_js)
+        self.assertIn("requestSingleInstanceLock", elec_js)
 
 
 if __name__ == '__main__':

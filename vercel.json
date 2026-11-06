@@ -67,7 +67,7 @@
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=(self *)"
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/index.html"
     },
@@ -81,7 +81,7 @@
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=(self *)"
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       }
     },
     {
@@ -101,7 +101,7 @@
       }
     },
     {
-      "src": "/download/(apk|Watchlivo.*\\.apk|ipa|ios|windows|exe)",
+      "src": "/download/(apk|Watchlivo.*\\.apk|ipa|Watchlivo.*\\.ipa|ios|windows|exe)",
       "dest": "server.py"
     },
     {
@@ -132,12 +132,12 @@
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=(self *)"
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact|meshes|report|accounts|browser-proxy|bridge|site-data)(.*)",
       "headers": {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store, no-cache, must-revalidate"
@@ -164,7 +164,7 @@
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|stats|analytics|about|privacy|terms|dmca|contact)",
+      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|b8f4e2a9c1d74e36a5b09f82c4e1d3a7\\.txt|stats|analytics|about|privacy|terms|dmca|contact)",
       "dest": "server.py"
     },
     {
@@ -176,7 +176,7 @@
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
         "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=(self *)"
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/index.html"
     }

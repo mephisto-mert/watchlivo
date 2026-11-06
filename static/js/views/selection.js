@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261106_v132';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261106_v132';
-import { api, qs } from '../api.js?v=20261106_v132';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261106_v132';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261106_v132';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261106_v132';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v132';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261106_v133';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261106_v133';
+import { api, qs } from '../api.js?v=20261106_v133';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261106_v133';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261106_v133';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261106_v133';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v133';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261106_v132';
+} from '../store.js?v=20261106_v133';
 
 let _activeHomePick = null;
 
@@ -296,7 +296,12 @@ export function videoCard(media, onPick, opts = {}) {
     } finally { l.remove(); }
   };
   card.addEventListener('click', go);
-  card.addEventListener('keydown', (e) => { if (e.target === card && e.key === 'Enter') go(); });
+  card.addEventListener('keydown', (e) => {
+    if (e.target === card && (e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      go();
+    }
+  });
   return card;
 }
 
@@ -723,8 +728,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   if (!compact) {
     _activeHomePick = pickSafe;
     let lastSyncedStamp = state.cloudMediaSynced || 0;
-    subscribe((s) => {
-      if (!root.isConnected) return;
+    const _unsubCloudMedia = subscribe((s) => {
+      if (!root.isConnected) { _unsubCloudMedia(); return; }
       if ((s.cloudMediaSynced || 0) !== lastSyncedStamp) {
         lastSyncedStamp = s.cloudMediaSynced || 0;
         const activeInp = root.querySelector('input');
@@ -822,7 +827,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   function openMoviePreviewModal(t, defProv, onAction) {
     const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
-    const banner = t.backdrop || t.poster || '/static/watchlivo-poster.svg';
+    const banner = String(t.backdrop || t.poster || '/static/watchlivo-poster.svg').replace(/["'()\\\r\n]/g, '');
     const poster = t.poster || t.backdrop || '/static/watchlivo-poster.svg';
     let modalRef = null;
     const body = h('div', { class: 'wl-preview-modal' },
@@ -1453,6 +1458,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             class: 'hero-main-img',
             src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
             alt: heroItem.title,
+            width: '780',
+            height: '439',
+            fetchpriority: 'high',
+            decoding: 'async',
             onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
           }))),
       h('div', { class: 'hero-showcase-strip' },
@@ -1477,8 +1486,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               title: 'Arşivden yeni rastgele vitrin önerileri getir',
               onclick: (e) => shuffleShowcaseUI(e.currentTarget),
             }, '🎲 Karıştır'),
-            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
-            h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { heroStripRow.scrollBy({ left: 420, behavior: 'smooth' }); } }, '▶'),
+            h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Önceki vitrin kartları', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
+            h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Sonraki vitrin kartları', onclick: () => { heroStripRow.scrollBy({ left: 420, behavior: 'smooth' }); } }, '▶'),
             h('button', { type: 'button', class: 'btn sm', onclick: () => { provider = getProvider('cinema'); render(); } }, 'Tümünü Gör →'))),
         heroStripRow)) : null;
 
@@ -1627,7 +1636,27 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   root.render = render;
-  root.setProvider = (id) => { provider = id ? getProvider(id) : null; render(); };
+  root.setProvider = (id) => {
+    const cleanId = String(id || '').trim().toLowerCase();
+    if (!cleanId) {
+      provider = null;
+      render();
+      return;
+    }
+    const catAliases = { series: 'series', movies: 'movies', anime: 'animation', vizyon: 'vizyon', favs: 'favs' };
+    if (catAliases[cleanId]) {
+      provider = getProvider('cinema');
+      if (provider) provider._initialCat = catAliases[cleanId];
+      render();
+      setTimeout(() => {
+        const tab = root.querySelector(`.cat-tab-pill[data-cat="${catAliases[cleanId]}"]`);
+        if (tab) tab.click();
+      }, 60);
+      return;
+    }
+    provider = getProvider(cleanId) || getProvider(id) || null;
+    render();
+  };
   root.openFavorites = () => {
     provider = getProvider('cinema');
     if (provider) provider._initialCat = 'favs';

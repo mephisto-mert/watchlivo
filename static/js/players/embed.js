@@ -50,6 +50,8 @@ export class EmbedAdapter {
   }
 
   _handleMessage(ev) {
+    if (this.frame && ev?.source && ev.source !== this.frame.contentWindow) return;
+    if (this._expectedOrigin && ev?.origin && ev.origin !== 'null' && ev.origin !== this._expectedOrigin) return;
     const d = ev?.data;
     if (!d || typeof d !== 'object') return;
     if (d.type === 'PLAYER_EVENT' && d.data) {
@@ -69,6 +71,7 @@ export class EmbedAdapter {
     this.paused = !shouldPlay;
     this.duration = Number(media.duration) || (media.mediaType === 'tv' ? 2700 : 7200);
     const src = this.buildSrc(media, this.baseTime);
+    try { this._expectedOrigin = src.startsWith('http') ? new URL(src).origin : ''; } catch (_) { this._expectedOrigin = ''; }
     const f = document.createElement('iframe');
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;

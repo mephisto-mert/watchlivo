@@ -9,6 +9,7 @@ static/Watchlivo.exe
 *.db-journal
 rave_extracted/
 desktop/
+audit/
 .env
 .env.*
 *.bak

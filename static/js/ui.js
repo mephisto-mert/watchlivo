@@ -1,7 +1,7 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261106_v132';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261106_v133';
 
-const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
+const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
 export const icons = {
   close: SVG('<path d="M18 6 6 18M6 6l12 12"/>'),
@@ -181,7 +181,10 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
 }
 
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable, onClose }
+let _popupSeq = 0;
 export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, onClose = null } = {}) {
+  const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const titleId = title ? `wl-popup-title-${++_popupSeq}` : '';
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   const root = document.getElementById('popup-root');
   if (fsEl && root && !fsEl.contains(root)) {
@@ -189,26 +192,51 @@ export function popup({ title, message, options = [], content = null, dismissabl
   } else if (!fsEl && root && root.parentElement !== document.body) {
     document.body.appendChild(root);
   }
+  const getTrapItems = () => Array.from(card.querySelectorAll(
+    'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter((el) => el instanceof HTMLElement && el.offsetParent !== null);
   const onKey = (e) => {
     if (!back.isConnected) {
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       return;
     }
-    if (e.key === 'Escape' && dismissable && (!root || root.lastElementChild === back)) {
+    const openBacks = root ? Array.from(root.querySelectorAll(':scope > .popup-backdrop:not(.is-closing)')) : [];
+    const isTop = !openBacks.length || openBacks[openBacks.length - 1] === back;
+    if ((e.key === 'Escape' || e.key === 'Esc' || e.code === 'Escape') && dismissable && isTop) {
+      e.preventDefault();
+      e.stopPropagation();
       close();
+      return;
+    }
+    if (e.key === 'Tab' && isTop) {
+      const focusables = getTrapItems();
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !card.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
   let closing = false;
   const close = () => {
     if (closing) return;
     closing = true;
-    window.removeEventListener('keydown', onKey);
+    window.removeEventListener('keydown', onKey, true);
     try { onClose?.(); } catch (_) {}
     back.classList.add('is-closing');
     card.classList.add('is-closing');
-    setTimeout(() => back.remove(), 175);
+    setTimeout(() => {
+      back.remove();
+      if (prevFocus && prevFocus.isConnected) {
+        try { prevFocus.focus({ preventScroll: true }); } catch (_) {}
+      }
+    }, 175);
   };
-  if (dismissable) window.addEventListener('keydown', onKey);
   let touchMoved = false;
   const drawerHandle = dismissable ? h('div', {
     class: 'wl-drawer-handle',
@@ -226,10 +254,15 @@ export function popup({ title, message, options = [], content = null, dismissabl
       })
     : null;
   let optBusy = false;
-  const card = h('div', { class: `popup ${wide ? 'popup-wide ' : ''}acrylic wl-vaul-sheet`, role: 'dialog', 'aria-modal': 'true' },
+  const card = h('div', {
+    class: `popup ${wide ? 'popup-wide ' : ''}acrylic wl-vaul-sheet`,
+    role: 'dialog',
+    'aria-modal': 'true',
+    ...(titleId ? { 'aria-labelledby': titleId } : { 'aria-label': 'İletişim Kutusu' }),
+  },
     drawerHandle,
     closeBtn,
-    title ? h('h3', { class: dismissable ? 'popup-title-pad' : '' }, title) : null,
+    title ? h('h3', { id: titleId, class: dismissable ? 'popup-title-pad' : '' }, title) : null,
     message ? h('p', {}, message) : null,
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
@@ -281,7 +314,17 @@ export function popup({ title, message, options = [], content = null, dismissabl
     drawerHandle.addEventListener('touchend', endDrag, { passive: true });
     drawerHandle.addEventListener('touchcancel', endDrag, { passive: true });
   }
-  root.append(back);
+  back._closePopup = close;
+  if (root) root.append(back);
+  else document.body.append(back);
+  window.addEventListener('keydown', onKey, true);
+  queueMicrotask(() => {
+    const focusables = getTrapItems();
+    const target = focusables.find((el) => !el.classList.contains('popup-close-x')) || focusables[0];
+    if (target) {
+      try { target.focus({ preventScroll: true }); } catch (_) {}
+    }
+  });
   return { close, card };
 }
 

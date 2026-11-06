@@ -1,6 +1,7 @@
 # Watchlivo Unified Multi-Platform Music & Music Video Party Engine
 # Aggregates real data from Spotify, Apple Music, Deezer, YouTube Music & SoundCloud
 import asyncio
+from collections import OrderedDict
 import concurrent.futures
 import json
 import re
@@ -48,13 +49,26 @@ SPOTIFY_PLAYLISTS = {
     "global_pop": "37i9dQZEVXbMDoHDwVN2tF", # Global Top 50
 }
 
+class _BoundedCache(OrderedDict):
+    def __init__(self, maxsize: int = 512):
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
+
+
 _TR_ASCII = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
-_MUSIC_CACHE: dict[str, tuple[float, dict]] = {}
-_SIMILAR_CACHE: dict[str, tuple[float, list]] = {}
-_RESOLVE_MUSIC_CACHE: dict[str, tuple[float, dict]] = {}
-_LYRICS_CACHE: dict[str, tuple[float, str]] = {}
-_SPOTIFY_PL_CACHE: dict[str, tuple[float, list]] = {}
-_YT_IOS_STREAM_CACHE: dict[str, tuple[float, dict]] = {}
+_MUSIC_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(512)
+_SIMILAR_CACHE: dict[str, tuple[float, list]] = _BoundedCache(512)
+_RESOLVE_MUSIC_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(1024)
+_LYRICS_CACHE: dict[str, tuple[float, str]] = _BoundedCache(512)
+_SPOTIFY_PL_CACHE: dict[str, tuple[float, list]] = _BoundedCache(128)
+_YT_IOS_STREAM_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(512)
 
 _REMIX_KW_RE = re.compile(
     r"\b(remix|rmx|bootleg|mashup|edit|rework|flip|club\s*mix|extended\s*mix|radio\s*edit|vip\s*mix|"
@@ -747,7 +761,7 @@ def _sc_resolve_full_track_sync(artist: str, song_title: str, expected_dur_sec: 
 UA_YT_IOS = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
 UA_YT_VR = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
 UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
-_YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = {}
+_YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = _BoundedCache(512)
 
 
 def _parse_dash_rng(val) -> dict | None:

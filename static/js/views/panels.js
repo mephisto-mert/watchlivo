@@ -1,16 +1,16 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261106_v132';
+import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261106_v133';
 import {
   state, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261106_v132';
-import { avatar } from '../profile.js?v=20261106_v132';
-import { clock } from '../sync.js?v=20261106_v132';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261106_v132';
-import { copyInvite, inviteUrl } from './chat.js?v=20261106_v132';
-import { parseVideoUrl } from '../providers.js?v=20261106_v132';
-import { resolveMedia } from './selection.js?v=20261106_v132';
+} from '../store.js?v=20261106_v133';
+import { avatar } from '../profile.js?v=20261106_v133';
+import { clock } from '../sync.js?v=20261106_v133';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261106_v133';
+import { copyInvite, inviteUrl } from './chat.js?v=20261106_v133';
+import { parseVideoUrl } from '../providers.js?v=20261106_v133';
+import { resolveMedia } from './selection.js?v=20261106_v133';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -103,6 +103,7 @@ function Vote(ctx) {
   const urlInput = h('input', {
     class: 'input',
     placeholder: 'YouTube, MP4, M3U8, Kick bağlantısı yapıştır...',
+    'aria-label': 'Sıraya video bağlantısı ekle',
     style: { flex: '1', fontSize: '.78rem', padding: '7px 10px' },
   });
   const addFromInput = async (playNow = false) => {
@@ -310,7 +311,21 @@ function Friends() {
       h('a', { class: 'btn invite-social-btn tg', href: tgUrl, target: '_blank', rel: 'noopener' }, '✈️ Telegram ile Gönder'),
       h('button', { type: 'button', class: 'btn invite-social-btn copy-msg', onclick: copyCardMsg }, '📋 Davet Mesajını Kopyala'),
       navigator.share ? h('button', { type: 'button', class: 'btn invite-social-btn', onclick: () => navigator.share({ title: 'Watchlivo Sinema Odası', text: inviteText, url }).catch(() => {}) }, '📲 Diğer Uygulamalar') : null),
-    h('img', { class: 'qr', alt: 'Davet QR kodu', src: `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(url)}` }),
+    h('img', {
+      class: 'qr',
+      alt: 'Davet QR kodu',
+      loading: 'lazy',
+      src: (() => {
+        try {
+          const cleanQr = new URL(url);
+          cleanQr.searchParams.delete('pwd');
+          cleanQr.searchParams.delete('r_tok');
+          return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(cleanQr.toString())}`;
+        } catch (_) {
+          return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(location.origin)}`;
+        }
+      })(),
+    }),
     h('div', { class: 'sel-note', style: { textAlign: 'center' } }, 'Telefon kamerasıyla QR kodu okut ve anında odaya katıl.'));
   return { el, update: renderLiveFriends };
 }
@@ -422,10 +437,10 @@ function Participants(ctx) {
             }, isMut ? '✓ Arkadaş' : (isPend ? '⏳ İstekli' : '+ Arkadaş'));
           })() : null,
           hostOnly && !isMe && !isBot ? h('div', { class: 'raver-actions' },
-            m?.voipMode === 'stage' ? h('button', { 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
-            h('button', { 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
-            h('button', { 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }),
-            h('button', { 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick })) : null);
+            m?.voipMode === 'stage' ? h('button', { type: 'button', 'aria-label': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al', 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
+            h('button', { type: 'button', 'aria-label': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider yap', 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
+            h('button', { type: 'button', 'aria-label': `${p.name} kişisini lider yap`, 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }),
+            h('button', { type: 'button', 'aria-label': `${p.name} kişisini odadan çıkar`, 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick })) : null);
       }),
       overflowCount > 0 ? h('div', { class: 'dim', style: { padding: '10px 12px', textAlign: 'center', fontSize: '.82rem' } }, `+${overflowCount} diğer izleyici odada aktif (Toplam ${totalCount} kişi)`) : null);
   };

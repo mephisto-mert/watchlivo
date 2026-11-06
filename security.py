@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -45,20 +46,26 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
         )
     with _SECRET_LOCK:
         if name not in _EPHEMERAL:
-            shared_entropy = (
-                (os.environ.get("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-                or (os.environ.get("KV_REST_API_TOKEN") or "").strip()
-                or (os.environ.get("VERCEL_PROJECT_PRODUCTION_URL") or "").strip()
-                or "watchlivo-cluster-hmac-mesh-seed-v130-prod"
-            )
-            _EPHEMERAL[name] = hmac.new(
-                shared_entropy.encode("utf-8"),
-                f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
-                hashlib.sha256,
-            ).digest()
-            if name not in _WARNED:
-                _WARNED.add(name)
-                print(f"[security] {name} tanımlı değil — küme uyumlu deterministik HMAC sırrı üretildi.")
+            shared_entropy = ""
+            for env_key in ("VORTEX_SECRET", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN", "REDIS_URL"):
+                cand = (os.environ.get(env_key) or "").strip()
+                if len(cand) >= 24:
+                    shared_entropy = cand
+                    break
+            if shared_entropy:
+                _EPHEMERAL[name] = hmac.new(
+                    shared_entropy.encode("utf-8"),
+                    f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
+                    hashlib.sha256,
+                ).digest()
+                if name not in _WARNED:
+                    _WARNED.add(name)
+                    print(f"[security] {name} tanımlı değil — özel küme entropisinden deterministik HMAC sırrı üretildi.")
+            else:
+                _EPHEMERAL[name] = secrets.token_bytes(32)
+                if name not in _WARNED:
+                    _WARNED.add(name)
+                    print(f"[security] {name} tanımlı değil — süreç bazlı rastgele CSPRNG sırrı üretildi.")
         return _EPHEMERAL[name]
 
 

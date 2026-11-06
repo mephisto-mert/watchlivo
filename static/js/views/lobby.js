@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261106_v132';
-import { avatar, openDmModal } from '../profile.js?v=20261106_v132';
-import { getProvider } from '../providers.js?v=20261106_v132';
-import { api, qs } from '../api.js?v=20261106_v132';
+import { h, icons, popup, toast } from '../ui.js?v=20261106_v133';
+import { avatar, openDmModal } from '../profile.js?v=20261106_v133';
+import { getProvider } from '../providers.js?v=20261106_v133';
+import { api, qs } from '../api.js?v=20261106_v133';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261106_v132';
-import { expectedPosition } from '../sync.js?v=20261106_v132';
+} from '../store.js?v=20261106_v133';
+import { expectedPosition } from '../sync.js?v=20261106_v133';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -71,14 +71,20 @@ export function tvGlassCard(room, onOpen) {
     tabindex: '0',
     'data-room': room.id,
     style: { '--room-accent': brand.c1 },
-    onclick: () => onOpen(room),
-    onkeydown: (e) => { if (e.key === 'Enter') onOpen(room); },
+    onclick: () => onOpen(card._room || room),
+    onkeydown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onOpen(card._room || room);
+      }
+    },
   },
     h('div', { class: 'tv-logo-box', style: { background: `linear-gradient(135deg, ${brand.c1}, ${brand.c2})` } }, brand.label),
     h('div', { class: 'tv-info' },
       h('div', { class: 'tv-badge' }, isRadio ? '7/24 RADYO' : '7/24 CANLI', eq),
       h('div', { class: 'tv-name meshthumb-title' }, room.media?.title || room.name || brand.label),
       h('div', { class: 'tv-desc' }, `${brand.sub} · Herkese Açık`)));
+  card._room = room;
   card.addEventListener('mousemove', (e) => {
     const rect = card.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -119,15 +125,20 @@ export function meshThumb(room, onOpen) {
     ? `${room.name || displayTitle} · 7/24 Kesintisiz`
     : `👤 ${hostName} · ${privacyLabel}`;
 
-  return h('div', {
+  const card = h('div', {
     class: `meshthumb ${room.curated ? 'curated-room' : ''} ${room.privacy === 'friends' ? 'friends-only-room' : ''}`,
     role: 'button',
     tabindex: '0',
     'data-room': room.id,
     'data-privacy': room.privacy || 'public',
     style: brand ? { '--room-accent': brand.c1 } : undefined,
-    onclick: () => onOpen(room),
-    onkeydown: (e) => { if (e.key === 'Enter') onOpen(room); },
+    onclick: () => onOpen(card._room || room),
+    onkeydown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        onOpen(card._room || room);
+      }
+    },
   },
     h('div', { class: 'meshthumb-img' },
       thumb ? h('img', { src: thumb, alt: displayTitle, decoding: 'async', onerror: (e) => { e.target.style.display = 'none'; } }) : null,
@@ -146,6 +157,8 @@ export function meshThumb(room, onOpen) {
         hasTr ? h('span', { class: 'meshthumb-lang-badge' }, '🇹🇷 TR') : null),
       dur > 0 ? h('div', { class: 'meshthumb-progress' }, h('div', { style: { width: `${pct}%` } })) : null),
     room.hasPassword ? h('span', { class: 'meshthumb-lock', html: icons.lock }) : null);
+  card._room = room;
+  return card;
 }
 
 export function rememberRoom(room) {
@@ -248,7 +261,7 @@ export async function fetchRooms() {
 }
 
 export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
-  const box = h('div', { class: 'friends-manager-modal wl-rave-friends-hub', style: { display: 'flex', flexDirection: 'column', gap: '12px', minWidth: 'min(480px, 90vw)' } });
+  const box = h('div', { class: 'friends-manager-modal wl-rave-friends-hub', style: { display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', maxWidth: '100%' } });
   let activeTab = initialTab;
   let searchQuery = '';
   let searchResults = [];
@@ -700,7 +713,7 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     container.querySelectorAll('.meshthumb[data-room]').forEach((card) => {
       const r = byId.get(card.dataset.room);
       if (!r) return;
-      card.onclick = () => onOpen(r);
+      card._room = r;
       const badge = card.querySelector('.meshthumb-live-badge');
       if (badge && !r.curated) {
         const vc = Math.max(0, Number(r.count ?? (r.participants || []).filter((p) => p.transport !== 'bot').length) || 0);

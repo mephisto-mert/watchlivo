@@ -33,6 +33,7 @@
       padding: 36px 30px;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 0 40px rgba(0, 245, 212, 0.06);
+      -webkit-backdrop-filter: blur(20px);
       backdrop-filter: blur(20px);
     }
     .logo-badge {
@@ -156,12 +157,21 @@
       }
     }
 
-    // Auto-check if already logged in on web
+    // Require explicit user click before sending local web session token to loopback port
     try {
       const saved = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
       if (port && state && saved && saved.authToken && saved.name && !saved.isGuest) {
-        setStatus(`Mevcut hesabınız (${saved.name} · @${saved.handle || 'uye'}) masaüstüne aktarılıyor...`, '', true);
-        sendToDesktop(saved, saved.authToken);
+        const confirmBtn = document.createElement('button');
+        confirmBtn.type = 'button';
+        confirmBtn.className = 'btn-google';
+        confirmBtn.style.cssText = 'margin-bottom:12px;background:#00f5d4;color:#041014;font-weight:800;';
+        confirmBtn.textContent = `${saved.name} (@${saved.handle || 'uye'}) olarak Masaüstüne Bağlan`;
+        confirmBtn.addEventListener('click', () => {
+          confirmBtn.disabled = true;
+          sendToDesktop(saved, saved.authToken);
+        });
+        btn.parentNode.insertBefore(confirmBtn, btn);
+        setStatus('Mevcut hesabınızla devam etmek için yukarıdaki onay butonuna tıklayın veya farklı bir Google hesabı seçin.');
       }
     } catch (_) {}
 

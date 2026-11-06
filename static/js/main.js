@@ -1,10 +1,10 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v132';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v132';
-import { renderHome, destroyHome } from './views/home.js?v=20261106_v132';
-import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261106_v132';
-import { api } from './api.js?v=20261106_v132';
-import { h, toast } from './ui.js?v=20261106_v132';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261106_v133';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261106_v133';
+import { renderHome, destroyHome } from './views/home.js?v=20261106_v133';
+import { enterMesh, leaveMeshView } from './views/mesh.js?v=20261106_v133';
+import { api } from './api.js?v=20261106_v133';
+import { h, toast } from './ui.js?v=20261106_v133';
 
 function parseRoute() {
   const searchParams = new URLSearchParams(location.search);
@@ -54,8 +54,10 @@ window.vortexMinimizeRoom = () => {
     return;
   }
   window.__vortexCancelChatVoiceRec?.();
+  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.add('mesh-minimized');
-  document.body.classList.remove('vortex-fs');
+  document.body.classList.remove('vortex-fs', 'theater-mode');
   toast('🗗 Oda sağ alta küçültüldü · Gezinmeye devam edebilirsin');
   navigate('/');
 };
@@ -67,7 +69,8 @@ window.vortexRestoreRoom = () => {
 };
 
 window.vortexCloseMinimizedRoom = () => {
-  document.body.classList.remove('mesh-minimized');
+  document.body.classList.remove('mesh-minimized', 'vortex-fs', 'theater-mode');
+  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
   activeMeshRoomId = null;
   leaveMeshView(true);
   const meshRoot = document.getElementById('mesh-root');
@@ -85,7 +88,10 @@ async function route() {
   set({ route: r });
   if (r.name === 'mesh') {
     document.body.classList.remove('mesh-minimized');
-    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => el.remove());
+    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => {
+      if (typeof el._closePopup === 'function') el._closePopup();
+      else el.remove();
+    });
     if (current === 'home') destroyHome();
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');
@@ -116,7 +122,10 @@ async function route() {
       }
     }
   } else {
-    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => el.remove());
+    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => {
+      if (typeof el._closePopup === 'function') el._closePopup();
+      else el.remove();
+    });
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
       document.body.classList.add('mesh-minimized');
@@ -193,17 +202,17 @@ async function boot() {
     const isIosFullBleed = isIos && (isStandalone || insets.top >= 20);
     const isIosWebClipShort = isIosFullBleed && !kbOpen && isMobilePortrait && statusDiff >= 20 && statusDiff <= 80;
     const fullH = isIosWebClipShort ? portraitScreenH : rawH;
-    const h = Math.max(240, kbOpen ? Math.min(rawH, vvH || rawH) : fullH);
+    const h = Math.max(kbOpen ? 120 : 240, kbOpen ? Math.min(rawH, vvH || rawH) : fullH);
     let topSafeOffset = insets.top;
     let bottomSafeOffset = insets.bottom;
     if (isMobilePortrait) {
       if (isIosFullBleed) {
         const minTop = portraitScreenH >= 812 ? 52 : 28;
         topSafeOffset = Math.max(insets.top, minTop) + 10;
-        bottomSafeOffset = 10;
+        bottomSafeOffset = Math.max(insets.bottom, 10);
       } else if (isIos) {
         topSafeOffset = insets.top > 0 ? insets.top + 6 : 8;
-        bottomSafeOffset = 6;
+        bottomSafeOffset = Math.max(insets.bottom, 6);
       } else {
         topSafeOffset = insets.top > 0 ? insets.top + 4 : 6;
         bottomSafeOffset = Math.min(Math.max(insets.bottom, 6), 12);
@@ -423,7 +432,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261106_v132', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261106_v133', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -524,7 +533,7 @@ function initRaveNotifications() {
         }, '▶ Odaya Katıl')
       );
     }
-    actionBtns.push(h('button', { type: 'button', class: 'btn sm ghost', onclick: closeCard }, '✕'));
+    actionBtns.push(h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Bildirimi kapat', onclick: closeCard }, '✕'));
 
     const leadVisual = payload.fromName
       ? avatar({ name: payload.fromName, color: payload.color || '#27dcc8', avatarUrl: payload.avatarUrl || '' }, 38, { online: true })
@@ -809,7 +818,8 @@ window.wlTrackGA4 = trackWatchlivoGA4;
 
 function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
   try {
-    const curPath = location.pathname + (location.hash || '');
+    const cleanHash = location.hash ? location.hash.split('?')[0] : '';
+    const curPath = location.pathname + cleanHash;
     const curTitle = document.title || 'Watchlivo';
     if (ev === 'pageview') {
       trackWatchlivoGA4('page_view', {

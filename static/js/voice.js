@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261106_v132';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261106_v132';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261106_v132';
+import { toast } from './ui.js?v=20261106_v133';
+import { applyStreamBoost } from './players/audio-gain.js?v=20261106_v133';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261106_v133';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -211,7 +211,8 @@ export class Voice {
     const selfCam = document.querySelector('#vortex-cam-dock [data-cam-id="self"]');
     if (selfCam) selfCam.classList.toggle('is-speaking', Boolean(this.selfSpeaking));
     for (const p of this.participants || []) {
-      const bubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`);
+      const escPid = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(p.id || '')) : String(p.id || '').replace(/["\\]/g, '\\$&');
+      const bubble = escPid ? document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`) : null;
       if (bubble) bubble.classList.toggle('is-speaking', Boolean(p.speaking));
     }
     this.onStateChange?.();
@@ -480,7 +481,8 @@ export class Voice {
   _attachVideoBubble(id, stream, label = 'Kamera', isScreen = false) {
     if (!stream || !stream.getVideoTracks().length) return;
     const dock = this._ensureDock();
-    let wrap = dock.querySelector(`[data-cam-id="${id}"]`);
+    const escId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(id || '')) : String(id || '').replace(/["\\]/g, '\\$&');
+    let wrap = dock.querySelector(`[data-cam-id="${escId}"]`);
     if (!wrap) {
       wrap = document.createElement('div');
       wrap.className = `cam-bubble ${isScreen ? 'is-screen-share' : ''}`.trim();
@@ -518,7 +520,8 @@ export class Voice {
   }
 
   _removeVideoBubble(id) {
-    const el = document.querySelector(`#vortex-cam-dock [data-cam-id="${id}"]`);
+    const escId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(id || '')) : String(id || '').replace(/["\\]/g, '\\$&');
+    const el = escId ? document.querySelector(`#vortex-cam-dock [data-cam-id="${escId}"]`) : null;
     if (el) {
       el.remove();
       this._layoutCameraBubbles();
@@ -582,7 +585,7 @@ export class Voice {
           if (!pkt || typeof pkt !== 'object') return;
           pkt.fromCid = id;
           const evType = pkt.event?.type;
-          if (evType && !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync'].includes(evType)) return;
+          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync'].includes(evType)) return;
           this.onP2pData?.(pkt);
         } catch (e) { /* ignore */ }
       };
@@ -756,11 +759,12 @@ export class Voice {
           if (!p.cam && !p.screen) {
             this._removeVideoBubble(p.id);
           } else if (p.cam || p.screen) {
+            const escPid = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(p.id || '')) : String(p.id || '').replace(/["\\]/g, '\\$&');
             const existingSt = this.peers.get(p.id);
-            if (existingSt?.remoteVideoStream && !document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`)) {
+            if (existingSt?.remoteVideoStream && !document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`)) {
               this._attachVideoBubble(p.id, existingSt.remoteVideoStream, p.name || 'Katılımcı', Boolean(p.screen));
             }
-            const peerBubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`);
+            const peerBubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`);
             if (peerBubble) {
               peerBubble.classList.toggle('is-speaking', Boolean(p.speaking));
               peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
@@ -777,6 +781,7 @@ export class Voice {
               if (idleEntry) {
                 const [evictId, evictSt] = idleEntry;
                 try { evictSt.pc.close(); } catch (e) { /* ignore */ }
+                try { evictSt.audio?.pause?.(); if (evictSt.audio) evictSt.audio.srcObject = null; } catch (e) { /* ignore */ }
                 evictSt.audio?.remove();
                 this._removeVideoBubble(evictId);
                 this.peers.delete(evictId);
@@ -1281,6 +1286,7 @@ export class Voice {
       const clampedPrev = prevNext > ctx.currentTime + 1.5 ? ctx.currentTime + 0.06 : prevNext;
       const startAt = Math.max(ctx.currentTime + 0.04, clampedPrev);
       this.relayNextPlayAtByPeer.set(peerKey, startAt + audioBuf.duration);
+      src.onended = () => { try { src.disconnect(); gain.disconnect(); } catch (_) {} };
       src.start(startAt);
     } catch (_) {}
   }

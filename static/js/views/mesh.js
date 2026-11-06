@@ -1,14 +1,14 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v132';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v132';
-import { resolveMusicItem } from './selection-kinds.js?v=20261106_v132';
-import { MeshConnection } from '../realtime.js?v=20261106_v132';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v132';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v132';
-import { buildLayout } from './mesh-layout.js?v=20261106_v132';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v132';
-import { Voice } from '../voice.js?v=20261106_v132';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v132';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261106_v133';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261106_v133';
+import { resolveMusicItem } from './selection-kinds.js?v=20261106_v133';
+import { MeshConnection } from '../realtime.js?v=20261106_v133';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261106_v133';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261106_v133';
+import { buildLayout } from './mesh-layout.js?v=20261106_v133';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261106_v133';
+import { Voice } from '../voice.js?v=20261106_v133';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261106_v133';
 
 let ctx = null;
 
@@ -535,6 +535,7 @@ function onMessage(data) {
       break;
     case 'sync':
       if (data.cid && data.cid === state.clientId) break;
+      if (data.viaP2p && room && (room.playMode || 'leader') === 'leader' && data.cid && data.cid !== (room.hostId || room.host_id) && !(room.coHosts || room.co_hosts || []).includes(data.cid)) break;
       if (isTimeKeeper() && (data.action === 'poll_sync' || data.action === 'heartbeat') && (ctx?.userPaused || (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 6500))) break;
       if (room && data.media) {
         const incTime = Number(data.media.meshStateTime || data.media.updatedAt || 0);
@@ -722,8 +723,8 @@ function onMessage(data) {
       }
       ctx?.conn?.close(false);
       set({ mesh: null });
-      popup({ title: 'Odadan Çıkarıldın', message: 'Bu oda kapatıldı veya oda lideri tarafından çıkarıldın.', options: [{ label: 'Ana Sayfa', primary: true, onClick: () => window.vortexNavigate('/') }], dismissable: false });
       window.vortexNavigate('/');
+      popup({ title: 'Odadan Çıkarıldın', message: 'Bu oda kapatıldı veya oda lideri tarafından çıkarıldın.', options: [{ label: 'Ana Sayfa', primary: true, onClick: () => window.vortexNavigate('/') }], dismissable: false });
       break;
     }
     case 'webrtc_offer': case 'webrtc_answer': case 'webrtc_ice': ctx?.voice?.onSignal(data); break;
@@ -733,12 +734,34 @@ function onMessage(data) {
 }
 
 function askPassword() {
+  if (typeof document !== 'undefined' && document.getElementById('wl-room-pwd-input')) return;
   if (typeof document !== 'undefined' && document.pictureInPictureElement) {
     try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
   }
-  const input = h('input', { class: 'input', type: 'password', placeholder: 'Oda şifresi' });
+  const submitPwd = () => {
+    const id = state.route.params.id;
+    const val = input.value;
+    try { if (id && val) sessionStorage.setItem(`vortex_pwd_${id}`, val); } catch (_) {}
+    leaveMeshView();
+    enterMesh(document.getElementById('mesh-root') || document.getElementById('app'), { id, pwd: val });
+  };
+  const input = h('input', {
+    class: 'input',
+    id: 'wl-room-pwd-input',
+    type: 'password',
+    placeholder: 'Oda şifresi',
+    'aria-label': 'Oda şifresi',
+    onkeydown: (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const bd = document.querySelector('.popup-backdrop');
+        if (bd?._closePopup) bd._closePopup(); else bd?.remove();
+        submitPwd();
+      }
+    },
+  });
   popup({ title: 'Bu oda şifreli', content: input, dismissable: false, options: [
-    { label: 'Katıl', primary: true, onClick: () => { const id = state.route.params.id; leaveMeshView(); enterMesh(document.getElementById('mesh-root') || document.getElementById('app'), { id, pwd: input.value }); } },
+    { label: 'Katıl', primary: true, onClick: submitPwd },
     { label: 'Ana Sayfa', onClick: () => window.vortexNavigate('/') },
   ] });
 }
@@ -1177,6 +1200,9 @@ export async function enterMesh(app, params) {
     if (params.r_tok && params.id) {
       sessionStorage.setItem(`vortex_st_${params.id}`, String(params.r_tok));
     }
+    if (params.pwd && params.id) {
+      sessionStorage.setItem(`vortex_pwd_${params.id}`, String(params.pwd));
+    }
     if (params.new === '1' && params.id) {
       const existingCreatorCid = params.cid || sessionStorage.getItem(`vortex_creator_${params.id}`) || sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
       sessionStorage.setItem('vortex_cid', existingCreatorCid);
@@ -1216,8 +1242,12 @@ export async function enterMesh(app, params) {
   ctx.layout = buildLayout(app, ctx);
   const cachedRoom = getRememberedRoom(params.id);
   const initialSavedChat = loadSavedChat(params.id);
+  let savedRoomPwd = params.pwd || '';
+  if (!savedRoomPwd && params.id) {
+    try { savedRoomPwd = sessionStorage.getItem(`vortex_pwd_${params.id}`) || ''; } catch (_) {}
+  }
   ctx.conn = new MeshConnection({
-    roomId: params.id, profile: state.self, password: params.pwd || '', device: deviceLabel(),
+    roomId: params.id, profile: state.self, password: savedRoomPwd, device: deviceLabel(),
     onMessage, onStatus: (s) => { set({ connection: s }); ctx?.layout.update(); },
   });
   if (cachedRoom && cachedRoom.id === params.id) {
@@ -1253,7 +1283,9 @@ export async function enterMesh(app, params) {
   if (params.autocall === '1') {
     setTimeout(() => { if (!ctx?.voice?.destroyed && !ctx?.voice?.inCall) ctx.voice.joinCall({ withMic: true }); }, 450);
   }
+  const _prevLayoutBgTick = window.__watchlivoBgSyncTick;
   window.__watchlivoBgSyncTick = () => {
+    try { _prevLayoutBgTick?.(); } catch (_) {}
     ctx?.sync?.tickFromMedia?.();
     ctx?.conn?.nudgeIfDisconnected?.();
   };

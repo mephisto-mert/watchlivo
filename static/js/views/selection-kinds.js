@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261106_v132';
-import { api, qs } from '../api.js?v=20261106_v132';
-import { parseVideoUrl } from '../providers.js?v=20261106_v132';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261106_v132';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261106_v132';
-import { profileSetup } from '../profile.js?v=20261106_v132';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v132';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261106_v133';
+import { api, qs } from '../api.js?v=20261106_v133';
+import { parseVideoUrl } from '../providers.js?v=20261106_v133';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261106_v133';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261106_v133';
+import { profileSetup } from '../profile.js?v=20261106_v133';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261106_v133';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261106_v132';
+} from '../store.js?v=20261106_v133';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -737,6 +737,10 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     if (ioObserver) ioObserver.disconnect();
     if (!('IntersectionObserver' in window) || !sentinelEl) return;
     ioObserver = new IntersectionObserver((entries) => {
+      if (!sentinelEl.isConnected || !body.isConnected) {
+        if (ioObserver) { ioObserver.disconnect(); ioObserver = null; }
+        return;
+      }
       if (entries.some((e) => e.isIntersecting) && !loadingMore && hasMorePages && !currentQuery) {
         loadMorePage(btnEl);
       }
@@ -985,12 +989,19 @@ export function openVizyonModal(pick, onAdded) {
     if (it.mediaType === 'tv') {
       const seriesHost = h('div', { style: { minHeight: '220px' } });
       let pickerPopup = null;
-      await renderSeriesPicker(it, { id: it.provider || 'cinema', name: 'Sinema+ Vizyon' }, seriesHost, async (media) => {
-        pickerPopup?.close?.();
-        closeRef?.close?.();
-        await pick(media);
-      }, () => pickerPopup?.close?.());
       pickerPopup = popup({ title: `📺 ${it.title} — Sezon & Bölüm Seç`, content: seriesHost, wide: true, options: [] });
+      await renderSeriesPicker(
+        it,
+        { id: it.provider || 'cinema', name: 'Sinema+ Vizyon' },
+        seriesHost,
+        () => pickerPopup?.close?.(),
+        async (media) => {
+          pickerPopup?.close?.();
+          closeRef?.close?.();
+          await pick(media);
+        },
+        resolveCatalogItem
+      );
       return;
     }
     toast(`🍿 "${it.title}" odada hazırlanıyor...`);

@@ -43,6 +43,7 @@ _CLOSED_ROOMS: Dict[str, float] = {}
 SYNC_TOKEN_TTL = 86400.0
 CLIENT_TOKEN_TTL = 86400.0
 _JOIN_LIMITER = RateLimiter(12, 300.0, name="room_pwd")
+_CREATE_ROOM_LIMIT = RateLimiter(120, 60.0, name="room_create")
 _PWD_ITERATIONS = 120_000
 
 
@@ -968,7 +969,12 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         for sp in (snap.get("polls") or []):
             if isinstance(sp, dict) and sp.get("id"):
                 pid = sp["id"]
-                if pid not in by_id or sum(len(o.get("votes") or []) for o in sp.get("options") or []) >= sum(len(o.get("votes") or []) for o in by_id[pid].get("options") or []):
+                sp_rev = int(sp.get("rev") or 0)
+                cur_p_rev = int(by_id[pid].get("rev") or 0) if pid in by_id else -1
+                if pid not in by_id or sp_rev > cur_p_rev or (
+                    sp_rev == cur_p_rev
+                    and sum(len(o.get("votes") or []) for o in sp.get("options") or []) >= sum(len(o.get("votes") or []) for o in by_id[pid].get("options") or [])
+                ):
                     by_id[pid] = sp
         room["polls"] = list(by_id.values())[-10:]
     prev_c_len = len(room.get("chat") or [])
@@ -1712,7 +1718,9 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
                 p_uid = str(p.get("uid") or "").strip()
                 uid_ok = (not old_uid.startswith(("u_", "uid_"))) or (p_uid and p_uid == old_uid)
                 explicit_cid = str(room.get("explicitCreatorCid") or "").strip()
-                if uid_ok and (
+                req_mtype = str(data.get("type") or "").strip().lower()
+                allow_precreated_claim = req_mtype in ("", "init", "join", "poll") or bool(data.get("_verifiedClientToken"))
+                if allow_precreated_claim and uid_ok and (
                     (not other_real_humans and not explicit_cid)
                     or (p_slug and _slugify_name(old_p.get("name") or "") == p_slug and bool(data.get("isCreator")))
                 ):
@@ -2174,14 +2182,21 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if room.get("curated"):
             deny("7/24 canlı yayın odalarında yayın atlanamaz.")
             return out
-        if cid not in room["skip_votes"]:
+        human_ids = {
+            pcid for pcid, pp in (room.get("participants") or {}).items()
+            if isinstance(pp, dict) and pp.get("transport") != "bot"
+        }
+        room["skip_votes"] = [v for v in (room.get("skip_votes") or []) if v in human_ids]
+        if cid in human_ids and cid not in room["skip_votes"]:
             room["skip_votes"].append(cid)
         room["rev"] = int(room.get("rev") or 1) + 1
-        needed = max(1, len(room["participants"]) // 2 + 1)
+        needed = max(1, len(human_ids) // 2 + 1)
         if len(room["skip_votes"]) >= needed and room["queue"]:
             _play_next(room, "Atlama oylaması")
             out["broadcast"].append((_room_event(room, "media_changed", by="skip"), None))
         else:
+            if not room["queue"]:
+                room["skip_votes"] = []
             out["broadcast"].append(({"type": "skip_votes", "votes": room["skip_votes"], "needed": needed}, None))
 
     elif mtype == "video_ended":
@@ -2419,6 +2434,18 @@ def _handle_social(room, cid, data, out, name, is_host):
             me["statusText"] = clean_str(data.get("statusText"), 60)
         if "statusEmoji" in data:
             me["statusEmoji"] = clean_str(data.get("statusEmoji"), 12) or "🍿"
+        if "hideLocation" in data:
+            me["hideLocation"] = _as_bool(data.get("hideLocation"))
+            if me["hideLocation"]:
+                me["country"] = "XX"
+            elif data.get("country"):
+                me["country"] = re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper()) or "TR"
+        elif data.get("country") and not me.get("hideLocation"):
+            me["country"] = re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper()) or me.get("country", "TR")
+        if "medal" in data:
+            me["medal"] = clean_str(data.get("medal"), 32)
+        if "watchMinutes" in data:
+            me["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
         raw_av_upd = str(data.get("avatarUrl") or "").strip()
         if raw_av_upd and (raw_av_upd.startswith(("https://", "/static/", "/uploads/")) or (raw_av_upd.startswith("data:image/") and len(raw_av_upd) <= 45000)):
             me["avatarUrl"] = raw_av_upd
@@ -2439,6 +2466,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 })
             except Exception:
                 pass
+        room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         room["_tok_sig"] = ""
         out["broadcast"].append((_room_event(room), None))
@@ -2571,16 +2599,16 @@ def _handle_social(room, cid, data, out, name, is_host):
             out["reply"].append({"type": "error", "message": "7/24 canlı yayın odalarında oda ayarları değiştirilemez."})
             return out
         act = data.get("action")
-        is_creator_match = _is_creator_of_room(room, cid, me, {**data, "uid": me.get("uid", "")})
+        is_creator_match = (not room.get("host_transferred")) and _is_creator_of_room(room, cid, me, {**data, "uid": me.get("uid", "")})
         if not (is_host or cid in (room.get("co_hosts") or []) or is_creator_match):
             out["reply"].append({"type": "error", "message": "Bu ayarları yalnızca oda lideri değiştirebilir."})
             return out
         if is_creator_match and room.get("host_id") not in room.get("participants", {}):
             room["host_id"] = cid
+        if act != "toggle_stage_speaker" and not (is_host or is_creator_match):
+            out["reply"].append({"type": "error", "message": "Bu işlemi yalnızca oda lideri gerçekleştirebilir."})
+            return out
         if act == "set_privacy":
-            if not (is_host or is_creator_match):
-                out["reply"].append({"type": "error", "message": "Oda gizlilik ve mod ayarlarını yalnızca oda lideri değiştirebilir."})
-                return out
             if data.get("privacy") in VALID_PRIVACY:
                 room["privacy"] = data["privacy"]
             if data.get("playMode") in VALID_PLAY_MODES:
@@ -2600,9 +2628,6 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["host_transferred"] = True
             sys_msg(room, "artık oda lideri", room["participants"][data["targetId"]]["name"])
         elif act == "toggle_stage_mode":
-            if not (is_host or is_creator_match):
-                out["reply"].append({"type": "error", "message": "Sahne modunu yalnızca oda lideri değiştirebilir."})
-                return out
             next_v = "all" if room.get("voipMode") == "stage" else "stage"
             room["voipMode"] = next_v
             if next_v == "stage":
@@ -2653,14 +2678,17 @@ def _handle_social(room, cid, data, out, name, is_host):
                 return out
             kicked = room["participants"].pop(tid)
             room.setdefault("left", {})[tid] = now()
-            co_list = list(room.get("co_hosts") or [])
-            if tid in co_list:
-                co_list.remove(tid)
-                room["co_hosts"] = co_list
+            co_list = [x for x in (room.get("co_hosts") or []) if x != tid]
+            room["co_hosts"] = co_list
+            room["stage_speakers"] = [x for x in (room.get("stage_speakers") or []) if x != tid]
+            room["skip_votes"] = [x for x in (room.get("skip_votes") or []) if x != tid]
             k_list = list(room.get("kicked") or [])
             if tid not in k_list:
                 k_list.append(tid)
-            room["kicked"] = k_list
+            kicked_uid = str(kicked.get("uid") or "").strip()
+            if kicked_uid.startswith("u_wl_") and f"uid:{kicked_uid}" not in k_list:
+                k_list.append(f"uid:{kicked_uid}")
+            room["kicked"] = k_list[-50:]
             if room.get("host_id") == tid:
                 ensure_host(room)
             sys_msg(room, f"{name} tarafından odadan çıkarıldı", kicked["name"])
@@ -2669,6 +2697,8 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["_close_room_now"] = True
             _LOBBY_CACHE["ts"] = 0.0
             out["close_room"] = True
+            return out
+        else:
             return out
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
@@ -2709,28 +2739,6 @@ def _handle_social(room, cid, data, out, name, is_host):
             room["rev"] = int(room.get("rev") or 1) + 1
             room["_tok_sig"] = ""
             out.setdefault("direct", []).append((target, relay))
-    elif mtype == "profile_update":
-        me["name"] = clean_str(data.get("name"), 24) or me["name"]
-        raw_col = clean_str(data.get("color"), 16)
-        if re.match(r"^#[0-9a-fA-F]{3,8}$", raw_col):
-            me["color"] = raw_col
-        if "avatarUrl" in data:
-            raw_av = str(data.get("avatarUrl") or "").strip()
-            if not raw_av or raw_av.startswith(("https://", "/static/", "/uploads/")) or (raw_av.startswith("data:image/") and len(raw_av) <= 45000):
-                me["avatarUrl"] = raw_av
-        if "hideLocation" in data:
-            me["hideLocation"] = _as_bool(data.get("hideLocation"))
-            if me["hideLocation"]:
-                me["country"] = "XX"
-            elif data.get("country"):
-                me["country"] = re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper()) or "TR"
-        if "medal" in data:
-            me["medal"] = clean_str(data.get("medal"), 32)
-        if "watchMinutes" in data:
-            me["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
-        room["_parts_list"] = None
-        room["rev"] = int(room.get("rev") or 1) + 1
-        out["broadcast"].append(({"type": "participants_updated", "participants": serialize(room)["participants"]}, None))
     elif mtype == "poll_create":
         t_now = now()
         question = clean_str(data.get("question"), 140)
@@ -2741,6 +2749,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                 "question": question,
                 "creator": name,
                 "createdAt": t_now,
+                "rev": 1,
                 "options": [{"text": opt, "votes": []} for opt in raw_opts],
             }
             room["polls"] = ((room.get("polls") or []) + [poll])[-10:]
@@ -2774,6 +2783,7 @@ def _handle_social(room, cid, data, out, name, is_host):
                     o["votes"] = [v for v in (o.get("votes") or []) if v != voter_tag and (is_gen_guest or v != name)]
                 if not already:
                     poll["options"][opt_idx]["votes"].append(voter_tag)
+                poll["rev"] = int(poll.get("rev") or 1) + 1
                 room["rev"] = int(room.get("rev") or 1) + 1
                 out["broadcast"].append(({"type": "poll_updated", "poll": poll, "polls": room["polls"]}, None))
                 break
@@ -2785,6 +2795,10 @@ def check_vote_end(room: Dict[str, Any]) -> bool:
     if room["voteEndsAt"] and now() >= room["voteEndsAt"]:
         room["voteEndsAt"] = 0.0
         if _play_next(room, "Oylama"):
+            t_v = now()
+            ev = {"id": "mc_" + uuid.uuid4().hex[:10], "ts": t_v, "type": "media_changed", "by": "vote", "media": dict(room.get("media") or {})}
+            room["events"] = (room.get("events") or [])[-34:] + [ev]
+            room["rev"] = int(room.get("rev") or 1) + 1
             return True
     return False
 
@@ -2983,7 +2997,7 @@ async def ws_endpoint(websocket: WebSocket):
             room["creatorId"] = verified_uid or cid
             room["creatorCid"] = cid
         room.setdefault("kicked", [])
-        if cid in room["kicked"]:
+        if cid in room["kicked"] or (verified_uid and f"uid:{verified_uid}" in room["kicked"]):
             await websocket.send_json({"type": "kicked"})
             await websocket.close()
             return
@@ -3018,7 +3032,7 @@ async def ws_endpoint(websocket: WebSocket):
                 room["media"]["updatedAt"] = now()
                 room["media"]["playing"] = True
         room.pop("emptySince", None)
-        p, is_new_ws = add_participant(room, cid, join_data, "ws")
+        p, is_new_ws = add_participant(room, cid, {**join_data, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "ws")
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
         SOCKETS.setdefault(room_id, {})[cid] = websocket
         await STORE.put(room, force_disk=bool(is_new_ws))
@@ -3248,7 +3262,7 @@ async def http_sync(request: Request):
         if not room.get("fromCreateApi") and not room.get("curated") and requested_cid and requested_cid == room.get("creatorCid") and not str(room.get("creatorId") or "").startswith("u_wl_"):
             room["explicitCreatorCid"] = requested_cid
         room.setdefault("kicked", [])
-        if cid in room["kicked"]:
+        if cid in room["kicked"] or (verified_uid and f"uid:{verified_uid}" in room["kicked"]):
             return JSONResponse({"error": "kicked"}, status_code=410)
         existing_p = (room.get("participants") or {}).get(cid)
         pw_trusted_member = bool(existing_p and ((signed_cid and signed_cid == cid) or existing_p.get("_precreated")))
@@ -3272,8 +3286,11 @@ async def http_sync(request: Request):
         pruned = prune(room)
         was_empty_humans = not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values())
         empty_elapsed = (now() - float(room.get("emptySince") or 0.0)) if room.get("emptySince") else 0.0
+        stale_empty_wipe = False
         if was_empty_humans and (room.get("curated") or empty_elapsed > 3600.0):
-            room["_explicit_chat_clear"] = True
+            stale_empty_wipe = True
+            if room.get("curated"):
+                room["_explicit_chat_clear"] = True
             room["chat"] = []
             room["polls"] = []
             if room.get("media") and not data.get("syncToken"):
@@ -3290,8 +3307,10 @@ async def http_sync(request: Request):
                         set_media(room, spec["media"], room["creator"], start=0.0)
         room.pop("emptySince", None)
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now())
+        if stale_empty_wipe and not restored_recent_chat:
+            room["_explicit_chat_clear"] = True
         safe_http_uid = _safe_participant_uid(verified_uid, data.get("uid") or data.get("userId"))
-        p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid}, "http")
+        p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "http")
         if is_new:
             sys_msg(room, "odaya katıldı", p["name"])
             t_ev = now()
@@ -3359,8 +3378,10 @@ async def http_sync(request: Request):
                 _LOBBY_CACHE["ts"] = 0.0
                 await broadcast(room_id, {"type": "room_closed", "roomId": room_id}, cid)
                 return JSONResponse({"ok": True, "roomClosed": True})
-            if out.get("kick"):
+            if out.get("kick") and out["kick"] not in room["kicked"]:
                 room["kicked"] = (room["kicked"] + [out["kick"]])[-50:]
+        elif voted and SOCKETS.get(room_id):
+            out = {"broadcast": [(_room_event(room, "media_changed", by="vote"), None)]}
         elif is_new and SOCKETS.get(room_id) and (now() - float(room.get("_lastWsJoinBcast") or 0.0) > 1.0):
             room["_lastWsJoinBcast"] = now()
             out = {"broadcast": [(_room_event(room), cid)]}
@@ -3399,7 +3420,7 @@ async def http_sync(request: Request):
                 "privacy": room.get("privacy", "public"),
                 "playMode": room.get("playMode", "leader"),
                 "voipMode": room.get("voipMode", "all"),
-                "name": room.get("name", ""),
+                "name": _effective_room_name(room),
                 "host_id": room.get("host_id"),
                 "media": ser_Quick["media"],
                 "syncToken": pack_sync_token(room),
@@ -3412,11 +3433,18 @@ async def http_sync(request: Request):
 
 
 async def create_room(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    if not isinstance(payload, dict):
+    allowed_rl, retry_rl = _CREATE_ROOM_LIMIT.hit(client_ip(request))
+    if not allowed_rl:
+        return JSONResponse({"ok": False, "error": "Çok fazla oda oluşturma isteği", "retryAfter": int(retry_rl)}, status_code=429)
+    raw_body = await request.body()
+    if raw_body and raw_body.strip():
+        try:
+            payload = json.loads(raw_body)
+        except Exception:
+            return JSONResponse({"ok": False, "error": "Geçersiz JSON gövdesi"}, status_code=400)
+        if not isinstance(payload, dict):
+            return JSONResponse({"ok": False, "error": "Geçersiz istek biçimi"}, status_code=400)
+    else:
         payload = {}
     name = clean_str(payload.get("name"), 45) or "Watchlivo Odası"
     slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
@@ -3429,8 +3457,7 @@ async def create_room(request: Request):
     if not verified_uid and raw_creator_id.lower().startswith("u_wl_"):
         raw_creator_id = ""
     creator_uid = verified_uid or raw_creator_id or creator_cid
-    creator_slug = _slugify_name(payload.get("creator") or "")
-    if verified_uid or creator_cid or (len(creator_slug) >= 2 and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")):
+    if verified_uid or req_cid:
         try:
             all_existing = await STORE.all()
             stale_creator_rooms = []
@@ -3446,14 +3473,8 @@ async def create_room(request: Request):
                     not cand_has_live_human
                     and not has_password(cand)
                     and not str(cand.get("creatorId") or "").startswith("u_wl_")
-                    and (
-                        (creator_cid and cand.get("creatorCid") == creator_cid)
-                        or (
-                            creator_slug
-                            and creator_slug not in ("misafir", "izleyici", "misafir-izleyici")
-                            and _slugify_name(cand.get("creator") or "") == creator_slug
-                        )
-                    )
+                    and req_cid
+                    and cand.get("creatorCid") == req_cid
                 )
                 if (cand_owned_by_verified or cand_stale_guest_match) and cand.get("id"):
                     stale_creator_rooms.append(cand.get("id"))

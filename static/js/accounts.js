@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261106_v132';
-import { api, qs } from './api.js?v=20261106_v132';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261106_v132';
+import { h, toast, popup } from './ui.js?v=20261106_v133';
+import { api, qs } from './api.js?v=20261106_v133';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261106_v133';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -447,21 +447,22 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
       onchange: (ev) => switchSeason(ev.target.value),
     }, ...seasons.map((s) => h('option', { value: String(s.season), selected: s.season === curSeason ? 'selected' : undefined }, `${s.name || `${s.season}. Sezon`}${s.count ? ` (${s.count} Bölüm)` : ''}`))) : null) : null;
 
+    const safeBackdropCss = String(backdrop || '').replace(/["'()\\\r\n]/g, '');
     const detail = h('div', { class: 'series-detail fade-in' },
-      h('div', { class: 'series-hero', style: { backgroundImage: `linear-gradient(180deg, rgba(11,10,18,.45), rgba(11,10,18,.96)), url("${backdrop}")` } },
+      h('div', { class: 'series-hero', style: { backgroundImage: `linear-gradient(180deg, rgba(11,10,18,.45), rgba(11,10,18,.96)), url("${safeBackdropCss}")` } },
         h('div', { class: 'series-top-row' },
           h('button', { class: 'btn', onclick: onBack }, '← Kataloğa Dön'),
           h('span', { class: 'series-badge' }, `${effMtype === 'tv' ? `📺 DİZİ • ${seasons.length} Sezon` : '🎬 FİLM'}${year ? ` • ${year}` : ''}${rating ? ` • ⭐ ${rating}` : ''}`)),
         h('div', { class: 'series-hero-body' },
           h('img', {
             class: 'series-poster',
-            src: poster || `/api/rave/poster?${qs({ tid: tmdbId || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
+            src: poster || `/api/rave/poster?${qs({ tid: tid || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`,
             alt: title,
             onerror: (e) => {
               const el = e.currentTarget || e.target;
-              if (!el.dataset.healed && (title || tmdbId)) {
+              if (!el.dataset.healed && (title || tid)) {
                 el.dataset.healed = '1';
-                el.src = `/api/rave/poster?${qs({ tid: tmdbId || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
+                el.src = `/api/rave/poster?${qs({ tid: tid || '', t: title || '', ot: origTitle || '', y: year || '', mt: mtype })}`;
               } else {
                 el.src = '/static/watchlivo-poster.svg';
               }
@@ -505,7 +506,12 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           return h('div', {
             class: `episode-card ${isSavedEp ? 'is-saved-resume' : ''}`, role: 'button', tabindex: '0',
             onclick: (ev) => playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, ev.currentTarget.querySelector('.episode-play'), epStartSec),
-            onkeydown: (e) => { if (e.key === 'Enter') playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, null, epStartSec); },
+            onkeydown: (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, null, epStartSec);
+              }
+            },
           },
           h('div', { class: 'episode-thumb' },
             h('img', { src: ep.still || backdrop, alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),

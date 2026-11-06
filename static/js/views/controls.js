@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261106_v132';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261106_v132';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261106_v132';
-import { getProvider } from '../providers.js?v=20261106_v132';
-import { expectedPosition } from '../sync.js?v=20261106_v132';
-import { thumbFor } from './lobby.js?v=20261106_v132';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261106_v132';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261106_v132';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261106_v132';
-import { avatar } from '../profile.js?v=20261106_v132';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261106_v133';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261106_v133';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261106_v133';
+import { getProvider } from '../providers.js?v=20261106_v133';
+import { expectedPosition } from '../sync.js?v=20261106_v133';
+import { thumbFor } from './lobby.js?v=20261106_v133';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261106_v133';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261106_v133';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261106_v133';
+import { avatar } from '../profile.js?v=20261106_v133';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -361,7 +361,27 @@ export function buildControls(frame, ctx) {
   const seekPreviewSub = h('div', { class: 'seek-preview-sub' }, '');
   const seekPreviewTime = h('div', { class: 'seek-preview-time' }, '0:00');
   const seekPreview = h('div', { class: 'seek-preview-card hidden', id: 'ctl-seek-preview' }, seekPreviewChapter, seekPreviewSub, seekPreviewTime);
-  const timeline = h('div', { class: 'timeline', id: 'ctl-timeline' }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
+  const timeline = h('div', {
+    class: 'timeline',
+    id: 'ctl-timeline',
+    role: 'slider',
+    tabindex: '0',
+    'aria-label': 'Video zaman çizelgesi',
+    'aria-valuemin': '0',
+    'aria-valuemax': '100',
+    'aria-valuenow': '0',
+    onkeydown: (e) => {
+      if (e.key === 'Home' && canSeekNow()) {
+        e.preventDefault();
+        e.stopPropagation();
+        actions.seek(0);
+      } else if (e.key === 'End' && canSeekNow() && duration() > 1) {
+        e.preventDefault();
+        e.stopPropagation();
+        actions.seek(Math.max(0, duration() - 1));
+      }
+    },
+  }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const isIosFixedVol = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
   const volRange = h('input', { type: 'range', min: '0', max: '100', step: '1', value: String(Math.min(100, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
@@ -1444,7 +1464,10 @@ export function buildControls(frame, ctx) {
       const pct = d ? (p / d) * 100 : 0;
       cur.style.width = `${pct}%`;
       knob.style.left = `${pct}%`;
-      time.textContent = host.adapter?.caps.live ? 'CANLI' : `${fmtTime(p)} / ${fmtTime(d)}`;
+      const timeLabel = host.adapter?.caps.live ? 'CANLI' : `${fmtTime(p)} / ${fmtTime(d)}`;
+      time.textContent = timeLabel;
+      timeline.setAttribute('aria-valuenow', String(Math.round(pct)));
+      timeline.setAttribute('aria-valuetext', timeLabel);
     }
     buf.style.width = d ? `${Math.min(100, ((host.adapter?.getBuffered?.() || 0) / d) * 100)}%` : '0%';
     updateUnmuteVisibility();
@@ -2620,14 +2643,16 @@ export function buildControls(frame, ctx) {
   }
 
   if (typeof window !== 'undefined') {
+    const _prevBgSyncTick = window.__watchlivoBgSyncTick;
     window.__watchlivoBgSyncTick = () => {
+      try { _prevBgSyncTick?.(); } catch (_) {}
       const mBg = state.mesh?.media;
       if (!mBg) return;
       updateMediaSessionPositionImmediate();
       const curP = position();
       const curD = duration();
-      if (!state.mesh?.curated && !mBg.isMusic && !mBg.live && curP > 12 && Date.now() - lastProgressSaveAt > 12000) {
-        lastProgressSaveAt = Date.now();
+      if (!state.mesh?.curated && !mBg.isMusic && !mBg.live && curP > 12 && Date.now() - lastProgressSavedAt > 12000) {
+        lastProgressSavedAt = Date.now();
         saveWatchProgress({ ...mBg, poster: mBg.poster || thumbFor(mBg) || mBg.thumbnail || '' }, curP, curD);
       }
     };

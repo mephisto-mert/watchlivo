@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 from starlette.requests import Request
@@ -40,6 +41,7 @@ _REGISTER_LIMIT = RateLimiter(15, 900.0, name="register")
 _OTP_LIMIT = RateLimiter(5, 600.0, name="otp_send")
 _OTP_VERIFY_LIMIT = RateLimiter(10, 600.0, name="otp_verify")
 _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
+_PASSWORD_RESET_PENDING: Dict[str, float] = {}
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -449,10 +451,30 @@ def _candidate_auth_secrets() -> list[bytes]:
     return out
 
 
+_REVOKED_AUTH_SIGS: "OrderedDict[str, float]" = OrderedDict()
+
+
+def revoke_auth_token(token: str) -> None:
+    if not token or "." not in token:
+        return
+    _, sig = token.rsplit(".", 1)
+    if not sig:
+        return
+    exp_ts = time.time() + TOKEN_TTL
+    _REVOKED_AUTH_SIGS[sig] = exp_ts
+    while len(_REVOKED_AUTH_SIGS) > 5000:
+        _REVOKED_AUTH_SIGS.popitem(last=False)
+
+
 def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or "." not in token or len(token) > 4096:
         return None
     b64, sig = token.rsplit(".", 1)
+    rev_exp = _REVOKED_AUTH_SIGS.get(sig)
+    if rev_exp:
+        if rev_exp > time.time():
+            return None
+        _REVOKED_AUTH_SIGS.pop(sig, None)
     b64_bytes = b64.encode("ascii")
     matched = any(
         hmac.compare_digest(hmac.new(sec, b64_bytes, hashlib.sha256).hexdigest()[:32], sig)
@@ -530,6 +552,9 @@ async def auth_register(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Lütfen geçerli bir e-posta adresi girin."}, status_code=400)
     if len(password) < 6:
         return JSONResponse({"ok": False, "error": "Şifre en az 6 karakter olmalıdır."}, status_code=400)
+    allowed, retry_after = _REGISTER_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
     uid = "u_wl_" + hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
     try:
         existing_em = _uid_for("email", email)
@@ -551,9 +576,6 @@ async def auth_register(request: Request) -> JSONResponse:
         handle = explicit_norm
     else:
         handle = _norm_handle("", name)
-    allowed, retry_after = _REGISTER_LIMIT.hit(client_ip(request))
-    if not allowed:
-        return too_many_response(retry_after)
     salt = _new_salt()
     pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
@@ -664,7 +686,8 @@ async def auth_login(request: Request) -> JSONResponse:
                     _user_create(row)
                 except Exception:
                     pass
-    if not row and target_email and EMAIL_RE.match(target_email):
+    reset_allowed = bool(target_email and _PASSWORD_RESET_PENDING.get(target_email, 0.0) > time.time())
+    if not fb_verified and (not row or reset_allowed) and target_email and EMAIL_RE.match(target_email):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
@@ -675,21 +698,31 @@ async def auth_login(request: Request) -> JSONResponse:
                 fb_email = str(fb_res.get("email") or target_email).strip().lower()
                 if fb_email == target_email:
                     fb_verified = True
-                    uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
+                    _PASSWORD_RESET_PENDING.pop(target_email, None)
                     salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
-                    disp = str(fb_res.get("displayName") or target_email.split("@")[0])[:24]
-                    row = {
-                        "uid": uid, "email": target_email,
-                        "handle": _norm_handle("", disp),
-                        "name": disp, "password_hash": pw_hash, "salt": salt,
-                        "color": "#00f5d4", "avatar": "🎬",
-                        "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
-                    }
-                    try:
-                        _user_create(row)
-                    except Exception:
-                        pass
+                    if row:
+                        row["password_hash"] = pw_hash
+                        row["salt"] = salt
+                        row["updated_at"] = time.time()
+                        try:
+                            _user_update(row["uid"], {"password_hash": pw_hash, "salt": salt, "updated_at": row["updated_at"]})
+                        except Exception:
+                            pass
+                    else:
+                        uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
+                        disp = str(fb_res.get("displayName") or target_email.split("@")[0])[:24]
+                        row = {
+                            "uid": uid, "email": target_email,
+                            "handle": _norm_handle("", disp),
+                            "name": disp, "password_hash": pw_hash, "salt": salt,
+                            "color": "#00f5d4", "avatar": "🎬",
+                            "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
+                        }
+                        try:
+                            _user_create(row)
+                        except Exception:
+                            pass
                 break
     if not row and is_email:
         sb_res = _supabase_auth_req("/auth/v1/token?grant_type=password", {
@@ -1038,6 +1071,7 @@ async def auth_email_action(request: Request) -> JSONResponse:
         })
         res = _firebase_auth_req("accounts:sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
         if res and res.get("email"):
+            _PASSWORD_RESET_PENDING[email] = time.time() + 3600.0
             return JSONResponse({"ok": True, "message": f"Şifre sıfırlama bağlantısı {email} adresine gönderildi."})
         return JSONResponse({"ok": False, "error": "Sıfırlama e-postası gönderilemedi. Lütfen adresi kontrol edin."}, status_code=400)
     if action == "magic_link":
@@ -1203,6 +1237,13 @@ async def auth_logout(request: Request) -> JSONResponse:
     auth_hdr = request.headers.get("Authorization", "")
     token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
     claims = verify_auth_token(token) if token else None
+    if token:
+        revoke_auth_token(token)
+        try:
+            import server
+            server._UID_CACHE.pop(token, None)
+        except Exception:
+            pass
     uid = str((claims or {}).get("uid") or "").strip()
     if uid:
         try:

@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261106_v132';
-import { Html5Adapter } from './html5.js?v=20261106_v132';
-import { VimeoAdapter } from './vimeo.js?v=20261106_v132';
-import { EmbedAdapter } from './embed.js?v=20261106_v132';
-import { WebviewAdapter } from './webview.js?v=20261106_v132';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261106_v132';
+import { YouTubeAdapter } from './youtube.js?v=20261106_v133';
+import { Html5Adapter } from './html5.js?v=20261106_v133';
+import { VimeoAdapter } from './vimeo.js?v=20261106_v133';
+import { EmbedAdapter } from './embed.js?v=20261106_v133';
+import { WebviewAdapter } from './webview.js?v=20261106_v133';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261106_v133';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -291,7 +291,10 @@ export class PlayerHost {
     this.onEvent('loading');
     try {
       await ad.load(media, startAt, shouldPlay);
-      if (this.adapter !== ad) return true;
+      if (this.adapter !== ad) {
+        try { ad.destroy?.(); } catch (_) {}
+        return true;
+      }
       ad.setVolume(this._effectiveVolume());
       if (this.userMuted) {
         ad.setMuted(true);
@@ -304,6 +307,8 @@ export class PlayerHost {
       if (this.adapter === ad) {
         this.error = e.message || 'Oynatıcı yüklenemedi';
         this.onEvent('error', this.error);
+      } else {
+        try { ad.destroy?.(); } catch (_) {}
       }
     } finally {
       if (this.adapter === ad) {
@@ -408,7 +413,7 @@ export class PlayerHost {
       (typeof document !== 'undefined' && document.pictureInPictureEnabled && typeof v.requestPictureInPicture === 'function')
       || typeof v.webkitSetPresentationMode === 'function'
     )) return true;
-    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.adapter) return true;
+    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.adapter && !this.container?.querySelector?.('iframe')) return true;
     return false;
   }
 
@@ -438,7 +443,7 @@ export class PlayerHost {
         return 'entered';
       }
     }
-    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.container && this.adapter) {
+    if (typeof window !== 'undefined' && window.documentPictureInPicture?.requestWindow && this.container && this.adapter && !this.container.querySelector('iframe')) {
       try {
         const pipWin = await window.documentPictureInPicture.requestWindow({ width: 480, height: 270 });
         this._docPipWin = pipWin;

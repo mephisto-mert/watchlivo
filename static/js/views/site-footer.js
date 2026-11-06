@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261106_v132';
-import { api } from '../api.js?v=20261106_v132';
-import { state } from '../store.js?v=20261106_v132';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261106_v133';
+import { api } from '../api.js?v=20261106_v133';
+import { state } from '../store.js?v=20261106_v133';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -153,6 +153,7 @@ export function openLegalModal(initialTab = 'about') {
   }
   selectTab(activeKey);
 
+  let legalModalRef = null;
   const wrap = h('div', { class: 'wl-legal-modal-wrap' },
     tabsRow,
     bodyBox,
@@ -161,11 +162,15 @@ export function openLegalModal(initialTab = 'about') {
       h('button', {
         type: 'button',
         class: 'btn sm primary',
-        onclick: () => openContactModal(activeKey === 'dmca' ? 'dmca' : 'contact'),
+        onclick: () => {
+          const curTab = tabsRow.querySelector('.wl-legal-tab-btn.active')?.dataset?.tab || activeKey;
+          legalModalRef?.close?.();
+          openContactModal(curTab === 'dmca' ? 'dmca' : 'contact');
+        },
       }, '✉️ Bize Yazın / Başvuru Yapın'))
   );
 
-  popup({
+  legalModalRef = popup({
     title: 'Watchlivo — Kurumsal & Yasal Bilgiler',
     content: wrap,
     options: [{ label: 'Kapat', primary: true }],
@@ -219,14 +224,14 @@ export function openContactModal(initialType = 'request') {
           toast(`📋 E-posta kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
         },
       }, '📋 Kopyala')),
-    h('label', { class: 'wl-contact-lbl' }, 'Konu Kategorisi'),
+    h('label', { class: 'wl-contact-lbl', for: 'wl-contact-type' }, 'Konu Kategorisi'),
     typeSelect,
     h('div', { class: 'wl-contact-row2' },
-      h('div', {}, h('label', { class: 'wl-contact-lbl' }, 'Adınız / Rumuz'), nameInput),
-      h('div', {}, h('label', { class: 'wl-contact-lbl' }, 'E-Posta Adresiniz'), emailInput)),
-    h('label', { class: 'wl-contact-lbl' }, 'İçerik Adı / Başlık'),
+      h('div', {}, h('label', { class: 'wl-contact-lbl', for: 'wl-contact-name' }, 'Adınız / Rumuz'), nameInput),
+      h('div', {}, h('label', { class: 'wl-contact-lbl', for: 'wl-contact-email' }, 'E-Posta Adresiniz'), emailInput)),
+    h('label', { class: 'wl-contact-lbl', for: 'wl-contact-subject' }, 'İçerik Adı / Başlık'),
     subjectInput,
-    h('label', { class: 'wl-contact-lbl' }, 'Mesajınız'),
+    h('label', { class: 'wl-contact-lbl', for: 'wl-contact-msg' }, 'Mesajınız'),
     msgInput,
     statusEl
   );
@@ -262,9 +267,14 @@ export function openContactModal(initialType = 'request') {
               toast('✅ Mesajınız Watchlivo ekibine başarıyla iletildi!');
               return false;
             }
-          } catch (_) {}
-          toast('✅ Mesajınız kaydedildi!');
-          return false;
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = res?.error || '⚠️ Mesaj iletilemedi, lütfen tekrar deneyin.';
+            return true;
+          } catch (err) {
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = err?.data?.error || '⚠️ Bağlantı hatası oluştu, lütfen tekrar deneyin.';
+            return true;
+          }
         },
       },
       {
@@ -397,7 +407,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261106_v132', alt: 'Watchlivo', class: 'wl-footer-logo' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261106_v133', alt: 'Watchlivo', class: 'wl-footer-logo' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

@@ -141,6 +141,10 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
       if (ac.state === 'suspended') {
         try { await ac.resume(); } catch (_) {}
       }
+      if (ac.state !== 'running') {
+        try { await ac.close(); } catch (_) {}
+        throw new Error('AC_SUSPENDED');
+      }
       const srcRate = ac.sampleRate || 48000;
       const srcNode = ac.createMediaStreamSource(stream);
       const proc = ac.createScriptProcessor(4096, 1, 1);
@@ -174,7 +178,11 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
         try { proc.disconnect(); srcNode.disconnect(); muteGain.disconnect(); } catch (_) {}
         try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
         try { await ac.close(); } catch (_) {}
-        if (!shouldSend || totalFrames < 600) return;
+        if (!shouldSend) return;
+        if (totalFrames < 600) {
+          onError?.('Ses kaydı çok kısa — kaydetmek için biraz daha uzun konuşun');
+          return;
+        }
         const durSec = Math.max(0.8, Math.min(maxSeconds + 1, (Date.now() - startedAt) / 1000));
         const merged = new Float32Array(totalFrames);
         let pos = 0;
@@ -240,7 +248,7 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
       let dataUrl = String(reader.result || '').replace(/^data:video\/mp4/i, 'data:audio/mp4');
       if (!dataUrl.includes(';base64,')) return;
       const normPeaks = peaks.length >= 4 ? peaks.slice(-24) : [0.3, 0.65, 0.85, 0.5, 0.75, 0.55];
-      let payload = { dataUrl, duration: Number(durSec.toFixed(1)), peaks: normPeaks };
+      let payload = { dataUrl, mime: rawMime, duration: Number(durSec.toFixed(1)), peaks: normPeaks };
       if (typeof apiFn === 'function') {
         try {
           const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload });

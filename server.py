@@ -25,8 +25,9 @@ import uuid
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
@@ -148,29 +149,38 @@ class SecurityHeaders:
 
         async def send_wrapper(message):
             if message["type"] == "http.response.start":
-                hdrs = list(message.get("headers") or [])
-                hdrs.append((b"x-content-type-options", b"nosniff"))
-                hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
-                hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
-                hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=(self *), fullscreen=(self *), picture-in-picture=(self *)"))
-                hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
-                hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
-                if scope.get("path") == "/api/rave/browser-proxy":
-                    hdrs.append((b"content-security-policy", b"sandbox allow-scripts allow-forms; frame-ancestors 'self'; object-src 'none'; base-uri 'none'"))
-                else:
-                    hdrs.append((
-                        b"content-security-policy",
-                        b"default-src 'self'; "
-                        b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
-                        b"worker-src 'self' blob:; "
-                        b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-                        b"font-src 'self' data: https://fonts.gstatic.com; "
-                        b"img-src 'self' data: blob: https:; "
-                        b"media-src 'self' data: blob: https:; "
-                        b"connect-src 'self' https: wss: ws:; "
-                        b"frame-src 'self' https:; "
-                        b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
-                    ))
+                raw_hdrs = list(message.get("headers") or [])
+                existing_keys = {hk.lower() for (hk, _) in raw_hdrs}
+                hdrs = list(raw_hdrs)
+                if b"x-content-type-options" not in existing_keys:
+                    hdrs.append((b"x-content-type-options", b"nosniff"))
+                if b"referrer-policy" not in existing_keys:
+                    hdrs.append((b"referrer-policy", b"strict-origin-when-cross-origin"))
+                if b"x-frame-options" not in existing_keys:
+                    hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
+                if b"permissions-policy" not in existing_keys:
+                    hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"))
+                if b"strict-transport-security" not in existing_keys:
+                    hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
+                if b"cross-origin-opener-policy" not in existing_keys:
+                    hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
+                if b"content-security-policy" not in existing_keys:
+                    if scope.get("path") == "/api/rave/browser-proxy":
+                        hdrs.append((b"content-security-policy", b"sandbox allow-scripts allow-forms; frame-ancestors 'self'; object-src 'none'; base-uri 'none'"))
+                    else:
+                        hdrs.append((
+                            b"content-security-policy",
+                            b"default-src 'self'; "
+                            b"script-src 'self' 'unsafe-inline' blob: https://cdn.jsdelivr.net https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
+                            b"worker-src 'self' blob:; "
+                            b"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                            b"font-src 'self' data: https://fonts.gstatic.com; "
+                            b"img-src 'self' data: blob: https:; "
+                            b"media-src 'self' data: blob: https:; "
+                            b"connect-src 'self' https: wss: ws:; "
+                            b"frame-src 'self' https:; "
+                            b"frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+                        ))
                 req_path = str(scope.get("path") or "")
                 if req_path.startswith("/uploads/"):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"content-security-policy", b"content-disposition")]
@@ -1810,7 +1820,7 @@ def _register_custom_release_stream(it_obj: dict) -> None:
     if no_k:
         keys.append(f"{mt_k}:{no_k}:1:1")
     for k in keys:
-        if k in v_streams and isinstance(v_streams[k], dict) and not v_streams[k].get("customDirect"):
+        if k in v_streams and isinstance(v_streams[k], dict):
             continue
         v_streams[k] = entry
 
@@ -2355,6 +2365,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         "hasMore": bool(items) and (pg < 50 or (len(items) > 18 and pg < 200)),
     }
     if items:
+        if len(_CATALOG_MEM_CACHE) >= 300:
+            _CATALOG_MEM_CACHE.pop(next(iter(_CATALOG_MEM_CACHE)), None)
         _CATALOG_MEM_CACHE[cache_key] = (now_ts, payload)
     return payload
 
@@ -5889,6 +5901,14 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "duration": dur,
                 }
         if direct_list:
+            alive_pre = [(u, st) for u, st in direct_list if _STREAM_RES_HINT.get(u, 0) != -1]
+            if not alive_pre:
+                if not refresh:
+                    return _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, refresh=True)
+                direct_list = []
+            else:
+                direct_list = alive_pre
+        if direct_list:
             primary_p = (m_cached or {}).get("primaryProv") or ""
             eff_prov = pmeta.get("prov") or (prov if prov in PROV_LABELS else "cinema")
             if primary_p and (eff_prov in ("cinema", "web") or (eff_prov == "prime" and primary_p == "max")):
@@ -6316,7 +6336,10 @@ def _ingest_custom_release_sync(payload: dict) -> dict:
     tid = raw_tid or (str(tm_hit.get("tmdbId") or "") if tm_hit else "") or f"vizyon-{abs(hash(_norm_title(title))) % 10000000}"
     year = raw_year or (str(tm_hit.get("year") or "") if tm_hit else "") or "2026"
     poster = raw_poster or (str(tm_hit.get("poster") or "") if tm_hit else "")
-    backdrop = str(payload.get("backdrop") or (tm_hit.get("backdrop") if tm_hit else "") or poster).strip()
+    raw_backdrop = str(payload.get("backdrop") or "").strip()[:600]
+    if raw_backdrop and not (raw_backdrop.startswith(("https://", "http://")) and public_http_url(raw_backdrop)):
+        raw_backdrop = ""
+    backdrop = raw_backdrop or (str(tm_hit.get("backdrop") or "") if tm_hit else "") or poster
     rating = float(payload.get("rating") or (tm_hit.get("rating") if tm_hit else 0) or 7.8)
     cats = list(dict.fromkeys(((tm_hit.get("categories") if tm_hit else []) or []) + ["vizyon", "trend", "series" if mtype == "tv" else "movies"]))
 
@@ -6362,8 +6385,14 @@ def _ingest_custom_release_sync(payload: dict) -> dict:
     return new_item
 
 
+_VIZYON_POST_LIMIT = RateLimiter(15, 600.0, name="vizyon_post")
+
+
 async def rave_new_releases(request: Request):
     if request.method == "POST":
+        allowed_v, retry_v = _VIZYON_POST_LIMIT.hit(client_ip(request))
+        if not allowed_v:
+            return too_many_response(retry_v)
         try:
             payload = await request.json()
         except Exception:
@@ -6374,8 +6403,8 @@ async def rave_new_releases(request: Request):
             item = await asyncio.to_thread(_ingest_custom_release_sync, payload)
         except ValueError as ve:
             return JSONResponse({"ok": False, "error": str(ve)}, status_code=400)
-        except Exception as exc:
-            return JSONResponse({"ok": False, "error": f"İçerik eklenemedi: {exc}"}, status_code=500)
+        except Exception:
+            return JSONResponse({"ok": False, "error": "İçerik şu anda eklenemedi."}, status_code=500)
         return JSONResponse({
             "ok": True,
             "item": item,
@@ -6455,7 +6484,7 @@ async def rave_new_releases(request: Request):
                 w_tid = str(w_it.get("tmdbId") or "")
                 w_mt = str(w_it.get("mediaType") or "movie")
                 w_t = str(w_it.get("title") or "")
-                w_ckey = f"v24|cinema|{w_mt}|{w_tid or w_t.lower()}|1|1"
+                w_ckey = f"v25|cinema|{w_mt}|{w_tid or w_t.lower()}|1|1"
                 if w_ckey not in _RESOLVE_RESP_CACHE:
                     r_w = await asyncio.wait_for(
                         asyncio.to_thread(_resolve_catalog_sync, "cinema", w_t, str(w_it.get("year") or ""), w_tid, w_mt, str(w_it.get("poster") or ""), 1, 1, str(w_it.get("imdbId") or ""), w_t, str(w_it.get("sourceUrl") or "")),
@@ -6465,10 +6494,11 @@ async def rave_new_releases(request: Request):
                         _RESOLVE_RESP_CACHE[w_ckey] = (time.time(), r_w)
             except Exception:
                 pass
-    try:
-        asyncio.create_task(_warm_top())
-    except Exception:
-        pass
+    if not IS_VERCEL:
+        try:
+            asyncio.create_task(_warm_top())
+        except Exception:
+            pass
 
     return JSONResponse({
         "ok": True,
@@ -6503,7 +6533,7 @@ def _fetch_latest_episodes_sync() -> list[dict]:
         f"https://api.themoviedb.org/3/trending/tv/week?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
     ]
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-        futs = [pool.submit(_http_json, u, 3.2) for u in eps_urls]
+        futs = [pool.submit(_http_json, u, timeout=3.2) for u in eps_urls]
         for f in futs:
             try:
                 data = f.result(timeout=3.5) or {}
@@ -7479,11 +7509,11 @@ async def rave_stream_manifest(request: Request):
                     mt_guess = explicit_mtype
                     mt_tries = (explicit_mtype,)
                 else:
-                    mt_guess = "tv" if (f"v35:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v34:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v33:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v35:movie:{tid}:1:1" in _STREAM_CACHE or f"v34:movie:{tid}:1:1" in _STREAM_CACHE or f"v33:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                    mt_guess = "tv" if (f"v36:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v35:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v34:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v33:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v36:movie:{tid}:1:1" in _STREAM_CACHE or f"v35:movie:{tid}:1:1" in _STREAM_CACHE or f"v34:movie:{tid}:1:1" in _STREAM_CACHE or f"v33:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                     mt_tries = (mt_guess, "movie" if mt_guess == "tv" else "tv")
                 cands = []
                 for mt_try in mt_tries:
-                    for ver_p in ("v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
@@ -8120,8 +8150,8 @@ async def stream_proxy(request: Request):
             hdrs,
             is_head=(request.method == "HEAD"),
         )
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
+    except Exception:
+        return JSONResponse({"error": "Akış kaynağına ulaşılamadı."}, status_code=502, headers=cors_hdrs)
 
 
 def _srt_to_vtt(raw_bytes) -> str:
@@ -8509,6 +8539,8 @@ async def rave_subtitles(request: Request):
     cached_s = _SUB_RESP_CACHE.get(s_ckey)
     if cached_s and time.time() - cached_s[0] < 600:
         return JSONResponse(cached_s[1], headers=cc_hdrs)
+    if len(_SUB_RESP_LOCKS) >= 400:
+        _SUB_RESP_LOCKS.pop(next(iter(_SUB_RESP_LOCKS)), None)
     lock = _SUB_RESP_LOCKS.setdefault(s_ckey, asyncio.Lock())
     async with lock:
         cached_s = _SUB_RESP_CACHE.get(s_ckey)
@@ -8731,6 +8763,15 @@ async def upload_file(request: Request):
     try:
         with open(dest, "wb") as out:
             while chunk := await file.read(1024 * 1024):
+                if size == 0:
+                    head_low = chunk[:512].lstrip().lower()
+                    if (
+                        chunk.startswith((b"MZ", b"\x7fELF", b"#!"))
+                        or head_low.startswith((b"<!doctype", b"<html", b"<svg", b"<script", b"<?xml"))
+                    ):
+                        out.close()
+                        dest.unlink(missing_ok=True)
+                        return JSONResponse({"error": "Geçersiz medya dosyası başlığı"}, status_code=415)
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     out.close()
@@ -8748,9 +8789,11 @@ async def manifest_json(request: Request):
         "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik", "short_name": "Watchlivo", "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
         "start_url": "/", "display": "standalone", "background_color": "#080A0F", "theme_color": "#080A0F", "orientation": "any",
         "icons": [
-            {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"},
-            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
-            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"},
+            {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
         ],
     })
 
@@ -8854,16 +8897,21 @@ async def download_apk_endpoint(request: Request):
 
 
 async def download_windows_endpoint(request: Request):
-    if not IS_VERCEL:
-        exe_file = STATIC_DIR / "Watchlivo.exe"
-        if exe_file.exists():
-            return FileResponse(
-                exe_file,
-                media_type="application/vnd.microsoft.portable-executable",
-                filename="Watchlivo.exe",
-                headers={"Content-Disposition": 'attachment; filename="Watchlivo.exe"'},
-            )
-    return RedirectResponse("/static/Watchlivo-v2.0.apk", status_code=302)
+    exe_file = STATIC_DIR / "Watchlivo.exe"
+    if exe_file.exists():
+        return FileResponse(
+            exe_file,
+            media_type="application/vnd.microsoft.portable-executable",
+            filename="Watchlivo.exe",
+            headers={
+                "Content-Disposition": 'attachment; filename="Watchlivo.exe"',
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+    ext_win = os.environ.get("WATCHLIVO_WINDOWS_DOWNLOAD_URL", "").strip()
+    if ext_win.startswith("https://"):
+        return RedirectResponse(ext_win, status_code=302)
+    return RedirectResponse("/#/?platform=windows", status_code=302)
 
 
 async def download_ipa_endpoint(request: Request):
@@ -9095,8 +9143,8 @@ def _call_openai_sync(prompt: str, model: str) -> dict:
             d2 = json.loads(r.read().decode("utf-8"))
             txt2 = d2.get("data") or d2.get("text") or ""
             return {"ok": True, "model": "gpt-5.4", "text": txt2, "provider": "openai-cloud"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    except Exception:
+        return {"ok": False, "error": "Yapay zeka servisi şu anda yanıt vermiyor."}
 
 
 async def rave_ai_chat(request: Request):
@@ -9376,8 +9424,10 @@ async def room_share_landing(request: Request) -> HTMLResponse:
         qp_v = str(request.query_params.get(qp_k) or "").strip()[:500]
         if qp_v:
             fwd_params.append((qp_k, qp_v))
-    eff_rtok = incoming_rtok
-    if not eff_rtok and room:
+    req_pwd = str(request.query_params.get("pwd") or "")
+    can_expose_rtok = not is_locked or rooms.verify_room_password(room, req_pwd)
+    eff_rtok = incoming_rtok if can_expose_rtok else ""
+    if not eff_rtok and room and can_expose_rtok:
         try:
             eff_rtok = rooms.pack_sync_token(room)
         except Exception:
@@ -9549,10 +9599,15 @@ def _track_analytics_sync(
     now_t = time.time()
     with _ANALYTICS_LOCK:
         _load_analytics_from_kv_locked()
+        if len(_ANALYTICS_STATE["daily"]) > 45:
+            for old_d in sorted(_ANALYTICS_STATE["daily"].keys())[:-35]:
+                _ANALYTICS_STATE["daily"].pop(old_d, None)
         d_ent = _ANALYTICS_STATE["daily"].setdefault(day_str, {"pageviews": 0, "visitors": set()})
         if visitor_id:
-            _ANALYTICS_STATE["visitors"].add(visitor_id)
-            d_ent["visitors"].add(visitor_id)
+            if len(_ANALYTICS_STATE["visitors"]) < 5000:
+                _ANALYTICS_STATE["visitors"].add(visitor_id)
+            if len(d_ent["visitors"]) < 2500:
+                d_ent["visitors"].add(visitor_id)
             _ANALYTICS_STATE["active_heartbeats"][visitor_id] = now_t
             if len(_ANALYTICS_STATE["active_heartbeats"]) > 2000:
                 cutoff = now_t - 360.0
@@ -9568,13 +9623,15 @@ def _track_analytics_sync(
             q_clean = re.sub(r"\s+", " ", query.strip())[:80]
             if len(q_clean) >= 2:
                 _ANALYTICS_STATE["total_searches"] += 1
-                _ANALYTICS_STATE["top_searches"][q_clean] = _ANALYTICS_STATE["top_searches"].get(q_clean, 0) + 1
+                if q_clean in _ANALYTICS_STATE["top_searches"] or len(_ANALYTICS_STATE["top_searches"]) < 500:
+                    _ANALYTICS_STATE["top_searches"][q_clean] = _ANALYTICS_STATE["top_searches"].get(q_clean, 0) + 1
         elif event_type == "watch" and title:
             t_clean = re.sub(r"\s+", " ", title.strip())[:100]
             if len(t_clean) >= 2:
                 _ANALYTICS_STATE["total_watches"] += 1
                 lbl = f"{t_clean} ({'Dizi' if media_type == 'tv' else 'Film'})" if media_type else t_clean
-                _ANALYTICS_STATE["top_watched"][lbl] = _ANALYTICS_STATE["top_watched"].get(lbl, 0) + 1
+                if lbl in _ANALYTICS_STATE["top_watched"] or len(_ANALYTICS_STATE["top_watched"]) < 500:
+                    _ANALYTICS_STATE["top_watched"][lbl] = _ANALYTICS_STATE["top_watched"].get(lbl, 0) + 1
         _flush_analytics_to_kv_locked(force=False)
 
 
@@ -9585,7 +9642,9 @@ async def robots_txt_endpoint(request: Request) -> Response:
         "Allow: /r/\n"
         "Allow: /join/\n"
         "Disallow: /api/\n"
-        "Disallow: /uploads/\n\n"
+        "Disallow: /uploads/\n"
+        "Disallow: /stats\n"
+        "Disallow: /analytics\n\n"
         "Sitemap: https://watchlivo.online/sitemap.xml\n"
     )
     return Response(txt, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})
@@ -9785,6 +9844,30 @@ async def rave_ga_collect_proxy(request: Request) -> Response:
     return Response(b"", status_code=204, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
 
 
+def _is_admin_request(request: Request) -> bool:
+    adm_secret = os.environ.get("ADMIN_SECRET", "").strip()
+    if not adm_secret:
+        return False
+    hdr_tok = (request.headers.get("x-admin-secret") or "").strip()
+    if not hdr_tok:
+        auth_h = (request.headers.get("authorization") or "").strip()
+        if auth_h.lower().startswith("bearer "):
+            hdr_tok = auth_h[7:].strip()
+    return bool(hdr_tok and hmac.compare_digest(hdr_tok, adm_secret))
+
+
+def _mask_email(raw_email: str) -> str:
+    em = str(raw_email or "").strip()
+    if not em or "@" not in em:
+        return "***" if em else ""
+    local, _, domain = em.partition("@")
+    head = local[:1] if local else "*"
+    return f"{head}***@{domain}"
+
+
+_CONTACT_LIMIT = RateLimiter(15, 600.0, name="contact_post")
+
+
 async def rave_analytics_endpoint(request: Request) -> JSONResponse:
     ip_str = client_ip(request)
     ua_str = request.headers.get("user-agent") or ""
@@ -9797,8 +9880,16 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
         if not isinstance(body, dict):
             body = {}
         if "gaMeasurementId" in body:
+            req_ga = str(body.get("gaMeasurementId") or "").strip().upper()
+            cur_ga = await asyncio.to_thread(_get_ga_measurement_id_sync)
+            if req_ga != cur_ga and not _is_admin_request(request):
+                return JSONResponse(
+                    {"ok": False, "error": "Google Analytics kimliğini değiştirmek için yönetici yetkisi gerekli."},
+                    status_code=403,
+                    headers={"Cache-Control": "no-store"},
+                )
             try:
-                saved_ga = await asyncio.to_thread(_set_ga_measurement_id_sync, str(body.get("gaMeasurementId") or ""))
+                saved_ga = await asyncio.to_thread(_set_ga_measurement_id_sync, req_ga)
                 if "event" not in body:
                     return JSONResponse({"ok": True, "gaMeasurementId": saved_ga}, headers={"Cache-Control": "no-store"})
             except ValueError as ve:
@@ -9846,6 +9937,9 @@ def _save_contact_message_sync(msg: dict) -> list:
 
 async def rave_contact_endpoint(request: Request) -> JSONResponse:
     if request.method == "POST":
+        allowed_c, retry_c = _CONTACT_LIMIT.hit(client_ip(request))
+        if not allowed_c:
+            return too_many_response(retry_c)
         try:
             body = await request.json()
         except Exception:
@@ -9869,9 +9963,12 @@ async def rave_contact_endpoint(request: Request) -> JSONResponse:
             "message": msg,
         }
         await asyncio.to_thread(_save_contact_message_sync, entry)
-        return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "entry": entry}, headers={"Cache-Control": "no-store"})
+        safe_entry = {**entry, "email": _mask_email(email)}
+        return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "entry": safe_entry}, headers={"Cache-Control": "no-store"})
+    is_admin = _is_admin_request(request)
     msgs = await asyncio.to_thread(_get_contact_messages_sync)
-    return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "messages": msgs[:30]}, headers={"Cache-Control": "no-store"})
+    pub_msgs = [m if is_admin else {**m, "email": _mask_email(m.get("email", ""))} for m in msgs[:30] if isinstance(m, dict)]
+    return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "messages": pub_msgs}, headers={"Cache-Control": "no-store"})
 
 
 async def legal_page_endpoint(request: Request) -> HTMLResponse:
@@ -9922,6 +10019,70 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
         ),
     }
     title, desc, h1_txt, body_html = pages.get(path, pages["about"])
+    form_html = ""
+    if path in ("contact", "dmca"):
+        def_cat = "dmca" if path == "dmca" else "request"
+        form_html = f"""
+    <form id="wl-page-contact-form" style="margin-top:18px;display:grid;gap:12px;background:#09101b;padding:18px;border-radius:14px;border:1px solid rgba(39,220,200,.22);">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;">
+        <label for="wlc-cat" style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">Kategori
+          <select id="wlc-cat" style="background:#0d1522;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px;font-size:14px;">
+            <option value="request" {'selected' if def_cat=='request' else ''}>🎬 Film / Dizi İsteği</option>
+            <option value="bug">🛠️ Hata / Bozuk Bölüm Bildirimi</option>
+            <option value="contact">✉️ Genel İletişim</option>
+            <option value="dmca" {'selected' if def_cat=='dmca' else ''}>⚖️ DMCA / Telif Bildirimi</option>
+          </select>
+        </label>
+        <label for="wlc-name" style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">Adınız / Rumuz
+          <input id="wlc-name" type="text" maxlength="64" placeholder="Adınız" style="background:#0d1522;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px;font-size:16px;" />
+        </label>
+        <label for="wlc-email" style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">E-Posta Adresiniz
+          <input id="wlc-email" type="email" maxlength="96" placeholder="ornek@eposta.com" style="background:#0d1522;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px;font-size:16px;" />
+        </label>
+      </div>
+      <label for="wlc-subj" style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">Başlık / İçerik Adı
+        <input id="wlc-subj" type="text" required minlength="2" maxlength="140" placeholder="Örn: Film/Dizi adı veya bildirim konusu" style="background:#0d1522;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px;font-size:16px;" />
+      </label>
+      <label for="wlc-msg" style="font-size:12px;color:#94a3b8;display:grid;gap:4px;">Mesajınız
+        <textarea id="wlc-msg" rows="4" required minlength="2" maxlength="1200" placeholder="Detayları buraya yazın..." style="background:#0d1522;color:#fff;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:10px;font-size:16px;resize:vertical;"></textarea>
+      </label>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <button type="submit" style="background:#27dcc8;color:#041014;border:none;border-radius:10px;padding:10px 20px;font-weight:800;font-size:14px;cursor:pointer;">Gönder</button>
+        <span id="wlc-status" role="status" aria-live="polite" style="font-size:13px;color:#27dcc8;font-weight:700;"></span>
+      </div>
+    </form>
+    <script>
+      document.getElementById('wl-page-contact-form')?.addEventListener('submit', async (ev) => {{
+        ev.preventDefault();
+        const st = document.getElementById('wlc-status');
+        st.style.color = '#27dcc8';
+        st.textContent = 'Gönderiliyor...';
+        try {{
+          const r = await fetch('/api/rave/contact', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{
+              category: document.getElementById('wlc-cat').value,
+              name: document.getElementById('wlc-name').value,
+              email: document.getElementById('wlc-email').value,
+              subject: document.getElementById('wlc-subj').value,
+              message: document.getElementById('wlc-msg').value
+            }})
+          }});
+          const d = await r.json();
+          if (r.ok && d.ok) {{
+            st.textContent = '✅ Mesajınız iletildi! En kısa sürede incelenecektir.';
+            ev.target.reset();
+          }} else {{
+            st.style.color = '#f87171';
+            st.textContent = '❌ ' + (d.error || 'Gönderilemedi.');
+          }}
+        }} catch (_) {{
+          st.style.color = '#f87171';
+          st.textContent = '❌ Ağ bağlantısı hatası.';
+        }}
+      }});
+    </script>"""
     html_doc = f"""<!doctype html>
 <html lang="tr">
 <head>
@@ -9943,7 +10104,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
 </head>
 <body>
   <div class="box">
-    <nav>
+    <nav aria-label="Kurumsal sayfalar">
       <a href="/">← Watchlivo Ana Sayfa</a>
       <a href="/about" class="{'act' if path=='about' else ''}">Hakkımızda</a>
       <a href="/privacy" class="{'act' if path=='privacy' else ''}">Gizlilik & KVKK</a>
@@ -9951,8 +10112,11 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
       <a href="/dmca" class="{'act' if path=='dmca' else ''}">DMCA / Telif</a>
       <a href="/contact" class="{'act' if path=='contact' else ''}">İletişim</a>
     </nav>
-    <h1>{h1_txt}</h1>
-    {body_html}
+    <main>
+      <h1>{h1_txt}</h1>
+      {body_html}
+      {form_html}
+    </main>
     <div class="foot">
       <span>📩 Resmi İletişim & Hukuk: <a href="mailto:jokallame0@gmail.com" style="color:#27dcc8;font-weight:700;">jokallame0@gmail.com</a></span>
       <span>© 2026 Watchlivo (watchlivo.online)</span>
@@ -9975,11 +10139,12 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
         f"<tr><td>{i}</td><td>{html_mod.escape(x['title'])}</td><td style='text-align:right;font-weight:700;color:#10b981;'>{x['count']}</td></tr>"
         for i, x in enumerate(data["topWatched"], 1)
     ) or "<tr><td colspan='3' style='color:#64748b;'>Henüz izleme kaydı yok</td></tr>"
+    is_admin = _is_admin_request(request)
     contact_msgs = await asyncio.to_thread(_get_contact_messages_sync)
     c_rows = "".join(
-        f"<tr><td>{html_mod.escape(m.get('ts',''))}</td><td><b>{html_mod.escape(m.get('category',''))}</b></td><td>{html_mod.escape(m.get('name',''))} ({html_mod.escape(m.get('email',''))})</td><td><b>{html_mod.escape(m.get('subject',''))}</b> — {html_mod.escape(m.get('message',''))}</td></tr>"
+        f"<tr><td>{html_mod.escape(m.get('ts',''))}</td><td><b>{html_mod.escape(m.get('category',''))}</b></td><td>{html_mod.escape(m.get('name',''))} ({html_mod.escape(m.get('email','') if is_admin else _mask_email(m.get('email','')))})</td><td><b>{html_mod.escape(m.get('subject',''))}</b> — {html_mod.escape(m.get('message',''))}</td></tr>"
         for m in contact_msgs[:15]
-    ) or "<tr><td colspan='4' style='color:#64748b;'>Henüz gelen istek veya iletişim mesajı yok</td></tr>"
+    ) or "<tr><td colspan='4' style='color:#94a3b8;'>Henüz gelen istek veya iletişim mesajı yok</td></tr>"
     devs = data["devices"]
     html = f"""<!doctype html>
 <html lang="tr">
@@ -10065,6 +10230,31 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
 </body>
 </html>"""
     return HTMLResponse(html, headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+class SelectiveGZipMiddleware:
+    """Compress HTML/JS/CSS/JSON/VTT/M3U8 while keeping byte-range media streams unbuffered."""
+
+    _SKIP_PREFIXES = (
+        "/api/rave/stream-proxy",
+        "/api/rave/stream_chunk",
+        "/api/rave/yt-music-stream",
+        "/api/rave/voice-note/",
+        "/uploads/",
+        "/download/",
+    )
+
+    def __init__(self, app, minimum_size: int = 1000):
+        self.raw_app = app
+        self.gzip_app = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            path = str(scope.get("path") or "")
+            if path.startswith(self._SKIP_PREFIXES) or path.lower().endswith((".apk", ".ipa", ".exe", ".mp4", ".mp3", ".webm")):
+                await self.raw_app(scope, receive, send)
+                return
+        await self.gzip_app(scope, receive, send)
 
 
 app = Starlette(
@@ -10208,7 +10398,7 @@ app = Starlette(
         Mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), check_dir=False), name="uploads"),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],
-    middleware=[Middleware(SecurityHeaders), Middleware(IdentityMiddleware)],
+    middleware=[Middleware(SecurityHeaders), Middleware(SelectiveGZipMiddleware, minimum_size=1000), Middleware(IdentityMiddleware)],
 )
 
 

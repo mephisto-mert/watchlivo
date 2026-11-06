@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261106_v132';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261106_v132';
-import { avatar } from '../profile.js?v=20261106_v132';
-import { api, qs } from '../api.js?v=20261106_v132';
-import { resolveMusicItem } from './selection-kinds.js?v=20261106_v132';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261106_v132';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261106_v133';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261106_v133';
+import { avatar } from '../profile.js?v=20261106_v133';
+import { api, qs } from '../api.js?v=20261106_v133';
+import { resolveMusicItem } from './selection-kinds.js?v=20261106_v133';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261106_v133';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1024,7 +1024,8 @@ export function buildChat(ctx) {
       onclick: (e) => {
         e.stopPropagation();
         if (!obj.id) return;
-        const target = list.querySelector(`.msg[data-id="${obj.id}"]`);
+        const safeId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(String(obj.id)) : String(obj.id).replace(/["\\]/g, '\\$&');
+        const target = list.querySelector(`.msg[data-id="${safeId}"]`);
         if (target) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
           target.classList.add('msg-highlight');

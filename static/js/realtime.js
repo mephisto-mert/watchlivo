@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261106_v132';
-import { api } from './api.js?v=20261106_v132';
-import { state } from './store.js?v=20261106_v132';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v132';
+import { clock } from './sync.js?v=20261106_v133';
+import { api } from './api.js?v=20261106_v133';
+import { state } from './store.js?v=20261106_v133';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261106_v133';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -100,10 +100,6 @@ export class MeshConnection {
     if (pkt.fromCid === this.clientId) return;
     if (pkt._id && this.seenP2pIds.has(pkt._id)) return;
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
-    if (pkt.room && pkt.syncToken && Number(pkt.rev || 0) >= this.lastRev) {
-      this.syncToken = pkt.syncToken;
-      this.lastRev = Number(pkt.rev || this.lastRev);
-    }
     if (pkt.event) {
       const ev = pkt.event;
       if (ev.targetId && ev.targetId !== this.clientId) return;
@@ -116,7 +112,7 @@ export class MeshConnection {
           this._addBounded(this.seenEventIds, ev.id);
         }
       }
-      this.onMessage?.(ev);
+      this.onMessage?.({ ...ev, viaP2p: true });
     }
   }
 
@@ -264,15 +260,17 @@ export class MeshConnection {
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
       const rawBaseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950;
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
+      const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
       const jitterMs = pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140);
       this.pollTimer = setTimeout(async () => {
+        if (this.closed) return;
         if (this.outQueue.length && !this.flushing) {
           await this._flushOutQueue();
         } else if (!this.inFlight && !this.outQueue.length) {
           await this.httpSend({ type: 'poll' });
         }
         scheduleNextPoll();
-      }, baseMs + jitterMs);
+      }, baseMs + backoffMs + jitterMs);
     };
     scheduleNextPoll();
   }
@@ -384,6 +382,7 @@ export class MeshConnection {
         method: 'POST', timeout: 12000,
         body: reqBody,
       });
+      if (this.closed) return false;
       this.httpFailCount = 0;
       if (res?.roomClosed) {
         this.close(false);
@@ -513,7 +512,11 @@ export class MeshConnection {
       }
       return true;
     } catch (e) {
-      if (e.status === 410 || e.status === 404) {
+      if (this.closed) return false;
+      if (e.data?.error === 'kicked' || (e.status === 403 && e.data?.error === 'kicked')) {
+        this.close(false);
+        this.onMessage?.({ type: 'kicked', roomId: this.roomId });
+      } else if (e.status === 410 || e.status === 404) {
         this.close(false);
         this.onMessage?.({ type: 'room_closed', roomId: this.roomId });
       } else if (e.status === 403) {
@@ -524,7 +527,7 @@ export class MeshConnection {
         }
       } else {
         this.httpFailCount = (this.httpFailCount || 0) + 1;
-        if (!this.lastRoom || this.httpFailCount >= 5) {
+        if (e.status !== 429 && (!this.lastRoom || this.httpFailCount >= 5)) {
           this.emitStatus('connecting');
         }
       }
@@ -644,6 +647,7 @@ export class MeshConnection {
       } catch (e) { /* ignore */ }
     }
     this.closed = true;
+    this.outQueue = [];
     if (typeof window !== 'undefined' && window.__vortexActiveConn === this) {
       window.__vortexActiveConn = null;
     }
@@ -655,6 +659,13 @@ export class MeshConnection {
     }
     clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer); clearTimeout(this.wsRetryTimer);
     try { this.bc?.close(); } catch (e) { /* ignore */ }
-    try { this.ws?.close(); } catch (e) { /* ignore */ }
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onclose = null;
+      this.ws.onerror = null;
+      try { this.ws.close(); } catch (e) { /* ignore */ }
+      this.ws = null;
+    }
   }
 }
