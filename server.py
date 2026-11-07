@@ -5816,7 +5816,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
 
 
 _AUDIO_LANG_ALIASES = {
-    "tr": ("tr", "tur", "turkish", "türkçe", "turkce", "türk"),
+    "tr": ("tr", "tur", "turkish", "türkçe", "turkce", "türk", "dublaj", "dub", "trdub", "tr-dub"),
     "orig": ("orig", "original audio", "original", "orijinal", "orijinal ses"),
     "en": ("en", "eng", "english", "ingilizce", "i̇ngilizce"),
     "ja": ("ja", "jpn", "jp", "japanese", "japonca", "日本語"),
@@ -8043,6 +8043,9 @@ async def rave_stream_manifest(request: Request):
             elif "daioncdn.net/halktv" in target:
                 hdrs["Referer"] = "https://halktv.com.tr/"
                 hdrs["Origin"] = "https://halktv.com.tr"
+            elif is_hfnl or ("cdnimages" in target and "/hls/" in target) or "playmix.uno" in target or "hdfilmcehennemi.mobi" in target:
+                hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
+                hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
             elif ref_mode == "vm" or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
                 hdrs["Referer"] = "https://vidmoly.biz/"
                 hdrs["Origin"] = "https://vidmoly.biz"
@@ -8241,6 +8244,9 @@ async def rave_stream_manifest(request: Request):
                         elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimg" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/", cand_u):
                             c_hdrs["Referer"] = "https://rapidvid.org/"
                             c_hdrs["Origin"] = "https://rapidvid.org"
+                        elif "hfnl" in str(cand_k) or "cdnimages" in cand_u or "hdfilmcehennemi" in cand_u:
+                            c_hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
+                            c_hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
                         elif "dl" in str(cand_k) or "makesomthingup" in cand_u:
                             c_hdrs["Referer"] = "https://one.makesomthingup.click/"
                             c_hdrs["Origin"] = "https://one.makesomthingup.click"
@@ -8423,6 +8429,8 @@ async def rave_stream_manifest(request: Request):
                             (idx_b, b) for idx_b, b in enumerate(blocks)
                             if not any(ad_re.search(u) for u in b[1])
                         ]
+                        if len(kept_indexed) == len(blocks) and explicit_mtype != "tv" and blocks[0][0] <= 48.0 and len(blocks) >= 2 and blocks[1][0] >= 500.0:
+                            kept_indexed = [(idx_b, b) for idx_b, b in enumerate(blocks) if idx_b > 0]
                         if kept_indexed and len(kept_indexed) < len(blocks):
                             first_kept_idx = kept_indexed[0][0]
                             stripped_leading_segs = sum(len(blocks[sk_i][1]) for sk_i in range(first_kept_idx))
@@ -8496,14 +8504,18 @@ async def rave_stream_manifest(request: Request):
                             s_ln = re.sub(r',SUBTITLES="[^"]*"', '', s_ln)
                             if not valid_aud_lines:
                                 s_ln = re.sub(r',AUDIO="[^"]*"', '', s_ln)
+                            else:
+                                s_ln = re.sub(r',?mp4a\.[a-zA-Z0-9.]+', '', s_ln)
                             pending_inf = s_ln
                             continue
                         if 'TYPE=AUDIO' in s_ln:
                             if 'URI="undefined' in s_ln:
                                 continue
 
-                            def _set_aud_default(tag_ln: str, is_def: bool) -> str:
+                            def _set_aud_default(tag_ln: str, is_def: bool, lang_c: str = "") -> str:
                                 cleaned = re.sub(r',?\b(?:DEFAULT|AUTOSELECT)=(?:YES|NO)\b', '', tag_ln)
+                                if lang_c and 'LANGUAGE="' not in cleaned:
+                                    cleaned = re.sub(r'TYPE=AUDIO\s*,?\s*', f'TYPE=AUDIO,LANGUAGE="{lang_c}",', cleaned, count=1)
                                 cleaned = re.sub(r'TYPE=AUDIO\s*,?\s*', f'TYPE=AUDIO,DEFAULT={"YES" if is_def else "NO"},AUTOSELECT={"YES" if is_def else "NO"},', cleaned, count=1)
                                 return cleaned.rstrip(",")
 
@@ -8525,17 +8537,17 @@ async def rave_stream_manifest(request: Request):
                                         is_match = not is_tr_line
                                 if is_match and grp_id not in selected_aud_groups:
                                     selected_aud_groups.add(grp_id)
-                                    s_ln = _set_aud_default(s_ln, True)
+                                    s_ln = _set_aud_default(s_ln, True, l_code)
                                 else:
-                                    s_ln = _set_aud_default(s_ln, False)
+                                    s_ln = _set_aud_default(s_ln, False, l_code)
                             elif not is_probe and grp_has_tr:
                                 if is_tr_line and grp_id not in selected_aud_groups:
                                     selected_aud_groups.add(grp_id)
-                                    s_ln = _set_aud_default(s_ln, True)
+                                    s_ln = _set_aud_default(s_ln, True, l_code)
                                 else:
-                                    s_ln = _set_aud_default(s_ln, False)
+                                    s_ln = _set_aud_default(s_ln, False, l_code)
                             elif grp_id not in default_aud_groups and 'DEFAULT=NO' in s_ln:
-                                s_ln = _set_aud_default(s_ln, True)
+                                s_ln = _set_aud_default(s_ln, True, l_code)
                                 default_aud_groups.add(grp_id)
                         if s_ln.startswith("#EXT-X-I-FRAME-STREAM-INF"):
                             continue
@@ -9489,7 +9501,6 @@ async def rave_subtitle_vtt(request: Request):
     body_bytes = vtt.encode("utf-8")
     return Response(b"" if request.method == "HEAD" else body_bytes, media_type="text/vtt; charset=utf-8", headers={
         "Access-Control-Allow-Origin": "*",
-        "Content-Length": str(len(body_bytes)),
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
     })
 

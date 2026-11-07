@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261107_v142';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v143';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -227,6 +227,9 @@ export class SubtitleDubController {
       if (/\[(?:intro|opening|jenerik|açılış)\]/i.test(String(c.text || '')) && c.end > c.start + 15 && c.end <= 150) {
         return { start: Math.max(0, c.start), end: c.end };
       }
+    }
+    if (cues.length >= 5 && cues[0].start >= 30 && cues[0].start <= 65) {
+      return { start: 0, end: Math.floor(cues[0].start) };
     }
     return null;
   }
@@ -636,6 +639,11 @@ export class SubtitleDubController {
     }
     if (targetIdx >= 0 && hls.audioTrack !== targetIdx) {
       hls.audioTrack = targetIdx;
+      if (hls.bufferController) {
+        try {
+          hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: this.adapter.getTime(), endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
+        } catch (_) {}
+      }
     }
   }
 
@@ -842,7 +850,9 @@ export class SubtitleDubController {
       this.adapter.events.onTracksChanged?.();
       return null;
     }
-    let track = this.subtitleTracks.find((t) => t.id === cleanId)
+    const streamTrack = this.subtitleTracks.find((t) => (t.id === cleanId || t.lang === cleanId || (cleanId === 'tr' && String(t.lang || '').startsWith('tr'))) && (t.source === 'stream' || t.source === 'fansub' || String(t.id || '').includes('-hls')));
+    let track = (cleanId !== 'off' && streamTrack)
+      || this.subtitleTracks.find((t) => t.id === cleanId)
       || this.subtitleTracks.find((t) => t.lang === cleanId)
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId))
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith('tr'))
@@ -873,7 +883,7 @@ export class SubtitleDubController {
         this.adapter.events.onTracksChanged?.();
         return track;
       }
-      const isStreamEmbeddedFansub = track.source === 'fansub';
+      const isStreamEmbeddedFansub = track.source === 'fansub' || track.source === 'stream' || String(track.id || '').includes('-hls');
       const isForcedOrTruncated = track.source === 'local'
         ? false
         : (isStreamEmbeddedFansub
@@ -895,6 +905,20 @@ export class SubtitleDubController {
       }
       this.selectedSubId = track.id;
       this.subCues = cues;
+      if (this.offsetSec === 0 && cues.length > 0 && cues[0].start < 15) {
+        const streamEmbedded = this.subtitleTracks.find((t) => (t.source === 'fansub' || t.source === 'stream' || String(t.id || '').includes('-hls')) && t.id !== track.id);
+        if (streamEmbedded) {
+          try {
+            const semCues = await this._loadCuesForTrack(streamEmbedded);
+            if (Array.isArray(semCues) && semCues.length > 0 && semCues[0].start > 30) {
+              const delta = Math.round((semCues[0].start - cues[0].start) * 10) / 10;
+              if (delta >= 15 && delta <= 90) {
+                this.offsetSec = delta;
+              }
+            }
+          } catch (_) {}
+        }
+      }
       if (!this.intro) this.intro = this._detectIntroFromCues(cues);
       this.secondaryCues = [];
       this._attachNativeTrack(track);
@@ -1027,8 +1051,9 @@ export class SubtitleDubController {
 
     if (track.mode === 'tts' || track.id === 'tr-ai-dub' || track.id === 'en-ai-dub') {
       const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
-      if (isInit && !isAnime) {
+      if (!isAnime) {
         this.ttsDubActive = false;
+        this.stopDubAudio();
         return track;
       }
       this.ttsDubActive = true;
@@ -1058,7 +1083,7 @@ export class SubtitleDubController {
 
     const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
-    if (typeof track.hlsIndex === 'number' && hlsHasMulti && (!track.url || cleanUrl(track.url) === cleanUrl(this.adapter.currentUrl))) {
+    if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
     } else if (track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       await this.adapter.switchStreamSource(track.url);

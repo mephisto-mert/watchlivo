@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v142';
-import { expectedPosition } from '../sync.js?v=20261107_v142';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v142';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v142';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v142';
+import { SubtitleDubController } from './subtitles.js?v=20261108_v143';
+import { expectedPosition } from '../sync.js?v=20261108_v143';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261108_v143';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261108_v143';
+import { ensureHlsJs } from './hls-loader.js?v=20261108_v143';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -943,7 +943,7 @@ export class Html5Adapter {
         if (effStart >= 0.5 && v.readyState >= 1 && Math.abs((v.currentTime || 0) - effStart) > 1.2) {
           try { v.currentTime = effStart; } catch (err) { /* ignore */ }
         }
-        this.subs.mergeHlsAudioTracks(this.hls.audioTracks || data?.audioTracks || []);
+        this.subs.mergeHlsAudioTracks((this.hls.audioTracks?.length ? this.hls.audioTracks : data?.audioTracks) || []);
         this.subs._applyHlsAudioSelection();
         if (this.wantPlaying) this.tryPlay();
         if (v.readyState >= 2) {
@@ -953,7 +953,10 @@ export class Html5Adapter {
         }
       });
       this.hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
-        this.subs.mergeHlsAudioTracks(data?.audioTracks || this.hls?.audioTracks || []);
+        this.subs.mergeHlsAudioTracks((data?.audioTracks?.length ? data.audioTracks : this.hls?.audioTracks) || []);
+        this.subs._applyHlsAudioSelection();
+      });
+      this.hls.on(window.Hls.Events.AUDIO_TRACK_LOADED, () => {
         this.subs._applyHlsAudioSelection();
       });
       let netRetries = 0;

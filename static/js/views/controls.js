@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v142';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v142';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v142';
-import { getProvider } from '../providers.js?v=20261107_v142';
-import { expectedPosition } from '../sync.js?v=20261107_v142';
-import { thumbFor } from './lobby.js?v=20261107_v142';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v142';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v142';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v142';
-import { avatar } from '../profile.js?v=20261107_v142';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261108_v143';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261108_v143';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261108_v143';
+import { getProvider } from '../providers.js?v=20261108_v143';
+import { expectedPosition } from '../sync.js?v=20261108_v143';
+import { thumbFor } from './lobby.js?v=20261108_v143';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261108_v143';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261108_v143';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261108_v143';
+import { avatar } from '../profile.js?v=20261108_v143';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -534,7 +534,7 @@ export function buildControls(frame, ctx) {
   });
   const getActiveIntro = () => {
     const m = state.mesh?.media;
-    if (!m || m.mediaType !== 'tv') return null;
+    if (!m || (m.mediaType !== 'tv' && !host.adapter?.subs?.intro && !m?.intro)) return null;
     const raw = host.adapter?.subs?.intro || m?.intro || null;
     if (!raw || !(Number(raw.end) > Number(raw.start))) return null;
     if (Number(raw.start) > 240 || (Number(raw.end) - Number(raw.start)) > 110) return null;
@@ -1848,9 +1848,10 @@ export function buildControls(frame, ctx) {
     const curSubId = host.adapter?.getSelectedSubtitleId?.() || 'off';
     const curSubObj = subTracks.find((t) => t.id === curSubId);
     const rawAudioTracks = host.adapter?.getAudioTracks?.() || m.audioTracks || [];
+    const isAnimeMedia = m.provider === 'anime' || m.origLang === 'ja' || m.type === 'anime';
     const audioTracks = rawAudioTracks.length
       ? rawAudioTracks
-      : (m.isMusic || m.isLive
+      : (m.isMusic || m.isLive || !isAnimeMedia
           ? [{ id: 'orig', label: '🎬 Orijinal Ses (HD)' }]
           : [
               { id: 'orig', label: '🎬 Orijinal Ses' },
@@ -2885,7 +2886,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261107_v142',
+            v: '20261108_v143',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
@@ -2964,8 +2965,15 @@ export function buildControls(frame, ctx) {
       const sId = availSubs.length ? rawSId : 'off';
       const aId = host.adapter?.getSelectedAudioId?.() || 'orig';
       const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
+      let subSig = 'Altyazı & Ses';
+      if (aId === 'tr-dub' || String(aId || '').startsWith('tr-dub')) {
+        subSig = (sId && sId !== 'off') ? `🇹🇷 TR Dublaj · ${sId.toUpperCase().slice(0, 2)} Alt` : '🇹🇷 TR Dublaj';
+      } else if (aId === 'orig' || String(aId || '').startsWith('orig')) {
+        subSig = (sId && sId !== 'off') ? `🎬 Orijinal · ${sId.toUpperCase().slice(0, 2)} Alt` : '🎬 Orijinal Ses';
+      } else {
       const dubTag = aId === 'tr-dub' ? 'TR Dublaj' : aId === 'tr-ai-dub' ? '🤖 AI Ses' : aId === 'en-dub' ? 'EN Dublaj' : aId === 'en-ai-dub' ? '🤖 EN AI' : 'Orijinal';
       const subSig = `${subTag} · ${dubTag}`;
+      }
       if (subPillBtn.dataset.sig !== subSig) {
         subPillBtn.dataset.sig = subSig;
         subPillBtn.replaceChildren(ico('subtitles'), subSig);
