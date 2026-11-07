@@ -5640,3 +5640,390 @@ html.is-android-pip .rave-subtitle-cue {
     letter-spacing: -0.02em !important;
   }
 }
+
+
+/* ============================================================================
+   v138 — Portrait & Landscape (Yan Ekran) Button Geometry, Hit-Target & Cinema Fix
+   ============================================================================ */
+.break-lbl-short,
+.d-join-short {
+  display: none;
+}
+
+.panel-chat {
+  container-type: inline-size;
+}
+
+.discord-stage-btn:not(.hidden) {
+  min-height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  box-sizing: border-box !important;
+}
+
+.discord-join-btn:not(.hidden) {
+  min-height: 28px !important;
+  padding: 0 10px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  box-sizing: border-box !important;
+}
+
+/* Fix emoji reaction strip overlap & 12px-18px crush across all narrow & landscape panels */
+.reaction-emoji-grid {
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  width: 100% !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none !important;
+}
+.reaction-emoji-grid::-webkit-scrollbar {
+  display: none !important;
+}
+.react-emoji-btn {
+  flex: 1 0 28px !important;
+  min-width: 28px !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 0 !important;
+}
+#btn-chat-break:not(.hidden) {
+  flex: 0 0 auto !important;
+  height: 28px !important;
+  min-height: 28px !important;
+  padding: 0 9px !important;
+  white-space: nowrap !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+@container (max-width: 345px) {
+  .discord-call-title .d-title-txt {
+    display: none !important;
+  }
+  #btn-chat-break .break-lbl-full {
+    display: none !important;
+  }
+  #btn-chat-break .break-lbl-short {
+    display: inline !important;
+  }
+  #btn-chat-break:not(.hidden) {
+    padding: 0 7px !important;
+    font-size: 0.68rem !important;
+    height: 26px !important;
+    min-height: 26px !important;
+  }
+  .react-emoji-btn {
+    flex: 1 0 25px !important;
+    min-width: 25px !important;
+    height: 26px !important;
+    min-height: 26px !important;
+    font-size: 0.86rem !important;
+  }
+  .discord-call-head {
+    flex-wrap: nowrap !important;
+    gap: 4px !important;
+  }
+  .discord-call-head-actions {
+    flex-wrap: nowrap !important;
+    gap: 3px !important;
+    margin-left: auto !important;
+  }
+  .discord-stage-btn:not(.hidden) {
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 0 !important;
+  }
+  .discord-stage-btn .d-btn-lbl {
+    display: none !important;
+  }
+  .discord-stage-btn .d-btn-ico {
+    margin-right: 0 !important;
+  }
+  .discord-join-btn:not(.hidden) {
+    padding: 0 8px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    font-size: 0.68rem !important;
+    white-space: nowrap !important;
+  }
+  .discord-join-btn .d-join-full {
+    display: none !important;
+  }
+  .discord-join-btn .d-join-short {
+    display: inline !important;
+  }
+}
+
+@container (max-width: 265px) {
+  #discord-call-badge {
+    display: none !important;
+  }
+}
+
+@container (max-width: 295px) {
+  .chatbar .chat-input {
+    min-height: 34px !important;
+    padding: 2px 4px 2px 8px !important;
+    gap: 3px !important;
+  }
+  .chatbar .chat-input #btn-chat-gif {
+    display: none !important;
+  }
+  .chatbar .chat-input .chat-tools-toggle,
+  .chatbar .chat-input .ctl-action {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+    flex: 0 0 28px !important;
+  }
+}
+
+/* Fix #ctl-embed-hud-btn text spill & prevent blocking #ctl-next-ep-top when HUD is visible */
+.embed-touch-hud-btn:not(.hidden) {
+  width: auto !important;
+  min-width: 32px !important;
+  height: 30px !important;
+  padding: 0 10px !important;
+  border-radius: 999px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 5px !important;
+  font-size: 0.72rem !important;
+  white-space: nowrap !important;
+}
+@media (max-width: 720px) {
+  .embed-touch-hud-btn:not(.hidden) {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 0 !important;
+    border-radius: 50% !important;
+  }
+  .embed-touch-hud-btn .embed-hud-lbl {
+    display: none !important;
+  }
+}
+.video-frame:has(.controls.show) .embed-touch-hud-btn,
+.video-frame:has(.controls.ui-active) .embed-touch-hud-btn {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* Top HUD interactive pills minimum 26px touch height */
+.video-frame .ctl-top #ctl-sub-pill:not(.hidden),
+.video-frame .ctl-top #ctl-prev-ep-top:not(.hidden),
+.video-frame .ctl-top #ctl-ep-btn:not(.hidden),
+.video-frame .ctl-top #ctl-next-ep-top:not(.hidden),
+.video-frame .ctl-top #ctl-orig-btn:not(.hidden) {
+  min-height: 26px !important;
+  height: 26px !important;
+  min-width: 28px !important;
+  padding: 0 8px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  white-space: nowrap !important;
+  box-sizing: border-box !important;
+}
+
+/* Container-query responsive player controls (covers 320-430px portrait & 568-844px split-landscape) */
+.video-frame .controls {
+  container-type: inline-size;
+  width: 100% !important;
+}
+@container (max-width: 470px) {
+  .ctl-top {
+    padding: 6px 8px !important;
+    gap: 4px !important;
+  }
+  .ctl-top-left {
+    flex: 1 1 0% !important;
+    min-width: 0 !important;
+    overflow: hidden !important;
+    gap: 6px !important;
+  }
+  .ctl-top-right {
+    flex: 0 0 auto !important;
+    gap: 4px !important;
+  }
+  .video-frame .ctl-top #ctl-prev-ep-top:not(.hidden),
+  .video-frame .ctl-top #ctl-quality-badge:not(.hidden),
+  .video-frame .ctl-top #ctl-break-btn:not(.hidden),
+  #ctl-prev-ep-top,
+  #ctl-quality-badge,
+  #ctl-break-btn {
+    display: none !important;
+  }
+}
+@container (max-width: 375px) {
+  .ctl-top {
+    padding: 5px 6px !important;
+    gap: 3px !important;
+  }
+  .video-frame .ctl-top #ctl-sub-pill:not(.hidden),
+  #ctl-sub-pill {
+    display: none !important;
+  }
+  .video-frame .ctl-top #ctl-ep-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-next-ep-top:not(.hidden) {
+    padding: 0 6px !important;
+    font-size: 0.66rem !important;
+  }
+}
+
+@container (max-width: 520px) {
+  .ctl-bottom {
+    padding: 5px 7px 6px !important;
+    gap: 4px !important;
+  }
+  .ctl-bar-row {
+    gap: 3px !important;
+    padding: 0 2px !important;
+  }
+  .ctl-cluster-left,
+  .ctl-cluster-right {
+    gap: 3px !important;
+  }
+  #ctl-speed-btn,
+  #ctl-back10,
+  #ctl-fwd10,
+  #ctl-snap,
+  #ctl-sub-btn .ctl-btn-lbl {
+    display: none !important;
+  }
+  #ctl-play {
+    width: 30px !important;
+    height: 30px !important;
+    min-width: 30px !important;
+    min-height: 30px !important;
+    flex: 0 0 30px !important;
+  }
+  .ctl-action,
+  .ctl-action.ctl-labeled-pill,
+  #ctl-sub-btn {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+    flex: 0 0 28px !important;
+    padding: 0 !important;
+  }
+  .ctl-bar-row .ctl-time {
+    font-size: 0.63rem !important;
+    padding: 3px 5px !important;
+    white-space: nowrap !important;
+    letter-spacing: -0.01em !important;
+  }
+}
+
+@container (max-width: 385px) {
+  .ctl-bottom {
+    padding: 4px 5px 5px !important;
+  }
+  #ctl-theater {
+    display: none !important;
+  }
+  .ctl-action,
+  .ctl-action.ctl-labeled-pill,
+  #ctl-sub-btn {
+    width: 27px !important;
+    height: 27px !important;
+    min-width: 27px !important;
+    min-height: 27px !important;
+    flex: 0 0 27px !important;
+  }
+  .ctl-bar-row .ctl-time {
+    font-size: 0.59rem !important;
+    padding: 2px 4px !important;
+  }
+}
+
+/* Landscape Cinema / Chat-Hide Toggle & Compact Yan Ekran Header */
+@media (max-width: 960px) and (orientation: portrait) {
+  #mesh-root > .navbar .nav-icon.room-nav-pill#nav-toggle-chat,
+  #mesh-root > .navbar #nav-toggle-chat {
+    display: none !important;
+  }
+}
+
+@media (min-width: 961px), (orientation: landscape) {
+  #mesh-root > .navbar .nav-icon.room-nav-pill#nav-toggle-chat:not(.hidden),
+  #mesh-root > .navbar #nav-toggle-chat:not(.hidden) {
+    display: inline-flex !important;
+  }
+}
+
+@media (max-width: 960px) and (orientation: landscape), (orientation: landscape) and (max-height: 560px) {
+  body:not(.vortex-fs):not(.mesh-minimized) #mesh-root .video-chat.no-chat .panel-chat,
+  body.theater-mode:not(.vortex-fs):not(.mesh-minimized) #mesh-root .panel-chat {
+    display: none !important;
+  }
+  body:not(.vortex-fs):not(.mesh-minimized) #mesh-root .video-chat.no-chat .panel-video,
+  body.theater-mode:not(.vortex-fs):not(.mesh-minimized) #mesh-root .panel-video {
+    flex: 1 1 100% !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
+  #ctl-skip-intro:not(.hidden) {
+    bottom: 60px !important;
+    right: 10px !important;
+    padding: 5px 11px !important;
+    font-size: 0.74rem !important;
+    min-height: 28px !important;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  #mesh-root > .navbar {
+    height: calc(40px + var(--top-safe-offset, 0px)) !important;
+    min-height: calc(40px + var(--top-safe-offset, 0px)) !important;
+    max-height: calc(40px + var(--top-safe-offset, 0px)) !important;
+    gap: 4px !important;
+  }
+  #mesh-root > .navbar .nav-icon.room-nav-pill {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+    border-radius: 8px !important;
+  }
+  #mesh-root > .navbar .room-brand-capsule {
+    min-height: 28px !important;
+    padding: 2px 7px !important;
+  }
+  body:not(.mesh-minimized) #mesh-root:not(.hidden) > .mesh {
+    height: calc(var(--app-height, 100dvh) - 40px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    max-height: calc(var(--app-height, 100dvh) - 40px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+  }
+  .mesh-layout > .panel-side {
+    top: calc(40px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    height: calc(var(--app-height, 100dvh) - 40px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    max-height: calc(var(--app-height, 100dvh) - 40px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+  }
+  body > .ctl-menu.is-body-portal,
+  .video-frame .ctl-menu {
+    max-height: calc(var(--app-height, 100dvh) - 16px) !important;
+    overflow-y: auto !important;
+  }
+  #chat-tools-popover:not(.hidden),
+  .gif-panel:not(.hidden) {
+    max-height: calc(var(--app-height, 100dvh) - 88px) !important;
+    overflow-y: auto !important;
+  }
+}

@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v137';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v137';
-import { avatar } from '../profile.js?v=20261107_v137';
-import { api, qs } from '../api.js?v=20261107_v137';
-import { resolveMusicItem } from './selection-kinds.js?v=20261107_v137';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v137';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v138';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v138';
+import { avatar } from '../profile.js?v=20261107_v138';
+import { api, qs } from '../api.js?v=20261107_v138';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v138';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v138';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -229,7 +229,7 @@ export function buildChat(ctx) {
   const micBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Mikrofon', 'data-tip': 'Mikrofon', id: 'btn-mic', onclick: () => toggleMic() }, h('span', { html: icons.micOff, style: { display: 'flex' } }));
   const camBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Kamera', 'data-tip': 'Kamera Aç/Kapat', id: 'btn-cam', onclick: () => toggleCam() }, h('span', { html: icons.cameraOff, style: { display: 'flex' } }));
   const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
-  const gifBtn = h('button', { type: 'button', class: 'ctl-action', 'aria-label': 'GIF', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
+  const gifBtn = h('button', { type: 'button', class: 'ctl-action', id: 'btn-chat-gif', 'aria-label': 'GIF', title: 'GIF Ara ve Gönder', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
   const sendBtn = h('button', {
     type: 'button',
     class: 'ctl-action',
@@ -310,7 +310,14 @@ export function buildChat(ctx) {
       }
       actions.requestBreak?.();
     },
-  }, '☕ Mola Zamanı');
+  }, h('span', { class: 'break-lbl-full' }, '☕ Mola Zamanı'), h('span', { class: 'break-lbl-short' }, '☕ Mola'));
+  const gifToolBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-tool-gif',
+    title: 'Sohbete GIF Ara ve Gönder',
+    onclick: (e) => { e.stopPropagation(); toggleGif(); },
+  }, h('span', { html: icons.gif, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'GIF');
   const reactions = h('div', { class: 'reaction-bar' },
     h('div', { class: 'reaction-emoji-grid' },
       ...REACTIONS.map((e) => h('button', {
@@ -328,7 +335,7 @@ export function buildChat(ctx) {
 
   toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
     h('div', { class: 'chat-tools-sec-title' }, '⚡ Oda Araçları & Hızlı Paylaşım'),
-    h('div', { class: 'reaction-tools-row' }, snapSceneBtn, stampTimeBtn, pollBtn, clearChatBtn),
+    h('div', { class: 'reaction-tools-row' }, snapSceneBtn, stampTimeBtn, gifToolBtn, pollBtn, clearChatBtn),
     h('div', { class: 'chat-tools-sec-title' }, '🔊 Ses Efektleri (Soundboard)'),
     h('div', { class: 'reaction-tools-row' },
       ...SOUNDBOARD.map(([k, lbl]) => h('button', {
@@ -358,26 +365,30 @@ export function buildChat(ctx) {
     type: 'button',
     class: 'discord-join-btn',
     id: 'btn-discord-call',
+    'aria-label': 'Sesliye Katıl',
     onclick: () => toggleCallJoin(),
-  }, h('span', { html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), 'Sesliye Katıl');
+  }, h('span', { class: 'd-btn-ico', html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), h('span', { class: 'd-join-full' }, 'Sesliye Katıl'), h('span', { class: 'd-join-short' }, 'Katıl'));
   const dHeadMicBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn head-mic-btn',
     id: 'btn-discord-head-mic',
+    'aria-label': 'Mikrofon',
     title: 'Oda İçi Mikrofonu Aç / Kapat',
     onclick: () => toggleMic(),
-  }, h('span', { html: icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Mikrofon');
+  }, h('span', { class: 'd-btn-ico', html: icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Mikrofon'));
   const dHeadCamBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn head-cam-btn',
     id: 'btn-discord-head-cam',
+    'aria-label': 'Kamera',
     title: 'Kamerayı Aç / Kapat (Yuvarlak Görüntülü Sohbet Baloncuğu)',
     onclick: () => toggleCam(),
-  }, h('span', { html: icons.camera, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
+  }, h('span', { class: 'd-btn-ico', html: icons.camera, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Kamera'));
   const dShareQuickBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn share-toggle-btn',
     id: 'btn-discord-share-toggle',
+    'aria-label': 'Paylaş',
     title: 'Hızlı Davet Linki, WhatsApp, QR & Oda Gizliliği',
     onclick: () => {
       onboarding = true;
@@ -385,28 +396,31 @@ export function buildChat(ctx) {
       const hiddenNow = quickAccessZone.classList.toggle('hidden');
       dShareQuickBtn.classList.toggle('on', !hiddenNow);
     },
-  }, h('span', { html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Paylaş');
+  }, h('span', { class: 'd-btn-ico', html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Paylaş'));
   const dSwapBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-swap',
+    'aria-label': 'Yer Değiştir',
     title: 'Kamera Ekranlarının Yerini Değiştir',
     onclick: () => { ctx.voice?.swapCameraPositions?.(); syncVoiceUi(); },
-  }, h('span', { html: icons.swap, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Yer Değiştir');
+  }, h('span', { class: 'd-btn-ico', html: icons.swap, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Yer Değiştir'));
   const dStripBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-strip',
+    'aria-label': 'Şerit',
     title: 'Kameraları Kanal Şeridine veya Video Köşelerine Al',
     onclick: () => { ctx.voice?.toggleStripMode?.(); syncVoiceUi(); },
-  }, h('span', { html: icons.theater, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Şerit');
+  }, h('span', { class: 'd-btn-ico', html: icons.theater, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Şerit'));
   const dStageBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-stage',
+    'aria-label': 'Sahne',
     title: 'Kamera ve Ekran Paylaşımlarını Sahne / Izgara Görünümünde Aç',
     onclick: () => { ctx.voice?.toggleStageGrid?.(); syncVoiceUi(); },
-  }, h('span', { html: icons.layoutGrid, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), 'Sahne');
+  }, h('span', { class: 'd-btn-ico', html: icons.layoutGrid, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Sahne'));
   const dMicPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-mic', onclick: () => toggleMic() }, '🎙️ Mikrofon');
   const dDeafPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-deafen', onclick: () => toggleDeafen() }, '🎧 Ses Açık');
   const dCamPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-cam', onclick: () => toggleCam() }, '📷 Kamera');
@@ -426,7 +440,7 @@ export function buildChat(ctx) {
       h('div', { class: 'discord-call-title' },
         h('span', { class: 'discord-live-dot' }),
         h('span', { html: icons.audioWave, style: { display: 'inline-flex', width: '14px', height: '14px', color: '#27DCC8' } }),
-        h('span', {}, 'Ses Kanalı'),
+        h('span', { class: 'd-title-txt' }, 'Ses Kanalı'),
         dCallStatusBadge),
       h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dShareQuickBtn, dHeadMicBtn, dHeadCamBtn, dJoinBtn)),
     discordCallPeers,
@@ -649,18 +663,23 @@ export function buildChat(ctx) {
 
     discordCallBar.classList.toggle('in-call', inCall);
     dJoinBtn.classList.toggle('active', inCall);
-    dJoinBtn.replaceChildren(h('span', { html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), inCall ? 'Ayrıl' : 'Sesliye Katıl');
+    dJoinBtn.setAttribute('aria-label', inCall ? 'Ayrıl' : 'Sesliye Katıl');
+    dJoinBtn.replaceChildren(
+      h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
+      inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
+      inCall ? null : h('span', { class: 'd-join-short' }, 'Katıl'),
+    );
     dStageBtn.classList.toggle('on', stageOn);
     dStripBtn.classList.toggle('on', Boolean(v?.stripMode));
     dMicPill.classList.toggle('on', micOn);
     dMicPill.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon' : 'Sessiz');
     dHeadMicBtn.classList.toggle('on', micOn);
-    dHeadMicBtn.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon Açık' : 'Mikrofon');
+    dHeadMicBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, micOn ? 'Mikrofon Açık' : 'Mikrofon'));
     dDeafPill.classList.toggle('on', deafened);
     dDeafPill.replaceChildren(h('span', { html: deafened ? icons.headphonesOff : icons.headphones, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), deafened ? 'Sağır' : 'Kulaklık');
     dCamPill.classList.toggle('on', camOn);
     dHeadCamBtn.classList.toggle('on', camOn);
-    dHeadCamBtn.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), camOn ? 'Kamera Açık' : 'Kamera');
+    dHeadCamBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, camOn ? 'Kamera Açık' : 'Kamera'));
     dCamPill.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
     dScreenPill.classList.toggle('on', screenOn);
     dScreenPill.replaceChildren(h('span', { html: icons.screenShare, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), screenOn ? 'Durdur' : 'Ekran');

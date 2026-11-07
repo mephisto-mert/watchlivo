@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v137';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v137';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v137';
-import { getProvider } from '../providers.js?v=20261107_v137';
-import { expectedPosition } from '../sync.js?v=20261107_v137';
-import { thumbFor } from './lobby.js?v=20261107_v137';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v137';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v137';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v137';
-import { avatar } from '../profile.js?v=20261107_v137';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v138';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v138';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v138';
+import { getProvider } from '../providers.js?v=20261107_v138';
+import { expectedPosition } from '../sync.js?v=20261107_v138';
+import { thumbFor } from './lobby.js?v=20261107_v138';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v138';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v138';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v138';
+import { avatar } from '../profile.js?v=20261107_v138';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1166,8 +1166,10 @@ export function buildControls(frame, ctx) {
     type: 'button',
     class: 'btn embed-touch-hud-btn hidden',
     id: 'ctl-embed-hud-btn',
+    'aria-label': 'Kontroller',
+    title: 'Oynatıcı Kontrolleri ve Ayarlar',
     ...tapProps(() => toggleMenu('list')),
-  }, ico('settings'), 'Kontroller');
+  }, ico('settings'), h('span', { class: 'embed-hud-lbl' }, 'Kontroller'));
   const barRow = h('div', { class: 'ctl-bar-row' },
     h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: `vol-wrap ${isIosFixedVol ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange), time),
     h('div', { class: 'ctl-spacer' }),
@@ -2949,7 +2951,8 @@ export function buildControls(frame, ctx) {
     timeline.classList.toggle('locked', !leader || !canSeek);
     mid.style.pointerEvents = embedOnly ? 'none' : 'auto';
     controls.classList.toggle('passthrough-mid', !!embedOnly);
-    embedTouchHudBtn.classList.toggle('hidden', !(embedOnly && has));
+    const hudVisibleNow = controls.classList.contains('show') || controls.classList.contains('ui-active');
+    embedTouchHudBtn.classList.toggle('hidden', !(embedOnly && has && !hudVisibleNow));
     const status = `${m.meshStateStatus}|${m.lastActionBy || ''}`;
     if (status !== lastStatus) {
       lastStatus = status;

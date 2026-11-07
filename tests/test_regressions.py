@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261107_v137 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v138 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261107_v137", index_html)
+        self.assertIn("20261107_v138", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261107_v137", sw_js)
+        self.assertIn("v20261107_v138", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261107_v137', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v138', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261107_v137', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v138', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261107_v137')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v138')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3021,6 +3021,34 @@ console.log('HA_UNIT_TESTS_PASSED');
             self.assertEqual(m_seg.status_code, 200)
             self.assertNotIn("ext=.m3u8", m_seg.text)
             self.assertEqual(m_seg.text.count("/api/rave/stream-proxy"), 3)
+
+    def test_v138_portrait_and_landscape_button_matrix_regressions(self):
+        from pathlib import Path
+        root = Path(__file__).resolve().parent.parent
+
+        mesh_layout_js = (root / "static" / "js" / "views" / "mesh-layout.js").read_text(encoding="utf-8")
+        self.assertIn("roomActionBtn('panelRightClose', 'Sinema'", mesh_layout_js)
+        self.assertIn("id: 'nav-toggle-chat'", mesh_layout_js)
+
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        self.assertIn("class: 'embed-hud-lbl'", ctl_js)
+        self.assertIn("embedTouchHudBtn.classList.toggle('hidden', !(embedOnly && has && !hudVisibleNow))", ctl_js)
+
+        chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        self.assertIn("id: 'btn-chat-gif'", chat_js)
+        self.assertIn("id: 'btn-chat-tool-gif'", chat_js)
+        self.assertIn("class: 'break-lbl-short'", chat_js)
+        self.assertIn("class: 'd-btn-lbl'", chat_js)
+
+        mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
+        self.assertIn(".video-frame:has(.controls.show) .embed-touch-hud-btn", mesh_css)
+        self.assertIn("#mesh-root > .navbar .nav-icon.room-nav-pill#nav-toggle-chat:not(.hidden)", mesh_css)
+        self.assertIn("body.theater-mode:not(.vortex-fs):not(.mesh-minimized) #mesh-root .panel-chat", mesh_css)
+        self.assertIn("@container (max-width: 520px)", mesh_css)
+
+        vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
+        self.assertIn("@media (max-width: 960px), ((orientation: landscape) and (max-height: 560px))", vortex_css)
+        self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr)) !important;", vortex_css)
 
 
 if __name__ == '__main__':
