@@ -3281,7 +3281,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
 def _clean_query_title(s: str) -> str:
     if not s:
         return ""
-    t = html_mod.unescape(str(s)).split(" — ")[0].strip()
+    t = re.sub(r"[\u200b-\u200f\u202a-\u202e\ufeff]", "", html_mod.unescape(str(s))).split(" — ")[0].strip()
     t = re.sub(r"\s*\(\s*(?:19|20)\d{2}\s*\)\s*$", "", t)
     t = t.replace(".", "").strip()
     return t.strip()
@@ -3381,7 +3381,7 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "") -
     u = stream_url.lower()
     if u.startswith("/api/rave/") or "youtube.com/" in u or "youtu.be/" in u:
         return True
-    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z]/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.", "goldenkite.top", "cleartree.top", "workers.dev", "lightspeed.st", "archive.org")):
+    if re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z0-9]+/", u) or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.", "goldenkite.top", "cleartree.top", "workers.dev", "lightspeed.st", "archive.org")):
         return True
     parsed = urllib.parse.urlparse(stream_url)
     path = parsed.path
@@ -3879,6 +3879,10 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
             q_cands.append(qc.replace("&", " "))
         if re.search(r"\b(?:II|III|IV|V|VI)\b", qc):
             q_cands.append(re.sub(r"\bII\b", "2", re.sub(r"\bIII\b", "3", re.sub(r"\bIV\b", "4", qc))))
+        qc_chap = re.sub(r"[:\-\s]*\b(?:chapter|b[oö]l[uü]m|part|k[ıi]s[ıi]m)\s+(\d+)\b", r" \1", qc, flags=re.I)
+        qc_chap = re.sub(r"\s+", " ", qc_chap).strip()
+        if qc_chap and qc_chap not in q_cands:
+            q_cands.append(qc_chap)
     valid_titles = list(dict.fromkeys(q_cands + [disp_title, title]))
 
     # 1. Instant lookup in _MAIN_SITES_VAULT (FullHDFilmizlesene.now + HDFilmCehennemi.nl + Dizibox.live)
@@ -3986,10 +3990,22 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
             if vst_cand in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr") and ("cdnimg" in vu_cand.lower() or ".shop/" in vu_cand.lower()):
                 try:
                     v_req = urllib.request.Request(vu_cand, headers={"User-Agent": UA137, "Referer": "https://rapidvid.org/", "Origin": "https://rapidvid.org"})
-                    with _public_open(v_req, timeout=1.8) as vr_chk:
-                        v_head = vr_chk.read(2048).decode("utf-8", errors="ignore")
+                    with _public_open(v_req, timeout=2.8) as vr_chk:
+                        v_head = vr_chk.read(16384).decode("utf-8", errors="ignore")
                     if "#EXTM3U" in v_head:
                         verified_vault_res.append((vu_cand, vst_cand))
+                        _STREAM_RES_HINT[vu_cand] = 1920
+                        v_langs = []
+                        for _vln in v_head.splitlines():
+                            if _vln.startswith("#EXT-X-MEDIA") and "TYPE=AUDIO" in _vln:
+                                _lm = re.search(r'LANGUAGE="([^"]*)"', _vln)
+                                _nm = re.search(r'NAME="([^"]*)"', _vln)
+                                _cd = _norm_audio_lang(_lm.group(1) if _lm else "", _nm.group(1) if _nm else "")
+                                if _cd and _cd not in v_langs:
+                                    v_langs.append(_cd)
+                        if v_langs:
+                            _AUDIO_LANG_HINT[vu_cand] = v_langs
+                            _AUDIO_PROBE_CACHE[vu_cand] = (time.time(), v_langs)
                 except Exception:
                     continue
             else:
@@ -4015,7 +4031,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 s_u = f"https://www.fullhdfilmizlesene.now/arama/{urllib.parse.quote(qc)}"
                 shtml = urllib.request.urlopen(urllib.request.Request(s_u, headers={"User-Agent": UA137, "Referer": "https://www.fullhdfilmizlesene.now/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 for card in re.findall(r'<li class="film"[^>]*>(.*?)</li>', shtml, re.S):
-                    hm = re.search(r'<a[^>]+class="tt"[^>]+href=["\'](https://www\.fullhdfilmizlesene\.now/film/[^"\']+)["\']', card)
+                    hm = re.search(r'<a[^>]+class="tt"[^>]+href=["\'](https://[^"\']*fullhdfilmizlesene\.[^/"\']+/film/[^"\']+)["\']', card)
                     tm = re.search(r'<span class="film-title">([^<]+)</span>', card)
                     om = re.search(r'<span class="kt">([^<]+)</span>', card)
                     ym = re.search(r'<span class="film-yil">(\d{4})</span>', card)
@@ -4324,16 +4340,18 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 if item_fb not in fb_tau:
                     fb_tau.append(item_fb)
         fb_by_id = {str(p[0]): (str(p[2]) if len(p) >= 3 else "") for p in fb_tau if isinstance(p, (list, tuple)) and len(p) >= 2}
-        has_fb_dub = any(
-            isinstance(p, (list, tuple)) and len(p) >= 2 and (("dub" in str(p[1]).lower()) if str(p[0]).startswith("https://") else bool(p[1]))
+        has_fb_mp4 = any(
+            isinstance(p, (list, tuple)) and ((len(p) >= 3 and str(p[2]).startswith("https://")) or str(p[0]).startswith("https://"))
             for p in fb_tau
         )
         vids = None
-        if not (IS_VERCEL and fb_tau and has_fb_dub):
-            for s_try, e_try in cand_se[:3]:
+        if not (IS_VERCEL and has_fb_mp4):
+            ac_se_slice = cand_se[:1] if IS_VERCEL else cand_se[:3]
+            ac_to = 1.4 if IS_VERCEL else 2.4
+            for s_try, e_try in ac_se_slice:
                 try:
                     ep_url = f"https://animecix.tv/secure/episode-videos?titleId={ac_id}&episode={e_try}&season={s_try}"
-                    v_try = _raw_get_json(ep_url, headers=hdrs, timeout=2.4)
+                    v_try = _raw_get_json(ep_url, headers=hdrs, timeout=ac_to)
                     if isinstance(v_try, list) and v_try:
                         vids = v_try
                         break
@@ -4341,7 +4359,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                     continue
             if not vids and (mtype == "movie" or (s == 1 and e == 1)):
                 try:
-                    v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=2.4) or {}
+                    v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=ac_to) or {}
                     pag = v_data.get("pagination") if isinstance(v_data, dict) else None
                     raw_vids = (pag.get("data") if isinstance(pag, dict) else None) or []
                     vids = [
@@ -4389,9 +4407,11 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
             try:
                 best_u = (fb_u if (IS_VERCEL and fb_u.startswith("https://")) else "") or _TAU_URL_CACHE.get(tau_id, "")
                 if not best_u and not tau_id.startswith("https://"):
-                    for _try_tau in range(2):
+                    tau_tries = 1 if IS_VERCEL else 2
+                    tau_to = 1.6 if IS_VERCEL else 3.6
+                    for _try_tau in range(tau_tries):
                         try:
-                            t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=3.6) or {}
+                            t_info = _raw_get_json(f"https://tau-video.xyz/api/video/{tau_id}", headers={"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, timeout=tau_to) or {}
                             u_list = [x for x in (t_info.get("urls") or []) if isinstance(x, dict) and str(x.get("url") or "").startswith("https://")]
                             u_list.sort(key=lambda x: 0 if "1080" in str(x.get("label") or "") else (1 if "720" in str(x.get("label") or "") else 2))
                             if u_list:
@@ -4512,7 +4532,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1, "has_splits": False}
     s_split, e_split = ep_num["s_split"], ep_num["e_split"]
     s_tmdb, e_tmdb = ep_num["s_tmdb"], ep_num["e_tmdb"]
-    ckey = f"v37:{mtype}:{tid}:{s_split}:{e_split}"
+    ckey = f"v38:{mtype}:{tid}:{s_split}:{e_split}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -6204,7 +6224,7 @@ async def resolve_catalog(request: Request):
         episode = min(5000, max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1)))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v26|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v27|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     if not force_refresh:
@@ -7650,11 +7670,11 @@ async def rave_stream_manifest(request: Request):
                     mt_guess = explicit_mtype
                     mt_tries = (explicit_mtype,)
                 else:
-                    mt_guess = "tv" if (f"v37:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v36:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v35:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v37:movie:{tid}:1:1" in _STREAM_CACHE or f"v36:movie:{tid}:1:1" in _STREAM_CACHE or f"v35:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                    mt_guess = "tv" if (f"v38:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v37:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v36:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v38:movie:{tid}:1:1" in _STREAM_CACHE or f"v37:movie:{tid}:1:1" in _STREAM_CACHE or f"v36:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                     mt_tries = (mt_guess, "movie" if mt_guess == "tv" else "tv")
                 cands = []
                 for mt_try in mt_tries:
-                    for ver_p in ("v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
