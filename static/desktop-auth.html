@@ -90,26 +90,34 @@
       margin-right: 6px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+    button:focus-visible, input:focus-visible { outline: 2px solid var(--neon) !important; outline-offset: 2px; }
   </style>
 </head>
 <body>
-  <div class="auth-card">
+  <main class="auth-card">
     <div class="logo-badge">
-      <img src="/static/watchlivo-logo.svg" alt="Watchlivo" />
+      <img src="/static/watchlivo-logo.svg" alt="Watchlivo" width="38" height="38" />
       <span>Watch<em>livo</em></span>
     </div>
     <h1>Masaüstü Uygulaması Girişi</h1>
-    <p class="desc">Watchlivo hesap şifrenizi girin ve Google hesabınızı seçerek masaüstü uygulamasına güvenle bağlanın.</p>
+    <p class="desc">Watchlivo hesabınızla doğrudan veya Google hesabınızı seçerek masaüstü uygulamasına güvenle bağlanın.</p>
     <form id="desktop-auth-form" style="display:flex;flex-direction:column;gap:12px;">
-      <input id="desktop-pw" type="password" minlength="6" autocomplete="current-password" placeholder="Hesap şifreniz (en az 6 karakter — zorunlu)" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(15,23,42,0.85);color:#f8fafc;font-size:16px;outline:none;" />
+      <label for="desktop-ident" class="sr-only">E-posta veya @kullanıcıadı</label>
+      <input id="desktop-ident" type="text" autocomplete="username" placeholder="E-posta veya @kullanıcıadı (doğrudan giriş için)" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(15,23,42,0.85);color:#f8fafc;font-size:16px;" />
+      <label for="desktop-pw" class="sr-only">Hesap şifreniz</label>
+      <input id="desktop-pw" type="password" minlength="6" autocomplete="current-password" placeholder="Hesap şifreniz (en az 6 karakter — zorunlu)" style="width:100%;padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,0.14);background:rgba(15,23,42,0.85);color:#f8fafc;font-size:16px;" />
+      <button id="email-login-btn" type="button" class="btn-google" style="background:rgba(0,245,212,0.14);color:#00f5d4;border:1px solid rgba(0,245,212,0.4);">
+        <span>🔑 Watchlivo Hesabıyla Giriş Yap</span>
+      </button>
       <button id="google-btn" type="submit" class="btn-google">
-        <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.3-2 3l3.2 2.5c1.9-1.7 3-4.3 3-7.4 0-.7-.1-1.4-.2-2H12z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.2-2.5c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.9v2.6C4.6 19.8 8 22 12 22z"/><path fill="#FBBC05" d="M6.2 13.8c-.2-.6-.3-1.2-.3-1.8s.1-1.2.3-1.8V7.6H2.9C2.3 8.9 2 10.4 2 12s.3 3.1.9 4.4l3.3-2.6z"/><path fill="#4285F4" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9C17 2.9 14.7 2 12 2 8 2 4.6 4.2 2.9 7.6l3.3 2.6c.8-2.5 3.1-4.3 5.8-4.3z"/></svg>
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.3-2 3l3.2 2.5c1.9-1.7 3-4.3 3-7.4 0-.7-.1-1.4-.2-2H12z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.2-2.5c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.9v2.6C4.6 19.8 8 22 12 22z"/><path fill="#FBBC05" d="M6.2 13.8c-.2-.6-.3-1.2-.3-1.8s.1-1.2.3-1.8V7.6H2.9C2.3 8.9 2 10.4 2 12s.3 3.1.9 4.4l3.3-2.6z"/><path fill="#4285F4" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9C17 2.9 14.7 2 12 2 8 2 4.6 4.2 2.9 7.6l3.3 2.6c.8-2.5 3.1-4.3 5.8-4.3z"/></svg>
         <span>Google ile Giriş Yap</span>
       </button>
     </form>
-    <div id="status" class="status-box"></div>
-  </div>
+    <div id="status" class="status-box" role="status" aria-live="polite"></div>
+  </main>
 
-  <script type="module" src="/static/js/desktop-auth.js?v=20261107_v140"></script>
+  <script type="module" src="/static/js/desktop-auth.js?v=20261107_v141"></script>
 </body>
 </html>

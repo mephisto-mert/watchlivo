@@ -50,7 +50,24 @@ async function sendToDesktop(user, authToken) {
 }
 
 const formEl = document.getElementById('desktop-auth-form');
+const identEl = document.getElementById('desktop-ident');
 const pwEl = document.getElementById('desktop-pw');
+const emailBtn = document.getElementById('email-login-btn');
+
+async function verifySessionToken(token) {
+  try {
+    const r = await fetch('/api/auth/me', {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!r.ok) return null;
+    const d = await r.json().catch(() => null);
+    if (d && d.authenticated === true && d.user) {
+      return { user: d.user, authToken: token || d.authToken };
+    }
+  } catch (_) {}
+  return null;
+}
 
 try {
   const saved = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
@@ -60,15 +77,53 @@ try {
     confirmBtn.className = 'btn-google';
     confirmBtn.style.cssText = 'margin-bottom:12px;background:#00f5d4;color:#041014;font-weight:800;';
     confirmBtn.textContent = `${saved.name} (@${saved.handle || 'uye'}) olarak Masaüstüne Bağlan`;
-    confirmBtn.addEventListener('click', () => {
+    confirmBtn.addEventListener('click', async () => {
       confirmBtn.disabled = true;
-      sendToDesktop(saved, saved.authToken);
+      const verified = await verifySessionToken(saved.authToken);
+      if (!verified) {
+        try { localStorage.removeItem('vortex_profile_v2'); } catch (_) {}
+        confirmBtn.remove();
+        setStatus('Oturumunuz sona ermiş. Lütfen tekrar giriş yapın.', 'err');
+        return;
+      }
+      await sendToDesktop(verified.user, verified.authToken);
     });
     const anchor = formEl || btn;
     anchor?.parentNode?.insertBefore(confirmBtn, anchor);
-    setStatus('Mevcut hesabınızla devam etmek için yukarıdaki onay butonuna tıklayın veya farklı bir Google hesabı seçin.');
+    setStatus('Mevcut hesabınızla devam etmek için yukarıdaki onay butonuna tıklayın veya aşağıdan giriş yapın.');
   }
 } catch (_) {}
+
+emailBtn?.addEventListener('click', async () => {
+  const ident = String(identEl?.value || '').trim();
+  const pw = String(pwEl?.value || '');
+  if (!ident) {
+    setStatus('Lütfen e-posta adresinizi veya @kullanıcıadınızı girin.', 'err');
+    identEl?.focus?.();
+    return;
+  }
+  if (pw.length < 6) {
+    setStatus('Lütfen en az 6 karakterli Watchlivo hesap şifrenizi girin.', 'err');
+    pwEl?.focus?.();
+    return;
+  }
+  emailBtn.disabled = true;
+  setStatus('Hesap doğrulanıyor...', '', true);
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: ident, password: pw }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok || !data.user) throw new Error(data.error || 'Giriş başarısız.');
+    localStorage.setItem('vortex_profile_v2', JSON.stringify({ ...data.user, authToken: data.authToken, isGuest: false, verified: true }));
+    await sendToDesktop(data.user, data.authToken);
+  } catch (err) {
+    emailBtn.disabled = false;
+    setStatus(err.message || 'Giriş yapılamadı.', 'err');
+  }
+});
 
 formEl?.addEventListener('submit', async (ev) => {
   ev.preventDefault();

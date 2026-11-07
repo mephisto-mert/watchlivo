@@ -1,12 +1,12 @@
 // Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
 const _TRUSTED_EMBED_DOMAINS = [
   'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
-  'twitch.tv', 'kick.com', 'tiktok.com', 'google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
-  'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
+  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
+  'rutube.ru', 'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
 ];
 const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid)\.[a-z0-9-]+$/i;
 
-function _isTrustedEmbedUrl(rawUrl) {
+export function isTrustedEmbedUrl(rawUrl) {
   try {
     const u = new URL(String(rawUrl || '').trim());
     if (u.protocol !== 'https:') return false;
@@ -17,6 +17,8 @@ function _isTrustedEmbedUrl(rawUrl) {
     return false;
   }
 }
+
+const _isTrustedEmbedUrl = isTrustedEmbedUrl;
 
 export class EmbedAdapter {
   constructor(container, events) {
@@ -36,31 +38,42 @@ export class EmbedAdapter {
   buildSrc(media, startAt = 0) {
     const host = location.hostname;
     if (media.provider === 'twitch') {
-      const id = media.videoId || '';
+      const id = String(media.videoId || '').trim();
+      if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) return 'about:blank';
       const isVod = /^\d+$/.test(id);
       this.caps.live = !isVod;
       this.caps.seek = isVod;
       return isVod
-        ? `https://player.twitch.tv/?video=v${id}&parent=${host}&autoplay=true`
-        : `https://player.twitch.tv/?channel=${encodeURIComponent(id)}&parent=${host}&autoplay=true&muted=false`;
+        ? `https://player.twitch.tv/?video=v${id}&parent=${encodeURIComponent(host)}&autoplay=true`
+        : `https://player.twitch.tv/?channel=${encodeURIComponent(id)}&parent=${encodeURIComponent(host)}&autoplay=true&muted=false`;
     }
     if (media.provider === 'kick') {
+      const id = String(media.videoId || '').trim();
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return 'about:blank';
       this.caps.live = true;
       this.caps.seek = false;
-      return `https://player.kick.com/${encodeURIComponent(media.videoId || '')}?autoplay=true&muted=false`;
+      return `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true&muted=false`;
     }
     if (media.provider === 'dailymotion') {
+      const id = String(media.videoId || '').trim();
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) return 'about:blank';
       this.caps.seek = false;
-      return `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(media.videoId || '')}&autoplay=1`;
+      return `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(id)}&autoplay=1`;
     }
     if (media.provider === 'tiktok') {
+      const id = String(media.videoId || '').trim();
+      if (!/^\d{5,32}$/.test(id)) return 'about:blank';
       this.caps.seek = false;
-      return `https://www.tiktok.com/player/v1/${encodeURIComponent(media.videoId || '')}?autoplay=1&rel=0`;
+      return `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?autoplay=1&rel=0`;
     }
     if (media.provider === 'drive') {
       this.caps.seek = false;
-      const fid = media.videoId || media.fileId || (String(media.url || '').match(/(?:\/d\/|id=)([A-Za-z0-9_-]{15,})/) || [])[1] || '';
-      return fid ? `https://drive.google.com/file/d/${encodeURIComponent(fid)}/preview` : (media.embedUrl || media.url || '');
+      const fid = String(media.videoId || media.fileId || (String(media.url || '').match(/(?:\/d\/|id=)([A-Za-z0-9_-]{15,})/) || [])[1] || '').trim();
+      if (/^[A-Za-z0-9_-]{10,120}$/.test(fid)) {
+        return `https://drive.google.com/file/d/${encodeURIComponent(fid)}/preview`;
+      }
+      const fallbackDrive = media.embedUrl || media.url || '';
+      return _isTrustedEmbedUrl(fallbackDrive) ? fallbackDrive : 'about:blank';
     }
     let u = media.embedUrl || media.url || '';
     if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {

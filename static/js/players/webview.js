@@ -1,5 +1,23 @@
 // Rave-parity Desktop <webview> adapter: mounts provider page in persist:vortex-drm partition
 // and synchronizes its internal HTML5 <video> element via executeJavaScript.
+const _DRM_WEBVIEW_HOSTS = [
+  'netflix.com', 'disneyplus.com', 'primevideo.com', 'amazon.com', 'max.com', 'hbomax.com',
+  'tv.apple.com', 'mubi.com', 'hulu.com', 'paramountplus.com', 'peacocktv.com', 'plex.tv',
+  'pluto.tv', 'exxen.com', 'blutv.com', 'gain.tv', 'todtv.com.tr', 'tabii.com',
+  'tvplus.com.tr', 'puhutv.com', 'crunchyroll.com', 'tubitv.com',
+];
+
+function _isAllowedWebviewUrl(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl || '').trim());
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase().replace(/\.$/, '');
+    return _DRM_WEBVIEW_HOSTS.some((d) => h === d || h.endsWith('.' + d));
+  } catch (_) {
+    return false;
+  }
+}
+
 export class WebviewAdapter {
   constructor(container, events) {
     this.container = container;
@@ -15,10 +33,9 @@ export class WebviewAdapter {
     clearInterval(this.timer);
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
-    const safeUrl = /^https?:\/\//i.test(String(media?.url || '')) ? media.url : 'about:blank';
+    const safeUrl = _isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : 'about:blank';
     const wv = document.createElement('webview');
     wv.setAttribute('partition', window.vortexDesktop?.partition || 'persist:vortex-drm');
-    wv.setAttribute('allowpopups', '');
     wv.style.cssText = 'width:100%;height:100%;border:0;';
     wv.src = safeUrl;
     this.wv = wv;

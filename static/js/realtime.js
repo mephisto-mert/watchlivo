@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261107_v140';
-import { api } from './api.js?v=20261107_v140';
-import { state } from './store.js?v=20261107_v140';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261107_v140';
+import { clock } from './sync.js?v=20261107_v141';
+import { api } from './api.js?v=20261107_v141';
+import { state } from './store.js?v=20261107_v141';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261107_v141';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -25,7 +25,8 @@ export class MeshConnection {
       this.syncToken = sessionStorage.getItem(`vortex_st_${roomId}`) || '';
       this.clientToken = sessionStorage.getItem(`vortex_ct_${roomId}`) || '';
       const creatorCid = sessionStorage.getItem(`vortex_creator_${roomId}`) || '';
-      this.clientId = creatorCid || sessionStorage.getItem('vortex_cid') || null;
+      const guestSeedCid = (profile?.isGuest && /^guest_[a-z0-9_-]{6,28}$/i.test(String(profile.id || ''))) ? String(profile.id) : null;
+      this.clientId = creatorCid || sessionStorage.getItem('vortex_cid') || guestSeedCid || null;
       this.isCreator = Boolean(creatorCid && this.clientId === creatorCid);
     } catch (e) { /* ignore */ }
     this.seenEventIds = new Set();
@@ -190,7 +191,8 @@ export class MeshConnection {
       pwd: this.password,
       country: COUNTRY,
     });
-    if (this.profile.authToken) q.set('authToken', this.profile.authToken);
+    const wsAuthTok = this.profile.authToken || this.profile.guestToken || state.self?.authToken || state.self?.guestToken || '';
+    if (wsAuthTok) q.set('authToken', wsAuthTok);
     if (this.clientId) q.set('clientId', this.clientId);
     if (this.clientToken) q.set('clientToken', this.clientToken);
     if (this.syncToken) q.set('syncToken', this.syncToken);
@@ -291,7 +293,7 @@ export class MeshConnection {
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this._addBounded(this.seenEventIds, ev.id);
-      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat' || ev.type === 'break_request')) {
+      if (!isInit && (ev.cid !== this.clientId || ev.type === 'chat' || ev.type === 'break_request' || ev.type === 'media_changed')) {
         this.onMessage?.(ev);
       }
     }
@@ -389,6 +391,7 @@ export class MeshConnection {
       try {
         res = await api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
           method: 'POST', timeout: 12000,
+          headers: { 'X-Watchlivo-Transport': 'http-poll' },
           body: reqBody,
           signal: reqAbort.signal,
         });
@@ -647,28 +650,34 @@ export class MeshConnection {
         try { this._emitP2p({ event: { type: 'room_closed', roomId: this.roomId } }); } catch (e) { /* ignore */ }
       }
       try {
-        localStorage.removeItem(`vortex_st_${this.roomId}`);
-        localStorage.removeItem(`vortex_room_${this.roomId}`);
-        localStorage.removeItem(`vortex_creator_flag_${this.roomId}`);
-        sessionStorage.removeItem(`vortex_st_${this.roomId}`);
-        sessionStorage.removeItem(`vortex_room_${this.roomId}`);
-        sessionStorage.removeItem(`vortex_creator_${this.roomId}`);
-      } catch (e) { /* ignore */ }
-      try {
-        if (this.ws && this.ws.readyState === 1) {
-          this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId }));
+        if (shouldCloseRoom) {
+          localStorage.removeItem(`vortex_st_${this.roomId}`);
+          localStorage.removeItem(`vortex_room_${this.roomId}`);
+          localStorage.removeItem(`vortex_creator_flag_${this.roomId}`);
+          sessionStorage.removeItem(`vortex_st_${this.roomId}`);
+          sessionStorage.removeItem(`vortex_room_${this.roomId}`);
+          sessionStorage.removeItem(`vortex_creator_${this.roomId}`);
         }
       } catch (e) { /* ignore */ }
       try {
+        if (this.ws && this.ws.readyState === 1) {
+          this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId, gracefulClose: true }));
+        }
+      } catch (e) { /* ignore */ }
+      try {
+        const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
+        const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
+        if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
         fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
           method: 'POST',
           keepalive: true,
-          headers: { 'Content-Type': 'application/json' },
+          headers: leaveHeaders,
           body: JSON.stringify({
             type: shouldCloseRoom ? 'close_room' : 'leave',
             clientId: this.clientId,
             username: this.profile?.name || '',
             clientToken: this.clientToken || undefined,
+            gracefulClose: true,
           }),
         }).catch(() => {});
       } catch (e) { /* ignore */ }

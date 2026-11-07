@@ -1,9 +1,13 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261107_v140';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261107_v140';
-import { renderHome, destroyHome } from './views/home.js?v=20261107_v140';
-import { api } from './api.js?v=20261107_v140';
-import { h, toast } from './ui.js?v=20261107_v140';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261107_v141';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261107_v141';
+import { renderHome, destroyHome } from './views/home.js?v=20261107_v141';
+import { api } from './api.js?v=20261107_v141';
+import { h, toast } from './ui.js?v=20261107_v141';
+
+const MODULE_VER = (() => {
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261107_v141'; } catch (_) { return '20261107_v141'; }
+})();
 
 let _meshMod = null;
 let _meshModPromise = null;
@@ -11,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261107_v140')
+    _meshModPromise = import('./views/mesh.js?v=20261107_v141')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -76,6 +80,12 @@ window.vortexMinimizeRoom = () => {
     return;
   }
   window.__vortexCancelChatVoiceRec?.();
+  window.__activeSubsController?.stopDubAudio?.();
+  try {
+    if (localStorage.getItem('vortex_bg_audio') === 'off') {
+      window.__kinoxHost?.adapter?.pause?.();
+    }
+  } catch (_) {}
   document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.add('mesh-minimized');
@@ -153,6 +163,12 @@ async function route() {
     closeNavPopups();
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
+      window.__activeSubsController?.stopDubAudio?.();
+      try {
+        if (localStorage.getItem('vortex_bg_audio') === 'off') {
+          window.__kinoxHost?.adapter?.pause?.();
+        }
+      } catch (_) {}
       document.body.classList.add('mesh-minimized');
     }
     const keepMinimized = Boolean(activeMeshRoomId && document.body.classList.contains('mesh-minimized') && state.mesh);
@@ -266,17 +282,25 @@ async function boot() {
       window.scrollTo(0, 0);
     }
   };
+  let _vpSyncRaf = 0;
+  const scheduleSyncAppViewportMetrics = () => {
+    if (_vpSyncRaf) return;
+    _vpSyncRaf = requestAnimationFrame(() => {
+      _vpSyncRaf = 0;
+      syncAppViewportMetrics();
+    });
+  };
   window.__wlSyncViewport = syncAppViewportMetrics;
   syncAppViewportMetrics();
-  window.addEventListener('resize', syncAppViewportMetrics, { passive: true });
+  window.addEventListener('resize', scheduleSyncAppViewportMetrics, { passive: true });
   window.addEventListener('orientationchange', () => {
     syncAppViewportMetrics();
     setTimeout(syncAppViewportMetrics, 120);
     setTimeout(syncAppViewportMetrics, 350);
   }, { passive: true });
   if (window.visualViewport) {
-    window.visualViewport.addEventListener('resize', syncAppViewportMetrics, { passive: true });
-    window.visualViewport.addEventListener('scroll', syncAppViewportMetrics, { passive: true });
+    window.visualViewport.addEventListener('resize', scheduleSyncAppViewportMetrics, { passive: true });
+    window.visualViewport.addEventListener('scroll', scheduleSyncAppViewportMetrics, { passive: true });
   }
   window.__onWatchlivoAndroidPiP = (active) => {
     document.documentElement.classList.toggle('is-android-pip', Boolean(active));
@@ -346,6 +370,14 @@ async function boot() {
           color: initialProfile.color || '#27DCC8',
           avatarUrl: initialProfile.avatarUrl || '',
         }),
+      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d?.guestToken) {
+          initialProfile.guestToken = d.guestToken;
+          if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
+            state.self.guestToken = d.guestToken;
+          }
+          try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
+        }
       }).catch(() => {});
     }
   } else {
@@ -361,7 +393,7 @@ async function boot() {
         id: gid,
         uid: gid,
         name: `Misafir #${gTag}`,
-        handle: `misafir${gTag}`,
+        handle: `misafir_${gid.slice(-6)}`,
         color: gColors[gTag % gColors.length],
         isGuest: true,
       };
@@ -382,6 +414,14 @@ async function boot() {
           handle: guestFallback.handle,
           color: guestFallback.color,
         }),
+      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d?.guestToken) {
+          guestFallback.guestToken = d.guestToken;
+          if (state.self && state.self.uid === guestFallback.uid) {
+            state.self.guestToken = d.guestToken;
+          }
+          try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guestFallback)); } catch (_) {}
+        }
       }).catch(() => {});
     }
     if (!isRedirectPending && (sp.get('login') === '1' || sp.get('auth') === '1')) {
@@ -451,7 +491,8 @@ function initPresenceLifecycle() {
     if (!uid) return;
     try {
       const hdrs = { 'Content-Type': 'application/json' };
-      if (s?.authToken) hdrs.Authorization = `Bearer ${s.authToken}`;
+      const tok = s?.authToken || s?.guestToken || '';
+      if (tok) hdrs.Authorization = `Bearer ${tok}`;
       fetch('/api/rave/social/presence', {
         method: 'POST',
         headers: hdrs,
@@ -460,13 +501,13 @@ function initPresenceLifecycle() {
       }).catch(() => {});
     } catch (_) {}
   };
-  window.addEventListener('beforeunload', markOffline);
+  window.addEventListener('pagehide', markOffline);
 }
 
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261107_v140', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(MODULE_VER)}`, { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {
@@ -738,7 +779,7 @@ function initSpatialTvNavigation() {
   const FOCUS_SELECTOR = [
     'button:not([disabled])',
     'a[href]',
-    'input:not([disabled]):not([type="hidden"])',
+    'input:not([disabled]):not([type="hidden"]):not([type="range"])',
     'select:not([disabled])',
     '[role="button"]:not([disabled])',
     '[tabindex]:not([tabindex="-1"])',
@@ -825,8 +866,9 @@ function initSpatialTvNavigation() {
       active.tagName === 'TEXTAREA' ||
       active.isContentEditable
     );
+    if (isTextInput) return;
     if (dir) {
-      if (isTextInput && (dir === 'left' || dir === 'right')) return;
+      if (document.body.classList.contains('in-room') && !document.querySelector('.popup-backdrop, .modal-backdrop') && !document.body.classList.contains('tv-nav-active')) return;
       if (document.querySelector('#mesh-root .video-stage:hover') && !document.body.classList.contains('tv-nav-active')) return;
       document.body.classList.add('tv-nav-active');
       if (moveFocus(dir)) {

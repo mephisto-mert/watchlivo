@@ -112,6 +112,16 @@
       "dest": "/static/$1"
     },
     {
+      "src": "/static/(Watchlivo.*\\.ipa)",
+      "headers": {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.ipa\"",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "dest": "/static/$1"
+    },
+    {
       "src": "/static/Watchlivo\\.mobileconfig",
       "headers": {
         "Content-Type": "application/x-apple-aspen-config",
@@ -162,7 +172,7 @@
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|b8f4e2a9c1d74e36a5b09f82c4e1d3a7\\.txt|stats|analytics|about|privacy|terms|dmca|contact)",
+      "src": "/(manifest\\.json|manifest\\.webmanifest|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|b8f4e2a9c1d74e36a5b09f82c4e1d3a7\\.txt|stats|analytics|about|privacy|terms|dmca|contact)",
       "dest": "server.py"
     },
     {

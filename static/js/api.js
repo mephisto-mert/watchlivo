@@ -4,7 +4,16 @@ function _getAuthToken() {
     const v2Raw = localStorage.getItem('vortex_profile_v2');
     if (v2Raw !== null) {
       const p2 = JSON.parse(v2Raw);
-      return (p2 && p2.authToken && !p2.isGuest) ? String(p2.authToken) : '';
+      if (p2) {
+        if (!p2.isGuest && p2.authToken) return String(p2.authToken);
+        if (p2.isGuest && p2.guestToken) return String(p2.guestToken);
+      }
+      return '';
+    }
+    const tmpGuestRaw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('vortex_temp_guest_v1') : null;
+    if (tmpGuestRaw) {
+      const gp = JSON.parse(tmpGuestRaw);
+      if (gp && gp.isGuest && gp.guestToken) return String(gp.guestToken);
     }
     for (const k of ['vortex_profile_v1', 'vortex_self']) {
       const raw = localStorage.getItem(k);

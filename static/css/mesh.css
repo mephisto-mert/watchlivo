@@ -289,6 +289,11 @@ body.vortex-fs .panel-video {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+.video-frame[data-menu-view="subtitle"] .rave-subtitle-overlay:not(.hidden),
+.video-frame[data-menu-view="subtitlePreferences"] .rave-subtitle-overlay:not(.hidden) {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
 video::cue {
   color: #ffffff;
   background-color: rgba(0, 0, 0, 0.72);
@@ -368,7 +373,14 @@ video::cue {
 .reaction-bar::-webkit-scrollbar { display: none; }
 .reaction-bar button { font-size: 1em; padding: .15em .32em; border-radius: 8px; flex-shrink: 0; white-space: nowrap; }
 .reaction-bar button:hover { background: hsla(0,0%,100%,.1); }
-.float-emoji { position: absolute; bottom: 12%; font-size: 2em; animation: floatUp 2.4s ease-out forwards; pointer-events: none; z-index: 7; }
+.float-emoji { position: absolute; bottom: 12%; font-size: 2em; animation: floatUp 2.4s ease-out forwards; pointer-events: none; z-index: 38; }
+.ctl-fs-reactions { display: none; align-items: center; gap: 2px; margin-right: 4px; }
+#video-frame:fullscreen .ctl-fs-reactions,
+#video-frame:-webkit-full-screen .ctl-fs-reactions,
+.video-frame.fullscreen .ctl-fs-reactions,
+body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
+.ctl-fs-react-btn { padding: 2px 5px; border-radius: 7px; font-size: 13px; line-height: 1; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); cursor: pointer; }
+.ctl-fs-react-btn:hover { background: rgba(255,255,255,.16); }
 @keyframes floatUp { 0% { transform: translateY(0) scale(.6); opacity: 0; } 15% { opacity: 1; transform: scale(1.1); } 100% { transform: translateY(-260px) scale(1); opacity: 0; } }
 .gif-panel { position: absolute; left: .5em; right: .5em; bottom: calc(100% + 6px); height: 300px; border-radius: 14px; display: flex; flex-direction: column; padding: .5em; z-index: 70 !important; background: rgba(14, 18, 28, 0.98) !important; border: 1px solid var(--wl-border) !important; box-shadow: 0 -12px 32px rgba(0,0,0,.75) !important; }
 .gif-grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-top: .5em; }
@@ -803,14 +815,15 @@ video::cue {
 }
 .chat-poll-card {
   display: flex; flex-direction: column; gap: 6px; padding: .6em .75em;
-  margin: .3em 0; border-radius: 12px;
+  margin: .3em 0; border-radius: 12px; max-width: 100%; min-width: 0; overflow: hidden; box-sizing: border-box;
   background: linear-gradient(145deg, rgba(18,21,34,.94), rgba(10,12,20,.92));
   border: 1px solid rgba(99, 102, 241,.32);
 }
-.chat-poll-q { font-size: .8em; font-weight: 800; color: #fff; }
-.chat-poll-opts { display: flex; flex-direction: column; gap: 5px; }
+.chat-poll-q { font-size: .8em; font-weight: 800; color: #fff; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.chat-poll-opts { display: flex; flex-direction: column; gap: 5px; min-width: 0; max-width: 100%; }
 .chat-poll-opt {
-  position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between;
+  position: relative; overflow: hidden; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  max-width: 100%; min-width: 0; box-sizing: border-box;
   padding: .38em .6em; border-radius: 8px; font-size: .74em; font-weight: 700; color: #fff;
   background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12); text-align: left;
 }
@@ -821,7 +834,8 @@ video::cue {
   transition: width .25s ease;
 }
 .chat-poll-txt, .chat-poll-cnt { position: relative; z-index: 1; }
-.chat-poll-cnt { font-size: .88em; color: #a5f3fc; }
+.chat-poll-txt { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.chat-poll-cnt { flex: 0 0 auto; white-space: nowrap; font-size: .88em; color: #a5f3fc; }
 .chat-poll-foot { font-size: .65em; color: var(--text-dim); text-align: right; }
 
 /* Message Reply (Quote) & Per-Message Animated Emoji Reactions */
@@ -6026,4 +6040,50 @@ html.is-android-pip .rave-subtitle-cue {
     max-height: calc(var(--app-height, 100dvh) - 88px) !important;
     overflow-y: auto !important;
   }
+  #mesh-root .video-chat,
+  #mesh-root .panel-chat,
+  #mesh-root .panel-chat .chat {
+    min-height: 0 !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+  }
+  #mesh-root .panel-chat .chat-list {
+    flex: 1 1 0px !important;
+    min-height: 24px !important;
+    overflow-y: auto !important;
+  }
+  #mesh-root .quick-access-zone:not(:empty) {
+    max-height: 64px !important;
+    overflow-y: auto !important;
+    flex: 0 1 auto !important;
+  }
+  #mesh-root .music-similar-bar:not(.hidden) {
+    max-height: 40px !important;
+    overflow-y: auto !important;
+    padding: 2px 6px !important;
+    flex: 0 1 auto !important;
+  }
+  #mesh-root .reply-draft-bar:not(.hidden) {
+    padding: 2px 8px !important;
+    min-height: 0 !important;
+    flex: 0 0 auto !important;
+  }
+  #mesh-root .panel-chat .chatbar {
+    flex: 0 0 auto !important;
+    padding-top: 3px !important;
+    padding-bottom: max(3px, env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .video-frame:not(.fullscreen) #ctl-fit {
+    display: none !important;
+  }
+}
+
+.video-frame.fullscreen:has(.controls.show) .fs-chat-stack,
+.video-frame.fullscreen:has(.controls.ui-active) .fs-chat-stack,
+.video-frame:fullscreen:has(.controls.show) .fs-chat-stack,
+.video-frame:fullscreen:has(.controls.ui-active) .fs-chat-stack {
+  bottom: max(116px, calc(104px + env(safe-area-inset-bottom, 0px))) !important;
 }

@@ -16,6 +16,7 @@ import pathlib
 import re
 import secrets
 import sqlite3
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -30,22 +31,54 @@ IS_VERCEL = bool(os.environ.get("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 AUTH_DB_PATH = pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
 
-from security import RateLimiter, client_ip, constant_time_eq, server_secret, too_many_response
+from security import BoundedTTLCache, RateLimiter, client_ip, constant_time_eq, server_secret, too_many_response
 
 # Fail-closed: no public fallback secret. Without AUTH_SECRET the process uses an
 # unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
 AUTH_SECRET = server_secret("AUTH_SECRET") if len((os.environ.get("AUTH_SECRET") or "").strip()) >= 16 else server_secret("VORTEX_SECRET")
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL") or 60 * 60 * 24 * 7)
 _LOGIN_LIMIT = RateLimiter(20, 300.0, name="login")
+_ACCT_LOGIN_LIMIT = RateLimiter(10, 300.0, name="login_acct")
 _REGISTER_LIMIT = RateLimiter(15, 900.0, name="register")
 _OTP_LIMIT = RateLimiter(5, 600.0, name="otp_send")
 _OTP_VERIFY_LIMIT = RateLimiter(10, 600.0, name="otp_verify")
 _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
-_PASSWORD_RESET_PENDING: Dict[str, float] = {}
+_PW_CHANGE_LIMIT = RateLimiter(10, 600.0, name="pw_change")
+_PASSWORD_RESET_PENDING = BoundedTTLCache(maxsize=1000, default_ttl=3600.0)
+_DELETED_UIDS = BoundedTTLCache(maxsize=4096, default_ttl=86400 * 30)
+_USER_REVOKED_AFTER = BoundedTTLCache(maxsize=4096, default_ttl=TOKEN_TTL)
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
+AVATAR_DATA_RE = re.compile(r"^data:image/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=\s]+)$", re.IGNORECASE)
+AVATAR_URL_RE = re.compile(r"^(?:https://|/static/|/uploads/)[^\s<>\"'\\]+$")
+
+
+def _is_valid_avatar_url(val: str) -> bool:
+    s = str(val or "").strip()
+    if not s:
+        return True
+    low = s.lower()
+    if "svg" in low[:40] or "javascript:" in low or "vbscript:" in low or "data:text/" in low:
+        return False
+    if low.startswith("data:"):
+        if len(s) > 45000:
+            return False
+        m = AVATAR_DATA_RE.match(s)
+        if not m:
+            return False
+        try:
+            raw = base64.b64decode(re.sub(r"\s+", "", m.group(1)), validate=True)
+            return 8 <= len(raw) <= 36000 and b"<svg" not in raw[:512].lower()
+        except Exception:
+            return False
+    if len(s) > 500 or not AVATAR_URL_RE.match(s):
+        return False
+    clean_path = low.split("?", 1)[0].split("#", 1)[0]
+    if clean_path.endswith((".svg", ".svgz", ".html", ".htm", ".xml", ".xhtml")):
+        return False
+    return True
 
 
 def _clean_color(val: Any, default: str = "#00f5d4") -> str:
@@ -120,58 +153,79 @@ def _supabase_auth_req(path: str, payload: Dict[str, Any]) -> Optional[Dict[str,
 
 
 _AUTH_DB_SCHEMA_READY = False
+_AUTH_DB_READY_PATH = ""
+_AUTH_DB_LOCK = threading.Lock()
 
 
 def _get_db() -> sqlite3.Connection:
-    global _AUTH_DB_SCHEMA_READY
-    conn = sqlite3.connect(str(AUTH_DB_PATH), timeout=10.0)
+    global _AUTH_DB_SCHEMA_READY, _AUTH_DB_READY_PATH
+    cur_path = str(AUTH_DB_PATH)
+    conn = sqlite3.connect(cur_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=5000")
     except Exception:
         pass
-    if not _AUTH_DB_SCHEMA_READY:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS watchlivo_users (
-                uid TEXT PRIMARY KEY,
-                email TEXT UNIQUE,
-                handle TEXT UNIQUE,
-                name TEXT NOT NULL,
-                password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL,
-                color TEXT DEFAULT '#00f5d4',
-                avatar TEXT DEFAULT '🎬',
-                auth_provider TEXT DEFAULT 'email',
-                verified INTEGER DEFAULT 1,
-                created_at REAL DEFAULT 0,
-                updated_at REAL DEFAULT 0,
-                bio TEXT DEFAULT '',
-                status_text TEXT DEFAULT '',
-                status_emoji TEXT DEFAULT '🍿',
-                avatar_url TEXT DEFAULT '',
-                hide_watching INTEGER DEFAULT 0,
-                hide_friends INTEGER DEFAULT 0,
-                hide_location INTEGER DEFAULT 0,
-                password_set INTEGER DEFAULT 0
-            )
-        """)
-        for col_def in [
-            "bio TEXT DEFAULT ''",
-            "status_text TEXT DEFAULT ''",
-            "status_emoji TEXT DEFAULT '🍿'",
-            "avatar_url TEXT DEFAULT ''",
-            "hide_watching INTEGER DEFAULT 0",
-            "hide_friends INTEGER DEFAULT 0",
-            "hide_location INTEGER DEFAULT 0",
-            "password_set INTEGER DEFAULT 0",
-        ]:
-            try:
-                conn.execute(f"ALTER TABLE watchlivo_users ADD COLUMN {col_def}")
-            except Exception:
-                pass
-        conn.commit()
-        _AUTH_DB_SCHEMA_READY = True
+    if not _AUTH_DB_SCHEMA_READY or _AUTH_DB_READY_PATH != cur_path:
+        with _AUTH_DB_LOCK:
+            if not _AUTH_DB_SCHEMA_READY or _AUTH_DB_READY_PATH != cur_path:
+                try:
+                    try:
+                        conn.execute("PRAGMA journal_mode=WAL")
+                    except Exception:
+                        pass
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS watchlivo_users (
+                            uid TEXT PRIMARY KEY,
+                            email TEXT UNIQUE,
+                            handle TEXT UNIQUE,
+                            name TEXT NOT NULL,
+                            password_hash TEXT NOT NULL,
+                            salt TEXT NOT NULL,
+                            color TEXT DEFAULT '#00f5d4',
+                            avatar TEXT DEFAULT '🎬',
+                            auth_provider TEXT DEFAULT 'email',
+                            verified INTEGER DEFAULT 1,
+                            created_at REAL DEFAULT 0,
+                            updated_at REAL DEFAULT 0,
+                            bio TEXT DEFAULT '',
+                            status_text TEXT DEFAULT '',
+                            status_emoji TEXT DEFAULT '🍿',
+                            avatar_url TEXT DEFAULT '',
+                            hide_watching INTEGER DEFAULT 0,
+                            hide_friends INTEGER DEFAULT 0,
+                            hide_location INTEGER DEFAULT 0,
+                            password_set INTEGER DEFAULT 0,
+                            tokens_valid_after REAL DEFAULT 0
+                        )
+                    """)
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS watchlivo_deleted_users (
+                            uid TEXT PRIMARY KEY,
+                            deleted_at REAL DEFAULT 0
+                        )
+                    """)
+                    for col_def in [
+                        "bio TEXT DEFAULT ''",
+                        "status_text TEXT DEFAULT ''",
+                        "status_emoji TEXT DEFAULT '🍿'",
+                        "avatar_url TEXT DEFAULT ''",
+                        "hide_watching INTEGER DEFAULT 0",
+                        "hide_friends INTEGER DEFAULT 0",
+                        "hide_location INTEGER DEFAULT 0",
+                        "password_set INTEGER DEFAULT 0",
+                        "tokens_valid_after REAL DEFAULT 0",
+                    ]:
+                        try:
+                            conn.execute(f"ALTER TABLE watchlivo_users ADD COLUMN {col_def}")
+                        except Exception:
+                            pass
+                    conn.commit()
+                    _AUTH_DB_SCHEMA_READY = True
+                    _AUTH_DB_READY_PATH = cur_path
+                except Exception:
+                    conn.close()
+                    raise
     return conn
 
 
@@ -188,13 +242,21 @@ def _kv_cfg():
 
 def _kv(*cmd):
     url, tok = _kv_cfg()
-    req = urllib.request.Request(url, data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
-                                 headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=5) as r:
-        out = json.loads(r.read().decode("utf-8"))
-    if isinstance(out, dict) and out.get("error"):
-        raise RuntimeError(f"KV error: {out['error']}")
-    return out.get("result") if isinstance(out, dict) else None
+    if not url or not tok:
+        return None
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
+            headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            out = json.loads(r.read().decode("utf-8"))
+        if isinstance(out, dict) and out.get("error"):
+            return None
+        return out.get("result") if isinstance(out, dict) else None
+    except (OSError, TimeoutError, ValueError, RuntimeError, urllib.error.URLError):
+        return None
 
 
 def _kp() -> str:
@@ -252,7 +314,93 @@ _ALLOWED_USER_COLS = frozenset({
     "color", "avatar", "auth_provider", "verified", "created_at", "updated_at",
     "bio", "status_text", "status_emoji", "avatar_url",
     "hide_watching", "hide_friends", "hide_location",
+    "password_set", "tokens_valid_after",
 })
+
+
+def is_uid_deleted(uid: str) -> bool:
+    if not uid:
+        return False
+    if _DELETED_UIDS.get(uid):
+        return True
+    if store_backend() == "redis":
+        raw = _kv("GET", f"{_kp()}del_uid:{uid}")
+        if raw:
+            _DELETED_UIDS.set(uid, float(raw) if str(raw).replace(".", "", 1).isdigit() else time.time())
+            return True
+        return False
+    try:
+        conn = _get_db()
+        try:
+            row = conn.execute("SELECT deleted_at FROM watchlivo_deleted_users WHERE uid = ?", (uid,)).fetchone()
+            if row:
+                _DELETED_UIDS.set(uid, float(row["deleted_at"] or time.time()))
+                return True
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return False
+
+
+def clear_uid_deleted(uid: str) -> None:
+    if not uid:
+        return
+    _DELETED_UIDS.delete(uid)
+    _USER_REVOKED_AFTER.delete(uid)
+    if store_backend() == "redis":
+        _kv("DEL", f"{_kp()}del_uid:{uid}")
+        _kv("DEL", f"{_kp()}rev_uid:{uid}")
+    else:
+        try:
+            conn = _get_db()
+            try:
+                conn.execute("DELETE FROM watchlivo_deleted_users WHERE uid = ?", (uid,))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+
+
+def _user_delete(uid: str) -> bool:
+    if not uid:
+        return False
+    now_ts = round(time.time(), 3)
+    row = _user_get(uid)
+    _DELETED_UIDS.set(uid, now_ts)
+    _USER_REVOKED_AFTER.set(uid, now_ts)
+    if store_backend() == "redis":
+        if row:
+            if row.get("email"):
+                _kv("DEL", f"{_kp()}email:{row['email']}")
+            if row.get("handle"):
+                _kv("DEL", f"{_kp()}handle:{row['handle']}")
+        _kv("DEL", f"{_kp()}user:{uid}")
+        _kv("SREM", f"{_kp()}uids", uid)
+        _kv("SET", f"{_kp()}del_uid:{uid}", str(now_ts), "EX", 86400 * 30)
+        _kv("SET", f"{_kp()}rev_uid:{uid}", str(now_ts), "EX", TOKEN_TTL)
+    else:
+        conn = _get_db()
+        try:
+            conn.execute("DELETE FROM watchlivo_users WHERE uid = ?", (uid,))
+            conn.execute("INSERT OR REPLACE INTO watchlivo_deleted_users (uid, deleted_at) VALUES (?, ?)", (uid, now_ts))
+            conn.commit()
+        finally:
+            conn.close()
+    try:
+        import social_engine
+        social_engine._SOCIAL_USERS.pop(uid, None)
+        social_engine._PRESENCE_MAP.pop(uid, None)
+        social_engine._kv_set(f"wl:soc:u:{uid}", {}, ttl_sec=1)
+        social_engine._kv_set(f"wl:soc:pres:{uid}", {"uid": uid, "state": "offline", "roomId": "", "lastSeen": 0}, ttl_sec=60)
+        s_dir = social_engine._load_social_dir()
+        if isinstance(s_dir, dict) and uid in s_dir:
+            s_dir.pop(uid, None)
+            social_engine._kv_set("wl:soc:dir", s_dir, ttl_sec=2592000)
+    except Exception:
+        pass
+    return True
 
 
 def _user_create(row: Dict[str, Any]) -> bool:
@@ -381,7 +529,7 @@ def _sync_user_to_social(user: Dict[str, Any]) -> None:
             if user.get("color"):
                 su["color"] = str(user.get("color"))[:16]
             if "avatarUrl" in user:
-                su["avatarUrl"] = str(user.get("avatarUrl") or "")[:600]
+                su["avatarUrl"] = str(user.get("avatarUrl") or "")[:45000]
             priv = su.setdefault("privacy", {"presenceVisibility": "friends", "hideWatching": False, "allowInvites": "friends"})
             if "hideWatching" in user:
                 priv["hideWatching"] = bool(user.get("hideWatching"))
@@ -391,13 +539,9 @@ def _sync_user_to_social(user: Dict[str, Any]) -> None:
         pass
 
 
-def sign_auth_token(user: Dict[str, Any], pw_verifier: str = "") -> str:
-    """Mint a short-lived HMAC session token.
-
-    The password hash never enters the token: a leaked token must not help an
-    attacker guess or reuse credentials.
-    """
-    issued = int(time.time())
+def sign_auth_token(user: Dict[str, Any], pw_verifier: str = "", issued_override: Optional[float] = None) -> str:
+    """Mint a short-lived HMAC session token."""
+    issued = round(float(issued_override if issued_override is not None else time.time()), 3)
     raw_av = str(user.get("avatar") or "🎬")
     safe_av = "📷" if (raw_av.startswith("data:image/") or len(raw_av) > 120) else raw_av
     raw_av_url = str(user.get("avatarUrl") or "").strip()
@@ -419,7 +563,7 @@ def sign_auth_token(user: Dict[str, Any], pw_verifier: str = "") -> str:
         "provider": user.get("authProvider", "email"),
         "verified": bool(user.get("verified", True)),
         "iat": issued,
-        "exp": issued + TOKEN_TTL,
+        "exp": round(issued + TOKEN_TTL, 3),
         "jti": secrets.token_hex(8),
     }
     pwh_val = str(pw_verifier or user.get("_pwh") or "").strip()
@@ -431,28 +575,50 @@ def sign_auth_token(user: Dict[str, Any], pw_verifier: str = "") -> str:
     return f"{b64}.{sig}"
 
 
+def sign_guest_token(guest_uid: str, binding_sig: str = "") -> str:
+    """Mint a signed guest session token bound to the caller's guest UID."""
+    issued = round(time.time(), 3)
+    payload: Dict[str, Any] = {
+        "uid": str(guest_uid or "")[:64],
+        "guest": True,
+        "iat": issued,
+        "exp": round(issued + TOKEN_TTL, 3),
+        "jti": secrets.token_hex(6),
+    }
+    if binding_sig:
+        payload["gbind"] = str(binding_sig)[:24]
+    raw = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    b64 = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    sig = hmac.new(AUTH_SECRET, b64.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+    return f"{b64}.{sig}"
+
+
 def _candidate_auth_secrets() -> list[bytes]:
     out = [AUTH_SECRET]
-    if not (os.environ.get("AUTH_SECRET") or "").strip() and not (os.environ.get("VORTEX_SECRET") or "").strip():
-        ent = (
-            os.environ.get("UPSTASH_REDIS_REST_TOKEN")
-            or os.environ.get("KV_REST_API_TOKEN")
-            or ""
-        ).strip()
-        if len(ent) >= 24:
-            for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
-                for tag in ("watchlivo-shared-secret-v4", "watchlivo-hmac-secret-v4"):
-                    cand_v4 = hmac.new(ent.encode("utf-8"), f"{tag}:{nm}".encode("utf-8"), hashlib.sha256).digest()
-                    if cand_v4 not in out:
-                        out.append(cand_v4)
-                cand_v2 = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:default".encode("utf-8")).digest()
-                if cand_v2 not in out:
-                    out.append(cand_v2)
+    for sec_name in ("AUTH_SECRET", "VORTEX_SECRET"):
+        try:
+            cand = server_secret(sec_name)
+            if cand not in out:
+                out.append(cand)
+        except Exception:
+            pass
+    ent = (os.environ.get("UPSTASH_REDIS_REST_TOKEN") or os.environ.get("KV_REST_API_TOKEN") or "").strip()
+    if len(ent) >= 24:
+        for nm in ("VORTEX_SECRET", "AUTH_SECRET"):
+            for tag in ("watchlivo-shared-secret-v4", "watchlivo-hmac-secret-v4"):
+                hm = hmac.new(ent.encode("utf-8"), f"{tag}:{nm}".encode("utf-8"), hashlib.sha256)
+                for c in (hm.hexdigest()[:32].encode("ascii"), hm.digest()):
+                    if c not in out:
+                        out.append(c)
+            sh = hashlib.sha256(f"watchlivo-deterministic-secret-v2:{nm}:{ent}:default".encode("utf-8"))
+            for c in (sh.hexdigest()[:32].encode("ascii"), sh.digest()):
+                if c not in out:
+                    out.append(c)
     return out
 
 
-_REVOKED_AUTH_SIGS: "OrderedDict[str, float]" = OrderedDict()
-_REVOKED_NEG_CACHE: "OrderedDict[str, float]" = OrderedDict()
+_REVOKED_AUTH_SIGS = BoundedTTLCache(maxsize=5000, default_ttl=TOKEN_TTL)
+_REVOKED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=2.0)
 
 
 def revoke_auth_token(token: str) -> None:
@@ -462,43 +628,91 @@ def revoke_auth_token(token: str) -> None:
     if not sig:
         return
     exp_ts = time.time() + TOKEN_TTL
-    _REVOKED_AUTH_SIGS[sig] = exp_ts
-    _REVOKED_NEG_CACHE.pop(sig, None)
-    while len(_REVOKED_AUTH_SIGS) > 5000:
-        _REVOKED_AUTH_SIGS.popitem(last=False)
+    _REVOKED_AUTH_SIGS.set(sig, exp_ts, ttl=TOKEN_TTL)
+    _REVOKED_NEG_CACHE.delete(sig)
     if store_backend() == "redis":
+        _kv("SET", f"{_kp()}rev:{sig}", str(int(exp_ts)), "EX", TOKEN_TTL)
+
+
+def revoke_all_user_tokens(uid: str) -> float:
+    if not uid:
+        return 0.0
+    rev_ts = round(time.time(), 3)
+    _USER_REVOKED_AFTER.set(uid, rev_ts, ttl=TOKEN_TTL)
+    if store_backend() == "redis":
+        _kv("SET", f"{_kp()}rev_uid:{uid}", str(rev_ts), "EX", TOKEN_TTL)
         try:
-            _kv("SET", f"{_kp()}rev:{sig}", str(int(exp_ts)), "EX", TOKEN_TTL)
+            _user_update(uid, {"tokens_valid_after": rev_ts})
         except Exception:
             pass
+    else:
+        try:
+            conn = _get_db()
+            try:
+                conn.execute("UPDATE watchlivo_users SET tokens_valid_after = ? WHERE uid = ?", (rev_ts, uid))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception:
+            pass
+    return rev_ts
 
 
-def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
+def get_user_revoked_after(uid: str) -> float:
+    if not uid:
+        return 0.0
+    cached = _USER_REVOKED_AFTER.get(uid)
+    if cached is not None:
+        return float(cached)
+    val = 0.0
+    if store_backend() == "redis":
+        raw = _kv("GET", f"{_kp()}rev_uid:{uid}")
+        if raw:
+            try:
+                val = float(raw)
+            except Exception:
+                val = 0.0
+    else:
+        try:
+            conn = _get_db()
+            try:
+                row = conn.execute("SELECT tokens_valid_after FROM watchlivo_users WHERE uid = ?", (uid,)).fetchone()
+                if row and row["tokens_valid_after"]:
+                    val = float(row["tokens_valid_after"])
+            finally:
+                conn.close()
+        except Exception:
+            val = 0.0
+    _USER_REVOKED_AFTER.set(uid, val, ttl=5.0 if val <= 0 else TOKEN_TTL)
+    return val
+
+
+def verify_any_token(token: str) -> Optional[Dict[str, Any]]:
     if not token or "." not in token or len(token) > 4096:
         return None
     b64, sig = token.rsplit(".", 1)
     now_ts = time.time()
     rev_exp = _REVOKED_AUTH_SIGS.get(sig)
     if rev_exp:
-        if rev_exp > now_ts:
+        if float(rev_exp) > now_ts:
             return None
-        _REVOKED_AUTH_SIGS.pop(sig, None)
+        _REVOKED_AUTH_SIGS.delete(sig)
     elif store_backend() == "redis":
-        neg_until = _REVOKED_NEG_CACHE.get(sig, 0.0)
-        if neg_until <= now_ts:
-            try:
-                raw_rev = _kv("GET", f"{_kp()}rev:{sig}")
-                if raw_rev:
+        if not _REVOKED_NEG_CACHE.get(sig):
+            raw_rev = _kv("GET", f"{_kp()}rev:{sig}")
+            if raw_rev:
+                try:
                     r_exp = float(raw_rev)
                     if r_exp > now_ts:
-                        _REVOKED_AUTH_SIGS[sig] = r_exp
+                        _REVOKED_AUTH_SIGS.set(sig, r_exp, ttl=max(1.0, r_exp - now_ts))
                         return None
-                _REVOKED_NEG_CACHE[sig] = now_ts + 2.0
-                while len(_REVOKED_NEG_CACHE) > 5000:
-                    _REVOKED_NEG_CACHE.popitem(last=False)
-            except Exception:
-                pass
-    b64_bytes = b64.encode("ascii")
+                except Exception:
+                    pass
+            _REVOKED_NEG_CACHE.set(sig, now_ts + 2.0, ttl=2.0)
+    try:
+        b64_bytes = b64.encode("ascii")
+    except Exception:
+        return None
     matched = any(
         hmac.compare_digest(hmac.new(sec, b64_bytes, hashlib.sha256).hexdigest()[:32], sig)
         for sec in _candidate_auth_secrets()
@@ -513,9 +727,23 @@ def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
     if not isinstance(data, dict) or not data.get("uid"):
         return None
     try:
-        if float(data.get("exp") or 0.0) <= time.time():
+        if float(data.get("exp") or 0.0) <= now_ts:
             return None
     except (TypeError, ValueError):
+        return None
+    uid = str(data.get("uid") or "")
+    if not data.get("guest"):
+        if is_uid_deleted(uid):
+            return None
+        rev_after = get_user_revoked_after(uid)
+        if rev_after > 0 and float(data.get("iat") or 0.0) <= rev_after:
+            return None
+    return data
+
+
+def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
+    data = verify_any_token(token)
+    if not data or data.get("guest"):
         return None
     return data
 
@@ -552,6 +780,7 @@ def _row_to_user(row: Any) -> Dict[str, Any]:
         "hideLocation": _as_bool(d["hide_location"] if "hide_location" in d else d.get("hideLocation", False)),
         "authProvider": d.get("auth_provider") or "email",
         "verified": _as_bool(d.get("verified", 1)),
+        "passwordSet": _as_bool(d.get("password_set", 1 if (d.get("auth_provider") or "email") == "email" else 0)),
         "isGuest": False,
     }
 
@@ -630,6 +859,7 @@ async def auth_register(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Hesap kaydı şu an yapılamıyor. Lütfen tekrar deneyin."}, status_code=503)
     if not created:
         return JSONResponse({"ok": False, "error": "Bu e-posta adresi zaten kayıtlı. Lütfen Giriş Yap sekmesinden şifrenizle giriş yapın."}, status_code=409)
+    clear_uid_deleted(uid)
     user = _row_to_user(row)
     _sync_user_to_social(user)
     token = sign_auth_token(user, pw_verifier=_pw_verifier(uid, password))
@@ -651,7 +881,7 @@ async def auth_login(request: Request) -> JSONResponse:
     password = str(body.get("password") or "")[:256]
     if not identifier or not password:
         return JSONResponse({"ok": False, "error": "E-posta / kullanıcı adı ve şifre zorunludur."}, status_code=400)
-    acct_ok, acct_retry = _LOGIN_LIMIT.hit(f"acct:{_tr_fold(raw_ident)[:80]}")
+    acct_ok, acct_retry = _ACCT_LOGIN_LIMIT.hit(_tr_fold(raw_ident)[:80])
     if not acct_ok:
         return too_many_response(acct_retry)
     is_email = bool(EMAIL_RE.match(identifier))
@@ -660,6 +890,8 @@ async def auth_login(request: Request) -> JSONResponse:
     try:
         uid = _uid_for("email", identifier) if is_email else (_uid_for("handle", clean_h) or _uid_for("handle", _strip_discrim_tag(identifier.lstrip("@"))))
         row = _user_get(uid) if uid else None
+    except sqlite3.OperationalError:
+        return JSONResponse({"ok": False, "error": "Veritabanı şu an meşgul. Lütfen tekrar deneyin."}, status_code=503)
     except Exception:
         row = None
     target_email = identifier if is_email else (row.get("email", "") if row else "")
@@ -672,10 +904,10 @@ async def auth_login(request: Request) -> JSONResponse:
     )
     if local_verified:
         fb_verified = True
-    if not row:
+    if not row and store_backend() == "sqlite":
         vault_tok = str(body.get("vaultToken") or "").strip()
         v_claims = verify_auth_token(vault_tok) if vault_tok else None
-        if v_claims and v_claims.get("uid") and v_claims.get("pwh"):
+        if v_claims and v_claims.get("uid") and v_claims.get("pwh") and not is_uid_deleted(str(v_claims["uid"])):
             v_uid = str(v_claims["uid"])
             v_email = str(v_claims.get("email") or "").strip().lower()
             v_handle = _norm_handle(str(v_claims.get("handle") or ""))
@@ -702,6 +934,7 @@ async def auth_login(request: Request) -> JSONResponse:
                     "hide_location": 1 if _as_bool(v_claims.get("hideLocation")) else 0,
                     "auth_provider": str(v_claims.get("provider") or "email"),
                     "verified": 1,
+                    "password_set": 1,
                     "created_at": time.time(),
                     "updated_at": time.time(),
                 }
@@ -709,7 +942,7 @@ async def auth_login(request: Request) -> JSONResponse:
                     _user_create(row)
                 except Exception:
                     pass
-    reset_allowed = bool(target_email and _PASSWORD_RESET_PENDING.get(target_email, 0.0) > time.time())
+    reset_allowed = bool(target_email and (float(_PASSWORD_RESET_PENDING.get(target_email) or 0.0) > time.time()))
     if not reset_allowed and target_email and store_backend() == "redis":
         try:
             raw_rst = _kv("GET", f"{_kp()}pwreset:{target_email}")
@@ -717,7 +950,8 @@ async def auth_login(request: Request) -> JSONResponse:
                 reset_allowed = True
         except Exception:
             pass
-    if not fb_verified and (not row or reset_allowed) and target_email and EMAIL_RE.match(target_email):
+    cand_uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12] if target_email else ""
+    if not fb_verified and (not row or reset_allowed) and target_email and EMAIL_RE.match(target_email) and not is_uid_deleted(cand_uid):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
             fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
@@ -727,32 +961,35 @@ async def auth_login(request: Request) -> JSONResponse:
             if fb_res and fb_res.get("idToken"):
                 fb_email = str(fb_res.get("email") or target_email).strip().lower()
                 if fb_email == target_email:
+                    if row:
+                        lk = _firebase_auth_req("accounts:lookup", {"idToken": fb_res["idToken"]})
+                        lk_users = (lk or {}).get("users") or []
+                        if not lk_users or lk_users[0].get("emailVerified") is not True:
+                            break
                     fb_verified = True
-                    _PASSWORD_RESET_PENDING.pop(target_email, None)
+                    _PASSWORD_RESET_PENDING.delete(target_email)
                     if store_backend() == "redis":
-                        try:
-                            _kv("DEL", f"{_kp()}pwreset:{target_email}")
-                        except Exception:
-                            pass
+                        _kv("DEL", f"{_kp()}pwreset:{target_email}")
                     salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
                     if row:
                         row["password_hash"] = pw_hash
                         row["salt"] = salt
+                        row["password_set"] = 1
                         row["updated_at"] = time.time()
                         try:
-                            _user_update(row["uid"], {"password_hash": pw_hash, "salt": salt, "updated_at": row["updated_at"]})
+                            _user_update(row["uid"], {"password_hash": pw_hash, "salt": salt, "password_set": 1, "updated_at": row["updated_at"]})
                         except Exception:
                             pass
                     else:
-                        uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12]
                         disp = str(fb_res.get("displayName") or target_email.split("@")[0])[:24]
                         row = {
-                            "uid": uid, "email": target_email,
+                            "uid": cand_uid, "email": target_email,
                             "handle": _norm_handle("", disp),
                             "name": disp, "password_hash": pw_hash, "salt": salt,
                             "color": "#00f5d4", "avatar": "🎬",
-                            "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
+                            "auth_provider": "email", "verified": 1, "password_set": 1,
+                            "created_at": time.time(), "updated_at": time.time(),
                         }
                         try:
                             _user_create(row)
@@ -907,13 +1144,14 @@ async def auth_oauth(request: Request) -> JSONResponse:
     }
     try:
         _user_create(row)
+        clear_uid_deleted(uid)
     except Exception:
         pass
     user = _row_to_user(row)
     return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
 
 
-_PHONE_CODES: Dict[str, Dict[str, Any]] = {}
+_PHONE_CODES = BoundedTTLCache(maxsize=1000, default_ttl=300.0)
 
 
 def _clean_phone(raw: str) -> str:
@@ -1075,6 +1313,7 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
     }
     try:
         _user_create(row)
+        clear_uid_deleted(uid)
     except Exception:
         pass
     user = _row_to_user(row)
@@ -1082,7 +1321,7 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
 
 
 async def auth_email_action(request: Request) -> JSONResponse:
-    """Firebase Email Actions: Password Reset ('reset_password'), Magic Link ('magic_link'), Complete Link ('complete_magic_link')."""
+    """Firebase Email Actions: Password Reset ('reset_password', 'verify_reset_code'), Magic Link ('magic_link'), Complete Link ('complete_magic_link')."""
     try:
         body = await request.json()
     except Exception:
@@ -1090,6 +1329,30 @@ async def auth_email_action(request: Request) -> JSONResponse:
     if not isinstance(body, dict):
         return JSONResponse({"ok": False, "error": "Geçersiz istek."}, status_code=400)
     action = str(body.get("action") or "").strip().lower()
+    if action in ("verify_reset_code", "confirm_reset_password"):
+        allowed, retry_after = _RESET_LIMIT.hit(client_ip(request))
+        if not allowed:
+            return too_many_response(retry_after)
+        oob_code = str(body.get("oobCode") or body.get("code") or "").strip()[:256]
+        new_pw = str(body.get("newPassword") or body.get("password") or "")[:256]
+        if not oob_code:
+            return JSONResponse({"ok": False, "error": "Sıfırlama kodu zorunludur."}, status_code=400)
+        if len(new_pw) < 6:
+            return JSONResponse({"ok": False, "error": "Yeni şifre en az 6 karakter olmalıdır."}, status_code=400)
+        res = _firebase_auth_req("accounts:resetPassword", {"oobCode": oob_code, "newPassword": new_pw})
+        rst_email = str((res or {}).get("email") or "").strip().lower()
+        if not rst_email or not EMAIL_RE.match(rst_email):
+            return JSONResponse({"ok": False, "error": "Şifre sıfırlama kodu geçersiz veya süresi dolmuş."}, status_code=401)
+        uid = _uid_for("email", rst_email)
+        if uid:
+            salt = _new_salt()
+            pw_hash = _hash_pw(new_pw, salt)
+            rev_ts = revoke_all_user_tokens(uid)
+            _user_update(uid, {"password_hash": pw_hash, "salt": salt, "password_set": 1, "tokens_valid_after": rev_ts})
+            _PASSWORD_RESET_PENDING.delete(rst_email)
+            if store_backend() == "redis":
+                _kv("DEL", f"{_kp()}pwreset:{rst_email}")
+        return JSONResponse({"ok": True, "message": "Şifreniz başarıyla güncellendi. Yeni şifrenizle giriş yapabilirsiniz."})
     email = str(body.get("email") or "").strip().lower()[:120]
     if not EMAIL_RE.match(email):
         return JSONResponse({"ok": False, "error": "Lütfen geçerli bir e-posta adresi girin."}, status_code=400)
@@ -1097,8 +1360,9 @@ async def auth_email_action(request: Request) -> JSONResponse:
         allowed, retry_after = _RESET_LIMIT.hit(f"{client_ip(request)}:{email}")
         if not allowed:
             return too_many_response(retry_after)
-        # Ensure account exists in Firebase Auth so Firebase can dispatch the reset email.
-        # The bootstrap password must be random: a derived one would be guessable.
+        existing_uid = _uid_for("email", email)
+        if not existing_uid or is_uid_deleted(existing_uid):
+            return JSONResponse({"ok": True, "message": f"Eğer {email} adresine bağlı bir hesap varsa şifre sıfırlama bağlantısı gönderildi."})
         _firebase_auth_req("accounts:signUp", {
             "email": email,
             "password": "Wl!" + secrets.token_urlsafe(24),
@@ -1107,12 +1371,9 @@ async def auth_email_action(request: Request) -> JSONResponse:
         res = _firebase_auth_req("accounts:sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
         if res and res.get("email"):
             rst_exp = time.time() + 3600.0
-            _PASSWORD_RESET_PENDING[email] = rst_exp
+            _PASSWORD_RESET_PENDING.set(email, rst_exp, ttl=3600.0)
             if store_backend() == "redis":
-                try:
-                    _kv("SET", f"{_kp()}pwreset:{email}", str(int(rst_exp)), "EX", 3600)
-                except Exception:
-                    pass
+                _kv("SET", f"{_kp()}pwreset:{email}", str(int(rst_exp)), "EX", 3600)
             return JSONResponse({"ok": True, "message": f"Şifre sıfırlama bağlantısı {email} adresine gönderildi."})
         return JSONResponse({"ok": False, "error": "Sıfırlama e-postası gönderilemedi. Lütfen adresi kontrol edin."}, status_code=400)
     if action == "magic_link":
@@ -1201,11 +1462,22 @@ async def auth_profile(request: Request) -> JSONResponse:
     color = str(body.get("color") or "").strip()[:16]
     if re.match(r"^#[0-9a-fA-F]{3,8}$", color):
         fields["color"] = color
-    avatar_url = str(body.get("avatarUrl") or body.get("avatar") or "").strip()
-    if avatar_url and not avatar_url.lower().startswith("data:image/svg") and (avatar_url.startswith(("https://", "/static/", "/uploads/")) or (avatar_url.startswith("data:image/") and len(avatar_url) <= 45000)):
-        fields["avatar_url"] = avatar_url
-    elif "avatarUrl" in body and not avatar_url:
-        fields["avatar_url"] = ""
+    if "avatarUrl" in body:
+        raw_av_url = str(body.get("avatarUrl") or "").strip()
+        if not raw_av_url:
+            fields["avatar_url"] = ""
+        elif _is_valid_avatar_url(raw_av_url):
+            fields["avatar_url"] = raw_av_url
+        else:
+            return JSONResponse({"ok": False, "error": "Geçersiz profil görseli formatı (yalnızca 45 KB altı PNG/JPEG/WebP/GIF veya HTTPS görsel kabul edilir)."}, status_code=400)
+    elif "avatar" in body:
+        raw_av_in = str(body.get("avatar") or "").strip()
+        if raw_av_in.lower().startswith(("http:", "https:", "data:", "/", "javascript:", "vbscript:")):
+            if not _is_valid_avatar_url(raw_av_in):
+                return JSONResponse({"ok": False, "error": "Geçersiz profil görseli formatı."}, status_code=400)
+            fields["avatar_url"] = raw_av_in
+        elif raw_av_in and len(raw_av_in) <= 16 and not re.search(r"[<>\"'\\]", raw_av_in):
+            fields["avatar"] = raw_av_in
     if "bio" in body:
         fields["bio"] = str(body.get("bio") or "").strip()[:160]
     if "statusText" in body:
@@ -1222,11 +1494,13 @@ async def auth_profile(request: Request) -> JSONResponse:
     upd_failed = False
     try:
         row = _user_update(uid, fields)
+    except sqlite3.OperationalError:
+        return JSONResponse({"ok": False, "error": "Veritabanı şu an meşgul. Lütfen tekrar deneyin."}, status_code=503)
     except Exception:
         row = None
         upd_failed = True
     if not row:
-        if store_backend() == "redis" and not upd_failed:
+        if not (IS_VERCEL and store_backend() == "sqlite" and not upd_failed and not is_uid_deleted(uid)):
             return JSONResponse({"ok": False, "error": "Hesap bulunamadı. Lütfen tekrar giriş yapın."}, status_code=401)
         user = {
             "uid": uid,
@@ -1244,6 +1518,7 @@ async def auth_profile(request: Request) -> JSONResponse:
             "hideLocation": bool(fields["hide_location"]) if "hide_location" in fields else bool(claims.get("hideLocation", False)),
             "authProvider": claims.get("provider", "email"),
             "verified": True,
+            "passwordSet": True,
             "isGuest": False,
         }
         try:
@@ -1266,6 +1541,7 @@ async def auth_profile(request: Request) -> JSONResponse:
                 "hide_location": 1 if user.get("hideLocation") else 0,
                 "auth_provider": user["authProvider"],
                 "verified": 1,
+                "password_set": 1,
                 "created_at": time.time(),
                 "updated_at": time.time(),
             })
@@ -1278,18 +1554,106 @@ async def auth_profile(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_keep)})
 
 
+def _purge_uid_cache(token: str = "", uid: str = "") -> None:
+    try:
+        import server
+        if token:
+            server._UID_CACHE.pop(token, None)
+        if uid:
+            stale_keys = [k for k, v in list(server._UID_CACHE.items()) if isinstance(v, tuple) and v[0] == uid]
+            for k in stale_keys:
+                server._UID_CACHE.pop(k, None)
+    except Exception:
+        pass
+
+
+async def auth_change_password(request: Request) -> JSONResponse:
+    allowed, retry_after = _PW_CHANGE_LIMIT.hit(client_ip(request))
+    if not allowed:
+        return too_many_response(retry_after)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "Geçersiz veri."}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"ok": False, "error": "Geçersiz veri."}, status_code=400)
+    auth_hdr = request.headers.get("Authorization", "")
+    token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else str(body.get("authToken") or "")
+    claims = verify_auth_token(token)
+    if not claims:
+        return JSONResponse({"ok": False, "error": "Oturum doğrulanamadı. Lütfen tekrar giriş yapın."}, status_code=401)
+    uid = str(claims["uid"])
+    row = _user_get(uid)
+    if not row:
+        return JSONResponse({"ok": False, "error": "Hesap bulunamadı."}, status_code=401)
+    cur_pw = str(body.get("currentPassword") or body.get("oldPassword") or "")[:256]
+    new_pw = str(body.get("newPassword") or body.get("password") or "")[:256]
+    if len(new_pw) < 6:
+        return JSONResponse({"ok": False, "error": "Yeni şifre en az 6 karakter olmalıdır."}, status_code=400)
+    has_pw = bool(row.get("password_set")) or str(row.get("auth_provider") or "") == "email"
+    if has_pw:
+        if not cur_pw or not constant_time_eq(row["password_hash"], _hash_pw(cur_pw, row["salt"])):
+            return JSONResponse({"ok": False, "error": "Mevcut şifreniz hatalı."}, status_code=401)
+    salt = _new_salt()
+    pw_hash = _hash_pw(new_pw, salt)
+    rev_ts = revoke_all_user_tokens(uid)
+    if token:
+        revoke_auth_token(token)
+    _purge_uid_cache(token=token, uid=uid)
+    updated = _user_update(uid, {
+        "password_hash": pw_hash,
+        "salt": salt,
+        "password_set": 1,
+        "tokens_valid_after": rev_ts,
+    }) or {**row, "password_hash": pw_hash, "salt": salt, "password_set": 1, "tokens_valid_after": rev_ts}
+    user = _row_to_user(updated)
+    fresh_iat = round(max(time.time(), rev_ts + 0.005), 3)
+    new_tok = sign_auth_token(user, pw_verifier=_pw_verifier(uid, new_pw), issued_override=fresh_iat)
+    return JSONResponse({"ok": True, "user": user, "authToken": new_tok, "message": "Şifreniz başarıyla güncellendi."})
+
+
+async def auth_delete_account(request: Request) -> JSONResponse:
+    auth_hdr = request.headers.get("Authorization", "")
+    body: Dict[str, Any] = {}
+    if request.method in ("POST", "DELETE"):
+        try:
+            raw_b = await request.body()
+            if raw_b:
+                parsed = json.loads(raw_b.decode("utf-8"))
+                if isinstance(parsed, dict):
+                    body = parsed
+        except Exception:
+            body = {}
+    token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else str(body.get("authToken") or "")
+    claims = verify_auth_token(token)
+    if not claims:
+        return JSONResponse({"ok": False, "error": "Oturum doğrulanamadı."}, status_code=401)
+    uid = str(claims["uid"])
+    row = _user_get(uid)
+    if not row:
+        return JSONResponse({"ok": False, "error": "Hesap bulunamadı."}, status_code=401)
+    supplied_pw = str(body.get("password") or "")[:256]
+    has_pw = bool(row.get("password_set")) or str(row.get("auth_provider") or "") == "email"
+    if supplied_pw and has_pw:
+        if not constant_time_eq(row["password_hash"], _hash_pw(supplied_pw, row["salt"])):
+            return JSONResponse({"ok": False, "error": "Şifre doğrulanamadı."}, status_code=401)
+    if token:
+        revoke_auth_token(token)
+    _user_delete(uid)
+    _purge_uid_cache(token=token, uid=uid)
+    return JSONResponse({"ok": True, "deleted": True, "message": "Hesabınız kalıcı olarak silindi."})
+
+
 async def auth_logout(request: Request) -> JSONResponse:
     auth_hdr = request.headers.get("Authorization", "")
     token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
-    claims = verify_auth_token(token) if token else None
+    claims = verify_any_token(token) if token else None
+    uid = str((claims or {}).get("uid") or "").strip()
     if token:
         revoke_auth_token(token)
-        try:
-            import server
-            server._UID_CACHE.pop(token, None)
-        except Exception:
-            pass
-    uid = str((claims or {}).get("uid") or "").strip()
+    if uid and not (claims or {}).get("guest"):
+        revoke_all_user_tokens(uid)
+    _purge_uid_cache(token=token, uid=uid)
     if uid:
         try:
             import social_engine
@@ -1303,16 +1667,22 @@ async def auth_logout(request: Request) -> JSONResponse:
 
 
 async def auth_me(request: Request) -> JSONResponse:
+    if request.method == "DELETE":
+        return await auth_delete_account(request)
     priv_hdrs = {"Cache-Control": "private, no-store, max-age=0", "Vary": "Authorization"}
     auth_hdr = request.headers.get("Authorization", "")
     token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
+    if not token:
+        return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
     claims = verify_auth_token(token)
     if not claims:
-        return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
+        return JSONResponse({"ok": False, "authenticated": False}, status_code=401, headers=priv_hdrs)
     pwh_keep = str(claims.get("pwh") or "")
     lookup_failed = False
     try:
         row = _user_get(claims["uid"])
+    except sqlite3.OperationalError:
+        return JSONResponse({"ok": False, "authenticated": False, "error": "Veritabanı meşgul."}, status_code=503, headers=priv_hdrs)
     except Exception:
         row = None
         lookup_failed = True
@@ -1320,8 +1690,8 @@ async def auth_me(request: Request) -> JSONResponse:
         u_obj = _row_to_user(row)
         _sync_user_to_social(u_obj)
         return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj, pw_verifier=pwh_keep)}, headers=priv_hdrs)
-    if store_backend() == "redis" and not lookup_failed:
-        return JSONResponse({"ok": False, "authenticated": False}, status_code=200, headers=priv_hdrs)
+    if not (IS_VERCEL and store_backend() == "sqlite" and not lookup_failed and not is_uid_deleted(str(claims["uid"]))):
+        return JSONResponse({"ok": False, "authenticated": False}, status_code=401, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],
         "email": claims.get("email", ""),
@@ -1338,6 +1708,7 @@ async def auth_me(request: Request) -> JSONResponse:
         "hideLocation": bool(claims.get("hideLocation", False)),
         "authProvider": claims.get("provider", "email"),
         "verified": bool(claims.get("verified", True)),
+        "passwordSet": True,
         "isGuest": False,
     }
     try:
@@ -1360,6 +1731,7 @@ async def auth_me(request: Request) -> JSONResponse:
             "hide_location": 1 if user["hideLocation"] else 0,
             "auth_provider": user["authProvider"],
             "verified": 1 if user["verified"] else 0,
+            "password_set": 1,
             "created_at": time.time(),
             "updated_at": time.time(),
         })

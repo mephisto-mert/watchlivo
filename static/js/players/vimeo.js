@@ -24,13 +24,16 @@ export class VimeoAdapter {
   }
 
   async load(media, startAt = 0, autoplay = true) {
+    this._destroyed = false;
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(autoplay);
+    this.initialSeekPending = Number(startAt) > 0.5 ? Number(startAt) : 0;
     await loadSdk();
+    if (this._destroyed) return;
     const mount = document.createElement('div');
     this.container.replaceChildren(mount);
     const id = media.videoId || (String(media.url).match(/vimeo\.com\/(?:video\/)?(\d+)/) || [])[1];
-    this.player = new window.Vimeo.Player(mount, { id: Number(id) || undefined, url: media.url || undefined, autoplay, controls: false, playsinline: true, responsive: false, width: 640 });
+    this.player = new window.Vimeo.Player(mount, { id: Number(id) || undefined, url: media.url || undefined, autoplay: false, controls: false, playsinline: true, responsive: false, width: 640 });
     const styleFrame = () => {
       const iframe = mount.querySelector('iframe');
       if (iframe) Object.assign(iframe.style, { width: '100%', height: '100%' });
@@ -39,26 +42,51 @@ export class VimeoAdapter {
     const p = this.player;
     p.on('timeupdate', (d) => { this.t = d.seconds; this.tAt = performance.now(); this.duration = d.duration; });
     p.on('progress', (d) => { this.buffered = d.seconds; });
-    p.on('play', () => { this.paused = false; this.tAt = performance.now(); this.events.onPlay?.(); });
+    p.on('play', () => {
+      this.paused = false;
+      this.tAt = performance.now();
+      if (this.initialSeekPending > 0.5 && Math.abs((this.t || 0) - this.initialSeekPending) > 2) {
+        const target = this.initialSeekPending;
+        this.initialSeekPending = 0;
+        p.setCurrentTime(target).catch(() => {});
+      } else {
+        this.initialSeekPending = 0;
+      }
+      this.events.onPlay?.();
+    });
     p.on('pause', () => { this.paused = true; this.events.onPause?.(); });
     p.on('bufferstart', () => this.events.onBuffering?.(true));
     p.on('bufferend', () => this.events.onBuffering?.(false));
-    p.on('ended', () => this.events.onEnded?.());
+    p.on('ended', () => { this.wantPlaying = false; this.events.onEnded?.(); });
     p.on('playbackratechange', (d) => { this.rate = d.playbackRate; });
     p.on('error', (e) => this.events.onError?.(`Vimeo: ${e?.message || 'oynatma hatası'}`));
     try {
       await p.ready();
+      if (this._destroyed || this.player !== p) return;
       styleFrame();
-      this.duration = await p.getDuration();
-      if (startAt > 0) await p.setCurrentTime(startAt).catch(() => {});
+      this.duration = await p.getDuration().catch(() => 0);
+      if (startAt > 0.5) await p.setCurrentTime(startAt).catch(() => {});
       this.t = startAt; this.tAt = performance.now();
       this.events.onReady?.();
+      if (autoplay && this.wantPlaying) {
+        this.play();
+      }
     } catch (e) {
-      this.events.onError?.('Vimeo videosu açılamadı (gizli veya gömmeye kapalı olabilir)');
+      if (!this._destroyed) this.events.onError?.('Vimeo videosu açılamadı (gizli veya gömmeye kapalı olabilir)');
     }
   }
 
-  play() { this.wantPlaying = true; this.player?.play().catch(() => { this.events.onAutoplayBlocked?.(); this.setMuted(true); this.player?.play().catch(() => {}); }); }
+  play() {
+    this.wantPlaying = true;
+    this.player?.play().catch((err) => {
+      const isAutoBlock = !err || err.name === 'NotAllowedError' || /notallowed|interact|autoplay/i.test(String(err.message || err.name || ''));
+      if (isAutoBlock) {
+        this.muted = true;
+        this.events.onAutoplayBlocked?.();
+        this.player?.setMuted(true).then(() => this.player?.play()).catch(() => {});
+      }
+    });
+  }
   pause() { this.wantPlaying = false; this.player?.pause().catch(() => {}); }
   seek(t) { this.t = Math.max(0, t); this.tAt = performance.now(); this.player?.setCurrentTime(this.t).catch(() => {}); }
   getTime() { return this.paused ? this.t : this.t + ((performance.now() - this.tAt) / 1000) * this.rate; }
@@ -71,5 +99,5 @@ export class VimeoAdapter {
   setVolume(v) { this.player?.setVolume(Math.min(1, Math.max(0, v / 100))).catch(() => {}); }
   setMuted(m) { this.muted = m; this.player?.setMuted(m).catch(() => {}); }
   isMuted() { return this.muted; }
-  destroy() { try { this.player?.destroy(); } catch (e) { /* ignore */ } this.player = null; this.container.replaceChildren(); }
+  destroy() { this._destroyed = true; try { this.player?.destroy(); } catch (e) { /* ignore */ } this.player = null; this.container.replaceChildren(); }
 }

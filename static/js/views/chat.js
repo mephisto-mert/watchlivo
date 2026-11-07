@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v140';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v140';
-import { avatar } from '../profile.js?v=20261107_v140';
-import { api, qs } from '../api.js?v=20261107_v140';
-import { resolveMusicItem } from './selection-kinds.js?v=20261107_v140';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v140';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v141';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v141';
+import { avatar } from '../profile.js?v=20261107_v141';
+import { api, qs } from '../api.js?v=20261107_v141';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v141';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v141';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -223,12 +223,9 @@ export async function copyInvite() {
 
 export function buildChat(ctx) {
   const { actions } = ctx;
-  const list = h('div', { class: 'chat-list', id: 'chat-list' });
-  const typing = h('div', { class: 'typing' });
+  const list = h('div', { class: 'chat-list', id: 'chat-list', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions' });
+  const typing = h('div', { class: 'typing', 'aria-live': 'polite' });
   const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', enterkeyhint: 'send', autocomplete: 'off', 'aria-label': 'Mesaj', id: 'chat-input' });
-  const micBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Mikrofon', 'data-tip': 'Mikrofon', id: 'btn-mic', onclick: () => toggleMic() }, h('span', { html: icons.micOff, style: { display: 'flex' } }));
-  const camBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Kamera', 'data-tip': 'Kamera Aç/Kapat', id: 'btn-cam', onclick: () => toggleCam() }, h('span', { html: icons.cameraOff, style: { display: 'flex' } }));
-  const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
   const gifBtn = h('button', { type: 'button', class: 'ctl-action', id: 'btn-chat-gif', 'aria-label': 'GIF', title: 'GIF Ara ve Gönder', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
   const sendBtn = h('button', {
     type: 'button',
@@ -616,6 +613,11 @@ export function buildChat(ctx) {
   }
   let lastTyping = 0;
   input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && input.value.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (e.key === 'Enter' || e.keyCode === 13) {
       e.preventDefault();
       send();
@@ -627,7 +629,19 @@ export function buildChat(ctx) {
     (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && typeof window !== 'undefined' && window.innerWidth <= 960 && !window.matchMedia?.('(pointer: fine)')?.matches)
   );
   input.addEventListener('focus', () => {
-    if (isVirtualKbDevice()) document.body.classList.add('kb-open');
+    if (!document.body.classList.contains('kb-open')) {
+      const curW = window.innerWidth || document.documentElement.clientWidth || 0;
+      const curH = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (curW > 0 && curH > 0) {
+        preKbPortrait = curH >= curW;
+        if (preKbPortrait) maxPortraitH = Math.max(maxPortraitH, curH);
+        else maxLandscapeH = Math.max(maxLandscapeH, curH);
+      }
+    }
+    if (isVirtualKbDevice()) {
+      document.body.classList.add('kb-open');
+      if (preKbPortrait) document.body.classList.add('kb-portrait');
+    }
     try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     setTimeout(() => {
       try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
@@ -655,15 +669,18 @@ export function buildChat(ctx) {
     const inCall = Boolean(v?.inCall || micOn || camOn || screenOn);
     const stageOn = Boolean(v?.stageGridMode);
 
-    micBtn.classList.toggle('on', micOn); micBtn.classList.toggle('off', !micOn);
-    micBtn.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'flex' } }));
-    camBtn.classList.toggle('on', camOn); camBtn.classList.toggle('off', !camOn);
-    camBtn.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'flex' } }));
-    screenBtn.classList.toggle('on', screenOn); screenBtn.classList.toggle('off', !screenOn);
-
     discordCallBar.classList.toggle('in-call', inCall);
     dJoinBtn.classList.toggle('active', inCall);
+    dJoinBtn.setAttribute('aria-pressed', String(inCall));
     dJoinBtn.setAttribute('aria-label', inCall ? 'Ayrıl' : 'Sesliye Katıl');
+    dHeadMicBtn.setAttribute('aria-pressed', String(micOn));
+    dHeadCamBtn.setAttribute('aria-pressed', String(camOn));
+    dMicPill.setAttribute('aria-pressed', String(micOn));
+    dDeafPill.setAttribute('aria-pressed', String(deafened));
+    dCamPill.setAttribute('aria-pressed', String(camOn));
+    dScreenPill.setAttribute('aria-pressed', String(screenOn));
+    dStageBtn.setAttribute('aria-pressed', String(stageOn));
+    dStripBtn.setAttribute('aria-pressed', String(Boolean(v?.stripMode)));
     dJoinBtn.replaceChildren(
       h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
       inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
@@ -888,7 +905,10 @@ export function buildChat(ctx) {
       return;
     }
     const myName = state.self?.name || '';
-    const sig = `${myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
+    const myBase = myName.split('#')[0];
+    const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myVoteTag = myCidTail ? `${myBase}#${myCidTail}` : '';
+    const sig = `${myVoteTag || myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
     if (wrap.dataset.pollSig === sig) return;
     wrap.dataset.pollSig = sig;
     const total = (poll.options || []).reduce((acc, o) => acc + (o.votes?.length || 0), 0);
@@ -897,7 +917,7 @@ export function buildChat(ctx) {
       h('div', { class: 'chat-poll-opts' }, ...(poll.options || []).map((opt, idx) => {
         const count = (opt.votes || []).length;
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-        const voted = (opt.votes || []).some((u) => u === myName || String(u).startsWith(myName + '#'));
+        const voted = (opt.votes || []).some((u) => (myVoteTag ? (u === myVoteTag || (!String(u).includes('#') && u === myName)) : u === myName));
         return h('button', {
           type: 'button',
           class: `chat-poll-opt ${voted ? 'voted' : ''}`,
@@ -938,7 +958,7 @@ export function buildChat(ctx) {
             animationDelay: delay,
           },
         }, emoji);
-        document.body.appendChild(f);
+        (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(f);
         setTimeout(() => f.remove(), 1150 + i * 60);
       }
     } catch (_) {}
@@ -967,7 +987,7 @@ export function buildChat(ctx) {
             '--rot': rot,
           },
         }, emoji);
-        document.body.appendChild(p);
+        (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(p);
         setTimeout(() => p.remove(), 700);
       }
     } catch (e) { /* ignore */ }
@@ -999,8 +1019,11 @@ export function buildChat(ctx) {
     const msgObj = (state.mesh?.chat || []).find((x) => x.id === msgId);
     const reacts = msgObj?.reactions || {};
     const myName = state.self?.name || 'Misafir';
+    const myBase = myName.split('#')[0];
+    const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myReactTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const entries = Object.entries(reacts).filter(([, u]) => Array.isArray(u) && u.length > 0);
-    const sig = `${myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
+    const sig = `${myReactTag || myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
     if (wrap.dataset.reactSig === sig) return;
     wrap.dataset.reactSig = sig;
     if (!entries.length) {
@@ -1010,11 +1033,11 @@ export function buildChat(ctx) {
     }
     wrap.classList.remove('empty');
     wrap.replaceChildren(...entries.map(([em, users]) => {
-      const mine = users.some((u) => u === myName || String(u).startsWith(myName + '#'));
+      const mine = users.some((u) => (myReactTag ? (u === myReactTag || (!String(u).includes('#') && u === myName)) : u === myName));
       return h('button', {
         type: 'button',
         class: `msg-react-pill ${mine ? 'mine' : ''}`,
-        title: users.join(', '),
+        title: users.map((u) => String(u).split('#')[0]).join(', '),
         onclick: (e) => {
           e.stopPropagation();
           spawnReactionBurst(e.currentTarget, em);
@@ -1447,8 +1470,8 @@ export function buildChat(ctx) {
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
 
-  let maxPortraitH = 0;
-  let maxLandscapeH = 0;
+  let maxPortraitH = (typeof window !== 'undefined' && window.innerHeight >= window.innerWidth) ? window.innerHeight : 0;
+  let maxLandscapeH = (typeof window !== 'undefined' && window.innerWidth > window.innerHeight) ? window.innerHeight : 0;
   let preKbPortrait = typeof window !== 'undefined' ? (window.innerHeight >= window.innerWidth) : true;
   let destroyed = false;
   const onVisualViewportResize = () => {
@@ -1461,11 +1484,11 @@ export function buildChat(ctx) {
     const isInputTag = Boolean(activeEl && /^(INPUT|TEXTAREA)$/i.test(activeEl.tagName) && activeEl.type !== 'range' && activeEl.type !== 'checkbox' && activeEl.type !== 'radio' && activeEl.type !== 'file');
     const isChatFocused = Boolean(activeEl && (activeEl === input || (el.contains(activeEl) && isInputTag)));
     const isRoomOrPopupInput = Boolean(isChatFocused || (isInputTag && activeEl.closest?.('#mesh-root, #popup-root')));
-    const orientType = String(window.screen?.orientation?.type || '');
-    const physicalPortrait = orientType
-      ? orientType.startsWith('portrait')
-      : (!isRoomOrPopupInput ? rawH >= rawW : preKbPortrait);
-    if (!isRoomOrPopupInput) preKbPortrait = physicalPortrait;
+    const kbWasOpen = document.body.classList.contains('kb-open');
+    const physicalPortrait = (kbWasOpen || isRoomOrPopupInput)
+      ? preKbPortrait
+      : ((rawW > 0 && rawH > 0) ? (rawH >= rawW) : preKbPortrait);
+    if (!isRoomOrPopupInput && !kbWasOpen) preKbPortrait = physicalPortrait;
     const isLandscape = !physicalPortrait && (rawW > rawH * 1.08);
     if (!isRoomOrPopupInput) {
       if (isLandscape) maxLandscapeH = Math.max(maxLandscapeH, rawH, vvH || 0);
@@ -1573,10 +1596,10 @@ export function buildChat(ctx) {
     },
     setMicLevel(lvl) {
       const n = Math.max(0, Math.min(1, Number(lvl || 0)));
-      micBtn.classList.toggle('speaking', n > 0.08);
-      micBtn.style.setProperty('--mic-lvl', n.toFixed(2));
       dMicPill.classList.toggle('speaking', n > 0.08);
       dMicPill.style.setProperty('--mic-lvl', n.toFixed(2));
+      dHeadMicBtn.classList.toggle('speaking', n > 0.08);
+      dHeadMicBtn.style.setProperty('--mic-lvl', n.toFixed(2));
     },
     destroy() {
       destroyed = true;

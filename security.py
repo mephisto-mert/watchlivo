@@ -53,20 +53,142 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
                     shared_entropy = cand
                     break
             if shared_entropy:
-                _EPHEMERAL[name] = hmac.new(
-                    shared_entropy.encode("utf-8"),
-                    f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
-                    hashlib.sha256,
-                ).digest()
+                _EPHEMERAL[name] = (
+                    hmac.new(
+                        shared_entropy.encode("utf-8"),
+                        f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
+                        hashlib.sha256,
+                    )
+                    .hexdigest()[:32]
+                    .encode("ascii")
+                )
                 if name not in _WARNED:
                     _WARNED.add(name)
-                    print(f"[security] {name} tanımlı değil — özel küme entropisinden deterministik HMAC sırrı üretildi.")
+                    print(f"[security] {name} tanımlı değil — özel küme entropisinden deterministik ASCII HMAC sırrı üretildi.")
             else:
-                _EPHEMERAL[name] = secrets.token_bytes(32)
+                _EPHEMERAL[name] = secrets.token_hex(16).encode("ascii")
                 if name not in _WARNED:
                     _WARNED.add(name)
                     print(f"[security] {name} tanımlı değil — süreç bazlı rastgele CSPRNG sırrı üretildi.")
         return _EPHEMERAL[name]
+
+
+class BoundedTTLCache:
+    """Thread-safe dict-compatible LRU + TTL cache preventing unbounded RAM growth."""
+
+    def __init__(self, maxsize: int = 2048, default_ttl: float = 1800.0, ttl: Optional[float] = None) -> None:
+        self.maxsize = max(16, int(maxsize))
+        self.default_ttl = float(ttl if ttl is not None else default_ttl)
+        self._lock = threading.RLock()
+        self._data: "OrderedDict[object, Tuple[object, float]]" = OrderedDict()
+
+    def _purge_expired_locked(self, now_t: float, max_scan: int = 64) -> None:
+        scanned = 0
+        stale = []
+        for k, (_, exp) in self._data.items():
+            if exp > 0 and exp <= now_t:
+                stale.append(k)
+            scanned += 1
+            if scanned >= max_scan:
+                break
+        for k in stale:
+            self._data.pop(k, None)
+
+    def get(self, key: object, default: object = None) -> object:
+        now_t = time.time()
+        with self._lock:
+            item = self._data.get(key)
+            if item is None:
+                return default
+            val, exp = item
+            if exp > 0 and exp <= now_t:
+                self._data.pop(key, None)
+                return default
+            self._data.move_to_end(key)
+            return val
+
+    def set(self, key: object, value: object, ttl: Optional[float] = None) -> None:
+        eff_ttl = self.default_ttl if ttl is None else float(ttl)
+        now_t = time.time()
+        exp = (now_t + eff_ttl) if eff_ttl > 0 else 0.0
+        with self._lock:
+            if key in self._data:
+                self._data.pop(key, None)
+            self._data[key] = (value, exp)
+            if len(self._data) > self.maxsize:
+                self._purge_expired_locked(now_t, max_scan=128)
+                while len(self._data) > self.maxsize:
+                    self._data.popitem(last=False)
+
+    def __getitem__(self, key: object) -> object:
+        sentinel = object()
+        val = self.get(key, sentinel)
+        if val is sentinel:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key: object, value: object) -> None:
+        self.set(key, value)
+
+    def __contains__(self, key: object) -> bool:
+        sentinel = object()
+        return self.get(key, sentinel) is not sentinel
+
+    def setdefault(self, key: object, default: object = None) -> object:
+        sentinel = object()
+        with self._lock:
+            cur = self.get(key, sentinel)
+            if cur is not sentinel:
+                return cur
+            self.set(key, default)
+            return default
+
+    def pop(self, key: object, *args: object) -> object:
+        now_t = time.time()
+        with self._lock:
+            item = self._data.pop(key, None)
+            if item is not None:
+                val, exp = item
+                if exp <= 0 or exp > now_t:
+                    return val
+            if args:
+                return args[0]
+            raise KeyError(key)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+    def keys(self):
+        now_t = time.time()
+        with self._lock:
+            return [k for k, (_, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def values(self):
+        now_t = time.time()
+        with self._lock:
+            return [v for _, (v, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def items(self):
+        now_t = time.time()
+        with self._lock:
+            return [(k, v) for k, (v, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def delete(self, key: object) -> None:
+        with self._lock:
+            self._data.pop(key, None)
+
+    def update(self, mapping: Any) -> None:
+        items = mapping.items() if hasattr(mapping, "items") else mapping
+        for k, v in items:
+            self.set(k, v)
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
 
 
 def constant_time_eq(left: str, right: str) -> bool:
@@ -261,7 +383,7 @@ class RateLimiter:
 
 
 def client_ip(scope_or_request) -> str:
-    """Best-effort client IP honouring common proxy headers."""
+    """Best-effort client IP honouring verified proxy headers without client spoofing."""
     headers: Dict[str, str] = {}
     if isinstance(scope_or_request, dict):
         for k, v in (scope_or_request.get("headers") or []):
@@ -277,28 +399,44 @@ def client_ip(scope_or_request) -> str:
     edge_secret = (os.environ.get("EDGE_ORIGIN_SECRET") or os.environ.get("ADMIN_SECRET") or "").strip()
     req_edge_secret = (headers.get("x-watchlivo-edge-secret") or "").strip()
     if edge_secret and req_edge_secret and constant_time_eq(req_edge_secret, edge_secret):
-        edge_ip = (headers.get("x-watchlivo-client-ip") or "").split(",")[0].strip()
-        if edge_ip:
-            try:
-                ipaddress.ip_address(edge_ip)
-                return edge_ip[:64]
-            except Exception:
-                pass
+        for hdr_name in ("x-watchlivo-client-ip", "cf-connecting-ip"):
+            edge_ip = (headers.get(hdr_name) or "").split(",")[0].strip()
+            if edge_ip:
+                try:
+                    ipaddress.ip_address(edge_ip)
+                    return edge_ip[:64]
+                except Exception:
+                    continue
     trust_vercel = os.environ.get("VERCEL") == "1"
     trust_proxy = os.environ.get("WATCHLIVO_TRUST_PROXY") == "1" or bool(os.environ.get("RENDER"))
-    trusted_hdrs = (
-        ("cf-connecting-ip", "x-vercel-forwarded-for")
-        if (trust_vercel and not trust_proxy)
-        else (("cf-connecting-ip", "x-vercel-forwarded-for", "x-real-ip", "x-forwarded-for") if trust_proxy else ())
-    )
-    for hdr_name in trusted_hdrs:
-        try:
-            val = (headers.get(hdr_name) or "").split(",")[0].strip()
-            if val:
-                ipaddress.ip_address(val)
-                return val[:64]
-        except Exception:
-            continue
+    if trust_vercel and not trust_proxy:
+        v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
+        if v_ip:
+            try:
+                ipaddress.ip_address(v_ip)
+                return v_ip[:64]
+            except Exception:
+                pass
+    elif trust_proxy:
+        if headers.get("cf-ray"):
+            cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
+            if cf_ip:
+                try:
+                    ipaddress.ip_address(cf_ip)
+                    return cf_ip[:64]
+                except Exception:
+                    pass
+        xff = headers.get("x-forwarded-for") or ""
+        if xff:
+            for raw_part in reversed(xff.split(",")):
+                cand = raw_part.strip()
+                if not cand:
+                    continue
+                try:
+                    ipaddress.ip_address(cand)
+                    return cand[:64]
+                except Exception:
+                    continue
     try:
         client = getattr(scope_or_request, "client", None)
         if client and getattr(client, "host", None):
@@ -325,15 +463,40 @@ def too_many_response(retry_after: float):
     )
 
 
-_SAFE_HOST_CACHE: "OrderedDict[Tuple[str, int], float]" = OrderedDict()
-_SAFE_HOST_LOCK = threading.Lock()
-
-
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+_NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
+_NAT64_LOCAL_NETWORK = ipaddress.ip_network("64:ff9b:1::/48")
+
+
+def is_ip_public_global(ip_obj: ipaddress._BaseAddress) -> bool:
+    """Validate that an IPv4/IPv6 address (and any embedded/mapped IPv4) is globally routable."""
+    candidates = [ip_obj]
+    if isinstance(ip_obj, ipaddress.IPv6Address):
+        if ip_obj.ipv4_mapped is not None:
+            candidates.append(ip_obj.ipv4_mapped)
+        if ip_obj.sixtofour is not None:
+            candidates.append(ip_obj.sixtofour)
+        if ip_obj.teredo is not None:
+            candidates.extend(ip_obj.teredo)
+        if ip_obj in _NAT64_NETWORK or ip_obj in _NAT64_LOCAL_NETWORK:
+            candidates.append(ipaddress.IPv4Address(int(ip_obj) & 0xFFFFFFFF))
+    for ip in candidates:
+        if (
+            not ip.is_global
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+            or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK)
+        ):
+            return False
+    return True
 
 
 def is_safe_public_url(url: str) -> bool:
-    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT ranges (SSRF guard)."""
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT/NAT64 ranges."""
     import socket
     import urllib.parse
 
@@ -341,32 +504,22 @@ def is_safe_public_url(url: str) -> bool:
         p = urllib.parse.urlparse(str(url or "").strip())
         if p.scheme not in ("http", "https") or not p.hostname:
             return False
-        host = p.hostname.lower()
+        host = p.hostname.lower().rstrip(".")
+        if not host or host in ("localhost", "metadata.google.internal", "metadata") or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
+            return False
+        try:
+            lit_ip = ipaddress.ip_address(host)
+            return is_ip_public_global(lit_ip)
+        except ValueError:
+            pass
         port = int(p.port or (443 if p.scheme == "https" else 80))
-        now_t = time.time()
-        with _SAFE_HOST_LOCK:
-            exp = _SAFE_HOST_CACHE.get((host, port))
-            if exp and exp > now_t:
-                return True
         infos = socket.getaddrinfo(host, port)
         if not infos:
             return False
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-                or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK)
-            ):
+            if not is_ip_public_global(ip):
                 return False
-        with _SAFE_HOST_LOCK:
-            _SAFE_HOST_CACHE[(host, port)] = now_t + 5.0
-            while len(_SAFE_HOST_CACHE) > 1024:
-                _SAFE_HOST_CACHE.popitem(last=False)
         return True
     except Exception:
         return False

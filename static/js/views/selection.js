@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261107_v140';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261107_v140';
-import { api, qs } from '../api.js?v=20261107_v140';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261107_v140';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261107_v140';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261107_v140';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v140';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261107_v141';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261107_v141';
+import { api, qs } from '../api.js?v=20261107_v141';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261107_v141';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261107_v141';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261107_v141';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v141';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261107_v140';
+} from '../store.js?v=20261107_v141';
 
 let _activeHomePick = null;
 
@@ -473,7 +473,10 @@ export function openYtPersonalizeModal(onUpdated) {
 export function createSelection({ onPick, compact = false, initialProvider = null } = {}) {
   const root = h('div', { class: 'selection fade-in' });
   let provider = initialProvider ? getProvider(initialProvider) : null;
-  let superQuery = '';
+  let superQuery = (() => {
+    if (compact || initialProvider) return '';
+    try { return (new URLSearchParams(window.location.search).get('q') || '').trim().slice(0, 120); } catch (_) { return ''; }
+  })();
   let catFilter = 'all';
   let showAllProviders = true;
   let showTrending = false;
@@ -705,7 +708,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         autoRotateTimer = null;
         return;
       }
-      if (compact || provider || superQuery || heroHovered || !autoRotateEnabled) return;
+      if (compact || provider || superQuery || !showTrending || heroHovered || !autoRotateEnabled) return;
       const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
       if (!heroPool.length) return;
       heroIndex = (heroIndex + 1) % heroPool.length;
@@ -725,10 +728,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return; }
     await onPick(media);
   };
+  let _unsubCloudMedia = null;
   if (!compact) {
     _activeHomePick = pickSafe;
     let lastSyncedStamp = state.cloudMediaSynced || 0;
-    const _unsubCloudMedia = subscribe((s) => {
+    _unsubCloudMedia = subscribe((s) => {
       if (!root.isConnected) { _unsubCloudMedia(); return; }
       if ((s.cloudMediaSynced || 0) !== lastSyncedStamp) {
         lastSyncedStamp = s.cloudMediaSynced || 0;
@@ -873,6 +877,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   function renderGrid() {
+    const prevCatScroll = root.querySelector('.provider-cat-bar')?.scrollLeft || 0;
     const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
@@ -912,9 +917,18 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       if (e.key === 'Enter') run();
       else if (e.key === 'Escape') hideCmdk();
     });
+    input.addEventListener('focus', () => {
+      if (window.innerHeight <= 520) {
+        setTimeout(() => { try { searchEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {} }, 120);
+      }
+    });
     input.addEventListener('input', () => {
       clearTimeout(cmdkTimer);
       const q = input.value.trim();
+      if (!q && superQuery) {
+        superQuery = '';
+        results.replaceChildren();
+      }
       if (compact || q.length < 2 || parseVideoUrl(q)) {
         hideCmdk();
         return;
@@ -1044,6 +1058,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         class: 'provider-cat-pill random-pill',
         onclick: (e) => pickRandomMovie(e.currentTarget),
       }, '🎲 Rastgele Film') : null);
+    if (!root._catWheelBound) {
+      root._catWheelBound = true;
+      root.addEventListener('wheel', (e) => {
+        const cb = e.target?.closest?.('.provider-cat-bar');
+        if (cb && Math.abs(e.deltaY) > Math.abs(e.deltaX) && cb.scrollWidth > cb.clientWidth) {
+          e.preventDefault();
+          cb.scrollLeft += e.deltaY;
+        }
+      }, { passive: false });
+    }
 
     const openTvSeriesModal = (tvItem, tvProv) => {
       const box = h('div', { style: { minHeight: '340px' } });
@@ -1275,8 +1299,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       input,
       voiceSearchBtn,
       !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
-      h('button', { class: 'btn primary', onclick: run }, 'Ara'),
-      !compact ? cmdkDropdown : null);
+      h('button', { class: 'btn primary', onclick: run }, 'Ara'));
+    if (!compact && !root._cmdkOutsideBound) {
+      root._cmdkOutsideBound = true;
+      document.addEventListener('pointerdown', (ev) => {
+        const dd = document.getElementById('wl-cmdk-dropdown');
+        if (!dd || dd.style.display === 'none') return;
+        if (ev.target?.closest?.('.home-search, #wl-cmdk-dropdown')) return;
+        dd.style.display = 'none';
+      }, { passive: true });
+    }
 
     const topBar = compact
       ? h('div', {}, searchEl, catBar)
@@ -1301,6 +1333,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (!trendingFetched && !trendingLoading && !compact) {
       ensureTrending().then(() => {
         if (!provider && root.isConnected && !superQuery) {
+          if (!showTrending) {
+            updateHeroBannerInPlace();
+            return;
+          }
           const activeInp = root.querySelector('input');
           if (activeInp && (document.activeElement === activeInp || activeInp.value.trim())) {
             updateHeroBannerInPlace();
@@ -1515,12 +1551,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const showYtHome = false;
     root.replaceChildren(
       topBar,
+      ...(!compact ? [cmdkDropdown] : []),
       results,
       ...(heroBanner ? [heroBanner] : []),
       ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
       ...(latestEpsRail ? [latestEpsRail] : []),
       gridSection);
+    if (prevCatScroll > 0) catBar.scrollLeft = prevCatScroll;
     if (superQuery) runSuperSearch(superQuery, results);
   }
 
@@ -1674,6 +1712,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       const favTab = root.querySelector('.cat-tab-pill[data-cat="favs"]');
       if (favTab) favTab.click();
     }, 60);
+  };
+  root.destroy = () => {
+    if (autoRotateTimer) { clearInterval(autoRotateTimer); autoRotateTimer = null; }
+    try { _unsubHomeYt?.(); } catch (_) {}
+    try { _unsubCloudMedia?.(); } catch (_) {}
+    document.removeEventListener('pointerdown', _onDocPointerDown, true);
   };
   return root;
 }

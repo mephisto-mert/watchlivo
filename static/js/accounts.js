@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261107_v140';
-import { api, qs } from './api.js?v=20261107_v140';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261107_v140';
+import { h, toast, popup } from './ui.js?v=20261107_v141';
+import { api, qs } from './api.js?v=20261107_v141';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261107_v141';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -27,14 +27,7 @@ function readLocalAccounts() {
     localStorage.removeItem('vortex_accounts_v5');
     localStorage.removeItem('vortex_accounts_v6');
     const scopedKey = _scopedAccountsKey();
-    let raw = localStorage.getItem(scopedKey) || '';
-    if ((!raw || raw === '{}') && scopedKey !== `${LS_KEY}:guest`) {
-      const guestRaw = localStorage.getItem(`${LS_KEY}:guest`) || '';
-      if (guestRaw && guestRaw !== '{}') {
-        raw = guestRaw;
-        localStorage.setItem(scopedKey, guestRaw);
-      }
-    }
+    const raw = localStorage.getItem(scopedKey) || '';
     return _zkDecode(raw);
   } catch (e) { return {}; }
 }
@@ -263,7 +256,7 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
           local[p.id] = {
             loginSatisfied: true,
             userAuthenticated: true,
-            accountEmail: em,
+            accountEmail: maskAccountEmail(em),
             profileName: pr,
             updatedAt: Date.now(),
           };
@@ -326,7 +319,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261105_v117',
+        v: '20261107_v141',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

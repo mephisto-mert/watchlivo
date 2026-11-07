@@ -1,5 +1,6 @@
 // Minimal reactive store (mirrors Rave's redux slices: self, view, mesh, selection, uiPrefs/theme schemas).
-const listeners = new Set();
+const _STORE_SINGLETON = (typeof window !== 'undefined' && window.__wlStoreSingleton) || null;
+const listeners = _STORE_SINGLETON ? _STORE_SINGLETON.listeners : new Set();
 const UI_PREFS_KEY = 'vortex_ui_prefs_v1';
 
 export const THEME_SCHEMAS = [
@@ -79,13 +80,14 @@ export function applyUiPrefs(prefs = state?.uiPrefs) {
   }
 }
 
-export const state = {
+export const state = _STORE_SINGLETON ? _STORE_SINGLETON.state : {
   self: null,                         // { id, name, color, emoji }
   route: { name: 'home', params: {} },
   view: { left: 'Collapsed', right: 'Collapsed' },   // Rave mesh/view: Search, Vote, Friends, Participants, Globe, Settings, MeshList, Collapsed
   mesh: null,                         // serialized room from server
   clientId: null,
   connection: 'offline',              // offline | connecting | online
+  voice: { inCall: false, micOn: false, camOn: false, screenOn: false, deafened: false, speaking: false },
   selection: { provider: null, query: '' },
   chatVisible: true,
   unseenChat: 0,
@@ -102,6 +104,9 @@ export const state = {
     loaded: false,
   },
 };
+if (typeof window !== 'undefined' && !window.__wlStoreSingleton) {
+  window.__wlStoreSingleton = { state, listeners };
+}
 
 applyUiPrefs(state.uiPrefs);
 
@@ -124,11 +129,7 @@ export function set(patch) {
               localStorage.setItem(aKey, gVal);
             }
           }
-          const gAcc = localStorage.getItem('vortex_accounts_v7:guest');
-          const sUid = String(state.self?.uid || state.self?.id || '').trim().toLowerCase();
-          if (gAcc && gAcc !== '{}' && sUid && !localStorage.getItem(`vortex_accounts_v7:${sUid}`)) {
-            localStorage.setItem(`vortex_accounts_v7:${sUid}`, gAcc);
-          }
+
         } catch (_) {}
       }
       _activeAccountScope = nextScope;
@@ -145,8 +146,9 @@ export function set(patch) {
   }
 }
 
-export function setUiPref(patch) {
-  const next = { ...state.uiPrefs, ...patch };
+export function setUiPref(patch, val) {
+  const patchObj = typeof patch === 'string' ? { [patch]: val } : (patch && typeof patch === 'object' ? patch : {});
+  const next = { ...state.uiPrefs, ...patchObj };
   try { localStorage.setItem(UI_PREFS_KEY, JSON.stringify(next)); } catch (e) { /* ignore */ }
   applyUiPrefs(next);
   set({ uiPrefs: next });
@@ -334,9 +336,21 @@ const _normTs = (v) => {
 };
 
 const _authHdrs = () => {
-  const tok = state.self?.authToken;
-  return (tok && !state.self?.isGuest) ? { Authorization: `Bearer ${tok}` } : {};
+  const s = state.self;
+  const tok = s?.isGuest ? s?.guestToken : s?.authToken;
+  return tok ? { Authorization: `Bearer ${tok}` } : {};
 };
+
+function _boundProgressKey(raw) {
+  const s = String(raw || '').trim();
+  if (s.length <= 120) return s;
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${s.slice(0, 96)}_${(h >>> 0).toString(16).padStart(8, '0')}`;
+}
 
 export function getCloudUid() {
   const s = state.self;
@@ -389,15 +403,26 @@ export async function syncCloudUserMedia(force = false) {
     const validP = pRes.status === 'fulfilled' && pRes.value?.authenticated === true && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
     if (validP) {
       const cloudProg = validP;
+      const cloudKeys = new Set();
+      for (const c of cloudProg) {
+        const mtype = c.mediaType === 'tv' ? 'tv' : 'movie';
+        const ck = _boundProgressKey(c.key || (c.tmdbId ? `${mtype}:${c.tmdbId}` : c.title || ''));
+        if (ck) cloudKeys.add(ck);
+      }
       const localList = getWatchHistory();
       const byKey = new Map();
       for (const loc of localList) {
-        const k = String(loc.historyId || loc.key || '');
-        if (k) byKey.set(k, loc);
+        const k = _boundProgressKey(loc.historyId || loc.key || '');
+        if (!k) continue;
+        if (!cloudKeys.has(k) && (loc.cloudSynced || (cloudProg.length === 0 && _normTs(loc.updatedAt) < now - 4000))) {
+          historyChanged = true;
+          continue;
+        }
+        byKey.set(k, loc);
       }
       for (const c of cloudProg) {
         const mtype = c.mediaType === 'tv' ? 'tv' : 'movie';
-        const k = String(c.key || (c.tmdbId ? `${mtype}:${c.tmdbId}` : c.title || ''));
+        const k = _boundProgressKey(c.key || (c.tmdbId ? `${mtype}:${c.tmdbId}` : c.title || ''));
         if (!k) continue;
         const cTs = _normTs(c.updatedAt);
         const prev = byKey.get(k);
@@ -439,6 +464,7 @@ export async function syncCloudUserMedia(force = false) {
             completed: Boolean(c.completed || syncedPct >= 95),
             epProgress: mergedEpProg,
             year: c.year || prev?.year || '',
+            cloudSynced: true,
             updatedAt: cTs || now,
           });
           historyChanged = true;
@@ -556,12 +582,19 @@ export function clearWatchHistory() {
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({ action: 'clear' }),
       keepalive: true,
+    }).then((r) => {
+      if (r && r.ok) {
+        try {
+          const cur = getWatchHistory().map((x) => (String(x.historyId || x.key || '') === id ? { ...x, cloudSynced: true } : x));
+          localStorage.setItem(_historyKey(), JSON.stringify(cur));
+        } catch (_) {}
+      }
     }).catch(() => {});
   }
 }
 
 export function removeWatchProgress(itemKey) {
-  const k = String(itemKey || '').trim();
+  const k = _boundProgressKey(itemKey);
   if (!k) return;
   let removedCloudKey = k;
   try {
@@ -631,7 +664,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const rawDur = Math.floor(Number(duration || media.duration || 0));
   const rawTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 3 ? Math.floor(Number(currentTime)) : 0;
   const mtype = media.mediaType === 'tv' ? 'tv' : 'movie';
-  const id = media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || '');
+  const id = _boundProgressKey(media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || ''));
   const existingList = getWatchHistory();
   const prev = existingList.find((item) => String(item.historyId || item.key || '') === id);
   const sNum = Math.max(1, Number(media.season || 1));

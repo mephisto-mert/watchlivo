@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261107_v140';
-import { api } from './api.js?v=20261107_v140';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261107_v140';
+import { h, icons, popup, toast } from './ui.js?v=20261107_v141';
+import { api } from './api.js?v=20261107_v141';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261107_v141';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261107_v140';
+} from './store.js?v=20261107_v141';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -32,6 +32,20 @@ export function normalizeHandle(raw = '', fallbackName = '') {
   const cleanFb = foldTurkish(String(fallbackName || '').trim().replace(/^@+/, '').replace(/#\d{2,6}$/, '')).replace(/[^a-z0-9_.-]/g, '').slice(0, 20);
   if (cleanFb.length >= 2) return cleanFb;
   return cleanRaw || cleanFb || 'uye';
+}
+
+export function sanitizeAvatarUrl(raw = '') {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const compact = s.replace(/[\u0000-\u0020]+/g, '');
+  if (/^(?:javascript:|vbscript:|data:text\/|data:application\/|data:image\/svg)/i.test(compact)) return '';
+  if (/\.svg(?:$|[?#])/i.test(compact)) return '';
+  if (/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(compact)) {
+    return compact.length <= 62000 ? compact : '';
+  }
+  if (/^https:\/\//i.test(s) && s.length <= 2048) return s;
+  if ((s.startsWith('/static/') || s.startsWith('/uploads/')) && !s.startsWith('//') && s.length <= 512) return s;
+  return '';
 }
 
 function _syncLiveSelfEverywhere(p) {
@@ -135,8 +149,8 @@ export function saveGuestProfile(data = {}) {
     handle,
     email: '',
     color: data.color || guestPrev.color || AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)],
-    avatar: String(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? '').trim(),
-    avatarUrl: String(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? '').trim(),
+    avatar: sanitizeAvatarUrl(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? ''),
+    avatarUrl: sanitizeAvatarUrl(data.avatarUrl ?? data.avatar ?? guestPrev.avatarUrl ?? ''),
     bio: String(data.bio ?? guestPrev.bio ?? '').trim().slice(0, 160),
     statusText: String(data.statusText ?? prev.statusText ?? '').trim().slice(0, 60),
     statusEmoji: String(data.statusEmoji ?? prev.statusEmoji ?? '🍿').trim().slice(0, 12) || '🍿',
@@ -147,6 +161,7 @@ export function saveGuestProfile(data = {}) {
     medal: '🍿 Misafir İzleyici',
     authProvider: 'guest',
     authToken: '',
+    guestToken: String(data.guestToken ?? guestPrev.guestToken ?? '').trim(),
     verified: false,
     isGuest: true,
     guestConfirmed: true,
@@ -158,10 +173,12 @@ export function saveGuestProfile(data = {}) {
   _syncLiveSelfEverywhere(p);
   if (!data._skipProvision && typeof fetch === 'function') {
     setTimeout(() => {
+      const gHdrs = { 'Content-Type': 'application/json' };
+      if (p.guestToken) gHdrs.Authorization = `Bearer ${p.guestToken}`;
       fetch('/api/rave/social/guest', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
+        headers: gHdrs,
         body: JSON.stringify({
           uid: p.uid,
           name: p.name,
@@ -172,9 +189,18 @@ export function saveGuestProfile(data = {}) {
           statusText: p.statusText,
           statusEmoji: p.statusEmoji,
         }),
+      }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+        if (d?.guestToken) {
+          p.guestToken = String(d.guestToken);
+          try {
+            localStorage.setItem(KEY, JSON.stringify(p));
+            sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p));
+            set({ self: { ...p } });
+          } catch (_) {}
+        }
+        syncSocialState(true).catch(() => {});
+        pushPresenceHeartbeat().catch(() => {});
       }).catch(() => {});
-      syncSocialState(true).catch(() => {});
-      pushPresenceHeartbeat().catch(() => {});
     }, 30);
   }
   return p;
@@ -193,7 +219,7 @@ export function saveProfile(data = {}) {
   const rawHandle = normalizeHandle(data.handle ?? (sameAccount ? prev.handle : '') ?? '', name);
   const watchMinutes = Math.max(0, Number(data.watchMinutes ?? (sameAccount ? prev.watchMinutes : 0) ?? 0) || 0);
   const computedMedal = data.medal || (sameAccount ? prev.medal : '') || (watchMinutes >= 300 ? '🥇 Altın İzleyici' : watchMinutes >= 120 ? '🥈 Gümüş İzleyici' : watchMinutes >= 30 ? '🥉 Bronz İzleyici' : '⚡ Yeni İzleyici');
-  const avatarUrl = String(data.avatarUrl ?? data.avatar ?? (sameAccount ? (prev.avatarUrl ?? prev.avatar) : '') ?? '').trim();
+  const avatarUrl = sanitizeAvatarUrl(data.avatarUrl ?? data.avatar ?? (sameAccount ? (prev.avatarUrl ?? prev.avatar) : '') ?? '');
   const hideLocation = asBool(data.hideLocation ?? (sameAccount ? prev.hideLocation : false) ?? false);
   const hideWatching = asBool(data.hideWatching ?? (sameAccount ? prev.hideWatching : false) ?? false);
   const hideFriends = asBool(data.hideFriends ?? (sameAccount ? prev.hideFriends : false) ?? false);
@@ -271,14 +297,21 @@ export function logoutProfile() {
     try {
       const vaultRaw = JSON.parse(localStorage.getItem(VAULT_KEY) || '{}');
       if (vaultRaw && typeof vaultRaw === 'object') {
+        const normHnd = prevHandle ? normalizeHandle(prevHandle) : '';
         for (const k of Object.keys(vaultRaw)) {
+          const kLow = String(k).trim().toLowerCase();
           const entry = vaultRaw[k];
-          if (!entry || typeof entry !== 'object') continue;
-          const eUid = String(entry.uid || entry.id || '').trim();
-          const eMail = String(entry.email || '').trim().toLowerCase();
-          const eHnd = String(entry.handle || '').trim().toLowerCase();
-          if ((prevUid && eUid === prevUid) || (prevEmail && eMail === prevEmail) || (prevHandle && eHnd === prevHandle) || (prevTok && entry.authToken === prevTok)) {
+          if ((prevEmail && kLow === prevEmail) || (prevHandle && (kLow === prevHandle || kLow === normHnd)) || (typeof entry === 'string' && prevTok && entry === prevTok)) {
             delete vaultRaw[k];
+            continue;
+          }
+          if (entry && typeof entry === 'object') {
+            const eUid = String(entry.uid || entry.id || '').trim();
+            const eMail = String(entry.email || '').trim().toLowerCase();
+            const eHnd = String(entry.handle || '').trim().toLowerCase();
+            if ((prevUid && eUid === prevUid) || (prevEmail && eMail === prevEmail) || (prevHandle && (eHnd === prevHandle || eHnd === normHnd)) || (prevTok && entry.authToken === prevTok)) {
+              delete vaultRaw[k];
+            }
           }
         }
         localStorage.setItem(VAULT_KEY, JSON.stringify(vaultRaw));
@@ -289,6 +322,7 @@ export function logoutProfile() {
     localStorage.removeItem('vortex_self');
     localStorage.removeItem('rave_user');
     localStorage.removeItem('watchlivo_auth_pending_redirect');
+    localStorage.removeItem('vortex_accounts_v7:guest');
     sessionStorage.removeItem('watchlivo_auth_pending_pw');
     sessionStorage.removeItem('watchlivo_auth_pending_email');
     sessionStorage.removeItem('vortex_temp_guest_v1');
@@ -341,6 +375,13 @@ export async function verifyAndRefreshSession() {
         credentials: 'same-origin',
         headers: { Authorization: `Bearer ${s.authToken}` },
       });
+      if (r.status === 401) {
+        saveGuestProfile({
+          name: (s.name && s.name !== 'Üye' && !/^Misafir/i.test(s.name)) ? s.name : '',
+          color: s.color,
+        });
+        return null;
+      }
       if (r.ok) {
         const d = await r.json().catch(() => null);
         if (d?.authenticated && d?.user) {
@@ -382,8 +423,8 @@ export function avatar(user, size = 32, { speaking = false, online = false } = {
   const medalTxt = user?.medal ? ` · ${user.medal}` : '';
   const minsTxt = user?.watchMinutes ? ` · ${user.watchMinutes} dk izleme` : '';
   const label = user?.name ? (user?.handle ? `${user.name} (@${String(user.handle).replace(/^@/, '')})${medalTxt}${minsTxt}` : `${user.name}${medalTxt}${minsTxt}`) : '';
-  const imgUrl = String(user?.avatarUrl || user?.avatar || '').trim();
-  const hasImg = Boolean(imgUrl && (imgUrl.startsWith('https://') || imgUrl.startsWith('http://') || imgUrl.startsWith('/static/') || imgUrl.startsWith('/uploads/') || imgUrl.startsWith('data:image/') || imgUrl.startsWith('blob:')));
+  const imgUrl = sanitizeAvatarUrl(user?.avatarUrl || user?.avatar || '');
+  const hasImg = Boolean(imgUrl);
   const el = h('span', {
     class: `avatar ${speaking ? 'speaking' : ''} ${user?.verified ? 'verified-avatar' : ''} ${hasImg ? 'has-img-avatar' : ''}`,
     title: label,
@@ -998,7 +1039,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
       };
 
-      const syncAvatarEverywhere = (newAvatarDataUrl) => {
+      const syncAvatarEverywhere = (rawAvatarDataUrl) => {
+        const newAvatarDataUrl = rawAvatarDataUrl ? sanitizeAvatarUrl(rawAvatarDataUrl) : '';
+        if (rawAvatarDataUrl && !newAvatarDataUrl) {
+          toast('⚠️ Geçersiz veya desteklenmeyen görsel biçimi engellendi.');
+          return;
+        }
         selectedAvatarUrl = newAvatarDataUrl;
         avatarInp.value = newAvatarDataUrl.startsWith('data:image/') ? '' : newAvatarDataUrl;
         refreshLiveCard();
@@ -1055,15 +1101,23 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       const fileInp = h('input', {
         type: 'file',
         id: 'wl-avatar-file-input',
-        accept: 'image/*,image/heic,image/heif,image/webp,image/gif',
+        accept: 'image/png,image/jpeg,image/webp,image/gif',
         style: { position: 'absolute', width: '1px', height: '1px', opacity: '0', pointerEvents: 'none' },
         onchange: (e) => {
           const file = e.target.files?.[0];
           if (!file) return;
+          if (/svg/i.test(String(file.type || '')) || /\.svg$/i.test(String(file.name || ''))) {
+            toast('⚠️ SVG dosyaları güvenlik nedeniyle profil fotoğrafı olarak kullanılamaz.');
+            e.target.value = '';
+            return;
+          }
           const reader = new FileReader();
           reader.onload = (ev) => {
             const rawDataUrl = String(ev.target?.result || '');
-            if (!rawDataUrl) return;
+            if (!rawDataUrl || /^data:image\/svg/i.test(rawDataUrl)) {
+              toast('⚠️ Geçersiz profil fotoğrafı biçimi.');
+              return;
+            }
             const img = new Image();
             img.onload = () => {
               try {
@@ -1077,16 +1131,18 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                 const sy = Math.max(0, ((img.height || sz) - minSide) / 2);
                 cctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, sz, sz);
                 const outUrl = canvas.toDataURL('image/jpeg', 0.85);
-                syncAvatarEverywhere(outUrl && outUrl.length > 64 ? outUrl : rawDataUrl);
+                syncAvatarEverywhere(outUrl && outUrl.length > 64 ? outUrl : sanitizeAvatarUrl(rawDataUrl));
                 toast('📷 Profil fotoğrafın galeriden yüklendi ve kaydedildi!');
               } catch (_) {
-                syncAvatarEverywhere(rawDataUrl);
-                toast('📷 Profil fotoğrafın güncellendi!');
+                const safeFallback = sanitizeAvatarUrl(rawDataUrl);
+                if (safeFallback) {
+                  syncAvatarEverywhere(safeFallback);
+                  toast('📷 Profil fotoğrafın güncellendi!');
+                }
               }
             };
             img.onerror = () => {
-              syncAvatarEverywhere(rawDataUrl);
-              toast('📷 Profil fotoğrafın güncellendi!');
+              toast('⚠️ Seçilen görsel dosyası okunamadı.');
             };
             img.src = rawDataUrl;
           };
@@ -1101,8 +1157,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       bioInp.addEventListener('input', refreshLiveCard);
       statusInp.addEventListener('input', refreshLiveCard);
       avatarInp.addEventListener('input', () => {
-        if (avatarInp.value.trim()) {
-          selectedAvatarUrl = avatarInp.value.trim();
+        const cleanVal = sanitizeAvatarUrl(avatarInp.value.trim());
+        if (cleanVal) {
+          selectedAvatarUrl = cleanVal;
           refreshLiveCard();
         }
       });
@@ -1293,6 +1350,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                     ...payload,
                     uid: gUser.uid || guestId,
                     handle: gUser.handle || handle,
+                    guestToken: gRes?.guestToken || profObj.guestToken || '',
                     _skipProvision: true,
                   });
                   syncSocialState(true).catch(() => {});
@@ -1311,6 +1369,65 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
               }
             },
           }, '💾 Profili & Gizlilik Ayarlarını Kaydet'),
+          isLoggedMember ? (() => {
+            const curPwInp = h('input', { class: 'input', type: 'password', id: 'wl-cur-password-input', autocomplete: 'current-password', placeholder: 'Mevcut şifreniz' });
+            const newPwInp = h('input', { class: 'input', type: 'password', id: 'wl-new-password-input', autocomplete: 'new-password', placeholder: 'Yeni şifre (en az 6 karakter)' });
+            return h('details', { class: 'wl-account-sec-details', style: { width: '100%', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.09)', borderRadius: '11px', padding: '8px 10px' } },
+              h('summary', { style: { cursor: 'pointer', fontSize: '.78rem', fontWeight: '700', color: '#cbd5e1' } }, '🔐 Şifre Değiştir & Hesap Yönetimi'),
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '8px' } },
+                curPwInp,
+                newPwInp,
+                h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+                  h('button', {
+                    type: 'button',
+                    id: 'wl-change-password-btn',
+                    class: 'btn sm primary',
+                    onclick: async () => {
+                      const cp = curPwInp.value;
+                      const np = newPwInp.value;
+                      if (!cp || np.length < 6) {
+                        errBox.textContent = 'Mevcut şifrenizi ve en az 6 karakterli yeni şifrenizi girin.';
+                        return;
+                      }
+                      try {
+                        const r = await api('/api/auth/password', { method: 'POST', body: { currentPassword: cp, newPassword: np } });
+                        if (r?.ok) {
+                          const saved = saveProfile({ ...profObj, ...(r.user || {}), authToken: r.authToken || profObj.authToken, isGuest: false });
+                          Object.assign(profObj, saved);
+                          curPwInp.value = '';
+                          newPwInp.value = '';
+                          toast('✓ Şifreniz güncellendi ve diğer oturumlar sonlandırıldı!');
+                        }
+                      } catch (e) {
+                        errBox.textContent = e?.message || 'Şifre güncellenemedi.';
+                      }
+                    },
+                  }, '🔑 Şifreyi Güncelle'),
+                  h('button', {
+                    type: 'button',
+                    id: 'wl-delete-account-btn',
+                    class: 'btn sm danger',
+                    onclick: async () => {
+                      const cp = curPwInp.value;
+                      if (!cp) {
+                        errBox.textContent = 'Hesabı silmek için mevcut şifrenizi kutuya girin.';
+                        curPwInp.focus();
+                        return;
+                      }
+                      try {
+                        const r = await api('/api/auth/delete', { method: 'POST', body: { password: cp } });
+                        if (r?.ok) {
+                          const guestProf = logoutProfile();
+                          onDone?.(guestProf);
+                          toast('Hesabınız kalıcı olarak silindi.');
+                          modalRef?.close?.();
+                        }
+                      } catch (e) {
+                        errBox.textContent = e?.message || 'Hesap silinemedi.';
+                      }
+                    },
+                  }, '🗑️ Hesabı Sil'))));
+          })() : null,
           isLoggedMember ? h('button', {
             type: 'button',
             class: 'btn wl-btn-logout',
@@ -1681,7 +1798,7 @@ export async function openDmModal(initialPeerId = null) {
       const pState = fr.presenceState || (fr.online ? 'online' : 'offline');
       return h('button', {
         type: 'button',
-        class: `dm-thread-item ${isAct ? 'on' : ''}`,
+        class: `dm-thread-item wl-dm-thread-item ${isAct ? 'on active' : ''}`,
         onclick: () => { lastRenderSig = ''; refreshAll(fr.uid, true); },
       },
       h('div', { style: { position: 'relative', flexShrink: '0' } },
@@ -1811,7 +1928,19 @@ export async function openDmModal(initialPeerId = null) {
             lastRenderSig = '';
             await refreshAll(activePeer.uid, false);
           },
-        }, expOn ? '⏱️ 24s' : '∞') : null)
+        }, expOn ? '⏱️ 24s' : '∞') : null,
+        activePeer.uid ? h('button', {
+          type: 'button',
+          class: 'btn sm danger',
+          title: 'Kullanıcıyı Engelle',
+          onclick: async () => {
+            await updateFriendAction('block', { targetUid: activePeer.uid, targetName: activePeer.name });
+            toast(`🚫 ${activePeer.name} engellendi`);
+            activePeerId = '';
+            lastRenderSig = '';
+            await refreshAll('', true);
+          },
+        }, '🚫 Engelle') : null)
     );
 
     if (!activeDmMeta.canMessage) {
@@ -1957,12 +2086,12 @@ export async function openDmModal(initialPeerId = null) {
   };
 
   const refreshAll = async (peerId = activePeerId, forceScroll = false) => {
-    try {
-      const st = await syncSocialState(true);
-      if (st?.ok) socialData = st;
-    } catch (_) {}
-    if (!peerId && socialData.friends?.length) {
-      peerId = socialData.friends[0].uid;
+    if (!peerId) {
+      try {
+        const st0 = await syncSocialState(true);
+        if (st0?.ok) socialData = st0;
+      } catch (_) {}
+      if (socialData.friends?.length) peerId = socialData.friends[0].uid;
     }
     activePeerId = peerId || '';
     if (activePeerId) {
@@ -1982,6 +2111,10 @@ export async function openDmModal(initialPeerId = null) {
         activeMessages = [];
       }
     }
+    try {
+      const st = await syncSocialState(true);
+      if (st?.ok) socialData = st;
+    } catch (_) {}
     const sig = JSON.stringify([
       activePeerId,
       activeDmMeta.canMessage,
@@ -1990,6 +2123,7 @@ export async function openDmModal(initialPeerId = null) {
       activeDmMeta.settings?.expirySec,
       (socialData.requests || []).length,
       (socialData.friends || []).map((f) => `${f.uid}:${f.presenceState}:${f.unread || 0}`),
+      (socialData.threads || []).map((t) => `${t.peer?.uid}:${t.unreadCount || 0}:${t.lastMessage?.id || ''}`),
       activeMessages.map((m) => `${m.id}:${m.readAt || 0}:${JSON.stringify(m.reactions || {})}`),
     ]);
     if (sig !== lastRenderSig || forceScroll) {
@@ -2291,7 +2425,17 @@ export function openUserProfileModal(targetUser) {
           userModal?.close?.();
           openDmModal(safeSocialUid || `@${uHandle}`);
         },
-      }, '💬 Özel Mesaj')));
+      }, '💬 Özel Mesaj'),
+      h('button', {
+        type: 'button',
+        class: 'btn danger',
+        style: { flex: '1', justifyContent: 'center' },
+        onclick: async () => {
+          await updateFriendAction('block', { targetUid: safeSocialUid || `@${uHandle}`, targetName: uName });
+          toast(`🚫 ${uName} engellendi`);
+          userModal?.close?.();
+        },
+      }, '🚫 Engelle')));
 
   const userModal = popup({
     title: `${uName} (@${uHandle})`,

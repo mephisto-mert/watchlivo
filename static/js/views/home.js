@@ -1,21 +1,23 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261107_v140';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261107_v141';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261107_v140';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261107_v140';
-import { api } from '../api.js?v=20261107_v140';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261107_v140';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v140';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261107_v140';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261107_v140';
+} from '../store.js?v=20261107_v141';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261107_v141';
+import { api } from '../api.js?v=20261107_v141';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261107_v141';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v141';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261107_v141';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261107_v141';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
 let unsubHomeStore = null;
+let activeSelection = null;
+let tubelightCleanups = [];
 let rooms = [];
 
 function attachTubelight(container, itemSel, activeCls) {
@@ -38,6 +40,7 @@ function attachTubelight(container, itemSel, activeCls) {
   };
   requestAnimationFrame(() => requestAnimationFrame(sync));
   window.addEventListener('resize', sync, { passive: true });
+  tubelightCleanups.push(() => window.removeEventListener('resize', sync));
   container._syncTubelight = sync;
   return sync;
 }
@@ -59,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v140', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v141', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -187,11 +190,11 @@ export function renderHome(app) {
         id: 'nav-btn-apk',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        title: 'Watchlivo Native Android APK İndir (v2.0 Otomatik Güncellemeli)',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000),
+        title: 'Watchlivo Native Android APK İndir (v2.0.2 Otomatik Güncellemeli)',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000),
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
-      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0)')) : null,
+      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0.2)')) : null,
       h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
         const btnEl = ev?.currentTarget;
         if (btnEl?.dataset?.busy === '1') return;
@@ -220,6 +223,7 @@ export function renderHome(app) {
     }
     try { await createRoomWithMedia(media); } catch (e) { toast(e.message || 'Oda oluşturulamadı'); }
   } });
+  activeSelection = selection;
   selection.id = 'home-selection';
   selection.render();
   syncCloudUserMedia().then((chg) => {
@@ -230,12 +234,22 @@ export function renderHome(app) {
   let query = '';
   const lobbyBox = h('div', { id: 'lobby-box' });
   const lobbySearch = h('input', { id: 'lobby-search', class: 'input lobby-search-compact', placeholder: 'Katılacak yeni odalar keşfet...', 'aria-label': 'Katılacak yeni odalar keşfet', style: { maxWidth: '360px' } });
-  const tabs = h('div', { class: 'lobby-tabs' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık']].map(([k, label]) =>
+  const syncLobbyTabsA11y = (activeBtn = null) => {
+    tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => {
+      const isOn = activeBtn ? b === activeBtn : idx === 0;
+      b.classList.toggle('on', isOn);
+      b.setAttribute('aria-selected', isOn ? 'true' : 'false');
+    });
+  };
+  const tabs = h('div', { class: 'lobby-tabs', role: 'tablist', 'aria-label': 'Oda Filtreleri' }, [['all', 'Tümü'], ['friends', 'Arkadaşlar'], ['public', 'Herkese Açık']].map(([k, label]) =>
     h('button', {
+      type: 'button',
+      role: 'tab',
+      'aria-selected': k === filter ? 'true' : 'false',
       class: `lobby-tab ${k === filter ? 'on' : ''}`,
       onclick: (e) => {
         filter = k;
-        tabs.querySelectorAll('.lobby-tab').forEach((b) => b.classList.toggle('on', b === e.currentTarget));
+        syncLobbyTabsA11y(e.currentTarget);
         tabs._syncTubelight?.();
         draw(true);
       },
@@ -261,7 +275,7 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
     h('div', { class: 'wl-app-banner-text' },
       h('div', { class: 'wl-app-banner-title' },
-        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0'),
+        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0.2'),
         h('b', {}, 'Watchlivo Android Uygulaması (Otomatik Güncellemeli)')),
       h('span', { class: 'wl-app-banner-sub' }, 'Gerçek donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncellemeli yeni sürüm.')),
     h('div', { class: 'wl-app-banner-actions' },
@@ -269,7 +283,7 @@ export function renderHome(app) {
         class: 'btn primary sm wl-banner-apk-btn',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
         class: 'btn sm wl-banner-info-btn',
@@ -316,7 +330,8 @@ export function renderHome(app) {
     makeDockBtn('rooms', 'Herkese Açık & Arkadaş Odaları', icons.rooms, false, () => {
       selection.setProvider(null);
       filter = 'all';
-      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      syncLobbyTabsA11y();
+      tabs._syncTubelight?.();
       draw(true);
       setTimeout(() => {
         const el = document.getElementById('lobby-anchor');
@@ -326,7 +341,8 @@ export function renderHome(app) {
     makeDockBtn('tv', '7/24 Canlı TV & Radyolar', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z"/></svg>', false, () => {
       selection.setProvider(null);
       filter = 'all';
-      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      syncLobbyTabsA11y();
+      tabs._syncTubelight?.();
       draw(true);
       setTimeout(() => {
         const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
@@ -411,7 +427,8 @@ export function renderHome(app) {
     onScrollToTv: () => {
       selection.setProvider(null);
       filter = 'all';
-      tabs.querySelectorAll('.lobby-tab').forEach((b, idx) => b.classList.toggle('on', idx === 0));
+      syncLobbyTabsA11y();
+      tabs._syncTubelight?.();
       draw(true);
       setTimeout(() => {
         const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
@@ -478,7 +495,8 @@ export function renderHome(app) {
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
     h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
-  const home = h('main', { class: 'home', id: 'home-main', tabindex: '-1' }, homeScroll);
+  const srTitle = h('h1', { class: 'sr-only' }, 'Watchlivo — Birlikte Sinema, Dizi, Anime ve Canlı TV İzleme Odaları');
+  const home = h('main', { class: 'home', id: 'home-main', tabindex: '-1' }, srTitle, homeScroll);
 
   app.replaceChildren(nav, home);
   try {
@@ -515,6 +533,14 @@ export function destroyHome() {
   refreshTimer = null;
   clearTimeout(homeDrawTimer);
   homeDrawTimer = null;
+  if (activeSelection && typeof activeSelection.destroy === 'function') {
+    try { activeSelection.destroy(); } catch (_) {}
+  }
+  activeSelection = null;
+  while (tubelightCleanups.length) {
+    const fn = tubelightCleanups.pop();
+    try { fn(); } catch (_) {}
+  }
   if (typeof unsubHomeStore === 'function') {
     unsubHomeStore();
     unsubHomeStore = null;

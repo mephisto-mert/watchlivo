@@ -152,7 +152,7 @@ function inferReferer(url, explicitRef) {
 function resolveMediaContentType(url, extHint, upstreamCt) {
   const rawCt = (upstreamCt || "").toLowerCase();
   const cleanPath = url.toLowerCase().split("?")[0];
-  if (url.includes("key.php") || cleanPath.endsWith(".key")) {
+  if (extHint === ".key" || url.includes("key.php") || cleanPath.endsWith(".key")) {
     return "application/octet-stream";
   }
   if (
@@ -442,7 +442,32 @@ export default {
     }
 
     const upCt = (upResp.headers.get("Content-Type") || "").toLowerCase();
-    if (upCt.includes("text/html")) {
+    let streamBody = upResp.body;
+    if (upCt.includes("text/html") && upResp.body && request.method !== "HEAD") {
+      const reader = upResp.body.getReader();
+      const first = await reader.read();
+      const chunk = first?.value;
+      const headAscii = chunk
+        ? new TextDecoder("utf-8", { fatal: false }).decode(chunk.subarray(0, Math.min(chunk.length, 256))).trimStart().toLowerCase()
+        : "";
+      if (!chunk || headAscii.startsWith("<!doctype") || headAscii.startsWith("<html") || headAscii.startsWith("<head") || headAscii.startsWith("<body")) {
+        try { await reader.cancel(); } catch {}
+        return jsonResponse({ error: "Akış kaynağı medya yerine HTML döndürdü." }, 502);
+      }
+      streamBody = new ReadableStream({
+        start(controller) {
+          controller.enqueue(chunk);
+        },
+        async pull(controller) {
+          const { done, value } = await reader.read();
+          if (done) controller.close();
+          else controller.enqueue(value);
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+    } else if (upCt.includes("text/html") && request.method === "HEAD" && extHint !== ".key" && extHint !== ".ts" && extHint !== ".m4s" && extHint !== ".mp4" && extHint !== ".aac") {
       upResp.body?.cancel?.();
       return jsonResponse({ error: "Akış kaynağı medya yerine HTML döndürdü." }, 502);
     }
@@ -481,7 +506,7 @@ export default {
     const outStatus = [200, 206, 416].includes(upResp.status) ? upResp.status : 200;
 
     if (cacheKey && outStatus === 200 && Number(upCl || 0) <= 15 * 1024 * 1024) {
-      const [bodyClient, bodyCache] = upResp.body ? upResp.body.tee() : [null, null];
+      const [bodyClient, bodyCache] = streamBody ? streamBody.tee() : [null, null];
       if (bodyCache) {
         const cacheResp = new Response(bodyCache, { status: 200, headers: outHeaders });
         ctx.waitUntil(cache.put(cacheKey, cacheResp).catch(() => {}));
@@ -492,7 +517,7 @@ export default {
       });
     }
 
-    return new Response(request.method === "HEAD" ? null : upResp.body, {
+    return new Response(request.method === "HEAD" ? null : streamBody, {
       status: outStatus,
       headers: outHeaders,
     });

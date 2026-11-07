@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261107_v140';
-import { applyStreamBoost, releaseStreamBoost } from './players/audio-gain.js?v=20261107_v140';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261107_v140';
+import { toast } from './ui.js?v=20261107_v141';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261107_v141';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261107_v141';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -48,7 +48,9 @@ export class Voice {
     this._relayMute = null;
     this.participants = [];
     this.peerVolumes = new Map();
-    this.onStateChange = null;
+    this._chimeCtxs = new Set();
+    this._onStateChange = null;
+    this._syncStoreVoice();
     this._unlockBound = () => {
       for (const st of this.peers.values()) {
         if (st.audio && st.audio.srcObject && st.audio.paused) {
@@ -66,11 +68,40 @@ export class Voice {
     window.addEventListener('keydown', this._unlockBound, { passive: true });
   }
 
+  set onStateChange(fn) {
+    this._onStateChange = typeof fn === 'function' ? fn : null;
+  }
+
+  get onStateChange() {
+    return () => {
+      this._syncStoreVoice();
+      this._onStateChange?.();
+    };
+  }
+
+  _syncStoreVoice() {
+    try {
+      const stObj = typeof window !== 'undefined' ? window.__wlStoreSingleton?.state : null;
+      if (stObj) {
+        stObj.voice = {
+          inCall: Boolean(this.inCall && !this.destroyed),
+          micOn: Boolean(this.micOn && !this.destroyed),
+          camOn: Boolean(this.camOn && !this.destroyed),
+          screenOn: Boolean(this.screenOn && !this.destroyed),
+          deafened: Boolean(this.deafened && !this.destroyed),
+          speaking: Boolean(this.selfSpeaking && !this.destroyed),
+        };
+      }
+    } catch (_) {}
+  }
+
   _playCallChime(join = true) {
+    if (this.destroyed) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       const ac = new Ctx();
+      this._chimeCtxs.add(ac);
       const notes = join ? [440, 587.33] : [523.25, 349.23];
       notes.forEach((freq, idx) => {
         const osc = ac.createOscillator();
@@ -83,21 +114,32 @@ export class Voice {
         osc.start(ac.currentTime + idx * 0.085);
         osc.stop(ac.currentTime + idx * 0.085 + 0.15);
       });
-      setTimeout(() => ac.close().catch(() => {}), 500);
+      setTimeout(() => {
+        this._chimeCtxs.delete(ac);
+        try { if (ac.state !== 'closed') ac.close().catch(() => {}); } catch (_) {}
+      }, 420);
     } catch (e) { /* ignore */ }
   }
 
   toggleDeafen() {
     this.deafened = !this.deafened;
+    if (this.deafened && this.micOn) {
+      this.toggleMic().catch(() => {});
+    }
+    if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
+      if (this.deafened) this.relayPlayCtx.suspend().catch(() => {});
+      else if (this.inCall) this.relayPlayCtx.resume().catch(() => {});
+    }
     for (const [id, st] of this.peers.entries()) {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
-        const effVol = this.deafened ? 0 : volPct;
+        const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
         applyStreamBoost(st.audio, st.audio.srcObject, effVol);
-        st.audio.muted = this.deafened || effVol === 0 || effVol > 100;
+        st.audio.muted = !this.inCall || this.deafened || effVol === 0 || effVol > 100;
       }
     }
-    this.send('voice_state', { deafened: this.deafened });
+    this._updateDuckState();
+    this.send('voice_state', { deafened: this.deafened, muted: !this.micOn });
     this.onStateChange?.();
     toast(this.deafened ? '🎧 Kulaklık sesi kapatıldı (Sağırlaştırıldı)' : '🎧 Kulaklık sesi açıldı');
     return this.deafened;
@@ -567,7 +609,7 @@ export class Voice {
       .slice(0, 12);
   }
 
-  peer(id) {
+  peer(id, { forOffer = false } = {}) {
     if (this.peers.has(id)) return this.peers.get(id);
     if (this.peers.size >= 12) return null;
     const pc = new RTCPeerConnection({ iceServers: ICE });
@@ -576,27 +618,38 @@ export class Voice {
     audio.playsInline = true;
     audio.setAttribute('playsinline', '');
     this._ensureAudioHost().appendChild(audio);
-    let dc = null;
+    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
+    this.peers.set(id, st);
+    if (!forOffer) {
+      try {
+        const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
+        st.audioTransceiver = pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
+        st.audioSender = st.audioTransceiver.sender;
+        if (aTrack) {
+          st.audioSender.replaceTrack(aTrack).catch(() => {});
+        }
+      } catch (e) {
+        if (this.stream && this.stream.getAudioTracks().length) {
+          for (const t of this.stream.getAudioTracks()) {
+            st.audioSender = pc.addTrack(t, this.stream);
+          }
+        }
+      }
+    }
     try {
-      dc = pc.createDataChannel('vortex-p2p', { negotiated: true, id: 0 });
+      const dc = pc.createDataChannel('vortex-p2p', { negotiated: true, id: 0 });
+      st.dc = dc;
       dc.onmessage = (ev) => {
         try {
           const pkt = JSON.parse(ev.data);
           if (!pkt || typeof pkt !== 'object') return;
           pkt.fromCid = id;
           const evType = pkt.event?.type;
-          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync'].includes(evType)) return;
+          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync', 'room_state', 'room_closed'].includes(evType)) return;
           this.onP2pData?.(pkt);
         } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    const st = { pc, dc, makingOffer: false, ignoreOffer: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
-    this.peers.set(id, st);
-    if (this.stream && this.stream.getAudioTracks().length) {
-      for (const t of this.stream.getAudioTracks()) {
-        st.audioSender = pc.addTrack(t, this.stream);
-      }
-    }
     const activeVid = this.screenStream || this.camStream;
     if (activeVid) {
       for (const t of activeVid.getVideoTracks()) {
@@ -619,12 +672,12 @@ export class Voice {
         const aStream = new MediaStream([e.track]);
         audio.srcObject = aStream;
         const volPct = this.getPeerVolume(id);
-        const effVol = this.deafened ? 0 : volPct;
+        const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
         if (effVol > 100) {
           applyStreamBoost(audio, aStream, effVol);
         } else {
           releaseStreamBoost(audio);
-          audio.muted = Boolean(this.deafened) || effVol === 0;
+          audio.muted = !this.inCall || Boolean(this.deafened) || effVol === 0;
           audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
         }
         audio.play().catch(() => {});
@@ -674,7 +727,7 @@ export class Voice {
         this.peers.delete(from);
       }
     }
-    const st = this.peer(from);
+    const st = this.peer(from, { forOffer: data.type === 'webrtc_offer' });
     if (!st) return;
     st.sigChain = (st.sigChain || Promise.resolve()).then(async () => {
       if (this.destroyed || this.peers.get(from) !== st) return;
@@ -696,16 +749,15 @@ export class Voice {
             try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
           }
           await pc.setRemoteDescription(new RTCSessionDescription(desc));
-          if (!st.audioTransceiver) {
-            const tr = pc.getTransceivers?.().find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
-            if (tr) {
-              st.audioTransceiver = tr;
-              if (!st.audioSender) st.audioSender = tr.sender;
-              if (desc.type === 'offer' && this.micOn && this.stream?.getAudioTracks?.()[0]) {
-                const aTrack = this.stream.getAudioTracks()[0];
-                tr.direction = 'sendrecv';
-                try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
-              }
+          const tr = pc.getTransceivers?.().find((t) => t.mid !== null && (t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio'))
+            || pc.getTransceivers?.().find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+          if (tr) {
+            st.audioTransceiver = tr;
+            st.audioSender = tr.sender || st.audioSender;
+            if (this.micOn && this.stream?.getAudioTracks?.()[0]) {
+              const aTrack = this.stream.getAudioTracks()[0];
+              tr.direction = 'sendrecv';
+              try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
             }
           }
           if (st.iceQueue?.length) {
@@ -1090,7 +1142,15 @@ export class Voice {
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
           try {
-            if (st.audioTransceiver) {
+            const aTrs = st.pc.getTransceivers?.().filter((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio') || [];
+            if (aTrs.length) {
+              for (const tr of aTrs) {
+                tr.direction = 'sendrecv';
+                try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
+              }
+              st.audioTransceiver = aTrs.find((t) => t.mid !== null) || aTrs[0];
+              st.audioSender = st.audioTransceiver.sender;
+            } else if (st.audioTransceiver) {
               st.audioTransceiver.direction = 'sendrecv';
               await st.audioTransceiver.sender.replaceTrack(aTrack);
             } else if (st.audioSender) {
@@ -1228,6 +1288,7 @@ export class Voice {
   }
 
   _ensureRelayPlayCtx() {
+    if (this.destroyed || !this.inCall) return null;
     if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
       if (this.relayPlayCtx.state === 'suspended') this.relayPlayCtx.resume().catch(() => {});
       return this.relayPlayCtx;
@@ -1295,6 +1356,7 @@ export class Voice {
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
       const audioBuf = await ctx.decodeAudioData(bytes.buffer.slice(0));
+      if (this.destroyed || !this.inCall || this.deafened || ctx.state === 'closed') return;
       const src = ctx.createBufferSource();
       const gain = ctx.createGain();
       gain.gain.value = Math.min(2.0, Math.max(0, volPct / 100));
@@ -1421,6 +1483,12 @@ export class Voice {
 
   destroy() {
     this.destroyed = true;
+    this.inCall = false;
+    this.micOn = false;
+    this.camOn = false;
+    this.screenOn = false;
+    this.selfSpeaking = false;
+    this.onDuckChange?.(false);
     clearInterval(this.speakTimer);
     clearInterval(this.synthTimer);
     clearInterval(this.screenSynthTimer);
@@ -1452,9 +1520,17 @@ export class Voice {
     this._relayProc = null;
     this._relaySrc = null;
     this._relayMute = null;
+    if (this._chimeCtxs?.size) {
+      for (const cac of this._chimeCtxs) {
+        try { if (cac.state !== 'closed') cac.close().catch(() => {}); } catch (_) {}
+      }
+      this._chimeCtxs.clear();
+    }
     this.audioCtx?.close?.().catch(() => {});
     this.relayPlayCtx?.close?.().catch(() => {});
     this.synthAudioCtx?.close?.().catch(() => {});
+    try { closeSharedAudioContext(); } catch (_) {}
+    this._syncStoreVoice();
     if (typeof window !== 'undefined') { window.__kinoxVoiceDuckFactor = 1.0; window.__kinoxSyncDuckVolume?.(); }
   }
 }

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261107_v140 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v141 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261107_v140", index_html)
+        self.assertIn("20261107_v141", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261107_v140", sw_js)
+        self.assertIn("v20261107_v141", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261107_v140', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v141', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261107_v140', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v141', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261107_v140')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v141')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3132,6 +3132,71 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("onStreamFallbackUrl(nextUrl)", subs_js)
         self.assertIn("this.subs.resolveInitialAudioTrack(media)", html5_js)
         self.assertNotIn("Number(it.voteCount || 0) >= 800", sel_kinds_js)
+
+
+    def test_v141_twenty_subagent_zero_error_hardening(self):
+        import time
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. Password-protected room /r/{id} share HTML masks secret room title & media metadata
+        r_create = self.client.post(
+            "/api/rooms/create",
+            json={
+                "name": "UltraGizliVIP",
+                "visibility": "private",
+                "password": "secret-pass-v141",
+                "host": {"id": "host_v141", "name": "HostV141"},
+                "media": {"title": "TopSecretMovieTitle", "url": "https://example.com/secret.mp4", "provider": "cinema"},
+            },
+        )
+        self.assertEqual(r_create.status_code, 200)
+        rid = r_create.json()["room"]["id"]
+        share_html = self.client.get(f"/r/{rid}")
+        self.assertEqual(share_html.status_code, 200)
+        self.assertIn("Şifreli Watchlivo Odası", share_html.text)
+        self.assertNotIn("UltraGizliVIP", share_html.text)
+        self.assertNotIn("TopSecretMovieTitle", share_html.text)
+
+        # 2. Stream-proxy suffix byte-range (Range: bytes=-188 -> 206 Partial Content + Content-Range)
+        dummy_ts_url = "https://cdn.example-v141-test.com/seg001.ts"
+        dummy_ts_bytes = (b"\x47" + b"\x00" * 187) * 3  # 564 bytes (3 MPEG-TS packets)
+        with server._SEG_TABLE_LOCK:
+            server._SEGMENT_CACHE[dummy_ts_url] = (time.time(), dummy_ts_bytes, "video/mp2t")
+        try:
+            with patch.object(server, "public_http_url", return_value=True):
+                r_suf = self.client.get(server._proxy_u(dummy_ts_url), headers={"Range": "bytes=-188"})
+            self.assertEqual(r_suf.status_code, 206)
+            self.assertEqual(len(r_suf.content), 188)
+            self.assertEqual(r_suf.headers.get("content-range"), "bytes 376-563/564")
+        finally:
+            with server._SEG_TABLE_LOCK:
+                server._SEGMENT_CACHE.pop(dummy_ts_url, None)
+
+        # 3. Guest social bootstrap auto-resolves handle collision instead of 409 Conflict
+        sfx = str(int(time.time()) % 100000)
+        h_guest = f"misafir{sfx}"
+        g1 = TestClient(server.app).post("/api/rave/social/guest", json={"uid": f"guest_v141a_{sfx}", "name": "Misafir", "handle": h_guest})
+        self.assertEqual(g1.status_code, 200)
+        g2 = TestClient(server.app).post("/api/rave/social/guest", json={"uid": f"guest_v141b_{sfx}", "name": "Misafir", "handle": h_guest})
+        self.assertEqual(g2.status_code, 200)
+        self.assertNotEqual(g1.json()["user"]["handle"], g2.json()["user"]["handle"])
+
+        # 4. v141 Frontend & Cache-Bust Integrity Guards (WebAudio spy hook, horizontal scroll lock, v141 version)
+        audio_gain_js = (root / "static" / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
+        selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
+        sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
+        server_py = (root / "server.py").read_text(encoding="utf-8")
+        self.assertIn("_NATIVE_CREATE_GAIN", audio_gain_js)
+        self.assertIn("prevCatScroll", selection_js)
+        self.assertIn("_catWheelBound", selection_js)
+        self.assertIn("has_vault_dub", server_py)
+        self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
+        self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
+        self.assertIn("20261107_v141", index_html)
+        self.assertIn("20261107_v141", sw_js)
 
 
 if __name__ == '__main__':

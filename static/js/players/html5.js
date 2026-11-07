@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v140';
-import { expectedPosition } from '../sync.js?v=20261107_v140';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v140';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v140';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v140';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v141';
+import { expectedPosition } from '../sync.js?v=20261107_v141';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v141';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v141';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v141';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -223,7 +223,7 @@ export class Html5Adapter {
           this.container.append(deckB);
           if (/\.m3u8(\?|$)|soundcloud\.cloud|sndcdn\.com/i.test(String(bSrc)) && window.Hls && window.Hls.isSupported()) {
             try {
-              const hlsB = new window.Hls({ enableWorker: true });
+              const hlsB = new window.Hls({ enableWorker: true, subtitleDisplay: false, enableWebVTT: false });
               this.mashupHlsB = hlsB;
               hlsB.loadSource(bSrc);
               hlsB.attachMedia(deckB);
@@ -900,6 +900,7 @@ export class Html5Adapter {
         levelLoadingTimeOut: 16000,
         levelLoadingMaxRetry: 4,
       });
+      v._hls = this.hls;
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
         if (data?.levels?.length > 1) {
           let maxAllowedIdx = -1;
@@ -945,6 +946,7 @@ export class Html5Adapter {
       let firstSingleStallAt = 0;
       this.hls.on(window.Hls.Events.FRAG_BUFFERED, (_e, data) => {
         netRetries = 0;
+        mediaRetries = 0;
         if (data?.frag?.type === 'audio' && !this.isMusic && v.readyState < 3) {
           return;
         }
@@ -954,7 +956,7 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         const errCode = Number(data?.response?.code || 0);
-        const isHardUpstreamDead = [403, 404, 410].includes(errCode);
+        const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
         if (!data?.fatal) {
           if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
             this._switchedToProxySegs = true;
@@ -1062,8 +1064,10 @@ export class Html5Adapter {
             }
           } else if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
             mediaRetries += 1;
-            if (mediaRetries <= 1) {
+            if (mediaRetries === 1) {
               try { this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
+            } else if (mediaRetries === 2) {
+              try { this.hls.swapAudioCodec?.(); this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
             } else if (canNativeHls && !triedHlsFallback) {
               triedHlsFallback = true;
               useNativeHls = true;
@@ -1413,7 +1417,6 @@ export class Html5Adapter {
           await v.play();
         } catch (e2) {
           this.autoplayHardBlocked = true;
-          this.wantPlaying = false;
           this.events.onPause?.();
         }
       }
@@ -1726,7 +1729,7 @@ export class Html5Adapter {
   getRate() { return Number(this._activeMediaEl()?.playbackRate || 1); }
   setVolume(v) {
     const rawNum = Number(v);
-    this.baseVolume = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
+    this.baseVolume = Math.max(0, Math.min(200, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
     this.subs.syncVideoVolume();
     if (this.video && (this.hls || hasWebAudioGraph(this.video)) && isIosWebKit()) {
       this._ensureIosPipStandby?.(this.currentUrl);
@@ -1795,7 +1798,8 @@ export class Html5Adapter {
       this._setMusicVisualMode?.(isNextAudioOnly ? 'vinyl' : 'clip');
     }
     if (!this.hls && isNextHls && !/stream-proxy/i.test(newUrl) && window.Hls && window.Hls.isSupported() && !this.useNativeHls) {
-      this.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+      this.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, subtitleDisplay: false, enableWebVTT: false });
+      this.video._hls = this.hls;
       this.hls.on(window.Hls.Events.ERROR, (_ev, data) => {
         if (!data?.fatal || !this.hls) return;
         if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
@@ -2260,6 +2264,7 @@ export class Html5Adapter {
     }
     if (this.video) {
       try {
+        this.video._hls = null;
         releaseMediaBoost(this.video);
         this.video.pause();
         this.video.removeAttribute('src');

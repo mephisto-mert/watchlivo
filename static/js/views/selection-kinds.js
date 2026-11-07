@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261107_v140';
-import { api, qs } from '../api.js?v=20261107_v140';
-import { parseVideoUrl } from '../providers.js?v=20261107_v140';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261107_v140';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261107_v140';
-import { profileSetup } from '../profile.js?v=20261107_v140';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v140';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261107_v141';
+import { api, qs } from '../api.js?v=20261107_v141';
+import { parseVideoUrl } from '../providers.js?v=20261107_v141';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261107_v141';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261107_v141';
+import { profileSetup } from '../profile.js?v=20261107_v141';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v141';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261107_v140';
+} from '../store.js?v=20261107_v141';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -786,14 +786,16 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }));
 
     if (activeCat === 'favs') {
-      if (!favList.length) {
-        contentArea.replaceChildren(h('div', { class: 'lobby-empty' }, 'Henüz favorilere eklenmiş bir dizi veya film yok.'));
+      const qLower = currentQuery.trim().toLowerCase();
+      const shownFavs = qLower ? favList.filter((it) => `${it.title || ''} ${it.originalTitle || ''} ${it.year || ''}`.toLowerCase().includes(qLower)) : favList;
+      if (!shownFavs.length) {
+        contentArea.replaceChildren(h('div', { class: 'lobby-empty' }, qLower ? 'Favorilerinizde aramanızla eşleşen içerik bulunamadı.' : 'Henüz favorilere eklenmiş bir dizi veya film yok.'));
         return;
       }
       contentArea.replaceChildren(
         h('section', { class: 'cat-section' },
-          h('div', { class: 'cat-sec-head' }, h('h3', {}, `❤️ Favori Dizi & Filmlerim (${favList.length})`)),
-          h('div', { class: 'poster-grid' }, ...favList.map(makePoster))));
+          h('div', { class: 'cat-sec-head' }, h('h3', {}, `❤️ Favori Dizi & Filmlerim (${shownFavs.length})`)),
+          h('div', { class: 'poster-grid' }, ...shownFavs.map(makePoster))));
       return;
     }
 
@@ -897,7 +899,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     }
     contentArea.replaceChildren(spinner());
     const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, page: 1, category: activeCat === 'favs' ? 'all' : activeCat })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
-    if (mine !== seq) return;
+    if (mine !== seq || input.value.trim() !== raw) return;
     currentItems = catData.items || [];
     if (catData.totalAvailable) {
       catalogTotals = {
@@ -926,7 +928,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     clearTimeout(debTimer);
     const val = input.value.trim();
     if (!val || (!/^https?:\/\//i.test(val) && val.length >= 2)) {
-      debTimer = setTimeout(() => run(input.value), 380);
+      debTimer = setTimeout(() => run(input.value), 200);
+    } else if (val.length === 1 && currentQuery.length >= 2) {
+      debTimer = setTimeout(() => run(''), 200);
     }
   });
   input.addEventListener('keydown', (e) => {

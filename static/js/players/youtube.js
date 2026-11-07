@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v140';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, resumeSharedAudioContext } from './audio-gain.js?v=20261107_v140';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v140';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v141';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261107_v141';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v141';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -137,7 +137,7 @@ export class YouTubeAdapter {
       this.hls = null;
     }
     if (this.video) {
-      try { this.video.pause(); this.video.removeAttribute('src'); this.video.load(); this.video.remove(); } catch (_) {}
+      try { this.video._hls = null; releaseMediaBoost(this.video); this.video.pause(); this.video.removeAttribute('src'); this.video.load(); this.video.remove(); } catch (_) {}
       this.video = null;
     }
     this.useNativeHls = false;
@@ -348,11 +348,14 @@ export class YouTubeAdapter {
         const hls = new window.Hls({
           enableWorker: true,
           lowLatencyMode: Boolean(this.media?.live),
+          subtitleDisplay: false,
+          enableWebVTT: false,
           maxBufferLength: 30,
           maxMaxBufferLength: 60,
           startPosition: effHlsStart > 0.5 ? effHlsStart : -1,
         });
         this.hls = hls;
+        v._hls = hls;
         hls.on(window.Hls.Events.MANIFEST_PARSED, () => {
           if (autoplay && this.wantPlaying && !this._destroyed && this.video === v) {
             this._attemptDirectPlay(v);
@@ -405,9 +408,13 @@ export class YouTubeAdapter {
             this.ready = true;
             try {
               this.player?.unMute?.();
-              this.player?.setVolume?.(this.baseVolume);
+              this.player?.setVolume?.(Math.min(100, Math.round(this.baseVolume)));
               this.player?.setPlaybackQualityRange?.('hd1080', 'highres');
               this.player?.setPlaybackQuality?.('hd1080');
+              if (this.initialSeekPending && this.initialSeekPending > 0.5 && !this.media?.live) {
+                this.player?.seekTo?.(this.initialSeekPending, true);
+                this.initialSeekPending = 0;
+              }
             } catch (_) {}
             this._syncYtNativeCaptions();
             done();
@@ -972,7 +979,7 @@ export class YouTubeAdapter {
   }
 
   setVolume(v) {
-    this.baseVolume = Math.max(0, Math.min(150, Number(v ?? (isIosWebKit() ? 100 : 80))));
+    this.baseVolume = Math.max(0, Math.min(200, Number(v ?? (isIosWebKit() ? 100 : 80))));
     if (this.pipVideo) this.pipVideo.muted = Boolean(this._muted || this.baseVolume <= 0);
     if (this.video) {
       this.video.muted = Boolean(this._muted || this.baseVolume <= 0);
@@ -1027,7 +1034,7 @@ export class YouTubeAdapter {
     }
     if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute?.('src'); this.bgMvEl.remove(); } catch (_) {} this.bgMvEl = null; }
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (_) {} this.vinylBtn = null; }
-    if (this.audioEl) { try { this.audioEl.pause(); this.audioEl.remove(); } catch (_) {} this.audioEl = null; }
+    if (this.audioEl) { try { releaseMediaBoost(this.audioEl); this.audioEl.pause(); this.audioEl.remove(); } catch (_) {} this.audioEl = null; }
     try { this.player?.destroy?.(); } catch (_) {}
     this.player = null;
     this.container.replaceChildren();

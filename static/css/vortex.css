@@ -4857,8 +4857,8 @@ header.navbar.top-nav-capsule {
   align-items: center !important;
   justify-content: space-between !important;
   gap: 10px !important;
-  width: min(94vw, 1580px) !important;
-  max-width: 1580px !important;
+  width: min(95vw, 1480px) !important;
+  max-width: min(95vw, 1480px) !important;
   margin: 0 auto !important;
   padding: 8px 14px !important;
   border-radius: 15px !important;
@@ -5029,11 +5029,12 @@ header.navbar.top-nav-capsule {
 }
 
 .wl-cmdk-dropdown {
-  position: absolute !important;
-  top: calc(100% + 8px) !important;
+  position: relative !important;
+  top: 0 !important;
   left: 0 !important;
-  width: min(620px, 92vw) !important;
-  max-height: 440px !important;
+  margin: 8px 0 12px 0 !important;
+  width: min(680px, 100%) !important;
+  max-height: 360px !important;
   overflow-y: auto !important;
   border-radius: 16px !important;
   padding: 10px !important;
@@ -5041,7 +5042,7 @@ header.navbar.top-nav-capsule {
   border: 1px solid color-mix(in srgb, var(--accent) 42%, rgba(255, 255, 255, 0.14)) !important;
   box-shadow: 0 24px 56px rgba(0, 0, 0, 0.78), 0 0 28px color-mix(in srgb, var(--accent) 22%, transparent) !important;
   -webkit-backdrop-filter: blur(22px) saturate(160%) !important; backdrop-filter: blur(22px) saturate(160%) !important;
-  z-index: 1200 !important;
+  z-index: 40 !important;
 }
 
 .wl-cmdk-head {
@@ -7723,4 +7724,33 @@ body.tv-nav-active .dock-item:focus {
     gap: 5px !important;
     font-size: 0.7rem !important;
   }
+  .wl-cmdk-dropdown {
+    max-height: calc(var(--app-height, 100dvh) - 96px) !important;
+    overflow-y: auto !important;
+  }
+}
+
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.app-layout > .wl-studio-theme-strip {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+.poll-opt,
+.poll-opt-text,
+.poll-question,
+.chat-poll-opt {
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
 }

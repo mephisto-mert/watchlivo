@@ -31,7 +31,7 @@ from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainT
 from starlette.routing import Mount, Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 
-from security import RateLimiter, client_ip, server_secret, too_many_response
+from security import BoundedTTLCache, RateLimiter, client_ip, is_ip_public_global, is_safe_public_url, server_secret, too_many_response
 
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 STATIC_DIR = BASE_DIR / "static"
@@ -60,7 +60,17 @@ ACC_DB_PATH = pathlib.Path("/tmp/vortex_accounts.db") if IS_VERCEL else BASE_DIR
 _PROXY_SECRET = server_secret("PROXY_SECRET")
 PROXY_URL_TTL = 21600.0
 STREAM_PROXY_BASE_URL = (os.environ.get("STREAM_PROXY_BASE_URL") or "").strip().rstrip("/")
-_WORKER_BYPASS_HOSTS = ("hakunaymatata.com",)
+_WORKER_BYPASS_HOSTS = (
+    "hakunaymatata.com",
+    "vidmoly.",
+    "vmbox.",
+    "vmnow.",
+    "vmpx.",
+    "hdfilmcehennemi.mobi",
+    "ag2m5.cfd",
+    "uk-traffic-",
+    "fastplay.",
+)
 
 
 def _proxy_sig(url: str, ref: str = "") -> str:
@@ -194,12 +204,22 @@ class SecurityHeaders:
                         ).encode("ascii")
                         hdrs.append((b"content-security-policy", csp_val))
                 req_path = str(scope.get("path") or "")
+                raw_qs = bytes(scope.get("query_string") or b"")
                 if req_path.startswith("/uploads/"):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"content-security-policy", b"content-disposition")]
                     hdrs.append((b"content-security-policy", b"default-src 'none'; sandbox"))
                     hdrs.append((b"content-disposition", b"attachment"))
-                if req_path.startswith("/static/") and req_path.lower().endswith((".js", ".css", ".mjs")) and b"cache-control" not in existing_keys:
-                    hdrs.append((b"cache-control", b"public, max-age=0, must-revalidate"))
+                if req_path in ("/desktop-auth.html", "/static/desktop-auth.html"):
+                    hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"x-robots-tag")]
+                    hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
+                    hdrs.append((b"cdn-cache-control", b"no-store"))
+                    hdrs.append((b"x-robots-tag", b"noindex, nofollow"))
+                elif req_path.startswith("/static/") and req_path.lower().endswith((".js", ".css", ".mjs")):
+                    if b"v=" in raw_qs:
+                        hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() != b"cache-control"]
+                        hdrs.append((b"cache-control", b"public, max-age=31536000, immutable"))
+                    elif b"cache-control" not in existing_keys:
+                        hdrs.append((b"cache-control", b"public, max-age=0, must-revalidate"))
                 if req_path == "/api/rooms" or req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/voice-relay/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed", "/api/rooms/")):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
@@ -226,7 +246,7 @@ def _claims_from_token(token: str) -> dict:
         return val if isinstance(val, dict) else {"uid": str(val or "")}
     try:
         import auth_engine
-        claims = auth_engine.verify_auth_token(token)
+        claims = auth_engine.verify_any_token(token)
     except Exception:
         claims = None
     if isinstance(claims, dict) and claims.get("uid"):
@@ -282,44 +302,9 @@ def _http_json(url: str, **kw):
     return json.loads(_http(url, **kw).decode("utf-8", errors="ignore"))
 
 
-_DNS_PUBLIC_CACHE: dict[tuple[str, int], tuple[bool, float]] = {}
-_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
-
-
 def public_http_url(url: str) -> bool:
-    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT ranges (SSRF guard)."""
-    try:
-        p = urllib.parse.urlparse(url)
-        if p.scheme not in ("http", "https") or not p.hostname:
-            return False
-        port = p.port or (443 if p.scheme == "https" else 80)
-        ck = (p.hostname.lower(), port)
-        now_d = time.time()
-        hit = _DNS_PUBLIC_CACHE.get(ck)
-        if hit and now_d - hit[1] < 5.0:
-            return hit[0]
-        infos = socket.getaddrinfo(p.hostname, port)
-        if not infos:
-            return False
-        for info in infos:
-            ip = ipaddress.ip_address(info[4][0])
-            if (
-                ip.is_private
-                or ip.is_loopback
-                or ip.is_link_local
-                or ip.is_reserved
-                or ip.is_multicast
-                or ip.is_unspecified
-                or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NET)
-            ):
-                _DNS_PUBLIC_CACHE[ck] = (False, now_d)
-                return False
-        if len(_DNS_PUBLIC_CACHE) > 1000:
-            _DNS_PUBLIC_CACHE.clear()
-        _DNS_PUBLIC_CACHE[ck] = (True, now_d)
-        return True
-    except Exception:
-        return False
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT/NAT64 ranges (0-TTL SSRF guard)."""
+    return is_safe_public_url(url)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -1070,8 +1055,11 @@ _FLAGSHIP_TR_TMDB_IDS = {
 }
 
 
+_BIDI_CTRL_RE = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
 def _parse_search_query(q: str) -> tuple[str, str, str, bool]:
-    raw_s = (q or "").strip()
+    raw_s = _BIDI_CTRL_RE.sub("", q or "").strip()
     if not raw_s:
         return "", "", "", False
     q_year = ""
@@ -1352,7 +1340,7 @@ _HFNL_CAT_PATHS = {
     "movies": ["/category/film-izle-2/", "/category/tavsiye-filmler-izle2/"],
     "series": ["/yabancidiziizle-5/"],
     "trend": ["/category/tavsiye-filmler-izle2/", "/category/film-izle-2/"],
-    "dublaj": ["/category/film-izle-2/"],
+    "dublaj": ["/turkce-dublaj-film-izle/", "/category/film-izle-2/"],
     "anime": ["/yabancidiziizle-5/"],
     "action": ["/tur/action-adventure/"],
     "scifi": ["/tur/science-fiction/", "/tur/sci-fi-fantasy/"],
@@ -1439,6 +1427,8 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -> l
     if page == 1:
         for src_list in (v_cat.get("fhd") or [], v_cat.get("hfnl") or []):
             for it in src_list:
+                if cat == "dublaj" and not _has_dub_vault_stream(it):
+                    continue
                 if cat in ("all", "trend") or cat in (it.get("categories") or []):
                     if it["id"] not in seen:
                         seen.add(it["id"])
@@ -1460,7 +1450,10 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "") -> l
                     continue
                 dm = re.search(r'<span class="trz[^"]*"[^>]*>([^<]+)</span>', card)
                 lang_tag = html_mod.unescape(dm.group(1).strip()) if dm else "Dublaj & Altyazı"
-                if "yakında" in lang_tag.lower() or "fragman" in lang_tag.lower():
+                lt_low = lang_tag.lower()
+                if "yakında" in lt_low or "fragman" in lt_low:
+                    continue
+                if cat == "dublaj" and ("altyaz" in lt_low and "dublaj" not in lt_low and "dual" not in lt_low):
                     continue
                 seen.add(cid)
                 tm = re.search(r'<span class="film-title">([^<]+)</span>', card)
@@ -1934,6 +1927,46 @@ def _has_vault_stream(it_obj: dict) -> int:
     return best_tier
 
 
+def _has_dub_vault_stream(it_obj: dict) -> bool:
+    if not isinstance(it_obj, dict):
+        return False
+    if str(it_obj.get("origLang") or "").lower() == "tr":
+        return True
+    tid_k = str(it_obj.get("tmdbId") or it_obj.get("id") or "")
+    if tid_k and tid_k in _FLAGSHIP_TR_TMDB_IDS:
+        return True
+    v_streams = _MAIN_SITES_VAULT.get("streams") or {}
+    mt_k = "tv" if it_obj.get("mediaType") == "tv" else "movie"
+    cid_k = str(it_obj.get("id") or "")
+    off_k = str(it_obj.get("officialUrl") or "")
+    nt_k = _norm_title(it_obj.get("title") or "")
+    no_k = _norm_title(it_obj.get("originalTitle") or "")
+    c_keys = [f"url:{off_k}", f"tmdb:{mt_k}:{tid_k}:1:1", f"{mt_k}:{nt_k}:1:1", f"{mt_k}:{no_k}:1:1"]
+    if mt_k == "movie":
+        c_keys.extend([f"id:{tid_k}", f"id:{cid_k}"])
+    saw_any_vault = False
+    for ck in c_keys:
+        if ck and ck in v_streams:
+            saw_any_vault = True
+            for s in (v_streams[ck].get("streams") or []):
+                if not isinstance(s, (list, tuple)) or len(s) < 2:
+                    continue
+                st_t = str(s[1])
+                if (
+                    "multi" in st_t
+                    or st_t.endswith("_tr")
+                    or st_t.endswith("_dub")
+                    or st_t.startswith(("hls_fp:tr:", "hls_fp:multi:"))
+                ):
+                    return True
+    if saw_any_vault:
+        return False
+    g_lbl = str(it_obj.get("genreLabel") or "").lower()
+    if "dublaj" in g_lbl and not ("altyaz" in g_lbl and "dublaj" not in g_lbl):
+        return True
+    return False
+
+
 def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category: str = "all", media_type_filter: str = "") -> dict:
     pg = max(1, min(200, int(page or 1)))
     cat = (category or "all").strip().lower()
@@ -1950,21 +1983,27 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         sq = q.strip()
         import concurrent.futures
         scraped_q = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as qpool:
+        qpool = concurrent.futures.ThreadPoolExecutor(max_workers=5)
+        try:
             fut_tmdb = qpool.submit(_tmdb_sync, sq)
             fut_hdfc = qpool.submit(_scrape_hdfc_catalog_sync, cat, 1, sq) if is_free_tr else None
             fut_dl = qpool.submit(_scrape_dizilife_catalog_sync, cat, 1, sq) if is_free_tr else None
             fut_ac = qpool.submit(_scrape_animecix_catalog_sync, cat, 1, sq) if (is_free_tr or prov == "crunchyroll") else None
             fut_dp = qpool.submit(_scrape_dizipal_catalog_sync, cat, 1, sq) if is_free_tr else None
             tmdb_items = fut_tmdb.result()
-            for f_s in (fut_hdfc, fut_dl, fut_ac, fut_dp):
-                if f_s:
-                    try:
-                        scraped_q.extend(f_s.result(timeout=4.0) or [])
-                    except Exception:
-                        pass
+            rem_futs = [f_s for f_s in (fut_hdfc, fut_dl, fut_ac, fut_dp) if f_s]
+            if rem_futs:
+                concurrent.futures.wait(rem_futs, timeout=1.2)
+                for f_s in rem_futs:
+                    if f_s.done() and not f_s.exception():
+                        try:
+                            scraped_q.extend(f_s.result() or [])
+                        except Exception:
+                            pass
+        finally:
+            qpool.shutdown(wait=False)
         jw_items = []
-        if prov in JW_PROV:
+        if prov in JW_PROV and len(tmdb_items) < 4:
             pkgs, country = JW_PROV[prov]
             try:
                 jw_items = _justwatch_sync(sq, pkgs, country, 24)
@@ -2042,6 +2081,10 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             seen_ids.add(dedup_k)
             merged.append(item)
         merged.sort(key=lambda x: _rank_search_item(x, sq), reverse=True)
+        if cat == "dublaj":
+            dub_filtered = [x for x in merged if _has_dub_vault_stream(x)]
+            if dub_filtered:
+                merged = dub_filtered
         if mt_flt in ("tv", "movie"):
             merged = [x for x in merged if x.get("mediaType") == mt_flt]
         elif cat == "series" or prov in ("dizibox", "dizilife", "yabancidizi"):
@@ -2053,7 +2096,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         return {"items": sliced_q, "totalAvailable": len(merged), "totalTv": sum(1 for x in merged if x.get("mediaType") == "tv"), "totalMovies": sum(1 for x in merged if x.get("mediaType") != "tv"), "page": pg, "hasMore": len(merged) > start_q + 48}
 
     now_ts = time.time()
-    cache_key = f"v4:{prov}:{cat}:{pg}:{mt_flt}"
+    cache_key = f"v5:{prov}:{cat}:{pg}:{mt_flt}"
     cached = _CATALOG_MEM_CACHE.get(cache_key)
     if cached and (now_ts - cached[0] < 600) and cached[1]:
         return cached[1]
@@ -2348,6 +2391,14 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     vf_mv = sum(1 for x in verified_only if x.get("mediaType") != "tv")
     if cat != "vizyon" and verified_only and ((is_free_tr and len(verified_only) >= 12) or (vf_tv >= 10 and vf_mv >= 10)):
         items = verified_only
+    if cat == "dublaj":
+        _VERIFIED_STREAMING_DUB_IDS = {"95396", "84958", "1396", "66732", "60574", "1429", "95479"}
+        dub_filtered = [
+            x for x in items
+            if _has_dub_vault_stream(x) or str(x.get("tmdbId") or "") in _VERIFIED_STREAMING_DUB_IDS
+        ]
+        if dub_filtered:
+            items = dub_filtered
     if mt_flt in ("tv", "movie"):
         items = [x for x in items if x.get("mediaType") == mt_flt]
     elif prov in ("dizibox", "dizilife", "yabancidizi") or cat == "series":
@@ -2619,6 +2670,22 @@ def _is_generic_ep_name(name: str) -> bool:
     return bool(re.fullmatch(r"(?:\d+\.\s*bölüm|bölüm\s*\d+|episode\s*\d+|ep\.?\s*\d+)", n, re.I))
 
 
+_TMDB_SEASON_RAW_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _tmdb_cached_json(url: str, timeout: float = 4.8) -> dict:
+    now_t = time.time()
+    hit = _TMDB_SEASON_RAW_CACHE.get(url)
+    if hit and (now_t - hit[0]) < 1800:
+        return hit[1]
+    data = _http_json(url, timeout=timeout) or {}
+    if data:
+        if len(_TMDB_SEASON_RAW_CACHE) >= 400:
+            _TMDB_SEASON_RAW_CACHE.pop(next(iter(_TMDB_SEASON_RAW_CACHE)), None)
+        _TMDB_SEASON_RAW_CACHE[url] = (now_t, data)
+    return data
+
+
 def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
     tid = str(tmdb_id or "").strip()
     raw_mt = str(media_type or "").strip().lower()
@@ -2640,7 +2707,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
         eps_fb = [{"episode": i, "season": s_num, "name": f"{i}. Bölüm", "overview": f"{title} — {s_num}. Sezon {i}. Bölüm", "runtime": 45, "still": ""} for i in range(1, 13)] if mtype == "tv" else []
         return {"tmdbId": "", "mediaType": mtype, "title": title, "originalTitle": title, "year": "", "rating": 0.0, "overview": "", "seasons": [{"season": 1, "name": "1. Sezon", "count": 12}] if mtype == "tv" else [], "episodes": eps_fb}
     try:
-        info = _http_json(f"https://api.themoviedb.org/3/{mtype}/{tid}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "append_to_response": "external_ids"}), timeout=5.5)
+        info = _tmdb_cached_json(f"https://api.themoviedb.org/3/{mtype}/{tid}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "append_to_response": "external_ids"}), timeout=5.5)
     except Exception:
         info = {}
     if mtype == "tv" and not (info.get("name") or info.get("seasons")):
@@ -2698,7 +2765,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
             tmdb_ep_en: dict[tuple[int, int], dict] = {}
             for t_sn in sorted(needed_tmdb_seasons):
                 try:
-                    sd_tr = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=4.8) or {}
+                    sd_tr = _tmdb_cached_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=4.8)
                     for ep_o in (sd_tr.get("episodes") or []):
                         tmdb_ep_tr[(t_sn, int(ep_o.get("episode_number") or 1))] = ep_o
                 except Exception:
@@ -2711,7 +2778,7 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
                 )
                 if need_en:
                     try:
-                        sd_en = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5) or {}
+                        sd_en = _tmdb_cached_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{t_sn}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5)
                         for ep_o in (sd_en.get("episodes") or []):
                             tmdb_ep_en[(t_sn, int(ep_o.get("episode_number") or 1))] = ep_o
                     except Exception:
@@ -2746,15 +2813,18 @@ def _seasons_sync(tmdb_id: str, title: str, media_type: str, season: int):
                 if re.fullmatch(r"Season\s*(\d+)", str(rs.get("name") or ""), re.I):
                     rs["name"] = f"{rs['season']}. Sezon"
             out["seasons"] = raw_seasons
+            valid_s_nums = [int(x.get("season") or 1) for x in raw_seasons if int(x.get("season") or 0) >= 1]
+            if valid_s_nums and s_num not in valid_s_nums:
+                s_num = max(valid_s_nums) if s_num > max(valid_s_nums) else min(valid_s_nums)
             try:
-                sdata_tr = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=5.0) or {}
+                sdata_tr = _tmdb_cached_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR"}), timeout=5.0)
             except Exception:
                 sdata_tr = {}
             eps_tr = sdata_tr.get("episodes") or []
             en_by_num: dict[int, dict] = {}
             if not eps_tr or any(_is_generic_ep_name(ep.get("name")) or not str(ep.get("overview") or "").strip() for ep in eps_tr):
                 try:
-                    sdata_en = _http_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5) or {}
+                    sdata_en = _tmdb_cached_json(f"https://api.themoviedb.org/3/tv/{tid}/season/{s_num}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US"}), timeout=4.5)
                     for ep_e in (sdata_en.get("episodes") or []):
                         en_by_num[int(ep_e.get("episode_number") or 1)] = ep_e
                     if not eps_tr and sdata_en.get("episodes"):
@@ -2823,7 +2893,10 @@ async def title_seasons(request: Request):
     if cached and now_t - cached[0] < 3600:
         return JSONResponse(cached[1], headers=hdrs)
     if len(_SEASONS_LOCKS) >= 300:
-        _SEASONS_LOCKS.pop(next(iter(_SEASONS_LOCKS)), None)
+        for _slk_k in list(_SEASONS_LOCKS.keys()):
+            if not _SEASONS_LOCKS[_slk_k].locked():
+                _SEASONS_LOCKS.pop(_slk_k, None)
+                break
     lock = _SEASONS_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         cached = _SEASONS_CACHE.get(ckey)
@@ -2956,9 +3029,9 @@ PROV_BROWSE = {
 
 
 _HEXA_CAP = {"token": "", "exp": 0.0}
-_VE_SEED_CACHE = {}
-_TMDB_META_CACHE = {}
-_STREAM_CACHE = {}
+_VE_SEED_CACHE = BoundedTTLCache(maxsize=500, ttl=3600.0)
+_TMDB_META_CACHE = BoundedTTLCache(maxsize=2000, ttl=21600.0)
+_STREAM_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
 UA137 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
 
@@ -2983,8 +3056,8 @@ OFFICIAL_SEARCH_URLS = {
     "yabancidizi": "https://dizi84.life/ara?q={q}",
 }
 
-_EMBED_SUB_CACHE = {}
-_DUB_STREAM_CACHE = {}
+_EMBED_SUB_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
+_DUB_STREAM_CACHE = BoundedTTLCache(maxsize=1000, ttl=3600.0)
 
 _AES_SBOX = [
     0x63,0x7c,0x77,0x7b,0xf2,0x6b,0x6f,0xc5,0x30,0x01,0x67,0x2b,0xfe,0xd7,0xab,0x76,0xca,0x82,0xc9,0x7d,0xfa,0x59,0x47,0xf0,0xad,0xd4,0xa2,0xaf,0x9c,0xa4,0x72,0xc0,
@@ -3061,7 +3134,7 @@ def _gen_fp_xsp(sp: str, spt: int = 0) -> str:
 _TR_ASCII_MAP = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
 DIZIPAL_DOMAINS = [d.strip() for d in (os.environ.get("DIZIPAL_DOMAINS") or "dizipal1593.com,dizipal1592.com,dizipalw2.com").split(",") if d.strip()]
 DIZIPAL_PASSPHRASE = "3hPn4uCjTVtfYWcjIcoJQ4cL1WWk1qxXI39egLYOmNv6IblA7eKJz68uU3eLzux1biZLCms0quEjTYniGv5z1JcKbNIsDQFSeIZOBZJz4is6pD7UyWDggWWzTLBQbHcQFpBQdClnuQaMNUHtLHTpzCvZy33p6I7wFBvL4fnXBYH84aUIyWGTRvM2G5cfoNf4705tO2kv"
-_DP_M3U8_CACHE = {}
+_DP_M3U8_CACHE = BoundedTTLCache(maxsize=800, ttl=1800.0)
 
 
 def _decrypt_dizipal_rmk(encrypted_json_str: str) -> str:
@@ -3391,7 +3464,7 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "") -
     fn = m_hls.group(1)
     fn = re.sub(r"\.(?:mp4|m3u8|txt|mkv|webm).*$", "", fn, flags=re.I)
     fn = re.sub(r"-[A-Za-z0-9]{10,12}$", "", fn)
-    slug = re.split(r"-(?:19|20)\d{2}|-(?:webdl|bluray|cam|hdrip|trdual|dual|tekmp4|tt\d+)", fn, flags=re.I)[0]
+    slug = re.split(r"-s\d{1,2}e\d{1,4}\b|-sezon-\d+|-bolum-\d+|-(?:19|20)\d{2}\b|-(?:webdl|bluray|cam|hdrip|trdual|dual|tekmp4|tt\d+)", fn, flags=re.I)[0]
     clean_slug = re.sub(r"[^a-z0-9]", "", slug.lower().replace("&", "and"))
     if not clean_slug or len(clean_slug) < 4 or re.fullmatch(r"[0-9a-f]{12,}", clean_slug):
         return True
@@ -4011,7 +4084,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
             else:
                 verified_vault_res.append((vu_cand, vst_cand))
         res = verified_vault_res
-    if res and (not refresh or IS_VERCEL):
+    has_vault_dub = any(
+        ("tr" in (_AUDIO_LANG_HINT.get(vu) or []))
+        or (not _AUDIO_LANG_HINT.get(vu) and vst in ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr"))
+        for vu, vst in res
+    )
+    if res and (IS_VERCEL or (not refresh and (mtype == "movie" or has_vault_dub))):
         return res + [x for x in fallback_res if x not in res]
     _collect_vault_keys(fb_ep_keys, fallback_res)
 
@@ -4075,7 +4153,13 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         if "rapidvid." in vu:
                             m3u8_u, subs = _decode_rapidvid_embed(vu, f_u)
                             if m3u8_u:
-                                st_tag = "hls_fhd_multi" if mode_k in ("multi", "dual") else ("hls_fhd_tr" if "tr" in mode_k else "hls_fhd")
+                                mk_low = str(mode_k or "").lower()
+                                if mk_low in ("multi", "dual"):
+                                    st_tag = "hls_fhd_multi"
+                                elif "tr" in mk_low or "dub" in mk_low:
+                                    st_tag = "hls_fhd_tr"
+                                else:
+                                    st_tag = "hls_fhd"
                                 res.append((m3u8_u, st_tag))
                                 for sb in subs:
                                     if not any(x.get("url") == sb["url"] for x in es_list):
@@ -4140,9 +4224,13 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 emb_html = urllib.request.urlopen(urllib.request.Request(emb_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 m3u8_u = _decode_hdfc_mobi_html(emb_html)
                 if m3u8_u and m3u8_u.startswith("http"):
-                    is_dual_hfnl = any(k in m3u8_u.lower() for k in ("dual", "trdual")) or "closedual" in emb_html.lower() or "dual" in phtml.lower()
+                    is_dual_hfnl = any(k in m3u8_u.lower() for k in ("dual", "trdual")) or "closedual" in emb_html.lower()
                     st_tag = "hls_hfnl_multi" if is_dual_hfnl else "hls_hfnl"
-                    res.append((m3u8_u, st_tag))
+                    if is_dual_hfnl:
+                        _AUDIO_LANG_HINT[m3u8_u] = ["tr", "orig"]
+                        res.insert(0, (m3u8_u, st_tag))
+                    else:
+                        res.append((m3u8_u, st_tag))
                     for sb in _parse_embed_vtt_tracks(emb_html, "hfnl_embed"):
                         if not any(x.get("url") == sb["url"] for x in es_list):
                             es_list.insert(0, sb)
@@ -4189,9 +4277,9 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 if m_vm_ifr:
                     mu = ("https:" + m_vm_ifr.group(1)) if m_vm_ifr.group(1).startswith("//") else m_vm_ifr.group(1)
                     mhtml = urllib.request.urlopen(urllib.request.Request(mu, headers={"User-Agent": UA137, "Referer": ep_u}), timeout=3.0).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-                    m_vm_emb = re.search(r'https?://vidmoly\.[a-z]+/embed-[a-zA-Z0-9_-]+\.html', mhtml, re.I)
+                    m_vm_emb = re.search(r'https?://(?:vidmoly|vmbox|vmnow|vmpx)\.[a-z]+/(?:embed-|w/)[a-zA-Z0-9_-]+(?:\.html)?', mhtml, re.I)
                     if m_vm_emb:
-                        vm_emb_u = re.sub(r'vidmoly\.[a-z]+', 'vidmoly.biz', m_vm_emb.group(0))
+                        vm_emb_u = re.sub(r'(?:vidmoly|vmbox|vmnow|vmpx)\.[a-z]+', 'vidmoly.biz', m_vm_emb.group(0), flags=re.I)
                         res.append((vm_emb_u, "hls_vm"))
                 if res:
                     break
@@ -4258,7 +4346,7 @@ except Exception:
     _HIDDEN_TMDB_IDS = set()
 
 _ANIMECIX_TAU_MAP: dict = {}
-_TAU_URL_CACHE: dict[str, str] = {}
+_TAU_URL_CACHE = BoundedTTLCache(maxsize=1500, ttl=1200.0)
 try:
     _tau_map_path = BASE_DIR / "animecix_tau_map.json"
     if _tau_map_path.exists():
@@ -4324,11 +4412,9 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
         ]:
             if pair_se not in cand_se and pair_se[0] >= 1 and pair_se[1] >= 1:
                 cand_se.append(pair_se)
-        if tid_str == "120089":  # SPY x FAMILY (TMDB S1 has 25 eps = Cour 1 + Cour 2; Animecix splits S1=12, S2=13, S3=12)
+        if tid_str == "120089":  # SPY x FAMILY (TMDB S1 has 25 eps = Cour 1 + Cour 2; _CANONICAL_SEASON_SPLITS already maps S2->S3)
             if s == 1 and e > 12 and (2, e - 12) not in cand_se:
                 cand_se.insert(0, (2, e - 12))
-            elif s >= 2 and (s + 1, e) not in cand_se:
-                cand_se.insert(0, (s + 1, e))
         elif tid_str == "85937" and s >= 2:  # Demon Slayer arc shift fallback
             if (s + 1, e) not in cand_se:
                 cand_se.append((s + 1, e))
@@ -4357,7 +4443,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                         break
                 except Exception:
                     continue
-            if not vids and (mtype == "movie" or (s == 1 and e == 1)):
+            if not vids and mtype == "movie":
                 try:
                     v_data = _raw_get_json(f"https://animecix.tv/secure/videos?titleId={ac_id}", headers=hdrs, timeout=ac_to) or {}
                     pag = v_data.get("pagination") if isinstance(v_data, dict) else None
@@ -4366,7 +4452,7 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                         v for v in raw_vids
                         if isinstance(v, dict)
                         and int(v.get("title_id") or 0) == int(ac_id)
-                        and str(v.get("category") or "").lower() != "teaser"
+                        and str(v.get("category") or "").lower() not in ("teaser", "trailer", "clip", "opening", "ending")
                     ]
                 except Exception:
                     vids = None
@@ -4532,7 +4618,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1, "has_splits": False}
     s_split, e_split = ep_num["s_split"], ep_num["e_split"]
     s_tmdb, e_tmdb = ep_num["s_tmdb"], ep_num["e_tmdb"]
-    ckey = f"v38:{mtype}:{tid}:{s_split}:{e_split}"
+    ckey = f"v43:{mtype}:{tid}:{s_split}:{e_split}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -4835,7 +4921,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower() or str(tid or "") in _ANIMECIX_KNOWN_TMDB
     _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
-    _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_dl", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
+    _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
+    has_tr_dub_ready = orig_lang == "tr"
     while time.time() - t_start < 5.6:
         ac_res_now = (f_ac.result() or []) if (f_ac.done() and not f_ac.exception()) else []
         ac_ok = bool(ac_res_now)
@@ -4864,7 +4951,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 4.5):
             time.sleep(0.08)
             continue
-        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or dl_ok or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
+        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
         if primary_1080_ok and t_first_hf == 0.0:
             t_first_hf = time.time()
         if primary_1080_ok and (has_glob_ready or vl_ok or (time.time() - t_first_hf >= 0.65)):
@@ -4878,6 +4965,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         time.sleep(0.10)
     if not any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
         concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.2)
+    elif not is_ja_or_anime and not has_tr_dub_ready and not f_hf.done():
+        concurrent.futures.wait([f_hf], timeout=3.2)
     ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
     if f_ac.done():
         try:
@@ -5016,6 +5105,8 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             try:
                 conn = _get_acc_db()
                 conn.execute("INSERT OR REPLACE INTO resolved_streams (ckey, val_json, exp) VALUES (?, ?, ?)", (ckey, json.dumps({"urls": out_urls, "subs": esubs_now}), exp_t))
+                if int(now_t) % 37 == 0:
+                    conn.execute("DELETE FROM resolved_streams WHERE exp < ?", (now_t,))
                 conn.commit()
             except Exception:
                 pass
@@ -5073,10 +5164,10 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     return u
 
 
-_SUB_CACHE = {}
+_SUB_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
 _SUB_VTT_CACHE = collections.OrderedDict()
 _TTS_CACHE = collections.OrderedDict()
-_PLATFORM_META_CACHE = {}
+_PLATFORM_META_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
 
 SUB_LANG_MAP = {
     "tur": ("tr", "🇹🇷 Türkçe", 0), "tr": ("tr", "🇹🇷 Türkçe", 0), "türkçe": ("tr", "🇹🇷 Türkçe", 0), "turkish": ("tr", "🇹🇷 Türkçe", 0),
@@ -5195,11 +5286,11 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         base_n = raw_name.split("[")[0].strip().replace("İ", "i").replace("I", "ı").lower()
         if base_n in SUB_LANG_MAP:
             allow_subs.add(SUB_LANG_MAP[base_n][0])
-    ckey = f"sub:v14:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
+    ckey = f"sub:v15:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
     now_t = time.time()
     cached = _SUB_CACHE.get(ckey)
     if cached and cached["exp"] > now_t:
-        return cached["val"]
+        return [dict(t) for t in (cached.get("val") or [])]
     all_embed = []
     for u_dir, _ in (direct_list or []):
         u_clean = str(u_dir or "").strip()
@@ -5279,15 +5370,15 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 if mtype == "tv"
                 else f"https://rest.opensubtitles.org/search/imdbid-{imdb_num}/sublanguageid-{lang3}"
             )
-            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=2.4)
+            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=4.2)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as os_pool:
             fut_tr = os_pool.submit(_fetch_os_rest, "tur")
             fut_en = os_pool.submit(_fetch_os_rest, "eng")
-            fut_strem = os_pool.submit(_raw_get_json, ep_url, None, 2.4)
+            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 4.2)
             for lang3, fut in (("tur", fut_tr), ("eng", fut_en)):
                 try:
-                    os_items = fut.result(timeout=2.5)
+                    os_items = fut.result(timeout=4.5)
                     if isinstance(os_items, list):
                         valid_os = [
                             it for it in os_items
@@ -5366,17 +5457,18 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                             dl_link = str(it.get("SubDownloadLink") or "").strip()
                             if dl_link.startswith("http"):
                                 is_auto_os = str(it.get("SubAutoTranslation") or "0") == "1"
-                                _add_sub(dl_link, lang3, 1 if is_auto_os else (-4 if idx_os == 0 else -3), not is_auto_os, "auto" if is_auto_os else "opensubtitles")
+                                _add_sub(dl_link, lang3, 1 if is_auto_os else (-2 if idx_os == 0 else -1), not is_auto_os, "auto" if is_auto_os else "opensubtitles")
                 except Exception:
                     pass
             try:
-                data = fut_strem.result(timeout=2.5) or {}
-                for sub in (data.get("subtitles") or []):
+                data = fut_strem.result(timeout=4.5) or {}
+                for idx_st, sub in enumerate(data.get("subtitles") or []):
                     raw_lang = str(sub.get("lang") or "").lower().strip()
                     if raw_lang not in SUB_LANG_MAP:
                         continue
                     lcode = SUB_LANG_MAP[raw_lang][0]
-                    _add_sub(sub.get("url"), raw_lang, 0 if lcode in allow_subs else 1, False, "opensubtitles")
+                    st_tier = (-4 if idx_st < 4 else -3) if lcode in ("tr", "en") or lcode in allow_subs else 0
+                    _add_sub(sub.get("url"), raw_lang, st_tier, lcode in ("tr", "en"), "opensubtitles")
             except Exception:
                 pass
 
@@ -5387,7 +5479,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
     lang_counts = {}
     picked = []
     for prio, tier, _, lcode, llabel, sub_url, is_orig, src_tag in raw_cands:
-        max_for_lang = 3 if lcode in ("tr", "en") else 1
+        max_for_lang = 5 if lcode in ("tr", "en") else 2
         cnt = lang_counts.get(lcode, 0)
         if cnt >= max_for_lang:
             continue
@@ -5431,11 +5523,46 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
             grp = 5
         return (grp, x[0], x[1], var)
     picked.sort(key=_sub_sort_key)
-    tracks = [x[3] for x in picked[:24]]
+    pre_tracks = [x[3] for x in picked[:28]]
+    live_tracks = _filter_live_subs(pre_tracks) if pre_tracks else []
+    if not any(t.get("lang") == "tr" for t in live_tracks) and live_tracks:
+        fb_src_track = next((t for t in live_tracks if t.get("lang") == "en"), live_tracks[0])
+        q_fb = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_src_track.get("url") or "")).query)
+        raw_fb_src = (q_fb.get("url") or [""])[0]
+        if raw_fb_src.startswith("http"):
+            tr_synth_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_fb_src, safe='')}&lang=tr&translate=tr{meta_q}"
+            live_tracks.insert(0, {"id": "tr", "lang": "tr", "label": f"🇹🇷 Türkçe ({plabel} Akıllı Çeviri Senkron)", "url": tr_synth_u, "kind": "subtitles", "source": "ai-tr"})
+    if not any(t.get("lang") == "en" for t in live_tracks) and live_tracks:
+        fb_en_track = next((t for t in live_tracks if t.get("lang") == "tr"), live_tracks[0])
+        q_en = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_en_track.get("url") or "")).query)
+        raw_en_src = (q_en.get("url") or [""])[0]
+        if raw_en_src.startswith("http"):
+            en_synth_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_en_src, safe='')}&lang=en&translate=en{meta_q}"
+            ins_en_idx = 1 if (live_tracks and live_tracks[0].get("lang") == "tr") else 0
+            live_tracks.insert(ins_en_idx, {"id": "en", "lang": "en", "label": f"🇬🇧 İngilizce (English) ({plabel} Akıllı Çeviri Senkron)", "url": en_synth_u, "kind": "subtitles", "source": "ai-en"})
+    final_counts = {}
+    tracks = []
+    seen_tids_out = set()
+    for trk in live_tracks:
+        lc = str(trk.get("lang") or "und")
+        cap = 3 if lc in ("tr", "en") else 1
+        cur_c = final_counts.get(lc, 0)
+        if cur_c >= cap:
+            continue
+        final_counts[lc] = cur_c + 1
+        t_copy = dict(trk)
+        want_id = lc if cur_c == 0 else f"{lc}-{cur_c + 1}"
+        if want_id in seen_tids_out:
+            want_id = f"{want_id}-{len(seen_tids_out) + 1}"
+        seen_tids_out.add(want_id)
+        t_copy["id"] = want_id
+        tracks.append(t_copy)
+        if len(tracks) >= 24:
+            break
     if tracks:
         has_tr_sub = any(t.get("lang") == "tr" for t in tracks)
-        _SUB_CACHE[ckey] = {"val": tracks, "exp": now_t + (3600 if has_tr_sub else 90)}
-    return tracks
+        _SUB_CACHE[ckey] = {"val": [dict(t) for t in tracks], "exp": now_t + (3600 if has_tr_sub else 90)}
+    return [dict(t) for t in tracks]
 
 
 _AUDIO_LANG_ALIASES = {
@@ -5458,9 +5585,9 @@ _AUDIO_LANG_ALIASES = {
 }
 _AUDIO_LANG_FLAGS = {"tr": "🇹🇷", "en": "🇬🇧", "ja": "🇯🇵", "ko": "🇰🇷", "de": "🇩🇪", "fr": "🇫🇷", "es": "🇪🇸", "it": "🇮🇹", "ru": "🇷🇺", "ar": "🇸🇦", "pt": "🇵🇹", "nl": "🇳🇱", "pl": "🇵🇱", "zh": "🇨🇳", "hi": "🇮🇳"}
 _AUDIO_LANG_TR_NAMES = {**ISO_TO_TR_NAME, "zh": "Çince", "hi": "Hintçe"}
-_AUDIO_LANG_HINT: dict[str, list] = {}
-_STREAM_RES_HINT: dict[str, int] = {}
-_AUDIO_PROBE_CACHE: dict[str, tuple[float, list]] = {}
+_AUDIO_LANG_HINT = BoundedTTLCache(maxsize=2000, ttl=3600.0)
+_STREAM_RES_HINT = BoundedTTLCache(maxsize=2000, ttl=900.0)
+_AUDIO_PROBE_CACHE = BoundedTTLCache(maxsize=800, ttl=1800.0)
 
 
 def _norm_audio_lang(*vals) -> str:
@@ -5479,7 +5606,7 @@ def _norm_audio_lang(*vals) -> str:
     return ""
 
 
-def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int):
+def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int, mtype: str = ""):
     """Return the audio languages a source really carries: [codes], [] for muxed/unlabelled audio, None on failure."""
     import base64
     if raw_u in _AUDIO_LANG_HINT and _AUDIO_LANG_HINT[raw_u] and raw_u in _STREAM_RES_HINT:
@@ -5496,7 +5623,7 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int)
     cached = _AUDIO_PROBE_CACHE.get(raw_u)
     if cached and time.time() - cached[0] < 1800 and raw_u in _STREAM_RES_HINT:
         return list(cached[1])
-    wu = _wrap_first_party_stream(raw_u, st, prov, tid, s, e)
+    wu = _wrap_first_party_stream(raw_u, st, prov, tid, s, e, mtype or ("tv" if (s > 1 or e > 1) else ""))
     if "/api/rave/stream?" not in wu:
         return None
     wu_probe = f"{wu}&probe=1"
@@ -5508,13 +5635,19 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int)
             self.query_params = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(u).query))
 
     try:
-        resp = asyncio.run(rave_stream_manifest(_ProbeReq(wu_probe)))
+        _p_loop = asyncio.new_event_loop()
+        try:
+            resp = _p_loop.run_until_complete(rave_stream_manifest(_ProbeReq(wu_probe)))
+        finally:
+            _p_loop.close()
         if resp.status_code != 200:
-            _STREAM_RES_HINT[raw_u] = -1
+            if "multi" not in str(st):
+                _STREAM_RES_HINT.set(raw_u, -1, ttl=45.0)
             return None
         body = resp.body.decode("utf-8", errors="ignore")
     except Exception:
-        _STREAM_RES_HINT[raw_u] = -1
+        if "multi" not in str(st):
+            _STREAM_RES_HINT.set(raw_u, -1, ttl=30.0)
         return None
     max_w = max((max(int(m.group(1)), int(int(m.group(2)) * 16 / 9)) for m in re.finditer(r"RESOLUTION=(\d+)x(\d+)", body, re.I)), default=0)
     if not max_w:
@@ -5532,8 +5665,6 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int)
                 langs.append("?")
     langs = [x for x in langs if x != "?"] if any(x != "?" for x in langs) else []
     _AUDIO_PROBE_CACHE[raw_u] = (time.time(), langs)
-    if len(_AUDIO_PROBE_CACHE) > 600:
-        _AUDIO_PROBE_CACHE.pop(next(iter(_AUDIO_PROBE_CACHE)), None)
     return langs
 
 
@@ -5559,7 +5690,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
     lang_map = {}
     if probe_targets:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(probe_targets)) as ppool:
-            futs = {ppool.submit(_probe_audio_langs, u, st, prov, tid, s, e): u for u, st in probe_targets}
+            futs = {ppool.submit(_probe_audio_langs, u, st, prov, tid, s, e, mtype): u for u, st in probe_targets}
             done, _ = concurrent.futures.wait(futs, timeout=4.8)
             for f in done:
                 try:
@@ -5619,6 +5750,8 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             langs = [orig_lang]
         if not langs and st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr"):
             langs = ["tr"]
+        if not langs and (st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_ve_multi") or str(st).startswith("hls_fp:multi:")):
+            langs = ["tr", orig_lang or "en"] if (orig_lang or "en") != "tr" else ["tr"]
         if not langs and orig_lang == "tr":
             langs = ["tr"]
         if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
@@ -6079,7 +6212,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
             if late_embeds:
                 meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
-                for esub in late_embeds:
+                existing_sub_ids = {str(st_item.get("id") or "") for st_item in sub_tracks}
+                for idx_le, esub in enumerate(late_embeds):
                     eu = str(esub.get("url") or "").strip()
                     raw_l = str(esub.get("lang") or esub.get("label") or "").lower().strip()
                     base_l = re.split(r"[\s(\[-]", raw_l)[0].strip()
@@ -6087,13 +6221,54 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     if eu.startswith("http") and linfo and not any(urllib.parse.quote(eu, safe="") in str(st_item.get("url") or "") for st_item in sub_tracks):
                         lcode, llabel, _ = linfo
                         vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(eu, safe='')}&lang={lcode}{meta_q_late}"
-                        sub_tracks.insert(0, {"id": f"{lcode}-hls", "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
+                        cand_sid = f"{lcode}-hls" if f"{lcode}-hls" not in existing_sub_ids else f"{lcode}-hls-{idx_le + 2}"
+                        existing_sub_ids.add(cand_sid)
+                        sub_tracks.insert(0, {"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
             if not intro_seg and sub_tracks:
                 intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
             sub_tracks = _filter_live_subs(sub_tracks)
+            if sub_tracks and not any(t.get("lang") == "tr" for t in sub_tracks):
+                fb_t = next((t for t in sub_tracks if t.get("lang") == "en"), sub_tracks[0])
+                q_t = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_t.get("url") or "")).query)
+                raw_src_u = (q_t.get("url") or [""])[0]
+                if raw_src_u.startswith("http"):
+                    meta_q_fb = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
+                    sub_tracks.insert(0, {
+                        "id": "tr-auto",
+                        "lang": "tr",
+                        "label": f"🇹🇷 Türkçe ({label} Akıllı Çeviri Senkron)",
+                        "url": f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_src_u, safe='')}&lang=tr&translate=tr{meta_q_fb}",
+                        "kind": "subtitles",
+                        "source": "ai-tr",
+                    })
+            if sub_tracks and not any(t.get("lang") == "en" for t in sub_tracks):
+                fb_e = next((t for t in sub_tracks if t.get("lang") == "tr"), sub_tracks[0])
+                q_e = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_e.get("url") or "")).query)
+                raw_en_u = (q_e.get("url") or [""])[0]
+                if raw_en_u.startswith("http"):
+                    meta_q_fb_e = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
+                    ins_e_at = 1 if (sub_tracks and sub_tracks[0].get("lang") == "tr") else 0
+                    sub_tracks.insert(ins_e_at, {
+                        "id": "en-auto",
+                        "lang": "en",
+                        "label": f"🇬🇧 İngilizce (English) ({label} Akıllı Çeviri Senkron)",
+                        "url": f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_en_u, safe='')}&lang=en&translate=en{meta_q_fb_e}",
+                        "kind": "subtitles",
+                        "source": "ai-en",
+                    })
             alive_wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
             if not audio_tracks:
                 audio_tracks = [{"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({label})", "mode": "stream", "url": alive_wrapped[0][0]}]
+                if orig_lang != "tr" and prov not in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv"):
+                    audio_tracks.append({
+                        "id": "tr-ai-dub",
+                        "lang": "tr",
+                        "targetLang": "tr",
+                        "audioLang": "tr",
+                        "label": f"🇹🇷 Türkçe ({label} Akıllı Seslendirme)",
+                        "mode": "tts",
+                        "url": alive_wrapped[0][0],
+                    })
             stream_url = audio_tracks[0]["url"] if audio_tracks else alive_wrapped[0][0]
             stype = "mp4" if ("&ext=.mp4" in stream_url or ".mp4" in stream_url) else alive_wrapped[0][1]
             alt_urls = list(dict.fromkeys([t["url"] for t in audio_tracks if t.get("url")] + [u for u, _ in alive_wrapped]))
@@ -6199,7 +6374,7 @@ async def resolve_catalog(request: Request):
     has_ep_q = bool((request.query_params.get("season") or request.query_params.get("s") or "").strip()) or bool((request.query_params.get("episode") or request.query_params.get("e") or "").strip())
     if raw_mtype_q:
         media_type = raw_mtype_q
-    elif prov in ("dizi", "anime", "cizgifilm") or (has_ep_q and str(request.query_params.get("episode") or request.query_params.get("e") or "1").strip() != "1") or (has_ep_q and str(request.query_params.get("season") or request.query_params.get("s") or "1").strip() != "1"):
+    elif prov in ("dizi", "anime", "cizgifilm") or has_ep_q:
         media_type = "tv"
     else:
         media_type = "movie"
@@ -6224,7 +6399,7 @@ async def resolve_catalog(request: Request):
         episode = min(5000, max(1, int(request.query_params.get("episode") or request.query_params.get("e") or 1)))
     except (TypeError, ValueError):
         season, episode = 1, 1
-    ckey = f"v27|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
+    ckey = f"v32|{prov}|{media_type}|{tmdb_id or imdb_id or title.lower()}|{season}|{episode}"
     now_t = time.time()
     cc_hdrs = {"Cache-Control": "no-store" if force_refresh else "public, max-age=60, s-maxage=90, stale-while-revalidate=180"}
     if not force_refresh:
@@ -6232,7 +6407,10 @@ async def resolve_catalog(request: Request):
         if cached and now_t - cached[0] < 120:
             return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
     if len(_RESOLVE_LOCKS) >= 400:
-        _RESOLVE_LOCKS.pop(next(iter(_RESOLVE_LOCKS)), None)
+        for _rlk_k in list(_RESOLVE_LOCKS.keys()):
+            if not _RESOLVE_LOCKS[_rlk_k].locked():
+                _RESOLVE_LOCKS.pop(_rlk_k, None)
+                break
     lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
         if not force_refresh:
@@ -6802,7 +6980,7 @@ async def rave_latest_episodes(request: Request):
 
 
 async def supersearch(request: Request):
-    q = (request.query_params.get("q") or "").strip()[:200]
+    q = _BIDI_CTRL_RE.sub("", request.query_params.get("q") or "").strip()[:200]
     if not q:
         return JSONResponse({"youtube": [], "tmdb": [], "justwatch": []})
     qkey = q.replace("İ", "i").replace("I", "ı").lower()
@@ -6951,13 +7129,15 @@ def _extract_sync(url: str, fallback_title: str):
     for pat, prov in ((r"(https?:\\?/\\?/[^\s\"'<>]+?\.m3u8[^\s\"'<>]*)", "hls"), (r"(https?:\\?/\\?/[^\s\"'<>]+?\.(?:mp4|webm)(?:\?[^\s\"'<>]*)?)", "direct")):
         mm = re.search(pat, html, re.I)
         if mm:
-            return {"provider": prov, "url": mm.group(1).replace("\\/", "/"), "title": title, "thumbnail": thumb}
+            cand_media_u = mm.group(1).replace("\\/", "/")
+            if public_http_url(cand_media_u):
+                return {"provider": prov, "url": cand_media_u, "title": title, "thumbnail": thumb}
     og = re.search(r"<meta[^>]+property=[\"']og:video(?::secure_url|:url)?[\"'][^>]+content=[\"']([^\"']+)", html, re.I)
     if og:
         yt = YT_RE.search(og.group(1))
         if yt:
             return {"provider": "youtube", "videoId": yt.group(1), "url": f"https://www.youtube.com/watch?v={yt.group(1)}", "title": title, "thumbnail": f"https://i.ytimg.com/vi/{yt.group(1)}/hqdefault.jpg"}
-        if re.search(r"\.(mp4|webm|m3u8)(\?|$)", og.group(1), re.I):
+        if re.search(r"\.(mp4|webm|m3u8)(\?|$)", og.group(1), re.I) and public_http_url(og.group(1)):
             return {"provider": "hls" if ".m3u8" in og.group(1) else "direct", "url": og.group(1), "title": title, "thumbnail": thumb}
     emb = YT_RE.search(html)
     if emb:
@@ -7230,6 +7410,20 @@ def _get_seg_lock(url: str) -> threading.Lock:
 _KNOWN_LARGE_MP4_URLS: set[str] = set()
 
 
+def _is_binary_media_payload(data: bytes) -> bool:
+    if not data or len(data) < 4:
+        return False
+    if data[0] == 0x47 and (len(data) < 189 or data[188] == 0x47):
+        return True
+    if len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx", b"mdat", b"moov", b"free", b"wide"):
+        return True
+    if data.startswith((b"\x1a\x45\xdf\xa3", b"ID3", b"OggS", b"RIFF", b"fLaC")):
+        return True
+    if len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xF0) in (0xF0, 0xE0):
+        return True
+    return False
+
+
 def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     if not rng:
         with _SEG_TABLE_LOCK:
@@ -7294,13 +7488,11 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
     is_fmp4_seg = is_fmp4_init or ext_hint == ".m4s" or clean_u_path.endswith(".m4s")
     is_explicit_mp4 = (not is_fmp4_seg) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower() or "drive.usercontent.google.com" in url.lower())
-    is_seg_url = is_fmp4_seg or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
+    is_seg_url = is_fmp4_seg or ext_hint in (".ts", ".aac", ".key", ".vtt", ".m3u8") or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
         m_hi = re.match(r"bytes=(\d+)-", rng)
         if m_hi and int(m_hi.group(1)) >= 8 * 1024 * 1024:
-            has_high_range = True
-        elif rng.startswith("bytes=-"):
             has_high_range = True
     is_full_mp4 = (is_explicit_mp4 and not is_seg_url) or has_high_range
     if not is_full_mp4:
@@ -7320,14 +7512,34 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                 else:
                     data = b""
                     ct = "video/mp2t"
-                    use_seg_rng = bool(rng and rng.startswith("bytes=") and rng != "bytes=0-1023" and not rng.startswith("bytes=0-"))
+                    is_key_req = ext_hint == ".key" or clean_u_path.endswith(".key") or "key.php" in url
+                    small_map_rng = False
+                    if rng and rng.startswith("bytes=") and (ext_hint == ".m4s" or clean_u_path.endswith(".mp4")):
+                        m_sm = re.match(r"bytes=(\d+)-(\d+)$", rng)
+                        if m_sm and 0 <= (int(m_sm.group(2)) - int(m_sm.group(1))) <= 262144:
+                            small_map_rng = True
+                    use_seg_rng = bool(
+                        rng
+                        and rng.startswith("bytes=")
+                        and not rng.startswith("bytes=-")
+                        and (rng == "bytes=0-0" or small_map_rng or (rng != "bytes=0-1023" and not rng.startswith("bytes=0-")))
+                    )
+                    if use_seg_rng:
+                        m_chk_rev = re.match(r"bytes=(\d+)-(\d+)$", rng)
+                        if m_chk_rev and int(m_chk_rev.group(2)) < int(m_chk_rev.group(1)):
+                            use_seg_rng = False
                     req_hdrs = {**hdrs, "Range": rng} if use_seg_rng else hdrs
                     for _attempt in range(2):
                         try:
                             req = urllib.request.Request(url, headers=req_hdrs)
                             with _public_open(req, timeout=16) as r:
                                 data = r.read(28 * 1024 * 1024)
-                                if data and ("text/html" in (r.headers.get("Content-Type") or "").lower() or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
+                                raw_ct_low = (r.headers.get("Content-Type") or "").lower()
+                                head_trim = data[:64].lstrip().lower() if data else b""
+                                if is_key_req:
+                                    if not data or len(data) > 256 or "text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html", b"{\"error")):
+                                        raise ValueError("Invalid HLS key response")
+                                elif data and not _is_binary_media_payload(data) and ("text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html"))):
                                     raise ValueError("Upstream returned HTML instead of media segment")
                                 if use_seg_rng and r.status == 206:
                                     cr_up = r.headers.get("Content-Range") or ""
@@ -7339,14 +7551,20 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                                     raise IOError(f"Incomplete upstream segment ({len(data)}/{up_total} bytes)")
                                 is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
                                 is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
-                                raw_ct = (r.headers.get("Content-Type") or "").lower()
-                                if len(data) == 16 or "key.php" in url:
+                                is_adts = len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xF6) == 0xF0
+                                if is_key_req or len(data) == 16:
                                     ct = "application/octet-stream"
+                                elif ext_hint == ".aac" or clean_u_path.endswith(".aac") or is_adts:
+                                    ct = "audio/aac"
+                                elif ext_hint == ".mp3" or clean_u_path.endswith(".mp3") or data.startswith(b"ID3"):
+                                    ct = "audio/mpeg"
+                                elif ext_hint == ".m4a" or clean_u_path.endswith(".m4a"):
+                                    ct = "audio/mp4"
                                 elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url or ext_hint == ".m4s")):
                                     ct = "video/mp4"
                                 elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
                                     ct = "video/mp2t"
-                                elif "video/" in raw_ct or "audio/" in raw_ct or "mpegurl" in raw_ct:
+                                elif "video/" in raw_ct_low or "audio/" in raw_ct_low or "mpegurl" in raw_ct_low:
                                     ct = r.headers.get("Content-Type")
                                 else:
                                     ct = "video/mp2t"
@@ -7365,13 +7583,26 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                             _seg_cache_put_locked(url, time.time(), data, ct)
         total = max(len(data), up_total)
         if rng and rng.startswith("bytes=") and len(data) > 0:
+            m_suf_s = re.match(r"bytes=-(\d+)$", rng)
+            if m_suf_s:
+                n_suf = int(m_suf_s.group(1))
+                if n_suf <= 0:
+                    return b"", 416, f"bytes */{total}", ct
+                part = data[max(0, len(data) - n_suf):]
+                start_s = len(data) - len(part)
+                return part, 206, f"bytes {start_s}-{len(data) - 1}/{total}", ct
             m = re.match(r"bytes=(\d+)-(\d*)", rng)
             if m:
                 start = int(m.group(1))
                 if start >= len(data):
                     return b"", 416, f"bytes */{total}", ct
-                end = int(m.group(2)) if m.group(2) else (len(data) - 1)
-                end = min(max(start, end), len(data) - 1)
+                if m.group(2):
+                    req_end = int(m.group(2))
+                    if req_end < start:
+                        return b"", 416, f"bytes */{total}", ct
+                    end = min(req_end, len(data) - 1)
+                else:
+                    end = len(data) - 1
                 part = data[start:end + 1]
                 return part, 206, f"bytes {start}-{start + len(part) - 1}/{total}", ct
         return data, 200, "", ct
@@ -7384,13 +7615,17 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
         m_suf = re.match(r"bytes=-(\d+)", rng)
         m = re.match(r"bytes=(\d+)-(\d*)", rng)
         if m_suf:
-            hdrs["Range"] = f"bytes=-{min(int(m_suf.group(1)), max_closed_sz)}"
+            n_s = int(m_suf.group(1))
+            if n_s <= 0:
+                return b"", 416, "bytes */*", "video/mp4"
+            hdrs["Range"] = f"bytes=-{min(n_s, max_closed_sz)}"
         elif m:
             start = int(m.group(1))
             if m.group(2):
-                end = min(int(m.group(2)), start + max_closed_sz - 1)
-                if end < start:
-                    end = start + chunk_sz - 1
+                raw_end_m = int(m.group(2))
+                if raw_end_m < start:
+                    return b"", 416, "bytes */*", "video/mp4"
+                end = min(raw_end_m, start + max_closed_sz - 1)
             else:
                 end = start + chunk_sz - 1
             hdrs["Range"] = f"bytes={start}-{end}"
@@ -7412,15 +7647,24 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     with _public_open(req, timeout=10) as r:
         data = r.read(read_cap)
         raw_mp4_ct = (r.headers.get("Content-Type") or "").lower()
-        if data and ("text/html" in raw_mp4_ct or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
+        if data and not _is_binary_media_payload(data) and ("text/html" in raw_mp4_ct or data[:64].lstrip().lower().startswith((b"<!doctype", b"<html"))):
             raise ValueError("Upstream returned HTML instead of MP4 media")
         cr = r.headers.get("Content-Range") or ""
+        if not cr and m_suf and data:
+            n_s = int(m_suf.group(1))
+            if n_s > 0:
+                tot_m = len(data)
+                data = data[max(0, tot_m - n_s):]
+                cr = f"bytes {tot_m - len(data)}-{tot_m - 1}/{tot_m}"
         status = 206 if cr else 200
         ct = "video/mp4"
     if data and len(data) <= int(3 * 1024 * 1024):
         with _SEG_TABLE_LOCK:
             _seg_cache_put_locked(mp4_ckey, time.time(), data, f"{ct}\n{cr}\n{status}")
     return data, status, cr, ct
+
+
+_STREAM_MANIFEST_LIMIT = RateLimiter(900, 60.0, name="stream_manifest")
 
 
 async def rave_stream_manifest(request: Request):
@@ -7431,6 +7675,10 @@ async def rave_stream_manifest(request: Request):
             "Access-Control-Allow-Headers": "Range, Content-Type",
             "Access-Control-Max-Age": "86400",
         })
+    if request.query_params.get("probe") != "1":
+        allowed_sm, retry_sm = _STREAM_MANIFEST_LIMIT.hit(client_ip(request))
+        if not allowed_sm:
+            return too_many_response(retry_sm)
     import base64
     sid = (request.query_params.get("sid") or "").strip()
     ref_mode = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("ref") or "").strip())[:16]
@@ -7479,8 +7727,10 @@ async def rave_stream_manifest(request: Request):
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
     if cached_m and now_m - cached_m[0] < ttl_m:
-        return Response(b"" if request.method == "HEAD" else cached_m[1], media_type="application/vnd.apple.mpegurl", headers={
+        c_bytes = cached_m[1] if isinstance(cached_m[1], bytes) else str(cached_m[1]).encode("utf-8")
+        return Response(b"" if request.method == "HEAD" else c_bytes, media_type="application/vnd.apple.mpegurl", headers={
             "Access-Control-Allow-Origin": "*",
+            "Content-Length": str(len(c_bytes)),
             "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=300",
         })
     try:
@@ -7536,13 +7786,13 @@ async def rave_stream_manifest(request: Request):
                 hdrs["Origin"] = "https://vidmoly.biz"
             cur_target = "https://shrek.dragonballzfans.xyz/" + target.split("serve.dragonballzfans.xyz/", 1)[1] if "serve.dragonballzfans.xyz/" in target else target
             now_dp = time.time()
-            if "vidmoly." in cur_target and "/embed-" in cur_target:
+            if any(d in cur_target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")) and ("/embed-" in cur_target or "/w/" in cur_target):
                 dp_c = _DP_M3U8_CACHE.get(cur_target)
                 if dp_c and dp_c[1] > now_dp:
                     cur_target = dp_c[0]
                 else:
                     try:
-                        vm_u = re.sub(r"vidmoly\.[a-z]+", "vidmoly.biz", cur_target)
+                        vm_u = re.sub(r"(?:vidmoly|vmbox|vmnow|vmpx)\.[a-z]+", "vidmoly.biz", cur_target, flags=re.I)
                         with _public_open(urllib.request.Request(vm_u, headers={"User-Agent": UA137, "Referer": "https://www.dizibox.live/"}), timeout=3.8) as vmr:
                             vm_html = vmr.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                         m_vm = re.search(r"https?://[^\s'\"<>]+\.m3u8[^\s'\"<>]*", vm_html)
@@ -7670,11 +7920,11 @@ async def rave_stream_manifest(request: Request):
                     mt_guess = explicit_mtype
                     mt_tries = (explicit_mtype,)
                 else:
-                    mt_guess = "tv" if (f"v38:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v37:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v36:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v38:movie:{tid}:1:1" in _STREAM_CACHE or f"v37:movie:{tid}:1:1" in _STREAM_CACHE or f"v36:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                    mt_guess = "tv" if (f"v43:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v42:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v41:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v40:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v43:movie:{tid}:1:1" in _STREAM_CACHE or f"v42:movie:{tid}:1:1" in _STREAM_CACHE or f"v41:movie:{tid}:1:1" in _STREAM_CACHE or f"v40:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                     mt_tries = (mt_guess, "movie" if mt_guess == "tv" else "tv")
                 cands = []
                 for mt_try in mt_tries:
-                    for ver_p in ("v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v43", "v42", "v41", "v40", "v39", "v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
@@ -7776,6 +8026,12 @@ async def rave_stream_manifest(request: Request):
                     seg_ext_hint = ".key"
                 elif tag_kind == "map" or u_path_low.endswith((".m4s", ".mp4")) or "init-" in u_path_low or "/init." in u_path_low or "_init." in u_path_low:
                     seg_ext_hint = ".m4s"
+                elif u_path_low.endswith(".aac"):
+                    seg_ext_hint = ".aac"
+                elif u_path_low.endswith(".mp3"):
+                    seg_ext_hint = ".mp3"
+                elif u_path_low.endswith(".m4a"):
+                    seg_ext_hint = ".m4a"
                 else:
                     seg_ext_hint = ".ts"
                 if "key.php" in u_str:
@@ -7793,7 +8049,7 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, "https://vidmoly.biz/", seg_ext_hint)
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", seg_ext_hint)
-                if "dragonballzfans" in u_str or needs_seg_proxy:
+                if tag_kind in ("key", "map") or "dragonballzfans" in u_str or needs_seg_proxy:
                     ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
                         "https://rapidvid.org/" if cur_is_fhd else (
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (
@@ -7854,15 +8110,28 @@ async def rave_stream_manifest(request: Request):
                             cur_blk.append(st_ln)
                     if cur_blk:
                         blocks.append((cur_dur, cur_uris, cur_blk))
-                    tot_dur = sum(b[0] for b in blocks)
-                    if len(blocks) > 1 and tot_dur >= 180.0:
+                    if len(blocks) > 1:
                         ad_re = re.compile(r"(?:preroll|midroll|/ads?/|reklam|promo|sponsor|bumper|1xbet|melbet|mostbet|betwinner|casino)", re.I)
                         kept_indexed = [
                             (idx_b, b) for idx_b, b in enumerate(blocks)
-                            if not ((b[0] <= 55.0 and (idx_b == 0 or b[0] < tot_dur * 0.08)) or any(ad_re.search(u) for u in b[1]))
+                            if not any(ad_re.search(u) for u in b[1])
                         ]
-                        if kept_indexed:
+                        if kept_indexed and len(kept_indexed) < len(blocks):
                             first_kept_idx = kept_indexed[0][0]
+                            stripped_leading_segs = sum(len(blocks[sk_i][1]) for sk_i in range(first_kept_idx))
+                            if stripped_leading_segs > 0:
+                                updated_seq = False
+                                new_hdr = []
+                                for hl in hdr_part:
+                                    m_ms = re.match(r"^#EXT-X-MEDIA-SEQUENCE:(\d+)$", hl)
+                                    if m_ms:
+                                        new_hdr.append(f"#EXT-X-MEDIA-SEQUENCE:{int(m_ms.group(1)) + stripped_leading_segs}")
+                                        updated_seq = True
+                                    else:
+                                        new_hdr.append(hl)
+                                if not updated_seq:
+                                    new_hdr.append(f"#EXT-X-MEDIA-SEQUENCE:{stripped_leading_segs}")
+                                hdr_part = new_hdr
                             hoisted_key = next((hl for hl in reversed(hdr_part) if hl.startswith("#EXT-X-KEY:")), "")
                             hoisted_map = next((hl for hl in reversed(hdr_part) if hl.startswith("#EXT-X-MAP:")), "")
                             for sk_i in range(first_kept_idx):
@@ -7925,6 +8194,12 @@ async def rave_stream_manifest(request: Request):
                         if 'TYPE=AUDIO' in s_ln:
                             if 'URI="undefined' in s_ln:
                                 continue
+
+                            def _set_aud_default(tag_ln: str, is_def: bool) -> str:
+                                cleaned = re.sub(r',?\b(?:DEFAULT|AUTOSELECT)=(?:YES|NO)\b', '', tag_ln)
+                                cleaned = re.sub(r'TYPE=AUDIO\s*,?\s*', f'TYPE=AUDIO,DEFAULT={"YES" if is_def else "NO"},AUTOSELECT={"YES" if is_def else "NO"},', cleaned, count=1)
+                                return cleaned.rstrip(",")
+
                             grp_id = _aud_grp(s_ln)
                             grp_lines = aud_by_grp.get(grp_id) or valid_aud_lines
                             grp_has_tr = any(_line_lang(l) == "tr" for l in grp_lines)
@@ -7933,28 +8208,27 @@ async def rave_stream_manifest(request: Request):
                             l_code = _line_lang(s_ln)
                             is_tr_line = l_code == "tr"
                             if grp_has_want or (aud_pref == "orig" and grp_has_orig) or (want_code and want_code != "tr" and grp_has_orig):
-                                is_match = (l_code == want_code) if grp_has_want else (not is_tr_line)
+                                if grp_has_want:
+                                    is_match = l_code == want_code
+                                else:
+                                    orig_def_lines = [l for l in grp_lines if _line_lang(l) != "tr" and "DEFAULT=YES" in l]
+                                    if orig_def_lines:
+                                        is_match = (not is_tr_line) and ("DEFAULT=YES" in s_ln)
+                                    else:
+                                        is_match = not is_tr_line
                                 if is_match and grp_id not in selected_aud_groups:
                                     selected_aud_groups.add(grp_id)
-                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=YES', s_ln)
-                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
-                                    if "DEFAULT=YES" not in s_ln:
-                                        s_ln = s_ln.replace("TYPE=AUDIO,", "TYPE=AUDIO,DEFAULT=YES,AUTOSELECT=YES,", 1)
+                                    s_ln = _set_aud_default(s_ln, True)
                                 else:
-                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
-                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)
-                                    if "DEFAULT=NO" not in s_ln:
-                                        s_ln = s_ln.replace("TYPE=AUDIO,", "TYPE=AUDIO,DEFAULT=NO,AUTOSELECT=NO,", 1)
+                                    s_ln = _set_aud_default(s_ln, False)
                             elif not is_probe and grp_has_tr:
                                 if is_tr_line and grp_id not in selected_aud_groups:
                                     selected_aud_groups.add(grp_id)
-                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=YES', s_ln)
-                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
+                                    s_ln = _set_aud_default(s_ln, True)
                                 else:
-                                    s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
-                                    s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)
+                                    s_ln = _set_aud_default(s_ln, False)
                             elif grp_id not in default_aud_groups and 'DEFAULT=NO' in s_ln:
-                                s_ln = s_ln.replace('DEFAULT=NO', 'DEFAULT=YES', 1)
+                                s_ln = _set_aud_default(s_ln, True)
                                 default_aud_groups.add(grp_id)
                         if s_ln.startswith("#EXT-X-I-FRAME-STREAM-INF"):
                             continue
@@ -8034,13 +8308,15 @@ async def rave_stream_manifest(request: Request):
                     out_lines.append(uri_l)
             return "\n".join(out_lines)
         body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=15.0)
-        if body:
+        body_bytes = body.encode("utf-8")
+        if body_bytes:
             if len(_M3U8_CACHE) >= 240:
                 oldest_m = min(_M3U8_CACHE, key=lambda k: _M3U8_CACHE[k][0])
                 _M3U8_CACHE.pop(oldest_m, None)
-            _M3U8_CACHE[m3u8_ckey] = (time.time(), body)
-        return Response(body, media_type="application/vnd.apple.mpegurl", headers={
+            _M3U8_CACHE[m3u8_ckey] = (time.time(), body_bytes)
+        return Response(b"" if request.method == "HEAD" else body_bytes, media_type="application/vnd.apple.mpegurl", headers={
             "Access-Control-Allow-Origin": "*",
+            "Content-Length": str(len(body_bytes)),
             "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
         })
     except Exception:
@@ -8278,6 +8554,18 @@ async def stream_proxy(request: Request):
         return JSONResponse({"error": "İmzasız proxy isteği reddedildi"}, status_code=403, headers={"Cache-Control": "no-store", **cors_hdrs})
     raw_req_rng = request.headers.get("range") or ""
     is_unranged_head = request.method == "HEAD" and not raw_req_rng
+    if is_unranged_head:
+        with _SEG_TABLE_LOCK:
+            fast_head = _SEGMENT_CACHE.get(url)
+        if fast_head and (time.time() - fast_head[0] < 90):
+            return Response(b"", status_code=200, headers={
+                "Content-Type": fast_head[2],
+                "Content-Length": str(len(fast_head[1])),
+                "Accept-Ranges": "bytes",
+                "Vary": "Range",
+                "Cache-Control": "public, max-age=300",
+                **cors_hdrs,
+            })
     rng = raw_req_rng or ("bytes=0-0" if is_unranged_head else "")
     ext_hint = (request.query_params.get("ext") or "").strip().lower()
     can_coalesce = request.method != "HEAD" and not rng
@@ -8356,9 +8644,37 @@ async def stream_proxy(request: Request):
     except urllib.error.HTTPError as he:
         up_code = int(getattr(he, "code", 502) or 502)
         out_code = up_code if up_code in (403, 404, 410, 416, 429) else 502
-        return JSONResponse({"error": "Akış kaynağına ulaşılamadı.", "upstreamStatus": up_code}, status_code=out_code, headers={"Cache-Control": "no-store", **cors_hdrs})
+        err_hdrs = {"Cache-Control": "no-store", **cors_hdrs}
+        if out_code == 416:
+            up_cr = he.headers.get("Content-Range") if getattr(he, "headers", None) else None
+            err_hdrs["Content-Range"] = up_cr or "bytes */*"
+        return JSONResponse({"error": "Akış kaynağına ulaşılamadı.", "upstreamStatus": up_code}, status_code=out_code, headers=err_hdrs)
     except Exception:
         return JSONResponse({"error": "Akış kaynağına ulaşılamadı."}, status_code=502, headers={"Cache-Control": "no-store", **cors_hdrs})
+
+
+def _norm_vtt_ts_tok(tok: str) -> str:
+    m = re.match(r"^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,](\d{1,3}))?$", (tok or "").strip())
+    if not m:
+        return tok.replace(",", ".")
+    hh = int(m.group(1) or 0)
+    mm = int(m.group(2))
+    ss = int(m.group(3))
+    ms = (m.group(4) or "000").ljust(3, "0")[:3]
+    return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms}"
+
+
+def _norm_vtt_ts_line(ts_line: str) -> str:
+    lhs, sep, rhs_full = ts_line.partition("-->")
+    if not sep:
+        return ts_line
+    rhs_parts = rhs_full.strip().split(None, 1)
+    if not rhs_parts:
+        return ts_line
+    start_norm = _norm_vtt_ts_tok(lhs.strip())
+    end_norm = _norm_vtt_ts_tok(rhs_parts[0])
+    extra = re.sub(r"[<>\"']", "", rhs_parts[1]).strip() if len(rhs_parts) > 1 else ""
+    return f"{start_norm} --> {end_norm}" + (f" {extra}" if extra else "")
 
 
 def _srt_to_vtt(raw_bytes) -> str:
@@ -8366,26 +8682,32 @@ def _srt_to_vtt(raw_bytes) -> str:
     if isinstance(raw_bytes, str):
         txt = raw_bytes
     else:
-        encs = ("utf-8-sig", "utf-16", "cp1254", "latin-1") if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")) else ("utf-8-sig", "utf-8", "cp1254", "latin-1")
+        if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")):
+            encs = ("utf-16", "utf-8-sig", "cp1254", "latin-1")
+        elif len(raw_bytes) >= 4 and raw_bytes.count(b"\x00") > len(raw_bytes) // 5:
+            bomless_u16 = "utf-16-le" if (len(raw_bytes) >= 2 and raw_bytes[1] == 0) else "utf-16-be"
+            encs = (bomless_u16, "utf-16", "utf-8-sig", "cp1254", "latin-1")
+        else:
+            encs = ("utf-8-sig", "utf-8", "cp1254", "latin-1")
         for enc in encs:
             try:
                 txt = raw_bytes.decode(enc)
                 break
             except Exception:
                 continue
-    txt = txt.replace("\r\n", "\n").replace("\r", "\n").strip()
+    txt = txt.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if "<p " in txt and "begin=" in txt:
         cues = []
         for idx, m in enumerate(re.finditer(r'<p[^>]*\bbegin=["\']([^"\']+)["\'][^>]*\bend=["\']([^"\']+)["\'][^>]*>(.*?)</p>', txt, re.I | re.S), 1):
-            b = m.group(1).replace(",", ".")
-            e = m.group(2).replace(",", ".")
+            b = _norm_vtt_ts_tok(m.group(1))
+            e = _norm_vtt_ts_tok(m.group(2))
             body = re.sub(r"<br\s*/?>", "\n", m.group(3), flags=re.I)
-            body = re.sub(r"<[^>]+>", "", body).strip()
+            body = html_mod.unescape(body)
+            body = re.sub(r"<[^>]*>", "", body).replace("<", "").replace(">", "").strip()
             if body:
                 cues.append(f"{idx}\n{b} --> {e}\n{body}")
         return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
     if "<text " in txt and "start=" in txt:
-        import html as _html_mod
         cues = []
         def _fmt_sec(sec_f: float) -> str:
             sec_f = max(0.0, sec_f)
@@ -8396,37 +8718,32 @@ def _srt_to_vtt(raw_bytes) -> str:
         for idx, m in enumerate(re.finditer(r'<text[^>]*\bstart=["\']([\d.]+)["\'][^>]*?(?:\bdur=["\']([\d.]+)["\'])?[^>]*>(.*?)</text>', txt, re.I | re.S), 1):
             st_f = float(m.group(1) or 0)
             dur_f = float(m.group(2) or 3.0)
-            body = _html_mod.unescape(re.sub(r"<[^>]+>", " ", m.group(3) or "")).strip()
+            body = html_mod.unescape(m.group(3) or "")
+            body = re.sub(r"<[^>]*>", " ", body).replace("<", "").replace(">", "").strip()
             if body:
                 cues.append(f"{idx}\n{_fmt_sec(st_f)} --> {_fmt_sec(st_f + max(0.5, dur_f))}\n{body}")
         return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
-    txt = re.sub(r"\{\\[^}]*\}", "", txt)
     if "[Events]" in txt or re.search(r"(?m)^Dialogue:\s*\d+,", txt):
         cues = []
-        for idx, m in enumerate(re.finditer(r"(?m)^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{2,3}),(\d+:\d{2}:\d{2}[.,]\d{2,3}),(?:[^,]*,){6}(.+)$", txt), 1):
-            def _norm_ass_ts(ts_s: str) -> str:
-                ts_s = ts_s.replace(",", ".")
-                parts = ts_s.split(":")
-                hh = int(parts[0])
-                mm = int(parts[1])
-                ss_p = parts[2].split(".")
-                ss = int(ss_p[0])
-                ms_raw = (ss_p[1] if len(ss_p) > 1 else "000").ljust(3, "0")[:3]
-                return f"{hh:02d}:{mm:02d}:{ss:02d}.{ms_raw}"
-            b_ts = _norm_ass_ts(m.group(1))
-            e_ts = _norm_ass_ts(m.group(2))
-            body = re.sub(r"\\[nN]", "\n", m.group(3)).replace("\\h", " ")
-            body = html_mod.unescape(re.sub(r"<[^>]+>", "", body)).strip()
+        for idx, m in enumerate(re.finditer(r"(?m)^Dialogue:\s*[^,]*,(\d+:\d{2}:\d{2}[.,]\d{1,3}),(\d+:\d{2}:\d{2}[.,]\d{1,3}),([^,]*),(?:[^,]*,){5}(.+)$", txt), 1):
+            style_name = (m.group(3) or "").strip()
+            raw_ass_txt = m.group(4) or ""
+            if re.search(r"\{\\[^}]*\\p[1-9]\b", raw_ass_txt) or re.search(r"(?:^|[\s_-])(?:sign|signs|drawing|rune|fx|karaoke|shape|logo)(?:$|[\s_-])", style_name, re.I):
+                continue
+            b_ts = _norm_vtt_ts_tok(m.group(1))
+            e_ts = _norm_vtt_ts_tok(m.group(2))
+            body = re.sub(r"\{[^}]*\}", "", raw_ass_txt)
+            body = re.sub(r"\\[nN]", "\n", body).replace("\\h", " ")
+            body = html_mod.unescape(body)
+            body = re.sub(r"<[^>]*>", "", body).replace("<", "").replace(">", "").strip()
             if body:
-                cues.append(f"{idx}\n{b_ts} --> {e_ts}\n{body}")
-        if cues:
-            return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
+                cues.append(f"{len(cues) + 1}\n{b_ts} --> {e_ts}\n{body}")
+        return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
+    txt = re.sub(r"\{\\[^}]*\}", "", txt)
     txt = re.sub(r"<br\s*/?>", "\n", txt, flags=re.I)
-    txt = re.sub(r"</?[a-zA-Z][^>\n]*>", "", txt)
     txt = html_mod.unescape(txt)
+    txt = re.sub(r"</?[a-zA-Z!][^>\n]*>", "", txt)
     txt = re.sub(r"^X-TIMESTAMP-MAP[^\n]*\n?", "", txt, flags=re.M)
-    txt = re.sub(r"(\d{1,2}:\d{2}:\d{2}),(\d{3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}),(\d{3})", r"\1.\2 --> \3.\4", txt)
-    txt = re.sub(r"(?m)^(\d{2}:\d{2}[.,]\d{3})\s*-->\s*(\d{2}:\d{2}[.,]\d{3})", lambda m: f"00:{m.group(1).replace(',', '.')} --> 00:{m.group(2).replace(',', '.')}", txt)
     txt = re.sub(
         r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|dizipal|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|deneme\s*bonusu|freespin|t\.me/|(?:bahis|casino|telegram)[^\n]*(?:https?://|www\.|@[a-z0-9_]{3,}|\.(?:com|net|org|xyz|bet|io)|bonus|güncel\s*giriş)|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
         "",
@@ -8450,12 +8767,12 @@ def _srt_to_vtt(raw_bytes) -> str:
                 break
         if ts_idx < 0:
             continue
-        ts_line = b_lines[ts_idx]
+        ts_line = _norm_vtt_ts_line(b_lines[ts_idx])
         payload_lines = b_lines[ts_idx + 1:]
         dedup_payload = []
         seen_ln = set()
         for pl in payload_lines:
-            pl_clean = re.sub(r"<[^>]+>", "", pl).strip()
+            pl_clean = re.sub(r"<[^>]*>", "", pl).replace("<", "").replace(">", "").strip()
             norm_k = re.sub(r"\W+", " ", pl_clean.lower()).strip()
             if not norm_k or norm_k in seen_ln:
                 continue
@@ -8524,8 +8841,9 @@ def _fetch_vtt_sync(url: str) -> str:
     return vtt
 
 
-def _translate_vtt_to_tr_sync(vtt: str) -> str:
-    ck = f"tr_vtt:{hashlib.md5(vtt[:4096].encode('utf-8', errors='ignore')).hexdigest()}:{len(vtt)}"
+def _translate_vtt_to_tr_sync(vtt: str, target_lang: str = "tr") -> str:
+    tl_code = re.sub(r"[^a-z-]", "", (target_lang or "tr").strip().lower())[:5] or "tr"
+    ck = f"{tl_code}_vtt:{hashlib.md5(vtt[:4096].encode('utf-8', errors='ignore')).hexdigest()}:{len(vtt)}"
     with _VTT_CACHE_LOCK:
         if ck in _SUB_VTT_CACHE:
             _SUB_VTT_CACHE.move_to_end(ck)
@@ -8559,11 +8877,12 @@ def _translate_vtt_to_tr_sync(vtt: str) -> str:
         cur_len += len(c_t) + 4
     if cur_b:
         batches.append((cur_i, cur_b))
+    batches = batches[:40]
 
     def _tr_batch(b_tuple):
         b_idxs, b_txts = b_tuple
         joined = "\n ||| \n".join(b_txts)
-        u = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=tr&dt=t&q={urllib.parse.quote(joined)}"
+        u = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={tl_code}&dt=t&q={urllib.parse.quote(joined)}"
         try:
             data = _raw_get_json(u, headers={"User-Agent": UA137}, timeout=3.5)
             full_tr = "".join(seg[0] for seg in (data[0] or []) if seg and seg[0])
@@ -8748,7 +9067,12 @@ async def rave_subtitles(request: Request):
     if cached_s and time.time() - cached_s[0] < 600:
         return JSONResponse(cached_s[1], headers=cc_hdrs)
     if len(_SUB_RESP_LOCKS) >= 400:
-        _SUB_RESP_LOCKS.pop(next(iter(_SUB_RESP_LOCKS)), None)
+        for old_sk in list(_SUB_RESP_LOCKS.keys()):
+            lk_obj = _SUB_RESP_LOCKS.get(old_sk)
+            if lk_obj is not None and not lk_obj.locked():
+                _SUB_RESP_LOCKS.pop(old_sk, None)
+                if len(_SUB_RESP_LOCKS) < 350:
+                    break
     lock = _SUB_RESP_LOCKS.setdefault(s_ckey, asyncio.Lock())
     async with lock:
         cached_s = _SUB_RESP_CACHE.get(s_ckey)
@@ -8785,7 +9109,7 @@ async def rave_subtitles(request: Request):
             def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
             pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
         try:
-            subs = await asyncio.wait_for(asyncio.to_thread(_fetch_subtitles_sync, tid, imdb_id, mtype, s, e, prov, pmeta, direct_list), timeout=8)
+            subs = await asyncio.wait_for(asyncio.to_thread(_fetch_subtitles_sync, tid, imdb_id, mtype, s, e, prov, pmeta, direct_list), timeout=12.5)
         except Exception:
             subs = []
         try:
@@ -8819,6 +9143,7 @@ async def rave_subtitle_vtt(request: Request):
         return Response("WEBVTT\n\n", media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
     vtt = ""
     need_tr = (translate == "tr")
+    need_en = (translate == "en")
     try:
         vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_vtt_sync, url), timeout=7.5)
     except Exception:
@@ -8839,7 +9164,12 @@ async def rave_subtitle_vtt(request: Request):
             need_tr = True
     if vtt.count("-->") >= 2 and need_tr:
         try:
-            vtt = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt), timeout=8.5)
+            vtt = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt, "tr"), timeout=8.5)
+        except Exception:
+            pass
+    elif vtt.count("-->") >= 2 and need_en:
+        try:
+            vtt = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt, "en"), timeout=8.5)
         except Exception:
             pass
     if not vtt or not vtt.startswith("WEBVTT"):
@@ -8854,13 +9184,23 @@ async def rave_subtitle_vtt(request: Request):
     })
 
 
+def _clip_tts_text(text: str, limit: int = 220) -> str:
+    s = re.sub(r"\s+", " ", (text or "").strip())
+    if len(s) <= limit:
+        return s
+    cut = s[:limit]
+    sp = cut.rfind(" ")
+    return (cut[:sp] if sp >= limit // 2 else cut).strip()
+
+
 def _fetch_tts_mp3_sync(text: str, lang: str = "tr") -> bytes:
-    ck = f"{lang}:{text[:180]}"
+    clipped = _clip_tts_text(text, 220)
+    ck = f"{lang}:{clipped}"
     with _TTS_CACHE_LOCK:
         if ck in _TTS_CACHE:
             _TTS_CACHE.move_to_end(ck)
             return _TTS_CACHE[ck]
-    q = urllib.parse.quote(text[:180])
+    q = urllib.parse.quote(clipped)
     u = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={urllib.parse.quote(lang[:5])}&q={q}"
     req = urllib.request.Request(u, headers={"User-Agent": UA137, "Referer": "https://translate.google.com/"})
     with urllib.request.urlopen(req, timeout=4.5) as r:
@@ -8875,7 +9215,8 @@ def _fetch_tts_mp3_sync(text: str, lang: str = "tr") -> bytes:
 
 
 async def rave_tts(request: Request):
-    text = (request.query_params.get("q") or request.query_params.get("text") or "").strip()[:180]
+    raw_txt = (request.query_params.get("q") or request.query_params.get("text") or "").strip()
+    text = _clip_tts_text(raw_txt, 220)
     lang = (request.query_params.get("lang") or "tr").strip().lower()[:5]
     if not text:
         return Response(b"", media_type="audio/mpeg", status_code=400)
@@ -8942,12 +9283,33 @@ def _uploads_dir_size(prune_ttl_sec: float = 86400.0) -> int:
     return total
 
 
+def _has_valid_upload_magic(ext: str, head: bytes) -> bool:
+    if len(head) < 12:
+        return False
+    stripped = head.lstrip(b"\xef\xbb\xbf \t\r\n")
+    low = stripped[:256].lower()
+    if head.startswith((b"MZ", b"\x7fELF", b"#!")) or low.startswith((b"<!doctype", b"<html", b"<svg", b"<script", b"<img", b"<body", b"<iframe", b"<?xml")):
+        return False
+    if ext in (".mp4", ".mov", ".m4v", ".m4a"):
+        return head[4:8] in (b"ftyp", b"moov", b"mdat", b"free", b"skip", b"wide", b"pnot")
+    if ext == ".webm":
+        return head.startswith(b"\x1a\x45\xdf\xa3")
+    if ext == ".ogg":
+        return head.startswith(b"OggS")
+    if ext == ".wav":
+        return head.startswith(b"RIFF") and head[8:12] == b"WAVE"
+    if ext == ".mp3":
+        return head.startswith(b"ID3") or (head[0] == 0xFF and (head[1] & 0xE0) == 0xE0)
+    return False
+
+
 async def upload_file(request: Request):
     if IS_VERCEL:
         return JSONResponse({"error": "Dosya yükleme bulut sürümünde kapalı. Dosyanı Google Drive'a yükleyip bağlantısını kullanabilirsin."}, status_code=501)
-    # Uploads are expensive (disk, bandwidth): verified accounts only.
+    # Uploads are expensive (disk, bandwidth): verified accounts only (never guest tokens).
     uid = str(request.scope.get("wl_uid") or "")
-    if not uid:
+    claims = request.scope.get("wl_claims") or {}
+    if not uid or claims.get("guest"):
         return JSONResponse({"error": "Yükleme için giriş yapmalısın."}, status_code=401)
     allowed, retry_after = _UPLOAD_LIMIT.hit(uid)
     if not allowed:
@@ -8967,48 +9329,66 @@ async def upload_file(request: Request):
     file = form.get("file")
     if not file or not getattr(file, "filename", None) or not hasattr(file, "read"):
         return JSONResponse({"error": "Dosya bulunamadı"}, status_code=400)
-    ext = pathlib.Path(file.filename).suffix.lower()
+    clean_fname = os.path.basename(str(file.filename or "").replace("\\", "/")).strip()
+    if not clean_fname:
+        return JSONResponse({"error": "Geçersiz dosya adı"}, status_code=400)
+    ext = pathlib.Path(clean_fname).suffix.lower()
     if ext not in ALLOWED_UPLOAD_EXTS:
         return JSONResponse({"error": f"Desteklenmeyen dosya türü: {ext}"}, status_code=400)
     name = f"{uuid.uuid4().hex[:12]}{ext}"
     dest = UPLOADS_DIR / name
     size = 0
+    header_buf = bytearray()
+    header_checked = False
     try:
         with open(dest, "wb") as out:
             while chunk := await file.read(1024 * 1024):
-                if size == 0:
-                    head_low = chunk[:512].lstrip().lower()
-                    if (
-                        chunk.startswith((b"MZ", b"\x7fELF", b"#!"))
-                        or head_low.startswith((b"<!doctype", b"<html", b"<svg", b"<script", b"<?xml"))
-                    ):
-                        out.close()
-                        dest.unlink(missing_ok=True)
-                        return JSONResponse({"error": "Geçersiz medya dosyası başlığı"}, status_code=415)
+                if not header_checked:
+                    header_buf.extend(chunk[:max(0, 512 - len(header_buf))])
+                    if len(header_buf) >= 16:
+                        header_checked = True
+                        if not _has_valid_upload_magic(ext, bytes(header_buf)):
+                            out.close()
+                            dest.unlink(missing_ok=True)
+                            return JSONResponse({"error": "Geçersiz medya dosyası başlığı"}, status_code=415)
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     out.close()
                     dest.unlink(missing_ok=True)
                     return JSONResponse({"error": "Dosya 1 GB sınırını aşıyor"}, status_code=413)
                 out.write(chunk)
+        if size < 16 or not _has_valid_upload_magic(ext, bytes(header_buf)):
+            dest.unlink(missing_ok=True)
+            return JSONResponse({"error": "Boş veya geçersiz medya dosyası"}, status_code=415)
     except Exception:
         dest.unlink(missing_ok=True)
         return JSONResponse({"error": "Dosya yükleme kesildi"}, status_code=400)
-    return JSONResponse({"url": f"/uploads/{name}", "filename": pathlib.Path(file.filename).name[:120], "size": size})
+    return JSONResponse({"url": f"/uploads/{name}", "filename": clean_fname[:120], "size": size})
 
 
 async def manifest_json(request: Request):
-    return JSONResponse({
-        "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik", "short_name": "Watchlivo", "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
-        "start_url": "/", "display": "standalone", "background_color": "#080A0F", "theme_color": "#080A0F", "orientation": "any",
-        "icons": [
-            {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
-            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-            {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
-            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
-            {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-        ],
-    })
+    return JSONResponse(
+        {
+            "id": "/",
+            "scope": "/",
+            "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik",
+            "short_name": "Watchlivo",
+            "description": "Arkadaşlarınla aynı anda, tek kare gecikmesiz izle — web, telefon ve masaüstü.",
+            "start_url": "/",
+            "display": "standalone",
+            "background_color": "#06090e",
+            "theme_color": "#06090e",
+            "orientation": "any",
+            "icons": [
+                {"src": "/static/watchlivo-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+                {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                {"src": "/static/watchlivo-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+                {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                {"src": "/static/watchlivo-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+            ],
+        },
+        media_type="application/manifest+json",
+    )
 
 
 async def service_worker(request: Request):
@@ -9103,7 +9483,6 @@ async def download_apk_endpoint(request: Request):
         return FileResponse(
             apk_file,
             media_type="application/vnd.android.package-archive",
-            filename="Watchlivo-v2.0.apk",
             headers={
                 "Content-Disposition": 'attachment; filename="Watchlivo-v2.0.apk"',
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -9137,7 +9516,6 @@ async def download_windows_endpoint(request: Request):
         return FileResponse(
             exe_file,
             media_type="application/vnd.microsoft.portable-executable",
-            filename="Watchlivo.exe",
             headers={
                 "Content-Disposition": 'attachment; filename="Watchlivo.exe"',
                 "X-Content-Type-Options": "nosniff",
@@ -9154,7 +9532,6 @@ async def download_ipa_endpoint(request: Request):
         return FileResponse(
             ipa_file,
             media_type="application/octet-stream",
-            filename="Watchlivo.ipa",
             headers={
                 "Content-Disposition": 'attachment; filename="Watchlivo.ipa"',
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
@@ -9296,8 +9673,11 @@ async def download_ios_endpoint(request: Request):
         return FileResponse(
             cfg_file,
             media_type="application/x-apple-aspen-config",
-            filename="Watchlivo.mobileconfig",
-            headers={"Content-Disposition": 'inline; filename="Watchlivo.mobileconfig"', "Cache-Control": "no-cache"},
+            headers={
+                "Content-Disposition": 'inline; filename="Watchlivo.mobileconfig"',
+                "Cache-Control": "no-cache",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
     return RedirectResponse("/static/Watchlivo.mobileconfig", status_code=302)
 
@@ -9322,9 +9702,10 @@ async def rave_ai_status(request: Request):
 
 
 def _ai_guard(request: Request, limiter: RateLimiter):
-    """Return (uid, error_response). AI calls cost money, so they need an account."""
+    """Return (uid, error_response). AI calls cost money, so they need a verified account."""
     uid = str(request.scope.get("wl_uid") or "")
-    if not uid:
+    claims = request.scope.get("wl_claims") or {}
+    if not uid or claims.get("guest"):
         return "", JSONResponse({"ok": False, "error": "Yapay zeka özellikleri için giriş yapmalısın."}, status_code=401)
     allowed, retry_after = limiter.hit(uid)
     if not allowed:
@@ -9640,10 +10021,16 @@ async def room_share_landing(request: Request) -> HTMLResponse:
         except Exception:
             pass
     is_locked = bool(room and rooms.has_password(room))
+    is_non_public = bool(room and str(room.get("privacy") or "public") in ("private", "friends"))
+    req_pwd = str(request.query_params.get("pwd") or "")
+    pwd_ok = (not is_locked) or bool(room and rooms.verify_room_password(room, req_pwd))
+    valid_in_rtok = bool(incoming_rtok and safe_id and rooms.merge_sync_token(None, incoming_rtok, safe_id) is not None)
+    hide_meta = (is_non_public and not (valid_in_rtok and pwd_ok)) or (is_locked and not pwd_ok)
     p_count = sum(1 for hp in ((room or {}).get("participants") or {}).values() if isinstance(hp, dict) and hp.get("transport") != "bot")
-    r_name = str((room or {}).get("name") or request.query_params.get("t") or safe_id or "Watchlivo Sinema Odası").strip()
-    media = ((room or {}).get("media") or {}) if (room and not is_locked) else {}
-    m_title = str(media.get("title") or request.query_params.get("t") or "").strip()
+    raw_r_name = str((room or {}).get("name") or ("" if hide_meta else request.query_params.get("t")) or safe_id or "Watchlivo Sinema Odası").strip()
+    r_name = ("Şifreli Watchlivo Odası" if is_locked else "Özel Watchlivo Odası") if hide_meta else raw_r_name
+    media = ((room or {}).get("media") or {}) if (room and not hide_meta) else {}
+    m_title = str(media.get("title") or ("" if hide_meta else request.query_params.get("t")) or "").strip()
     raw_img = str(media.get("backdrop") or media.get("poster") or media.get("thumbnail") or "").strip()
     if raw_img.startswith("/") and not raw_img.lower().endswith(".svg"):
         og_img = f"{origin}{raw_img}"
@@ -9652,9 +10039,18 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     else:
         og_img = f"{origin}/static/watchlivo-og.png"
 
-    if is_locked:
+    if is_locked and hide_meta:
+        og_title = "🔒 Şifreli Watchlivo Odası"
+        og_desc = f"Şu an odada {max(1, p_count)} kişi var. Davet bağlantısına tıklayarak şifreyle katıl!"
+    elif is_non_public and hide_meta:
+        og_title = "🔒 Özel Watchlivo Odası"
+        og_desc = "Bu oda yalnızca davetli üyeler veya arkadaşlar içindir. Davet bağlantısına tıklayarak katıl!"
+    elif is_locked:
         og_title = f"🔒 {r_name} — Şifreli Watchlivo Odası"
         og_desc = f"Şu an odada {max(1, p_count)} kişi var. Davet bağlantısına tıklayarak şifreyle katıl!"
+    elif is_non_public:
+        og_title = "🔒 Özel Watchlivo Odası"
+        og_desc = "Bu oda yalnızca davetli üyeler veya arkadaşlar içindir. Davet bağlantısına tıklayarak katıl!"
     elif m_title:
         v_txt = f"{p_count} kişi birlikte izliyor" if p_count > 1 else "Canlı izleme odası açık"
         og_title = f"🎬 {m_title} · {r_name} | Watchlivo"
@@ -9674,10 +10070,9 @@ async def room_share_landing(request: Request) -> HTMLResponse:
         qp_v = str(request.query_params.get(qp_k) or "").strip()[:500]
         if qp_v:
             fwd_params.append((qp_k, qp_v))
-    req_pwd = str(request.query_params.get("pwd") or "")
-    can_expose_rtok = not is_locked or rooms.verify_room_password(room, req_pwd)
-    eff_rtok = incoming_rtok if can_expose_rtok else ""
-    if not eff_rtok and room and can_expose_rtok:
+    can_mint_rtok = (not is_non_public) and pwd_ok
+    eff_rtok = incoming_rtok if (valid_in_rtok and pwd_ok) else ""
+    if not eff_rtok and room and can_mint_rtok:
         try:
             eff_rtok = rooms.pack_sync_token(room)
         except Exception:
@@ -9695,6 +10090,7 @@ async def room_share_landing(request: Request) -> HTMLResponse:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{esc_title}</title>
   <meta name="description" content="{esc_desc}" />
+  <link rel="canonical" href="{esc_url}" />
   <meta property="og:type" content="video.other" />
   <meta property="og:site_name" content="Watchlivo" />
   <meta property="og:title" content="{esc_title}" />
@@ -9718,11 +10114,17 @@ async def room_share_landing(request: Request) -> HTMLResponse:
     return HTMLResponse(html_doc, headers={"Cache-Control": "no-store, must-revalidate"})
 
 
+_SUB_TRANSLATE_LIMIT = RateLimiter(30, 60.0, name="sub_tr")
+
+
 async def rave_sub_vtt_translate(request: Request):
     if request.method == "OPTIONS":
         return Response(b"", status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type"})
+    allowed_tr, retry_tr = _SUB_TRANSLATE_LIMIT.hit(client_ip(request))
+    if not allowed_tr:
+        return too_many_response(retry_tr)
     if request.method == "POST":
-        raw_b = (await request.body())[:2 * 1024 * 1024]
+        raw_b = (await request.body())[:512 * 1024]
         vtt_in = _srt_to_vtt(raw_b) if raw_b else "WEBVTT\n\n"
         if vtt_in.count("-->") >= 1:
             try:
@@ -10058,9 +10460,17 @@ def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str =
             pass
 
 
+_GA_PROXY_LIMIT = RateLimiter(240, 60.0, name="ga_proxy")
+
+
 async def rave_ga_collect_proxy(request: Request) -> Response:
     """First-party transport_url relay for Google Analytics 4 (/api/rave/ga-collect/g/collect)."""
     import urllib.request as _ur
+    if request.method == "OPTIONS":
+        return Response(b"", status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS"})
+    allowed_ga, retry_ga = _GA_PROXY_LIMIT.hit(client_ip(request))
+    if not allowed_ga:
+        return too_many_response(retry_ga)
     path_low = str(request.url.path or "").lower()
     sec_dest = (request.headers.get("sec-fetch-dest") or "").lower()
     if "sw_iframe" in path_low or "service_worker" in path_low or path_low.endswith(".html") or sec_dest in ("iframe", "document"):
@@ -10069,8 +10479,8 @@ async def rave_ga_collect_proxy(request: Request) -> Response:
             status_code=200,
             headers={"Cache-Control": "no-store", "Content-Disposition": "inline"},
         )
-    qs = str(request.url.query or "")
-    body_bytes = await request.body()
+    qs = str(request.url.query or "")[:4096]
+    body_bytes = (await request.body())[:32768]
     ua_str = request.headers.get("user-agent") or "Mozilla/5.0"
     ip_str = client_ip(request)
     if ip_str and ip_str != "127.0.0.1" and "_uip=" not in qs:
@@ -10216,9 +10626,22 @@ async def rave_contact_endpoint(request: Request) -> JSONResponse:
         await asyncio.to_thread(_save_contact_message_sync, entry)
         safe_entry = {**entry, "email": _mask_email(email)}
         return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "entry": safe_entry}, headers={"Cache-Control": "no-store"})
-    is_admin = _is_admin_request(request)
     msgs = await asyncio.to_thread(_get_contact_messages_sync)
-    pub_msgs = [m if is_admin else {**m, "email": _mask_email(m.get("email", ""))} for m in msgs[:30] if isinstance(m, dict)]
+    if _is_admin_request(request):
+        pub_msgs = [m for m in msgs[:30] if isinstance(m, dict)]
+    else:
+        pub_msgs = [
+            {
+                "id": str(m.get("id") or ""),
+                "ts": str(m.get("ts") or ""),
+                "category": str(m.get("category") or "contact"),
+                "name": (str(m.get("name") or "M")[:1] + "***"),
+                "email": _mask_email(str(m.get("email") or "")),
+                "subject": str(m.get("subject") or ""),
+            }
+            for m in msgs[:30]
+            if isinstance(m, dict)
+        ]
     return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "messages": pub_msgs}, headers={"Cache-Control": "no-store"})
 
 
@@ -10335,20 +10758,35 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
         }}
       }});
     </script>"""
+    esc_t = html_mod.escape(title, quote=True)
+    esc_d = html_mod.escape(desc, quote=True)
+    esc_p = html_mod.escape(path, quote=True)
+    canon_u = f"https://watchlivo.online/{esc_p}"
     html_doc = f"""<!doctype html>
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{html_mod.escape(title)}</title>
-  <meta name="description" content="{html_mod.escape(desc)}" />
-  <link rel="canonical" href="https://watchlivo.online/{html_mod.escape(path)}" />
+  <title>{esc_t}</title>
+  <meta name="description" content="{esc_d}" />
+  <link rel="canonical" href="{canon_u}" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Watchlivo" />
+  <meta property="og:title" content="{esc_t}" />
+  <meta property="og:description" content="{esc_d}" />
+  <meta property="og:url" content="{canon_u}" />
+  <meta property="og:image" content="https://watchlivo.online/static/watchlivo-og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="{esc_t}" />
+  <meta name="twitter:description" content="{esc_d}" />
+  <meta name="twitter:image" content="https://watchlivo.online/static/watchlivo-og.png" />
   <style>
     body {{ margin:0; background:#070b12; color:#f8fafc; font-family:Inter,system-ui,sans-serif; padding:28px 18px; line-height:1.65; }}
     .box {{ max-width:820px; margin:0 auto; background:#0d1522; border:1px solid rgba(39,220,200,.25); border-radius:20px; padding:28px; }}
     nav {{ display:flex; flex-wrap:wrap; gap:10px; margin-bottom:20px; padding-bottom:14px; border-bottom:1px solid rgba(255,255,255,.08); }}
     nav a {{ color:#94a3b8; text-decoration:none; font-size:13px; font-weight:700; padding:6px 12px; border-radius:999px; background:rgba(255,255,255,.05); }}
     nav a.act, nav a:hover {{ color:#041014; background:#27dcc8; }}
+    a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {{ outline:2px solid #27dcc8; outline-offset:2px; }}
     h1 {{ margin:0 0 14px; font-size:22px; color:#fff; }}
     p, li {{ color:#cbd5e1; font-size:14px; }}
     .foot {{ margin-top:24px; padding-top:14px; border-top:1px solid rgba(255,255,255,.08); font-size:13px; color:#94a3b8; display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px; }}
@@ -10394,11 +10832,14 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
         for i, x in enumerate(data["topWatched"], 1)
     ) or "<tr><td colspan='3' style='color:#64748b;'>Henüz izleme kaydı yok</td></tr>"
     is_admin = _is_admin_request(request)
-    contact_msgs = await asyncio.to_thread(_get_contact_messages_sync)
-    c_rows = "".join(
-        f"<tr><td>{html_mod.escape(m.get('ts',''))}</td><td><b>{html_mod.escape(m.get('category',''))}</b></td><td>{html_mod.escape(m.get('name',''))} ({html_mod.escape(m.get('email','') if is_admin else _mask_email(m.get('email','')))})</td><td><b>{html_mod.escape(m.get('subject',''))}</b> — {html_mod.escape(m.get('message',''))}</td></tr>"
-        for m in contact_msgs[:15]
-    ) or "<tr><td colspan='4' style='color:#94a3b8;'>Henüz gelen istek veya iletişim mesajı yok</td></tr>"
+    contact_msgs = (await asyncio.to_thread(_get_contact_messages_sync)) if is_admin else []
+    if is_admin:
+        c_rows = "".join(
+            f"<tr><td>{html_mod.escape(m.get('ts',''))}</td><td><b>{html_mod.escape(m.get('category',''))}</b></td><td>{html_mod.escape(m.get('name',''))} ({html_mod.escape(m.get('email',''))})</td><td><b>{html_mod.escape(m.get('subject',''))}</b> — {html_mod.escape(m.get('message',''))}</td></tr>"
+            for m in contact_msgs[:15]
+        ) or "<tr><td colspan='4' style='color:#94a3b8;'>Henüz gelen istek veya iletişim mesajı yok</td></tr>"
+    else:
+        c_rows = "<tr><td colspan='4' style='color:#94a3b8;'>🔒 İletişim mesajları yalnızca yetkili yönetici oturumunda görüntülenebilir.</td></tr>"
     devs = data["devices"]
     html = f"""<!doctype html>
 <html lang="tr">
@@ -10540,10 +10981,15 @@ async def desktop_auth_page(request: Request):
     return Response("Not found", status_code=404)
 
 
+async def _index_html_redirect(request: Request):
+    qs = str(request.url.query or "")
+    return RedirectResponse(f"/?{qs}" if qs else "/", status_code=301)
+
+
 app = Starlette(
     routes=[
         Route("/", index),
-        Route("/index.html", index),
+        Route("/index.html", _index_html_redirect, methods=["GET", "HEAD"]),
         Route("/desktop-auth.html", desktop_auth_page, methods=["GET", "HEAD"]),
         Route("/favicon.ico", _favicon_endpoint, methods=["GET", "HEAD"]),
         Route("/apple-touch-icon.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
@@ -10563,7 +11009,8 @@ app = Starlette(
         Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
-        Route("/manifest.json", manifest_json),
+        Route("/manifest.json", manifest_json, methods=["GET", "HEAD"]),
+        Route("/manifest.webmanifest", manifest_json, methods=["GET", "HEAD"]),
         Route("/sw.js", service_worker),
         Route("/api/health", health),
         Route("/api/app/version", app_version_endpoint, methods=["GET", "HEAD"]),
@@ -10588,9 +11035,17 @@ app = Starlette(
         Route("/api/auth/phone/send-code", auth_engine.auth_phone_send_code, methods=["POST"]),
         Route("/api/auth/phone/verify-code", auth_engine.auth_phone_verify_code, methods=["POST"]),
         Route("/api/auth/email-action", auth_engine.auth_email_action, methods=["POST"]),
+        Route("/api/auth/reset-password", auth_engine.auth_email_action, methods=["POST"]),
+        Route("/api/auth/password", auth_engine.auth_change_password, methods=["POST", "PUT"]),
+        Route("/api/auth/change-password", auth_engine.auth_change_password, methods=["POST", "PUT"]),
+        Route("/api/auth/delete", auth_engine.auth_delete_account, methods=["POST", "DELETE"]),
+        Route("/api/auth/account/delete", auth_engine.auth_delete_account, methods=["POST", "DELETE"]),
+        Route("/api/auth/account", auth_engine.auth_delete_account, methods=["DELETE"]),
         Route("/api/auth/profile", auth_engine.auth_profile, methods=["POST"]),
+        Route("/api/auth/profile", auth_engine.auth_delete_account, methods=["DELETE"]),
         Route("/api/auth/logout", auth_engine.auth_logout, methods=["POST"]),
         Route("/api/auth/me", auth_engine.auth_me, methods=["GET"]),
+        Route("/api/auth/me", auth_engine.auth_delete_account, methods=["DELETE"]),
         Route("/api/rave/social/guest", social_engine.social_guest_provision, methods=["POST"]),
         Route("/api/rave/social/state", social_engine.social_state, methods=["GET"]),
         Route("/api/rave/social/search", social_engine.social_user_search, methods=["GET"]),

@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261107_v140';
-import { Html5Adapter } from './html5.js?v=20261107_v140';
-import { VimeoAdapter } from './vimeo.js?v=20261107_v140';
-import { EmbedAdapter } from './embed.js?v=20261107_v140';
-import { WebviewAdapter } from './webview.js?v=20261107_v140';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v140';
+import { YouTubeAdapter } from './youtube.js?v=20261107_v141';
+import { Html5Adapter } from './html5.js?v=20261107_v141';
+import { VimeoAdapter } from './vimeo.js?v=20261107_v141';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261107_v141';
+import { WebviewAdapter } from './webview.js?v=20261107_v141';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v141';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -68,7 +68,7 @@ export class PlayerHost {
     const rawVol = localStorage.getItem('vortex_volume');
     const parsedVol = (rawVol !== null && rawVol !== '') ? Number(rawVol) : NaN;
     const defaultVol = isIosWebKit() ? 100 : 80;
-    let initVol = Number.isFinite(parsedVol) ? Math.max(0, Math.min(100, Math.round(parsedVol))) : defaultVol;
+    let initVol = Number.isFinite(parsedVol) ? Math.max(0, Math.min(200, Math.round(parsedVol))) : defaultVol;
     if (isIosWebKit() && initVol > 0 && initVol < 100 && !window.webkit?.messageHandlers?.watchlivoVolume) {
       initVol = 100;
       try { localStorage.setItem('vortex_volume', '100'); } catch (_) {}
@@ -151,7 +151,7 @@ export class PlayerHost {
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('pointerdown', this._onPointerDown, { capture: true, passive: true });
-      ['click', 'keydown'].forEach((ev) => {
+      ['click', 'pointerup', 'touchend', 'keydown'].forEach((ev) => {
         window.addEventListener(ev, this._gestureHandler, { capture: true, passive: true });
       });
     }
@@ -184,7 +184,7 @@ export class PlayerHost {
 
   _effectiveVolume() {
     const rawNum = Number(this.volume);
-    const base = Math.max(0, Math.min(100, Number.isFinite(rawNum) ? rawNum : 0));
+    const base = Math.max(0, Math.min(200, Number.isFinite(rawNum) ? rawNum : 0));
     if (base === 0) return 0;
     if (!this.isAutoDuckEnabled()) return base;
     const g = Number.isFinite(this.duckGain) ? this.duckGain : 1.0;
@@ -333,7 +333,7 @@ export class PlayerHost {
   setVolume(v) {
     resumeSharedAudioContext();
     const rawNum = Number(v);
-    this.volume = Math.max(0, Math.min(100, Math.round(Number.isFinite(rawNum) ? rawNum : 0)));
+    this.volume = Math.max(0, Math.min(200, Math.round(Number.isFinite(rawNum) ? rawNum : 0)));
     try { localStorage.setItem('vortex_volume', String(this.volume)); } catch (e) { /* ignore */ }
     if (this.volume === 0) {
       this.muted = true;
@@ -375,7 +375,7 @@ export class PlayerHost {
       this.userUnlocked = true;
       this.autoplayBlocked = false;
       resumeSharedAudioContext();
-      if (this.volume <= 0) this.volume = Math.min(100, this._lastNonZeroVol || 50);
+      if (this.volume <= 0) this.volume = Math.min(200, this._lastNonZeroVol || 50);
       this.adapter?.setVolume(this._effectiveVolume());
       this.onEvent('unmuted');
     }
@@ -389,7 +389,7 @@ export class PlayerHost {
     this.autoplayBlocked = false;
     if (this.adapter) this.adapter.autoplayHardBlocked = false;
     this.muted = false;
-    if (this.volume <= 0) this.volume = Math.min(100, this._lastNonZeroVol || 50);
+    if (this.volume <= 0) this.volume = Math.min(200, this._lastNonZeroVol || 50);
     this.adapter?.setVolume(this._effectiveVolume());
     this.adapter?.setMuted(false);
     if (this.adapter?.isPaused?.() && this.adapter?.wantPlaying === true) this.adapter?.play?.();
@@ -516,7 +516,7 @@ export class PlayerHost {
     if (typeof window !== 'undefined') {
       if (this._onPointerDown) window.removeEventListener('pointerdown', this._onPointerDown, { capture: true });
       if (this._gestureHandler) {
-        ['click', 'keydown'].forEach((ev) => {
+        ['click', 'pointerup', 'touchend', 'keydown'].forEach((ev) => {
           window.removeEventListener(ev, this._gestureHandler, { capture: true });
         });
       }
@@ -530,5 +530,6 @@ export class PlayerHost {
       }
     }
     this.destroyAdapterOnly();
+    suspendSharedAudioContext();
   }
 }

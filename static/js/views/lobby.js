@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261107_v140';
-import { avatar, openDmModal } from '../profile.js?v=20261107_v140';
-import { getProvider } from '../providers.js?v=20261107_v140';
-import { api, qs } from '../api.js?v=20261107_v140';
+import { h, icons, popup, toast } from '../ui.js?v=20261107_v141';
+import { avatar, openDmModal } from '../profile.js?v=20261107_v141';
+import { getProvider } from '../providers.js?v=20261107_v141';
+import { api, qs } from '../api.js?v=20261107_v141';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261107_v140';
-import { expectedPosition } from '../sync.js?v=20261107_v140';
+} from '../store.js?v=20261107_v141';
+import { expectedPosition } from '../sync.js?v=20261107_v141';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -44,7 +44,7 @@ export function thumbFor(media, roomId = '') {
   const brand = LIVE_BRANDS[roomId];
   const primaryImg = media.thumbnail || media.poster || media.backdrop || media.still || '';
   if (brand && (!primaryImg || primaryImg.includes('watchlivo-poster.svg'))) {
-    return makeLiveBrandSvg(brand);
+    return '/static/watchlivo-poster.svg';
   }
   if (primaryImg) return primaryImg;
   if (media.provider === 'youtube' && media.videoId) return `https://i.ytimg.com/vi/${media.videoId}/hqdefault.jpg`;
@@ -273,6 +273,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
   let liveTimer = null;
 
   const findFriendActiveRoom = (f) => {
+    if (!f || f.hideWatching) return null;
     const wId = f.watchingRoom?.roomId || f.roomId || '';
     if (wId) {
       const liveMatch = (lastLobbyRooms || []).find((r) => r && r.id === wId);
@@ -285,13 +286,16 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
       return { id: f.roomId, name: f.roomName || 'Canlı Oda', media: { title: f.mediaTitle || '', poster: f.mediaPoster || '' } };
     }
     const fUid = String(f.uid || '').trim();
+    if (state.social?.loaded && fUid) return null;
     const fh = String(f.handle || '').replace(/^@+/, '').toLowerCase();
     const fn = String(f.name || '').toLowerCase();
-    return (lastLobbyRooms || []).find((r) => !r.curated && (
+    return (lastLobbyRooms || []).find((r) => !r.curated && !r.hasPassword && (!r.privacy || r.privacy === 'public') && (
       (r.participants || []).some((p) =>
-        (fUid && p.uid && p.uid === fUid) ||
-        (fh && p.handle && String(p.handle).replace(/^@+/, '').toLowerCase() === fh) ||
-        (!fUid && fn && String(p.name || '').toLowerCase() === fn)
+        (!p.hideWatching) && (
+          (fUid && p.uid && p.uid === fUid) ||
+          (fh && p.handle && String(p.handle).replace(/^@+/, '').toLowerCase() === fh) ||
+          (!fUid && fn && String(p.name || '').toLowerCase() === fn)
+        )
       ) ||
       (!fUid && fn && String(r.creator || '').toLowerCase() === fn)
     ));
@@ -372,6 +376,18 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             if (r?.ok) toast(`👋 ${f.name} kişisine el salladın!`);
           },
         }, '👋'),
+        h('button', {
+          type: 'button',
+          class: 'btn sm ghost',
+          title: 'Kullanıcıyı Engelle',
+          'aria-label': 'Engelle',
+          onclick: async () => {
+            await updateFriendAction('block', { targetUid: f.uid || fUid, targetName: f.name });
+            toast(`🚫 ${f.name} engellendi`);
+            renderModalContent();
+            onRefresh?.();
+          },
+        }, '🚫'),
         h('button', {
           type: 'button',
           class: 'btn sm ghost',
@@ -617,7 +633,7 @@ export function renderHomeFriendsStrip(onOpenRoom) {
       friends.length ? h('div', { class: 'wl-hfs-rail' },
         ...friends.map((f) => {
           const pState = f.presenceState || (f.online ? 'online' : 'offline');
-          const wRoom = f.watchingRoom;
+          const wRoom = f.hideWatching ? null : f.watchingRoom;
           return h('div', {
             class: `wl-hfs-chip is-${pState}`,
             onclick: () => {

@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v140';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v140';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v140';
-import { getProvider } from '../providers.js?v=20261107_v140';
-import { expectedPosition } from '../sync.js?v=20261107_v140';
-import { thumbFor } from './lobby.js?v=20261107_v140';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v140';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v140';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v140';
-import { avatar } from '../profile.js?v=20261107_v140';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v141';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v141';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v141';
+import { getProvider } from '../providers.js?v=20261107_v141';
+import { expectedPosition } from '../sync.js?v=20261107_v141';
+import { thumbFor } from './lobby.js?v=20261107_v141';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v141';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v141';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v141';
+import { avatar } from '../profile.js?v=20261107_v141';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -33,6 +33,7 @@ const SN_ICONS = {
   customize: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
   download: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
   embed: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>',
+  fit: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h3M7 9v3M17 15h-3M17 15v-3"/></svg>',
   playTriangle: '<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>',
 };
 
@@ -384,7 +385,7 @@ export function buildControls(frame, ctx) {
   }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
   const isIosFixedVol = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-  const volRange = h('input', { type: 'range', min: '0', max: '100', step: '1', value: String(Math.min(100, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
+  const volRange = h('input', { type: 'range', min: '0', max: '200', step: '1', value: String(Math.min(200, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
   const skipBtn = h('button', { class: 'ctl-action', id: 'ctl-skip', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
   const speedBtn = h('button', { class: 'ctl-action ctl-speed-btn', id: 'ctl-speed-btn', 'data-tip': 'Oynatma Hızı', 'aria-label': 'Oynatma Hızı', ...tapProps(() => toggleMenu('speed')) }, h('span', { style: { fontSize: '.72em', fontWeight: '800' } }, '1x'));
@@ -462,7 +463,15 @@ export function buildControls(frame, ctx) {
     }
     toast('Tarayıcı menüsünden "Yansıt / Cast" veya AirPlay seçeneğini kullanabilirsiniz.');
   };
+  const toggleFitMode = () => {
+    const nextFit = frame.dataset.fit === 'cover' ? 'contain' : 'cover';
+    frame.dataset.fit = nextFit;
+    fitBtn.classList.toggle('on', nextFit === 'cover');
+    syncVideoStageBounds(true);
+    showOverlay(nextFit === 'cover' ? '▭ Ekranı Doldur (Tam Çerçeve)' : '▭ Ekrana Sığdır (Orijinal Oran)', 1600);
+  };
   const castBtn = h('button', { class: 'ctl-action hidden', id: 'ctl-cast', 'data-tip': "TV'ye Yansıt (AirPlay / Cast)", 'aria-label': "TV'ye Yansıt", ...trustedTapProps(() => triggerCast()) }, ico('cast'));
+  const fitBtn = h('button', { type: 'button', class: 'ctl-action', id: 'ctl-fit', 'data-tip': 'Ekran Oranı: Sığdır / Doldur', 'aria-label': 'Ekran Oranı', ...tapProps(() => toggleFitMode()) }, h('span', { html: SN_ICONS.fit, style: { display: 'contents' } }));
   const pipBtn = h('button', { class: 'ctl-action', id: 'ctl-pip', 'data-tip': 'Pencere İçinde Pencere / PiP (P)', 'aria-label': 'Pencere İçinde Pencere', ...trustedTapProps(() => togglePiP()) }, ico('pip'));
   const theaterBtn = h('button', { class: 'ctl-action ctl-labeled-pill', id: 'ctl-theater', 'data-tip': 'Sinema Modu (T)', 'aria-label': 'Sinema Modu', ...tapProps(() => ctx.toggleTheaterMode?.()) }, ico('theater'), h('span', { class: 'ctl-btn-lbl' }, 'Sinema'));
   const fsBtn = h('button', { class: 'ctl-action', id: 'ctl-fs', 'data-tip': 'Tam Ekran (F)', 'aria-label': 'Tam ekran', ...trustedTapProps(() => { if (isActuallyMuted() && !host.userMuted) doUnlockAudio(); toggleFullscreen(); }) }, ico('fullscreen'));
@@ -611,7 +620,7 @@ export function buildControls(frame, ctx) {
   function setRealVolume(nextPct, { showHud = false } = {}) {
     resumeSharedAudioContext();
     const rawV = Number(nextPct);
-    const nv = Math.max(0, Math.min(100, Math.round(Number.isFinite(rawV) ? rawV : 0)));
+    const nv = Math.max(0, Math.min(200, Math.round(Number.isFinite(rawV) ? rawV : 0)));
     host.setVolume(nv);
     if (nv > 0) {
       host.userUnlocked = true;
@@ -800,6 +809,7 @@ export function buildControls(frame, ctx) {
         targetSeason,
         targetEp,
         epName,
+        { applySavedResume: false },
       );
       if (prevMedia) {
         actions.pickMedia({
@@ -898,6 +908,7 @@ export function buildControls(frame, ctx) {
         targetSeason,
         targetEp,
         epName,
+        { applySavedResume: false },
       );
       if (nextMedia) {
         actions.pickMedia({
@@ -923,6 +934,15 @@ export function buildControls(frame, ctx) {
     }
   }
   const closeMenu = () => {
+    currentMenuView = '';
+    delete menu.dataset.view;
+    delete frame.dataset.menuView;
+    if (subCue.dataset.previewSample === '1') {
+      delete subCue.dataset.previewSample;
+      subCue.textContent = '';
+      host.adapter?.subs?.onTimeUpdate?.(position(), true);
+      if (!subCue.textContent) subOverlay.classList.add('hidden');
+    }
     menu.classList.add('hidden');
     menuBackdrop.classList.add('hidden');
     frame.classList.remove('menu-open');
@@ -1031,7 +1051,7 @@ export function buildControls(frame, ctx) {
     isSwiping = false;
     swipeMode = null;
     const rawHostVol = Number(host.volume);
-    startVolume = isActuallyMuted() ? 0 : (Number.isFinite(rawHostVol) ? Math.max(0, Math.min(100, rawHostVol)) : 80);
+    startVolume = isActuallyMuted() ? 0 : (Number.isFinite(rawHostVol) ? Math.max(0, Math.min(200, rawHostVol)) : 80);
     startBrightness = currentBrightness;
   }, { passive: true });
 
@@ -1137,6 +1157,16 @@ export function buildControls(frame, ctx) {
     toggleFullscreen();
   });
   const miniTitle = h('span', { class: 'mini-player-title' }, 'Canlı Oda');
+  const miniMicBtn = h('button', {
+    type: 'button',
+    class: 'mini-player-btn mic hidden',
+    title: 'Mikrofonu Aç / Kapat',
+    'aria-label': 'Mikrofonu Aç / Kapat',
+    onclick: (e) => {
+      e.stopPropagation();
+      ctx.voice?.toggleMic?.().then?.(() => update()).catch?.(() => {});
+    },
+  }, '🎙️');
   const miniBar = h('div', {
     class: 'mini-player-bar',
     onclick: (e) => {
@@ -1148,6 +1178,7 @@ export function buildControls(frame, ctx) {
       h('span', { class: 'mini-player-dot' }),
       miniTitle),
     h('div', { class: 'mini-player-actions' },
+      miniMicBtn,
       h('button', {
         type: 'button',
         class: 'mini-player-btn expand',
@@ -1170,10 +1201,18 @@ export function buildControls(frame, ctx) {
     title: 'Oynatıcı Kontrolleri ve Ayarlar',
     ...tapProps(() => toggleMenu('list')),
   }, ico('settings'), h('span', { class: 'embed-hud-lbl' }, 'Kontroller'));
+  const fsReactions = h('div', { class: 'ctl-fs-reactions', 'aria-label': 'Tam Ekran Tepkiler' },
+    ...['❤️', '😂', '🔥', '👏', '😮'].map((em) => h('button', {
+      type: 'button',
+      class: 'react-emoji-btn ctl-fs-react-btn',
+      title: `Tepki: ${em}`,
+      'aria-label': `Tepki ${em}`,
+      ...tapProps(() => actions.reaction(em)),
+    }, em)));
   const barRow = h('div', { class: 'ctl-bar-row' },
     h('div', { class: 'ctl-cluster-left' }, playBtn, back10Btn, fwd10Btn, h('div', { class: `vol-wrap ${isIosFixedVol ? 'is-fixed-vol' : ''}`.trim() }, volBtn, volRange), time),
     h('div', { class: 'ctl-spacer' }),
-    h('div', { class: 'ctl-cluster-right' }, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, castBtn, pipBtn, theaterBtn, fsBtn));
+    h('div', { class: 'ctl-cluster-right' }, fsReactions, skipBtn, speedBtn, subBtn, snapBtn, gearBtn, castBtn, fitBtn, pipBtn, theaterBtn, fsBtn));
   const controls = h('div', { class: 'controls' },
     h('div', { class: 'ctl-top' },
       h('div', { class: 'ctl-top-left' }, thumb, h('div', { class: 'ctl-info' }, kickerBadge, title, artist)),
@@ -1232,6 +1271,14 @@ export function buildControls(frame, ctx) {
     if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
     if (e.key === 'Escape') {
       if (!menu.classList.contains('hidden')) { e.preventDefault(); closeMenu(); return; }
+      const toolsPop = document.getElementById('chat-tools-popover');
+      if (toolsPop && !toolsPop.classList.contains('hidden')) { e.preventDefault(); toolsPop.classList.add('hidden'); document.getElementById('btn-chat-tools')?.classList.remove('active'); return; }
+      const gifPop = document.querySelector('#mesh-root .gif-panel:not(.hidden)');
+      if (gifPop) { e.preventDefault(); gifPop.classList.add('hidden'); return; }
+      const qZone = document.getElementById('chat-access-zone');
+      if (qZone && !qZone.classList.contains('hidden')) { e.preventDefault(); qZone.classList.add('hidden'); document.getElementById('btn-discord-share-toggle')?.classList.remove('on'); return; }
+      if (state.view?.left && state.view.left !== 'Collapsed') { e.preventDefault(); setView('left', 'Collapsed'); ctx.layout?.update?.(); return; }
+      if (state.view?.right && state.view.right !== 'Collapsed') { e.preventDefault(); setView('right', 'Collapsed'); ctx.layout?.update?.(); return; }
       if (isFullscreenActive()) { e.preventDefault(); toggleFullscreen(); return; }
       return;
     }
@@ -1388,7 +1435,7 @@ export function buildControls(frame, ctx) {
       const uName = String(p.name || 'Misafir');
       const reactObj = seatReactions.get(uName);
       const hasEmoji = Boolean(reactObj && now - reactObj.at < 2600);
-      const isSpk = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+      const isSpk = Boolean(p.speaking || (p.id === state.clientId && ctx.voice?.selfSpeaking));
       return hasEmoji || isSpk;
     });
     if (!hasMedia || !activeParts.length) {
@@ -1406,7 +1453,7 @@ export function buildControls(frame, ctx) {
       const uName = String(p.name || 'Misafir');
       const reactObj = seatReactions.get(uName);
       const activeEmoji = (reactObj && now - reactObj.at < 2600) ? reactObj.emoji : '';
-      const isSpeaking = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+      const isSpeaking = Boolean(p.speaking || (p.id === state.clientId && ctx.voice?.selfSpeaking));
       const isRoomHost = Boolean(p.isHost || p.id === state.mesh?.hostId || p.id === state.mesh?.leaderId);
       return `${p.id || uName}:${isSpeaking ? 1 : 0}:${isRoomHost ? 1 : 0}:${activeEmoji}`;
     }).join('|');
@@ -1418,7 +1465,7 @@ export function buildControls(frame, ctx) {
         const uName = String(p.name || 'Misafir');
         const reactObj = seatReactions.get(uName);
         const activeEmoji = (reactObj && now - reactObj.at < 2600) ? reactObj.emoji : '';
-        const isSpeaking = Boolean(p.speaking || (p.id === state.self?.id && state.voice?.speaking));
+        const isSpeaking = Boolean(p.speaking || (p.id === state.clientId && ctx.voice?.selfSpeaking));
         const isRoomHost = Boolean(p.isHost || p.id === state.mesh?.hostId || p.id === state.mesh?.leaderId);
         return h(
           'div',
@@ -1558,8 +1605,11 @@ export function buildControls(frame, ctx) {
         navigator.mediaSession.setPositionState({ duration: d, playbackRate: r > 0 ? r : 1, position: Math.max(0, Math.min(d, p)) });
       } catch (e) { /* ignore */ }
     }
+    const inSubPreview = (currentMenuView === 'subtitlePreferences' || currentMenuView === 'subtitle') && subCue.dataset.previewSample === '1';
     const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
-    if (curSub === 'off' || !subCue.textContent) {
+    if (inSubPreview) {
+      subOverlay.classList.remove('hidden');
+    } else if (curSub === 'off' || !subCue.textContent) {
       if (curSub === 'off') {
         subCue.textContent = '';
         dualCue.textContent = '';
@@ -1784,6 +1834,14 @@ export function buildControls(frame, ctx) {
 
   function renderMenuView(view) {
     currentMenuView = view;
+    menu.dataset.view = view;
+    frame.dataset.menuView = view;
+    if (view !== 'subtitlePreferences' && view !== 'subtitle' && subCue.dataset.previewSample === '1') {
+      delete subCue.dataset.previewSample;
+      subCue.textContent = '';
+      host.adapter?.subs?.onTimeUpdate?.(position(), true);
+      if (!subCue.textContent) subOverlay.classList.add('hidden');
+    }
     const m = state.mesh?.media || {};
     const rate = Number(m.meshStatePlaybackSpeed || 1);
     const subTracks = host.adapter?.getSubtitleTracks?.() || m.subtitleTracks || [];
@@ -1801,7 +1859,9 @@ export function buildControls(frame, ctx) {
     const curAudioId = host.adapter?.getSelectedAudioId?.() || 'orig';
     const curAudioObj = audioTracks.find((t) => t.id === curAudioId) || audioTracks[0];
     const rawServers = Array.isArray(m.servers) && m.servers.length
-      ? m.servers
+      ? m.servers.map((s, idx) => (typeof s === 'string'
+          ? { id: `srv-${idx + 1}`, label: `📡 Sunucu ${idx + 1}`, url: s }
+          : s)).filter((s) => s && s.url)
       : Array.from(new Set([m.url, ...(m.altUrls || [])].map((u) => cleanSrvUrl(u)).filter(Boolean))).map((u, idx) => ({
           id: `srv-${idx + 1}`,
           label: `📡 Sunucu ${idx + 1} · ${u.includes('ref=fhd') ? 'FullHD (1080p)' : u.includes('ref=pv') ? 'Pilavyer (HD)' : u.includes('ref=ve') ? 'VidFast (1080p)' : u.includes('ref=dl') ? 'DiziLife (1080p)' : 'Alternatif Yayın (HD)'}`,
@@ -1824,6 +1884,12 @@ export function buildControls(frame, ctx) {
     );
 
     if (view === 'subtitle') {
+      if (!subCue.textContent && curSubId !== 'off') {
+        subCue.dataset.previewSample = '1';
+        subCue.textContent = 'Altyazı Görünümü Önizleme';
+      }
+      applySubPrefsStyle();
+      if (curSubId !== 'off') subOverlay.classList.remove('hidden');
       const prefBtn = h('button', { class: 'ctl-menu-subbtn', onclick: (e) => { e.stopPropagation(); renderMenuView('subtitlePreferences'); } }, '🎨 Gelişmiş');
       const prefs = getSubPrefs();
       const audioSection = [
@@ -1956,6 +2022,12 @@ export function buildControls(frame, ctx) {
     }
 
     if (view === 'subtitlePreferences') {
+      if (!subCue.textContent) {
+        subCue.dataset.previewSample = '1';
+        subCue.textContent = 'Altyazı Görünümü Önizleme';
+      }
+      applySubPrefsStyle();
+      subOverlay.classList.remove('hidden');
       const prefs = getSubPrefs();
       const segRow = (label, options, curVal, onPick) => h('div', { class: 'ctl-pref-group' },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, label),
@@ -1997,8 +2069,14 @@ export function buildControls(frame, ctx) {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
             let nextSrvUrl = srv.url;
-            const wantTrAud = curAudioId === 'tr-dub' || String(curAudioId || '').startsWith('tr-dub-');
-            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj/i.test(String(srv.label || ''))) {
+            const stickyPref = host.adapter?.subs?.userAudioPref || localStorage.getItem('vortex_audio_lang') || localStorage.getItem('watchlivo_audio_pref') || '';
+            const wantTrAud = curAudioId === 'tr-dub'
+              || String(curAudioId || '').startsWith('tr-dub-')
+              || stickyPref === 'tr-dub'
+              || stickyPref === 'tr'
+              || String(stickyPref).startsWith('tr-dub-')
+              || (!stickyPref && m?.origLang && m.origLang !== 'tr');
+            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`)) {
               nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
                 ? nextSrvUrl.replace('&ext=.m3u8', '&aud=tr&ext=.m3u8')
                 : `${nextSrvUrl}&aud=tr`;
@@ -2044,7 +2122,7 @@ export function buildControls(frame, ctx) {
 
     const buildSlidersPanel = () => {
       const rawHostV = Number(host.volume);
-      const curVol = isActuallyMuted() ? 0 : Math.max(0, Math.min(100, Math.round(Number.isFinite(rawHostV) ? rawHostV : 80)));
+      const curVol = isActuallyMuted() ? 0 : Math.max(0, Math.min(200, Math.round(Number.isFinite(rawHostV) ? rawHostV : 80)));
       const volValEl = h('span', { class: 'ctl-slider-val', id: 'ctl-menu-vol-val' }, `%${curVol}`);
       const brValEl = h('span', { class: 'ctl-slider-val', id: 'ctl-menu-bright-val' }, `%${currentBrightness}`);
       const stopEv = (ev) => { ev.stopPropagation(); revealControls(8000); };
@@ -2053,7 +2131,7 @@ export function buildControls(frame, ctx) {
         class: 'ctl-menu-range',
         id: 'ctl-menu-vol-range',
         min: '0',
-        max: '100',
+        max: '200',
         step: '1',
         value: String(curVol),
         'aria-label': 'Ses Seviyesi',
@@ -2065,7 +2143,7 @@ export function buildControls(frame, ctx) {
         oninput: (ev) => {
           ev.stopPropagation();
           const rawIn = Number(ev.target.value);
-          const vNum = Math.max(0, Math.min(100, Math.round(Number.isFinite(rawIn) ? rawIn : 0)));
+          const vNum = Math.max(0, Math.min(200, Math.round(Number.isFinite(rawIn) ? rawIn : 0)));
           volValEl.textContent = `%${vNum}`;
           setRealVolume(vNum, { showHud: true });
         },
@@ -2182,6 +2260,14 @@ export function buildControls(frame, ctx) {
             renderMenuView('effects');
           },
         }, h('span', {}, '🎙️ Konuşurken Film Sesini Kıs'), h('span', {}, duckOn ? 'Açık' : 'Kapalı')),
+        h('div', {
+          class: `opt ${frame.dataset.fit === 'cover' ? 'on' : ''}`,
+          onclick: (e) => {
+            e.stopPropagation();
+            toggleFitMode();
+            renderMenuView('effects');
+          },
+        }, h('span', {}, '▭ Ekran Oranı (Sığdır / Doldur)'), h('span', {}, frame.dataset.fit === 'cover' ? 'Doldur' : 'Sığdır')),
         h('div', {
           class: 'opt',
           'data-native-gesture': '1',
@@ -2381,7 +2467,7 @@ export function buildControls(frame, ctx) {
       v.style.maxHeight = '100%';
       v.style.top = '0px';
       v.style.left = '0px';
-      v.style.objectFit = 'contain';
+      v.style.objectFit = frame.dataset.fit === 'cover' ? 'cover' : 'contain';
       v.style.objectPosition = 'center center';
       v.removeAttribute('width');
       v.removeAttribute('height');
@@ -2414,16 +2500,22 @@ export function buildControls(frame, ctx) {
     syncVideoStageBounds(true);
     applySubPrefsStyle();
     host.adapter?.subs?.onTimeUpdate?.(position(), true);
-    [50, 160, 420, 950].forEach((ms) => setTimeout(() => {
-      syncVideoStageBounds(ms <= 200);
-      applySubPrefsStyle();
-      host.adapter?.subs?.onTimeUpdate?.(position(), true);
-      const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
-      if (curSub !== 'off' && subCue.textContent) subOverlay.classList.remove('hidden');
-      else subOverlay.classList.add('hidden');
-    }, ms));
+    [50, 160, 420, 950].forEach((ms) => {
+      const tid = setTimeout(() => {
+        viewportTimers.delete(tid);
+        syncVideoStageBounds(ms <= 200);
+        applySubPrefsStyle();
+        host.adapter?.subs?.onTimeUpdate?.(position(), true);
+        const inPrev = (currentMenuView === 'subtitlePreferences' || currentMenuView === 'subtitle') && subCue.dataset.previewSample === '1';
+        const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
+        if (inPrev || (curSub !== 'off' && subCue.textContent)) subOverlay.classList.remove('hidden');
+        else subOverlay.classList.add('hidden');
+      }, ms);
+      viewportTimers.add(tid);
+    });
   }
 
+  const viewportTimers = new Set();
   let stageResizeObs = null;
   if (typeof ResizeObserver !== 'undefined') {
     stageResizeObs = new ResizeObserver(() => {
@@ -2786,7 +2878,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261105_v117',
+            v: '20261107_v141',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
@@ -2936,7 +3028,13 @@ export function buildControls(frame, ctx) {
       volBtn.dataset.sig = volIconName;
       volBtn.replaceChildren(ico(volIconName));
     }
-    volRange.value = String(isActuallyMuted() ? 0 : Math.max(0, Math.min(100, Number(host.volume ?? 80))));
+    volRange.value = String(isActuallyMuted() ? 0 : Math.max(0, Math.min(200, Number(host.volume ?? 80))));
+    const voiceActiveNow = Boolean(ctx.voice?.inCall || ctx.voice?.micOn || ctx.voice?.camOn || ctx.voice?.screenOn);
+    miniMicBtn.classList.toggle('hidden', !voiceActiveNow);
+    if (voiceActiveNow) {
+      miniMicBtn.textContent = ctx.voice?.micOn ? '🎙️' : '🔇';
+      miniMicBtn.classList.toggle('on', Boolean(ctx.voice?.micOn));
+    }
     const canSeek = !host.adapter || !!host.adapter.caps.seek;
     const leader = isLeader();
     back10Btn.classList.toggle('locked', !leader);
@@ -3006,6 +3104,8 @@ export function buildControls(frame, ctx) {
       clearTimeout(tapTimer);
       clearTimeout(rippleTimer);
       clearTimeout(desktopClickTimer);
+      for (const tid of viewportTimers) clearTimeout(tid);
+      viewportTimers.clear();
       closeMenu();
       if (typeof window !== 'undefined' && window.__watchlivoBgTickListeners instanceof Set) {
         window.__watchlivoBgTickListeners.delete(controlsBgTickListener);
@@ -3040,6 +3140,7 @@ export function buildControls(frame, ctx) {
       window.removeEventListener('resize', onViewportChange);
       window.removeEventListener('orientationchange', onViewportChange);
       document.body.classList.remove('vortex-fs');
+      if (typeof window !== 'undefined') window.__wlSyncViewport?.();
     },
     danmaku: (msg) => {
       if (!msg || msg.system || (!msg.text && !msg.gif)) return;

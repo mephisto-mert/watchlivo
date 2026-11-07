@@ -1,8 +1,9 @@
-// Shared WebAudio GainNode + Soft-Limiter Engine (0% - 150% real volume & boost, CORS/iOS PiP safe).
+// Shared WebAudio GainNode + Soft-Limiter Engine (0% - 200% real volume & boost, CORS/iOS PiP safe).
 
 let _audioCtx = null;
 const _mediaNodes = new WeakMap();
 const _streamNodes = new WeakMap();
+const _NATIVE_CREATE_GAIN = (typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext)?.prototype?.createGain) || null;
 
 export function isIosWebKit() {
   if (typeof navigator === 'undefined') return false;
@@ -46,6 +47,22 @@ export function resumeSharedAudioContext() {
   return ctx;
 }
 
+export function suspendSharedAudioContext() {
+  if (_audioCtx && _audioCtx.state === 'running') {
+    try { _audioCtx.suspend().catch(() => {}); } catch (_) {}
+  }
+}
+
+export function closeSharedAudioContext() {
+  if (_audioCtx) {
+    const c = _audioCtx;
+    _audioCtx = null;
+    try {
+      if (c.state !== 'closed') c.close().catch(() => {});
+    } catch (_) {}
+  }
+}
+
 export function isCorsSafeMediaElement(el, opts = {}) {
   if (!el) return false;
   if (el.srcObject) return true;
@@ -83,14 +100,16 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   if (!el || opts.forbidWebAudio || opts.inPip) return null;
   if (isIosWebKit() && el.tagName === 'VIDEO') return null;
   const existing = _mediaNodes.get(el);
-  if (existing) return existing;
+  if (existing) {
+    return existing.ctx?.state === 'closed' ? null : existing;
+  }
   if (!isCorsSafeMediaElement(el, opts)) return null;
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
   if ((ctx.state === 'suspended' || ctx.state === 'interrupted') && !(typeof document !== 'undefined' && document.hidden)) {
     try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
   }
-  if (ctx.state !== 'running') return null;
+  if (ctx.state === 'closed' || (isIosWebKit() && ctx.state !== 'running')) return null;
   try {
     const source = ctx.createMediaElementSource(el);
     const eqLow = ctx.createBiquadFilter();
@@ -98,7 +117,7 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
     eqLow.frequency.value = 180;
     eqLow.gain.value = 0;
     const gain = ctx.createGain();
-    gain.gain.value = Math.max(0, Math.min(1.5, Number.isFinite(initialGain) ? initialGain : 1.0));
+    gain.gain.value = Math.max(0, Math.min(2.0, Number.isFinite(initialGain) ? initialGain : 1.0));
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -2.5;
     limiter.knee.value = 10;
@@ -109,7 +128,7 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
     eqLow.connect(gain);
     gain.connect(limiter);
     limiter.connect(ctx.destination);
-    const entry = { ctx, source, eqLow, gain, limiter };
+    const entry = { ctx, source, eqLow, gain, limiter, _createGainRef: ctx.constructor?.prototype?.createGain };
     _mediaNodes.set(el, entry);
     return entry;
   } catch (e) {
@@ -137,9 +156,9 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   if (!el) return false;
   ensureIosPlaybackAudioSession();
   const rawNum = Number(effectivePct);
-  const pct = Math.max(0, Math.min(150, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
+  const pct = Math.max(0, Math.min(200, Number.isFinite(rawNum) ? rawNum : (isIosWebKit() ? 100 : 80)));
   const isMuted = Boolean(muted || pct <= 0);
-  const targetGain = isMuted ? 0 : Math.max(0, Math.min(1.5, pct / 100));
+  const targetGain = isMuted ? 0 : Math.max(0, Math.min(2.0, pct / 100));
 
   if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume?.postMessage) {
     el.muted = isMuted;
@@ -153,20 +172,33 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   const needWebAudio = _mediaNodes.has(el) || wantIosAudioGraph || wantBoostGraph || Boolean(opts.enableDjEq && !isIosWebKit());
   const graph = needWebAudio ? _attachElementGraph(el, opts, targetGain) : _mediaNodes.get(el);
 
-  if (graph) {
+  if (graph && graph.ctx?.state !== 'closed') {
+    const curCreateGain = graph.ctx.constructor?.prototype?.createGain;
+    if (curCreateGain && _NATIVE_CREATE_GAIN && curCreateGain !== _NATIVE_CREATE_GAIN && curCreateGain !== graph._customCreateGainRef) {
+      try {
+        const nextGain = graph.ctx.createGain();
+        nextGain.gain.value = targetGain;
+        try { graph.eqLow.disconnect(graph.gain); } catch (_) {}
+        try { graph.gain.disconnect(); } catch (_) {}
+        graph.eqLow.connect(nextGain);
+        nextGain.connect(graph.limiter);
+        graph.gain = nextGain;
+        graph._customCreateGainRef = curCreateGain;
+      } catch (_) {}
+    }
     if ((graph.ctx.state === 'suspended' || graph.ctx.state === 'interrupted') && !isMuted && !(typeof document !== 'undefined' && document.hidden)) {
       graph.ctx.resume().catch(() => {});
     }
     el.muted = isMuted;
     try { el.volume = 1.0; } catch (e) { /* iOS read-only 1.0 */ }
+    try { graph.gain.gain.cancelScheduledValues?.(graph.ctx.currentTime); } catch (_) {}
+    graph.gain.gain.value = targetGain;
     if (graph.ctx.state === 'running') {
       try {
         graph.gain.gain.setTargetAtTime(targetGain, graph.ctx.currentTime, 0.015);
       } catch (e) {
         graph.gain.gain.value = targetGain;
       }
-    } else {
-      graph.gain.gain.value = targetGain;
     }
     return true;
   }
@@ -203,7 +235,7 @@ export function releaseStreamBoost(audioEl) {
 
 export function applyStreamBoost(audioEl, stream, pct = 100) {
   if (!audioEl) return;
-  const clamped = Math.max(0, Math.min(150, Number(pct) || 0));
+  const clamped = Math.max(0, Math.min(200, Number(pct) || 0));
   if (clamped <= 100) {
     if (_streamNodes.has(audioEl)) {
       releaseStreamBoost(audioEl);
@@ -250,6 +282,6 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     if (node.ctx.state === 'suspended' || node.ctx.state === 'interrupted') {
       node.ctx.resume().catch(() => {});
     }
-    node.gain.gain.value = Math.max(0, Math.min(1.5, clamped / 100));
+    node.gain.gain.value = Math.max(0, Math.min(2.0, clamped / 100));
   }
 }

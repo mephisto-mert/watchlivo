@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261107_v140';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261107_v141';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -102,6 +102,7 @@ export function h(tag, attrs = {}, ...children) {
       if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
         const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
         const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
+        if (isSafeSvgImg && /(?:%3c|<)\s*script|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)) continue;
         if (!isSafeSvgImg && /^(?:javascript:|vbscript:|data:text\/html|data:image\/svg|data:application\/xhtml)/i.test(cleanV)) continue;
       }
       el.setAttribute(k, v === true ? '' : v);
@@ -212,7 +213,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
   }
   const getTrapItems = () => Array.from(card.querySelectorAll(
     'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-  )).filter((el) => el instanceof HTMLElement && el.offsetParent !== null);
+  )).filter((el) => el instanceof HTMLElement && el.getClientRects().length > 0);
   const onKey = (e) => {
     if (!back.isConnected) {
       window.removeEventListener('keydown', onKey, true);
@@ -248,6 +249,12 @@ export function popup({ title, message, options = [], content = null, dismissabl
     try { onClose?.(); } catch (_) {}
     back.classList.add('is-closing');
     card.classList.add('is-closing');
+    try {
+      const appEl = document.getElementById('app');
+      if (appEl && !document.querySelector('#popup-root > .popup-backdrop:not(.is-closing), body > .popup-backdrop:not(.is-closing)')) {
+        appEl.inert = false;
+      }
+    } catch (_) {}
     setTimeout(() => {
       back.remove();
       if (prevFocus && prevFocus.isConnected) {
@@ -334,9 +341,22 @@ export function popup({ title, message, options = [], content = null, dismissabl
     drawerHandle.addEventListener('touchend', endDrag, { passive: true });
     drawerHandle.addEventListener('touchcancel', endDrag, { passive: true });
   }
+  const syncAppInert = () => {
+    const appEl = document.getElementById('app');
+    if (!appEl) return;
+    const hostRoot = document.getElementById('popup-root');
+    if (hostRoot && appEl.contains(hostRoot)) return;
+    const hasOpen = Boolean(document.querySelector('#popup-root > .popup-backdrop:not(.is-closing), body > .popup-backdrop:not(.is-closing)'));
+    appEl.inert = hasOpen;
+  };
+  if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined' && root && !window.__wlPopupInertObs) {
+    window.__wlPopupInertObs = new MutationObserver(syncAppInert);
+    window.__wlPopupInertObs.observe(root, { childList: true, subtree: false, attributes: true, attributeFilter: ['class'] });
+  }
   back._closePopup = close;
   if (root) root.append(back);
   else document.body.append(back);
+  syncAppInert();
   window.addEventListener('keydown', onKey, true);
   queueMicrotask(() => {
     const focusables = getTrapItems();
@@ -547,8 +567,8 @@ export function openThemeModal() {
         class: 'btn wl-btn-apk-dl',
         href: '/download/Watchlivo-v2.0.apk',
         download: 'Watchlivo-v2.0.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
-      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0)'),
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.2)'),
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
@@ -590,15 +610,15 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Android Uygulaması (Native APK)'),
-          h('small', {}, 'v2.0.0 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
+          h('small', {}, 'v2.0.2 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
           h('p', {}, 'Tarayıcısız saf Android donanım oynatıcı, sistem PiP penceresi ve yeni sürüm çıktığında kendi kendini otomatik güncelleyen altyapı.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
           href: '/download/Watchlivo-v2.0.apk',
           download: 'Watchlivo-v2.0.apk',
-          onclick: () => toast('📱 Watchlivo Native APK v2.0 indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0)')
+          onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.2)')
       ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),

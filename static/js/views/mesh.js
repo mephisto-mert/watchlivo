@@ -1,15 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261107_v140';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261107_v140';
-import { resolveMusicItem } from './selection-kinds.js?v=20261107_v140';
-import { MeshConnection } from '../realtime.js?v=20261107_v140';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261107_v140';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261107_v140';
-import { buildLayout } from './mesh-layout.js?v=20261107_v140';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261107_v140';
-import { Voice } from '../voice.js?v=20261107_v140';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261107_v140';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261107_v140';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261107_v141';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261107_v141';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v141';
+import { MeshConnection } from '../realtime.js?v=20261107_v141';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261107_v141';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261107_v141';
+import { buildLayout } from './mesh-layout.js?v=20261107_v141';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261107_v141';
+import { Voice } from '../voice.js?v=20261107_v141';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261107_v141';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261107_v141';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261107_v141';
 
 let ctx = null;
 
@@ -796,7 +797,10 @@ function onMessage(data) {
 }
 
 function askPassword() {
-  if (typeof document !== 'undefined' && document.getElementById('wl-room-pwd-input')) return;
+  if (typeof document !== 'undefined') {
+    const existingPwd = document.getElementById('wl-room-pwd-input');
+    if (existingPwd && !existingPwd.closest('.popup-backdrop.is-closing')) return;
+  }
   if (typeof document !== 'undefined' && document.pictureInPictureElement) {
     try { document.exitPictureInPicture().catch(() => {}); } catch (_) {}
   }
@@ -824,7 +828,7 @@ function askPassword() {
   });
   popup({ title: 'Bu oda şifreli', content: input, dismissable: false, options: [
     { label: 'Katıl', primary: true, onClick: submitPwd },
-    { label: 'Ana Sayfa', onClick: () => window.vortexNavigate('/') },
+    { label: 'Ana Sayfa', onClick: () => { leaveMeshView(false); window.vortexNavigate('/'); } },
   ] });
 }
 
@@ -968,7 +972,9 @@ const actions = {
       const startPos = Number.isFinite(Number(media.currentTime)) && Number(media.currentTime) > 0 ? Number(media.currentTime) : 0;
       const nextMedia = { ...media, playing: true, currentTime: startPos, meshStateStatus: 'PLAYING', meshStatePosition: startPos, meshStateTime: clock.now() };
       if (state.mesh) {
-        const updatedRoom = { ...state.mesh, media: nextMedia };
+        const nextName = (!state.mesh.curated && nextMedia.title) ? String(nextMedia.title).trim().slice(0, 80) : state.mesh.name;
+        const updatedRoom = { ...state.mesh, name: nextName || state.mesh.name, media: nextMedia };
+        if (typeof document !== 'undefined' && nextMedia.title) document.title = `${nextMedia.title} — Watchlivo`;
         set({ mesh: updatedRoom });
         if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
         rememberRoom(updatedRoom);
@@ -1051,16 +1057,18 @@ const actions = {
     if (!pollId || typeof optionIndex !== 'number') return;
     const room = state.mesh;
     const myName = state.self?.name || 'Misafir';
+    const myVoteKey = `${myName}#${String(state.clientId || '').slice(-4)}`;
+    const isMyVote = (u) => u === myVoteKey || u === myName || (!state.clientId && String(u).startsWith(`${myName}#`));
     if (room && Array.isArray(room.polls)) {
       const nextPolls = room.polls.map((p) => {
         if (!p || p.id !== pollId) return p;
         const nextOpts = (p.options || []).map((opt, idx) => {
           const curVotes = Array.isArray(opt.votes) ? [...opt.votes] : [];
-          const hasMe = curVotes.some((u) => u === myName || String(u).startsWith(`${myName}#`));
+          const hasMe = curVotes.some(isMyVote);
           if (idx === optionIndex) {
-            return { ...opt, votes: hasMe ? curVotes.filter((u) => u !== myName && !String(u).startsWith(`${myName}#`)) : [...curVotes, myName] };
+            return { ...opt, votes: hasMe ? curVotes.filter((u) => !isMyVote(u)) : [...curVotes, myVoteKey] };
           }
-          return { ...opt, votes: curVotes.filter((u) => u !== myName && !String(u).startsWith(`${myName}#`)) };
+          return { ...opt, votes: curVotes.filter((u) => !isMyVote(u)) };
         });
         return { ...p, options: nextOpts };
       });
@@ -1245,13 +1253,16 @@ const actions = {
     const leavingId = state.mesh?.id || state.route?.params?.id;
     const isCurated = Boolean(state.mesh?.curated);
     const shouldCloseRoom = Boolean(!isCurated && closeForAll && (isHostOnly() || isCreatorSelf() || ctx?.conn?.isCreator));
-    if (leavingId && !isCurated) {
+    if (shouldCloseRoom && leavingId && !isCurated) {
       forgetRoom(leavingId);
     }
     if (shouldCloseRoom && leavingId && ctx?.conn) {
       const cid = ctx.conn.clientId || state.clientId;
       const ctok = ctx.conn.clientToken || '';
       const uname = state.self?.name || '';
+      const authTok = state.self?.authToken || state.self?.guestToken || '';
+      const closeHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
+      if (authTok) closeHeaders.Authorization = `Bearer ${authTok}`;
       clearSavedChat(leavingId);
       try { ctx.conn._emitP2p?.({ event: { type: 'room_closed', roomId: leavingId } }); } catch (e) { /* ignore */ }
       try { ctx.conn.close(false, false); } catch (e) { /* ignore */ }
@@ -1260,8 +1271,8 @@ const actions = {
           fetch(`/api/rooms/${encodeURIComponent(leavingId)}/sync`, {
             method: 'POST',
             keepalive: true,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'close_room', clientId: cid, username: uname, clientToken: ctok || undefined }),
+            headers: closeHeaders,
+            body: JSON.stringify({ type: 'close_room', clientId: cid, username: uname, clientToken: ctok || undefined, gracefulClose: true }),
           }),
           new Promise((r) => setTimeout(r, 350)),
         ]);
@@ -1522,7 +1533,9 @@ export function leaveMeshView(explicitLeave = false) {
   try { ctx.sync?.stop?.(); } catch (_) {}
   try { ctx.host?.destroy?.(); } catch (_) {}
   try { ctx.voice?.destroy?.(); } catch (_) {}
+  try { closeSharedAudioContext(); } catch (_) {}
   try { ctx.layout?.destroy?.(); } catch (_) {}
+  if (typeof window !== 'undefined' && window.__kinoxVoice) window.__kinoxVoice = null;
   ctx = null;
   set({ mesh: null, clientId: null });
   setTimeout(() => pushPresenceHeartbeat({ state: 'online', roomId: '', roomName: '', mediaTitle: '' }).catch(() => {}), 40);

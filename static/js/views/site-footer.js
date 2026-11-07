@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261107_v140';
-import { api } from '../api.js?v=20261107_v140';
-import { state } from '../store.js?v=20261107_v140';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261107_v141';
+import { api } from '../api.js?v=20261107_v141';
+import { state } from '../store.js?v=20261107_v141';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -24,7 +24,7 @@ export const FAQ_ITEMS = [
   },
   {
     q: 'Telefonda (iPhone / Android) ve bilgisayarda uygulama olarak nasıl kullanılır?',
-    a: 'Watchlivo kurulum gerektirmeden tüm mobil ve masaüstü tarayıcılarda çalışır. Ayrıca üst menüdeki "APK İndir (v2.0)" butonuyla Android yerel uygulamasını indirebilir, iPhone (Safari) veya bilgisayarında "Ana Ekrana Ekle / Uygulamayı Yükle" seçeneğiyle tam ekran PWA olarak kullanabilirsin.',
+    a: 'Watchlivo kurulum gerektirmeden tüm mobil ve masaüstü tarayıcılarda çalışır. Ayrıca üst menüdeki "APK İndir (v2.0.2)" butonuyla Android yerel uygulamasını indirebilir, iPhone (Safari) veya bilgisayarında "Ana Ekrana Ekle / Uygulamayı Yükle" seçeneğiyle tam ekran PWA olarak kullanabilirsin.',
   },
   {
     q: 'Telif hakkı (DMCA), içerik kaldırma ve hata bildirimleri nereye yapılır?',
@@ -43,7 +43,7 @@ const LEGAL_SECTIONS = {
         <li><b>Milisaniyelik Senkronizasyon Motoru:</b> Odadaki herkes videonun tam olarak aynı saniyesini görür. Duraklatma, sarma ve bölüm geçişleri anında eşitlenir.</li>
         <li><b>Kristal Netliğinde WebRTC Sesli Sohbet:</b> Harici bir uygulamaya ihtiyaç duymadan oda içinde mikrofonla konuşabilir, sesli not ve canlı tepkiler gönderebilirsiniz.</li>
         <li><b>Zengin Türkçe Dublaj & Altyazı Seçenekleri:</b> Binlerce film, dizi ve anime içeriğinde Türkçe dublaj, Türkçe altyazı ve orijinal dil alternatifleri tek tıkla değiştirilebilir.</li>
-        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
+        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0.2), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
       </ul>
       <p>Resmi İletişim & İşbirliği: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
     `,
@@ -328,7 +328,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
     ['⚡', 'Saliselik Senkronizasyon', 'Arkadaşlarınla aynı karede durdur, sar ve sıfır gecikmeyle birlikte izle.'],
     ['🎙️', 'Kristal Netliğinde Sesli Sohbet', 'Oda içi WebRTC düşük gecikmeli mikrofon, sesli not ve anlık emoji tepkileri.'],
     ['🇹🇷', '4K Türkçe Dublaj & Altyazı', 'Vizyon filmleri, popüler diziler, animeler, 7/24 canlı TV ve YouTube akışları.'],
-    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0 ile tam ekran izle.'],
+    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.2 ile tam ekran izle.'],
   ];
 
   const faqBox = h('div', { class: 'wl-faq-list' },
@@ -407,7 +407,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v140', alt: 'Watchlivo', class: 'wl-footer-logo' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v141', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),
