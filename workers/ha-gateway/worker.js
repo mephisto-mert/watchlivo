@@ -298,11 +298,17 @@ export default {
       }
     }
 
-    // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads) -> Render EU primary with instant Vercel fallback
+    // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads, stream/catalog caches) -> Render EU primary with instant Vercel fallback
     const prefersStatefulOrigin =
       url.pathname === "/api/rooms" ||
       url.pathname.startsWith("/api/rooms/") ||
       url.pathname.startsWith("/api/rave/voice-relay/") ||
+      url.pathname === "/api/rave/resolve-catalog" ||
+      url.pathname === "/api/rave/resolve-stream" ||
+      url.pathname === "/api/rave/stream" ||
+      url.pathname === "/api/rave/stream-manifest" ||
+      url.pathname === "/api/rave/stream_manifest" ||
+      url.pathname === "/api/rave/hls-proxy" ||
       url.pathname === "/api/upload" ||
       url.pathname.startsWith("/uploads/");
 

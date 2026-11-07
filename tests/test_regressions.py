@@ -3247,6 +3247,7 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn('hdrs["Referer"] = "https://vidy.st/"', server_src)
         self.assertIn("def _fetch_manifest_with_edge(", server_src)
         self.assertIn("is_sub_variant_req", server_src)
+        self.assertIn("def _manifest_url_ok(", server_src)
 
 
 if __name__ == '__main__':

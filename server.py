@@ -8254,10 +8254,23 @@ async def rave_stream_manifest(request: Request):
             is_fmp4_playlist = (not is_master) and ("#EXT-X-MAP:" in raw)
             needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "") + (f"&mtype={explicit_mtype}" if explicit_mtype else "")
+            _manifest_host_ok: dict[tuple[str, str], bool] = {}
+
+            def _manifest_url_ok(u_chk: str) -> bool:
+                p_chk = urllib.parse.urlsplit(u_chk)
+                if p_chk.scheme not in ("http", "https") or not p_chk.netloc:
+                    return False
+                hk = (p_chk.scheme, p_chk.netloc.lower())
+                ok_cached = _manifest_host_ok.get(hk)
+                if ok_cached is None:
+                    ok_cached = public_http_url(u_chk)
+                    _manifest_host_ok[hk] = ok_cached
+                return ok_cached
+
             def _rewrite_u(u_str: str, is_sub_playlist: bool = False, tag_kind: str = "") -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
-                if not public_http_url(u_str):
+                if not _manifest_url_ok(u_str):
                     return ""
                 if cur_is_fp and "/subtitle/" in u_str:
                     return f"/api/rave/subtitle.vtt?url={urllib.parse.quote(u_str, safe='')}&lang=tr"
