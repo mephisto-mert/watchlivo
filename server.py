@@ -3553,9 +3553,15 @@ _DDIZIMAG_BASE: str = "https://ddizimag.icu"
 
 
 def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: str = "", timeout: float = 3.8, max_bytes: int = MAX_PAGE_BYTES) -> tuple[bytes, str]:
-    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL or "https://watchlivo-stream-proxy.jokallame0.workers.dev").strip().rstrip("/")
-    if not edge_base or not edge_base.startswith("https://"):
-        edge_base = "https://watchlivo-stream-proxy.jokallame0.workers.dev"
+    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL or "").strip().rstrip("/")
+    if not edge_base or not edge_base.startswith("https://") or "watchlivo-edge.workers.dev" in edge_base or "jokallame0.workers.dev" in edge_base:
+        hdrs = {"User-Agent": UA137, "Accept": accept or "*/*"}
+        if referer:
+            hdrs["Referer"] = referer
+        if xhr:
+            hdrs["X-Requested-With"] = "XMLHttpRequest"
+        with _public_open(urllib.request.Request(url, headers=hdrs), timeout=timeout) as r:
+            return r.read(max_bytes), str(getattr(r, "url", "") or r.geturl() or url)
     q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
     if referer:
         q += f"&referer={urllib.parse.quote(referer, safe='')}"
@@ -8141,7 +8147,8 @@ async def rave_stream_manifest(request: Request):
                         pass
             def _fetch_manifest_with_edge(u_m: str, m_hdrs: dict, t_direct: float = 3.2, t_edge: float = 4.5) -> tuple[str, str]:
                 u_low_m = u_m.lower()
-                edge_ok = bool((os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip()) and not any(h in u_low_m for h in _WORKER_BYPASS_HOSTS) and ("fastplay." not in u_low_m)
+                edge_val = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip()
+                edge_ok = bool(edge_val) and not any(h in u_low_m for h in _WORKER_BYPASS_HOSTS) and ("fastplay." not in u_low_m)
                 prefer_edge = edge_ok and (
                     "pilavyer" in u_low_m or "cdnimg" in u_low_m or "molystream" in u_low_m
                     or bool(re.search(r"https?://s\d+\.[^/]+\.shop/", u_low_m))
@@ -10375,12 +10382,12 @@ async def room_share_landing(request: Request) -> HTMLResponse:
             fwd_params.append((qp_k, qp_v))
     can_mint_rtok = (not is_non_public) and pwd_ok
     eff_rtok = incoming_rtok if (valid_in_rtok and pwd_ok) else ""
-    if not eff_rtok and room and can_mint_rtok:
+    if not eff_rtok and room and can_mint_rtok and incoming_rtok:
         try:
             eff_rtok = rooms.pack_sync_token(room)
         except Exception:
             eff_rtok = ""
-    if eff_rtok:
+    if eff_rtok and incoming_rtok:
         fwd_params.append(("r_tok", eff_rtok))
     qs_suffix = ("?" + urllib.parse.urlencode(fwd_params)) if fwd_params else ""
     target_hash = f"/#/mesh/{urllib.parse.quote(safe_id)}{qs_suffix}" if safe_id else "/#/"

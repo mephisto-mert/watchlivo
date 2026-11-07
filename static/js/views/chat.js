@@ -185,11 +185,6 @@ export const inviteUrl = () => {
   if (m?.mediaType) qp.set('mt', m.mediaType);
   if (m?.season) qp.set('s', String(m.season));
   if (m?.episode) qp.set('e', String(m.episode));
-  let rtok = state.mesh?.syncToken || '';
-  if (!rtok && rid) {
-    try { rtok = sessionStorage.getItem('vortex_st_' + rid) || ''; } catch (_) {}
-  }
-  if (rtok && rtok.length < 6000) qp.set('r_tok', rtok);
   const qs = qp.toString();
   return `${location.origin}/r/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`;
 };
