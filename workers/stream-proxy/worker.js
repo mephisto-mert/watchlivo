@@ -183,7 +183,7 @@ function resolveMediaContentType(url, extHint, upstreamCt) {
   ) {
     return "video/mp2t";
   }
-  if (rawCt.includes("video/") || rawCt.includes("audio/") || rawCt.includes("mpegurl")) {
+  if (rawCt.includes("video/") || rawCt.includes("audio/") || rawCt.includes("mpegurl") || rawCt.includes("json")) {
     return upstreamCt;
   }
   return "video/mp2t";
