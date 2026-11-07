@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261107_v138 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v139 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261107_v138", index_html)
+        self.assertIn("20261107_v139", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261107_v138", sw_js)
+        self.assertIn("v20261107_v139", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261107_v138', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v139', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261107_v138', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v139', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261107_v138')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v139')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3049,6 +3049,89 @@ console.log('HA_UNIT_TESTS_PASSED');
         vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
         self.assertIn("@media (max-width: 960px), ((orientation: landscape) and (max-height: 560px))", vortex_css)
         self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr)) !important;", vortex_css)
+
+    def test_v139_dubbing_pipeline_and_audio_sync_regressions(self):
+        from pathlib import Path
+        from unittest.mock import patch
+        import social_engine
+
+        root = Path(__file__).resolve().parent.parent
+
+        # 1. social_engine.rank_servers_by_health MUST preserve primary tr-dub URL (&aud=tr) and prioritize TR Dublaj servers
+        sample_res = {
+            "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=tr&ext=.m3u8",
+            "altUrls": [],
+            "servers": [
+                {"id": "srv-1", "label": "📡 Sunucu 1 · Flixer / Hexa (1080p HD)", "url": "/api/rave/stream?sid=ZW5n&ref=hx&ext=.m3u8", "streamType": "hls"},
+                {"id": "srv-2", "label": "📡 Sunucu 2 · Watchlivo Dual (TR Dublaj & Altyazı · 1080p)", "url": "/api/rave/stream?sid=YWJj&ref=fhd&ext=.m3u8", "streamType": "hls"},
+            ],
+            "audioTracks": [
+                {"id": "tr-dub", "lang": "tr", "audioLang": "tr", "label": "🇹🇷 Türkçe Dublaj", "mode": "stream", "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=tr&ext=.m3u8"},
+                {"id": "orig", "lang": "orig", "audioLang": "en", "label": "🎬 İngilizce", "mode": "stream", "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=en&ext=.m3u8"},
+            ],
+        }
+        ranked = social_engine.rank_servers_by_health(sample_res)
+        self.assertIn("&aud=tr", ranked["url"])
+        self.assertIn("TR Dublaj", ranked["servers"][0]["label"])
+
+        # 2. _build_audio_tracks adds tr-ai-dub smart neural TTS fallback when no studio TR dub exists
+        with patch.object(server, "_get_tmdb_meta_sync", return_value={"origLang": "ja"}):
+            tracks = server._build_audio_tracks(
+                "/api/rave/stream-proxy?url=https%3A%2F%2Firtau1.online%2Fsub.mp4&ext=.mp4",
+                [("https://irtau1.online/sub.mp4", "mp4_ac_sub")],
+                prov="anime",
+                tid="85937",
+                s=1,
+                e=1,
+                mtype="tv",
+            )
+        aud_ids = [t["id"] for t in tracks]
+        self.assertIn("orig", aud_ids)
+        self.assertIn("tr-ai-dub", aud_ids)
+        ai_trk = next(t for t in tracks if t["id"] == "tr-ai-dub")
+        self.assertEqual(ai_trk["mode"], "tts")
+
+        # 3. Dual-audio HLS manifest preserves all #EXT-X-MEDIA:TYPE=AUDIO lines with DEFAULT=YES on requested aud=tr
+        dual_master = (
+            "#EXTM3U\n"
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="en",NAME="English",DEFAULT=YES,AUTOSELECT=YES,URI="en/index.m3u8"\n'
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="tr",NAME="Türkçe",DEFAULT=NO,AUTOSELECT=NO,URI="tr/index.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=3500000,RESOLUTION=1920x1080,AUDIO="audio"\n'
+            "v/1080.m3u8\n"
+        ).encode("utf-8")
+
+        class _FakeM3U:
+            def __init__(self, b, u):
+                self._b = b
+                self.url = u
+            def read(self, _n=-1):
+                return self._b
+            def geturl(self):
+                return self.url
+            def __enter__(self):
+                return self
+            def __exit__(self, *_a):
+                return False
+
+        with patch.object(server, "public_http_url", side_effect=lambda u: u if str(u).startswith("https://") else ""), \
+             patch.object(server, "_public_open", return_value=_FakeM3U(dual_master, "https://one.makesomthingup.click/abc/master.m3u8")):
+            resp = self.client.get("/api/rave/stream", params={"u": "https://one.makesomthingup.click/abc/master.m3u8", "ref": "dl", "aud": "tr"})
+            self.assertEqual(resp.status_code, 200)
+            self.assertIn('LANGUAGE="tr"', resp.text)
+            self.assertIn('LANGUAGE="en"', resp.text)
+            tr_line = next(ln for ln in resp.text.splitlines() if 'LANGUAGE="tr"' in ln)
+            en_line = next(ln for ln in resp.text.splitlines() if 'LANGUAGE="en"' in ln)
+            self.assertIn("DEFAULT=YES", tr_line)
+            self.assertIn("DEFAULT=NO", en_line)
+
+        # 4. Frontend audio initialization order & fallback sync guards
+        subs_js = (root / "static" / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+        self.assertIn("resolveInitialAudioTrack(media)", subs_js)
+        self.assertIn("onStreamFallbackUrl(nextUrl)", subs_js)
+        self.assertIn("this.subs.resolveInitialAudioTrack(media)", html5_js)
+        self.assertNotIn("Number(it.voteCount || 0) >= 800", sel_kinds_js)
 
 
 if __name__ == '__main__':

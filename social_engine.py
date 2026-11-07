@@ -2435,19 +2435,25 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         return res
     hmap = _load_health_map()
     scored = []
+    dead_buckets = set()
     for idx, srv in enumerate(srvs):
         if not isinstance(srv, dict) or not srv.get("url"):
             continue
+        lbl_low = str(srv.get("label") or "").lower()
         bkt = _extract_srv_bucket(srv.get("url", ""), srv.get("label", ""))
         rec = hmap.get(bkt) or {}
         ok_n = int(rec.get("ok") or 0)
         fail_n = int(rec.get("fail") or 0)
+        if fail_n >= 3 and ok_n == 0:
+            dead_buckets.add(bkt)
         lat_ms = float(rec.get("avgMs") or 650.0)
         total = ok_n + fail_n
         rel_score = ((ok_n + 2.0) / (total + 3.0)) - (min(lat_ms, 4000.0) / 20000.0)
-        # Preserve original priority order unless reliability differs meaningfully
+        # Keep Turkish dubbing / dual-audio servers ahead of English-only servers unless hard-dead
+        has_tr_lbl = any(k in lbl_low for k in ("tr dublaj", "türkçe dublaj", "dual"))
+        tr_srv_bonus = 0.35 if (has_tr_lbl and not (fail_n >= 3 and ok_n == 0)) else 0.0
         tie_bonus = max(0.0, (10 - idx) * 0.025)
-        final_score = round(rel_score + tie_bonus, 4)
+        final_score = round(rel_score + tr_srv_bonus + tie_bonus, 4)
         srv_copy = dict(srv)
         srv_copy["healthBucket"] = bkt
         srv_copy["healthScore"] = round(rel_score * 100, 1)
@@ -2460,8 +2466,25 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     ordered = [x[2] for x in scored]
     out = dict(res)
     out["servers"] = ordered
-    out["url"] = ordered[0]["url"]
-    out["altUrls"] = [s["url"] for s in ordered[1:7] if s.get("url")]
+    aud_tracks = [t for t in (res.get("audioTracks") or []) if isinstance(t, dict) and t.get("mode") == "stream" and t.get("url")]
+    primary_tr_tracks = [
+        t for t in aud_tracks
+        if (t.get("id") == "tr-dub" or str(t.get("id") or "").startswith("tr-dub-") or t.get("audioLang") == "tr" or t.get("lang") == "tr")
+        and _extract_srv_bucket(t.get("url", ""), t.get("label", "")) not in dead_buckets
+    ]
+    if primary_tr_tracks:
+        best_url = primary_tr_tracks[0]["url"]
+    elif res.get("url") and ("&aud=" in str(res.get("url")) or _extract_srv_bucket(str(res.get("url")), "") not in dead_buckets):
+        best_url = ordered[0]["url"] if not aud_tracks else (aud_tracks[0]["url"] if _extract_srv_bucket(aud_tracks[0]["url"], "") not in dead_buckets else ordered[0]["url"])
+    else:
+        best_url = ordered[0]["url"]
+    out["url"] = best_url
+    alt_candidates = [t["url"] for t in primary_tr_tracks[1:]] + [t["url"] for t in aud_tracks if t.get("url")] + [s["url"] for s in ordered if s.get("url")]
+    dedup_alts = []
+    for cand_u in alt_candidates:
+        if cand_u and cand_u != best_url and cand_u not in dedup_alts:
+            dedup_alts.append(cand_u)
+    out["altUrls"] = dedup_alts[:6]
     return out
 
 

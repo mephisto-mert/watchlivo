@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261107_v138';
-import { api, qs } from '../api.js?v=20261107_v138';
-import { parseVideoUrl } from '../providers.js?v=20261107_v138';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261107_v138';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261107_v138';
-import { profileSetup } from '../profile.js?v=20261107_v138';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v138';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261107_v139';
+import { api, qs } from '../api.js?v=20261107_v139';
+import { parseVideoUrl } from '../providers.js?v=20261107_v139';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261107_v139';
+import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261107_v139';
+import { profileSetup } from '../profile.js?v=20261107_v139';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v139';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261107_v138';
+} from '../store.js?v=20261107_v139';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -533,7 +533,7 @@ function itemMatchesCat(it, catId) {
   if (catId === 'dublaj') {
     const cats = Array.isArray(it.categories) ? it.categories : [];
     const badge = String(it.sourceBadge || it.audioBadge || '');
-    return Boolean(cats.includes('dublaj') || it.hasTrDub || it.origLang === 'tr' || /dublaj|türkçe|yerli/i.test(badge) || Number(it.voteCount || 0) >= 800 || Number(it.rating || 0) >= 7.2);
+    return Boolean(cats.includes('dublaj') || it.hasTrDub || it.origLang === 'tr' || /dublaj|türkçe|yerli/i.test(badge));
   }
   const isTv = it.mediaType === 'tv' || it.type === 'SHOW';
   if (catId === 'series') return isTv;

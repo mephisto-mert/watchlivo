@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v138';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v138';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v138';
-import { getProvider } from '../providers.js?v=20261107_v138';
-import { expectedPosition } from '../sync.js?v=20261107_v138';
-import { thumbFor } from './lobby.js?v=20261107_v138';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v138';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v138';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v138';
-import { avatar } from '../profile.js?v=20261107_v138';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v139';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v139';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v139';
+import { getProvider } from '../providers.js?v=20261107_v139';
+import { expectedPosition } from '../sync.js?v=20261107_v139';
+import { thumbFor } from './lobby.js?v=20261107_v139';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v139';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v139';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v139';
+import { avatar } from '../profile.js?v=20261107_v139';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1996,8 +1996,16 @@ export function buildControls(frame, ctx) {
           onclick: (e) => {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
-            m.url = srv.url;
-            host.adapter?.switchStreamSource?.(srv.url);
+            let nextSrvUrl = srv.url;
+            const wantTrAud = curAudioId === 'tr-dub' || String(curAudioId || '').startsWith('tr-dub-');
+            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj/i.test(String(srv.label || ''))) {
+              nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
+                ? nextSrvUrl.replace('&ext=.m3u8', '&aud=tr&ext=.m3u8')
+                : `${nextSrvUrl}&aud=tr`;
+            }
+            m.url = nextSrvUrl;
+            host.adapter?.switchStreamSource?.(nextSrvUrl);
+            host.adapter?.subs?.onStreamFallbackUrl?.(nextSrvUrl);
             showOverlay(srv.label, 2200);
             closeMenu();
             update();

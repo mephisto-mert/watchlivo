@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v138';
-import { expectedPosition } from '../sync.js?v=20261107_v138';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v138';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v138';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v138';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v139';
+import { expectedPosition } from '../sync.js?v=20261107_v139';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v139';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v139';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v139';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -594,9 +594,14 @@ export class Html5Adapter {
     const isHevcUrl = (u) => /\/resource\/h265\/|[._-]h265[._-]|[._-]hevc[._-]/i.test(String(u || ''));
     const isDemoTestUrl = (u) => /unified-streaming\.com|tears-of-steel|test-streams\.mux\.dev|shaka-demo-assets|angel-one|aHR0cHM6Ly9kZW1vLnVuaWZpZWQtc3RyZWFtaW5n|aHR0cHM6Ly90ZXN0LXN0cmVhbXMubXV4|aHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL3NoYWth/i.test(String(u || ''));
     this.subs._loadMediaSyncPrefs?.(media);
-    const prefAudio = (!this.isMusic && Array.isArray(media.audioTracks))
-      ? media.audioTracks.find((t) => t.mode === 'stream' && (t.audioLang || t.targetLang || t.lang) && (t.id === this.subs.selectedAudioId || t.targetLang === this.subs.selectedAudioId || t.lang === this.subs.selectedAudioId || t.audioLang === this.subs.selectedAudioId) && t.url && !isDemoTestUrl(t.url))
+    const resolvedInitAud = (!this.isMusic && this.subs?.resolveInitialAudioTrack)
+      ? this.subs.resolveInitialAudioTrack(media)
       : null;
+    const prefAudio = (resolvedInitAud && resolvedInitAud.url && !isDemoTestUrl(resolvedInitAud.url))
+      ? resolvedInitAud
+      : ((!this.isMusic && Array.isArray(media.audioTracks))
+        ? media.audioTracks.find((t) => t.mode === 'stream' && (t.audioLang || t.targetLang || t.lang) && (t.id === this.subs.selectedAudioId || t.targetLang === this.subs.selectedAudioId || t.lang === this.subs.selectedAudioId || t.audioLang === this.subs.selectedAudioId) && t.url && !isDemoTestUrl(t.url))
+        : null);
     const seenUrls = new Set();
     const alts = [];
     const primaryIsPlayableFull = Boolean(media.url && !is30sPreviewUrl(media.url) && !isDrmUrl(media.url));
@@ -622,13 +627,19 @@ export class Html5Adapter {
     if (rawInitialUrl && !isDrmUrl(rawInitialUrl)) {
       seenUrls.add(normDedupeKey(rawInitialUrl));
     }
+    const prefLang = prefAudio?.audioLang || prefAudio?.lang || '';
+    if (prefLang && Array.isArray(media.audioTracks)) {
+      for (const t of media.audioTracks) {
+        if (t?.mode === 'stream' && t?.url && (t.audioLang === prefLang || t.lang === prefLang)) pushAlt(t.url);
+      }
+    }
     if (media.url && media.url !== rawInitialUrl) pushAlt(media.url);
     for (const u of (media.altUrls || [])) pushAlt(u);
     if (Array.isArray(media.servers)) {
       for (const srv of media.servers) if (srv?.url) pushAlt(srv.url);
     }
     if (Array.isArray(media.audioTracks)) {
-      for (const t of media.audioTracks) if (t?.url) pushAlt(t.url);
+      for (const t of media.audioTracks) if (t?.mode === 'stream' && t?.url) pushAlt(t.url);
     }
     alts.sort((a, b) => (isHevcUrl(a) ? 1 : 0) - (isHevcUrl(b) ? 1 : 0));
     this._pushFallbackAlt = pushAlt;
@@ -743,6 +754,7 @@ export class Html5Adapter {
         this.loadedAtMs = Date.now();
       }
       this.currentUrl = nextUrl;
+      this.subs?.onStreamFallbackUrl?.(nextUrl);
       syncVideoCors(nextUrl, useNativeHls && isUrlHls(nextUrl));
       if (this.isMusic) {
         this._setMusicVisualMode?.(isAudioOnlyUrl(nextUrl) ? 'vinyl' : 'clip');

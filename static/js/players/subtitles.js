@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v138';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v139';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -136,8 +136,9 @@ export class SubtitleDubController {
     this.subtitleTracks = [];
     this.audioTracks = [];
     this.selectedSubId = localStorage.getItem('vortex_sub_lang') || 'tr';
-    const savedAud = localStorage.getItem('vortex_audio_proxy_pref') || 'tr-dub';
-    this.selectedAudioId = /^src-\d+$/.test(savedAud) ? 'tr-dub' : savedAud;
+    const savedAud = localStorage.getItem('vortex_audio_lang') || localStorage.getItem('vortex_audio_proxy_pref') || '';
+    this.userAudioPref = /^src-\d+$/.test(savedAud) ? '' : savedAud;
+    this.selectedAudioId = this.userAudioPref || 'tr-dub';
     this.offsetSec = 0;
     this.fpsScale = 1.0;
     this.dualSubEnabled = false;
@@ -259,6 +260,79 @@ export class SubtitleDubController {
     return this.fpsScale;
   }
 
+  resolveInitialAudioTrack(media) {
+    const rawAudio = Array.isArray(media?.audioTracks) ? media.audioTracks.filter(Boolean) : [];
+    if (!rawAudio.length) return null;
+    let pref = '';
+    try {
+      pref = localStorage.getItem('vortex_audio_lang') || localStorage.getItem('vortex_audio_proxy_pref') || this.userAudioPref || '';
+    } catch (e) { pref = this.userAudioPref || ''; }
+    if (/^src-\d+$/.test(pref)) pref = '';
+    this.userAudioPref = pref;
+    const isTrStudio = (t) => t && t.mode !== 'tts' && t.id !== 'tr-ai-dub' && (
+      t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || t.id === 'tr-orig'
+      || t.audioLang === 'tr' || t.lang === 'tr' || t.targetLang === 'tr'
+    );
+    const studioTr = rawAudio.find((t) => isTrStudio(t) && (t.url || typeof t.hlsIndex === 'number' || typeof t.nativeIndex === 'number'));
+    if (!pref || pref === 'tr-dub' || pref === 'tr' || String(pref).startsWith('tr-dub-')) {
+      if (studioTr) {
+        this.selectedAudioId = studioTr.id;
+        return studioTr;
+      }
+      const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
+      this.selectedAudioId = origFallback?.id || 'orig';
+      return origFallback || null;
+    }
+    if (pref === 'tr-ai-dub') {
+      if (studioTr) {
+        this.selectedAudioId = studioTr.id;
+        return studioTr;
+      }
+      const aiTrack = rawAudio.find((t) => t.id === 'tr-ai-dub' || t.mode === 'tts');
+      if (aiTrack) {
+        this.selectedAudioId = aiTrack.id;
+        return rawAudio.find((t) => t.mode === 'stream') || aiTrack;
+      }
+    }
+    const exact = rawAudio.find((t) => t.id === pref || t.targetLang === pref || t.lang === pref || t.audioLang === pref);
+    if (exact) {
+      this.selectedAudioId = exact.id;
+      return exact.mode === 'stream' ? exact : (rawAudio.find((t) => t.mode === 'stream') || exact);
+    }
+    const fallback = studioTr || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
+    this.selectedAudioId = fallback?.id || 'orig';
+    return fallback || null;
+  }
+
+  onStreamFallbackUrl(nextUrl) {
+    const u = String(nextUrl || '');
+    if (!u || !Array.isArray(this.audioTracks) || !this.audioTracks.length) return;
+    const norm = (s) => String(s || '').replace(/&proxy_segs=1/g, '');
+    const uClean = norm(u);
+    const curTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId);
+    const wasTrStudio = Boolean(curTrack && curTrack.mode !== 'tts' && (curTrack.id === 'tr-dub' || String(curTrack.id || '').startsWith('tr-dub-') || curTrack.audioLang === 'tr' || curTrack.lang === 'tr'));
+    const matchedTrack = this.audioTracks.find((t) => t.mode === 'stream' && t.url && norm(t.url) === uClean);
+    if (matchedTrack && matchedTrack.id !== this.selectedAudioId && this.selectedAudioId !== 'tr-ai-dub') {
+      this.selectedAudioId = matchedTrack.id;
+      const nowOrig = matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-') || (matchedTrack.audioLang && matchedTrack.audioLang !== 'tr');
+      if (wasTrStudio && nowOrig && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const trSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+        if (trSub) this.setSubtitleTrack(trSub.id, true).catch(() => {});
+      }
+      this.adapter?.events?.onTracksChanged?.();
+      return;
+    }
+    if (wasTrStudio && !/[?&]aud=tr\b/i.test(uClean) && (/[?&]aud=orig\b/i.test(uClean) || /hakunaymatata\.com|dragonballzfans\.xyz|vidy\.st|lightspeed\.st/i.test(uClean))) {
+      const origT = this.audioTracks.find((t) => t.id === 'orig' || String(t.id || '').startsWith('orig-'));
+      if (origT) this.selectedAudioId = origT.id;
+      if (this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+        const trSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+        if (trSub) this.setSubtitleTrack(trSub.id, true).catch(() => {});
+      }
+      this.adapter?.events?.onTracksChanged?.();
+    }
+  }
+
   async initForMedia(media) {
     const seq = (this._mediaSeq = (this._mediaSeq || 0) + 1);
     this.media = media;
@@ -340,9 +414,7 @@ export class SubtitleDubController {
     if (!this.subtitleTracks.length) {
       this.selectedSubId = 'off';
     }
-    if (this.selectedAudioId === 'tr-ai-dub' || this.selectedAudioId === 'en-ai-dub') {
-      this.selectedAudioId = 'orig';
-    }
+    this.resolveInitialAudioTrack({ ...(media || {}), audioTracks: this.audioTracks });
     const initAudTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId)
       || this.audioTracks.find((t) => (t.targetLang || t.lang) === this.selectedAudioId)
       || this.audioTracks[0];
@@ -360,6 +432,9 @@ export class SubtitleDubController {
     if (hasVerifiedTrStream && !savedExplicitSub && String(this.selectedSubId || '').startsWith('tr')) {
       this._prevSubBeforeDub = this.selectedSubId;
       this.selectedSubId = 'off';
+    } else if (!hasVerifiedTrStream && !savedExplicitSub && media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
+      const autoTrSub = this.subtitleTracks.find((t) => String(t.lang || t.id || '').toLowerCase().startsWith('tr'));
+      if (autoTrSub) this.selectedSubId = autoTrSub.id;
     }
     await this.setSubtitleTrack(this.selectedSubId, true);
     if (this._destroyed || this._mediaSeq !== seq) return;
@@ -831,6 +906,7 @@ export class SubtitleDubController {
     const cleanId = id || 'orig';
     this.selectedAudioId = cleanId;
     if (!isInit && !/^src-\d+$/.test(cleanId)) {
+      this.userAudioPref = cleanId;
       try {
         localStorage.setItem('vortex_audio_proxy_pref', cleanId);
         localStorage.setItem('vortex_audio_lang', cleanId);
@@ -861,14 +937,19 @@ export class SubtitleDubController {
 
     if (track.mode === 'tts' || track.id === 'tr-ai-dub' || track.id === 'en-ai-dub') {
       this.ttsDubActive = true;
+      this._lastTtsText = '';
       this.ttsLang = (track.audioLang || track.targetLang || track.lang || 'tr').toLowerCase();
       const dubSub = this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(this.ttsLang))
         || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith('tr'))
         || this.subtitleTracks[0];
       if (dubSub) {
         this.dubCues = await this._loadCuesForTrack(dubSub);
+        if (!this.selectedSubId || this.selectedSubId === 'off') {
+          await this.setSubtitleTrack(dubSub.id, true);
+        }
       }
       this.syncVideoVolume();
+      if (!isInit) this.onTimeUpdate(this.adapter.getTime(), true);
       this.adapter.events.onTracksChanged?.();
       return track;
     }
@@ -877,7 +958,7 @@ export class SubtitleDubController {
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti && (!track.url || cleanUrl(track.url) === cleanUrl(this.adapter.currentUrl))) {
       this._applyHlsAudioSelection();
-    } else if (!isInit && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       await this.adapter.switchStreamSource(track.url);
     } else {
       this._applyHlsAudioSelection();
