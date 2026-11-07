@@ -106,9 +106,10 @@ function inferReferer(url, explicitRef) {
   if (url.includes("hakunaymatata.com")) return "";
   if (url.includes("filmboom")) return "https://filmboom.top/";
   if (
-    ["zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev"].some((d) =>
+    ["zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "finalsignal.top", "workers.dev"].some((d) =>
       url.includes(d)
-    )
+    ) ||
+    /https?:\/\/[^/]+\.top\/vd[a-z0-9]*\//i.test(url)
   ) {
     return "https://vidy.st/";
   }

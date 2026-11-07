@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261107_v141';
-import { api, qs } from './api.js?v=20261107_v141';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261107_v141';
+import { h, toast, popup } from './ui.js?v=20261107_v142';
+import { api, qs } from './api.js?v=20261107_v142';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261107_v142';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -319,7 +319,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261107_v141',
+        v: '20261107_v142',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v141';
-import { expectedPosition } from '../sync.js?v=20261107_v141';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v141';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v141';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v141';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v142';
+import { expectedPosition } from '../sync.js?v=20261107_v142';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v142';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v142';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v142';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -591,8 +591,20 @@ export class Html5Adapter {
     v.addEventListener('ended', fireEndedOnce);
     const is30sPreviewUrl = (u) => /AudioPreview|Video211|mzaf_|mzvf_|p\.scdn\.co\/mp3-preview/i.test(String(u || ''));
     const isDrmUrl = (u) => /\/(?:cbcs|cenc)\//i.test(String(u || ''));
-    const isHevcUrl = (u) => /\/resource\/h265\/|[._-]h265[._-]|[._-]hevc[._-]/i.test(String(u || ''));
-    const isDemoTestUrl = (u) => /unified-streaming\.com|tears-of-steel|test-streams\.mux\.dev|shaka-demo-assets|angel-one|aHR0cHM6Ly9kZW1vLnVuaWZpZWQtc3RyZWFtaW5n|aHR0cHM6Ly90ZXN0LXN0cmVhbXMubXV4|aHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL3NoYWth/i.test(String(u || ''));
+    const decUrlSafe = (u) => {
+      const s = String(u || '');
+      try { return decodeURIComponent(s); } catch (_) { return s; }
+    };
+    const isHevcUrl = (u) => {
+      const rawU = String(u || '');
+      const decU = decUrlSafe(rawU);
+      return /\/resource\/h265\/|[/_.-](?:h265|hevc)(?:[/_.-?]|\.mp4|$)/i.test(rawU) || /\/resource\/h265\/|[/_.-](?:h265|hevc)(?:[/_.-?]|\.mp4|$)/i.test(decU);
+    };
+    const canBrowserPlayHevc = Boolean(
+      v.canPlayType?.('video/mp4; codecs="hev1.1.6.L93.B0"') ||
+      v.canPlayType?.('video/mp4; codecs="hvc1.1.6.L93.B0"')
+    );
+    const isDemoTestUrl = (u) => /unified-streaming\.com|tears-of-steel|test-streams\.mux\.dev|shaka-demo-assets|angel-one|nexa-banned|nexa\.mov\/|aHR0cHM6Ly9kZW1vLnVuaWZpZWQtc3RyZWFtaW5n|aHR0cHM6Ly90ZXN0LXN0cmVhbXMubXV4|aHR0cHM6Ly9zdG9yYWdlLmdvb2dsZWFwaXMuY29tL3NoYWth/i.test(decUrlSafe(u));
     this.subs._loadMediaSyncPrefs?.(media);
     const resolvedInitAud = (!this.isMusic && this.subs?.resolveInitialAudioTrack)
       ? this.subs.resolveInitialAudioTrack(media)
@@ -618,13 +630,13 @@ export class Html5Adapter {
     const pushAlt = (u) => {
       const s = String(u || '').trim();
       const k = normDedupeKey(s);
-      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
+      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || (!canBrowserPlayHevc && isHevcUrl(s)) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
       if (this.isMusic && is30sPreviewUrl(s) && primaryIsPlayableFull) return;
       seenUrls.add(k);
       alts.push(s);
     };
     const rawInitialUrl = (!isDemoTestUrl(prefAudio?.url) && prefAudio?.url) || (!isDemoTestUrl(media.url) && media.url) || '';
-    if (rawInitialUrl && !isDrmUrl(rawInitialUrl)) {
+    if (rawInitialUrl && !isDrmUrl(rawInitialUrl) && (canBrowserPlayHevc || !isHevcUrl(rawInitialUrl))) {
       seenUrls.add(normDedupeKey(rawInitialUrl));
     }
     const prefLang = prefAudio?.audioLang || prefAudio?.lang || '';
@@ -646,13 +658,17 @@ export class Html5Adapter {
 
     let nativeAltIdx = 0;
     let triedProxySegs = false;
-    let initialCandidate = (rawInitialUrl && !isDrmUrl(rawInitialUrl)) ? rawInitialUrl : '';
-    if (initialCandidate && isHevcUrl(initialCandidate) && alts.length > 0 && !isHevcUrl(alts[0])) {
-      const promoted = alts.shift();
-      alts.push(initialCandidate);
-      initialCandidate = promoted;
+    let initialCandidate = (rawInitialUrl && !isDrmUrl(rawInitialUrl) && !isDemoTestUrl(rawInitialUrl)) ? rawInitialUrl : '';
+    if (initialCandidate && isHevcUrl(initialCandidate)) {
+      if (!canBrowserPlayHevc) {
+        initialCandidate = alts.length > 0 ? alts.shift() : '';
+      } else if (alts.length > 0 && !isHevcUrl(alts[0])) {
+        const promoted = alts.shift();
+        alts.push(initialCandidate);
+        initialCandidate = promoted;
+      }
     }
-    const url = initialCandidate || (alts[nativeAltIdx++] || '') || (!isDrmUrl(media.url) ? String(media.url || '') : '');
+    const url = initialCandidate || (alts[nativeAltIdx++] || '') || ((!isDrmUrl(media.url) && !isDemoTestUrl(media.url) && (canBrowserPlayHevc || !isHevcUrl(media.url))) ? String(media.url || '') : '');
     this.currentUrl = url;
     if (this.isMusic) {
       const wantClip = !media.live && media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
@@ -1247,6 +1263,9 @@ export class Html5Adapter {
               v.addEventListener('loadedmetadata', () => { try { v.currentTime = resumeAt; } catch (e) {} }, { once: true });
             }
             if (this.wantPlaying) this.tryPlay();
+          } else {
+            v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
+            handleExhaustedCandidates(this.currentUrl);
           }
         }
       }
@@ -1263,6 +1282,8 @@ export class Html5Adapter {
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
             this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+          } else {
+            handleExhaustedCandidates(this.currentUrl);
           }
           return;
         }

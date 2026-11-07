@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261107_v141 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v142 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261107_v141", index_html)
+        self.assertIn("20261107_v142", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261107_v141", sw_js)
+        self.assertIn("v20261107_v142", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261107_v141', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v142', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261107_v141', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v142', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261107_v141')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v142')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3195,8 +3195,48 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261107_v141", index_html)
-        self.assertIn("20261107_v141", sw_js)
+        self.assertIn("20261107_v142", index_html)
+        self.assertIn("20261107_v142", sw_js)
+
+    def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
+        """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
+        import pathlib
+        root = pathlib.Path(server.__file__).resolve().parent
+
+        # 1. HEVC (/resource/h265/) and nexa-banned troll streams are strictly blocked (raw & URL-encoded)
+        self.assertTrue(server._is_unplayable_stream_url("https://bcdn.hakunaymatata.com/resource/h265/d62fa40a.mp4?sign=529"))
+        self.assertTrue(server._is_unplayable_stream_url("/api/rave/stream-proxy?url=https%3A%2F%2Fbcdn.hakunaymatata.com%2Fresource%2Fh265%2Fd62fa40a.mp4"))
+        self.assertTrue(server._is_unplayable_stream_url("https://nexa.mov/nexa-banned/edit.mp4"))
+        self.assertTrue(server._is_vault_url_expired("https://bcdn.hakunaymatata.com/resource/h265/d62fa40a.mp4"))
+        self.assertFalse(server._is_unplayable_stream_url("https://bcdn.hakunaymatata.com/resource/22a02d2d8cb53f8a.mp4?sign=cad"))
+        self.assertFalse(server._is_unplayable_stream_url("https://merten-1.cfd/file/tau-video/5f84a57e-d467-4269-ad4f-852adf14c57f.mp4"))
+
+        # 2. Remake / Live-Action IMDb & TV year collision guards (One Piece 1999 tt0388629 vs 2023 tt11737520)
+        self.assertFalse(server._stream_matches_title(
+            "https://balancehls11.playmix.uno/hls/onepiece-s01e02-webdl-trdual-tt11737520-abc12345678.mp4/txt/master.txt",
+            ["One Piece"], "1999", "tt0388629"
+        ))
+        self.assertTrue(server._stream_matches_title(
+            "https://balancehls11.playmix.uno/hls/onepiece-s01e02-webdl-trdual-tt11737520-abc12345678.mp4/txt/master.txt",
+            ["One Piece"], "2023", "tt11737520"
+        ))
+        self.assertTrue(server._page_year_or_imdb_mismatch('<span class="year">2023</span>', "tv", "1999", 1, "tt0388629"))
+        self.assertTrue(server._page_year_or_imdb_mismatch('<a href="https://www.imdb.com/title/tt11737520/">IMDb</a>', "tv", "1999", 1, "tt0388629"))
+        self.assertFalse(server._page_year_or_imdb_mismatch('<span class="year">2022</span>', "tv", "2016", 4, "tt4574334"))
+
+        # 3. VidFast rotating .top/vd/ CDN domains match both stream matcher and proxy referer inference
+        self.assertTrue(server._stream_matches_title("https://crispwave.top/vd/abc123/index.m3u8", ["Bleach"], "2004", "tt0434665"))
+        self.assertTrue(server._stream_matches_title("https://greennova.top/vd/xyz987/index.m3u8", ["All We Imagine as Light"], "2024", ""))
+
+        # 4. Hydrated Bleach S1E2 entry in animecix_tau_map.json & frontend HEVC/zero-dim guards
+        import json
+        tau_map = json.loads((root / "animecix_tau_map.json").read_text(encoding="utf-8"))
+        b_s1e2 = tau_map.get("82:1:2") or []
+        self.assertTrue(any(isinstance(x, list) and len(x) >= 3 and str(x[2]).startswith("https://") for x in b_s1e2))
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        self.assertIn("decUrlSafe", html5_js)
+        self.assertIn("canBrowserPlayHevc", html5_js)
+        self.assertIn("nexa-banned", html5_js)
 
 
 if __name__ == '__main__':
