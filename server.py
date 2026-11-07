@@ -3506,7 +3506,7 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "", i
     if (
         re.search(r"https?://s\d+\.[^/]+\.shop/m[a-z0-9]+/", u)
         or re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", u)
-        or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "workers.dev", "lightspeed.st", "archive.org"))
+        or any(h in u for h in ("videasy.", "vidfast.", "vidlink.", "filmboom.", "hakunaymatata.", "dragonballzfans", "flixer.", "tau-video.", "makesomthingup", "ag2m5", "pilavyer", "fastplay.", "dplayer", "molystream.", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "workers.dev", "lightspeed.st", "archive.org"))
     ):
         return True
     parsed = urllib.parse.urlparse(stream_url)
@@ -3548,7 +3548,26 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "", i
 
 
 _DDIZIMAG_DEAD_UNTIL: float = 0.0
+_DDIZIMAG_DIRECT_DEAD_UNTIL: float = 0.0
 _DDIZIMAG_BASE: str = "https://ddizimag.icu"
+
+
+def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: str = "", timeout: float = 3.8, max_bytes: int = MAX_PAGE_BYTES) -> tuple[bytes, str]:
+    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    if not edge_base or not edge_base.startswith("https://"):
+        raise RuntimeError("STREAM_PROXY_BASE_URL unavailable")
+    q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
+    if referer:
+        q += f"&referer={urllib.parse.quote(referer, safe='')}"
+    q += f"&sig={_proxy_sig(url, referer)}"
+    if xhr:
+        q += "&xhr=1"
+    if accept:
+        q += f"&accept={urllib.parse.quote(accept, safe='')}"
+    req = urllib.request.Request(q, headers={"User-Agent": UA137, "Accept": accept or "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        fin = str(r.headers.get("X-Final-Url") or url).strip()
+        return r.read(max_bytes), fin
 
 
 def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: str, ekey: str, year: str = "", extra_titles: list = None, source_url: str = "", orig_lang: str = "", imdb_id: str = "") -> list:
@@ -3595,23 +3614,44 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             ep_urls.append((f"{_DDIZIMAG_BASE}/film/{sl}", False))
 
     def _try_ep_page(ep_u: str, pre_verified: bool) -> list:
-        global _DDIZIMAG_DEAD_UNTIL, _DDIZIMAG_BASE
+        global _DDIZIMAG_DEAD_UNTIL, _DDIZIMAG_DIRECT_DEAD_UNTIL, _DDIZIMAG_BASE
         try:
             if not public_http_url(ep_u) or time.time() < _DDIZIMAG_DEAD_UNTIL:
                 return []
-            req = urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"})
-            try:
-                with _public_open(req, timeout=2.0) as r:
-                    fin_dd = str(r.geturl() or "").strip()
-                    p_dd = urllib.parse.urlparse(fin_dd)
-                    if p_dd.netloc and "ddizimag." in p_dd.netloc.lower():
-                        _DDIZIMAG_BASE = f"{p_dd.scheme}://{p_dd.netloc}"
-                    html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-            except urllib.error.HTTPError:
-                return []
-            except Exception:
-                _DDIZIMAG_DEAD_UNTIL = time.time() + 300.0
-                return []
+            html = ""
+            fin_dd = ""
+            now_dd = time.time()
+            edge_base_dd = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+            if now_dd >= _DDIZIMAG_DIRECT_DEAD_UNTIL:
+                req = urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"})
+                try:
+                    with _public_open(req, timeout=2.0) as r:
+                        fin_dd = str(r.geturl() or "").strip()
+                        html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                except urllib.error.HTTPError as he_dd:
+                    if he_dd.code in (403, 503) and edge_base_dd:
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 600.0
+                    else:
+                        return []
+                except Exception:
+                    if edge_base_dd:
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 600.0
+                    else:
+                        _DDIZIMAG_DEAD_UNTIL = time.time() + 300.0
+                        return []
+            if not html and edge_base_dd:
+                try:
+                    raw_dd, fin_dd = _edge_fetch_bytes(ep_u, _DDIZIMAG_BASE + "/", accept="text/html,*/*", timeout=3.2)
+                    html = raw_dd.decode("utf-8", errors="ignore")
+                except urllib.error.HTTPError:
+                    return []
+                except Exception:
+                    _DDIZIMAG_DEAD_UNTIL = time.time() + 180.0
+                    return []
+            if fin_dd:
+                p_dd = urllib.parse.urlparse(fin_dd)
+                if p_dd.netloc and "ddizimag." in p_dd.netloc.lower():
+                    _DDIZIMAG_BASE = f"{p_dd.scheme}://{p_dd.netloc}"
             if 'data-player-type="none"' in html:
                 return []
             m_pv = re.search(r'data-pv="([^"]+)"', html)
@@ -3693,12 +3733,26 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             break
         try:
             su = f"{_DDIZIMAG_BASE}/ara?q={urllib.parse.quote(q)}"
-            with urllib.request.urlopen(urllib.request.Request(su, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"}), timeout=2.0) as r:
-                fin_s = str(r.geturl() or "").strip()
+            s_html = ""
+            fin_s = ""
+            edge_base_dds = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+            if time.time() >= _DDIZIMAG_DIRECT_DEAD_UNTIL:
+                try:
+                    with urllib.request.urlopen(urllib.request.Request(su, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"}), timeout=2.0) as r:
+                        fin_s = str(r.geturl() or "").strip()
+                        s_html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                except Exception:
+                    if edge_base_dds:
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = time.time() + 600.0
+                    else:
+                        raise
+            if not s_html and edge_base_dds:
+                raw_dds, fin_s = _edge_fetch_bytes(su, _DDIZIMAG_BASE + "/", accept="text/html,*/*", timeout=3.0)
+                s_html = raw_dds.decode("utf-8", errors="ignore")
+            if fin_s:
                 p_dds = urllib.parse.urlparse(fin_s)
                 if p_dds.netloc and "ddizimag." in p_dds.netloc.lower():
                     _DDIZIMAG_BASE = f"{p_dds.scheme}://{p_dds.netloc}"
-                s_html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             hits = []
             for raw_href, sl in re.findall(r'href="((?:https?://(?:www\.)?ddizimag\.[a-z]{2,8})?/(?:dizi|film|anime)/([a-z0-9-]+))"', s_html):
                 full_href = raw_href if raw_href.startswith("http") else (_DDIZIMAG_BASE + raw_href)
@@ -4458,9 +4512,9 @@ def _ac_cloud_get_json(url: str, headers: dict, referer: str, timeout: float, ki
             if not edge_base:
                 raise
     if edge_base:
-        proxied = _proxy_u(url, referer)
-        if proxied.startswith("https://"):
-            return _raw_get_json(proxied, headers={"Accept": "application/json"}, timeout=timeout + 1.4)
+        is_xhr = str((headers or {}).get("X-Requested-With") or "").lower() == "xmlhttprequest" or "animecix.tv/secure/" in url
+        raw_ef, _ = _edge_fetch_bytes(url, referer, xhr=is_xhr, accept="application/json", timeout=timeout + 1.4)
+        return json.loads(raw_ef.decode("utf-8", errors="ignore"))
     return None
 
 
@@ -4606,8 +4660,8 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
             try:
                 best_u = (fb_u if fb_u.startswith("https://") else "") or _TAU_URL_CACHE.get(tau_id, "")
                 if not best_u and not tau_id.startswith("https://"):
-                    tau_tries = 1 if IS_VERCEL else 2
-                    tau_to = 1.6 if IS_VERCEL else 3.0
+                    tau_tries = 1 if (IS_VERCEL or len(res) >= 1) else 2
+                    tau_to = 1.6 if IS_VERCEL else (1.8 if len(res) >= 1 else 3.0)
                     for _try_tau in range(tau_tries):
                         try:
                             t_info = _ac_cloud_get_json(f"https://tau-video.xyz/api/video/{tau_id}", {"User-Agent": UA137, "Referer": f"https://tau-video.xyz/embed/{tau_id}"}, f"https://tau-video.xyz/embed/{tau_id}", tau_to, "tau") or {}
@@ -4941,7 +4995,18 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             enc_id = (_raw_get_json(f"https://enc-dec.app/api/enc-vidlink?text={tid}", timeout=4.0) or {}).get("result") or ""
             if enc_id:
                 ep = f"https://vidlink.pro/api/b/tv/{enc_id}/{s_tmdb}/{e_tmdb}?multiLang=0" if mtype == "tv" else f"https://vidlink.pro/api/b/movie/{enc_id}?multiLang=0"
-                st = (_raw_get_json(ep, headers={"Referer": "https://vidlink.pro/", "Origin": "https://vidlink.pro"}, timeout=4.5) or {}).get("stream") or {}
+                st_doc = None
+                try:
+                    st_doc = _raw_get_json(ep, headers={"Referer": "https://vidlink.pro/", "Origin": "https://vidlink.pro"}, timeout=3.4)
+                except Exception:
+                    st_doc = None
+                if not isinstance(st_doc, dict) or not st_doc.get("stream"):
+                    try:
+                        raw_vl, _ = _edge_fetch_bytes(ep, "https://vidlink.pro/", accept="application/json", timeout=3.6)
+                        st_doc = json.loads(raw_vl.decode("utf-8", errors="ignore"))
+                    except Exception:
+                        st_doc = st_doc or {}
+                st = (st_doc or {}).get("stream") or {}
                 caps = st.get("captions") or []
                 if caps:
                     es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
@@ -5064,7 +5129,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
     has_tr_dub_ready = orig_lang == "tr"
-    while time.time() - t_start < 5.6:
+    while time.time() - t_start < 4.6:
         ac_res_now = (f_ac.result() or []) if (f_ac.done() and not f_ac.exception()) else []
         ac_ok = bool(ac_res_now)
         pv_res_now = (f_pv.result() or []) if (f_pv.done() and not f_pv.exception()) else []
@@ -5085,29 +5150,30 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             or any(isinstance(x, (list, tuple)) and len(x) >= 2 and x[1] in _TR_DUB_TAGS for x in (ac_res_now + pv_res_now + hf_res_now + dl_res_now + dp_res_now))
         )
         tr_extractors_done = f_hf.done() and f_dl.done() and f_pv.done() and (f_ac.done() if is_ja_or_anime else True)
-        has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 4.0))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
-        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 4.4):
+        has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 3.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
+        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 4.0):
             time.sleep(0.08)
             continue
-        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 4.5):
+        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 3.6):
             time.sleep(0.08)
             continue
         primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
         if primary_1080_ok and t_first_hf == 0.0:
             t_first_hf = time.time()
-        if primary_1080_ok and (has_glob_ready or vl_ok or (time.time() - t_first_hf >= 0.65)):
+        if primary_1080_ok and (has_glob_ready or vl_ok or (time.time() - t_first_hf >= 0.55)):
             break
         if has_glob_ready and tr_extractors_done:
             break
-        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 4.0)) or (time.time() - t_start >= 4.8)):
+        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 3.4)) or (time.time() - t_start >= 4.2)):
             break
         if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
         time.sleep(0.10)
-    if not any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
-        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.2)
+    any_ready_after_loop = any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar))
+    if not any_ready_after_loop:
+        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.0)
     elif not is_ja_or_anime and not has_tr_dub_ready and not f_hf.done():
-        concurrent.futures.wait([f_hf], timeout=3.2)
+        concurrent.futures.wait([f_hf], timeout=0.8)
     ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
     if f_ac.done():
         try:
@@ -5523,15 +5589,15 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 if mtype == "tv"
                 else f"https://rest.opensubtitles.org/search/imdbid-{imdb_num}/sublanguageid-{lang3}"
             )
-            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=4.2)
+            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=2.4)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as os_pool:
             fut_tr = os_pool.submit(_fetch_os_rest, "tur")
             fut_en = os_pool.submit(_fetch_os_rest, "eng")
-            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 4.2)
+            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 2.8)
             for lang3, fut in (("tur", fut_tr), ("eng", fut_en)):
                 try:
-                    os_items = fut.result(timeout=4.5)
+                    os_items = fut.result(timeout=2.6)
                     if isinstance(os_items, list):
                         valid_os = [
                             it for it in os_items
@@ -5614,7 +5680,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 except Exception:
                     pass
             try:
-                data = fut_strem.result(timeout=4.5) or {}
+                data = fut_strem.result(timeout=3.0) or {}
                 for idx_st, sub in enumerate(data.get("subtitles") or []):
                     raw_lang = str(sub.get("lang") or "").lower().strip()
                     if raw_lang not in SUB_LANG_MAP:
@@ -5676,7 +5742,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
             grp = 5
         return (grp, x[0], x[1], var)
     picked.sort(key=_sub_sort_key)
-    pre_tracks = [x[3] for x in picked[:28]]
+    pre_tracks = [x[3] for x in picked[:14]]
     live_tracks = _filter_live_subs(pre_tracks) if pre_tracks else []
     if not any(t.get("lang") == "tr" for t in live_tracks) and live_tracks:
         fb_src_track = next((t for t in live_tracks if t.get("lang") == "en"), live_tracks[0])
@@ -5984,7 +6050,7 @@ def _filter_live_subs(tracks: list, min_cues: int = 8) -> list:
             raw = (q.get(key) or [""])[0]
             if raw.startswith(("https://", "http://")) and public_http_url(raw):
                 try:
-                    n = _fetch_vtt_sync(raw).count("-->")
+                    n = _fetch_vtt_sync(raw, timeout=2.2).count("-->")
                     if n >= min_cues:
                         return n
                 except Exception:
@@ -5994,7 +6060,7 @@ def _filter_live_subs(tracks: list, min_cues: int = 8) -> list:
     pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
     futs = [pool.submit(_count, t) for t in tracks]
     try:
-        concurrent.futures.wait(futs, timeout=6.0)
+        concurrent.futures.wait(futs, timeout=2.6)
     finally:
         pool.shutdown(wait=False)
     out = []
@@ -6374,6 +6440,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             if late_embeds:
                 meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
                 existing_sub_ids = {str(st_item.get("id") or "") for st_item in sub_tracks}
+                prepended_late = []
                 for idx_le, esub in enumerate(late_embeds):
                     eu = str(esub.get("url") or "").strip()
                     raw_l = str(esub.get("lang") or esub.get("label") or "").lower().strip()
@@ -6384,10 +6451,11 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(eu, safe='')}&lang={lcode}{meta_q_late}"
                         cand_sid = f"{lcode}-hls" if f"{lcode}-hls" not in existing_sub_ids else f"{lcode}-hls-{idx_le + 2}"
                         existing_sub_ids.add(cand_sid)
-                        sub_tracks.insert(0, {"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
+                        prepended_late.append({"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
+                if prepended_late:
+                    sub_tracks = _filter_live_subs(prepended_late[:6]) + sub_tracks
             if not intro_seg and sub_tracks:
                 intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
-            sub_tracks = _filter_live_subs(sub_tracks)
             if sub_tracks and not any(t.get("lang") == "tr" for t in sub_tracks):
                 fb_t = next((t for t in sub_tracks if t.get("lang") == "en"), sub_tracks[0])
                 q_t = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_t.get("url") or "")).query)
@@ -6580,7 +6648,7 @@ async def resolve_catalog(request: Request):
             if cached and time.time() - cached[0] < 120:
                 return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
         try:
-            res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh), timeout=18)
+            res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh), timeout=25)
         except Exception:
             res = None
         if res:
@@ -8956,7 +9024,7 @@ _VTT_CACHE_LOCK = threading.Lock()
 _TTS_CACHE_LOCK = threading.Lock()
 
 
-def _fetch_vtt_sync(url: str) -> str:
+def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
     import gzip
     with _VTT_CACHE_LOCK:
         if url in _SUB_VTT_CACHE:
@@ -8968,7 +9036,10 @@ def _fetch_vtt_sync(url: str) -> str:
         else ("TemporaryUserAgent" if "opensubtitles.org" in url else UA137)
     )
     hdrs = {"User-Agent": ua_use, "Accept": "*/*"}
-    if any(d in url for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "finalsignal.top")):
+    if any(d in url for d in ("goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "workers.dev")) or bool(re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", url)):
+        hdrs["Referer"] = "https://vidy.st/"
+        hdrs["Origin"] = "https://vidy.st"
+    elif any(d in url for d in ("zenoak.top", "paleoak.top", "olivewave.top", "finalsignal.top")):
         hdrs["Referer"] = "https://player.videasy.to/"
         hdrs["Origin"] = "https://player.videasy.to"
     elif "cdn77s.com" in url or "ag2m5.cfd" in url:
@@ -8987,7 +9058,7 @@ def _fetch_vtt_sync(url: str) -> str:
         hdrs["Referer"] = "https://fastplay.mom/"
         hdrs["Origin"] = "https://fastplay.mom"
     req = urllib.request.Request(url, headers=hdrs)
-    with _public_open(req, timeout=8.0) as r:
+    with _public_open(req, timeout=timeout) as r:
         raw = r.read(2 * 1024 * 1024)
     if raw[:2] == b"\x1f\x8b":
         try:

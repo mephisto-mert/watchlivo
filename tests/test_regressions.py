@@ -3238,6 +3238,14 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("canBrowserPlayHevc", html5_js)
         self.assertIn("nexa-banned", html5_js)
 
+        # 5. Cloudflare Edge Worker /api/rave/edge-fetch route & datacenter timeout guards
+        worker_js = (root / "workers" / "stream-proxy" / "worker.js").read_text(encoding="utf-8")
+        server_src = (root / "server.py").read_text(encoding="utf-8")
+        self.assertIn('path === "/api/rave/edge-fetch"', worker_js)
+        self.assertIn("X-Final-Url", worker_js)
+        self.assertTrue(callable(getattr(server, "_edge_fetch_bytes", None)))
+        self.assertIn('hdrs["Referer"] = "https://vidy.st/"', server_src)
+
 
 if __name__ == '__main__':
     unittest.main()

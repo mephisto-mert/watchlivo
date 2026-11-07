@@ -308,26 +308,33 @@ async function serveBinaryAsset(request, env, assetPath, filename, contentType) 
   });
 }
 
-async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4) {
+async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4, method = "GET", bodyBuf = undefined, timeoutMs = 15_000) {
   let curUrl = initialUrl;
+  let curMethod = method;
+  let curBody = bodyBuf;
   for (let hop = 0; hop <= maxHops; hop++) {
     if (!isPublicHttpUrl(curUrl)) {
       throw new Error("Blocked redirect target");
     }
     const resp = await fetch(curUrl, {
-      method: "GET",
+      method: curMethod,
       headers: baseHeaders,
+      body: curMethod === "POST" ? curBody : undefined,
       redirect: "manual",
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if ([301, 302, 303, 307, 308].includes(resp.status)) {
       const loc = resp.headers.get("Location");
-      if (!loc) return resp;
+      if (!loc) return { resp, finalUrl: curUrl };
       resp.body?.cancel?.();
       curUrl = new URL(loc, curUrl).toString();
+      if (resp.status === 301 || resp.status === 302 || resp.status === 303) {
+        curMethod = "GET";
+        curBody = undefined;
+      }
       continue;
     }
-    return resp;
+    return { resp, finalUrl: curUrl };
   }
   throw new Error("Too many redirects");
 }
@@ -340,12 +347,11 @@ export default {
         headers: { ...CORS_HEADERS, "Access-Control-Max-Age": "86400" },
       });
     }
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return jsonResponse({ error: "Method not allowed" }, 405);
-    }
-
     const reqUrl = new URL(request.url);
     const path = reqUrl.pathname;
+    if (path !== "/api/rave/edge-fetch" && request.method !== "GET" && request.method !== "HEAD") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
+    }
 
     if (path === "/health" || path === "/api/health") {
       return jsonResponse({
@@ -361,6 +367,66 @@ export default {
 
     if (path === "/download/ipa" || /^\/download\/Watchlivo.*\.ipa$/i.test(path) || path === "/Watchlivo.ipa") {
       return serveBinaryAsset(request, env, "/Watchlivo.ipa", "Watchlivo.ipa", "application/octet-stream");
+    }
+
+    if (path === "/api/rave/edge-fetch") {
+      if (request.method !== "GET" && request.method !== "POST" && request.method !== "HEAD") {
+        return jsonResponse({ error: "Method not allowed" }, 405);
+      }
+      const efUrl = (reqUrl.searchParams.get("url") || "").trim();
+      const efRef = (reqUrl.searchParams.get("referer") || "").trim();
+      const efSig = (reqUrl.searchParams.get("sig") || "").trim();
+      if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || ""))) {
+        return jsonResponse({ error: "İmzasız kenar isteği reddedildi" }, 403);
+      }
+      if (!isPublicHttpUrl(efUrl)) {
+        return jsonResponse({ error: "Geçersiz hedef URL" }, 403);
+      }
+      const efHeaders = new Headers();
+      efHeaders.set("User-Agent", UA137);
+      efHeaders.set("Accept", reqUrl.searchParams.get("accept") || request.headers.get("X-Edge-Accept") || "application/json, text/plain, */*");
+      efHeaders.set("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7");
+      const effEfRef = inferReferer(efUrl, efRef);
+      if (effEfRef) {
+        efHeaders.set("Referer", effEfRef);
+        try {
+          const rObj = new URL(effEfRef);
+          efHeaders.set("Origin", `${rObj.protocol}//${rObj.host}`);
+        } catch {}
+      }
+      if (reqUrl.searchParams.get("xhr") === "1" || request.headers.get("X-Edge-XHR") === "1" || efUrl.includes("animecix.tv/secure/")) {
+        efHeaders.set("X-Requested-With", "XMLHttpRequest");
+      }
+      const csrfTok = request.headers.get("X-Edge-CSRF") || "";
+      if (csrfTok) efHeaders.set("X-CSRF-Token", csrfTok);
+      const reqCt = request.headers.get("Content-Type") || "";
+      if (reqCt && request.method === "POST") efHeaders.set("Content-Type", reqCt);
+      const bodyBuf = request.method === "POST" ? await request.arrayBuffer() : undefined;
+      try {
+        const { resp: upEf, finalUrl: efFinalUrl } = await fetchPublicWithRedirects(
+          efUrl,
+          efHeaders,
+          4,
+          request.method,
+          bodyBuf,
+          10_000
+        );
+        const outEfHeaders = new Headers();
+        outEfHeaders.set("Content-Type", upEf.headers.get("Content-Type") || "application/octet-stream");
+        outEfHeaders.set("Cache-Control", "no-store");
+        outEfHeaders.set("X-Final-Url", efFinalUrl);
+        for (const [k, v] of Object.entries(CORS_HEADERS)) outEfHeaders.set(k, v);
+        return new Response(request.method === "HEAD" ? null : upEf.body, {
+          status: upEf.status,
+          headers: outEfHeaders,
+        });
+      } catch {
+        return jsonResponse({ error: "Kenar kaynağına ulaşılamadı" }, 502);
+      }
+    }
+
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
     if (
@@ -419,7 +485,7 @@ export default {
 
     let upResp;
     try {
-      upResp = await fetchPublicWithRedirects(targetUrl, upHeaders, 4);
+      ({ resp: upResp } = await fetchPublicWithRedirects(targetUrl, upHeaders, 4));
     } catch {
       return jsonResponse({ error: "Akış kaynağına ulaşılamadı." }, 502);
     }
