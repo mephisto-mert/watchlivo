@@ -4893,11 +4893,22 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                                 u = (st_dec.get("url") or "").strip()
                                 if not u.startswith("https://") or "finalsignal.top" in u or "olivewave.top" in u or _is_unplayable_stream_url(u):
                                     return None
-                                p_vf = urllib.request.Request(u, headers={"User-Agent": UA137, "Referer": "https://vidy.st/", "Origin": "https://vidy.st"})
-                                with _public_open(p_vf, timeout=2.1) as pr_vf:
-                                    head_vf = pr_vf.read(4096).decode("utf-8", errors="ignore")
-                                    if pr_vf.status not in (200, 206) or "#EXTM3U" not in head_vf:
-                                        return None
+                                head_vf = ""
+                                try:
+                                    p_vf = urllib.request.Request(u, headers={"User-Agent": UA137, "Referer": "https://vidy.st/", "Origin": "https://vidy.st"})
+                                    with _public_open(p_vf, timeout=2.0) as pr_vf:
+                                        if pr_vf.status in (200, 206):
+                                            head_vf = pr_vf.read(4096).decode("utf-8", errors="ignore")
+                                except Exception:
+                                    head_vf = ""
+                                if "#EXTM3U" not in head_vf:
+                                    try:
+                                        b_vf, _ = _edge_fetch_bytes(u, "https://vidy.st/", timeout=2.6, max_bytes=8192)
+                                        head_vf = b_vf.decode("utf-8", errors="ignore")
+                                    except Exception:
+                                        head_vf = ""
+                                if "#EXTM3U" not in head_vf:
+                                    return None
                                 return u, (st_dec.get("tracks") or st_dec.get("subtitles") or [])
                             except Exception:
                                 return None
@@ -8113,14 +8124,44 @@ async def rave_stream_manifest(request: Request):
                                 cur_target = st_u
                     except Exception:
                         pass
+            def _fetch_manifest_with_edge(u_m: str, m_hdrs: dict, t_direct: float = 3.2, t_edge: float = 4.5) -> tuple[str, str]:
+                u_low_m = u_m.lower()
+                edge_ok = bool((os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip()) and not any(h in u_low_m for h in _WORKER_BYPASS_HOSTS) and ("fastplay." not in u_low_m)
+                prefer_edge = edge_ok and (
+                    "pilavyer" in u_low_m or "cdnimg" in u_low_m or "molystream" in u_low_m
+                    or bool(re.search(r"https?://s\d+\.[^/]+\.shop/", u_low_m))
+                )
+                ref_m = str(m_hdrs.get("Referer") or "")
+                xhr_m = str(m_hdrs.get("X-Requested-With") or "") == "XMLHttpRequest"
+                if prefer_edge:
+                    try:
+                        eb, efin = _edge_fetch_bytes(u_m, ref_m, xhr=xhr_m, timeout=t_edge, max_bytes=1024 * 1024)
+                        etxt = eb.decode("utf-8", errors="ignore")
+                        if etxt and "#EXTM3U" in etxt:
+                            return etxt, (efin if efin.startswith("http") else u_m)
+                    except Exception:
+                        pass
+                try:
+                    with _public_open(urllib.request.Request(u_m, headers=m_hdrs), timeout=t_direct) as rm:
+                        dtxt = rm.read(1024 * 1024).decode("utf-8", errors="ignore")
+                        dfin = str(getattr(rm, "url", "") or rm.geturl() or "").strip()
+                    if dtxt and "#EXTM3U" in dtxt:
+                        return dtxt, (dfin if dfin.startswith("http") else u_m)
+                except Exception as derr:
+                    if not edge_ok or prefer_edge:
+                        raise derr
+                if edge_ok and not prefer_edge:
+                    eb, efin = _edge_fetch_bytes(u_m, ref_m, xhr=xhr_m, timeout=t_edge, max_bytes=1024 * 1024)
+                    etxt = eb.decode("utf-8", errors="ignore")
+                    if etxt and "#EXTM3U" in etxt:
+                        return etxt, (efin if efin.startswith("http") else u_m)
+                return "", u_m
+
             for attempt in range(1 if is_probe else 2):
                 try:
                     if is_fp and cur_sp:
                         hdrs["X-Sp"] = _gen_fp_xsp(cur_sp, cur_spt)
-                    req = urllib.request.Request(cur_target, headers=hdrs)
-                    with _public_open(req, timeout=4.2 if is_probe else 5.5) as r:
-                        raw = r.read(512 * 1024).decode("utf-8", errors="ignore")
-                        eff_r_url = str(getattr(r, "url", "") or r.geturl() or "").strip()
+                    raw, eff_r_url = _fetch_manifest_with_edge(cur_target, hdrs, t_direct=2.8 if is_probe else 3.4, t_edge=3.6 if is_probe else 4.8)
                     if raw and "#EXTM3U" in raw:
                         if eff_r_url.startswith("http"):
                             cur_target = eff_r_url
@@ -8144,7 +8185,8 @@ async def rave_stream_manifest(request: Request):
                         except Exception:
                             pass
             cur_k = ""
-            if not raw and tid.isdigit() and not is_probe:
+            is_sub_variant_req = bool(proxy_segs or "p=stream_" in cur_target or "/ml/" in cur_target or "sublist_" in cur_target)
+            if not raw and tid.isdigit() and not is_probe and not is_sub_variant_req:
                 s_i, e_i = int(s_num or 1), int(e_num or 1)
                 if explicit_mtype in ("tv", "movie"):
                     mt_guess = explicit_mtype
@@ -8187,11 +8229,10 @@ async def rave_stream_manifest(request: Request):
                         elif "dragonballzfans" in cand_u:
                             c_hdrs["Referer"] = "https://flixer.su/"
                             c_hdrs["Origin"] = "https://flixer.su"
-                        with _public_open(urllib.request.Request(cand_u, headers=c_hdrs), timeout=3.6) as r2:
-                            cand_raw = r2.read(512 * 1024).decode("utf-8", errors="ignore")
+                        cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.8, t_edge=3.8)
                         if cand_raw and "#EXTM3U" in cand_raw:
                             raw = cand_raw
-                            cur_target = cand_u
+                            cur_target = cand_fin if cand_fin.startswith("http") else cand_u
                             cur_k = str(cand_k)
                             break
                     except Exception:
