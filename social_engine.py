@@ -3089,9 +3089,9 @@ async def voice_relay_endpoint(request: Request):
             if rm_obj is not None:
                 if cid in (rm_obj.get("kicked") or rm_obj.get("kicked_cids") or []):
                     return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
-                if ctok and not tok_ok:
+                if not tok_ok:
                     return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
-                if not tok_ok and cid not in (rm_obj.get("participants") or {}):
+                if cid not in (rm_obj.get("participants") or {}):
                     return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
                 vmode = str(rm_obj.get("voipMode") or "all")
                 if vmode == "off":
@@ -3137,9 +3137,9 @@ async def voice_relay_endpoint(request: Request):
         if rm_obj_g is not None:
             if cid_q in (rm_obj_g.get("kicked") or rm_obj_g.get("kicked_cids") or []):
                 return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
-            if ctok_q and not tok_ok_g:
+            if not tok_ok_g:
                 return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
-            if not tok_ok_g and cid_q not in (rm_obj_g.get("participants") or {}):
+            if cid_q not in (rm_obj_g.get("participants") or {}):
                 return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
             if str(rm_obj_g.get("voipMode") or "all") == "off":
                 return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=_RELAY_HEADERS)

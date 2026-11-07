@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261107_v136';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261107_v136';
-import { api, qs } from '../api.js?v=20261107_v136';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261107_v136';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261107_v136';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261107_v136';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v136';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261107_v137';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261107_v137';
+import { api, qs } from '../api.js?v=20261107_v137';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261107_v137';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261107_v137';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261107_v137';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v137';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261107_v136';
+} from '../store.js?v=20261107_v137';
 
 let _activeHomePick = null;
 
@@ -1643,7 +1643,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       render();
       return;
     }
-    const catAliases = { series: 'series', movies: 'movies', anime: 'animation', vizyon: 'vizyon', favs: 'favs' };
+    const catAliases = { series: 'series', movies: 'movies', anime: 'anime', vizyon: 'vizyon', favs: 'favs' };
     if (catAliases[cleanId]) {
       provider = getProvider('cinema');
       if (provider) provider._initialCat = catAliases[cleanId];
@@ -1656,6 +1656,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     }
     provider = getProvider(cleanId) || getProvider(id) || null;
     render();
+  };
+  root.openTrending = async () => {
+    provider = null;
+    showTrending = true;
+    if (!trendingItems.length) await ensureTrending();
+    renderGrid();
+  };
+  root.pickRandom = (btnEl) => {
+    pickRandomMovie(btnEl || root.querySelector('#btn-random-movie'));
   };
   root.openFavorites = () => {
     provider = getProvider('cinema');

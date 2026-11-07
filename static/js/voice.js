@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261107_v136';
-import { applyStreamBoost } from './players/audio-gain.js?v=20261107_v136';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261107_v136';
+import { toast } from './ui.js?v=20261107_v137';
+import { applyStreamBoost, releaseStreamBoost } from './players/audio-gain.js?v=20261107_v137';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261107_v137';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -619,8 +619,14 @@ export class Voice {
         const aStream = new MediaStream([e.track]);
         audio.srcObject = aStream;
         const volPct = this.getPeerVolume(id);
-        audio.muted = Boolean(this.deafened) || volPct === 0;
-        audio.volume = Math.min(1.0, Math.max(0, volPct / 100));
+        const effVol = this.deafened ? 0 : volPct;
+        if (effVol > 100) {
+          applyStreamBoost(audio, aStream, effVol);
+        } else {
+          releaseStreamBoost(audio);
+          audio.muted = Boolean(this.deafened) || effVol === 0;
+          audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
+        }
         audio.play().catch(() => {});
       }
     };
@@ -663,7 +669,7 @@ export class Voice {
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
       if ((newU && oldU && newU !== oldU) || (!old.pc.remoteDescription && old.pc.signalingState === 'stable')) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
-        try { old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
+        try { releaseStreamBoost(old.audio); old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
         this.peers.delete(from);
       }
@@ -742,6 +748,7 @@ export class Voice {
     for (const [id, st] of this.peers) {
       if (!ids.has(id)) {
         st.pc.close();
+        releaseStreamBoost(st.audio);
         st.audio.srcObject = null;
         st.audio.remove();
         this._removeVideoBubble(id);
@@ -781,7 +788,7 @@ export class Voice {
               if (idleEntry) {
                 const [evictId, evictSt] = idleEntry;
                 try { evictSt.pc.close(); } catch (e) { /* ignore */ }
-                try { evictSt.audio?.pause?.(); if (evictSt.audio) evictSt.audio.srcObject = null; } catch (e) { /* ignore */ }
+                try { releaseStreamBoost(evictSt.audio); evictSt.audio?.pause?.(); if (evictSt.audio) evictSt.audio.srcObject = null; } catch (e) { /* ignore */ }
                 evictSt.audio?.remove();
                 this._removeVideoBubble(evictId);
                 this.peers.delete(evictId);
@@ -964,7 +971,9 @@ export class Voice {
     }
     try {
       if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
-        this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
+        const freshScreen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
+        if (this.destroyed) { freshScreen?.getTracks?.().forEach((t) => t.stop()); return false; }
+        this.screenStream = freshScreen;
       } else if (navigator.webdriver) {
         this.screenStream = this._createScreenShareFallbackStream();
       } else {
@@ -1013,6 +1022,13 @@ export class Voice {
       const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
       const isIos = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (isIos) {
+        clearInterval(this.speakTimer);
+        try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+        this._relayProc = null;
+        this._relaySrc = null;
+        this._relayMute = null;
+        this.audioCtx?.close?.().catch(() => {});
+        this.audioCtx = null;
         this.stream?.getAudioTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
         this.stream = null;
         try { if (navigator.audioSession && !window.isWatchlivoNativeIOS) navigator.audioSession.type = 'playback'; } catch (_) {}
@@ -1205,6 +1221,9 @@ export class Voice {
 
   _getClientToken(roomId) {
     if (!roomId) return '';
+    if (typeof window !== 'undefined' && window.__vortexActiveConn?.roomId === roomId && window.__vortexActiveConn?.clientToken) {
+      return String(window.__vortexActiveConn.clientToken);
+    }
     try { return sessionStorage.getItem(`vortex_ct_${roomId}`) || sessionStorage.getItem(`vortex_ctok_${roomId}`) || ''; } catch (_) { return ''; }
   }
 
@@ -1416,6 +1435,7 @@ export class Voice {
     }
     for (const st of this.peers.values()) {
       try { st.pc.close(); } catch (e) { /* ignore */ }
+      releaseStreamBoost(st.audio);
       st.audio.srcObject = null;
       st.audio.remove();
     }

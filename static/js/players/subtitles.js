@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v136';
+import { applyElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v137';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -149,6 +149,9 @@ export class SubtitleDubController {
     this.activeSecondaryCueText = '';
     this.blobUrl = null;
     this._autoHealedLang = '';
+    this._healingInFlight = false;
+    this._emptyReloadCount = 0;
+    this._mediaSeq = 0;
     this._loadingSubTrack = false;
     this.ttsDubActive = false;
     this.ttsLang = 'tr';
@@ -257,6 +260,7 @@ export class SubtitleDubController {
   }
 
   async initForMedia(media) {
+    const seq = (this._mediaSeq = (this._mediaSeq || 0) + 1);
     this.media = media;
     this.intro = null;
     this.subCues = [];
@@ -265,6 +269,8 @@ export class SubtitleDubController {
     this.activeCueText = '';
     this.activeSecondaryCueText = '';
     this._autoHealedLang = '';
+    this._healingInFlight = false;
+    this._emptyReloadCount = 0;
     this._loadMediaSyncPrefs(media);
     this.subtitleTracks = Array.isArray(media.subtitleTracks) ? [...media.subtitleTracks] : [];
     const baseUrl = media.url || '';
@@ -293,8 +299,10 @@ export class SubtitleDubController {
         if (!media.tmdbId && baseUrl) queryParams.url = baseUrl;
         const qs = new URLSearchParams(queryParams);
         const r = await fetch(`/api/rave/subtitles?${qs}`);
+        if (this._destroyed || this._mediaSeq !== seq) return;
         if (r.ok) {
           const data = await r.json();
+          if (this._destroyed || this._mediaSeq !== seq) return;
           if (Array.isArray(data.subtitleTracks) && data.subtitleTracks.length) {
             const existing = Array.isArray(this.subtitleTracks) ? this.subtitleTracks : [];
             const seenUrls = new Set(existing.map((t) => t.url));
@@ -354,7 +362,9 @@ export class SubtitleDubController {
       this.selectedSubId = 'off';
     }
     await this.setSubtitleTrack(this.selectedSubId, true);
+    if (this._destroyed || this._mediaSeq !== seq) return;
     await this.setAudioTrack(this.selectedAudioId, true);
+    if (this._destroyed || this._mediaSeq !== seq) return;
     this.adapter.events.onTracksChanged?.();
   }
 
@@ -493,15 +503,23 @@ export class SubtitleDubController {
 
   async _loadCuesForTrack(track) {
     if (!track?.url) return [];
-    if (this.cuesCache.has(track.url)) return this.cuesCache.get(track.url).cues;
+    if (this.cuesCache.has(track.url)) {
+      const hit = this.cuesCache.get(track.url);
+      if (!hit.failedAt || Date.now() - hit.failedAt < 30000) return hit.cues;
+      this.cuesCache.delete(track.url);
+    }
     try {
       const r = await fetch(track.url);
-      if (!r.ok) return [];
+      if (!r.ok) {
+        this.cuesCache.set(track.url, { vtt: '', cues: [], failedAt: Date.now() });
+        return [];
+      }
       const vtt = await r.text();
       const cues = parseVtt(vtt);
-      this.cuesCache.set(track.url, { vtt, cues });
+      this.cuesCache.set(track.url, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
       return cues;
     } catch (e) {
+      this.cuesCache.set(track.url, { vtt: '', cues: [], failedAt: Date.now() });
       return [];
     }
   }
@@ -700,9 +718,11 @@ export class SubtitleDubController {
       this.adapter.events.onSubtitleCue?.('', '');
       return null;
     }
+    const seq = this._mediaSeq;
     this._loadingSubTrack = true;
     try {
       let cues = await this._loadCuesForTrack(track);
+      if (this._destroyed || this._mediaSeq !== seq) return null;
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
       const minEnd = dur > 600 ? (dur * 0.5) : 900;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
@@ -723,6 +743,7 @@ export class SubtitleDubController {
         const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === track.lang);
         for (const alt of alts) {
           const altCues = await this._loadCuesForTrack(alt);
+          if (this._destroyed || this._mediaSeq !== seq) return null;
           const curSpan = getSpan(cues);
           const altSpan = getSpan(altCues);
           if ((altCues.length >= 60 && altSpan >= minEnd) || (altCues.length > cues.length && altSpan > curSpan)) {
@@ -914,37 +935,47 @@ export class SubtitleDubController {
   }
 
   async _tryHealTruncatedTrack(adjT) {
+    if (this._healingInFlight || this._destroyed) return;
     const curTrack = this.subtitleTracks.find((t) => t.id === this.selectedSubId);
     if (!curTrack) return;
-    if (this._autoHealedLang === `${curTrack.id}:${Math.floor(adjT / 300)}`) return;
-    const alts = this.subtitleTracks.filter((t) => t.id !== curTrack.id && t.lang === curTrack.lang);
-    for (const alt of alts) {
-      const altCues = await this._loadCuesForTrack(alt);
-      const lastEnd = altCues.length ? altCues[altCues.length - 1].end : 0;
-      if (lastEnd >= adjT + 30 && altCues.length >= 40) {
-        this._autoHealedLang = `${curTrack.id}:${Math.floor(adjT / 300)}`;
-        this.selectedSubId = alt.id;
-        this.subCues = altCues;
-        this._attachNativeTrack(alt);
-        this.onTimeUpdate(this.adapter.getTime(), true);
-        this.adapter.events.onTracksChanged?.();
-        return;
+    const bucketKey = `${curTrack.id}:${Math.floor(adjT / 300)}`;
+    if (this._autoHealedLang === bucketKey) return;
+    this._autoHealedLang = bucketKey;
+    this._healingInFlight = true;
+    const seq = this._mediaSeq;
+    try {
+      const alts = this.subtitleTracks.filter((t) => t.id !== curTrack.id && t.lang === curTrack.lang);
+      for (const alt of alts) {
+        const altCues = await this._loadCuesForTrack(alt);
+        if (this._destroyed || this._mediaSeq !== seq) return;
+        const lastEnd = altCues.length ? altCues[altCues.length - 1].end : 0;
+        if (lastEnd >= adjT + 30 && altCues.length >= 40) {
+          this.selectedSubId = alt.id;
+          this.subCues = altCues;
+          this._attachNativeTrack(alt);
+          this.onTimeUpdate(this.adapter.getTime(), true);
+          this.adapter.events.onTracksChanged?.();
+          return;
+        }
       }
+    } finally {
+      this._healingInFlight = false;
     }
   }
 
   onTimeUpdate(t, forceEmit = false) {
-    if (!Number.isFinite(t)) return;
+    if (!Number.isFinite(t) || this._destroyed) return;
     this._disableAllNativeTextTracks();
     const v = this.adapter?.video;
     const nativeVideoFs = this._isNativeSubView(v);
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
     const curSubObj = this.subtitleTracks.find((tr) => tr.id === this.selectedSubId);
-    if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && curSubObj?.source !== 'youtube-native' && this.subtitleTracks.length) {
+    if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && curSubObj?.source !== 'youtube-native' && this.subtitleTracks.length && (this._emptyReloadCount || 0) < 2) {
       const nowMs = Date.now();
       if (!this._lastEmptyReload || nowMs - this._lastEmptyReload > 8000) {
         this._lastEmptyReload = nowMs;
+        this._emptyReloadCount = (this._emptyReloadCount || 0) + 1;
         this.cuesCache.clear();
         this.setSubtitleTrack(this.selectedSubId, true).catch(() => {});
       }

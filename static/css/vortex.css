@@ -6761,7 +6761,7 @@ body.tv-nav-active .dock-item:focus {
     gap: 5px !important;
   }
   .rave-top-bar .home-search input {
-    font-size: 0.82rem !important;
+    font-size: 16px !important;
     min-width: 0 !important;
   }
   .rave-top-bar .home-search .btn.primary {

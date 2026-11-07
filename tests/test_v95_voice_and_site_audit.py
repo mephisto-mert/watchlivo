@@ -162,14 +162,20 @@ class V95VoiceAndSiteAuditTests(unittest.TestCase):
         wav_chunk = _make_wav_bytes(3200, rate=8000)
         post_rel = self.client.post(
             f"/api/rave/voice-relay/{rid}",
-            json={"clientId": "peerA", "seq": 7, "mime": "audio/wav", "b64": base64.b64encode(wav_chunk).decode("ascii")},
+            json={"clientId": "peerA", "clientToken": r_a["clientToken"], "seq": 7, "mime": "audio/wav", "b64": base64.b64encode(wav_chunk).decode("ascii")},
         )
         self.assertEqual(post_rel.status_code, 200)
 
-        get_self = self.client.get(f"/api/rave/voice-relay/{rid}", params={"clientId": "peerA", "sinceTs": 0}).json()
+        get_self = self.client.get(
+            f"/api/rave/voice-relay/{rid}",
+            params={"clientId": "peerA", "clientToken": r_a["clientToken"], "sinceTs": 0},
+        ).json()
         self.assertEqual(len(get_self["packets"]), 0)
 
-        get_peer = self.client.get(f"/api/rave/voice-relay/{rid}", params={"clientId": "peerB", "sinceTs": 0}).json()
+        get_peer = self.client.get(
+            f"/api/rave/voice-relay/{rid}",
+            params={"clientId": "peerB", "clientToken": r_b["clientToken"], "sinceTs": 0},
+        ).json()
         self.assertEqual(len(get_peer["packets"]), 1)
         self.assertEqual(get_peer["packets"][0]["seq"], 7)
 

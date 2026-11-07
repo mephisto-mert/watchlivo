@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261107_v136';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261107_v137';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -180,9 +180,27 @@ if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
   });
 }
 
+function restoreOverlayPortals() {
+  if (typeof document === 'undefined' || !document.body) return;
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  if (fsEl) return;
+  for (const id of ['popup-root', 'toast-root']) {
+    const el = document.getElementById(id);
+    if (el && el.parentElement !== document.body) {
+      document.body.appendChild(el);
+    }
+  }
+}
+
+if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.__wlOverlayPortalSync) {
+  window.__wlOverlayPortalSync = true;
+  document.addEventListener('fullscreenchange', restoreOverlayPortals);
+  document.addEventListener('webkitfullscreenchange', restoreOverlayPortals);
+}
+
 // Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable, onClose }
 let _popupSeq = 0;
-export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, onClose = null } = {}) {
+export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, persistOnNavigate = false, onClose = null } = {}) {
   const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const titleId = title ? `wl-popup-title-${++_popupSeq}` : '';
   const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -216,7 +234,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
       if (e.shiftKey && (document.activeElement === first || !card.contains(document.activeElement))) {
         e.preventDefault();
         last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
+      } else if (!e.shiftKey && (document.activeElement === last || !card.contains(document.activeElement))) {
         e.preventDefault();
         first.focus();
       }
@@ -267,6 +285,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
       h('button', {
+        type: 'button',
         class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(),
         onclick: async (e) => {
           if (optBusy) return;
@@ -284,6 +303,7 @@ export function popup({ title, message, options = [], content = null, dismissabl
         },
       }, o.label))) : null);
   const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
+  if (persistOnNavigate) back.dataset.persistOnNavigate = '1';
   if (dismissable && drawerHandle) {
     let startY = 0, deltaY = 0, dragging = false;
     drawerHandle.addEventListener('touchstart', (e) => {
@@ -329,10 +349,22 @@ export function popup({ title, message, options = [], content = null, dismissabl
 }
 
 export const confirmPopup = (message, yes = 'Evet', no = 'Hayır') => new Promise((resolve) => {
-  popup({ message, dismissable: false, options: [
-    { label: yes, primary: true, onClick: () => resolve(true) },
-    { label: no, onClick: () => resolve(false) },
-  ] });
+  let settled = false;
+  const done = (val) => {
+    if (!settled) {
+      settled = true;
+      resolve(val);
+    }
+  };
+  popup({
+    message,
+    dismissable: true,
+    onClose: () => done(false),
+    options: [
+      { label: yes, primary: true, onClick: () => done(true) },
+      { label: no, onClick: () => done(false) },
+    ],
+  });
 });
 
 export function fmtTime(sec) {

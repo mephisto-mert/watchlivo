@@ -106,7 +106,7 @@ function inferReferer(url, explicitRef) {
   if (url.includes("hakunaymatata.com")) return "";
   if (url.includes("filmboom")) return "https://filmboom.top/";
   if (
-    ["zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top"].some((d) =>
+    ["zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "finalsignal.top", "workers.dev"].some((d) =>
       url.includes(d)
     )
   ) {
@@ -144,6 +144,7 @@ function inferReferer(url, explicitRef) {
   }
   if (url.includes("daioncdn.net/startv")) return "https://www.startv.com.tr/";
   if (url.includes("daioncdn.net/ntv")) return "https://www.ntv.com.tr/";
+  if (url.includes("daioncdn.net/halktv")) return "https://halktv.com.tr/";
   if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => url.includes(d))) return "https://vidmoly.biz/";
   return "";
 }
@@ -207,6 +208,7 @@ async function serveBinaryAsset(request, env, assetPath, filename, contentType) 
   hdrs.set("Accept-Ranges", "bytes");
   hdrs.set("Cache-Control", "public, max-age=300");
   hdrs.set("X-Content-Type-Options", "nosniff");
+  hdrs.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   for (const [k, v] of Object.entries(CORS_HEADERS)) hdrs.set(k, v);
 
   const upCl = resp.headers.get("Content-Length") || "";
@@ -214,16 +216,68 @@ async function serveBinaryAsset(request, env, assetPath, filename, contentType) 
   if (request.method === "HEAD") {
     if (upCl) {
       hdrs.set("Content-Length", upCl);
+      resp.body?.cancel?.();
     } else if (resp.body) {
-      const buf = await resp.arrayBuffer();
-      hdrs.set("Content-Length", String(buf.byteLength));
+      let totalBytes = 0;
+      const reader = resp.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.byteLength;
+      }
+      hdrs.set("Content-Length", String(totalBytes));
     }
     return new Response(null, { status: 200, headers: hdrs });
   }
 
   if (rangeHdr && resp.status === 200) {
     const m = rangeHdr.match(/^bytes=(\d*)-(\d*)$/i);
-    if (m) {
+    const knownTotal = Number(upCl || 0);
+    if (m && knownTotal > 0 && resp.body) {
+      let start = m[1] ? parseInt(m[1], 10) : 0;
+      let end = m[2] ? parseInt(m[2], 10) : knownTotal - 1;
+      if (!m[1] && m[2]) {
+        const suffix = parseInt(m[2], 10);
+        start = Math.max(0, knownTotal - suffix);
+        end = knownTotal - 1;
+      }
+      if (start >= knownTotal || start < 0 || end < start) {
+        resp.body?.cancel?.();
+        hdrs.set("Content-Range", `bytes */${knownTotal}`);
+        return new Response(null, { status: 416, headers: hdrs });
+      }
+      end = Math.min(end, knownTotal - 1);
+      const wantLen = end - start + 1;
+      let offset = 0;
+      const { readable, writable } = new TransformStream();
+      const writer = writable.getWriter();
+      const reader = resp.body.getReader();
+      (async () => {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunkEnd = offset + value.byteLength;
+            if (chunkEnd > start && offset <= end) {
+              const sIdx = Math.max(0, start - offset);
+              const eIdx = Math.min(value.byteLength, end + 1 - offset);
+              await writer.write(value.subarray(sIdx, eIdx));
+            }
+            offset = chunkEnd;
+            if (offset > end) {
+              await reader.cancel();
+              break;
+            }
+          }
+          await writer.close();
+        } catch (err) {
+          try { await writer.abort(err); } catch {}
+        }
+      })();
+      hdrs.set("Content-Range", `bytes ${start}-${end}/${knownTotal}`);
+      hdrs.set("Content-Length", String(wantLen));
+      return new Response(readable, { status: 206, headers: hdrs });
+    } else if (m) {
       const fullBuf = await resp.arrayBuffer();
       const total = fullBuf.byteLength;
       let start = m[1] ? parseInt(m[1], 10) : 0;
@@ -268,6 +322,7 @@ async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4) {
     if ([301, 302, 303, 307, 308].includes(resp.status)) {
       const loc = resp.headers.get("Location");
       if (!loc) return resp;
+      resp.body?.cancel?.();
       curUrl = new URL(loc, curUrl).toString();
       continue;
     }
@@ -369,6 +424,7 @@ export default {
     }
 
     if (!upResp.ok && upResp.status !== 206 && upResp.status !== 416) {
+      upResp.body?.cancel?.();
       if (
         (upResp.status === 403 || upResp.status === 427 || upResp.status === 428) &&
         env.FALLBACK_ORIGIN &&
@@ -381,11 +437,13 @@ export default {
           headers: { Location: fbUrl.toString(), "Cache-Control": "no-store", ...CORS_HEADERS },
         });
       }
-      return jsonResponse({ error: "Akış kaynağı hata döndürdü.", upstreamStatus: upResp.status }, 502);
+      const passthroughStatus = [403, 404, 410, 429].includes(upResp.status) ? upResp.status : 502;
+      return jsonResponse({ error: "Akış kaynağı hata döndürdü.", upstreamStatus: upResp.status }, passthroughStatus);
     }
 
     const upCt = (upResp.headers.get("Content-Type") || "").toLowerCase();
     if (upCt.includes("text/html")) {
+      upResp.body?.cancel?.();
       return jsonResponse({ error: "Akış kaynağı medya yerine HTML döndürdü." }, 502);
     }
 
@@ -401,6 +459,7 @@ export default {
     const upCl = upResp.headers.get("Content-Length") || "";
 
     if (request.method === "HEAD" && !rangeHdr) {
+      upResp.body?.cancel?.();
       const mTot = upCr.match(/\/(\d+)$/);
       if (mTot) outHeaders.set("Content-Length", mTot[1]);
       else if (upCl) outHeaders.set("Content-Length", upCl);

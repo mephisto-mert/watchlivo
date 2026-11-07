@@ -5608,5 +5608,35 @@ html.is-android-pip .rave-subtitle-cue {
     max-width: 48px !important;
     padding: 2px 5px !important;
     font-size: 0.6rem !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+  }
+}
+
+/* v137: Ultra-Narrow 320px-390px Control Bar Protection — Guarantees #ctl-fs Never Clips on >1h Feature Films */
+@media (max-width: 390px) {
+  .video-frame:not(.fullscreen) .ctl-bar-row {
+    gap: 2px !important;
+    padding: 0 2px !important;
+  }
+  .video-frame:not(.fullscreen) #ctl-speed-btn,
+  .video-frame:not(.fullscreen) #ctl-theater,
+  .video-frame:not(.fullscreen) #ctl-sub-btn .ctl-btn-lbl {
+    display: none !important;
+  }
+  .video-frame:not(.fullscreen) .ctl-action,
+  .video-frame:not(.fullscreen) #ctl-sub-btn {
+    width: 28px !important;
+    height: 28px !important;
+    min-width: 28px !important;
+    min-height: 28px !important;
+    flex: 0 0 28px !important;
+    padding: 0 !important;
+  }
+  .video-frame:not(.fullscreen) .ctl-time {
+    font-size: 9.5px !important;
+    padding: 0 1px !important;
+    letter-spacing: -0.02em !important;
   }
 }

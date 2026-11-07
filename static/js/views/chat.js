@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v136';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v136';
-import { avatar } from '../profile.js?v=20261107_v136';
-import { api, qs } from '../api.js?v=20261107_v136';
-import { resolveMusicItem } from './selection-kinds.js?v=20261107_v136';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v136';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261107_v137';
+import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261107_v137';
+import { avatar } from '../profile.js?v=20261107_v137';
+import { api, qs } from '../api.js?v=20261107_v137';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v137';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261107_v137';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -1431,7 +1431,9 @@ export function buildChat(ctx) {
   let maxPortraitH = 0;
   let maxLandscapeH = 0;
   let preKbPortrait = typeof window !== 'undefined' ? (window.innerHeight >= window.innerWidth) : true;
+  let destroyed = false;
   const onVisualViewportResize = () => {
+    if (destroyed) return;
     const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
     const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
     const vv = window.visualViewport;
@@ -1558,6 +1560,7 @@ export function buildChat(ctx) {
       dMicPill.style.setProperty('--mic-lvl', n.toFixed(2));
     },
     destroy() {
+      destroyed = true;
       stopVoiceRecorder(false);
       if (typeof window !== 'undefined') {
         window.__vortexCancelChatVoiceRec = null;
@@ -1565,6 +1568,8 @@ export function buildChat(ctx) {
       stopActiveVoiceNoteGlobal();
       clearTimeout(typingTimer);
       document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
+      document.documentElement.style.setProperty('--vvh', '100%');
+      document.documentElement.style.setProperty('--vv-top', '0px');
       document.removeEventListener('pointerdown', onDocOutsideTap);
       window.removeEventListener('resize', onWindowOrientationOrResize);
       window.removeEventListener('orientationchange', onWindowOrientationOrResize);

@@ -198,6 +198,8 @@ class SecurityHeaders:
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"content-security-policy", b"content-disposition")]
                     hdrs.append((b"content-security-policy", b"default-src 'none'; sandbox"))
                     hdrs.append((b"content-disposition", b"attachment"))
+                if req_path.startswith("/static/") and req_path.lower().endswith((".js", ".css", ".mjs")) and b"cache-control" not in existing_keys:
+                    hdrs.append((b"cache-control", b"public, max-age=0, must-revalidate"))
                 if req_path == "/api/rooms" or req_path.startswith(("/api/user/", "/api/auth/", "/api/rave/social/", "/api/rave/notifications/", "/api/rave/voice-relay/", "/api/rave/accounts", "/api/rave/ai-image", "/api/rave/yt-personalized-feed", "/api/rooms/")):
                     hdrs = [(hk, hv) for (hk, hv) in hdrs if hk.lower() not in (b"cache-control", b"cdn-cache-control", b"vercel-cdn-cache-control", b"vary")]
                     hdrs.append((b"cache-control", b"private, no-store, no-cache, must-revalidate, max-age=0"))
@@ -214,7 +216,7 @@ _UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
 
 
 def _claims_from_token(token: str) -> dict:
-    """Resolve a bearer token to verified claims (small TTL cache, 5000 entries)."""
+    """Resolve a bearer token to verified claims (short 2s TTL cache, 5000 entries)."""
     if not token:
         return {}
     now_ts = time.time()
@@ -228,11 +230,12 @@ def _claims_from_token(token: str) -> dict:
     except Exception:
         claims = None
     if isinstance(claims, dict) and claims.get("uid"):
-        _UID_CACHE[token] = (claims, now_ts + 60.0)
+        _UID_CACHE[token] = (claims, now_ts + 2.0)
         _UID_CACHE.move_to_end(token)
         while len(_UID_CACHE) > 5000:
             _UID_CACHE.popitem(last=False)
         return claims
+    _UID_CACHE.pop(token, None)
     return {}
 
 
@@ -280,10 +283,11 @@ def _http_json(url: str, **kw):
 
 
 _DNS_PUBLIC_CACHE: dict[tuple[str, int], tuple[bool, float]] = {}
+_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
 
 
 def public_http_url(url: str) -> bool:
-    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local ranges (SSRF guard)."""
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT ranges (SSRF guard)."""
     try:
         p = urllib.parse.urlparse(url)
         if p.scheme not in ("http", "https") or not p.hostname:
@@ -292,11 +296,22 @@ def public_http_url(url: str) -> bool:
         ck = (p.hostname.lower(), port)
         now_d = time.time()
         hit = _DNS_PUBLIC_CACHE.get(ck)
-        if hit and now_d - hit[1] < 300.0:
+        if hit and now_d - hit[1] < 5.0:
             return hit[0]
-        for info in socket.getaddrinfo(p.hostname, port):
+        infos = socket.getaddrinfo(p.hostname, port)
+        if not infos:
+            return False
+        for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+                or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NET)
+            ):
                 _DNS_PUBLIC_CACHE[ck] = (False, now_d)
                 return False
         if len(_DNS_PUBLIC_CACHE) > 1000:
@@ -6412,6 +6427,12 @@ _VIZYON_POST_LIMIT = RateLimiter(15, 600.0, name="vizyon_post")
 
 async def rave_new_releases(request: Request):
     if request.method == "POST":
+        if os.environ.get("ADMIN_SECRET", "").strip() and not _is_admin_request(request):
+            return JSONResponse(
+                {"ok": False, "error": "Vizyon katalog yönetimi için yönetici yetkisi gerekli."},
+                status_code=403,
+                headers={"Cache-Control": "no-store"},
+            )
         allowed_v, retry_v = _VIZYON_POST_LIMIT.hit(client_ip(request))
         if not allowed_v:
             return too_many_response(retry_v)
@@ -7136,6 +7157,10 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             eff_ref = "https://www.startv.com.tr/"
         elif "daioncdn.net/ntv" in url:
             eff_ref = "https://www.ntv.com.tr/"
+        elif "daioncdn.net/halktv" in url:
+            eff_ref = "https://halktv.com.tr/"
+        elif "workers.dev" in url:
+            eff_ref = "https://vidy.st/"
         elif any(d in url for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
             eff_ref = "https://vidmoly.biz/"
     hdrs = {
@@ -7593,7 +7618,7 @@ async def rave_stream_manifest(request: Request):
             is_master = "#EXT-X-STREAM-INF" in raw
             needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "") + (f"&mtype={explicit_mtype}" if explicit_mtype else "")
-            def _rewrite_u(u_str: str, is_sub_playlist: bool = False) -> str:
+            def _rewrite_u(u_str: str, is_sub_playlist: bool = False, tag_kind: str = "") -> str:
                 if not u_str.startswith("http"):
                     u_str = urllib.parse.urljoin(base_u, u_str)
                 if not public_http_url(u_str):
@@ -7602,7 +7627,12 @@ async def rave_stream_manifest(request: Request):
                     return f"/api/rave/subtitle.vtt?url={urllib.parse.quote(u_str, safe='')}&lang=tr"
                 u_path_low = u_str.lower().split("?", 1)[0].split("#", 1)[0]
                 is_known_seg_ext = u_path_low.endswith((".ts", ".m4s", ".mp4", ".aac", ".vtt", ".srt", ".key", ".png", ".jpg", ".webp"))
-                want_m3u8 = is_sub_playlist or is_master or (".m3u8" in u_path_low) or (not is_known_seg_ext and (("/manifests/" in u_str) or ("/index-" in u_str) or ("sublist_" in u_str) or ("nm.php" in u_str) or ("nl.php" in u_str) or ("/l.php" in u_str) or ("/m.php" in u_str) or ("/q/" in u_str) or ("/embed/sheila/" in u_str)))
+                if tag_kind in ("key", "map"):
+                    want_m3u8 = False
+                elif is_sub_playlist or is_master:
+                    want_m3u8 = not u_path_low.endswith((".vtt", ".srt", ".key", ".m4s", ".mp4", ".ts"))
+                else:
+                    want_m3u8 = (".m3u8" in u_path_low) or (not is_known_seg_ext and (("sublist_" in u_str) or ("nm.php" in u_str) or ("nl.php" in u_str) or ("/embed/sheila/" in u_str)))
                 if want_m3u8:
                     sub_sid = base64.urlsafe_b64encode(u_str.encode("utf-8")).decode("ascii").rstrip("=")
                     if cur_is_hfnl:
@@ -7628,9 +7658,14 @@ async def rave_stream_manifest(request: Request):
                     if "dragonballzfans" in cur_target or ref_mode == "hx":
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
-                seg_ext_hint = ".m4s" if (u_path_low.endswith((".m4s", ".mp4")) or "init-" in u_path_low or "/init." in u_path_low or "_init." in u_path_low) else ".ts"
+                if tag_kind == "key" or u_path_low.endswith(".key") or "key.php" in u_str:
+                    seg_ext_hint = ".key"
+                elif tag_kind == "map" or u_path_low.endswith((".m4s", ".mp4")) or "init-" in u_path_low or "/init." in u_path_low or "_init." in u_path_low:
+                    seg_ext_hint = ".m4s"
+                else:
+                    seg_ext_hint = ".ts"
                 if "key.php" in u_str:
-                    return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/")
+                    return _proxy_u(u_str, f"https://{urllib.parse.urlparse(u_str).netloc or 'play2.pilavyerplay.top'}/", seg_ext_hint)
                 if cur_is_ve:
                     return _proxy_u(u_str, "https://vidy.st/", seg_ext_hint)
                 if cur_is_cj:
@@ -7659,16 +7694,20 @@ async def rave_stream_manifest(request: Request):
                 nm = re.search(r'NAME="([^"]*)"', l)
                 return _norm_audio_lang(lm.group(1) if lm else "", nm.group(1) if nm else "")
 
+            def _aud_grp(l: str) -> str:
+                gm = re.search(r'GROUP-ID="([^"]*)"', l)
+                return gm.group(1) if gm else "_default"
+
             valid_aud_lines = [l.strip() for l in raw.splitlines() if 'TYPE=AUDIO' in l and 'URI="undefined' not in l]
-            has_tr_aud = any(_line_lang(l) == "tr" for l in valid_aud_lines)
-            has_orig_aud = any(_line_lang(l) != "tr" for l in valid_aud_lines)
+            aud_by_grp: dict[str, list[str]] = {}
+            for _al in valid_aud_lines:
+                aud_by_grp.setdefault(_aud_grp(_al), []).append(_al)
             want_code = aud_pref if (aud_pref and aud_pref != "orig") else ""
-            has_want = bool(want_code) and any(_line_lang(l) == want_code for l in valid_aud_lines)
             out_lines = []
             variant_pairs = []
             pending_inf = None
-            has_default_aud = any('DEFAULT=YES' in l for l in valid_aud_lines)
-            selected_aud_set = False
+            default_aud_groups = {g for g, ls in aud_by_grp.items() if any('DEFAULT=YES' in l for l in ls)}
+            selected_aud_groups: set[str] = set()
             if not is_master and not is_live_tv and "#EXT-X-ENDLIST" in raw and "#EXT-X-DISCONTINUITY" in raw and "#EXTINF:" in raw:
                 try:
                     hdr_part, blocks, cur_blk, cur_dur, cur_uris = [], [], [], 0.0, []
@@ -7704,15 +7743,37 @@ async def rave_stream_manifest(request: Request):
                     tot_dur = sum(b[0] for b in blocks)
                     if len(blocks) > 1 and tot_dur >= 180.0:
                         ad_re = re.compile(r"(?:preroll|midroll|/ads?/|reklam|promo|sponsor|bumper|1xbet|melbet|mostbet|betwinner|casino)", re.I)
-                        kept_blocks = [
-                            b for idx_b, b in enumerate(blocks)
+                        kept_indexed = [
+                            (idx_b, b) for idx_b, b in enumerate(blocks)
                             if not ((b[0] <= 55.0 and (idx_b == 0 or b[0] < tot_dur * 0.08)) or any(ad_re.search(u) for u in b[1]))
                         ]
-                        if kept_blocks:
+                        if kept_indexed:
+                            first_kept_idx = kept_indexed[0][0]
+                            hoisted_key = next((hl for hl in reversed(hdr_part) if hl.startswith("#EXT-X-KEY:")), "")
+                            hoisted_map = next((hl for hl in reversed(hdr_part) if hl.startswith("#EXT-X-MAP:")), "")
+                            for sk_i in range(first_kept_idx):
+                                for sk_ln in blocks[sk_i][2]:
+                                    if sk_ln.startswith("#EXT-X-KEY:"):
+                                        hoisted_key = sk_ln
+                                    elif sk_ln.startswith("#EXT-X-MAP:"):
+                                        hoisted_map = sk_ln
+                            first_blk_lines = list(kept_indexed[0][1][2])
+                            pre_first_seg = []
+                            for fl in first_blk_lines:
+                                if not fl.startswith("#") or fl.startswith("#EXTINF:"):
+                                    break
+                                pre_first_seg.append(fl)
+                            hoist_prefix = []
+                            if hoisted_key and not any(hl.startswith("#EXT-X-KEY:") for hl in hdr_part) and not any(pl.startswith("#EXT-X-KEY:") for pl in pre_first_seg):
+                                hoist_prefix.append(hoisted_key)
+                            if hoisted_map and not any(hl.startswith("#EXT-X-MAP:") for hl in hdr_part) and not any(pl.startswith("#EXT-X-MAP:") for pl in pre_first_seg):
+                                hoist_prefix.append(hoisted_map)
                             rebuilt = list(hdr_part)
-                            for idx_k, (_, _, b_lines) in enumerate(kept_blocks):
+                            for idx_k, (_, (_, _, b_lines)) in enumerate(kept_indexed):
                                 if idx_k > 0:
                                     rebuilt.append("#EXT-X-DISCONTINUITY")
+                                elif hoist_prefix:
+                                    rebuilt.extend(hoist_prefix)
                                 rebuilt.extend(b_lines)
                             if "#EXT-X-ENDLIST" in raw:
                                 rebuilt.append("#EXT-X-ENDLIST")
@@ -7750,12 +7811,17 @@ async def rave_stream_manifest(request: Request):
                         if 'TYPE=AUDIO' in s_ln:
                             if 'URI="undefined' in s_ln:
                                 continue
+                            grp_id = _aud_grp(s_ln)
+                            grp_lines = aud_by_grp.get(grp_id) or valid_aud_lines
+                            grp_has_tr = any(_line_lang(l) == "tr" for l in grp_lines)
+                            grp_has_orig = any(_line_lang(l) != "tr" for l in grp_lines)
+                            grp_has_want = bool(want_code) and any(_line_lang(l) == want_code for l in grp_lines)
                             l_code = _line_lang(s_ln)
                             is_tr_line = l_code == "tr"
-                            if has_want or (aud_pref == "orig" and has_orig_aud) or (want_code and want_code != "tr" and has_orig_aud):
-                                is_match = (l_code == want_code) if has_want else (not is_tr_line)
-                                if is_match and not selected_aud_set:
-                                    selected_aud_set = True
+                            if grp_has_want or (aud_pref == "orig" and grp_has_orig) or (want_code and want_code != "tr" and grp_has_orig):
+                                is_match = (l_code == want_code) if grp_has_want else (not is_tr_line)
+                                if is_match and grp_id not in selected_aud_groups:
+                                    selected_aud_groups.add(grp_id)
                                     s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=YES', s_ln)
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
                                     if "DEFAULT=YES" not in s_ln:
@@ -7765,22 +7831,23 @@ async def rave_stream_manifest(request: Request):
                                 else:
                                     s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)
-                            elif not is_probe and has_tr_aud:
-                                if is_tr_line and not selected_aud_set:
-                                    selected_aud_set = True
+                            elif not is_probe and grp_has_tr:
+                                if is_tr_line and grp_id not in selected_aud_groups:
+                                    selected_aud_groups.add(grp_id)
                                     s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=YES', s_ln)
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=YES', s_ln)
                                 else:
                                     s_ln = re.sub(r'DEFAULT=(?:YES|NO)', 'DEFAULT=NO', s_ln)
                                     s_ln = re.sub(r'AUTOSELECT=(?:YES|NO)', 'AUTOSELECT=NO', s_ln)
-                            elif not has_default_aud and 'DEFAULT=NO' in s_ln:
+                            elif grp_id not in default_aud_groups and 'DEFAULT=NO' in s_ln:
                                 s_ln = s_ln.replace('DEFAULT=NO', 'DEFAULT=YES', 1)
-                                has_default_aud = True
+                                default_aud_groups.add(grp_id)
                         if s_ln.startswith("#EXT-X-I-FRAME-STREAM-INF"):
                             continue
                         if 'URI="' in s_ln:
                             is_media_tag = s_ln.startswith("#EXT-X-MEDIA")
-                            s_ln = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{_rewrite_u(m.group(1), is_sub_playlist=is_media_tag)}"', s_ln)
+                            t_kind = "key" if s_ln.startswith(("#EXT-X-KEY", "#EXT-X-SESSION-KEY")) else ("map" if s_ln.startswith("#EXT-X-MAP") else "")
+                            s_ln = re.sub(r'URI="([^"]+)"', lambda m: f'URI="{_rewrite_u(m.group(1), is_sub_playlist=is_media_tag, tag_kind=t_kind)}"', s_ln)
                     else:
                         raw_uri = s_ln
                         s_ln = _rewrite_u(s_ln, is_sub_playlist=is_master)
@@ -8082,7 +8149,7 @@ def _build_media_response(data: bytes, status_code: int, headers: dict, is_head:
 
 
 async def stream_proxy(request: Request):
-    url = (request.query_params.get("url") or "").strip()
+    url = (request.query_params.get("url") or request.query_params.get("u") or "").strip()
     ref = (request.query_params.get("referer") or "").strip()
     sig = (request.query_params.get("sig") or "").strip()
     cors_hdrs = {
@@ -8172,8 +8239,12 @@ async def stream_proxy(request: Request):
             hdrs,
             is_head=(request.method == "HEAD"),
         )
+    except urllib.error.HTTPError as he:
+        up_code = int(getattr(he, "code", 502) or 502)
+        out_code = up_code if up_code in (403, 404, 410, 416, 429) else 502
+        return JSONResponse({"error": "Akış kaynağına ulaşılamadı.", "upstreamStatus": up_code}, status_code=out_code, headers={"Cache-Control": "no-store", **cors_hdrs})
     except Exception:
-        return JSONResponse({"error": "Akış kaynağına ulaşılamadı."}, status_code=502, headers=cors_hdrs)
+        return JSONResponse({"error": "Akış kaynağına ulaşılamadı."}, status_code=502, headers={"Cache-Control": "no-store", **cors_hdrs})
 
 
 def _srt_to_vtt(raw_bytes) -> str:
@@ -10341,10 +10412,25 @@ async def _apple_touch_icon_endpoint(request: Request):
     return Response(status_code=204)
 
 
+async def desktop_auth_page(request: Request):
+    page = STATIC_DIR / "desktop-auth.html"
+    if page.exists():
+        return FileResponse(
+            page,
+            media_type="text/html; charset=utf-8",
+            headers={
+                "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+                "X-Robots-Tag": "noindex, nofollow",
+            },
+        )
+    return Response("Not found", status_code=404)
+
+
 app = Starlette(
     routes=[
         Route("/", index),
         Route("/index.html", index),
+        Route("/desktop-auth.html", desktop_auth_page, methods=["GET", "HEAD"]),
         Route("/favicon.ico", _favicon_endpoint, methods=["GET", "HEAD"]),
         Route("/apple-touch-icon.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
         Route("/apple-touch-icon-precomposed.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),

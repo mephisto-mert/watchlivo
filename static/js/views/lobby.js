@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261107_v136';
-import { avatar, openDmModal } from '../profile.js?v=20261107_v136';
-import { getProvider } from '../providers.js?v=20261107_v136';
-import { api, qs } from '../api.js?v=20261107_v136';
+import { h, icons, popup, toast } from '../ui.js?v=20261107_v137';
+import { avatar, openDmModal } from '../profile.js?v=20261107_v137';
+import { getProvider } from '../providers.js?v=20261107_v137';
+import { api, qs } from '../api.js?v=20261107_v137';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261107_v136';
-import { expectedPosition } from '../sync.js?v=20261107_v136';
+} from '../store.js?v=20261107_v137';
+import { expectedPosition } from '../sync.js?v=20261107_v137';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -92,7 +92,7 @@ export function tvGlassCard(room, onOpen) {
     const rotateX = (((y - rect.height / 2) / (rect.height / 2)) * -6);
     const rotateY = (((x - rect.width / 2) / (rect.width / 2)) * 6);
     card.style.transform = `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
-  });
+  }, { passive: true });
   card.addEventListener('mouseleave', () => { card.style.transform = ''; });
   return card;
 }
@@ -200,7 +200,8 @@ export function rememberRoom(room) {
         chat: [],
         polls: [],
         syncToken: undefined,
-        media: cachedMedia,
+        serverNow: undefined,
+        media: cachedMedia ? { ...cachedMedia, serverNow: undefined } : cachedMedia,
       };
       sessionStorage.setItem(`vortex_room_${room.id}`, JSON.stringify(cleanSnap));
       if (!room.curated) {

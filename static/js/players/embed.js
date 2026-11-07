@@ -1,4 +1,23 @@
 // Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
+const _TRUSTED_EMBED_DOMAINS = [
+  'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
+  'twitch.tv', 'kick.com', 'tiktok.com', 'google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
+  'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
+];
+const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid)\.[a-z0-9-]+$/i;
+
+function _isTrustedEmbedUrl(rawUrl) {
+  try {
+    const u = new URL(String(rawUrl || '').trim());
+    if (u.protocol !== 'https:') return false;
+    const h = u.hostname.toLowerCase().replace(/\.$/, '');
+    if (_TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d))) return true;
+    return _TRUSTED_EMBED_PREFIX_RE.test(h);
+  } catch (_) {
+    return false;
+  }
+}
+
 export class EmbedAdapter {
   constructor(container, events) {
     this.container = container;
@@ -9,6 +28,7 @@ export class EmbedAdapter {
     this.paused = false;
     this.rate = 1;
     this.duration = 0;
+    this._destroyed = false;
     this.caps = { seek: false, rate: false, overlayClicks: false, live: false };
     this._onMsg = (ev) => this._handleMessage(ev);
   }
@@ -46,7 +66,7 @@ export class EmbedAdapter {
     if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {
       u += `${u.includes('?') ? '&' : '?'}startAt=${Math.floor(startAt)}`;
     }
-    return /^https?:\/\//i.test(String(u || '')) ? u : 'about:blank';
+    return _isTrustedEmbedUrl(u) ? u : 'about:blank';
   }
 
   _handleMessage(ev) {
@@ -64,6 +84,7 @@ export class EmbedAdapter {
   }
 
   async load(media, startAt = 0, shouldPlay = true) {
+    this._destroyed = false;
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
     this.baseTime = Math.max(0, Number(startAt) || 0);
@@ -82,7 +103,7 @@ export class EmbedAdapter {
     this.frame = f;
     window.addEventListener('message', this._onMsg);
     this.container.replaceChildren(f);
-    const alts = (media.altUrls || []).filter((u) => /^https?:/i.test(String(u || '')));
+    const alts = (media.altUrls || []).filter((u) => _isTrustedEmbedUrl(u));
     if (alts.length) {
       let idx = 0;
       const allSrcs = [src, ...alts];
@@ -95,12 +116,15 @@ export class EmbedAdapter {
         idx = (idx + 1) % allSrcs.length;
         this.baseTime = 0;
         this.anchorPerf = performance.now();
-        f.src = allSrcs[idx];
+        const nextSrc = allSrcs[idx];
+        try { this._expectedOrigin = nextSrc.startsWith('http') ? new URL(nextSrc).origin : ''; } catch (_) { this._expectedOrigin = ''; }
+        f.src = nextSrc;
         sw.textContent = `🔄 Kaynak ${idx + 1}/${allSrcs.length}`;
       };
       this.container.appendChild(sw);
     }
     await new Promise((resolve) => { f.onload = resolve; setTimeout(resolve, 1800); });
+    if (this._destroyed || this.frame !== f) return;
     this.events.onBuffering?.(false);
     this.events.onReady?.();
     if (shouldPlay) this.events.onPlay?.();
@@ -132,5 +156,5 @@ export class EmbedAdapter {
     this._post({ method: 'setMuted', value: this._muted });
   }
   isMuted() { return Boolean(this._muted); }
-  destroy() { window.removeEventListener('message', this._onMsg); this.container.replaceChildren(); this.frame = null; }
+  destroy() { this._destroyed = true; window.removeEventListener('message', this._onMsg); this.container.replaceChildren(); this.frame = null; }
 }

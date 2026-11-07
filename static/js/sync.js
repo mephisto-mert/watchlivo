@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261107_v136';
+import { isRoomMediaPlaying } from './store.js?v=20261107_v137';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -38,10 +38,13 @@ export function expectedPosition(media) {
   }
   const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
   const pos = Number(media.meshStatePosition ?? media.currentTime ?? 0);
+  const rawUrl = String(media.url || '');
+  if (status !== 'PLAYING' || (rawUrl.startsWith('/api/rave/resolve-catalog') && !media.playbackAnchored && pos <= 0.5)) {
+    return Math.max(0, pos);
+  }
   const rawT0 = Number(media.meshStateTime ?? media.updatedAt ?? clock.now());
   const t0 = rawT0 > 1e11 ? rawT0 / 1000 : rawT0;
   const speed = Number(media.meshStatePlaybackSpeed ?? media.rate ?? 1);
-  if (status !== 'PLAYING') return Math.max(0, pos);
   return Math.max(0, pos + Math.max(0, clock.now() - t0) * speed);
 }
 

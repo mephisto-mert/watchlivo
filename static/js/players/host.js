@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261107_v136';
-import { Html5Adapter } from './html5.js?v=20261107_v136';
-import { VimeoAdapter } from './vimeo.js?v=20261107_v136';
-import { EmbedAdapter } from './embed.js?v=20261107_v136';
-import { WebviewAdapter } from './webview.js?v=20261107_v136';
-import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v136';
+import { YouTubeAdapter } from './youtube.js?v=20261107_v137';
+import { Html5Adapter } from './html5.js?v=20261107_v137';
+import { VimeoAdapter } from './vimeo.js?v=20261107_v137';
+import { EmbedAdapter } from './embed.js?v=20261107_v137';
+import { WebviewAdapter } from './webview.js?v=20261107_v137';
+import { resumeSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261107_v137';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -519,6 +519,14 @@ export class PlayerHost {
         ['click', 'keydown'].forEach((ev) => {
           window.removeEventListener(ev, this._gestureHandler, { capture: true });
         });
+      }
+      if (window.__kinoxHost === this) {
+        window.__kinoxHost = null;
+        window.vortexSetVoiceNotePlaying = null;
+        window.vortexSetAutoDuck = null;
+        window.__kinoxSyncDuckVolume = null;
+        window.__onWatchlivoAppState = null;
+        window.__onWatchlivoNativePiP = null;
       }
     }
     this.destroyAdapterOnly();

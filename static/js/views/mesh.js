@@ -1,15 +1,15 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261107_v136';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261107_v136';
-import { resolveMusicItem } from './selection-kinds.js?v=20261107_v136';
-import { MeshConnection } from '../realtime.js?v=20261107_v136';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261107_v136';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261107_v136';
-import { buildLayout } from './mesh-layout.js?v=20261107_v136';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261107_v136';
-import { Voice } from '../voice.js?v=20261107_v136';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261107_v136';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261107_v136';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261107_v137';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261107_v137';
+import { resolveMusicItem } from './selection-kinds.js?v=20261107_v137';
+import { MeshConnection } from '../realtime.js?v=20261107_v137';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261107_v137';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261107_v137';
+import { buildLayout } from './mesh-layout.js?v=20261107_v137';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261107_v137';
+import { Voice } from '../voice.js?v=20261107_v137';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261107_v137';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261107_v137';
 
 let ctx = null;
 
@@ -33,9 +33,15 @@ export function loadSavedChat(id) {
     return Array.from(byId.values()).sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0)).slice(-80);
   } catch (e) { return []; }
 }
-function saveChat(room) {
+const _saveChatTimers = new Map();
+const _pendingChatRooms = new Map();
+
+function flushSavedChat(room) {
   try {
     if (!room?.id || room.curated) return;
+    const t = _saveChatTimers.get(room.id);
+    if (t) { clearTimeout(t); _saveChatTimers.delete(room.id); }
+    _pendingChatRooms.delete(room.id);
     if (ctx?.chatClearedAt && Date.now() - ctx.chatClearedAt < 10000) return;
     const nowSec = Date.now() / 1000;
     const existing = loadSavedChat(room.id);
@@ -59,9 +65,23 @@ function saveChat(room) {
     try { localStorage.setItem(chatKey(room.id), localSafe); } catch (_) {}
   } catch (e) { /* ignore */ }
 }
+
+function saveChat(room) {
+  if (!room?.id || room.curated) return;
+  _pendingChatRooms.set(room.id, room);
+  if (_saveChatTimers.has(room.id)) return;
+  _saveChatTimers.set(room.id, setTimeout(() => {
+    _saveChatTimers.delete(room.id);
+    const latest = _pendingChatRooms.get(room.id) || room;
+    flushSavedChat(latest);
+  }, 260));
+}
 function clearSavedChat(id) {
   try {
     if (id) {
+      const t = _saveChatTimers.get(id);
+      if (t) { clearTimeout(t); _saveChatTimers.delete(id); }
+      _pendingChatRooms.delete(id);
       sessionStorage.removeItem(chatKey(id));
       localStorage.removeItem(chatKey(id));
     }
@@ -105,8 +125,19 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
     if (ctx?.conn) ctx.conn.lastRoom = room;
     if (isTimeKeeper() && (!ctx?.lastMediaRestoreAt || Date.now() - ctx.lastMediaRestoreAt > 2500)) {
       if (ctx) ctx.lastMediaRestoreAt = Date.now();
+      const localCtx = ctx;
       const curPos = ctx?.host.adapter?.getTime?.() ?? expectedPosition(curRoom.media);
-      setTimeout(() => ctx?.conn?.send('change_media', { ...curRoom.media, currentTime: curPos }), 120);
+      setTimeout(() => {
+        if (!localCtx || ctx !== localCtx) return;
+        localCtx.conn?.send('change_media', { ...curRoom.media, currentTime: curPos });
+      }, 120);
+    }
+  }
+  if (ctx && curRoom) {
+    const prevHost = curRoom.hostId || curRoom.host_id || '';
+    const nextHost = room.hostId || room.host_id || '';
+    if (prevHost && nextHost && prevHost !== nextHost) {
+      ctx.lastLeaderActionAt = 0;
     }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.url && !String(curRoom.media.url).startsWith('/api/rave/resolve-catalog') && String(room.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
@@ -141,9 +172,13 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
     };
     if (ctx && isTimeKeeper() && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
       ctx.lastResolvePushAt = Date.now();
+      const localCtx = ctx;
       const pushMedia = room.media;
       const pushPos = useLocalClock ? livePos : expectedPosition(room.media);
-      setTimeout(() => ctx?.conn?.send('resolve_media', { ...pushMedia, currentTime: pushPos }), 60);
+      setTimeout(() => {
+        if (!localCtx || ctx !== localCtx) return;
+        localCtx.conn?.send('resolve_media', { ...pushMedia, currentTime: pushPos });
+      }, 60);
     }
   }
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
@@ -183,7 +218,11 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
       room = { ...room, privacy: savedPriv };
       if (!ctx.lastPrivacySyncAt || Date.now() - ctx.lastPrivacySyncAt > 3500) {
         ctx.lastPrivacySyncAt = Date.now();
-        setTimeout(() => ctx?.conn?.send('host_action', { action: 'set_privacy', privacy: savedPriv }), 80);
+        const localCtx = ctx;
+        setTimeout(() => {
+          if (!localCtx || ctx !== localCtx) return;
+          localCtx.conn?.send('host_action', { action: 'set_privacy', privacy: savedPriv });
+        }, 80);
       }
     }
   }
@@ -366,7 +405,7 @@ async function loadMedia(media) {
       ctx.host.loading = false;
       ctx.layout?.playerEvent?.('loaded');
     }
-    if (!isTimeKeeper() && !state.mesh?.curated && !media?.live) {
+    if ((!isTimeKeeper() || !ctx.sync?.didInitialSync) && !state.mesh?.curated && !media?.live) {
       const liveExp = expectedPosition(state.mesh?.media || media);
       if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 1.5) {
         ctx.host.adapter.seek?.(liveExp);
@@ -551,10 +590,24 @@ function onMessage(data) {
           break;
         }
         const prevKey = mediaKey(room.media);
-        const mergedMedia = normalizeRoomMediaState(room.media, data.media);
+        const incomingKey = mediaKey(data.media);
+        if (data.viaP2p && prevKey && incomingKey && incomingKey !== prevKey) {
+          break;
+        }
+        const safeIncomingMedia = data.viaP2p
+          ? {
+              ...data.media,
+              url: room.media?.url || '',
+              embedUrl: room.media?.embedUrl || '',
+              videoId: room.media?.videoId || '',
+              provider: room.media?.provider || '',
+            }
+          : data.media;
+        const mergedMedia = normalizeRoomMediaState(room.media, safeIncomingMedia);
         const prevUrl = String(room.media?.url || '');
-        const nextUrl = String(data.media?.url || '');
-        if ((!nextUrl || nextUrl.startsWith('/api/rave/resolve-catalog')) && prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog') && prevKey === mediaKey(data.media)) {
+        const nextUrl = String(safeIncomingMedia?.url || '');
+        const sameMediaTarget = !incomingKey || prevKey === incomingKey;
+        if ((!nextUrl || nextUrl.startsWith('/api/rave/resolve-catalog')) && prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog') && sameMediaTarget) {
           mergedMedia.url = prevUrl;
           if (!mergedMedia.altUrls?.length && room.media?.altUrls?.length) mergedMedia.altUrls = room.media.altUrls;
           if (!mergedMedia.subtitleTracks?.length && room.media?.subtitleTracks?.length) mergedMedia.subtitleTracks = room.media.subtitleTracks;
@@ -564,10 +617,12 @@ function onMessage(data) {
         if (!mergedMedia.servers?.length && room.media?.servers?.length && prevKey === mediaKey(mergedMedia)) {
           mergedMedia.servers = room.media.servers;
         }
-        if (!mergedMedia.url && room.media?.url) mergedMedia.url = room.media.url;
-        if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
-        if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
-        if (!mergedMedia.provider && room.media?.provider) mergedMedia.provider = room.media.provider;
+        if (sameMediaTarget) {
+          if (!mergedMedia.url && room.media?.url) mergedMedia.url = room.media.url;
+          if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
+          if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
+          if (!mergedMedia.provider && room.media?.provider) mergedMedia.provider = room.media.provider;
+        }
         const nextKey = mediaKey(mergedMedia);
         const urlResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog') && (!prevUrl || prevUrl.startsWith('/api/rave/resolve-catalog') || !ctx?.host?.adapter));
         const updatedRoom = { ...room, media: mergedMedia };
@@ -731,7 +786,7 @@ function onMessage(data) {
       ctx?.conn?.close(false);
       set({ mesh: null });
       window.vortexNavigate('/');
-      popup({ title: 'Odadan Çıkarıldın', message: 'Bu oda kapatıldı veya oda lideri tarafından çıkarıldın.', options: [{ label: 'Ana Sayfa', primary: true, onClick: () => window.vortexNavigate('/') }], dismissable: false });
+      popup({ title: 'Odadan Çıkarıldın', message: 'Bu oda kapatıldı veya oda lideri tarafından çıkarıldın.', persistOnNavigate: true, options: [{ label: 'Ana Sayfa', primary: true, onClick: () => window.vortexNavigate('/') }], dismissable: false });
       break;
     }
     case 'webrtc_offer': case 'webrtc_answer': case 'webrtc_ice': ctx?.voice?.onSignal(data); break;
@@ -994,7 +1049,25 @@ const actions = {
   },
   votePoll(pollId, optionIndex) {
     if (!pollId || typeof optionIndex !== 'number') return;
-    ctx.conn.send('poll_vote', { pollId, optionIndex });
+    const room = state.mesh;
+    const myName = state.self?.name || 'Misafir';
+    if (room && Array.isArray(room.polls)) {
+      const nextPolls = room.polls.map((p) => {
+        if (!p || p.id !== pollId) return p;
+        const nextOpts = (p.options || []).map((opt, idx) => {
+          const curVotes = Array.isArray(opt.votes) ? [...opt.votes] : [];
+          const hasMe = curVotes.some((u) => u === myName || String(u).startsWith(`${myName}#`));
+          if (idx === optionIndex) {
+            return { ...opt, votes: hasMe ? curVotes.filter((u) => u !== myName && !String(u).startsWith(`${myName}#`)) : [...curVotes, myName] };
+          }
+          return { ...opt, votes: curVotes.filter((u) => u !== myName && !String(u).startsWith(`${myName}#`)) };
+        });
+        return { ...p, options: nextOpts };
+      });
+      set({ mesh: { ...room, polls: nextPolls } });
+      ctx?.layout?.pollsUpdated?.();
+    }
+    ctx?.conn?.send('poll_vote', { pollId, optionIndex });
   },
   reactMessage(msgId, emoji) {
     if (!msgId || !emoji) return;
@@ -1179,8 +1252,9 @@ const actions = {
       const cid = ctx.conn.clientId || state.clientId;
       const ctok = ctx.conn.clientToken || '';
       const uname = state.self?.name || '';
+      clearSavedChat(leavingId);
       try { ctx.conn._emitP2p?.({ event: { type: 'room_closed', roomId: leavingId } }); } catch (e) { /* ignore */ }
-      try { ctx.conn.close(true, true); } catch (e) { /* ignore */ }
+      try { ctx.conn.close(false, false); } catch (e) { /* ignore */ }
       try {
         await Promise.race([
           fetch(`/api/rooms/${encodeURIComponent(leavingId)}/sync`, {
@@ -1295,14 +1369,30 @@ export async function enterMesh(app, params) {
   sync.start();
   ctx.conn.p2pBroadcast = (pkt) => ctx?.voice?.broadcastP2p?.(pkt);
   if (params.autocall === '1') {
-    setTimeout(() => { if (!ctx?.voice?.destroyed && !ctx?.voice?.inCall) ctx.voice.joinCall({ withMic: true }); }, 450);
+    const localCtx = ctx;
+    setTimeout(() => {
+      if (!localCtx || ctx !== localCtx) return;
+      if (!localCtx.voice?.destroyed && !localCtx.voice?.inCall) localCtx.voice.joinCall({ withMic: true });
+    }, 450);
   }
-  const _prevLayoutBgTick = window.__watchlivoBgSyncTick;
-  window.__watchlivoBgSyncTick = () => {
-    try { _prevLayoutBgTick?.(); } catch (_) {}
-    ctx?.sync?.tickFromMedia?.();
-    ctx?.conn?.nudgeIfDisconnected?.();
+  const localMeshCtx = ctx;
+  const meshBgTickListener = () => {
+    if (!localMeshCtx || ctx !== localMeshCtx) return;
+    localMeshCtx.sync?.tickFromMedia?.();
+    localMeshCtx.conn?.nudgeIfDisconnected?.();
   };
+  ctx._bgTickListener = meshBgTickListener;
+  if (typeof window !== 'undefined') {
+    if (!(window.__watchlivoBgTickListeners instanceof Set)) {
+      window.__watchlivoBgTickListeners = new Set();
+    }
+    window.__watchlivoBgTickListeners.add(meshBgTickListener);
+    window.__watchlivoBgSyncTick = () => {
+      for (const fn of Array.from(window.__watchlivoBgTickListeners || [])) {
+        try { fn(); } catch (_) {}
+      }
+    };
+  }
   ctx.progressTimer = setInterval(() => {
     const m = state.mesh?.media;
     const ad = ctx?.host?.adapter;
@@ -1417,8 +1507,12 @@ export function leaveMeshView(explicitLeave = false) {
   const shouldClose = false;
   if (explicitLeave && state.mesh?.id && !state.mesh?.curated) {
     forgetRoom(state.mesh.id);
+  } else if (state.mesh?.id && _pendingChatRooms.has(state.mesh.id)) {
+    flushSavedChat(_pendingChatRooms.get(state.mesh.id));
   }
-  if (typeof window !== 'undefined' && window.__watchlivoBgSyncTick) window.__watchlivoBgSyncTick = null;
+  if (typeof window !== 'undefined' && ctx._bgTickListener && window.__watchlivoBgTickListeners instanceof Set) {
+    window.__watchlivoBgTickListeners.delete(ctx._bgTickListener);
+  }
   if (ctx.initFallbackTimer) {
     clearTimeout(ctx.initFallbackTimer);
     ctx.initFallbackTimer = null;

@@ -493,7 +493,7 @@ def verify_auth_token(token: str) -> Optional[Dict[str, Any]]:
                     if r_exp > now_ts:
                         _REVOKED_AUTH_SIGS[sig] = r_exp
                         return None
-                _REVOKED_NEG_CACHE[sig] = now_ts + 15.0
+                _REVOKED_NEG_CACHE[sig] = now_ts + 2.0
                 while len(_REVOKED_NEG_CACHE) > 5000:
                     _REVOKED_NEG_CACHE.popitem(last=False)
             except Exception:

@@ -1,19 +1,20 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261107_v136';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261107_v137';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261107_v136';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261107_v136';
-import { api } from '../api.js?v=20261107_v136';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261107_v136';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v136';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261107_v136';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261107_v136';
+} from '../store.js?v=20261107_v137';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261107_v137';
+import { api } from '../api.js?v=20261107_v137';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261107_v137';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261107_v137';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261107_v137';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261107_v137';
 
 let refreshTimer = null;
+let homeDrawTimer = null;
 let unsubHomeStore = null;
 let rooms = [];
 
@@ -58,7 +59,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v136', alt: 'Watchlivo' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261107_v137', alt: 'Watchlivo' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -242,14 +243,13 @@ export function renderHome(app) {
   attachTubelight(tabs, '.lobby-tab', 'on');
   let lastRoomsSig = '';
   let lastScrollAt = 0;
-  let pendingDrawTimer = null;
   const draw = (force = false) => {
     const sorted = [...rooms].sort((a, b) => String(a.id).localeCompare(String(b.id)));
     const sig = `${filter}|${query}|${JSON.stringify(sorted.map((r) => [r.id, r.name, r.privacy, r.count, r.media?.title, r.media?.url]))}`;
     if (!force && sig === lastRoomsSig) return;
     if (!force && Date.now() - lastScrollAt < 1000) {
-      clearTimeout(pendingDrawTimer);
-      pendingDrawTimer = setTimeout(() => draw(false), 1050);
+      clearTimeout(homeDrawTimer);
+      homeDrawTimer = setTimeout(() => draw(false), 1050);
       return;
     }
     lastRoomsSig = sig;
@@ -344,16 +344,19 @@ export function renderHome(app) {
         type: 'button',
         class: 'dock-quick-btn',
         onclick: () => {
-          selection.setProvider(null);
-          setTimeout(() => document.getElementById('btn-trending-toggle')?.click(), 30);
+          if (typeof selection.openTrending === 'function') selection.openTrending();
+          else {
+            selection.setProvider(null);
+            setTimeout(() => document.getElementById('btn-trending-toggle')?.click(), 30);
+          }
         },
       }, '🔥 Vitrin & Trendler'),
       h('button', {
         type: 'button',
         class: 'dock-quick-btn random',
-        onclick: () => {
-          const rndBtn = document.getElementById('btn-random-movie');
-          if (rndBtn) rndBtn.click();
+        onclick: (e) => {
+          if (typeof selection.pickRandom === 'function') selection.pickRandom(e.currentTarget);
+          else document.getElementById('btn-random-movie')?.click();
         },
       }, '🎲 Rastgele Film'),
       h('button', {
@@ -416,8 +419,8 @@ export function renderHome(app) {
       }, 40);
     },
     onRandomMovie: () => {
-      const rndBtn = document.getElementById('btn-random-movie');
-      if (rndBtn) rndBtn.click();
+      if (typeof selection.pickRandom === 'function') selection.pickRandom();
+      else document.getElementById('btn-random-movie')?.click();
     },
   });
 
@@ -510,6 +513,8 @@ export function renderHome(app) {
 export function destroyHome() {
   clearInterval(refreshTimer);
   refreshTimer = null;
+  clearTimeout(homeDrawTimer);
+  homeDrawTimer = null;
   if (typeof unsubHomeStore === 'function') {
     unsubHomeStore();
     unsubHomeStore = null;

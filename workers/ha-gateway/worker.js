@@ -206,6 +206,12 @@ export default {
     // 4. Native WebSockets (/ws/*) -> route directly to stateful ASGI Secondary Origin (Render)
     const upgrade = (request.headers.get("Upgrade") || "").toLowerCase();
     if (upgrade === "websocket") {
+      if (Date.now() < secondaryCircuitOpenUntil) {
+        return new Response("WebSocket origin temporarily unavailable", {
+          status: 503,
+          headers: { "Cache-Control": "no-store", "Retry-After": "5" },
+        });
+      }
       const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
       const wsTarget = new URL(url.pathname + url.search, secondaryBase);
       const clientIp = request.headers.get("CF-Connecting-IP") || "";
@@ -218,10 +224,22 @@ export default {
         false
       );
       wsHeaders.set("Upgrade", "websocket");
-      return fetch(wsTarget.toString(), {
-        method: request.method,
-        headers: wsHeaders,
-      });
+      try {
+        const wsResp = await fetch(wsTarget.toString(), {
+          method: request.method,
+          headers: wsHeaders,
+        });
+        if (wsResp.status >= 502) {
+          secondaryCircuitOpenUntil = Date.now() + 15_000;
+        }
+        return wsResp;
+      } catch {
+        secondaryCircuitOpenUntil = Date.now() + 15_000;
+        return new Response("WebSocket origin unreachable", {
+          status: 503,
+          headers: { "Cache-Control": "no-store", "Retry-After": "5" },
+        });
+      }
     }
 
     // 5. Buffer non-streaming request bodies (<= 4.2 MB) so POST/PUT/DELETE can failover cleanly
@@ -291,14 +309,10 @@ export default {
     if (prefersStatefulOrigin && Date.now() >= secondaryCircuitOpenUntil) {
       try {
         const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
-        if (statefulResp.status < 502 && statefulResp.status !== 429) {
+        if (!shouldFailoverResponse(statefulResp)) {
           return statefulResp;
         }
-        if (statefulResp.status >= 502 && !isAppManagedError(statefulResp)) {
-          secondaryCircuitOpenUntil = Date.now() + 20_000;
-        } else {
-          return statefulResp;
-        }
+        secondaryCircuitOpenUntil = Date.now() + 20_000;
       } catch {
         secondaryCircuitOpenUntil = Date.now() + 20_000;
       }
@@ -310,10 +324,17 @@ export default {
       }
     }
 
+    // Mirror auth logout to stateful secondary origin so in-memory token caches evict immediately across origins
+    if (request.method === "POST" && url.pathname === "/api/auth/logout" && Date.now() >= secondaryCircuitOpenUntil) {
+      ctx.waitUntil(
+        fetchSecondary(request, url, bodyBuf, env, "render-eu-logout-mirror").catch(() => null)
+      );
+    }
+
     if (
       url.hostname.endsWith(".workers.dev") ||
       env.FORCE_SECONDARY === "1" ||
-      Date.now() < primaryCircuitOpenUntil
+      (Date.now() < primaryCircuitOpenUntil && Date.now() >= secondaryCircuitOpenUntil)
     ) {
       return fetchSecondary(request, url, bodyBuf, env);
     }

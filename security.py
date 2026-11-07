@@ -329,9 +329,11 @@ _SAFE_HOST_CACHE: "OrderedDict[Tuple[str, int], float]" = OrderedDict()
 _SAFE_HOST_LOCK = threading.Lock()
 
 
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+
+
 def is_safe_public_url(url: str) -> bool:
-    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local ranges (SSRF guard)."""
-    import ipaddress
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT ranges (SSRF guard)."""
     import socket
     import urllib.parse
 
@@ -346,12 +348,23 @@ def is_safe_public_url(url: str) -> bool:
             exp = _SAFE_HOST_CACHE.get((host, port))
             if exp and exp > now_t:
                 return True
-        for info in socket.getaddrinfo(host, port):
+        infos = socket.getaddrinfo(host, port)
+        if not infos:
+            return False
+        for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+                or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK)
+            ):
                 return False
         with _SAFE_HOST_LOCK:
-            _SAFE_HOST_CACHE[(host, port)] = now_t + 90.0
+            _SAFE_HOST_CACHE[(host, port)] = now_t + 5.0
             while len(_SAFE_HOST_CACHE) > 1024:
                 _SAFE_HOST_CACHE.popitem(last=False)
         return True

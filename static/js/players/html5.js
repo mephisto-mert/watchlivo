@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261107_v136';
-import { expectedPosition } from '../sync.js?v=20261107_v136';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v136';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v136';
-import { ensureHlsJs } from './hls-loader.js?v=20261107_v136';
+import { SubtitleDubController } from './subtitles.js?v=20261107_v137';
+import { expectedPosition } from '../sync.js?v=20261107_v137';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261107_v137';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261107_v137';
+import { ensureHlsJs } from './hls-loader.js?v=20261107_v137';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -73,7 +73,6 @@ export class Html5Adapter {
       startAt = 0;
       this.caps = { ...this.caps, seek: false, live: true };
     }
-    setReferrerMeta('no-referrer');
     ensureIosPlaybackAudioSession();
     this.media = media || {};
     this.wantPlaying = Boolean(autoplay);
@@ -83,7 +82,10 @@ export class Html5Adapter {
     this.playingReported = false;
     this.readyReported = false;
     clearTimeout(this.watchdogTimer);
+    clearTimeout(this._hlsRetryTimer);
     const v = document.createElement('video');
+    try { v.referrerPolicy = 'no-referrer'; } catch (_) {}
+    v.setAttribute('referrerpolicy', 'no-referrer');
     let initialAutoPip = true;
     try { initialAutoPip = localStorage.getItem('vortex_auto_pip') !== 'off'; } catch (_) {}
     applyOptimalPipAttributes(v, initialAutoPip);
@@ -167,6 +169,7 @@ export class Html5Adapter {
         bgYtEl = document.createElement('iframe');
         bgYtEl.className = 'music-bg-mv';
         bgYtEl.allow = 'autoplay; encrypted-media';
+        bgYtEl.referrerPolicy = 'origin';
         bgYtEl.dataset.clipSrc = `https://www.youtube.com/embed/${clipVid}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&loop=1&playlist=${clipVid}&modestbranding=1&playsinline=1&rel=0`;
         bgYtEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;z-index:2;pointer-events:none;display:none;';
       }
@@ -674,7 +677,7 @@ export class Html5Adapter {
     };
     this._withProxySegs = withProxySegs;
 
-    let triedLiveRefresh = false;
+    let lastLiveRefreshAt = 0;
     const handleExhaustedCandidates = async (srcUrl, doneCb) => {
       const proxied = withProxySegs(srcUrl || this.currentUrl);
       if (!triedProxySegs && proxied && proxied !== (srcUrl || this.currentUrl)) {
@@ -682,8 +685,9 @@ export class Html5Adapter {
         loadCandidateUrl(proxied, doneCb);
         return;
       }
-      if (!triedLiveRefresh && !this.isMusic && !media?.live && (media?.tmdbId || media?.imdbId || media?.title)) {
-        triedLiveRefresh = true;
+      const nowRefreshMs = Date.now();
+      if ((nowRefreshMs - lastLiveRefreshAt > 60000) && !this.isMusic && !media?.live && (media?.tmdbId || media?.imdbId || media?.title)) {
+        lastLiveRefreshAt = nowRefreshMs;
         try {
           const qs = new URLSearchParams({
             provider: String(media.catalogProvider || media.provider || 'cinema'),
@@ -704,8 +708,12 @@ export class Html5Adapter {
               if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
               if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
               const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
+              seenUrls.clear();
               const prevLen = alts.length;
-              for (const fu of freshList) pushAlt(fu);
+              for (const fu of freshList) {
+                if (fu !== this.currentUrl) pushAlt(fu);
+              }
+              if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
               const addedAny = alts.length > prevLen;
               if (addedAny && nativeAltIdx < alts.length) {
                 triedProxySegs = false;
@@ -933,14 +941,21 @@ export class Html5Adapter {
         fireDoneOnce();
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
+        const errCode = Number(data?.response?.code || 0);
+        const isHardUpstreamDead = [403, 404, 410].includes(errCode);
         if (!data?.fatal) {
-          if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+          if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
             this._switchedToProxySegs = true;
             const proxied = withProxySegs(srcUrl);
             if (proxied && proxied !== srcUrl) {
               loadCandidateUrl(proxied, doneCb);
               return;
             }
+          }
+          if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError') && nativeAltIdx < alts.length) {
+            this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
+            loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+            return;
           }
           if ((data?.details === 'decryptError' || data?.details === 'keyLoadError') && nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
@@ -1005,13 +1020,15 @@ export class Html5Adapter {
               }
             }
             netRetries += 1;
-            if (netRetries <= (nativeAltIdx < alts.length ? 1 : 2)) {
-              setTimeout(() => {
+            if (!isHardUpstreamDead && netRetries <= (nativeAltIdx < alts.length ? 1 : 2)) {
+              clearTimeout(this._hlsRetryTimer);
+              this._hlsRetryTimer = setTimeout(() => {
+                if (this._destroyed || this.video !== v) return;
                 try { this.hls?.startLoad(curResume >= 5 ? curResume : -1); } catch (err) { /* ignore */ }
               }, 350 * netRetries);
             } else if (nativeAltIdx < alts.length) {
               netRetries = 0;
-              this._reportStreamHealth?.(srcUrl, false, { stalled: false });
+              this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode || undefined });
               loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             } else if (canNativeHls && !triedHlsFallback) {
               triedHlsFallback = true;
@@ -1024,7 +1041,8 @@ export class Html5Adapter {
               v.load();
               v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
               if (curResume >= 5) {
-                v.addEventListener('loadedmetadata', () => { try { v.currentTime = curResume; } catch (e) {} }, { once: true });
+                this.initialSeekPending = curResume;
+                this._bindInitSeekIfNeeded?.();
               }
               if (this.wantPlaying) this.tryPlay();
             } else {
@@ -1045,7 +1063,8 @@ export class Html5Adapter {
               v.load();
               v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
               if (curResume >= 5) {
-                v.addEventListener('loadedmetadata', () => { try { v.currentTime = curResume; } catch (e) {} }, { once: true });
+                this.initialSeekPending = curResume;
+                this._bindInitSeekIfNeeded?.();
               }
               if (this.wantPlaying) this.tryPlay();
             } else if (nativeAltIdx < alts.length) {
@@ -1137,6 +1156,7 @@ export class Html5Adapter {
             this.initialSeekPending = 0;
           }
         };
+        v._wlInitSeekFn = enforcePrimaryInitialSeek;
         ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
           v.addEventListener(evName, enforcePrimaryInitialSeek);
         });
@@ -1332,6 +1352,9 @@ export class Html5Adapter {
             loadCandidateUrl(alts[nativeAltIdx++]);
           } else if (this.hls) {
             try { this.hls.recoverMediaError(); } catch (err) { /* ignore */ }
+            handleExhaustedCandidates(this.currentUrl);
+          } else {
+            handleExhaustedCandidates(this.currentUrl);
           }
         }
       } else {
@@ -2199,23 +2222,24 @@ export class Html5Adapter {
     clearTimeout(this.resumeTimer);
     clearTimeout(this._pipPauseTimer);
     clearTimeout(this.watchdogTimer);
+    clearTimeout(this._hlsRetryTimer);
     this._syncAndroidPipState(false);
     if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && !window.__kinoxHost?._nativeIosPipActive) {
       try { window.watchlivoNativePiP?.('stop', {}); } catch (_) {}
     }
     clearInterval(this.playbackWatchdog);
-    setReferrerMeta('strict-origin-when-cross-origin');
     this.subs.stopDubAudio();
     this.subs.destroy();
     if (this.vinylBtn) { try { this.vinylBtn.remove(); } catch (e) { /* ignore */ } this.vinylBtn = null; }
     if (this.bgMvEl) { try { this.bgMvEl.pause(); this.bgMvEl.removeAttribute('src'); this.bgMvEl.remove(); } catch (e) { /* ignore */ } this.bgMvEl = null; }
     if (this.bgYtEl) { try { this.bgYtEl.removeAttribute('src'); this.bgYtEl.remove(); } catch (e) { /* ignore */ } this.bgYtEl = null; }
     if (this.mashupHlsB) { try { this.mashupHlsB.detachMedia(); this.mashupHlsB.destroy(); } catch (e) { /* ignore */ } this.mashupHlsB = null; }
-    if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); this.mashupDeckB.remove(); } catch (e) { /* ignore */ } this.mashupDeckB = null; }
+    if (this.mashupDeckB) { try { releaseMediaBoost(this.mashupDeckB); this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); this.mashupDeckB.remove(); } catch (e) { /* ignore */ } this.mashupDeckB = null; }
     clearInterval(this._musicPipTimer);
     if (this.iosPipVideo) {
       try {
         this.iosPipVideo.pause();
+        this.iosPipVideo.srcObject?.getTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
         this.iosPipVideo.srcObject = null;
         this.iosPipVideo.removeAttribute('src');
         this.iosPipVideo.remove();
@@ -2224,6 +2248,7 @@ export class Html5Adapter {
     }
     if (this.video) {
       try {
+        releaseMediaBoost(this.video);
         this.video.pause();
         this.video.removeAttribute('src');
         this.video.load();

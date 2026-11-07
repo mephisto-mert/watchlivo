@@ -1,9 +1,9 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261107_v136';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261107_v136';
-import { renderHome, destroyHome } from './views/home.js?v=20261107_v136';
-import { api } from './api.js?v=20261107_v136';
-import { h, toast } from './ui.js?v=20261107_v136';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261107_v137';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261107_v137';
+import { renderHome, destroyHome } from './views/home.js?v=20261107_v137';
+import { api } from './api.js?v=20261107_v137';
+import { h, toast } from './ui.js?v=20261107_v137';
 
 let _meshMod = null;
 let _meshModPromise = null;
@@ -11,7 +11,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261107_v136')
+    _meshModPromise = import('./views/mesh.js?v=20261107_v137')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -108,12 +108,17 @@ async function route() {
   const app = document.getElementById('app');
   const { homeRoot, meshRoot } = ensureViewRoots(app);
   set({ route: r });
-  if (r.name === 'mesh') {
-    document.body.classList.remove('mesh-minimized');
+  document.body.classList.toggle('in-room', r.name === 'mesh');
+  const closeNavPopups = () => {
     document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => {
+      if (el.dataset?.persistOnNavigate === '1') return;
       if (typeof el._closePopup === 'function') el._closePopup();
       else el.remove();
     });
+  };
+  if (r.name === 'mesh') {
+    document.body.classList.remove('mesh-minimized');
+    closeNavPopups();
     if (current === 'home') destroyHome();
     homeRoot.classList.add('hidden');
     meshRoot.classList.remove('hidden');
@@ -145,10 +150,7 @@ async function route() {
       }
     }
   } else {
-    document.querySelectorAll('.modal-backdrop, .popup-backdrop').forEach((el) => {
-      if (typeof el._closePopup === 'function') el._closePopup();
-      else el.remove();
-    });
+    closeNavPopups();
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
       document.body.classList.add('mesh-minimized');
@@ -179,6 +181,15 @@ export function navigate(path) {
 window.vortexNavigate = navigate;
 
 async function boot() {
+  document.querySelector('.skip-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = document.querySelector('#mesh-root:not(.hidden)') || document.getElementById('home-main') || document.getElementById('app');
+    if (target instanceof HTMLElement) {
+      if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+      try { target.focus({ preventScroll: true }); } catch (_) {}
+      try { target.scrollIntoView({ block: 'start' }); } catch (_) {}
+    }
+  });
   if (navigator.userAgent.includes('WatchlivoApp') || window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP || window.Android || navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches) {
     document.documentElement.classList.add('is-apk', 'is-native-apk');
   }
@@ -373,7 +384,7 @@ async function boot() {
         }),
       }).catch(() => {});
     }
-    if (!isRedirectPending && (!location.hash || location.hash === '#/' || location.hash === '#')) {
+    if (!isRedirectPending && (sp.get('login') === '1' || sp.get('auth') === '1')) {
       profileSetup({ dismissable: true, onDone: start });
     }
   }
@@ -455,7 +466,7 @@ function initPresenceLifecycle() {
 function initRaveNotifications() {
   let swReg = null;
   if ('serviceWorker' in navigator && !window.isWatchlivoNativeIOS && !window.Android) {
-    navigator.serviceWorker.register('/sw.js?v=20261107_v136', { updateViaCache: 'none' }).then((reg) => {
+    navigator.serviceWorker.register('/sw.js?v=20261107_v137', { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
     navigator.serviceWorker.addEventListener('message', (event) => {

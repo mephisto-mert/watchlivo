@@ -180,10 +180,34 @@ export function applyElementVolume(el, effectivePct, muted = false, opts = {}) {
   }
 }
 
+export function releaseMediaBoost(el) {
+  if (!el) return;
+  const entry = _mediaNodes.get(el);
+  if (!entry) return;
+  try { entry.source?.disconnect(); } catch (_) {}
+  try { entry.eqLow?.disconnect(); } catch (_) {}
+  try { entry.gain?.disconnect(); } catch (_) {}
+  try { entry.limiter?.disconnect(); } catch (_) {}
+  _mediaNodes.delete(el);
+}
+
+export function releaseStreamBoost(audioEl) {
+  if (!audioEl) return;
+  const node = _streamNodes.get(audioEl);
+  if (!node) return;
+  try { node.source?.disconnect(); } catch (_) {}
+  try { node.gain?.disconnect(); } catch (_) {}
+  try { node.limiter?.disconnect(); } catch (_) {}
+  _streamNodes.delete(audioEl);
+}
+
 export function applyStreamBoost(audioEl, stream, pct = 100) {
   if (!audioEl) return;
   const clamped = Math.max(0, Math.min(150, Number(pct) || 0));
-  if (clamped <= 100 && !_streamNodes.has(audioEl)) {
+  if (clamped <= 100) {
+    if (_streamNodes.has(audioEl)) {
+      releaseStreamBoost(audioEl);
+    }
     try { audioEl.volume = Math.max(0, Math.min(1, clamped / 100)); } catch (e) { /* ignore */ }
     return;
   }

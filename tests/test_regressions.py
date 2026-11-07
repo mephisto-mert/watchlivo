@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261107_v136 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261107_v137 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261107_v136", index_html)
+        self.assertIn("20261107_v137", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2528,7 +2528,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261107_v136", sw_js)
+        self.assertIn("v20261107_v137", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2581,12 +2581,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261107_v136', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261107_v137', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261107_v136', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261107_v137', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261107_v136')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261107_v137')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -2892,6 +2892,135 @@ console.log('HA_UNIT_TESTS_PASSED');
         chk = self.client.get("/download/windows?check=1")
         self.assertEqual(chk.status_code, 200)
         self.assertIn("available", chk.json())
+
+    def test_v137_second_pass_audit_regressions(self):
+        import os as _os
+        import base64 as _b64
+        from unittest.mock import patch
+
+        # 1. Voice-relay requires valid clientToken for both POST and GET
+        cr = self.client.post("/api/rooms/create", json={"name": "V137 Relay Oda", "creator": "Lider", "clientId": "v137host"}).json()
+        rid = cr["room"]["id"]
+        host_tok = cr["clientToken"]
+        unauth_post = self.client.post(
+            f"/api/rave/voice-relay/{rid}",
+            json={"clientId": "v137host", "seq": 1, "mime": "audio/webm", "b64": _b64.b64encode(b"test_pcm_bytes").decode("ascii")},
+        )
+        self.assertEqual(unauth_post.status_code, 403)
+        unauth_get = self.client.get(f"/api/rave/voice-relay/{rid}", params={"clientId": "v137host", "sinceTs": 0})
+        self.assertEqual(unauth_get.status_code, 403)
+        auth_post = self.client.post(
+            f"/api/rave/voice-relay/{rid}",
+            json={"clientId": "v137host", "clientToken": host_tok, "seq": 1, "mime": "audio/webm", "b64": _b64.b64encode(b"test_pcm_bytes").decode("ascii")},
+        )
+        self.assertEqual(auth_post.status_code, 200)
+        auth_get = self.client.get(f"/api/rave/voice-relay/{rid}", params={"clientId": "v137host", "clientToken": host_tok, "sinceTs": 0})
+        self.assertEqual(auth_get.status_code, 200)
+
+        # 2. POST /api/rave/new-releases requires X-Admin-Secret when ADMIN_SECRET is configured
+        with patch.dict(_os.environ, {"ADMIN_SECRET": "v137_admin_gate"}):
+            nr_denied = self.client.post("/api/rave/new-releases", json={"title": "Yetkisiz", "url": "https://watchlivo.online/"})
+            self.assertEqual(nr_denied.status_code, 403)
+
+        # 3. GET /api/rooms/{id} masks private & friends room metadata for outsiders while returning full info to members
+        priv_cr = self.client.post(
+            "/api/rooms/create",
+            json={
+                "name": "Gizli Film Gecesi",
+                "privacy": "private",
+                "creator": "GizliHost",
+                "clientId": "privhost1",
+                "media": {"provider": "mp4", "title": "Çok Gizli Film", "url": "https://watchlivo.online/static/test.mp4"},
+            },
+        ).json()
+        priv_id = priv_cr["room"]["id"]
+        priv_tok = priv_cr["clientToken"]
+        outsider_info = self.client.get(f"/api/rooms/{priv_id}").json()["room"]
+        self.assertEqual(outsider_info["name"], "🔒 Özel Oda")
+        self.assertEqual(outsider_info["media"]["url"], "")
+        self.assertEqual(outsider_info["media"]["title"], "🔒 Özel Oda")
+        self.assertEqual(outsider_info["creator"], "")
+        member_info = self.client.get(f"/api/rooms/{priv_id}", params={"clientToken": priv_tok}).json()["room"]
+        self.assertEqual(member_info["media"]["title"], "Çok Gizli Film")
+
+        # 4. _snapshot_room_event_ids + _mark_new_local_events_delivered keeps pre-existing remote events undelivered
+        rm_ev = rooms.new_room("v137-ev-room", "Ev Oda", "public", "leader", "Host", "h1")
+        rm_ev["events"] = [{"id": "remote_ev_keep_1", "type": "chat", "ts": rooms.now()}]
+        pre_ids = rooms._snapshot_room_event_ids(rm_ev)
+        rm_ev["events"].append({"id": "local_ev_new_2", "type": "chat", "ts": rooms.now()})
+        rooms._mark_new_local_events_delivered(rm_ev, pre_ids)
+        self.assertNotIn("remote_ev_keep_1", rooms._DELIVERED_EV_IDS)
+        self.assertIn("local_ev_new_2", rooms._DELIVERED_EV_IDS)
+
+        # 5. Empty-room freeze (_frozenByEmpty) resumes on rejoin, whereas explicit host pause stays paused
+        pause_cr = self.client.post(
+            "/api/rooms/create",
+            json={
+                "name": "Pause Oda",
+                "creator": "LiderP",
+                "clientId": "phost1",
+                "media": {"provider": "mp4", "title": "Test MP4", "url": "https://watchlivo.online/static/test.mp4", "duration": 3600},
+            },
+        ).json()
+        p_rid = pause_cr["room"]["id"]
+        p_tok = pause_cr["clientToken"]
+        self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "init", "clientId": "phost1", "clientToken": p_tok, "username": "LiderP"})
+        self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "leave", "clientId": "phost1", "clientToken": p_tok})
+        rejoin_auto = self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "init", "clientId": "phost1", "clientToken": p_tok, "username": "LiderP"}).json()
+        self.assertTrue(rejoin_auto["room"]["media"]["playing"])
+        self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "pause", "clientId": "phost1", "clientToken": p_tok, "currentTime": 120.0, "playing": False})
+        self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "leave", "clientId": "phost1", "clientToken": p_tok})
+        rejoin_paused = self.client.post(f"/api/rooms/{p_rid}/sync", json={"type": "init", "clientId": "phost1", "clientToken": p_tok, "username": "LiderP"}).json()
+        self.assertFalse(rejoin_paused["room"]["media"]["playing"])
+
+        # 6. GET /desktop-auth.html serves 200 with no-store & X-Robots-Tag: noindex, nofollow
+        da_res = self.client.get("/desktop-auth.html?port=49223&state=teststate")
+        self.assertEqual(da_res.status_code, 200)
+        self.assertIn("no-store", da_res.headers.get("cache-control", "").lower())
+        self.assertIn("noindex", da_res.headers.get("x-robots-tag", "").lower())
+
+        # 7. Stream-manifest rewrites #EXT-X-KEY & #EXT-X-MAP to /api/rave/stream-proxy without .m3u8 corruption & respects AUDIO GROUP-ID
+        fake_master = (
+            "#EXTM3U\n"
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_low",LANGUAGE="en",NAME="English",DEFAULT=YES,URI="https://93.184.216.34/aud_low/en.m3u8"\n'
+            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_hi",LANGUAGE="tr",NAME="Türkçe",DEFAULT=YES,URI="https://93.184.216.34/aud_hi/tr.m3u8"\n'
+            '#EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO="aud_low"\n'
+            "https://93.184.216.34/v/480/index.m3u8\n"
+            '#EXT-X-STREAM-INF:BANDWIDTH=2800000,AUDIO="aud_hi"\n'
+            "https://93.184.216.34/v/1080/index.m3u8\n"
+        )
+        fake_media = (
+            "#EXTM3U\n"
+            "#EXT-X-TARGETDURATION:6\n"
+            '#EXT-X-KEY:METHOD=AES-128,URI="https://93.184.216.34/keys/index-key1"\n'
+            '#EXT-X-MAP:URI="https://93.184.216.34/init/q/map.mp4"\n'
+            "#EXTINF:6.0,\n"
+            "https://93.184.216.34/seg/index-001.txt\n"
+            "#EXT-X-ENDLIST\n"
+        )
+        class _FakeResp:
+            def __init__(self, body_txt, url_s):
+                self._b = body_txt.encode("utf-8")
+                self.url = url_s
+            def read(self, *_a):
+                return self._b
+            def geturl(self):
+                return self.url
+            def __enter__(self):
+                return self
+            def __exit__(self, *_a):
+                return False
+
+        with patch.object(server, "public_http_url", side_effect=lambda u: u if str(u).startswith("https://") else ""), \
+             patch.object(server, "_public_open", side_effect=[_FakeResp(fake_master, "https://93.184.216.34/master.m3u8"), _FakeResp(fake_media, "https://93.184.216.34/v/1080/index.m3u8")]):
+            m_master = self.client.get("/api/rave/stream-manifest", params={"u": "https://93.184.216.34/master.m3u8", "proxy_segs": "1", "aud": "tr"})
+            self.assertEqual(m_master.status_code, 200)
+            self.assertIn('GROUP-ID="aud_low"', m_master.text)
+            self.assertIn('GROUP-ID="aud_hi"', m_master.text)
+            m_seg = self.client.get("/api/rave/stream-manifest", params={"u": "https://93.184.216.34/v/1080/index.m3u8", "proxy_segs": "1"})
+            self.assertEqual(m_seg.status_code, 200)
+            self.assertNotIn("ext=.m3u8", m_seg.text)
+            self.assertEqual(m_seg.text.count("/api/rave/stream-proxy"), 3)
 
 
 if __name__ == '__main__':

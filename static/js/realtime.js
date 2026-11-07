@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261107_v136';
-import { api } from './api.js?v=20261107_v136';
-import { state } from './store.js?v=20261107_v136';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261107_v136';
+import { clock } from './sync.js?v=20261107_v137';
+import { api } from './api.js?v=20261107_v137';
+import { state } from './store.js?v=20261107_v137';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261107_v137';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -31,6 +31,7 @@ export class MeshConnection {
     this.seenEventIds = new Set();
     this.seenSignalIds = new Set();
     this.seenP2pIds = new Set();
+    this._inFlightAborts = new Set();
     this.instanceId = 'inst_' + Math.random().toString(36).slice(2, 10);
     this.outQueue = [];
     this.flushing = false;
@@ -112,7 +113,9 @@ export class MeshConnection {
           this._addBounded(this.seenEventIds, ev.id);
         }
       }
-      this.onMessage?.({ ...ev, viaP2p: true });
+      const safeEv = { ...ev, viaP2p: true };
+      if (pkt.fromCid) safeEv.cid = pkt.fromCid;
+      this.onMessage?.(safeEv);
     }
   }
 
@@ -380,10 +383,18 @@ export class MeshConnection {
       if (this.syncToken) {
         reqBody.syncToken = this.syncToken;
       }
-      const res = await api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
-        method: 'POST', timeout: 12000,
-        body: reqBody,
-      });
+      const reqAbort = new AbortController();
+      this._inFlightAborts.add(reqAbort);
+      let res;
+      try {
+        res = await api(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+          method: 'POST', timeout: 12000,
+          body: reqBody,
+          signal: reqAbort.signal,
+        });
+      } finally {
+        this._inFlightAborts.delete(reqAbort);
+      }
       if (this.closed) return false;
       this.httpFailCount = 0;
       if (res?.roomClosed) {
@@ -481,6 +492,14 @@ export class MeshConnection {
             if (!isSelfHost || Number(res.media.meshStateTime || 0) >= Number(state.mesh.media.meshStateTime || 0) - 0.2) {
               Object.assign(state.mesh.media, this.lastRoom.media);
             }
+          }
+        }
+        if (Array.isArray(res.polls)) {
+          const prevPollsJson = JSON.stringify(this.lastRoom.polls || []);
+          const nextPollsJson = JSON.stringify(res.polls);
+          if (prevPollsJson !== nextPollsJson) {
+            this.lastRoom.polls = res.polls;
+            stateMutated = true;
           }
         }
         if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
@@ -616,6 +635,12 @@ export class MeshConnection {
 
   close(explicitLeave = false, closeRoomForAll = false) {
     if (this.closed) return;
+    if (this._inFlightAborts?.size) {
+      for (const ctl of this._inFlightAborts) {
+        try { ctl.abort(); } catch (_) {}
+      }
+      this._inFlightAborts.clear();
+    }
     if (explicitLeave) {
       const shouldCloseRoom = Boolean(closeRoomForAll);
       if (shouldCloseRoom) {

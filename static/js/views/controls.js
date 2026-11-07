@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v136';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v136';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v136';
-import { getProvider } from '../providers.js?v=20261107_v136';
-import { expectedPosition } from '../sync.js?v=20261107_v136';
-import { thumbFor } from './lobby.js?v=20261107_v136';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v136';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v136';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v136';
-import { avatar } from '../profile.js?v=20261107_v136';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261107_v137';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261107_v137';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261107_v137';
+import { getProvider } from '../providers.js?v=20261107_v137';
+import { expectedPosition } from '../sync.js?v=20261107_v137';
+import { thumbFor } from './lobby.js?v=20261107_v137';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261107_v137';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261107_v137';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261107_v137';
+import { avatar } from '../profile.js?v=20261107_v137';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1628,7 +1628,7 @@ export function buildControls(frame, ctx) {
     const rawSrcUrl = String(m.sourceUrl || '').trim();
     const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
     const box = h('div', { style: { minHeight: '280px' } });
-    popup({ title: `📺 ${cleanTitle} — Sezon & Bölüm Seç`, content: box, options: [{ label: 'Kapat' }] });
+    const epModal = popup({ title: `📺 ${cleanTitle} — Sezon & Bölüm Seç`, content: box, options: [{ label: 'Kapat' }] });
     renderSeriesPicker(
       {
         id: m.id || '',
@@ -1646,9 +1646,9 @@ export function buildControls(frame, ctx) {
       },
       prov,
       box,
-      () => document.querySelector('.popup-backdrop')?.remove(),
+      () => epModal.close(),
       async (nextMedia) => {
-        document.querySelector('.popup-backdrop')?.remove();
+        epModal.close();
         const pickFn = actions?.pickMedia || ctx.actions?.pickMedia || ctx.pickMedia;
         if (typeof pickFn === 'function') {
           await pickFn({
@@ -1830,7 +1830,7 @@ export function buildControls(frame, ctx) {
           class: `opt ${curAudioId === t.id ? 'on' : ''}`,
           onclick: async (e) => {
             e.stopPropagation();
-            if (host.autoplayBlocked || host.muted) doUnlockAudio();
+            if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
             await host.adapter?.setAudioTrack?.(t.id);
             ctx.sync?.kick();
             showOverlay(`🎙️ Ses: ${t.label}`, 2000);
@@ -1937,7 +1937,7 @@ export function buildControls(frame, ctx) {
         class: `opt ${curAudioId === t.id ? 'on' : ''}`,
         onclick: async (e) => {
           e.stopPropagation();
-          if (host.autoplayBlocked || host.muted) doUnlockAudio();
+          if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
           await host.adapter?.setAudioTrack?.(t.id);
           ctx.sync?.kick();
           showOverlay(`🎙️ Ses: ${t.label}`, 2000);
@@ -1993,7 +1993,7 @@ export function buildControls(frame, ctx) {
           class: `opt ${isOn ? 'on' : ''}`,
           onclick: (e) => {
             e.stopPropagation();
-            if (host.autoplayBlocked || host.muted) doUnlockAudio();
+            if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
             m.url = srv.url;
             host.adapter?.switchStreamSource?.(srv.url);
             showOverlay(srv.label, 2200);
@@ -2642,18 +2642,25 @@ export function buildControls(frame, ctx) {
     });
   }
 
+  const controlsBgTickListener = () => {
+    const mBg = state.mesh?.media;
+    if (!mBg) return;
+    updateMediaSessionPositionImmediate();
+    const curP = position();
+    const curD = duration();
+    if (!state.mesh?.curated && !mBg.isMusic && !mBg.live && curP > 12 && Date.now() - lastProgressSavedAt > 12000) {
+      lastProgressSavedAt = Date.now();
+      saveWatchProgress({ ...mBg, poster: mBg.poster || thumbFor(mBg) || mBg.thumbnail || '' }, curP, curD);
+    }
+  };
   if (typeof window !== 'undefined') {
-    const _prevBgSyncTick = window.__watchlivoBgSyncTick;
+    if (!(window.__watchlivoBgTickListeners instanceof Set)) {
+      window.__watchlivoBgTickListeners = new Set();
+    }
+    window.__watchlivoBgTickListeners.add(controlsBgTickListener);
     window.__watchlivoBgSyncTick = () => {
-      try { _prevBgSyncTick?.(); } catch (_) {}
-      const mBg = state.mesh?.media;
-      if (!mBg) return;
-      updateMediaSessionPositionImmediate();
-      const curP = position();
-      const curD = duration();
-      if (!state.mesh?.curated && !mBg.isMusic && !mBg.live && curP > 12 && Date.now() - lastProgressSavedAt > 12000) {
-        lastProgressSavedAt = Date.now();
-        saveWatchProgress({ ...mBg, poster: mBg.poster || thumbFor(mBg) || mBg.thumbnail || '' }, curP, curD);
+      for (const fn of Array.from(window.__watchlivoBgTickListeners || [])) {
+        try { fn(); } catch (_) {}
       }
     };
   }
@@ -2984,7 +2991,29 @@ export function buildControls(frame, ctx) {
       clearInterval(tickTimer);
       clearTimeout(uiTimer);
       clearTimeout(breakBannerTimer);
+      clearTimeout(overlayTimer);
+      clearTimeout(tapTimer);
+      clearTimeout(rippleTimer);
+      clearTimeout(desktopClickTimer);
       closeMenu();
+      if (typeof window !== 'undefined' && window.__watchlivoBgTickListeners instanceof Set) {
+        window.__watchlivoBgTickListeners.delete(controlsBgTickListener);
+      }
+      if (typeof navigator !== 'undefined' && 'mediaSession' in navigator) {
+        const ms = navigator.mediaSession;
+        for (const act of ['play', 'pause', 'stop', 'seekbackward', 'seekforward', 'seekto', 'previoustrack', 'nexttrack', 'enterpictureinpicture']) {
+          try { ms.setActionHandler(act, null); } catch (_) {}
+        }
+        try { ms.playbackState = 'none'; ms.metadata = null; } catch (_) {}
+      }
+      if (typeof document !== 'undefined') {
+        if (document.fullscreenElement) {
+          try { document.exitFullscreen?.().catch?.(() => {}); } catch (_) {}
+        } else if (document.webkitFullscreenElement) {
+          try { document.webkitExitFullscreen?.(); } catch (_) {}
+        }
+      }
+      try { screen.orientation?.unlock?.(); } catch (_) {}
       try { stageResizeObs?.disconnect?.(); } catch (e) { /* ignore */ }
       if (typeof document !== 'undefined') {
         document.removeEventListener('pointerdown', onDocMenuOutside);

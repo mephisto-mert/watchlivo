@@ -23,9 +23,14 @@ function _isSameOriginPath(path) {
   return false;
 }
 
-export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000 } = {}) {
+export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
+  const onExtAbort = () => ctl.abort();
+  if (extSignal) {
+    if (extSignal.aborted) ctl.abort();
+    else extSignal.addEventListener('abort', onExtAbort, { once: true });
+  }
   try {
     const hdrs = { ...(extraHeaders || {}) };
     if (body) hdrs['Content-Type'] = 'application/json';
@@ -50,6 +55,9 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders, t
     return data;
   } finally {
     clearTimeout(timer);
+    if (extSignal) {
+      try { extSignal.removeEventListener('abort', onExtAbort); } catch (_) {}
+    }
   }
 }
 

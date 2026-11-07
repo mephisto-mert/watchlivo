@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261107_v136
+// Watchlivo Service Worker v20261107_v137
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">
@@ -112,17 +112,18 @@ self.addEventListener('notificationclick', (event) => {
     if (parsed.origin === self.location.origin) targetUrl = parsed.pathname + parsed.search + parsed.hash;
   } catch (_) {}
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    (async () => {
+      const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
       for (const client of clientList) {
         if ('focus' in client) {
-          client.focus();
+          try { await client.focus(); } catch (_) {}
           client.postMessage({ type: 'WATCHLIVO_NOTIFICATION_CLICK', url: targetUrl });
           return;
         }
       }
       if (self.clients.openWindow) {
-        return self.clients.openWindow(targetUrl);
+        await self.clients.openWindow(targetUrl);
       }
-    }).catch(() => {})
+    })().catch(() => {})
   );
 });
