@@ -529,16 +529,21 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
                 "kind": "subtitles",
             })
     aud_tracks = []
+    is_anime_media = raw_prov == "anime" or clean_str(data.get("origLang"), 12).lower() == "ja"
     for at in (data.get("audioTracks") or [])[:6]:
         if isinstance(at, dict) and at.get("id"):
+            at_id = clean_str(at.get("id"), 20)
+            at_mode = clean_str(at.get("mode"), 20) or "stream"
+            if not is_anime_media and (at_id == "tr-ai-dub" or at_mode == "tts"):
+                continue
             au = _clean_media_url(at.get("url"), 1500, allow_relative=True, embed_only=False)
             aud_tracks.append({
-                "id": clean_str(at.get("id"), 20),
+                "id": at_id,
                 "lang": clean_str(at.get("lang"), 12),
                 "targetLang": clean_str(at.get("targetLang") or at.get("lang"), 12),
                 "audioLang": clean_str(at.get("audioLang") or at.get("lang"), 12),
                 "label": clean_str(at.get("label"), 60),
-                "mode": clean_str(at.get("mode"), 20) or "stream",
+                "mode": at_mode,
                 "url": au,
             })
     raw_intro = data.get("intro")

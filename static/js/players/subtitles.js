@@ -173,6 +173,10 @@ export class SubtitleDubController {
     this._loadingSubTrack = false;
     this.ttsDubActive = false;
     this.ttsLang = 'tr';
+    try {
+      if (localStorage.getItem('vortex_audio_lang') === 'tr-ai-dub') localStorage.removeItem('vortex_audio_lang');
+      if (localStorage.getItem('vortex_audio_proxy_pref') === 'tr-ai-dub') localStorage.removeItem('vortex_audio_proxy_pref');
+    } catch (e) {}
     this._ttsSpeaking = false;
     this._lastTtsText = '';
     this._ttsAudio = null;
@@ -1207,6 +1211,8 @@ export class SubtitleDubController {
 
   _canPlayTtsNow() {
     if (this._destroyed || !this.ttsDubActive) return false;
+    const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
+    if (!isAnime) return false;
     if (typeof document !== 'undefined' && document.body?.classList?.contains('mesh-minimized')) return false;
     const v = this.adapter?.video;
     if (this.adapter?.isPaused?.() || v?.paused || v?.ended) return false;
