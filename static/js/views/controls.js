@@ -1892,9 +1892,11 @@ export function buildControls(frame, ctx) {
       if (curSubId !== 'off') subOverlay.classList.remove('hidden');
       const prefBtn = h('button', { class: 'ctl-menu-subbtn', onclick: (e) => { e.stopPropagation(); renderMenuView('subtitlePreferences'); } }, '🎨 Gelişmiş');
       const prefs = getSubPrefs();
+      const isAnimeContent = host.media?.provider === 'anime' || host.media?.origLang === 'ja' || host.media?.type === 'anime';
+      const visibleAudioTracks = audioTracks.filter((t) => isAnimeContent || (t.id !== 'tr-ai-dub' && t.id !== 'en-ai-dub' && t.mode !== 'tts'));
       const audioSection = [
         h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.25em .7em .15em', color: '#a5b4fc' } }, '🎙️ Ses & Dublaj Seçimi'),
-        ...audioTracks.map((t) => h('div', {
+        ...visibleAudioTracks.map((t) => h('div', {
           class: `opt ${curAudioId === t.id ? 'on' : ''}`,
           onclick: async (e) => {
             e.stopPropagation();
@@ -1979,14 +1981,17 @@ export function buildControls(frame, ctx) {
       const curFps = Number(host.adapter?.subs?.fpsScale || 1.0);
       const offsetRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.2em' } },
         h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, `⏱️ Altyazı Senkron Kaydırma (${curOff >= 0 ? '+' : ''}${curOff} sn)`),
-        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(44px, 1fr))', gap: '4px' } },
+        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(36px, 1fr))', gap: '4px' } },
+          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-5.0); renderMenuView('subtitle'); } }, '-5s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-2.0); renderMenuView('subtitle'); } }, '-2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.5); renderMenuView('subtitle'); } }, '-0.5s'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.2); renderMenuView('subtitle'); } }, '-0.2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0, true); host.adapter?.subs?.setSubtitleFpsScale?.(1.0); renderMenuView('subtitle'); } }, 'Sıfırla'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.2); renderMenuView('subtitle'); } }, '+0.2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.5); renderMenuView('subtitle'); } }, '+0.5s'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(2.0); renderMenuView('subtitle'); } }, '+2s')),
+          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(2.0); renderMenuView('subtitle'); } }, '+2s'),
+          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(5.0); renderMenuView('subtitle'); } }, '+5s')),
+        h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'flex', gap: '4px' } },
+          h('button', { class: 'ctl-pref-pill', style: { flex: '1', color: '#38bdf8', fontWeight: 'bold' }, onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(45.0, true); renderMenuView('subtitle'); } }, '⚡ +45s Film İntro Eşitle'),
+          h('button', { class: 'ctl-pref-pill', style: { flex: '1', color: '#38bdf8', fontWeight: 'bold' }, onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-45.0, true); renderMenuView('subtitle'); } }, '⚡ -45s Film İntro Eşitle')),
         h('div', { class: 'dim', style: { fontSize: '.72em', marginBottom: '4px' } }, '🎞️ İleri Sahne FPS Hız Uyumu'),
         h('div', { class: 'ctl-pref-pills' },
           ...[[1.0, 'Normal (1:1)'], [1.042709, 'NTSC→PAL (23.976→25)'], [0.95904, 'PAL→NTSC (25→23.976)']].map(([sc, lbl]) => h('button', {
@@ -2001,7 +2006,9 @@ export function buildControls(frame, ctx) {
     }
 
     if (view === 'audio') {
-      const rows = audioTracks.map((t) => h('div', {
+      const isAnimeContent = host.media?.provider === 'anime' || host.media?.origLang === 'ja' || host.media?.type === 'anime';
+      const visibleAudioTracks = audioTracks.filter((t) => isAnimeContent || (t.id !== 'tr-ai-dub' && t.id !== 'en-ai-dub' && t.mode !== 'tts'));
+      const rows = visibleAudioTracks.map((t) => h('div', {
         class: `opt ${curAudioId === t.id ? 'on' : ''}`,
         onclick: async (e) => {
           e.stopPropagation();
@@ -2957,7 +2964,7 @@ export function buildControls(frame, ctx) {
       const sId = availSubs.length ? rawSId : 'off';
       const aId = host.adapter?.getSelectedAudioId?.() || 'orig';
       const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
-      const dubTag = (aId === 'tr-dub' || aId === 'tr-ai-dub') ? 'TR Dublaj' : (aId === 'en-dub' || aId === 'en-ai-dub') ? 'EN Dublaj' : 'Orijinal';
+      const dubTag = aId === 'tr-dub' ? 'TR Dublaj' : aId === 'tr-ai-dub' ? '🤖 AI Ses' : aId === 'en-dub' ? 'EN Dublaj' : aId === 'en-ai-dub' ? '🤖 EN AI' : 'Orijinal';
       const subSig = `${subTag} · ${dubTag}`;
       if (subPillBtn.dataset.sig !== subSig) {
         subPillBtn.dataset.sig = subSig;

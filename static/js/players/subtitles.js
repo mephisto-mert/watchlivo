@@ -301,14 +301,16 @@ export class SubtitleDubController {
       return origFallback || null;
     }
     if (pref === 'tr-ai-dub') {
-      if (studioTr) {
-        this.selectedAudioId = studioTr.id;
-        return studioTr;
-      }
-      const aiTrack = rawAudio.find((t) => t.id === 'tr-ai-dub' || t.mode === 'tts');
-      if (aiTrack) {
-        this.selectedAudioId = aiTrack.id;
-        return rawAudio.find((t) => t.mode === 'stream') || aiTrack;
+      const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
+      if (!isAnime || studioTr) {
+        pref = '';
+        try { localStorage.removeItem('vortex_audio_lang'); } catch (e) {}
+      } else {
+        const aiTrack = rawAudio.find((t) => t.id === 'tr-ai-dub' || t.mode === 'tts');
+        if (aiTrack) {
+          this.selectedAudioId = aiTrack.id;
+          return rawAudio.find((t) => t.mode === 'stream') || aiTrack;
+        }
       }
     }
     const exact = rawAudio.find((t) => t.id === pref || t.targetLang === pref || t.lang === pref || t.audioLang === pref);
@@ -1020,6 +1022,11 @@ export class SubtitleDubController {
     }
 
     if (track.mode === 'tts' || track.id === 'tr-ai-dub' || track.id === 'en-ai-dub') {
+      const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
+      if (isInit && !isAnime) {
+        this.ttsDubActive = false;
+        return track;
+      }
       this.ttsDubActive = true;
       this._lastTtsText = '';
       this.ttsLang = (track.audioLang || track.targetLang || track.lang || 'tr').toLowerCase();

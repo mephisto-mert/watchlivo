@@ -94,7 +94,7 @@ def _proxy_sig_ok(url: str, ref: str, sig: str) -> bool:
 
 
 def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
-    base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    base = (os.environ["STREAM_PROXY_BASE_URL"] if "STREAM_PROXY_BASE_URL" in os.environ else STREAM_PROXY_BASE_URL).strip().rstrip("/")
     u_low = (url or "").lower()
     if base and any(h in u_low for h in _WORKER_BYPASS_HOSTS):
         base = ""
@@ -3553,9 +3553,9 @@ _DDIZIMAG_BASE: str = "https://ddizimag.icu"
 
 
 def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: str = "", timeout: float = 3.8, max_bytes: int = MAX_PAGE_BYTES) -> tuple[bytes, str]:
-    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
+    edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL or "https://watchlivo-stream-proxy.jokallame0.workers.dev").strip().rstrip("/")
     if not edge_base or not edge_base.startswith("https://"):
-        raise RuntimeError("STREAM_PROXY_BASE_URL unavailable")
+        edge_base = "https://watchlivo-stream-proxy.jokallame0.workers.dev"
     q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
     if referer:
         q += f"&referer={urllib.parse.quote(referer, safe='')}"
@@ -4347,12 +4347,26 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                     m_sl = re.search(r"/dizi/([^/?#]+)", h_u)
                     slug = m_sl.group(1) if m_sl else h_u.rstrip("/").rsplit("/", 1)[-1]
                     h_u = f"https://www.hdfilmcehennemi.nl/dizi/{slug}/sezon-{s}/bolum-{e}/"
-            phtml = urllib.request.urlopen(urllib.request.Request(h_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
-            if _page_year_or_imdb_mismatch(phtml, mtype, year, s, imdb_id):
+            try:
+                phtml = urllib.request.urlopen(urllib.request.Request(h_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+            except Exception:
+                try:
+                    raw_b, _ = _edge_fetch_bytes(h_u, "https://www.hdfilmcehennemi.nl/", timeout=3.4)
+                    phtml = raw_b.decode("utf-8", errors="ignore")
+                except Exception:
+                    phtml = ""
+            if not phtml or _page_year_or_imdb_mismatch(phtml, mtype, year, s, imdb_id):
                 continue
             ifrs = re.findall(r'<iframe[^>]+(?:src|data-src)=["\'](https://hdfilmcehennemi\.mobi/video/embed/[^"\']+)["\']', phtml)
             for emb_u in list(dict.fromkeys(ifrs))[:2]:
-                emb_html = urllib.request.urlopen(urllib.request.Request(emb_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                try:
+                    emb_html = urllib.request.urlopen(urllib.request.Request(emb_u, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                except Exception:
+                    try:
+                        raw_eb, _ = _edge_fetch_bytes(emb_u, "https://www.hdfilmcehennemi.nl/", timeout=3.4)
+                        emb_html = raw_eb.decode("utf-8", errors="ignore")
+                    except Exception:
+                        emb_html = ""
                 m3u8_u = _decode_hdfc_mobi_html(emb_html)
                 if m3u8_u and m3u8_u.startswith("http"):
                     is_dual_hfnl = any(k in m3u8_u.lower() for k in ("dual", "trdual")) or "closedual" in emb_html.lower()
@@ -6029,7 +6043,8 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         })
     if not tracks:
         tracks.append({"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({plabel})", "mode": "stream", "url": stream_url})
-    if "tr" not in by_lang and not is_tr_native and tracks:
+    is_ja_or_anime = (orig_lang == "ja" or prov == "anime")
+    if is_ja_or_anime and "tr" not in by_lang and not is_tr_native and tracks:
         ai_ins_idx = 1 if len(tracks) >= 1 else 0
         tracks.insert(ai_ins_idx, {
             "id": "tr-ai-dub",
@@ -6499,7 +6514,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             alive_wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
             if not audio_tracks:
                 audio_tracks = [{"id": "src-1", "lang": "und", "targetLang": "und", "audioLang": "", "label": f"🎧 Varsayılan Ses ({label})", "mode": "stream", "url": alive_wrapped[0][0]}]
-                if orig_lang != "tr" and prov not in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv"):
+                if (orig_lang == "ja" or prov == "anime") and orig_lang != "tr" and prov not in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv"):
                     audio_tracks.append({
                         "id": "tr-ai-dub",
                         "lang": "tr",
