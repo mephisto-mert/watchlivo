@@ -6315,55 +6315,76 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
 def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request = None, auth_ctx: dict = None) -> bool:
     if is_authenticated:
         return True
-    if auth_ctx and isinstance(auth_ctx, dict):
-        if auth_ctx.get("is_authenticated") or auth_ctx.get("authenticated") or auth_ctx.get("max_auth"):
-            return True
-        if str(auth_ctx.get("authSatisfied") or "").strip().lower() in ("1", "true"):
-            return True
-        cookies = auth_ctx.get("cookies") or {}
-        if any(cookies.get(k) for k in ("st", "session", "max_profile", "max_session", "max_auth", "max_token", "hbomax_session")):
-            return True
-        headers = auth_ctx.get("headers") or {}
-        if any(headers.get(k) for k in ("x-max-auth", "x-max-token", "x-max-session")):
-            return True
-        params = auth_ctx.get("params") or {}
-        if any(str(params.get(k) or "").strip().lower() in ("1", "true") for k in ("authSatisfied", "max_auth", "auth", "authenticated")):
-            return True
+    uid = ""
+    if request is not None:
+        uid = _resolve_request_uid(request)
+    if not uid and auth_ctx and isinstance(auth_ctx, dict):
         uid = str(auth_ctx.get("userId") or auth_ctx.get("user_id") or auth_ctx.get("uid") or "").strip()
-        if uid:
-            fn = globals().get("has_active_max_connection")
-            if fn:
+        if not uid:
+            tok = auth_ctx.get("token") or auth_ctx.get("authToken")
+            if tok:
                 try:
-                    st = fn(uid)
-                    if st and st.get("has_active_connection"):
-                        return True
+                    import auth_engine
+                    claims = auth_engine.verify_any_token(tok)
+                    if isinstance(claims, dict) and claims.get("uid"):
+                        uid = str(claims["uid"]).strip()
                 except Exception:
                     pass
-
-    if request is not None:
+    if uid:
         try:
             fn = globals().get("has_active_max_connection")
             if fn:
-                status = fn(request)
-                if status and status.get("has_active_connection"):
+                st = fn(uid)
+                if st and st.get("has_active_connection"):
                     return True
         except Exception:
             pass
-
-        try:
-            rc = getattr(request, "cookies", {}) or {}
-            if any(rc.get(k) for k in ("st", "session", "max_profile", "max_session", "max_auth", "max_token", "hbomax_session")):
-                return True
-            rh = getattr(request, "headers", {}) or {}
-            if any(rh.get(k) for k in ("x-max-auth", "x-max-token", "x-max-session")):
-                return True
-            rq = getattr(request, "query_params", {}) or {}
-            if any(str(rq.get(k) or "").strip().lower() in ("1", "true") for k in ("authSatisfied", "max_auth", "auth", "authenticated")):
-                return True
-        except Exception:
-            pass
-
     return False
+
+
+def _build_max_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta):
+    official_url = source_url or (pmeta.get("officialUrl") if pmeta else "") or ""
+    if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
+        hits = _justwatch_sync(_clean_query_title(disp or tr_title or orig_title), ["mxx", "hbm"], "US", 6)
+        match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
+        if match and match.get("officialUrl"):
+            official_url = match["officialUrl"]
+    if not official_url:
+        official_url = "https://play.max.com"
+    full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
+    dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
+    return {
+        "id": eff_tid or tid,
+        "provider": "max",
+        "catalogProvider": "max",
+        "tmdbId": tid,
+        "imdbId": imdb_id,
+        "mediaType": mtype,
+        "season": s if mtype == "tv" else 0,
+        "episode": e if mtype == "tv" else 0,
+        "seriesTitle": disp or tr_title or orig_title,
+        "originalTitle": orig_title,
+        "year": year,
+        "origLang": orig_lang,
+        "sourceUrl": source_url or official_url,
+        "streamType": "official",
+        "url": official_url,
+        "embedUrl": official_url,
+        "altUrls": [],
+        "servers": [{"id": "srv-max-1", "label": "Max (HBO) Resmi Akış (4K Ultra HD)", "url": official_url, "streamType": "official"}],
+        "subtitleTracks": [],
+        "audioTracks": [{"id": "max-orig", "lang": orig_lang or "en", "label": "Orijinal Ses (Max)", "mode": "stream", "url": official_url}],
+        "intro": None,
+        "platformAudioLangs": (pmeta.get("audioLangs") if pmeta else None) or ["en", "tr"],
+        "platformSubLangs": (pmeta.get("subLangs") if pmeta else None) or ["tr", "en"],
+        "officialUrl": official_url,
+        "providerUrl": official_url,
+        "title": full_title,
+        "thumbnail": poster,
+        "channel": "Max (HBO) · Resmi Oynatıcı (1080p HD)",
+        "duration": dur,
+        "authenticated": True,
+    }
 
 
 def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_type: str, poster: str, season: int = 1, episode: int = 1, imdb_id: str = "", display_title: str = "", source_url: str = "", refresh: bool = False, request: Request = None, is_authenticated: bool = False, auth_ctx: dict = None):
@@ -6581,6 +6602,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     return _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
                 mp4_fb = [(u, st) for u, st in direct_list if str(st).startswith("mp4")]
                 if not mp4_fb:
+                    if is_max_prov and is_auth_user:
+                        return _build_max_official_item(eff_tid or tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta)
                     return None
                 direct_list = mp4_fb[:3]
             else:
@@ -6723,6 +6746,10 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "channel": f"{label} · {yt_res['channel']} (1080p HD)",
                     "duration": dur,
                 }
+        # If Max provider and user is authenticated, fall back to official player metadata
+        if is_max_prov and is_auth_user:
+            return _build_max_official_item(eff_tid or tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta)
+
         # REMOVED 4 FOREIGN EMBED FALLBACKS (vidsrc.cc, vidlink.pro, autoembed.cc, vidsrc.to)
         return None
 
@@ -7746,6 +7773,68 @@ def _resolve_request_uid(request: Request, body_payload: Optional[dict] = None) 
     return ""
 
 
+def _probe_real_max_token_sync(token: str) -> tuple[bool, str, dict]:
+    """Live probe against HBO Max official API (https://default.prd.api.max.com/users/v1/profiles)."""
+    tok = (token or "").strip()
+    if not tok or len(tok) < 12:
+        return False, "Oturum anahtarı boş veya geçersiz. Lütfen geçerli bir Max oturum tokenı girin.", {}
+
+    if tok.lower().startswith("bearer "):
+        tok = tok[7:].strip()
+    if tok.startswith("st="):
+        tok = tok[3:].strip()
+    if ";" in tok:
+        tok = tok.split(";")[0].strip()
+
+    import ssl
+    ctx = ssl.create_default_context()
+    # 1. Bearer Token Check
+    try:
+        req = urllib.request.Request(
+            "https://default.prd.api.max.com/users/v1/profiles",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Authorization": f"Bearer {tok}",
+                "Accept": "application/json",
+                "x-device-info": "WEB",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=6.0, context=ctx) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                profiles = data.get("data") or []
+                pname = profiles[0].get("name", "Max Profil") if profiles else "Max Profil"
+                return True, "", {"profile": pname, "profiles": profiles}
+    except urllib.error.HTTPError:
+        pass
+    except Exception:
+        pass
+
+    # 2. Cookie st=<token> Check
+    try:
+        req = urllib.request.Request(
+            "https://default.prd.api.max.com/users/v1/profiles",
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Cookie": f"st={tok}",
+                "Accept": "application/json",
+                "x-device-info": "WEB",
+            }
+        )
+        with urllib.request.urlopen(req, timeout=6.0, context=ctx) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode("utf-8"))
+                profiles = data.get("data") or []
+                pname = profiles[0].get("name", "Max Profil") if profiles else "Max Profil"
+                return True, "", {"profile": pname, "profiles": profiles}
+    except urllib.error.HTTPError:
+        pass
+    except Exception:
+        pass
+
+    return False, "❌ HBO Max oturumu doğrulanamadı. Token geçersiz, süresi dolmuş veya aktif bir abonelik bulunamadı.", {}
+
+
 def record_provider_account_session(
     user_id: str,
     provider: str,
@@ -8042,12 +8131,34 @@ async def rave_verify_account(request: Request):
         return JSONResponse({"ok": False, "error": "Bilinmeyen platform", "code": "unknown_provider"}, status_code=400)
 
     auth_type = str(payload.get("auth_type") or payload.get("authType") or "sso").strip().lower()
-    if auth_type not in ("sso", "session_cookie", "cookie", "credentials"):
+    if auth_type not in ("sso", "session_cookie", "cookie", "credentials", "session_token"):
         auth_type = "sso"
 
-    account_email = str(payload.get("email") or payload.get("account_email") or "").strip()
-    profile_name = str(payload.get("profile_name") or payload.get("profile") or "").strip()
-    session_token = str(payload.get("session_token") or payload.get("cookie") or payload.get("token") or "").strip()
+    account_email = str(payload.get("email") or payload.get("account_email") or payload.get("accountEmail") or "").strip()
+    profile_name = str(payload.get("profile_name") or payload.get("profile") or payload.get("profileName") or "").strip()
+    session_token = str(payload.get("session_token") or payload.get("sessionToken") or payload.get("cookie") or payload.get("token") or "").strip()
+
+    if provider in ("max", "hbomax"):
+        if not session_token or len(session_token) < 12:
+            return JSONResponse({
+                "ok": False,
+                "error": "❌ Max oturum doğrulaması için geçerli bir oturum anahtarı (st token) gereklidir. Lütfen Max oturumunuzu bağlayın.",
+                "code": "missing_token"
+            }, status_code=400)
+
+        ok_probe, probe_err, probe_info = await asyncio.to_thread(_probe_real_max_token_sync, session_token)
+        if not ok_probe:
+            return JSONResponse({
+                "ok": False,
+                "error": probe_err,
+                "code": "invalid_session"
+            }, status_code=401)
+
+        if not profile_name and probe_info.get("profile"):
+            profile_name = probe_info["profile"]
+        if not account_email:
+            account_email = f"{profile_name} (Resmi Max Abonesi)"
+        auth_type = "session_token" 
 
     if auth_type in ("session_cookie", "cookie"):
         if len(session_token) < 12:
@@ -8507,6 +8618,21 @@ async def rave_stream_manifest(request: Request):
     sid = (request.query_params.get("sid") or "").strip()
     ref_mode = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("ref") or "").strip())[:16]
     prov = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("provider") or "netflix").strip())[:24] or "netflix"
+    if prov in ("max", "hbomax"):
+        uid = _resolve_request_uid(request)
+        if not uid:
+            uid = (request.query_params.get("uid") or request.query_params.get("guest_id") or "").strip()
+        auth_ok = False
+        if uid:
+            st = has_active_max_connection(uid)
+            if st and st.get("has_active_connection"):
+                auth_ok = True
+        if not auth_ok:
+            return JSONResponse({
+                "error": "Bu içerik doğrulanmış resmi bir Max (HBO) aboneliği gerektirir. Lütfen geçerli bir Max oturumu bağlayın.",
+                "authRequired": True,
+                "provider": "max"
+            }, status_code=401)
     tid = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("tmdbId") or "").strip())[:32]
     s_num = re.sub(r"[^0-9]", "", (request.query_params.get("s") or "1").strip())[:6] or "1"
     e_num = re.sub(r"[^0-9]", "", (request.query_params.get("e") or "1").strip())[:6] or "1"
