@@ -9124,7 +9124,11 @@ _VTT_CACHE_LOCK = threading.Lock()
 _TTS_CACHE_LOCK = threading.Lock()
 
 
+_VTT_DIAG = {}
+
 def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
+    global _VTT_DIAG
+    _VTT_DIAG = {"url": url}
     import gzip
     with _VTT_CACHE_LOCK:
         if url in _SUB_VTT_CACHE:
@@ -9164,9 +9168,14 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
     try:
         from curl_cffi import requests as cffi_requests
         c_resp = cffi_requests.get(url, headers=hdrs, impersonate="chrome124", timeout=timeout)
+        _VTT_DIAG["cffi_status"] = c_resp.status_code
+        _VTT_DIAG["cffi_len"] = len(c_resp.content)
         if c_resp.status_code == 200 and len(c_resp.content) > 10:
             raw = c_resp.content
-    except Exception:
+        else:
+            _VTT_DIAG["cffi_body_sample"] = c_resp.text[:120]
+    except Exception as e:
+        _VTT_DIAG["cffi_exc"] = f"{type(e).__name__}: {str(e)[:120]}"
         raw = b""
 
     # 2. Fallback: _public_open with standard urllib
@@ -9175,16 +9184,18 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
             req = urllib.request.Request(url, headers=hdrs)
             with _public_open(req, timeout=timeout) as r:
                 raw = r.read(2 * 1024 * 1024)
-        except Exception:
-            pass
+                _VTT_DIAG["urllib_len"] = len(raw)
+        except Exception as e:
+            _VTT_DIAG["urllib_exc"] = f"{type(e).__name__}: {str(e)[:120]}"
 
     # 3. Fallback: edge fetch if available
     if not raw or len(raw) < 10:
         try:
             ref_u = str(hdrs.get("Referer") or "")
             raw, _ = _edge_fetch_bytes(url, referer=ref_u, timeout=timeout, max_bytes=2 * 1024 * 1024)
-        except Exception:
-            pass
+            _VTT_DIAG["edge_len"] = len(raw)
+        except Exception as e:
+            _VTT_DIAG["edge_exc"] = f"{type(e).__name__}: {str(e)[:120]}"
 
     if not raw:
         return ""
@@ -9519,10 +9530,12 @@ async def rave_subtitle_vtt(request: Request):
     need_en = (translate == "en")
     try:
         vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_vtt_sync, url), timeout=7.5)
+        dbg_info.update(_VTT_DIAG)
         dbg_info["vtt_len"] = len(vtt)
         dbg_info["vtt_cues"] = vtt.count("-->")
     except Exception as err:
         vtt = ""
+        dbg_info.update(_VTT_DIAG)
         dbg_info["vtt_err"] = str(err)
     min_cues = 20 if (request.query_params.get("mtype") == "tv") else 35
     if vtt.count("-->") < min_cues and fb.startswith(("https://", "http://")) and public_http_url(fb):
