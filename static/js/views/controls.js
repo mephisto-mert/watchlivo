@@ -1326,14 +1326,18 @@ export function buildControls(frame, ctx) {
       e.preventDefault();
       const step = e.key === ',' ? -0.2 : -0.5;
       const off = host.adapter?.subs?.setSubtitleOffset?.(step);
-      showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
+      if (typeof off === 'number') {
+        showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
+      }
       revealControls();
     }
     else if (e.key === ']' || e.key === 'x' || e.key === 'X' || e.key === '.') {
       e.preventDefault();
       const step = e.key === '.' ? 0.2 : 0.5;
       const off = host.adapter?.subs?.setSubtitleOffset?.(step);
-      showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
+      if (typeof off === 'number') {
+        showOverlay(`⏱️ Altyazı: ${off >= 0 ? '+' : ''}${off} sn`, 1200);
+      }
       revealControls();
     }
     else if (e.key === '\\' || e.key === 'c' || e.key === 'C') {
@@ -1981,13 +1985,13 @@ export function buildControls(frame, ctx) {
       const curOff = host.adapter?.subs?.offsetSec || 0;
       const curFps = Number(host.adapter?.subs?.fpsScale || 1.0);
       const offsetRow = h('div', { class: 'ctl-pref-group', style: { borderTop: '1px solid rgba(255,255,255,.1)', marginTop: '.2em' } },
-        h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, `⏱️ Altyazı Senkron Kaydırma (${curOff >= 0 ? '+' : ''}${curOff} sn)`),
+        h('div', { class: 'dim', style: { fontSize: '.74em', marginBottom: '4px' } }, `⏱️ Altyazı Senkron Kaydırma [ / ] (${curOff >= 0 ? '+' : ''}${curOff} sn)`),
         h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(36px, 1fr))', gap: '4px' } },
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-5.0); renderMenuView('subtitle'); } }, '-5s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-2.0); renderMenuView('subtitle'); } }, '-2s'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.5); renderMenuView('subtitle'); } }, '-0.5s'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0, true); host.adapter?.subs?.setSubtitleFpsScale?.(1.0); renderMenuView('subtitle'); } }, 'Sıfırla'),
-          h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.5); renderMenuView('subtitle'); } }, '+0.5s'),
+          h('button', { class: 'ctl-pref-pill', title: 'Kısayol: [ veya z (-0.5s)', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(-0.5); renderMenuView('subtitle'); } }, '-0.5s'),
+          h('button', { class: 'ctl-pref-pill', title: 'Kısayol: \\ veya c (Sıfırla)', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0, true); host.adapter?.subs?.setSubtitleFpsScale?.(1.0); renderMenuView('subtitle'); } }, 'Sıfırla'),
+          h('button', { class: 'ctl-pref-pill', title: 'Kısayol: ] veya x (+0.5s)', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(0.5); renderMenuView('subtitle'); } }, '+0.5s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(2.0); renderMenuView('subtitle'); } }, '+2s'),
           h('button', { class: 'ctl-pref-pill', onclick: (e) => { e.stopPropagation(); host.adapter?.subs?.setSubtitleOffset?.(5.0); renderMenuView('subtitle'); } }, '+5s')),
         h('div', { class: 'ctl-pref-pills', style: { marginBottom: '6px', display: 'flex', gap: '4px' } },
