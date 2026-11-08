@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v143';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v144';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -228,8 +228,10 @@ export class SubtitleDubController {
         return { start: Math.max(0, c.start), end: c.end };
       }
     }
-    if (cues.length >= 5 && cues[0].start >= 30 && cues[0].start <= 65) {
-      return { start: 0, end: Math.floor(cues[0].start) };
+    const isNoiseIntro = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull)/i.test(String(txt || ''));
+    const firstDia = cues.find((c) => !isNoiseIntro(c.text)) || cues[0];
+    if (cues.length >= 5 && firstDia && firstDia.start >= 30 && firstDia.start <= 65) {
+      return { start: 0, end: Math.floor(firstDia.start) };
     }
     return null;
   }
@@ -337,8 +339,19 @@ export class SubtitleDubController {
     const uClean = norm(u);
     const curTrack = this.audioTracks.find((t) => t.id === this.selectedAudioId);
     const wasTrStudio = Boolean(curTrack && curTrack.mode !== 'tts' && (curTrack.id === 'tr-dub' || String(curTrack.id || '').startsWith('tr-dub-') || curTrack.audioLang === 'tr' || curTrack.lang === 'tr'));
-    const matchedTrack = this.audioTracks.find((t) => t.mode === 'stream' && t.url && norm(t.url) === uClean);
+    const cleanAud = (s) => norm(s).replace(/[?&]aud=[^&]*/g, '');
+    const matchedTrack = this.audioTracks.find((t) => t.mode === 'stream' && t.url && norm(t.url) === uClean)
+      || this.audioTracks.find((t) => t.mode === 'stream' && t.url && cleanAud(t.url) === cleanAud(uClean));
     if (matchedTrack && matchedTrack.id !== this.selectedAudioId && this.selectedAudioId !== 'tr-ai-dub') {
+      if (wasTrStudio && (matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-'))) {
+        const studioTr = this.audioTracks.find((t) => (t.id === 'tr-dub' || String(t.id || '').startsWith('tr-dub-') || t.audioLang === 'tr') && (typeof t.hlsIndex === 'number' || typeof t.nativeIndex === 'number'));
+        if (studioTr) {
+          this.selectedAudioId = studioTr.id;
+          this._applyHlsAudioSelection();
+          this.adapter?.events?.onTracksChanged?.();
+          return;
+        }
+      }
       this.selectedAudioId = matchedTrack.id;
       const nowOrig = matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-') || (matchedTrack.audioLang && matchedTrack.audioLang !== 'tr');
       if (wasTrStudio && nowOrig && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
@@ -905,18 +918,25 @@ export class SubtitleDubController {
       }
       this.selectedSubId = track.id;
       this.subCues = cues;
-      if (this.offsetSec === 0 && cues.length > 0 && cues[0].start < 15) {
-        const streamEmbedded = this.subtitleTracks.find((t) => (t.source === 'fansub' || t.source === 'stream' || String(t.id || '').includes('-hls')) && t.id !== track.id);
-        if (streamEmbedded) {
-          try {
-            const semCues = await this._loadCuesForTrack(streamEmbedded);
-            if (Array.isArray(semCues) && semCues.length > 0 && semCues[0].start > 30) {
-              const delta = Math.round((semCues[0].start - cues[0].start) * 10) / 10;
-              if (delta >= 15 && delta <= 90) {
-                this.offsetSec = delta;
+      if (this.offsetSec === 0 && cues.length > 0) {
+        const isNoiseCue = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull|web-dl|bluray|fhd|1080p|sync)/i.test(String(txt || ''));
+        const firstDiaCue = cues.find((c) => !isNoiseCue(c.text)) || cues[0];
+        if (firstDiaCue && firstDiaCue.start < 25) {
+          const streamEmbedded = this.subtitleTracks.find((t) => (t.source === 'fansub' || t.source === 'stream' || String(t.id || '').includes('-hls')) && t.id !== track.id);
+          if (streamEmbedded) {
+            try {
+              const semCues = await this._loadCuesForTrack(streamEmbedded);
+              if (Array.isArray(semCues) && semCues.length > 0) {
+                const firstDiaSem = semCues.find((c) => c.start >= 20 || (c.start >= 8 && !isNoiseCue(c.text)));
+                if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 15) {
+                  const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
+                  if (delta >= 15 && delta <= 90) {
+                    this.offsetSec = delta;
+                  }
+                }
               }
-            }
-          } catch (_) {}
+            } catch (_) {}
+          }
         }
       }
       if (!this.intro) this.intro = this._detectIntroFromCues(cues);

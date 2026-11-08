@@ -5992,20 +5992,29 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
             by_lang.setdefault("tr", []).append((wu, "dub"))
             continue
         langs = lang_map.get(raw_u)
-        if not langs and _AUDIO_LANG_HINT.get(raw_u):
-            langs = list(_AUDIO_LANG_HINT[raw_u])
-        if not langs and str(st).startswith("hls_fp:tr:"):
-            langs = ["tr"]
-        if not langs and str(st).startswith("hls_fp:orig:") and orig_lang:
-            langs = [orig_lang]
-        if not langs and st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr"):
-            langs = ["tr"]
-        if not langs and (st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_ve_multi") or str(st).startswith("hls_fp:multi:")):
-            langs = ["tr", orig_lang or "en"] if (orig_lang or "en") != "tr" else ["tr"]
-        if not langs and orig_lang == "tr":
-            langs = ["tr"]
-        if not langs and (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
-            langs = [orig_lang or "en"]
+        if langs is not None:
+            if not langs:
+                if st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr") or str(st).startswith("hls_fp:tr:"):
+                    langs = ["tr"]
+                elif orig_lang == "tr":
+                    langs = ["tr"]
+                else:
+                    langs = [orig_lang or "en"]
+        else:
+            if _AUDIO_LANG_HINT.get(raw_u):
+                langs = list(_AUDIO_LANG_HINT[raw_u])
+            elif str(st).startswith("hls_fp:tr:"):
+                langs = ["tr"]
+            elif str(st).startswith("hls_fp:orig:") and orig_lang:
+                langs = [orig_lang]
+            elif st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr"):
+                langs = ["tr"]
+            elif (st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_ve_multi") or str(st).startswith("hls_fp:multi:")):
+                langs = ["tr", orig_lang or "en"] if (orig_lang or "en") != "tr" else ["tr"]
+            elif orig_lang == "tr":
+                langs = ["tr"]
+            elif (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
+                langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
             for L_raw in langs:
@@ -6225,14 +6234,18 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
 def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
     u_l = str(raw_u or "").lower()
     st_s = str(st or "")
+    hint = _AUDIO_LANG_HINT.get(raw_u) or []
+    probed = _AUDIO_PROBE_CACHE.get(raw_u)
+    probed_langs = list(probed[1]) if probed else []
+    has_tr = ("tr" in hint) or ("tr" in probed_langs)
     if st_s == "hls_fhd_multi":
-        return f"📡 Sunucu {idx} · FullHD Dual (TR Dublaj & Orijinal · 1080p)"
+        return f"📡 Sunucu {idx} · FullHD {'Dual (TR Dublaj & Orijinal)' if has_tr else 'Sinema'} (1080p HD)"
     if st_s == "hls_fhd_tr":
         return f"📡 Sunucu {idx} · FullHD (TR Dublaj · 1080p)"
     if st_s == "hls_fhd" or "rapidvid" in u_l or "cdnimgs" in u_l:
         return f"📡 Sunucu {idx} · FullHD Sinema (1080p HD)"
     if st_s in ("hls_hfnl_multi", "hls_hfnl") or "hdfilmcehennemi" in u_l or "playmix" in u_l:
-        return f"📡 Sunucu {idx} · HDCehennemi ({'Dual ' if 'multi' in st_s else ''}1080p HD)"
+        return f"📡 Sunucu {idx} · HDCehennemi ({'Dual ' if ('multi' in st_s and has_tr) else ''}1080p HD)"
     if st_s == "mp4_ac_sub":
         return f"📡 Sunucu {idx} · AnimeciX Fansub ({'720p' if '_720p' in u_l else '1080p'} HD)"
     if st_s == "mp4_ac_dub":
