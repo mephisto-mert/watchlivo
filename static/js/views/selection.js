@@ -1820,23 +1820,23 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');
     return { provider: 'direct', videoId: id, url: directUrl, streamType: 'mp4', title: fallbackTitle || 'Dropbox Videosu', channel: 'Dropbox' };
   }
-  if (provider === \'max\') {
-    const p = getProvider(\'max\');
+  if (provider === 'max') {
+    const p = getProvider('max');
     const directMedia = {
-      provider: \'max\',
-      catalogProvider: \'max\',
-      url: url || \'https://play.max.com\',
-      sourceUrl: url || \'https://play.max.com\',
-      officialUrl: url || \'https://play.max.com\',
-      streamType: \'official\',
-      title: fallbackTitle || \'Max (HBO) Canlı Yayını\',
-      channel: \'Max (HBO) · Canlı Oda Köprüsü\',
+      provider: 'max',
+      catalogProvider: 'max',
+      url: url || 'https://play.max.com',
+      sourceUrl: url || 'https://play.max.com',
+      officialUrl: url || 'https://play.max.com',
+      streamType: 'official',
+      title: fallbackTitle || 'Max (HBO) Canlı Yayını',
+      channel: 'Max (HBO) · Canlı Oda Köprüsü',
       authenticated: true,
       duration: 3600,
     };
     if (window.vortexDesktop?.isElectron) return directMedia;
     try {
-      const res = await resolveCatalogItem({ sourceUrl: url, title: fallbackTitle || id || \'Max\' }, p);
+      const res = await resolveCatalogItem({ sourceUrl: url, title: fallbackTitle || id || 'Max' }, p);
       if (res) return res;
     } catch (_) {}
     return directMedia;
