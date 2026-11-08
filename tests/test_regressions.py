@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261108_v149 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261108_v150 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261108_v149", index_html)
+        self.assertIn("20261108_v150", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2515,7 +2515,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261108_v149", sw_js)
+        self.assertIn("v20261108_v150", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2568,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261108_v149', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261108_v150', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261108_v149', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261108_v150', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261108_v149')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261108_v150')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3182,8 +3182,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261108_v149", index_html)
-        self.assertIn("20261108_v149", sw_js)
+        self.assertIn("20261108_v150", index_html)
+        self.assertIn("20261108_v150", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3235,6 +3235,92 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("def _fetch_manifest_with_edge(", server_src)
         self.assertIn("is_sub_variant_req", server_src)
         self.assertIn("def _manifest_url_ok(", server_src)
+
+
+    def test_v150_max_official_auth_gating_and_no_free_streams(self):
+        """v150: Max (HBO) catalog resolution enforces official auth gating, prevents free/pirated scrapers, and preserves other providers."""
+        # 1. Clean test state
+        conn = server._get_acc_db()
+        conn.execute("DELETE FROM user_provider_accounts WHERE user_id LIKE 'test_qa_%'")
+        conn.commit()
+        conn.close()
+        server._RESOLVE_RESP_CACHE.clear()
+
+        # 2. Unauthenticated request to Max returns 401 with authRequired: true and no pirated stream
+        resp_unauth = self.client.get("/api/rave/resolve-catalog?provider=max&tmdbId=100088&title=The+Last+of+Us&mediaType=tv&season=1&episode=1")
+        self.assertEqual(resp_unauth.status_code, 401)
+        data_unauth = resp_unauth.json()
+        self.assertTrue(data_unauth.get("authRequired"))
+        self.assertEqual(data_unauth.get("provider"), "max")
+        self.assertFalse(data_unauth.get("url"))
+        self.assertNotIn("servers", data_unauth)
+
+        # 3. Verify /api/rave/accounts/status reflects unauthenticated status
+        resp_status_anon = self.client.get("/api/rave/accounts/status?provider=max")
+        self.assertEqual(resp_status_anon.status_code, 200)
+        self.assertFalse(resp_status_anon.json().get("hasActiveConnection"))
+
+        # 4. Authenticate Max session for test user
+        uid = "test_qa_v150_user"
+        rec = server.record_provider_account_session(
+            user_id=uid,
+            provider="max",
+            account_email="subscriber@max.com",
+            profile_name="Test Max UHD",
+            session_token="valid_session_token_max_sec_2026",
+        )
+        self.assertTrue(rec.get("loginSatisfied"))
+        token = auth_engine.sign_auth_token({"uid": uid, "email": "subscriber@max.com"})
+
+        # 5. Verify /api/rave/accounts/status reflects authenticated status
+        resp_status_auth = self.client.get("/api/rave/accounts/status?provider=max", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(resp_status_auth.status_code, 200)
+        self.assertTrue(resp_status_auth.json().get("hasActiveConnection"))
+
+        # 6. Authenticated Max request resolves official stream URL without pirated fallbacks
+        server._RESOLVE_RESP_CACHE.clear()
+        resp_auth = self.client.get(
+            "/api/rave/resolve-catalog?provider=max&tmdbId=100088&title=The+Last+of+Us&mediaType=tv&season=1&episode=1",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        self.assertEqual(resp_auth.status_code, 200)
+        data_auth = resp_auth.json()
+        self.assertEqual(data_auth.get("provider"), "max")
+        self.assertEqual(data_auth.get("streamType"), "official")
+        res_url = data_auth.get("url") or ""
+        self.assertTrue("play.max.com" in res_url or "play.hbomax.com" in res_url or "max.com" in res_url)
+        off_url = data_auth.get("officialUrl") or ""
+        self.assertTrue("play.max.com" in off_url or "play.hbomax.com" in off_url or "max.com" in off_url)
+
+        # Confirm no pirated scrapers are listed in servers
+        servers = data_auth.get("servers") or []
+        self.assertTrue(len(servers) >= 1)
+        for srv in servers:
+            srv_u = str(srv.get("url") or "")
+            self.assertTrue(
+                "play.max.com" in srv_u or "play.hbomax.com" in srv_u or "max.com" in srv_u,
+                f"Pirated or unverified server detected in Max response: {srv_u}"
+            )
+            self.assertEqual(srv.get("streamType"), "official")
+
+        # 7. Other providers remain functional and are NOT affected by Max auth gating
+        server._RESOLVE_RESP_CACHE.clear()
+        resp_cinema = self.client.get("/api/rave/resolve-catalog?provider=cinema&tmdbId=225565&title=K%C4%B1%C5%9F+Uykusu&mediaType=movie&year=2014")
+        self.assertEqual(resp_cinema.status_code, 200)
+        data_cinema = resp_cinema.json()
+        self.assertFalse(data_cinema.get("authRequired"))
+        self.assertTrue(bool(data_cinema.get("url")))
+
+        # 8. User logout reverts to 401 unauthenticated
+        logout_resp = self.client.post("/api/rave/accounts/logout", json={"provider": "max"}, headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(logout_resp.status_code, 200)
+        server._RESOLVE_RESP_CACHE.clear()
+        resp_after_logout = self.client.get(
+            "/api/rave/resolve-catalog?provider=max&tmdbId=100088&title=The+Last+of+Us&mediaType=tv&season=1&episode=1",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+        self.assertEqual(resp_after_logout.status_code, 401)
+        self.assertTrue(resp_after_logout.json().get("authRequired"))
 
 
 if __name__ == '__main__':

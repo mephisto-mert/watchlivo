@@ -1,27 +1,38 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v149';
-import { api, qs } from '../api.js?v=20261108_v149';
-import { parseVideoUrl } from '../providers.js?v=20261108_v149';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v149';
-import { renderAccountBar, renderSeriesPicker, getAccount } from '../accounts.js?v=20261108_v149';
-import { profileSetup } from '../profile.js?v=20261108_v149';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v149';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v150';
+import { api, qs } from '../api.js?v=20261108_v150';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v150';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v150';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v150';
+import { profileSetup } from '../profile.js?v=20261108_v150';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v150';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261108_v149';
+} from '../store.js?v=20261108_v150';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
+  const provId = prov?.id || it?.provider || 'cinema';
+  if (provId === 'max' || it?.provider === 'max' || it?.catalogProvider === 'max') {
+    const maxAcct = getAccount('max');
+    if (!maxAcct?.loginSatisfied) {
+      toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+      const targetProv = (provId === 'max') ? prov : (getProvider('max') || { id: 'max', name: 'Max' });
+      openProviderLoginModal(targetProv);
+      return null;
+    }
+  }
+  const acct = getAccount(provId);
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
   const s = Math.max(1, Number(season) || 1);
   const e = Math.max(1, Number(episode) || 1);
   const rawTid = /^\d+$/.test(String(it.tmdbId || '').trim()) ? String(it.tmdbId).trim() : (/^\d+$/.test(String(it.id || '').trim()) ? String(it.id).trim() : '');
   const query = qs({
-    provider: prov.id,
-    title: it.originalTitle || it.title || prov.name,
+    provider: provId,
+    title: it.originalTitle || it.title || prov?.name || provId,
     originalTitle: it.originalTitle || '',
-    displayTitle: it.title || prov.name,
+    displayTitle: it.title || prov?.name || provId,
     year: it.year || '',
     tmdbId: rawTid,
     imdbId: it.imdbId || '',
@@ -30,11 +41,20 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     sourceUrl: it.officialUrl || it.sourceUrl || '',
     season: s,
     episode: e,
+    accountEmail: acct?.accountEmail || '',
+    authSatisfied: acct?.loginSatisfied ? '1' : '0',
+    profileName: acct?.profileName || '',
   });
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const qTry = attempt === 1 ? `${query}&refresh=1` : query;
       const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: 18000 });
+      if (res?.authRequired || res?.status === 401) {
+        const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
+        toast(res.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
+        if (targetProv) openProviderLoginModal(targetProv);
+        return null;
+      }
       if (res && (res.url || res.videoId)) {
         const disp = it.title || res.title || prov.name;
         if (mediaType === 'tv') {
@@ -61,6 +81,12 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       }
       break;
     } catch (err) {
+      if (err.status === 401 || err.data?.authRequired) {
+        const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
+        toast(err.data?.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
+        if (targetProv) openProviderLoginModal(targetProv);
+        return null;
+      }
       if (attempt === 1) {
         toast(err.data?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
         break;
@@ -587,7 +613,59 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const refreshAuth = () => {
-    authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)));
+    const acct = getAccount(p.id);
+    if (p.id === 'max' && !acct.loginSatisfied) {
+      const hero = h('div', {
+        class: 'max-gating-hero',
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px',
+          padding: '18px 22px',
+          marginBottom: '16px',
+          borderRadius: '16px',
+          background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.22) 0%, rgba(13, 16, 27, 0.95) 100%)',
+          border: '1px solid rgba(0, 43, 231, 0.45)',
+          boxShadow: '0 8px 30px rgba(0, 43, 231, 0.18)',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '14px', flex: '1 1 320px' } },
+          h('div', {
+            style: {
+              width: '48px',
+              height: '48px',
+              minWidth: '48px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #002be7, #4f46e5)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '900',
+              fontSize: '1.15rem',
+              letterSpacing: '-0.5px',
+              boxShadow: '0 4px 14px rgba(0, 43, 231, 0.45)',
+            },
+          }, 'MAX'),
+          h('div', {},
+            h('div', { style: { fontWeight: '800', fontSize: '1.02rem', color: '#f8fafc', marginBottom: '4px', letterSpacing: '-0.2px' } },
+              'HBO Max Resmi Abonelik Alanı — Watchlivo\'da arkadaşlarınızla senkronize Max izlemek için Max hesabınızla giriş yapın.'),
+            h('div', { style: { fontSize: '.84rem', color: '#94a3b8', lineHeight: '1.45' } },
+              'Max arşivindeki 4K film, dizi ve HBO yapımlarını odadaki arkadaşlarınızla canlı senkron izlemek için hesabınızı doğrulayın.'))),
+        h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
+          h('button', {
+            type: 'button',
+            class: 'btn primary',
+            style: { background: '#002be7', borderColor: '#002be7', color: '#ffffff', fontWeight: '700', padding: '10px 18px', borderRadius: '10px' },
+            onclick: () => openProviderLoginModal(p, () => refreshAuth()),
+          }, '🔑 Max Hesabı ile Giriş Yap'))
+      );
+      authHolder.replaceChildren(hero);
+    } else {
+      authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)));
+    }
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {
       catalogLoaded = true;
@@ -653,6 +731,15 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       class: 'btn primary poster-cta',
       onclick: async (e) => {
         e.stopPropagation();
+        if (p?.id === 'max' || it?.provider === 'max' || it?.catalogProvider === 'max') {
+          const maxAcct = getAccount('max');
+          if (!maxAcct?.loginSatisfied) {
+            toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+            const targetProv = (p?.id === 'max') ? p : (getProvider('max') || { id: 'max', name: 'Max' });
+            openProviderLoginModal(targetProv, () => refreshAuth?.());
+            return;
+          }
+        }
         if (isTv) { openDetail(it); return; }
         if (card.querySelector('.loading')) return;
         const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));

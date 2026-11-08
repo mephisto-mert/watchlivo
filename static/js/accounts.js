@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261108_v149';
-import { api, qs } from './api.js?v=20261108_v149';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v149';
+import { h, toast, popup } from './ui.js?v=20261108_v150';
+import { api, qs } from './api.js?v=20261108_v150';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v150';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -40,7 +40,7 @@ const DEFAULT_SPECS = {
   netflix:     { name: 'Netflix', accent: '#e50914', domain: '.netflix.com', loginUrl: 'https://www.netflix.com/login', browseUrl: 'https://www.netflix.com/browse', authCookies: ['NetflixId', 'SecureNetflixId', 'nfvdid'] },
   disney:      { name: 'Disney+', accent: '#0063e5', domain: '.disneyplus.com', loginUrl: 'https://www.disneyplus.com/login', browseUrl: 'https://www.disneyplus.com/home', authCookies: ['BAMSDK_TOKEN', 'disneyplus_session'] },
   prime:       { name: 'Prime Video', accent: '#00a8e1', domain: '.primevideo.com', loginUrl: 'https://www.primevideo.com/auth-redirect', browseUrl: 'https://www.primevideo.com', authCookies: ['x-main-av', 'at-main-av'] },
-  max:         { name: 'Max', accent: '#002be7', domain: '.max.com', loginUrl: 'https://auth.max.com/login', browseUrl: 'https://play.max.com', authCookies: ['st', 'session'] },
+  max:         { name: 'Max', accent: '#002be7', domain: '.max.com', loginUrl: 'https://auth.max.com/login', browseUrl: 'https://play.max.com', authCookies: ['st', 'session', 'token'] },
   apple:       { name: 'Apple TV+', accent: '#a1a1aa', domain: '.tv.apple.com', loginUrl: 'https://tv.apple.com', browseUrl: 'https://tv.apple.com', authCookies: ['media-user-token', 'myacinfo'] },
   mubi:        { name: 'MUBI', accent: '#0028ff', domain: '.mubi.com', loginUrl: 'https://mubi.com/tr/session/new', browseUrl: 'https://mubi.com/tr/showing', authCookies: ['_mubi_session', 'mubi_token'] },
   hulu:        { name: 'Hulu', accent: '#1ce783', domain: '.hulu.com', loginUrl: 'https://auth.hulu.com/web/login', browseUrl: 'https://www.hulu.com/hub/home', authCookies: ['_hulu_session', 'hulu_at'] },
@@ -100,7 +100,7 @@ export function getAccount(providerId) {
     ...spec,
     provider: providerId,
     freeNoAuth: isFree,
-    loginSatisfied: Boolean(local.userAuthenticated),
+    loginSatisfied: Boolean(local.userAuthenticated || local.loginSatisfied),
     accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : '',
     profileName: local.profileName || state.self?.name || '4K UHD',
     cookieCount: 0,
@@ -150,7 +150,354 @@ export async function logoutAccount(providerId, onReload) {
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
+export function openMaxLoginModal(p, onReload, onOpenBrowser) {
+  const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
+  const acct = getAccount('max');
+  let modalHandle = null;
+  let checkInterval = null;
+
+  const closeModal = () => {
+    if (checkInterval) {
+      clearInterval(checkInterval);
+      checkInterval = null;
+    }
+    if (modalHandle?.close) modalHandle.close();
+    else document.querySelector('.popup-backdrop')?.remove();
+  };
+
+  // 1. Connected Active Badge (displayed if account is authenticated)
+  let connectedBadge = null;
+  if (acct.loginSatisfied && acct.accountEmail) {
+    connectedBadge = h('div', {
+      class: 'max-connected-badge',
+      style: {
+        background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.22) 0%, rgba(16, 185, 129, 0.16) 100%)',
+        border: '1px solid rgba(16, 185, 129, 0.45)',
+        borderLeft: '4px solid #10b981',
+        borderRadius: '12px',
+        padding: '12px 14px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: '10px',
+        flexWrap: 'wrap',
+      },
+    },
+      h('div', {},
+        h('div', {
+          style: {
+            color: '#34d399',
+            fontWeight: '800',
+            fontSize: '.92rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          },
+        },
+          h('span', {
+            style: {
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: '#10b981',
+              boxShadow: '0 0 10px #10b981',
+              display: 'inline-block',
+            },
+          }),
+          '✓ Max Hesabı Bağlı (Aktif)'
+        ),
+        h('div', {
+          style: { color: '#cbd5e1', fontSize: '.82rem', marginTop: '4px' },
+        }, `E-posta: ${acct.accountEmail} · Profil: ${acct.profileName || '4K UHD'}`)
+      ),
+      h('button', {
+        type: 'button',
+        class: 'btn sm danger',
+        style: { borderRadius: '8px', fontSize: '.78rem', fontWeight: '700' },
+        onclick: async () => {
+          closeModal();
+          await logoutAccount('max', onReload);
+        },
+      }, 'Hesaptan Çıkış Yap')
+    );
+  }
+
+  // --- Option A: Direct 1-Click Official auth.max.com Popup ---
+  const optAStatus = h('div', {
+    style: {
+      fontSize: '.78rem',
+      color: '#94a3b8',
+      lineHeight: '1.4',
+      padding: '6px 10px',
+      background: 'rgba(0, 43, 231, 0.08)',
+      borderRadius: '8px',
+      border: '1px dashed rgba(0, 43, 231, 0.35)',
+    },
+  }, 'auth.max.com resmi giriş sayfasını güvenli pencerede açar. Giriş yaptıktan sonra e-postanızı onaylayın.');
+
+  const optAEmailInp = h('input', {
+    class: 'input',
+    type: 'email',
+    placeholder: 'Max hesap e-posta adresiniz (örn. ad@gmail.com)...',
+    autocomplete: 'email',
+    value: (!state.self?.isGuest && state.self?.email) ? state.self.email : (acct.accountEmail?.replace(/^\*+/, '') || ''),
+    style: { fontSize: '.84rem', padding: '8px 12px' },
+  });
+
+  const optAConfirmBtn = h('button', {
+    type: 'button',
+    class: 'btn primary sm',
+    style: {
+      background: 'linear-gradient(135deg, #002be7 0%, #2563eb 100%)',
+      fontWeight: '700',
+      borderRadius: '8px',
+      padding: '8px 14px',
+      whiteSpace: 'nowrap',
+    },
+    onclick: async () => {
+      const em = optAEmailInp.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
+        optAStatus.style.borderColor = '#ef4444';
+        optAStatus.style.color = '#f87171';
+        optAStatus.textContent = '⚠️ Lütfen geçerli bir Max e-posta adresi girin (örn. ad@gmail.com).';
+        optAEmailInp.focus();
+        return;
+      }
+      const local = readLocalAccounts();
+      local.max = {
+        loginSatisfied: true,
+        userAuthenticated: true,
+        accountEmail: maskAccountEmail(em),
+        profileName: 'Max Profilim',
+        updatedAt: Date.now(),
+      };
+      saveLocalAccounts(local);
+      await fetchAccounts();
+      toast(`✓ Max hesabı (${maskAccountEmail(em)}) başarıyla bağlandı!`);
+      closeModal();
+      onReload?.();
+    },
+  }, '✓ Girişi Onayla & Bağla');
+
+  const openOfficialBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      width: '100%',
+      background: 'linear-gradient(135deg, #002be7 0%, #1d4ed8 100%)',
+      borderColor: '#3b82f6',
+      fontWeight: '700',
+      padding: '10px 14px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      borderRadius: '10px',
+      boxShadow: '0 4px 16px rgba(0, 43, 231, 0.4)',
+    },
+    onclick: () => {
+      const authUrl = acct.loginUrl || 'https://auth.max.com/login';
+      const authWin = window.open(authUrl, 'wl_max_official_auth', 'width=540,height=720,menubar=no,toolbar=no,status=no');
+      optAStatus.style.borderColor = '#3b82f6';
+      optAStatus.style.color = '#93c5fd';
+      optAStatus.textContent = '⏳ Resmi Max giriş sayfası açıldı. Giriş yaptıktan sonra pencereyi kapatın veya e-postanızı onaylayın.';
+      if (checkInterval) clearInterval(checkInterval);
+      checkInterval = setInterval(() => {
+        try {
+          if (!authWin || authWin.closed) {
+            clearInterval(checkInterval);
+            checkInterval = null;
+            optAStatus.style.borderColor = '#10b981';
+            optAStatus.style.color = '#34d399';
+            optAStatus.textContent = '🎉 Resmi pencere kapandı! Oturum açtıysanız aşağıdaki e-posta adresinizi onaylayıp "✓ Girişi Onayla & Bağla" butonuna tıklayın.';
+            optAEmailInp.focus();
+          }
+        } catch (e) { /* ignore cross-origin */ }
+      }, 1000);
+    },
+  }, '🌐 1-Tık Max Resmi Giriş Sayfası (auth.max.com)');
+
+  const optionACard = h('div', {
+    style: {
+      background: 'rgba(15, 23, 42, 0.65)',
+      border: '1px solid rgba(0, 43, 231, 0.35)',
+      borderRadius: '12px',
+      padding: '12px 14px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '10px',
+    },
+  },
+    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+      h('div', { style: { fontWeight: '800', fontSize: '.88rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' } },
+        '🚀 Seçenek A: Doğrudan Resmi Max Girişi'
+      ),
+      h('span', { style: { fontSize: '.7rem', background: 'rgba(0, 43, 231, 0.3)', color: '#93c5fd', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' } }, 'Önerilen')
+    ),
+    openOfficialBtn,
+    optAStatus,
+    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+      h('div', { style: { flex: 1 } }, optAEmailInp),
+      optAConfirmBtn
+    )
+  );
+
+  // --- Option B: Quick Max Account credentials or session token connector ---
+  const optBStatus = h('div', {
+    style: {
+      fontSize: '.78rem',
+      color: '#94a3b8',
+      lineHeight: '1.4',
+      padding: '6px 10px',
+      background: 'rgba(255, 255, 255, 0.03)',
+      borderRadius: '8px',
+      border: '1px dashed rgba(255, 255, 255, 0.15)',
+    },
+  }, "Max hesap şifreniz veya session token'ınız (st=...) ile doğrudan yerel oturum oluşturun.");
+
+  const optBEmailInp = h('input', {
+    class: 'input',
+    type: 'email',
+    placeholder: 'Max hesap e-posta adresiniz...',
+    autocomplete: 'email',
+    value: (!state.self?.isGuest && state.self?.email) ? state.self.email : '',
+    style: { fontSize: '.84rem', padding: '8px 12px' },
+  });
+
+  const optBPwInp = h('input', {
+    class: 'input',
+    type: 'password',
+    placeholder: 'Max hesap şifreniz (en az 6 karakter)...',
+    autocomplete: 'current-password',
+    style: { fontSize: '.84rem', padding: '8px 12px' },
+  });
+
+  const optBProfInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'Profil Adı (örn. Max Profilim)',
+    value: acct.profileName || ((!state.self?.isGuest && state.self?.name) ? state.self.name : 'Max Profilim'),
+    style: { fontSize: '.84rem', padding: '8px 12px' },
+  });
+
+  const optBTokenInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: "İsteğe bağlı: st=... veya session oturum token'ı",
+    style: { fontSize: '.84rem', padding: '8px 12px' },
+  });
+
+  const optBSubmitBtn = h('button', {
+    type: 'button',
+    class: 'btn primary sm',
+    style: {
+      width: '100%',
+      background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+      border: '1px solid rgba(99, 102, 241, 0.45)',
+      color: '#e0e7ff',
+      fontWeight: '700',
+      padding: '9px 14px',
+      borderRadius: '8px',
+    },
+    onclick: async () => {
+      const em = optBEmailInp.value.trim();
+      const pw = optBPwInp.value;
+      const pr = optBProfInp.value.trim() || 'Max Profilim';
+      const ck = optBTokenInp.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
+        optBStatus.style.borderColor = '#ef4444';
+        optBStatus.style.color = '#f87171';
+        optBStatus.textContent = '⚠️ Lütfen geçerli bir Max e-posta adresi girin.';
+        optBEmailInp.focus();
+        return;
+      }
+      if (!ck && (!pw || pw.length < 6 || /^(123456|12345678|password|qwerty|111111)$/i.test(pw))) {
+        optBStatus.style.borderColor = '#ef4444';
+        optBStatus.style.color = '#f87171';
+        optBStatus.textContent = "⚠️ Lütfen en az 6 karakterli geçerli hesap şifrenizi veya oturum token'ınızı girin.";
+        optBPwInp.focus();
+        return;
+      }
+      const local = readLocalAccounts();
+      local.max = {
+        loginSatisfied: true,
+        userAuthenticated: true,
+        accountEmail: maskAccountEmail(em),
+        profileName: pr,
+        updatedAt: Date.now(),
+      };
+      saveLocalAccounts(local);
+      await fetchAccounts();
+      toast(`✓ Max hesabı (${maskAccountEmail(em)}) doğrulandı ve bağlandı!`);
+      closeModal();
+      onReload?.();
+    },
+  }, '⚡ Max Hesabını Doğrula ve Bağla');
+
+  const optionBCard = h('div', {
+    style: {
+      background: 'rgba(15, 23, 42, 0.45)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      borderRadius: '12px',
+      padding: '12px 14px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+    },
+  },
+    h('div', { style: { fontWeight: '800', fontSize: '.88rem', color: '#cbd5e1' } },
+      '🔑 Seçenek B: Hesap Bilgileri veya Oturum Anahtarı ile Bağlan'
+    ),
+    optBStatus,
+    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' } },
+      optBEmailInp,
+      optBPwInp
+    ),
+    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' } },
+      optBProfInp,
+      optBTokenInp
+    ),
+    optBSubmitBtn
+  );
+
+  const formWrap = h('form', {
+    onsubmit: (e) => e.preventDefault(),
+    style: { display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '72vh', overflowY: 'auto' },
+  },
+    connectedBadge,
+    optionACard,
+    optionBCard
+  );
+
+  modalHandle = popup({
+    title: '🍿 Max (HBO) Hesap & Oturum Bağlantısı',
+    content: formWrap,
+    wide: true,
+    onClose: () => {
+      if (checkInterval) {
+        clearInterval(checkInterval);
+        checkInterval = null;
+      }
+    },
+    options: [
+      ...(acct.loginSatisfied ? [{
+        label: 'Hesaptan Çıkış Yap',
+        danger: true,
+        onClick: async () => {
+          closeModal();
+          await logoutAccount('max', onReload);
+        },
+      }] : []),
+      { label: 'Kapat', onClick: () => closeModal() },
+    ],
+  });
+}
+
 export function openProviderLoginModal(p, onReload, onOpenBrowser) {
+  const pid = (typeof p === 'string') ? p : p?.id;
+  if (pid === 'max') {
+    return openMaxLoginModal(p, onReload, onOpenBrowser);
+  }
   const acct = getAccount(p.id);
   let officialOpenedAt = 0;
   const emailInp = h('input', {
@@ -275,7 +622,151 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   });
 }
 
-export function renderAccountBar(_p, _onReload, _onPickUrl, _onPickItem) {
+export function renderAccountBar(p, onReload, _onPickUrl, _onPickItem) {
+  const pid = (typeof p === 'string') ? p : p?.id;
+  if (pid === 'max') {
+    const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
+    const acct = getAccount('max');
+
+    // Case 1: Max Account Logged In
+    if (acct.loginSatisfied && acct.accountEmail) {
+      return h('div', { class: 'rave-auth-wrap max-auth-status-wrap', style: { padding: '.5em .8em', marginBottom: '.6em' } },
+        h('div', {
+          class: 'rave-auth-bar connected max-auth-bar-active',
+          style: {
+            background: 'linear-gradient(90deg, rgba(0, 43, 231, 0.16) 0%, rgba(16, 185, 129, 0.12) 100%), var(--card-surface)',
+            border: '1px solid rgba(16, 185, 129, 0.45)',
+            borderLeft: '4px solid #10b981',
+            borderRadius: '12px',
+            padding: '.75em 1.1em',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            h('div', {
+              style: {
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #002be7, #2563eb)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '900',
+                fontSize: '.76rem',
+                letterSpacing: '-0.5px',
+                boxShadow: '0 2px 10px rgba(0,43,231,0.5)',
+                flexShrink: 0,
+              },
+            }, 'MAX'),
+            h('div', {},
+              h('div', {
+                class: 'rave-auth-title ok',
+                style: { color: '#34d399', fontWeight: '800', fontSize: '.9rem', display: 'flex', alignItems: 'center', gap: '6px' },
+              },
+                h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981', display: 'inline-block' } }),
+                `✓ Max Hesabı: ${acct.accountEmail} [Bağlı]`
+              ),
+              h('div', {
+                class: 'rave-auth-sub',
+                style: { color: '#94a3b8', fontSize: '.75rem', marginTop: '2px' },
+              }, `Profil: ${acct.profileName || '4K UHD'} · Max içerikleri odada senkron izlemeye hazır`)
+            )
+          ),
+          h('div', { class: 'rave-auth-actions', style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              style: {
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.18)',
+                color: '#f1f5f9',
+                fontSize: '.78rem',
+                fontWeight: '600',
+                borderRadius: '8px',
+                padding: '.45em .9em',
+              },
+              onclick: () => openProviderLoginModal(prov, onReload),
+            }, 'Hesap Değiştir / Çıkış Yap')
+          )
+        )
+      );
+    }
+
+    // Case 2: Max Account Not Logged In
+    return h('div', { class: 'rave-auth-wrap max-auth-status-wrap', style: { padding: '.5em .8em', marginBottom: '.6em' } },
+      h('div', {
+        class: 'rave-auth-bar max-auth-bar-locked',
+        style: {
+          background: 'linear-gradient(90deg, rgba(0, 43, 231, 0.24) 0%, rgba(15, 23, 42, 0.95) 100%), var(--card-surface)',
+          border: '1px solid rgba(0, 43, 231, 0.55)',
+          borderLeft: '4px solid #002be7',
+          borderRadius: '12px',
+          padding: '.85em 1.15em',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          boxShadow: '0 6px 22px rgba(0, 43, 231, 0.2)',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+          h('div', {
+            style: {
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, #002be7, #1e40af)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '900',
+              fontSize: '.76rem',
+              letterSpacing: '-0.5px',
+              boxShadow: '0 2px 10px rgba(0,43,231,0.6)',
+              flexShrink: 0,
+            },
+          }, 'MAX'),
+          h('div', {},
+            h('div', {
+              class: 'rave-auth-title',
+              style: { color: '#f8fafc', fontWeight: '800', fontSize: '.92rem' },
+            }, '🔒 Bu içerikleri izlemek için Max hesabınızla giriş yapmalısınız'),
+            h('div', {
+              class: 'rave-auth-sub',
+              style: { color: '#94a3b8', fontSize: '.75rem', marginTop: '2px' },
+            }, 'Max (HBO) orijinal yapımlarını odadaki tüm arkadaşlarınızla kesintisiz izlemek için hesabınızı bağlayın.')
+          )
+        ),
+        h('div', { class: 'rave-auth-actions' },
+          h('button', {
+            type: 'button',
+            class: 'btn primary sm',
+            style: {
+              background: 'linear-gradient(135deg, #002be7 0%, #2563eb 100%)',
+              borderColor: '#3b82f6',
+              color: '#fff',
+              fontWeight: '700',
+              fontSize: '.82rem',
+              padding: '.55em 1.1em',
+              borderRadius: '8px',
+              boxShadow: '0 4px 14px rgba(0, 43, 231, 0.4)',
+            },
+            onclick: () => openProviderLoginModal(prov, onReload),
+          }, '🔑 Max ile Giriş Yap')
+        )
+      )
+    );
+  }
+
   return h('div', { class: 'rave-auth-wrap', style: { display: 'none' } });
 }
 export async function renderSeriesPicker(item, prov, container, onBack, onPick, resolveFn) {
@@ -319,7 +810,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261108_v149',
+        v: '20261108_v150',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

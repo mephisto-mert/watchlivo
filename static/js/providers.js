@@ -282,7 +282,7 @@ export const PROVIDERS = [
   { id: 'prime', name: 'Prime Video', cat: 'global', badge: 'Amazon Originals Vitrini', logo: LOGOS.prime, bg: '#10121a', accent: '#00a8e1', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.primevideo.com', placeholder: "Prime Video vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/(?:primevideo|amazon)\.[a-z.]+\/.*?(?:gti=|asin=|detail\/)([\w.-]+)/i) || [])[1] || null },
-  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Warner Bros Vitrini', logo: LOGOS.max, bg: '#10121a', accent: '#2563eb', web: true, kind: 'catalog', freeNoAuth: true,
+  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Max Hesabı Gerekir', logo: LOGOS.max, bg: '#10121a', accent: '#002be7', web: true, kind: 'catalog', freeNoAuth: false,
     homeUrl: 'https://play.max.com', placeholder: "Max vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/(?:hbomax|max)\.com\/.*?(?:video\/watch|play|movies|series)\/([\w-]+)/i) || [])[1] || null },
   { id: 'apple', name: 'Apple TV+', cat: 'global', badge: 'Apple Originals 4K Vitrini', logo: LOGOS.apple, bg: '#10121a', accent: '#f8fafc', web: true, kind: 'catalog', freeNoAuth: true,

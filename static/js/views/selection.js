@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261108_v149';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261108_v149';
-import { api, qs } from '../api.js?v=20261108_v149';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261108_v149';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261108_v149';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261108_v149';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v149';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261108_v150';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261108_v150';
+import { api, qs } from '../api.js?v=20261108_v150';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261108_v150';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261108_v150';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261108_v150';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v150';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261108_v149';
+} from '../store.js?v=20261108_v150';
 
 let _activeHomePick = null;
 
@@ -805,8 +805,16 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       const pool = movies.length ? movies : items;
       if (!pool.length) { toast('Katalog yüklenemedi, lütfen tekrar dene'); return; }
       const chosen = pool[Math.floor(Math.random() * pool.length)];
-      toast(`🎲 Rastgele Seçim: ${chosen.title} hazırlanıyor...`);
       const defProv = provider || getProvider(chosen.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
+      if (chosen.provider === 'max' || defProv?.id === 'max') {
+        const maxAcct = getAccount('max');
+        if (!maxAcct?.loginSatisfied) {
+          toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+          openProviderLoginModal(getProvider('max') || defProv);
+          return;
+        }
+      }
+      toast(`🎲 Rastgele Seçim: ${chosen.title} hazırlanıyor...`);
       const media = await resolveCatalogItem(chosen, defProv, 1, 1);
       if (media) await pickSafe(media);
     } finally {
@@ -852,6 +860,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               type: 'button',
               class: 'btn primary wl-preview-play-btn',
               onclick: async () => {
+                if (t.provider === 'max' || defProv?.id === 'max') {
+                  const maxAcct = getAccount('max');
+                  if (!maxAcct?.loginSatisfied) {
+                    toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                    openProviderLoginModal(getProvider('max') || defProv);
+                    return;
+                  }
+                }
                 modalRef?.close?.();
                 if (onAction) await onAction();
               },
@@ -967,6 +983,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const normalized = { ...it, tmdbId: String(it.tmdbId || it.id || '') };
                 const triggerPlay = async () => {
                   hideCmdk();
+                  if (it.provider === 'max' || normalized.provider === 'max' || defProv?.id === 'max') {
+                    const maxAcct = getAccount('max');
+                    if (!maxAcct?.loginSatisfied) {
+                      toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                      openProviderLoginModal(getProvider('max') || defProv);
+                      return;
+                    }
+                  }
                   if (isTv) {
                     openTvSeriesModal(normalized, defProv);
                   } else {
@@ -1101,6 +1125,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             role: 'button',
             tabindex: '0',
             onclick: async (e) => {
+              if (item.provider === 'max' || prov?.id === 'max') {
+                const maxAcct = getAccount('max');
+                if (!maxAcct?.loginSatisfied) {
+                  toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                  openProviderLoginModal(getProvider('max') || prov);
+                  return;
+                }
+              }
               if (item.mediaType === 'tv') {
                 openTvSeriesModal(item, prov);
                 return;
@@ -1171,6 +1203,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: async (ev) => {
               const cardEl = ev.currentTarget;
               if (cardEl.classList.contains('busy')) return;
+              if (epItem.provider === 'max' || prov?.id === 'max') {
+                const maxAcct = getAccount('max');
+                if (!maxAcct?.loginSatisfied) {
+                  toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                  openProviderLoginModal(getProvider('max') || prov);
+                  return;
+                }
+              }
               cardEl.classList.add('busy');
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
               try {
@@ -1263,6 +1303,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: async (ev) => {
               const cardEl = ev.currentTarget;
               if (cardEl.classList.contains('busy')) return;
+              if (epItem.provider === 'max' || prov?.id === 'max') {
+                const maxAcct = getAccount('max');
+                if (!maxAcct?.loginSatisfied) {
+                  toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                  openProviderLoginModal(getProvider('max') || prov);
+                  return;
+                }
+              }
               cardEl.classList.add('busy');
               toast(`🆕 ${epItem.title} · ${sNum}. Sezon ${eNum}. Bölüm odada hazırlanıyor...`);
               try {
@@ -1383,6 +1431,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               class: 'hero-mini-play',
               onclick: async (e) => {
                 e.stopPropagation();
+                if (item.provider === 'max' || prov?.id === 'max') {
+                  const maxAcct = getAccount('max');
+                  if (!maxAcct?.loginSatisfied) {
+                    toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                    openProviderLoginModal(getProvider('max') || prov);
+                    return;
+                  }
+                }
                 if (isTvItem) {
                   openTvSeriesModal(item, prov);
                   return;
@@ -1429,6 +1485,15 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const curPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
                 const curIdx = ((heroIndex % curPool.length) + curPool.length) % curPool.length;
                 const activeHero = curPool[curIdx] || heroItem;
+                const heroProv = getProvider(activeHero.provider || 'cinema') || defProv;
+                if (activeHero.provider === 'max' || heroProv.id === 'max') {
+                  const maxAcct = getAccount('max');
+                  if (!maxAcct?.loginSatisfied) {
+                    toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+                    openProviderLoginModal(getProvider('max') || heroProv);
+                    return;
+                  }
+                }
                 if (activeHero.mediaType === 'tv') {
                   openTvSeriesModal(activeHero, defProv);
                   return;
@@ -1609,6 +1674,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         ...(provs.length ? provs.slice(0, 2) : [defProv?.id || 'cinema']).map((id) => h('span', {}, getProvider(id)?.name || id))),
       h('button', { class: 'btn primary poster-cta' }, isTv ? '📺 Bölüm Seç' : '▶ Tam Film'));
     const go = async () => {
+      if (defProv?.id === 'max' || t?.provider === 'max' || t?.catalogProvider === 'max') {
+        const maxAcct = getAccount('max');
+        if (!maxAcct?.loginSatisfied) {
+          toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
+          openProviderLoginModal(getProvider('max') || defProv);
+          return;
+        }
+      }
       if (isTv && box) {
         renderSeriesPicker(t, defProv, box, () => runSuperSearch(superQuery, box), pickSafe, resolveCatalogItem);
         return;
