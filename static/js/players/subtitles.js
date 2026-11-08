@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v147';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v148';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -667,26 +667,62 @@ export class SubtitleDubController {
   }
 
   async _loadCuesForTrack(track) {
-    if (!track?.url) return [];
-    if (this.cuesCache.has(track.url)) {
-      const hit = this.cuesCache.get(track.url);
+    if (!track?.url && !track?.rawUrl) return [];
+    const cacheKey = track.url || track.rawUrl;
+    if (this.cuesCache.has(cacheKey)) {
+      const hit = this.cuesCache.get(cacheKey);
       if (!hit.failedAt || Date.now() - hit.failedAt < 30000) return hit.cues;
-      this.cuesCache.delete(track.url);
+      this.cuesCache.delete(cacheKey);
     }
-    try {
-      const r = await fetch(track.url);
-      if (!r.ok) {
-        this.cuesCache.set(track.url, { vtt: '', cues: [], failedAt: Date.now() });
+
+    // Direct residential browser fetch: Upstream sources like hdfilmcehennemi.mobi and subs5.strem.io
+    // support CORS (Access-Control-Allow-Origin: *) but block datacenter IPs. The browser fetches them
+    // directly without 403 blocks!
+    let directUrl = track.rawUrl || '';
+    if (!directUrl && track.url && track.url.includes('/api/rave/subtitle.vtt')) {
+      try {
+        const uObj = new URL(track.url, location.origin);
+        directUrl = uObj.searchParams.get('url') || '';
+      } catch (_) {}
+    }
+
+    if (directUrl && /^https?:\/\//i.test(directUrl)) {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 3500);
+        const dResp = await fetch(directUrl, { mode: 'cors', signal: ctrl.signal });
+        clearTimeout(tid);
+        if (dResp.ok) {
+          const dVtt = await dResp.text();
+          const dCues = parseVtt(dVtt);
+          if (Array.isArray(dCues) && dCues.length >= 10) {
+            this.cuesCache.set(cacheKey, { vtt: dVtt, cues: dCues, failedAt: 0 });
+            return dCues;
+          }
+        }
+      } catch (_) {
+        // Direct fetch failed (CORS, network error, or timeout) - proceed to proxy fallback below
+      }
+    }
+
+    // Fallback: Backend proxy fetch (/api/rave/subtitle.vtt)
+    if (track.url) {
+      try {
+        const r = await fetch(track.url);
+        if (!r.ok) {
+          this.cuesCache.set(cacheKey, { vtt: '', cues: [], failedAt: Date.now() });
+          return [];
+        }
+        const vtt = await r.text();
+        const cues = parseVtt(vtt);
+        this.cuesCache.set(cacheKey, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
+        return cues;
+      } catch (e) {
+        this.cuesCache.set(cacheKey, { vtt: '', cues: [], failedAt: Date.now() });
         return [];
       }
-      const vtt = await r.text();
-      const cues = parseVtt(vtt);
-      this.cuesCache.set(track.url, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
-      return cues;
-    } catch (e) {
-      this.cuesCache.set(track.url, { vtt: '', cues: [], failedAt: Date.now() });
-      return [];
     }
+    return [];
   }
 
   _isNativeSubView(v) {
@@ -928,7 +964,7 @@ export class SubtitleDubController {
         const isNoiseCue = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull|web-dl|bluray|fhd|1080p|sync)/i.test(String(txt || ''));
         const firstDiaCue = cues.find((c) => !isNoiseCue(c.text)) || cues[0];
         if (firstDiaCue) {
-          const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && t.url);
+          const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && (t.url || t.rawUrl));
           for (const refTrk of refTracks.slice(0, 5)) {
             try {
               const semCues = await this._loadCuesForTrack(refTrk);

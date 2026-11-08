@@ -5749,11 +5749,11 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
             fb_u = alt_tr or best_en_url
         fb_q = f"&fb={urllib.parse.quote(fb_u, safe='')}" if fb_u else ""
         vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(sub_url, safe='')}&lang={lcode}{fb_q}{meta_q}"
-        picked.append((tier, prio, cnt, {"id": tid_code, "lang": lcode, "label": f"{llabel}{tag}", "url": vtt_u, "kind": "subtitles", "source": src_tag}))
+        picked.append((tier, prio, cnt, {"id": tid_code, "lang": lcode, "label": f"{llabel}{tag}", "url": vtt_u, "rawUrl": sub_url, "kind": "subtitles", "source": src_tag}))
 
     if lang_counts.get("tr", 0) == 0 and best_en_url:
         tr_vtt_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(best_en_url, safe='')}&lang=tr&translate=tr{meta_q}"
-        picked.append((-2, 0, 0, {"id": "tr", "lang": "tr", "label": f"🇹🇷 Türkçe ({plabel} Akıllı Çeviri Senkron)", "url": tr_vtt_u, "kind": "subtitles", "source": "ai-tr"}))
+        picked.append((-2, 0, 0, {"id": "tr", "lang": "tr", "label": f"🇹🇷 Türkçe ({plabel} Akıllı Çeviri Senkron)", "url": tr_vtt_u, "rawUrl": best_en_url, "kind": "subtitles", "source": "ai-tr"}))
         lang_counts["tr"] = 1
 
     def _sub_sort_key(x):
@@ -5781,7 +5781,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         raw_fb_src = (q_fb.get("url") or [""])[0]
         if raw_fb_src.startswith("http"):
             tr_synth_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_fb_src, safe='')}&lang=tr&translate=tr{meta_q}"
-            live_tracks.insert(0, {"id": "tr", "lang": "tr", "label": f"🇹🇷 Türkçe ({plabel} Akıllı Çeviri Senkron)", "url": tr_synth_u, "kind": "subtitles", "source": "ai-tr"})
+            live_tracks.insert(0, {"id": "tr", "lang": "tr", "label": f"🇹🇷 Türkçe ({plabel} Akıllı Çeviri Senkron)", "url": tr_synth_u, "rawUrl": raw_fb_src, "kind": "subtitles", "source": "ai-tr"})
     if not any(t.get("lang") == "en" for t in live_tracks) and live_tracks:
         fb_en_track = next((t for t in live_tracks if t.get("lang") == "tr"), live_tracks[0])
         q_en = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_en_track.get("url") or "")).query)
@@ -5789,7 +5789,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         if raw_en_src.startswith("http"):
             en_synth_u = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(raw_en_src, safe='')}&lang=en&translate=en{meta_q}"
             ins_en_idx = 1 if (live_tracks and live_tracks[0].get("lang") == "tr") else 0
-            live_tracks.insert(ins_en_idx, {"id": "en", "lang": "en", "label": f"🇬🇧 İngilizce (English) ({plabel} Akıllı Çeviri Senkron)", "url": en_synth_u, "kind": "subtitles", "source": "ai-en"})
+            live_tracks.insert(ins_en_idx, {"id": "en", "lang": "en", "label": f"🇬🇧 İngilizce (English) ({plabel} Akıllı Çeviri Senkron)", "url": en_synth_u, "rawUrl": raw_en_src, "kind": "subtitles", "source": "ai-en"})
     final_counts = {}
     tracks = []
     seen_tids_out = set()

@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261108_v147';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261108_v147';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261108_v147';
-import { getProvider } from '../providers.js?v=20261108_v147';
-import { expectedPosition } from '../sync.js?v=20261108_v147';
-import { thumbFor } from './lobby.js?v=20261108_v147';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261108_v147';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261108_v147';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261108_v147';
-import { avatar } from '../profile.js?v=20261108_v147';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261108_v148';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261108_v148';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261108_v148';
+import { getProvider } from '../providers.js?v=20261108_v148';
+import { expectedPosition } from '../sync.js?v=20261108_v148';
+import { thumbFor } from './lobby.js?v=20261108_v148';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261108_v148';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261108_v148';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261108_v148';
+import { avatar } from '../profile.js?v=20261108_v148';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1322,21 +1322,23 @@ export function buildControls(frame, ctx) {
     else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePiP(); }
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); ctx.toggleTheaterMode?.(); }
     else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }
-    else if (e.key === '[' || e.key === 'z' || e.key === 'Z' || e.key === ',') {
+    else if (e.key === '[' || e.key === '{' || e.key === 'z' || e.key === 'Z' || e.key === ',') {
       e.preventDefault();
-      const step = e.key === ',' ? -0.2 : -0.5;
+      const isFast = e.key === '{' || (e.key === '[' && e.shiftKey);
+      const step = isFast ? -5.0 : (e.key === ',' ? -0.2 : -0.5);
       const off = host.adapter?.subs?.setSubtitleOffset?.(step);
       if (typeof off === 'number') {
-        showOverlay(`⏱️ Altyazı Senkronu: ${off >= 0 ? '+' : ''}${off} sn (Kısayol: [ / ])`, 1500);
+        showOverlay(`⏱️ Altyazı Senkronu: ${off >= 0 ? '+' : ''}${off} sn (Kısayol: [ / ] ${isFast ? '· İleri Kademe' : ''})`, 1500);
       }
       revealControls();
     }
-    else if (e.key === ']' || e.key === 'x' || e.key === 'X' || e.key === '.') {
+    else if (e.key === ']' || e.key === '}' || e.key === 'x' || e.key === 'X' || e.key === '.') {
       e.preventDefault();
-      const step = e.key === '.' ? 0.2 : 0.5;
+      const isFast = e.key === '}' || (e.key === ']' && e.shiftKey);
+      const step = isFast ? 5.0 : (e.key === '.' ? 0.2 : 0.5);
       const off = host.adapter?.subs?.setSubtitleOffset?.(step);
       if (typeof off === 'number') {
-        showOverlay(`⏱️ Altyazı Senkronu: ${off >= 0 ? '+' : ''}${off} sn (Kısayol: [ / ])`, 1500);
+        showOverlay(`⏱️ Altyazı Senkronu: ${off >= 0 ? '+' : ''}${off} sn (Kısayol: [ / ] ${isFast ? '· İleri Kademe' : ''})`, 1500);
       }
       revealControls();
     }
@@ -2890,7 +2892,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261108_v147',
+            v: '20261108_v148',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
