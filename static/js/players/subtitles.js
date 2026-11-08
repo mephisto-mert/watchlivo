@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v144';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v145';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -352,6 +352,12 @@ export class SubtitleDubController {
           return;
         }
       }
+      if (wasTrStudio && (matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-'))) {
+        // Retain Turkish studio dub selection even across server fallbacks
+        this._applyHlsAudioSelection();
+        this.adapter?.events?.onTracksChanged?.();
+        return;
+      }
       this.selectedAudioId = matchedTrack.id;
       const nowOrig = matchedTrack.id === 'orig' || String(matchedTrack.id || '').startsWith('orig-') || (matchedTrack.audioLang && matchedTrack.audioLang !== 'tr');
       if (wasTrStudio && nowOrig && this.media?.origLang !== 'tr' && (!this.selectedSubId || this.selectedSubId === 'off')) {
@@ -550,7 +556,7 @@ export class SubtitleDubController {
       } else if (!exOrig) {
         const lang = (ht.lang || 'orig').toLowerCase();
         const name = ht.name || ht.lang || `Orijinal Ses`;
-        this.audioTracks.unshift({
+        this.audioTracks.push({
           id: 'orig',
           hlsIndex: idx,
           lang: 'orig',
@@ -922,23 +928,22 @@ export class SubtitleDubController {
         const isNoiseCue = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull|web-dl|bluray|fhd|1080p|sync)/i.test(String(txt || ''));
         const firstDiaCue = cues.find((c) => !isNoiseCue(c.text)) || cues[0];
         if (firstDiaCue && firstDiaCue.start < 25) {
-          const streamEmbedded = this.subtitleTracks.find((t) => (t.source === 'fansub' || t.source === 'stream' || String(t.id || '').includes('-hls')) && t.id !== track.id);
-          if (streamEmbedded) {
-            try {
-              const semCues = await this._loadCuesForTrack(streamEmbedded);
-              if (Array.isArray(semCues) && semCues.length > 0) {
-                const firstDiaSem = semCues.find((c) => c.start >= 20 || (c.start >= 8 && !isNoiseCue(c.text)));
-                if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 15) {
-                  const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
-                  if (delta >= 15 && delta <= 90) {
-                    this.offsetSec = delta;
-                  }
+        const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && t.url);
+        for (const refTrk of refTracks.slice(0, 4)) {
+          try {
+            const semCues = await this._loadCuesForTrack(refTrk);
+            if (Array.isArray(semCues) && semCues.length > 0) {
+              const firstDiaSem = semCues.find((c) => c.start >= 20 && !isNoiseCue(c.text));
+              if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 15) {
+                const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
+                if (delta >= 15 && delta <= 90) {
+                  this.offsetSec = delta;
+                  break;
                 }
               }
-            } catch (_) {}
-          }
+            }
+          } catch (_) {}
         }
-      }
       if (!this.intro) this.intro = this._detectIntroFromCues(cues);
       this.secondaryCues = [];
       this._attachNativeTrack(track);
@@ -1024,7 +1029,8 @@ export class SubtitleDubController {
   }
 
   async setAudioTrack(id, isInit = false) {
-    const cleanId = id || 'orig';
+    const normId = (id === 'tr' || id === 'tur' || id === 'turkish') ? 'tr-dub' : (id || 'orig');
+    const cleanId = normId;
     this.selectedAudioId = cleanId;
     if (!isInit && !/^src-\d+$/.test(cleanId)) {
       const hasStudioTrDub = this.audioTracks.some((t) => t && t.mode !== 'tts' && t.id !== 'tr-ai-dub' && (

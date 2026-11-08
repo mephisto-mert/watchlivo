@@ -8518,7 +8518,8 @@ async def rave_stream_manifest(request: Request):
                             if not valid_aud_lines:
                                 s_ln = re.sub(r',AUDIO="[^"]*"', '', s_ln)
                             else:
-                                s_ln = re.sub(r',?mp4a\.[a-zA-Z0-9.]+', '', s_ln)
+                                s_ln = re.sub(r',?\s*mp4a\.[a-zA-Z0-9.]+', '', s_ln)
+                                s_ln = re.sub(r'CODECS="([^"]*),"', r'CODECS="\1"', s_ln)
                             pending_inf = s_ln
                             continue
                         if 'TYPE=AUDIO' in s_ln:
