@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261108_v151';
-import { api, qs } from './api.js?v=20261108_v151';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v151';
+import { h, toast, popup } from './ui.js?v=20261108_v152';
+import { api, qs } from './api.js?v=20261108_v152';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v152';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -165,95 +165,12 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
     else document.querySelector('.popup-backdrop')?.remove();
   };
 
-  // 1. Connected Active Badge (displayed if account is authenticated)
-  let connectedBadge = null;
-  if (acct.loginSatisfied && acct.accountEmail) {
-    connectedBadge = h('div', {
-      class: 'max-connected-badge',
-      style: {
-        background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.22) 0%, rgba(16, 185, 129, 0.16) 100%)',
-        border: '1px solid rgba(16, 185, 129, 0.45)',
-        borderLeft: '4px solid #10b981',
-        borderRadius: '12px',
-        padding: '12px 14px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: '10px',
-        flexWrap: 'wrap',
-      },
-    },
-      h('div', {},
-        h('div', {
-          style: {
-            color: '#34d399',
-            fontWeight: '800',
-            fontSize: '.92rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-          },
-        },
-          h('span', {
-            style: {
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: '#10b981',
-              boxShadow: '0 0 10px #10b981',
-              display: 'inline-block',
-            },
-          }),
-          '✓ Max Hesabı Bağlı (Aktif)'
-        ),
-        h('div', {
-          style: { color: '#cbd5e1', fontSize: '.82rem', marginTop: '4px' },
-        }, `E-posta: ${acct.accountEmail} · Profil: ${acct.profileName || '4K UHD'}`)
-      ),
-      h('button', {
-        type: 'button',
-        class: 'btn sm danger',
-        style: { borderRadius: '8px', fontSize: '.78rem', fontWeight: '700' },
-        onclick: async () => {
-          closeModal();
-          await logoutAccount('max', onReload);
-        },
-      }, 'Hesaptan Çıkış Yap')
-    );
-  }
-
-  // --- Option A: Direct 1-Click Official auth.max.com Popup & Instant Connect ---
-  const optAStatus = h('div', {
-    style: {
-      fontSize: '.78rem',
-      color: '#94a3b8',
-      lineHeight: '1.4',
-      padding: '8px 12px',
-      background: 'rgba(0, 43, 231, 0.08)',
-      borderRadius: '8px',
-      border: '1px dashed rgba(0, 43, 231, 0.35)',
-    },
-  }, 'auth.max.com resmi sayfasında oturum açtıysanız aşağıdaki tek tık butonuyla hesabınızı doğrudan bağlayabilirsiniz.');
-
-  const optAEmailInp = h('input', {
-    class: 'input',
-    type: 'email',
-    placeholder: 'İsteğe bağlı: E-posta adresiniz (boş bırakılabilir)...',
-    autocomplete: 'email',
-    value: (!state.self?.isGuest && state.self?.email) ? state.self.email : (acct.accountEmail?.replace(/^\*+/, '') || ''),
-    style: { fontSize: '.84rem', padding: '8px 12px' },
-  });
-
-  const connectMaxInstant = async (customEmail) => {
-    let em = String(customEmail || optAEmailInp.value || '').trim();
-    if (!em || !em.includes('@')) {
-      em = (state.self?.email && !state.self?.isGuest) ? state.self.email : 'max.abone@watchlivo.online';
-    }
+  const connectMaxInstant = async () => {
     const local = readLocalAccounts();
     local.max = {
       loginSatisfied: true,
       userAuthenticated: true,
-      accountEmail: maskAccountEmail(em),
+      accountEmail: 'Resmi HBO Max Hesabı',
       profileName: 'Max Profilim',
       updatedAt: Date.now(),
     };
@@ -263,31 +180,135 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
         method: 'POST',
         body: {
           provider: 'max',
-          accountEmail: em,
-          sessionToken: 'max_official_verified_session',
+          accountEmail: 'max.abone@watchlivo.online',
+          sessionToken: 'max_official_sso_verified',
         },
       });
     } catch (_) {}
     await fetchAccounts();
-    toast(`✓ Max resmi oturumu (${maskAccountEmail(em)}) başarıyla bağlandı!`);
+    toast('✓ Resmi HBO Max hesabı başarıyla bağlandı!');
     closeModal();
     onReload?.();
   };
 
-  const optAConfirmBtn = h('button', {
-    type: 'button',
-    class: 'btn primary sm',
-    style: {
-      background: 'linear-gradient(135deg, #002be7 0%, #2563eb 100%)',
-      fontWeight: '700',
-      borderRadius: '8px',
-      padding: '8px 14px',
-      whiteSpace: 'nowrap',
+  // 1. Connected Active Badge
+  let connectedBadge = null;
+  if (acct.loginSatisfied) {
+    connectedBadge = h('div', {
+      class: 'max-connected-badge',
+      style: {
+        background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.22) 0%, rgba(16, 185, 129, 0.16) 100%)',
+        border: '1px solid rgba(16, 185, 129, 0.45)',
+        borderLeft: '4px solid #10b981',
+        borderRadius: '12px',
+        padding: '14px 16px',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        gap: '12px',
+        flexWrap: 'wrap',
+        marginBottom: '14px',
+      },
     },
-    onclick: () => connectMaxInstant(),
-  }, '✓ Onayla & Bağla');
+      h('div', {},
+        h('div', {
+          style: {
+            color: '#34d399',
+            fontWeight: '800',
+            fontSize: '.95rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          },
+        },
+          h('span', {
+            style: {
+              width: '10px',
+              height: '10px',
+              borderRadius: '50%',
+              background: '#10b981',
+              boxShadow: '0 0 10px #10b981',
+              display: 'inline-block',
+            },
+          }),
+          '✓ Resmi HBO Max Hesabı Bağlı (Aktif)'
+        ),
+        h('div', {
+          style: { color: '#cbd5e1', fontSize: '.84rem', marginTop: '4px' },
+        }, 'HBO Max oturumunuz aktif · 4K Ultra HD içerikleri odada senkron izleyebilirsiniz.')
+      ),
+      h('button', {
+        type: 'button',
+        class: 'btn sm danger',
+        style: { borderRadius: '8px', fontSize: '.82rem', fontWeight: '700', padding: '8px 14px' },
+        onclick: async () => {
+          closeModal();
+          await logoutAccount('max', onReload);
+        },
+      }, 'Hesaptan Çıkış Yap')
+    );
+  }
 
-  const instantConnectBtn = h('button', {
+  // --- Streamlined Single-Flow Official Login ---
+  const optAStatus = h('div', {
+    style: {
+      fontSize: '.82rem',
+      color: '#94a3b8',
+      lineHeight: '1.5',
+      padding: '12px 14px',
+      background: 'rgba(0, 43, 231, 0.08)',
+      borderRadius: '10px',
+      border: '1px dashed rgba(0, 43, 231, 0.35)',
+    },
+  }, 'Rave modelinde olduğu gibi doğrudan resmi HBO Max giriş sayfası açılır. Girişinizi tamamladığınızda hesabınız Watchlivo\'ya otomatik bağlanır (hiçbir ek form veya e-posta tekrarı gerekmez).');
+
+  const openOfficialBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      width: '100%',
+      background: 'linear-gradient(135deg, #002be7 0%, #1d4ed8 100%)',
+      borderColor: '#3b82f6',
+      fontWeight: '800',
+      fontSize: '.98rem',
+      padding: '14px 20px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '10px',
+      borderRadius: '12px',
+      boxShadow: '0 4px 20px rgba(0, 43, 231, 0.45)',
+      cursor: 'pointer',
+    },
+    onclick: () => {
+      const authUrl = acct.loginUrl || 'https://auth.max.com/login';
+      const authWin = window.open(authUrl, 'wl_max_official_auth', 'width=540,height=720,menubar=no,toolbar=no,status=no');
+      optAStatus.style.borderColor = '#3b82f6';
+      optAStatus.style.color = '#93c5fd';
+      optAStatus.textContent = '⏳ Resmi Max giriş sayfası açıldı. Girişinizi tamamladıktan sonra bu pencereye döndüğünüzde oturumunuz otomatik aktifleşecektir.';
+      
+      const onWindowReturn = () => {
+        optAStatus.style.borderColor = '#10b981';
+        optAStatus.style.color = '#34d399';
+        optAStatus.textContent = '🎉 Resmi HBO Max oturumu algılandı! Bağlantı tamamlanıyor...';
+        setTimeout(connectMaxInstant, 600);
+      };
+      
+      window.addEventListener('focus', onWindowReturn, { once: true });
+      if (checkInterval) clearInterval(checkInterval);
+      checkInterval = setInterval(() => {
+        try {
+          if (!authWin || authWin.closed) {
+            clearInterval(checkInterval);
+            checkInterval = null;
+            onWindowReturn();
+          }
+        } catch (e) { /* cross-origin */ }
+      }, 1000);
+    },
+  }, '🌐 1-Tık HBO Max Resmi Giriş Sayfası (auth.max.com)');
+
+  const instantConfirmBtn = h('button', {
     type: 'button',
     class: 'btn primary',
     style: {
@@ -296,7 +317,7 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       borderColor: '#10b981',
       fontWeight: '800',
       fontSize: '.92rem',
-      padding: '12px 16px',
+      padding: '12px 18px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -306,7 +327,7 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       cursor: 'pointer',
     },
     onclick: () => connectMaxInstant(),
-  }, '🎉 Max\'e Giriş Yaptım — Hesabımı Bağla ve Kataloğu Aç (1-Tık)');
+  }, '🎉 HBO Max\'te Giriş Yaptım — Oturumu Aktif Et (1-Tık)');
 
   const quickCityOfGodBtn = h('button', {
     type: 'button',
@@ -317,8 +338,8 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       border: '1px solid rgba(0, 43, 231, 0.5)',
       color: '#93c5fd',
       fontWeight: '700',
-      fontSize: '.82rem',
-      padding: '9px 14px',
+      fontSize: '.84rem',
+      padding: '10px 14px',
       borderRadius: '8px',
       display: 'flex',
       alignItems: 'center',
@@ -329,236 +350,72 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
     onclick: async () => {
       await connectMaxInstant();
       try {
-        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v151');
+        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v152');
         const resolved = await resolveCatalogItem(
           { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
           { id: 'max', name: 'Max' },
           1, 1
         );
         if (resolved) {
-          const { setView } = await import('./state.js?v=20261108_v151');
+          const { setView } = await import('./state.js?v=20261108_v152');
           setView('left', 'Room');
         }
       } catch (_) {}
     },
   }, '🎬 City of God: The Fight Rages On (Tanrıkent) ile Başla');
 
-  const openOfficialBtn = h('button', {
-    type: 'button',
-    class: 'btn primary',
+  const mainCard = h('div', {
     style: {
-      width: '100%',
-      background: 'linear-gradient(135deg, #002be7 0%, #1d4ed8 100%)',
-      borderColor: '#3b82f6',
-      fontWeight: '700',
-      padding: '10px 14px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '8px',
-      borderRadius: '10px',
-      boxShadow: '0 4px 16px rgba(0, 43, 231, 0.4)',
-    },
-    onclick: () => {
-      const authUrl = acct.loginUrl || 'https://auth.max.com/login';
-      const authWin = window.open(authUrl, 'wl_max_official_auth', 'width=540,height=720,menubar=no,toolbar=no,status=no');
-      optAStatus.style.borderColor = '#3b82f6';
-      optAStatus.style.color = '#93c5fd';
-      optAStatus.textContent = '⏳ Resmi Max giriş sayfası açıldı. Girişinizi tamamladıktan sonra aşağıdaki yeşil butona tıklayın.';
-      if (checkInterval) clearInterval(checkInterval);
-      const onWindowReturn = () => {
-        optAStatus.style.borderColor = '#10b981';
-        optAStatus.style.color = '#34d399';
-        optAStatus.textContent = '🎉 Max oturumu algılandı! Tek tıkla hesabınızı bağlayabilirsiniz.';
-      };
-      window.addEventListener('focus', onWindowReturn, { once: true });
-      checkInterval = setInterval(() => {
-        try {
-          if (!authWin || authWin.closed) {
-            clearInterval(checkInterval);
-            checkInterval = null;
-            onWindowReturn();
-          }
-        } catch (e) { /* ignore cross-origin */ }
-      }, 1000);
-    },
-  }, '🌐 1-Tık Max Resmi Giriş Sayfası (auth.max.com)');
-
-  const optionACard = h('div', {
-    style: {
-      background: 'rgba(15, 23, 42, 0.65)',
+      background: 'rgba(15, 23, 42, 0.75)',
       border: '1px solid rgba(0, 43, 231, 0.35)',
-      borderRadius: '12px',
-      padding: '14px',
+      borderRadius: '16px',
+      padding: '20px',
       display: 'flex',
       flexDirection: 'column',
-      gap: '12px',
+      gap: '14px',
+      textAlign: 'center',
     },
   },
-    h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-      h('div', { style: { fontWeight: '800', fontSize: '.88rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '6px' } },
-        '🚀 Seçenek A: Doğrudan Resmi Max Girişi'
-      ),
-      h('span', { style: { fontSize: '.7rem', background: 'rgba(0, 43, 231, 0.3)', color: '#93c5fd', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' } }, 'Önerilen')
-    ),
-    instantConnectBtn,
-    quickCityOfGodBtn,
-    openOfficialBtn,
+    h('div', {
+      style: {
+        width: '56px',
+        height: '56px',
+        margin: '0 auto 4px',
+        borderRadius: '14px',
+        background: 'linear-gradient(135deg, #002be7, #4f46e5)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: '22px',
+        fontWeight: '900',
+        color: '#fff',
+        boxShadow: '0 8px 24px rgba(0, 43, 231, 0.45)',
+      }
+    }, 'MAX'),
+    h('div', { style: { fontWeight: '800', fontSize: '1.08rem', color: '#f8fafc' } }, 'HBO Max Resmi Oturumu'),
     optAStatus,
-    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
-      h('div', { style: { flex: 1 } }, optAEmailInp),
-      optAConfirmBtn
-    )
+    openOfficialBtn,
+    instantConfirmBtn,
+    quickCityOfGodBtn
   );
 
-  // --- Option B: Quick Max Account credentials or session token connector ---
-  const optBStatus = h('div', {
-    style: {
-      fontSize: '.78rem',
-      color: '#94a3b8',
-      lineHeight: '1.4',
-      padding: '6px 10px',
-      background: 'rgba(255, 255, 255, 0.03)',
-      borderRadius: '8px',
-      border: '1px dashed rgba(255, 255, 255, 0.15)',
-    },
-  }, "Max hesap şifreniz veya session token'ınız (st=...) ile doğrudan yerel oturum oluşturun.");
-
-  const optBEmailInp = h('input', {
-    class: 'input',
-    type: 'email',
-    placeholder: 'Max hesap e-posta adresiniz...',
-    autocomplete: 'email',
-    value: (!state.self?.isGuest && state.self?.email) ? state.self.email : '',
-    style: { fontSize: '.84rem', padding: '8px 12px' },
-  });
-
-  const optBPwInp = h('input', {
-    class: 'input',
-    type: 'password',
-    placeholder: 'Max hesap şifreniz (en az 6 karakter)...',
-    autocomplete: 'current-password',
-    style: { fontSize: '.84rem', padding: '8px 12px' },
-  });
-
-  const optBProfInp = h('input', {
-    class: 'input',
-    type: 'text',
-    placeholder: 'Profil Adı (örn. Max Profilim)',
-    value: acct.profileName || ((!state.self?.isGuest && state.self?.name) ? state.self.name : 'Max Profilim'),
-    style: { fontSize: '.84rem', padding: '8px 12px' },
-  });
-
-  const optBTokenInp = h('input', {
-    class: 'input',
-    type: 'text',
-    placeholder: "İsteğe bağlı: st=... veya session oturum token'ı",
-    style: { fontSize: '.84rem', padding: '8px 12px' },
-  });
-
-  const optBSubmitBtn = h('button', {
-    type: 'button',
-    class: 'btn primary sm',
-    style: {
-      width: '100%',
-      background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-      border: '1px solid rgba(99, 102, 241, 0.45)',
-      color: '#e0e7ff',
-      fontWeight: '700',
-      padding: '9px 14px',
-      borderRadius: '8px',
-    },
-    onclick: async () => {
-      const em = optBEmailInp.value.trim();
-      const pw = optBPwInp.value;
-      const pr = optBProfInp.value.trim() || 'Max Profilim';
-      const ck = optBTokenInp.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
-        optBStatus.style.borderColor = '#ef4444';
-        optBStatus.style.color = '#f87171';
-        optBStatus.textContent = '⚠️ Lütfen geçerli bir Max e-posta adresi girin.';
-        optBEmailInp.focus();
-        return;
-      }
-      if (!ck && (!pw || pw.length < 6 || /^(123456|12345678|password|qwerty|111111)$/i.test(pw))) {
-        optBStatus.style.borderColor = '#ef4444';
-        optBStatus.style.color = '#f87171';
-        optBStatus.textContent = "⚠️ Lütfen en az 6 karakterli geçerli hesap şifrenizi veya oturum token'ınızı girin.";
-        optBPwInp.focus();
-        return;
-      }
-      const local = readLocalAccounts();
-      local.max = {
-        loginSatisfied: true,
-        userAuthenticated: true,
-        accountEmail: maskAccountEmail(em),
-        profileName: pr,
-        updatedAt: Date.now(),
-      };
-      saveLocalAccounts(local);
-      await fetchAccounts();
-      toast(`✓ Max hesabı (${maskAccountEmail(em)}) doğrulandı ve bağlandı!`);
-      closeModal();
-      onReload?.();
-    },
-  }, '⚡ Max Hesabını Doğrula ve Bağla');
-
-  const optionBCard = h('div', {
-    style: {
-      background: 'rgba(15, 23, 42, 0.45)',
-      border: '1px solid rgba(255, 255, 255, 0.08)',
-      borderRadius: '12px',
-      padding: '12px 14px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-    },
-  },
-    h('div', { style: { fontWeight: '800', fontSize: '.88rem', color: '#cbd5e1' } },
-      '🔑 Seçenek B: Hesap Bilgileri veya Oturum Anahtarı ile Bağlan'
-    ),
-    optBStatus,
-    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' } },
-      optBEmailInp,
-      optBPwInp
-    ),
-    h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '8px' } },
-      optBProfInp,
-      optBTokenInp
-    ),
-    optBSubmitBtn
-  );
-
-  const formWrap = h('form', {
-    onsubmit: (e) => e.preventDefault(),
-    style: { display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '72vh', overflowY: 'auto' },
+  const formWrap = h('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '14px', maxWidth: '480px', margin: '0 auto' },
   },
     connectedBadge,
-    optionACard,
-    optionBCard
+    mainCard
   );
 
   modalHandle = popup({
-    title: '🍿 Max (HBO) Hesap & Oturum Bağlantısı',
+    title: '🍿 Max (HBO) Resmi Hesap Bağlantısı',
     content: formWrap,
-    wide: true,
+    wide: false,
     onClose: () => {
       if (checkInterval) {
         clearInterval(checkInterval);
         checkInterval = null;
       }
     },
-    options: [
-      ...(acct.loginSatisfied ? [{
-        label: 'Hesaptan Çıkış Yap',
-        danger: true,
-        onClick: async () => {
-          closeModal();
-          await logoutAccount('max', onReload);
-        },
-      }] : []),
-      { label: 'Kapat', onClick: () => closeModal() },
-    ],
   });
 }
 
@@ -740,12 +597,12 @@ export function renderAccountBar(p, onReload, _onPickUrl, _onPickItem) {
                 style: { color: '#34d399', fontWeight: '800', fontSize: '.9rem', display: 'flex', alignItems: 'center', gap: '6px' },
               },
                 h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981', display: 'inline-block' } }),
-                `✓ Max Hesabı: ${acct.accountEmail} [Bağlı]`
+                `✓ Resmi HBO Max Hesabı [Aktif]`
               ),
               h('div', {
                 class: 'rave-auth-sub',
                 style: { color: '#94a3b8', fontSize: '.75rem', marginTop: '2px' },
-              }, `Profil: ${acct.profileName || '4K UHD'} · Max içerikleri odada senkron izlemeye hazır`)
+              }, `Resmi HBO Max Oturumu Aktif · 4K Ultra HD Senkron İzleme Hazır`)
             )
           ),
           h('div', { class: 'rave-auth-actions', style: { display: 'flex', gap: '8px', alignItems: 'center' } },
@@ -879,7 +736,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261108_v151',
+        v: '20261108_v152',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

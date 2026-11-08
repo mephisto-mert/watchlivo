@@ -127,14 +127,14 @@ def patch_accounts_js():
     onclick: async () => {
       await connectMaxInstant();
       try {
-        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v151');
+        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v152');
         const resolved = await resolveCatalogItem(
           { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
           { id: 'max', name: 'Max' },
           1, 1
         );
         if (resolved) {
-          const { setView } = await import('./state.js?v=20261108_v151');
+          const { setView } = await import('./state.js?v=20261108_v152');
           setView('left', 'Room');
         }
       } catch (_) {}
@@ -260,7 +260,7 @@ def patch_selection_kinds_js():
             class: 'btn primary',
             style: { background: 'linear-gradient(135deg, #10b981, #059669)', borderColor: '#10b981', color: '#ffffff', fontWeight: '800', padding: '10px 18px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)', cursor: 'pointer' },
             onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v151');
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v152');
               const local = readLocalAccounts();
               local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
               saveLocalAccounts(local);
@@ -275,7 +275,7 @@ def patch_selection_kinds_js():
             class: 'btn sm',
             style: { background: 'rgba(0, 43, 231, 0.35)', border: '1px solid #3b82f6', color: '#93c5fd', fontWeight: '700', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
             onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v151');
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v152');
               const local = readLocalAccounts();
               local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
               saveLocalAccounts(local);
@@ -285,7 +285,7 @@ def patch_selection_kinds_js():
                 { id: 'max', name: 'Max' }, 1, 1
               );
               if (resolved) {
-                const { setView } = await import('../state.js?v=20261108_v151');
+                const { setView } = await import('../state.js?v=20261108_v152');
                 setView('left', 'Room');
               }
             },
@@ -340,7 +340,7 @@ def patch_selection_kinds_js():
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v151');
+                  const { setView } = await import('../state.js?v=20261108_v152');
                   setView('left', 'Room');
                 }
               },
@@ -355,7 +355,7 @@ def patch_selection_kinds_js():
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v151');
+                  const { setView } = await import('../state.js?v=20261108_v152');
                   setView('left', 'Room');
                 }
               },
@@ -370,7 +370,7 @@ def patch_selection_kinds_js():
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v151');
+                  const { setView } = await import('../state.js?v=20261108_v152');
                   setView('left', 'Room');
                 }
               },
