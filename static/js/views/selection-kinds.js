@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v152';
-import { api, qs } from '../api.js?v=20261108_v152';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v152';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v152';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v152';
-import { profileSetup } from '../profile.js?v=20261108_v152';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v152';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v153';
+import { api, qs } from '../api.js?v=20261108_v153';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v153';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v153';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v153';
+import { profileSetup } from '../profile.js?v=20261108_v153';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v153';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261108_v152';
+} from '../store.js?v=20261108_v153';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -660,7 +660,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
             class: 'btn primary',
             style: { background: 'linear-gradient(135deg, #10b981, #059669)', borderColor: '#10b981', color: '#ffffff', fontWeight: '800', padding: '10px 18px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)', cursor: 'pointer' },
             onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v152');
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v153');
               const local = readLocalAccounts();
               local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
               saveLocalAccounts(local);
@@ -675,7 +675,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
             class: 'btn sm',
             style: { background: 'rgba(0, 43, 231, 0.35)', border: '1px solid #3b82f6', color: '#93c5fd', fontWeight: '700', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
             onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v152');
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v153');
               const local = readLocalAccounts();
               local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
               saveLocalAccounts(local);
@@ -685,7 +685,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                 { id: 'max', name: 'Max' }, 1, 1
               );
               if (resolved) {
-                const { setView } = await import('../state.js?v=20261108_v152');
+                const { setView } = await import('../state.js?v=20261108_v153');
                 setView('left', 'Room');
               }
             },
@@ -734,7 +734,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v152');
+                  const { setView } = await import('../state.js?v=20261108_v153');
                   setView('left', 'Room');
                 }
               },
@@ -749,7 +749,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v152');
+                  const { setView } = await import('../state.js?v=20261108_v153');
                   setView('left', 'Room');
                 }
               },
@@ -764,7 +764,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v152');
+                  const { setView } = await import('../state.js?v=20261108_v153');
                   setView('left', 'Room');
                 }
               },

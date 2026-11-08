@@ -6440,50 +6440,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
         imdb_id = m_cached.get("imdbId") or imdb_id or ""
         orig_lang = m_cached.get("origLang") or ""
         disp = _clean_query_title(disp) or tr_title
-        if is_max_prov:
-            pmeta = _fetch_platform_meta_sync("max", tr_title or orig_title, tid, mtype)
-            official_url = source_url or pmeta.get("officialUrl") or ""
-            if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
-                hits = _justwatch_sync(_clean_query_title(disp or tr_title or orig_title), ["mxx", "hbm"], "US", 6)
-                match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
-                if match and match.get("officialUrl"):
-                    official_url = match["officialUrl"]
-            if not official_url:
-                official_url = "https://play.max.com"
-            full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
-            dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
-            return {
-                "id": eff_tid or tid,
-                "provider": "max",
-                "catalogProvider": "max",
-                "tmdbId": tid,
-                "imdbId": imdb_id,
-                "mediaType": mtype,
-                "season": s if mtype == "tv" else 0,
-                "episode": e if mtype == "tv" else 0,
-                "seriesTitle": disp or tr_title or orig_title,
-                "originalTitle": orig_title,
-                "year": year,
-                "origLang": orig_lang,
-                "sourceUrl": source_url or official_url,
-                "streamType": "official",
-                "url": official_url,
-                "embedUrl": official_url,
-                "altUrls": [],
-                "servers": [{"id": "srv-max-1", "label": "Max (HBO) Resmi Akış (4K Ultra HD)", "url": official_url, "streamType": "official"}],
-                "subtitleTracks": [],
-                "audioTracks": [{"id": "max-orig", "lang": orig_lang or "en", "label": "Orijinal Ses (Max)", "mode": "stream", "url": official_url}],
-                "intro": None,
-                "platformAudioLangs": pmeta.get("audioLangs") or ["en", "tr"],
-                "platformSubLangs": pmeta.get("subLangs") or ["tr", "en"],
-                "officialUrl": official_url,
-                "providerUrl": official_url,
-                "title": full_title,
-                "thumbnail": poster,
-                "channel": "Max (HBO) · Resmi Oynatıcı (1080p HD)",
-                "duration": dur,
-                "authenticated": True,
-            }
+
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as cat_pool:
             fut_direct = cat_pool.submit(_extract_direct_stream_sync, eff_tid, mtype, s, e, orig_title, year, imdb_id, tr_title, source_url, refresh)
@@ -6599,48 +6556,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         "authRequired": True,
                         "provider": "max",
                     }
-                official_url = source_url or pmeta.get("officialUrl") or ""
-                if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
-                    hits = _justwatch_sync(_clean_query_title(disp or tr_title or orig_title), ["mxx", "hbm"], "US", 6)
-                    match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
-                    if match and match.get("officialUrl"):
-                        official_url = match["officialUrl"]
-                if not official_url:
-                    official_url = "https://play.max.com"
-                full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
-                dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
-                return {
-                    "id": eff_tid or tid,
-                    "provider": "max",
-                    "catalogProvider": "max",
-                    "tmdbId": tid,
-                    "imdbId": imdb_id,
-                    "mediaType": mtype,
-                    "season": s if mtype == "tv" else 0,
-                    "episode": e if mtype == "tv" else 0,
-                    "seriesTitle": disp or tr_title or orig_title,
-                    "originalTitle": orig_title,
-                    "year": year,
-                    "origLang": orig_lang,
-                    "sourceUrl": source_url or official_url,
-                    "streamType": "official",
-                    "url": official_url,
-                    "embedUrl": official_url,
-                    "altUrls": [],
-                    "servers": [{"id": "srv-max-1", "label": "Max (HBO) Resmi Akış (4K Ultra HD)", "url": official_url, "streamType": "official"}],
-                    "subtitleTracks": [],
-                    "audioTracks": [{"id": "max-orig", "lang": orig_lang or "en", "label": "Orijinal Ses (Max)", "mode": "stream", "url": official_url}],
-                    "intro": None,
-                    "platformAudioLangs": pmeta.get("audioLangs") or ["en", "tr"],
-                    "platformSubLangs": pmeta.get("subLangs") or ["tr", "en"],
-                    "officialUrl": official_url,
-                    "providerUrl": official_url,
-                    "title": full_title,
-                    "thumbnail": poster,
-                    "channel": "Max (HBO) · Resmi Oynatıcı (1080p HD)",
-                    "duration": dur,
-                    "authenticated": True,
-                }
+                # User IS authenticated! Let direct_list proceed so it streams directly in Watchlivo room!
             label = PROV_LABELS.get(eff_prov, label)
             wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as sub_pool:

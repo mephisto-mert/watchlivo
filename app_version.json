@@ -10,5 +10,5 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-04T03:39:14.022390+00:00",
-  "changelog": "v152: Pure Single-Login Official HBO Flow (Rave Parity) — 0 forms, 1-click auth.max.com popup with auto-capture."
+  "changelog": "v153: Direct in-room HLS playback for authenticated Max (HBO) titles (Html5Adapter) — 0 external windows, 0 bridge cards."
 }

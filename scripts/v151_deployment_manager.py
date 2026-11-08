@@ -21,7 +21,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OLD_VERSION = "20261108_v150"
-NEW_VERSION = "20261108_v152"
+NEW_VERSION = "20261108_v153"
 RENDER_HOOK_URL = "https://api.render.com/deploy/srv-dbmnb7etlv9c73bgmfi0?key=W3Qbb8j__WQ"
 LIVE_DOMAIN = "https://watchlivo.online"
 

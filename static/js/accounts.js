@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261108_v152';
-import { api, qs } from './api.js?v=20261108_v152';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v152';
+import { h, toast, popup } from './ui.js?v=20261108_v153';
+import { api, qs } from './api.js?v=20261108_v153';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v153';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -350,14 +350,14 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
     onclick: async () => {
       await connectMaxInstant();
       try {
-        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v152');
+        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v153');
         const resolved = await resolveCatalogItem(
           { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
           { id: 'max', name: 'Max' },
           1, 1
         );
         if (resolved) {
-          const { setView } = await import('./state.js?v=20261108_v152');
+          const { setView } = await import('./state.js?v=20261108_v153');
           setView('left', 'Room');
         }
       } catch (_) {}
@@ -736,7 +736,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261108_v152',
+        v: '20261108_v153',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

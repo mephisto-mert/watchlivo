@@ -234,14 +234,14 @@ def patch_accounts_js():
     onclick: async () => {
       await connectMaxInstant();
       try {
-        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v152');
+        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v153');
         const resolved = await resolveCatalogItem(
           { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
           { id: 'max', name: 'Max' },
           1, 1
         );
         if (resolved) {
-          const { setView } = await import('./state.js?v=20261108_v152');
+          const { setView } = await import('./state.js?v=20261108_v153');
           setView('left', 'Room');
         }
       } catch (_) {}
