@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v145';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v146';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -590,7 +590,7 @@ export class SubtitleDubController {
         const exOrig = this.audioTracks.find((t) => t.id === 'orig' || (t.audioLang && t.audioLang !== 'tr'));
         if (exOrig && typeof exOrig.nativeIndex !== 'number') exOrig.nativeIndex = idx;
         else if (!exOrig) {
-          this.audioTracks.unshift({
+          this.audioTracks.push({
             id: 'orig', nativeIndex: idx, lang: 'orig', targetLang: 'orig',
             audioLang: (nt?.language || 'orig').toLowerCase(),
             label: `🎬 ${nt?.label || nt?.language || 'Orijinal Ses'} (Orijinal Stüdyo Ses)`, mode: 'native',
@@ -927,23 +927,31 @@ export class SubtitleDubController {
       if (this.offsetSec === 0 && cues.length > 0) {
         const isNoiseCue = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull|web-dl|bluray|fhd|1080p|sync)/i.test(String(txt || ''));
         const firstDiaCue = cues.find((c) => !isNoiseCue(c.text)) || cues[0];
-        if (firstDiaCue && firstDiaCue.start < 25) {
-        const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && t.url);
-        for (const refTrk of refTracks.slice(0, 4)) {
-          try {
-            const semCues = await this._loadCuesForTrack(refTrk);
-            if (Array.isArray(semCues) && semCues.length > 0) {
-              const firstDiaSem = semCues.find((c) => c.start >= 20 && !isNoiseCue(c.text));
-              if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 15) {
-                const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
-                if (delta >= 15 && delta <= 90) {
-                  this.offsetSec = delta;
-                  break;
+        if (firstDiaCue && firstDiaCue.start < 28) {
+          const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && t.url);
+          for (const refTrk of refTracks.slice(0, 5)) {
+            try {
+              const semCues = await this._loadCuesForTrack(refTrk);
+              if (Array.isArray(semCues) && semCues.length > 0) {
+                const firstDiaSem = semCues.find((c) => c.start >= 20 && !isNoiseCue(c.text));
+                if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 20) {
+                  const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
+                  if (delta >= 10 && delta <= 95) {
+                    this.offsetSec = delta;
+                    break;
+                  }
                 }
               }
+            } catch (_) {}
+          }
+          if (this.offsetSec === 0) {
+            const introEnd = Number(this.intro?.end || this.media?.intro?.end || 0);
+            if (introEnd >= 25 && firstDiaCue.start <= 10) {
+              this.offsetSec = Math.round(introEnd * 10) / 10;
             }
-          } catch (_) {}
+          }
         }
+      }
       if (!this.intro) this.intro = this._detectIntroFromCues(cues);
       this.secondaryCues = [];
       this._attachNativeTrack(track);

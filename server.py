@@ -5859,8 +5859,9 @@ def _norm_audio_lang(*vals) -> str:
 def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int, mtype: str = ""):
     """Return the audio languages a source really carries: [codes], [] for muxed/unlabelled audio, None on failure."""
     import base64
-    if raw_u in _AUDIO_LANG_HINT and _AUDIO_LANG_HINT[raw_u] and raw_u in _STREAM_RES_HINT:
-        return list(_AUDIO_LANG_HINT[raw_u])
+    cached = _AUDIO_PROBE_CACHE.get(raw_u)
+    if cached and time.time() - cached[0] < 1800 and raw_u in _STREAM_RES_HINT:
+        return list(cached[1])
     if str(st) == "hls_pv_tr":
         _STREAM_RES_HINT.setdefault(raw_u, 1280)
         return ["tr"]
@@ -5870,9 +5871,6 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int,
     if str(st).startswith("hls_fp:orig:"):
         _STREAM_RES_HINT.setdefault(raw_u, 1920)
         return []
-    cached = _AUDIO_PROBE_CACHE.get(raw_u)
-    if cached and time.time() - cached[0] < 1800 and raw_u in _STREAM_RES_HINT:
-        return list(cached[1])
     wu = _wrap_first_party_stream(raw_u, st, prov, tid, s, e, mtype or ("tv" if (s > 1 or e > 1) else ""))
     if "/api/rave/stream?" not in wu:
         return None
