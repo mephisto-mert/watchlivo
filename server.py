@@ -9503,25 +9503,38 @@ async def rave_subtitle_vtt(request: Request):
     fb = (request.query_params.get("fb") or "").strip()
     lang = (request.query_params.get("lang") or "").strip().lower()
     translate = (request.query_params.get("translate") or "").strip().lower()
+    
+    dbg_info = {}
+    try:
+        import curl_cffi
+        dbg_info["cffi"] = curl_cffi.__version__
+    except Exception as e:
+        dbg_info["cffi_err"] = str(e)
+
     if not url.startswith(("https://", "http://")) or not public_http_url(url):
-        return Response("WEBVTT\n\n", media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*"})
+        dbg_info["bad_url"] = True
+        return Response("WEBVTT\n\n", media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "X-Debug-Cffi": json.dumps(dbg_info)})
     vtt = ""
     need_tr = (translate == "tr")
     need_en = (translate == "en")
     try:
         vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_vtt_sync, url), timeout=7.5)
-    except Exception:
+        dbg_info["vtt_len"] = len(vtt)
+        dbg_info["vtt_cues"] = vtt.count("-->")
+    except Exception as err:
         vtt = ""
+        dbg_info["vtt_err"] = str(err)
     min_cues = 20 if (request.query_params.get("mtype") == "tv") else 35
     if vtt.count("-->") < min_cues and fb.startswith(("https://", "http://")) and public_http_url(fb):
         try:
             fb_vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_vtt_sync, fb), timeout=7.5)
+            dbg_info["fb_cues"] = fb_vtt.count("-->")
             if fb_vtt.count("-->") > vtt.count("-->"):
                 vtt = fb_vtt
                 if lang == "tr" and ("english" in fb.lower() or "sublanguageid-eng" in fb.lower()):
                     need_tr = True
-        except Exception:
-            pass
+        except Exception as err:
+            dbg_info["fb_err"] = str(err)
     if lang == "tr" and not need_tr and vtt.count("-->") >= 2:
         sample_vtt = vtt[:6000]
         if not re.search(r"[ğşıöüçĞŞİÖÜÇ]", sample_vtt) and len(re.findall(r"\b(?:the|you|what|that|have|with|this|from|they|would|there)\b", sample_vtt, re.I)) >= 4:
@@ -9539,11 +9552,12 @@ async def rave_subtitle_vtt(request: Request):
     if not vtt or not vtt.startswith("WEBVTT"):
         vtt = "WEBVTT\n\n"
     if vtt.count("-->") < 1:
-        return Response(b"" if request.method == "HEAD" else b"WEBVTT\n\n", status_code=404, media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"})
+        return Response(b"" if request.method == "HEAD" else b"WEBVTT\n\n", status_code=404, media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Debug-Cffi": json.dumps(dbg_info)})
     body_bytes = vtt.encode("utf-8")
     return Response(b"" if request.method == "HEAD" else body_bytes, media_type="text/vtt; charset=utf-8", headers={
         "Access-Control-Allow-Origin": "*",
         "Cache-Control": "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800",
+        "X-Debug-Cffi": json.dumps(dbg_info),
     })
 
 
