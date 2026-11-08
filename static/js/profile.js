@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261108_v148';
-import { api } from './api.js?v=20261108_v148';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261108_v148';
+import { h, icons, popup, toast } from './ui.js?v=20261108_v149';
+import { api } from './api.js?v=20261108_v149';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261108_v149';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261108_v148';
+} from './store.js?v=20261108_v149';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -573,10 +573,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         showErr('Lütfen geçerli bir Google e-posta adresi girin (örn. ad@gmail.com).');
         return;
       }
-      if (cleanPw.length < 6) {
-        showErr('Şifre yazmadan Google ile giriş yapılamaz! Lütfen en az 6 karakterli şifrenizi girin.');
-        return;
-      }
+
       if (window.isWatchlivoDesktop && window.pywebview?.api?.start_google_login) {
         toast('Google ile giriş için varsayılan tarayıcınız açılıyor...');
         try {
@@ -615,7 +612,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         return;
       }
       try {
-        toast('Google doğrulama penceresi açılıyor...');
+        toast('Google ile giriş penceresi açılıyor...');
         const cred = await fb.signInWithPopup(fb.auth, gProv);
         if (cred?.user) {
           idToken = await cred.user.getIdToken(true);
@@ -651,7 +648,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       });
       if (res?.ok && res.user) {
         const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-        finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak şifreli Google girişi yapıldı`);
+        finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak Google ile giriş yapıldı`);
       }
     } catch (e) {
       showErr(e.message || 'Google ile giriş başarısız oldu');
@@ -680,101 +677,20 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
   };
 
-  const renderSocialButtons = ({ hideGuestBtn = false, getFormCreds = null } = {}) => {
-    const gEmailInp = h('input', {
-      class: 'input',
-      type: 'email',
-      placeholder: 'Google E-posta Adresiniz (örn. ad@gmail.com)',
-      autocomplete: 'email',
-      value: (current && !current.isGuest && current.email) ? current.email : '',
-    });
-    const gPwInp = h('input', {
-      class: 'input',
-      type: 'password',
-      placeholder: 'Hesap Şifreniz (en az 6 karakter — zorunlu)',
-      autocomplete: 'current-password',
-    });
-    const gErrBox = h('div', { class: 'wl-auth-err', style: { minHeight: '18px' } });
-    const gVerifyPanel = h('form', {
-      class: 'wl-google-pw-panel',
-      onsubmit: (e) => {
-        e.preventDefault();
-        gVerifyPanel.querySelector('button.btn.primary')?.click?.();
-      },
-      style: {
-        display: 'none',
-        flexDirection: 'column',
-        gap: '8px',
-        marginTop: '10px',
-        padding: '12px',
-        borderRadius: '12px',
-        background: 'rgba(15, 23, 42, 0.92)',
-        border: '1px solid rgba(56, 189, 248, 0.38)',
-      },
-    },
-      h('div', { style: { fontSize: '.78rem', fontWeight: '700', color: '#38bdf8' } },
-        '🔐 Google ile Güvenli Giriş — Şifre Doğrulaması Zorunlu'),
-      h('div', { style: { fontSize: '.74rem', color: '#cbd5e1', lineHeight: '1.4' } },
-        'Şifre yazmadan otomatik giriş engellenmiştir. Google e-posta adresinizi ve en az 6 karakterli şifrenizi girip onaylayın:'),
-      gEmailInp,
-      gPwInp,
-      gErrBox,
-      h('button', {
-        type: 'button',
-        class: 'btn primary wl-btn-full',
-        onclick: () => {
-          gErrBox.textContent = '';
-          const em = gEmailInp.value.trim();
-          const pw = gPwInp.value;
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
-            gErrBox.style.color = '#fb7185';
-            gErrBox.textContent = 'Lütfen geçerli bir Google e-posta adresi girin.';
-            gEmailInp.focus();
-            return;
-          }
-          if (pw.length < 6) {
-            gErrBox.style.color = '#fb7185';
-            gErrBox.textContent = 'Şifre yazmadan Google ile giriş yapılamaz! En az 6 karakterli şifrenizi girin.';
-            gPwInp.focus();
-            return;
-          }
-          doSocialLogin('google', 'GmailÜyesi', { password: pw, expectedEmail: em, errEl: gErrBox });
-        },
-      }, '🌐 Şifreyi Doğrula & Google Penceresini Aç')
-    );
-
-    gPwInp.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        const btn = gVerifyPanel.querySelector('button.btn.primary');
-        btn?.click?.();
-      }
-    });
-
+  const renderSocialButtons = ({ hideGuestBtn = false } = {}) => {
     return h('div', { class: 'wl-social-stack' },
-      h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Şifreli Giriş' : 'veya Diğer Giriş Seçenekleri')),
+      h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Hızlı Giriş' : 'veya Diğer Giriş Seçenekleri')),
       h('div', { class: 'wl-social-row' },
         h('button', {
           type: 'button',
+          id: 'wl-google-signin-btn',
           class: 'wl-social-btn wl-social-google',
           onclick: () => {
-            const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
-            const formEmail = String(creds.email || '').trim();
-            const formPw = String(creds.password || '');
-            if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(formEmail) && formPw.length >= 6) {
-              doSocialLogin('google', 'GmailÜyesi', { password: formPw, expectedEmail: formEmail, errEl: creds.errEl || gErrBox });
-              return;
-            }
-            if (formEmail && !gEmailInp.value) gEmailInp.value = formEmail;
-            if (formPw && !gPwInp.value) gPwInp.value = formPw;
-            gVerifyPanel.style.display = 'flex';
-            gErrBox.style.color = '#fbbf24';
-            gErrBox.textContent = '⚠️ Google ile giriş yapmak için lütfen e-posta ve şifrenizi girin.';
-            if (!gEmailInp.value.trim()) gEmailInp.focus();
-            else gPwInp.focus();
+            doSocialLogin('google', 'GmailÜyesi');
           },
         },
         h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
-        h('span', {}, 'Google ile Giriş Yap (Şifreli)'),
+        h('span', {}, 'Google ile Giriş Yap'),
         lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null),
         !hideGuestBtn ? h('button', {
           type: 'button',
@@ -790,8 +706,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         },
         h('span', {}, '👤 Misafir Sekmesine Geç'),
         lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null),
-      gVerifyPanel,
-      h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Şifre Doğrulamalı Güvenli Hesap veya Kayıtsız Misafir Girişi'));
+      h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Resmi Google Hesabınız ile Tek Tıkla Güvenli Giriş'));
   };
 
   const draw = () => {
@@ -2450,9 +2365,6 @@ if (typeof window !== 'undefined') {
 export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') {
   const cleanPw = String(password || '');
   const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
-  if (cleanPw.length < 6) {
-    throw new Error('Şifre yazmadan YouTube / Google girişi yapılamaz. Lütfen en az 6 karakterli şifrenizi girin.');
-  }
   const fb = await getFirebaseAuth();
   if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {
     throw new Error('Google kimlik doğrulama modülü yüklenemedi.');

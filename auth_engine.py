@@ -1057,11 +1057,6 @@ async def auth_oauth(request: Request) -> JSONResponse:
     if provider not in PROVIDER_ICONS:
         provider = "google"
     password = str(body.get("password") or "")[:256]
-    if len(password) < 6:
-        return JSONResponse(
-            {"ok": False, "error": "Şifre yazmadan Google / YouTube girişi yapılamaz. Lütfen en az 6 karakterli şifrenizi girin."},
-            status_code=400,
-        )
     id_token = str(body.get("idToken") or "").strip()
     fb_email = ""
     fb_name = ""
@@ -1114,11 +1109,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
         uid = "u_wl_" + hashlib.sha256(raw_email.encode("utf-8")).hexdigest()[:12]
         ex = _user_get(uid)
         if ex:
-            has_pw = bool(ex.get("password_set")) or str(ex.get("auth_provider") or "") == "email"
-            if has_pw:
-                if not hmac.compare_digest(_hash_pw(password, ex["salt"]), ex["password_hash"]):
-                    return JSONResponse({"ok": False, "error": "Girdiğiniz şifre bu hesapla eşleşmiyor. Lütfen doğru şifrenizi girin."}, status_code=401)
-            else:
+            if password and len(password) >= 6 and not ex.get("password_set"):
                 new_salt = _new_salt()
                 new_hash = _hash_pw(password, new_salt)
                 ex = _user_update(uid, {"password_hash": new_hash, "salt": new_salt, "password_set": 1}) or ex
@@ -1129,17 +1120,14 @@ async def auth_oauth(request: Request) -> JSONResponse:
         raw_email = f"{handle}@{provider}.watchlivo.online"
         ex = _user_get(uid)
         if ex:
-            has_pw = bool(ex.get("password_set")) or str(ex.get("auth_provider") or "") == "email"
-            if has_pw and not hmac.compare_digest(_hash_pw(password, ex["salt"]), ex["password_hash"]):
-                return JSONResponse({"ok": False, "error": "Girdiğiniz şifre bu hesapla eşleşmiyor. Lütfen doğru şifrenizi girin."}, status_code=401)
             user = _row_to_user(ex)
             return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
     salt = _new_salt()
-    pw_hash = _hash_pw(password, salt)
+    pw_hash = _hash_pw(password or _new_salt(), salt)
     now_ts = time.time()
     row = {
         "uid": uid, "email": raw_email, "handle": handle, "name": raw_name, "password_hash": pw_hash, "salt": salt,
-        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1,
+        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1 if password else 0,
         "created_at": now_ts, "updated_at": now_ts,
     }
     try:
