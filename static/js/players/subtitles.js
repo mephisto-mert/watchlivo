@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v146';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v147';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -908,14 +908,14 @@ export class SubtitleDubController {
         : (isStreamEmbeddedFansub
           ? (cues.length < 20)
           : (cues.length < 35 || (isInit && cues.length < 45 && getSpan(cues) < minEnd)));
-      if (isForcedOrTruncated) {
+      if (isForcedOrTruncated || cues.length === 0) {
         const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === track.lang);
         for (const alt of alts) {
           const altCues = await this._loadCuesForTrack(alt);
           if (this._destroyed || this._mediaSeq !== seq) return null;
           const curSpan = getSpan(cues);
           const altSpan = getSpan(altCues);
-          if ((altCues.length >= 60 && altSpan >= minEnd) || (altCues.length > cues.length && altSpan > curSpan)) {
+          if ((altCues.length >= 60 && altSpan >= minEnd) || (altCues.length > cues.length && altSpan > curSpan) || (cues.length === 0 && altCues.length > 0)) {
             track = alt;
             cues = altCues;
             if (cues.length >= 60 && altSpan >= minEnd) break;
@@ -927,18 +927,29 @@ export class SubtitleDubController {
       if (this.offsetSec === 0 && cues.length > 0) {
         const isNoiseCue = (txt) => /(?:subtitle|çeviri|senkron|rip|sub|by\b|explosiveskull|web-dl|bluray|fhd|1080p|sync)/i.test(String(txt || ''));
         const firstDiaCue = cues.find((c) => !isNoiseCue(c.text)) || cues[0];
-        if (firstDiaCue && firstDiaCue.start < 28) {
+        if (firstDiaCue) {
           const refTracks = this.subtitleTracks.filter((t) => t.id !== track.id && t.url);
           for (const refTrk of refTracks.slice(0, 5)) {
             try {
               const semCues = await this._loadCuesForTrack(refTrk);
               if (Array.isArray(semCues) && semCues.length > 0) {
-                const firstDiaSem = semCues.find((c) => c.start >= 20 && !isNoiseCue(c.text));
-                if (firstDiaSem && firstDiaSem.start >= 25 && firstDiaCue.start <= 20) {
-                  const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
-                  if (delta >= 10 && delta <= 95) {
-                    this.offsetSec = delta;
-                    break;
+                const firstDiaSem = semCues.find((c) => !isNoiseCue(c.text)) || semCues[0];
+                if (firstDiaSem) {
+                  if (firstDiaSem.start >= 25 && firstDiaCue.start <= 20) {
+                    const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
+                    if (delta >= 10 && delta <= 95) {
+                      this.offsetSec = delta;
+                      break;
+                    }
+                  } else if (firstDiaCue.start >= 25 && firstDiaSem.start <= 20) {
+                    const streamIsWebDl = Boolean(this.adapter?.currentUrl && /vidy|videasy|netflix|amazon|disney|apple|web-dl/i.test(this.adapter.currentUrl));
+                    if (streamIsWebDl) {
+                      const delta = Math.round((firstDiaSem.start - firstDiaCue.start) * 10) / 10;
+                      if (delta <= -10 && delta >= -95) {
+                        this.offsetSec = delta;
+                        break;
+                      }
+                    }
                   }
                 }
               }

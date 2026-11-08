@@ -9135,7 +9135,11 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
         if "youtube.com/api/timedtext" in url
         else ("TemporaryUserAgent" if "opensubtitles.org" in url else UA137)
     )
-    hdrs = {"User-Agent": ua_use, "Accept": "*/*"}
+    hdrs = {
+        "User-Agent": ua_use,
+        "Accept": "*/*",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
     if any(d in url for d in ("goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "workers.dev")) or bool(re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", url)):
         hdrs["Referer"] = "https://vidy.st/"
         hdrs["Origin"] = "https://vidy.st"
@@ -9150,16 +9154,41 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
         hdrs["Origin"] = "https://play2.pilavyerplay.top"
     elif "rapidvid.org" in url:
         hdrs["Referer"] = "https://rapidvid.org/"
-        hdrs["Origin"] = "https://rapidvid.org"
     elif "hdfilmcehennemi.mobi" in url:
         hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
-        hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
     elif "fastplay." in url or ".cfd/" in url:
         hdrs["Referer"] = "https://fastplay.mom/"
-        hdrs["Origin"] = "https://fastplay.mom"
-    req = urllib.request.Request(url, headers=hdrs)
-    with _public_open(req, timeout=timeout) as r:
-        raw = r.read(2 * 1024 * 1024)
+
+    raw = b""
+    # 1. Primary: curl_cffi with Chrome 124 TLS impersonation (bypasses Cloudflare Managed Challenges on Render)
+    try:
+        from curl_cffi import requests as cffi_requests
+        c_resp = cffi_requests.get(url, headers=hdrs, impersonate="chrome124", timeout=timeout)
+        if c_resp.status_code == 200 and len(c_resp.content) > 10:
+            raw = c_resp.content
+    except Exception:
+        raw = b""
+
+    # 2. Fallback: _public_open with standard urllib
+    if not raw or len(raw) < 10:
+        try:
+            req = urllib.request.Request(url, headers=hdrs)
+            with _public_open(req, timeout=timeout) as r:
+                raw = r.read(2 * 1024 * 1024)
+        except Exception:
+            pass
+
+    # 3. Fallback: edge fetch if available
+    if not raw or len(raw) < 10:
+        try:
+            ref_u = str(hdrs.get("Referer") or "")
+            raw, _ = _edge_fetch_bytes(url, referer=ref_u, timeout=timeout, max_bytes=2 * 1024 * 1024)
+        except Exception:
+            pass
+
+    if not raw:
+        return ""
+
     if raw[:2] == b"\x1f\x8b":
         try:
             import zlib
@@ -9167,11 +9196,12 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
         except Exception:
             pass
     vtt = _srt_to_vtt(raw)
-    with _VTT_CACHE_LOCK:
-        _SUB_VTT_CACHE[url] = vtt
-        _SUB_VTT_CACHE.move_to_end(url)
-        while len(_SUB_VTT_CACHE) > 200:
-            _SUB_VTT_CACHE.popitem(last=False)
+    if vtt and vtt.count("-->") >= 1:
+        with _VTT_CACHE_LOCK:
+            _SUB_VTT_CACHE[url] = vtt
+            _SUB_VTT_CACHE.move_to_end(url)
+            while len(_SUB_VTT_CACHE) > 300:
+                _SUB_VTT_CACHE.popitem(last=False)
     return vtt
 
 
