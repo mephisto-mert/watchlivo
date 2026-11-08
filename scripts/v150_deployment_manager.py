@@ -5,7 +5,7 @@ Author: Subagent 10 (max-live-deployer)
 
 Usage:
   python v150_deployment_manager.py inspect          # Check app_version.json, files, and Render hook
-  python v150_deployment_manager.py apply-bump       # Apply atomic 20261108_v149 -> 20261108_v150 bump
+  python v150_deployment_manager.py apply-bump       # Apply atomic 20261108_v149 -> 20261108_v151 bump
   python v150_deployment_manager.py verify-local     # Run full pre-deploy verification suite
   python v150_deployment_manager.py trigger-deploy   # Trigger Render deploy hook (ONLY AFTER QA GREENLIGHT)
   python v150_deployment_manager.py verify-live      # Run complete post-deploy verification against https://watchlivo.online
@@ -27,7 +27,7 @@ sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='repla
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 OLD_VERSION = "20261108_v149"
-NEW_VERSION = "20261108_v150"
+NEW_VERSION = "20261108_v151"
 RENDER_HOOK_URL = "https://api.render.com/deploy/srv-cu2b5a5ds78s73cqbtt0?key=U11fJ1uLqQo"
 LIVE_DOMAIN = "https://watchlivo.online"
 
@@ -152,8 +152,8 @@ def verify_live_deployment() -> dict:
         "details": {}
     }
 
-    # Step 1: Verify v20261108_v150 loads on live
-    print("[CHECK 1] Verifying v20261108_v150 loads on live index.html and sw.js...")
+    # Step 1: Verify v20261108_v151 loads on live
+    print("[CHECK 1] Verifying v20261108_v151 loads on live index.html and sw.js...")
     try:
         req = urllib.request.Request(LIVE_DOMAIN, headers={"User-Agent": "WatchlivoVerifier/1.0", "Cache-Control": "no-cache"})
         with urllib.request.urlopen(req, timeout=12) as resp:
@@ -164,7 +164,7 @@ def verify_live_deployment() -> dict:
             print(f"    - Detected live version in HTML: {detected_ver}")
             if NEW_VERSION in v_matches:
                 checklist["1_live_v150_loaded"] = True
-                print("    - [PASS] v20261108_v150 is actively loaded in index.html!")
+                print("    - [PASS] v20261108_v151 is actively loaded in index.html!")
             else:
                 print(f"    - [PENDING] Live is currently running {detected_ver} (expecting {NEW_VERSION}).")
     except Exception as ex:

@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261108_v150';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261108_v150';
-import { api, qs } from '../api.js?v=20261108_v150';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261108_v150';
-import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261108_v150';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261108_v150';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v150';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261108_v151';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261108_v151';
+import { api, qs } from '../api.js?v=20261108_v151';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261108_v151';
+import { fetchAccounts, getAccount, openProviderLoginModal, renderSeriesPicker } from '../accounts.js?v=20261108_v151';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261108_v151';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v151';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261108_v150';
+} from '../store.js?v=20261108_v151';
 
 let _activeHomePick = null;
 
@@ -1819,6 +1819,27 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
   if (provider === 'dropbox') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');
     return { provider: 'direct', videoId: id, url: directUrl, streamType: 'mp4', title: fallbackTitle || 'Dropbox Videosu', channel: 'Dropbox' };
+  }
+  if (provider === \'max\') {
+    const p = getProvider(\'max\');
+    const directMedia = {
+      provider: \'max\',
+      catalogProvider: \'max\',
+      url: url || \'https://play.max.com\',
+      sourceUrl: url || \'https://play.max.com\',
+      officialUrl: url || \'https://play.max.com\',
+      streamType: \'official\',
+      title: fallbackTitle || \'Max (HBO) Canlı Yayını\',
+      channel: \'Max (HBO) · Canlı Oda Köprüsü\',
+      authenticated: true,
+      duration: 3600,
+    };
+    if (window.vortexDesktop?.isElectron) return directMedia;
+    try {
+      const res = await resolveCatalogItem({ sourceUrl: url, title: fallbackTitle || id || \'Max\' }, p);
+      if (res) return res;
+    } catch (_) {}
+    return directMedia;
   }
   if (CATALOG_IDS.has(provider)) {
     const p = getProvider(provider);

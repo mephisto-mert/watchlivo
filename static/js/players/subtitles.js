@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v150';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261108_v151';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'

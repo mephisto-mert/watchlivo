@@ -284,7 +284,13 @@ export const PROVIDERS = [
     idParser: (u) => (u.match(/(?:primevideo|amazon)\.[a-z.]+\/.*?(?:gti=|asin=|detail\/)([\w.-]+)/i) || [])[1] || null },
   { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Max Hesabı Gerekir', logo: LOGOS.max, bg: '#10121a', accent: '#002be7', web: true, kind: 'catalog', freeNoAuth: false,
     homeUrl: 'https://play.max.com', placeholder: "Max vitrininde dizi veya film ara...",
-    idParser: (u) => (u.match(/(?:hbomax|max)\.com\/.*?(?:video\/watch|play|movies|series)\/([\w-]+)/i) || [])[1] || null },
+    idParser: (u) => {
+      if (!u || typeof u !== 'string') return null;
+      const m = u.match(/(?:hbomax|max)\.com\/(?:[a-z0-9-_]+\/)?(?:video\/watch|play|movies|movie|series|page|feature|show|episode)?\/?([\w:.-]+)?/i);
+      if (m && m[1]) return m[1];
+      if (/(?:hbomax|max)\.com/i.test(u)) return 'max-live';
+      return null;
+    } },
   { id: 'apple', name: 'Apple TV+', cat: 'global', badge: 'Apple Originals 4K Vitrini', logo: LOGOS.apple, bg: '#10121a', accent: '#f8fafc', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://tv.apple.com/tr', placeholder: "Apple TV+ vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/tv\.apple\.com\/.*?(?:movie|show|episode)\/[\w-]+\/([\w.]+)/i) || [])[1] || null },

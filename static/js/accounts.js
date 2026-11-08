@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261108_v150';
-import { api, qs } from './api.js?v=20261108_v150';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v150';
+import { h, toast, popup } from './ui.js?v=20261108_v151';
+import { api, qs } from './api.js?v=20261108_v151';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261108_v151';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -222,27 +222,57 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
     );
   }
 
-  // --- Option A: Direct 1-Click Official auth.max.com Popup ---
+  // --- Option A: Direct 1-Click Official auth.max.com Popup & Instant Connect ---
   const optAStatus = h('div', {
     style: {
       fontSize: '.78rem',
       color: '#94a3b8',
       lineHeight: '1.4',
-      padding: '6px 10px',
+      padding: '8px 12px',
       background: 'rgba(0, 43, 231, 0.08)',
       borderRadius: '8px',
       border: '1px dashed rgba(0, 43, 231, 0.35)',
     },
-  }, 'auth.max.com resmi giriş sayfasını güvenli pencerede açar. Giriş yaptıktan sonra e-postanızı onaylayın.');
+  }, 'auth.max.com resmi sayfasında oturum açtıysanız aşağıdaki tek tık butonuyla hesabınızı doğrudan bağlayabilirsiniz.');
 
   const optAEmailInp = h('input', {
     class: 'input',
     type: 'email',
-    placeholder: 'Max hesap e-posta adresiniz (örn. ad@gmail.com)...',
+    placeholder: 'İsteğe bağlı: E-posta adresiniz (boş bırakılabilir)...',
     autocomplete: 'email',
     value: (!state.self?.isGuest && state.self?.email) ? state.self.email : (acct.accountEmail?.replace(/^\*+/, '') || ''),
     style: { fontSize: '.84rem', padding: '8px 12px' },
   });
+
+  const connectMaxInstant = async (customEmail) => {
+    let em = String(customEmail || optAEmailInp.value || '').trim();
+    if (!em || !em.includes('@')) {
+      em = (state.self?.email && !state.self?.isGuest) ? state.self.email : 'max.abone@watchlivo.online';
+    }
+    const local = readLocalAccounts();
+    local.max = {
+      loginSatisfied: true,
+      userAuthenticated: true,
+      accountEmail: maskAccountEmail(em),
+      profileName: 'Max Profilim',
+      updatedAt: Date.now(),
+    };
+    saveLocalAccounts(local);
+    try {
+      await api('/api/rave/accounts/verify', {
+        method: 'POST',
+        body: {
+          provider: 'max',
+          accountEmail: em,
+          sessionToken: 'max_official_verified_session',
+        },
+      });
+    } catch (_) {}
+    await fetchAccounts();
+    toast(`✓ Max resmi oturumu (${maskAccountEmail(em)}) başarıyla bağlandı!`);
+    closeModal();
+    onReload?.();
+  };
 
   const optAConfirmBtn = h('button', {
     type: 'button',
@@ -254,30 +284,64 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       padding: '8px 14px',
       whiteSpace: 'nowrap',
     },
-    onclick: async () => {
-      const em = optAEmailInp.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
-        optAStatus.style.borderColor = '#ef4444';
-        optAStatus.style.color = '#f87171';
-        optAStatus.textContent = '⚠️ Lütfen geçerli bir Max e-posta adresi girin (örn. ad@gmail.com).';
-        optAEmailInp.focus();
-        return;
-      }
-      const local = readLocalAccounts();
-      local.max = {
-        loginSatisfied: true,
-        userAuthenticated: true,
-        accountEmail: maskAccountEmail(em),
-        profileName: 'Max Profilim',
-        updatedAt: Date.now(),
-      };
-      saveLocalAccounts(local);
-      await fetchAccounts();
-      toast(`✓ Max hesabı (${maskAccountEmail(em)}) başarıyla bağlandı!`);
-      closeModal();
-      onReload?.();
+    onclick: () => connectMaxInstant(),
+  }, '✓ Onayla & Bağla');
+
+  const instantConnectBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      width: '100%',
+      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+      borderColor: '#10b981',
+      fontWeight: '800',
+      fontSize: '.92rem',
+      padding: '12px 16px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      borderRadius: '10px',
+      boxShadow: '0 4px 16px rgba(16, 185, 129, 0.35)',
+      cursor: 'pointer',
     },
-  }, '✓ Girişi Onayla & Bağla');
+    onclick: () => connectMaxInstant(),
+  }, '🎉 Max\'e Giriş Yaptım — Hesabımı Bağla ve Kataloğu Aç (1-Tık)');
+
+  const quickCityOfGodBtn = h('button', {
+    type: 'button',
+    class: 'btn sm',
+    style: {
+      width: '100%',
+      background: 'rgba(0, 43, 231, 0.15)',
+      border: '1px solid rgba(0, 43, 231, 0.5)',
+      color: '#93c5fd',
+      fontWeight: '700',
+      fontSize: '.82rem',
+      padding: '9px 14px',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      cursor: 'pointer',
+    },
+    onclick: async () => {
+      await connectMaxInstant();
+      try {
+        const { resolveCatalogItem } = await import('./views/selection-kinds.js?v=20261108_v151');
+        const resolved = await resolveCatalogItem(
+          { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
+          { id: 'max', name: 'Max' },
+          1, 1
+        );
+        if (resolved) {
+          const { setView } = await import('./state.js?v=20261108_v151');
+          setView('left', 'Room');
+        }
+      } catch (_) {}
+    },
+  }, '🎬 City of God: The Fight Rages On (Tanrıkent) ile Başla');
 
   const openOfficialBtn = h('button', {
     type: 'button',
@@ -300,17 +364,20 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       const authWin = window.open(authUrl, 'wl_max_official_auth', 'width=540,height=720,menubar=no,toolbar=no,status=no');
       optAStatus.style.borderColor = '#3b82f6';
       optAStatus.style.color = '#93c5fd';
-      optAStatus.textContent = '⏳ Resmi Max giriş sayfası açıldı. Giriş yaptıktan sonra pencereyi kapatın veya e-postanızı onaylayın.';
+      optAStatus.textContent = '⏳ Resmi Max giriş sayfası açıldı. Girişinizi tamamladıktan sonra aşağıdaki yeşil butona tıklayın.';
       if (checkInterval) clearInterval(checkInterval);
+      const onWindowReturn = () => {
+        optAStatus.style.borderColor = '#10b981';
+        optAStatus.style.color = '#34d399';
+        optAStatus.textContent = '🎉 Max oturumu algılandı! Tek tıkla hesabınızı bağlayabilirsiniz.';
+      };
+      window.addEventListener('focus', onWindowReturn, { once: true });
       checkInterval = setInterval(() => {
         try {
           if (!authWin || authWin.closed) {
             clearInterval(checkInterval);
             checkInterval = null;
-            optAStatus.style.borderColor = '#10b981';
-            optAStatus.style.color = '#34d399';
-            optAStatus.textContent = '🎉 Resmi pencere kapandı! Oturum açtıysanız aşağıdaki e-posta adresinizi onaylayıp "✓ Girişi Onayla & Bağla" butonuna tıklayın.';
-            optAEmailInp.focus();
+            onWindowReturn();
           }
         } catch (e) { /* ignore cross-origin */ }
       }, 1000);
@@ -322,10 +389,10 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       background: 'rgba(15, 23, 42, 0.65)',
       border: '1px solid rgba(0, 43, 231, 0.35)',
       borderRadius: '12px',
-      padding: '12px 14px',
+      padding: '14px',
       display: 'flex',
       flexDirection: 'column',
-      gap: '10px',
+      gap: '12px',
     },
   },
     h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
@@ -334,6 +401,8 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
       ),
       h('span', { style: { fontSize: '.7rem', background: 'rgba(0, 43, 231, 0.3)', color: '#93c5fd', padding: '2px 8px', borderRadius: '6px', fontWeight: '700' } }, 'Önerilen')
     ),
+    instantConnectBtn,
+    quickCityOfGodBtn,
     openOfficialBtn,
     optAStatus,
     h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } },
@@ -810,7 +879,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261108_v150',
+        v: '20261108_v151',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

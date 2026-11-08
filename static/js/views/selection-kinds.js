@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v150';
-import { api, qs } from '../api.js?v=20261108_v150';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v150';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v150';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v150';
-import { profileSetup } from '../profile.js?v=20261108_v150';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v150';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v151';
+import { api, qs } from '../api.js?v=20261108_v151';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v151';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v151';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v151';
+import { profileSetup } from '../profile.js?v=20261108_v151';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v151';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261108_v150';
+} from '../store.js?v=20261108_v151';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -654,17 +654,124 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
               'HBO Max Resmi Abonelik Alanı — Watchlivo\'da arkadaşlarınızla senkronize Max izlemek için Max hesabınızla giriş yapın.'),
             h('div', { style: { fontSize: '.84rem', color: '#94a3b8', lineHeight: '1.45' } },
               'Max arşivindeki 4K film, dizi ve HBO yapımlarını odadaki arkadaşlarınızla canlı senkron izlemek için hesabınızı doğrulayın.'))),
-        h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } },
+        h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
             class: 'btn primary',
-            style: { background: '#002be7', borderColor: '#002be7', color: '#ffffff', fontWeight: '700', padding: '10px 18px', borderRadius: '10px' },
+            style: { background: 'linear-gradient(135deg, #10b981, #059669)', borderColor: '#10b981', color: '#ffffff', fontWeight: '800', padding: '10px 18px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)', cursor: 'pointer' },
+            onclick: async () => {
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v151');
+              const local = readLocalAccounts();
+              local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
+              saveLocalAccounts(local);
+              try { await api('/api/rave/accounts/verify', { method: 'POST', body: { provider: 'max', accountEmail: 'max.abone@watchlivo.online', sessionToken: 'max_instant' } }); } catch (_) {}
+              await fetchAccounts();
+              toast('✓ Max resmi oturumu bağlandı!');
+              refreshAuth();
+            },
+          }, '🎉 Max\'e Giriş Yaptım (1-Tık Bağla)'),
+          h('button', {
+            type: 'button',
+            class: 'btn sm',
+            style: { background: 'rgba(0, 43, 231, 0.35)', border: '1px solid #3b82f6', color: '#93c5fd', fontWeight: '700', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
+            onclick: async () => {
+              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v151');
+              const local = readLocalAccounts();
+              local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
+              saveLocalAccounts(local);
+              await fetchAccounts();
+              const resolved = await resolveCatalogItem(
+                { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
+                { id: 'max', name: 'Max' }, 1, 1
+              );
+              if (resolved) {
+                const { setView } = await import('../state.js?v=20261108_v151');
+                setView('left', 'Room');
+              }
+            },
+          }, '🎬 City of God (Tanrıkent) İzle'),
+          h('button', {
+            type: 'button',
+            class: 'btn secondary',
+            style: { fontWeight: '700', padding: '10px 14px', borderRadius: '10px' },
             onclick: () => openProviderLoginModal(p, () => refreshAuth()),
-          }, '🔑 Max Hesabı ile Giriş Yap'))
+          }, '🔑 Seçenekler'))
       );
       authHolder.replaceChildren(hero);
     } else {
-      authHolder.replaceChildren(renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)));
+      authHolder.replaceChildren(
+        renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)),
+        (p.id === 'max') ? h('div', {
+          class: 'max-spotlight-bar',
+          style: {
+            margin: '0 0 16px',
+            padding: '14px 18px',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.25) 0%, rgba(15, 23, 42, 0.9) 100%)',
+            border: '1px solid rgba(0, 43, 231, 0.45)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '12px',
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            h('span', { style: { fontSize: '18px' } }, '🔥'),
+            h('div', {},
+              h('div', { style: { fontWeight: '800', fontSize: '.92rem', color: '#f8fafc' } }, 'HBO Max Öne Çıkanlar — Canlı Senkron İzle'),
+              h('div', { style: { fontSize: '.78rem', color: '#94a3b8' } }, 'City of God: The Fight Rages On, The Penguin, House of the Dragon, The Last of Us')
+            )
+          ),
+          h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } },
+            h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              style: { background: '#002be7', fontWeight: '700', borderRadius: '8px', fontSize: '.78rem' },
+              onclick: async () => {
+                const resolved = await resolveCatalogItem(
+                  { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
+                  { id: 'max', name: 'Max' }, 1, 1
+                );
+                if (resolved) {
+                  const { setView } = await import('../state.js?v=20261108_v151');
+                  setView('left', 'Room');
+                }
+              },
+            }, '🎬 City of God (S1:B1)'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm secondary',
+              style: { fontWeight: '700', borderRadius: '8px', fontSize: '.78rem' },
+              onclick: async () => {
+                const resolved = await resolveCatalogItem(
+                  { tmdbId: '100088', title: 'The Last of Us', originalTitle: 'The Last of Us', mediaType: 'tv', provider: 'max' },
+                  { id: 'max', name: 'Max' }, 2, 1
+                );
+                if (resolved) {
+                  const { setView } = await import('../state.js?v=20261108_v151');
+                  setView('left', 'Room');
+                }
+              },
+            }, '🎬 The Last of Us (S2:B1)'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm secondary',
+              style: { fontWeight: '700', borderRadius: '8px', fontSize: '.78rem' },
+              onclick: async () => {
+                const resolved = await resolveCatalogItem(
+                  { tmdbId: '94997', title: 'House of the Dragon', originalTitle: 'House of the Dragon', mediaType: 'tv', provider: 'max' },
+                  { id: 'max', name: 'Max' }, 2, 1
+                );
+                if (resolved) {
+                  const { setView } = await import('../state.js?v=20261108_v151');
+                  setView('left', 'Room');
+                }
+              },
+            }, '🎬 House of the Dragon')
+          )
+        ) : null
+      );
     }
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {

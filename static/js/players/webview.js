@@ -173,11 +173,27 @@ export class WebviewAdapter {
           </div>
         </div>
 
-        <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:18px;">
-          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:180px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 20px;border-radius:10px;background:#002be7;color:#ffffff;font-size:14px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
-            🎬 Max'te Aç & Başlat
+        <!-- Rave / Teleparty Companion Controller -->
+        <div style="display:flex;gap:8px;justify-content:center;margin-bottom:14px;">
+          <button id="vortex-bridge-seek-back" type="button" style="padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;font-size:12px;font-weight:700;cursor:pointer;">
+            ⏪ -10s
           </button>
-          <button id="vortex-bridge-copy-btn" type="button" style="padding:12px 16px;border-radius:10px;background:rgba(255,255,255,0.08);color:#f1f5f9;font-size:13px;font-weight:600;border:1px solid rgba(255,255,255,0.14);cursor:pointer;">
+          <button id="vortex-bridge-play-toggle" type="button" style="padding:8px 20px;border-radius:8px;background:linear-gradient(135deg, #002be7, #2563eb);border:none;color:#ffffff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(0,43,231,0.4);">
+            ${this.paused ? '▶️ Odayı Oynat' : '⏸ Odayı Duraklat'}
+          </button>
+          <button id="vortex-bridge-seek-fwd" type="button" style="padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;font-size:12px;font-weight:700;cursor:pointer;">
+            +10s ⏩
+          </button>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
+          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:#002be7;color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
+            🎬 Max'te Aç (Yan Yana İzle)
+          </button>
+          <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
+            ⚡ Canlı Eşitle
+          </button>
+          <button id="vortex-bridge-copy-btn" type="button" style="padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.08);color:#f1f5f9;font-size:13px;font-weight:600;border:1px solid rgba(255,255,255,0.14);cursor:pointer;">
             ⏱ Zamanı Kopyala
           </button>
         </div>
@@ -197,6 +213,41 @@ export class WebviewAdapter {
       openBtn.onclick = () => {
         this.targetWindow = window.open(this.mediaUrl, 'vortex_max_player', 'width=1280,height=760,menubar=no,toolbar=no');
         this.play();
+      };
+    }
+
+        const playToggleBtn = bridge.querySelector('#vortex-bridge-play-toggle');
+    if (playToggleBtn) {
+      playToggleBtn.onclick = () => {
+        if (this.paused) this.play();
+        else this.pause();
+        playToggleBtn.textContent = this.paused ? '▶️ Odayı Oynat' : '⏸ Odayı Duraklat';
+      };
+    }
+
+    const seekBackBtn = bridge.querySelector('#vortex-bridge-seek-back');
+    if (seekBackBtn) {
+      seekBackBtn.onclick = () => {
+        this.seek(Math.max(0, this.getTime() - 10));
+      };
+    }
+
+    const seekFwdBtn = bridge.querySelector('#vortex-bridge-seek-fwd');
+    if (seekFwdBtn) {
+      seekFwdBtn.onclick = () => {
+        this.seek(Math.min(this.duration, this.getTime() + 10));
+      };
+    }
+
+    const syncBtn = bridge.querySelector('#vortex-bridge-sync-btn');
+    if (syncBtn) {
+      syncBtn.onclick = async () => {
+        const syncBookmarklet = `javascript:(function(){const bc=new BroadcastChannel('vortex_drm_sync');const v=document.querySelector('video');if(!v){alert('Video bulunamadı!');return;}alert('✓ Watchlivo Senkronizasyonu Bağlandı!');const s=()=>bc.postMessage({type:'MAX_SYNC',currentTime:v.currentTime,duration:v.duration,paused:v.paused});v.addEventListener('play',s);v.addEventListener('pause',s);v.addEventListener('seeked',s);bc.onmessage=(e)=>{if(!e.data)return;if(e.data.action==='play')v.play();if(e.data.action==='pause')v.pause();if(e.data.action==='seek'&&Math.abs(v.currentTime-e.data.currentTime)>1.5)v.currentTime=e.data.currentTime;};})();`;
+        try {
+          await navigator.clipboard.writeText(syncBookmarklet);
+          syncBtn.textContent = '✓ Senkron Kodu Kopyalandı!';
+          setTimeout(() => { syncBtn.textContent = '⚡ Canlı Eşitle'; }, 2500);
+        } catch (_) {}
       };
     }
 
