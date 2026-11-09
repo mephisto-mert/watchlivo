@@ -6395,6 +6395,35 @@ def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request 
 
 
 
+def _get_netflix_title_by_id_sync(nid: str) -> str:
+    nid = str(nid or "").strip()
+    if not nid or not nid.isdigit():
+        return ""
+    t_url = f"https://www.netflix.com/title/{nid}"
+    req = urllib.request.Request(t_url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=4.5) as resp:
+            try:
+                raw = resp.read(256 * 1024)
+            except Exception as ex:
+                raw = getattr(ex, "partial", b"") or b""
+            html = raw.decode("utf-8", errors="ignore")
+            og = re.search(r'property="og:title"\s+content="([^"]*)"', html)
+            if og:
+                t = og.group(1)
+                t = re.sub(r"\s*izlemenizi bekliyor.*$", "", t, flags=re.I)
+                t = re.sub(r"^Watch\s+", "", t, flags=re.I)
+                t = re.sub(r"\s*\|\s*Netflix.*$", "", t, flags=re.I)
+                t = re.sub(r"\s*-\s*Netflix.*$", "", t, flags=re.I)
+                return t.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _build_netflix_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta, netflix_id=""):
     official_url = source_url or (f"https://www.netflix.com/watch/{netflix_id}" if netflix_id else "") or "https://www.netflix.com/browse"
     full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
@@ -6478,6 +6507,24 @@ def _build_max_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title,
 
 
 def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_type: str, poster: str, season: int = 1, episode: int = 1, imdb_id: str = "", display_title: str = "", source_url: str = "", refresh: bool = False, request: Request = None, is_authenticated: bool = False, auth_ctx: dict = None):
+    # Auto-resolve Netflix URLs into real Title & TMDB ID
+    _nf_check = str(title or "") if "netflix.com" in str(title or "") else str(source_url or "")
+    if "netflix.com" in _nf_check:
+        _nf_m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:watch|title)/(\d+)", _nf_check)
+        if _nf_m:
+            _nf_nid = _nf_m.group(1)
+            _scraped_t = _get_netflix_title_by_id_sync(_nf_nid)
+            if _scraped_t:
+                title = _scraped_t
+                display_title = _scraped_t
+                if not str(tmdb_id or "").isdigit():
+                    _thits = _tmdb_sync(_scraped_t)
+                    if _thits:
+                        tmdb_id = str(_thits[0].get("tmdbId") or _thits[0].get("id") or "")
+                        if not media_type or media_type not in ("tv", "movie"):
+                            media_type = _thits[0].get("mediaType") or "movie"
+                        if not year:
+                            year = str(_thits[0].get("year") or "")
     is_max_prov = prov in ("max", "hbomax")
     is_auth_user = _is_max_authenticated_sync(is_authenticated=is_authenticated, request=request, auth_ctx=auth_ctx)
     if is_max_prov and not is_auth_user:
@@ -6856,6 +6903,23 @@ async def resolve_catalog(request: Request):
     q_iid = (request.query_params.get("imdbId") or request.query_params.get("imdb_id") or "").strip()[:30]
     if not title and not q_tid and not q_iid and not (request.query_params.get("sourceUrl") or "").strip():
         return JSONResponse({"error": "İçerik başlığı veya kimliği gerekli"}, status_code=400)
+    # Auto-resolve Netflix URLs into real Title & TMDB metadata
+    _nf_q_check = title if "netflix.com" in title else (request.query_params.get("sourceUrl") or "")
+    if "netflix.com" in _nf_q_check:
+        _nf_q_m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:watch|title)/(\d+)", _nf_q_check)
+        if _nf_q_m:
+            _nf_scraped = _get_netflix_title_by_id_sync(_nf_q_m.group(1))
+            if _nf_scraped:
+                title = _nf_scraped
+                display_title = _nf_scraped
+                if not q_tid:
+                    _q_hits = _tmdb_sync(_nf_scraped)
+                    if _q_hits:
+                        q_tid = str(_q_hits[0].get("tmdbId") or _q_hits[0].get("id") or "")
+                        if not raw_mtype_q:
+                            raw_mtype_q = _q_hits[0].get("mediaType") or "movie"
+                        if not year:
+                            year = str(_q_hits[0].get("year") or "")
     display_title = (request.query_params.get("displayTitle") or title).strip()[:160]
     year = (request.query_params.get("year") or "").strip()[:10]
     tmdb_id = q_tid

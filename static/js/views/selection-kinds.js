@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v160';
-import { api, qs } from '../api.js?v=20261109_v160';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v160';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v160';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v160';
-import { profileSetup } from '../profile.js?v=20261109_v160';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v160';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v161';
+import { api, qs } from '../api.js?v=20261109_v161';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v161';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v161';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v161';
+import { profileSetup } from '../profile.js?v=20261109_v161';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v161';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v160';
+} from '../store.js?v=20261109_v161';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v160');
+                  const { setView } = await import('../state.js?v=20261109_v161');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v160');
+                  const { setView } = await import('../state.js?v=20261109_v161');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v160');
+                  const { setView } = await import('../state.js?v=20261109_v161');
                   setView('left', 'Room');
                 }
               },
@@ -2359,32 +2359,43 @@ export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
 
 export const NETFLIX_OFFICIAL_HUBS = [
   {
-    category: '🔥 Netflix Trend Dizi & Popüler Yapımlar',
+    category: '🔥 Dünyaca Popüler Netflix Trend Yapımları',
+    id: 'trending',
     items: [
-      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg', url: 'https://www.netflix.com/watch/80057281', season: 1, episode: 1 },
-      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '8.0', poster: 'https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg', url: 'https://www.netflix.com/watch/81040344', season: 1, episode: 1 },
-      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.4', poster: 'https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg', url: 'https://www.netflix.com/watch/81231974', season: 1, episode: 1 },
-      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg', url: 'https://www.netflix.com/watch/80192098', season: 1, episode: 1 },
-      { tmdbId: '125910', title: 'Griselda', originalTitle: 'Griselda', mediaType: 'tv', year: '2024', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/uGGAoM8ojRHOXj16n6xWiccKr34.jpg', url: 'https://www.netflix.com/watch/81435684', season: 1, episode: 1 },
+      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', overview: 'Ufak bir kasabada bir çocuk kaybolunca gizli deneyler ve doğaüstü güçler ortaya çıkar.', season: 1, episode: 1 },
+      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWFDx0O.jpg', overview: 'Para sıkıntısı çeken yüzlerce oyuncu, ölümcül çocuk oyunlarında yarışmayı kabul eder.', season: 1, episode: 1 },
+      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.3', poster: 'https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg', overview: 'Wednesday Addams Nevermore Akademisinde yeni gizemleri ve doğaüstü cinayetleri çözer.', season: 1, episode: 1 },
+      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gFZriCkpJYsApPwyQ9nxke46Gpu.jpg', overview: 'Profesör önderliğindeki sekiz hırsız, İspanya Kraliyet Darphanesine kusursuz bir soygun düzenler.', season: 1, episode: 1 },
+      { tmdbId: '236235', title: 'The Gentlemen', originalTitle: 'The Gentlemen', mediaType: 'tv', year: '2024', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/tw3tzfXaSpmUZIB8ZNqNEGzMBCy.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/4k487rA4sK8wD6s7X70hA6wJ9gU.jpg', overview: 'Eddie kendine miras kalan aristokrat mülkün dev bir kenevir imparatorluğuna yataklık ettiğini keşfeder.', season: 1, episode: 1 },
+      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/dK12GId1DS6AqRmuKeHR29xHGv2.jpg', overview: 'Dünyanın en çok aranan sanat eseri hırsızı ve FBI profil uzmanı kurnaz bir soygun için birleşir.' },
     ],
   },
   {
-    category: '🎬 4K Sinema & Netflix Orijinal Filmleri',
+    category: '🇹🇷 Netflix Türk Orijinal Dizi & Filmleri',
+    id: 'turkish',
     items: [
-      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', url: 'https://www.netflix.com/watch/81161626' },
-      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', url: 'https://www.netflix.com/watch/81076756' },
-      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUQpNgKrkDzJpbnNS.jpg', url: 'https://www.netflix.com/watch/80230399' },
-      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', url: 'https://www.netflix.com/watch/81218770' },
-      { tmdbId: '969492', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/h3jYanWMEJq6JJsCopy1h7cT2Hs.jpg', url: 'https://www.netflix.com/watch/81436868' },
+      { tmdbId: '577990', title: 'Organize İşler: Sazan Sarmalı', originalTitle: 'Organize İşler: Sazan Sarmalı', mediaType: 'movie', year: '2019', rating: '5.6', poster: 'https://image.tmdb.org/t/p/w500/p5vsOFlPOfdBEXSgrW9fcxdfJNC.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg', overview: 'Asım Noyan ve çetesi sazan sarmalında dolandırıcılık peşinde koşarken beklenmedik belalarla karşılaşır.' },
+      { tmdbId: '136125', title: 'Kulüp', originalTitle: 'Kulüp', mediaType: 'tv', year: '2021', rating: '6.9', poster: 'https://image.tmdb.org/t/p/w500/jHgMj6mtMHEBrFhmZaQCGFGYnFx.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/AwEQ9wAOs1ZbvhpO7XxpGQHYvx5.jpg', overview: '1950\'lerin kozmopolit İstanbul\'unda bir gece kulübünde başlayan dokunaklı aile ve aşk hikayesi.', season: 1, episode: 1 },
+      { tmdbId: '112745', title: 'Bir Başkadır', originalTitle: 'Bir Başkadır', mediaType: 'tv', year: '2020', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/9MzukREEyaCqW197buBrJr2LcTI.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/peOoKDVMbXdBMwZd9SeOxtOfCXD.jpg', overview: 'Farklı hayatlar yaşayan bir grup insanın İstanbul\'da kesişen yolları ve derin psikolojik yüzleşmeleri.', season: 1, episode: 1 },
+      { tmdbId: '197679', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/8T40UoCYztenuMOGLSTdch903k4.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/e9iztxikysYdbx3gwGrMt05kFWV.jpg', overview: '70\'ler sinemasında efsaneleşen Erşan Kuneri ekibiyle birlikte farklı sinema türlerini dener.', season: 1, episode: 1 },
+      { tmdbId: '214079', title: 'Terzi', originalTitle: 'Terzi', mediaType: 'tv', year: '2023', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/i8YLOXlSEm3a4jR3e3L9m8bM0sE.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/7kK1L7x7L3JmK1N4j4vH8lB2rZ.jpg', overview: 'Ünlü bir terzi en yakın arkadaşının müstakbel eşine gelinlik dikerken sırlar açığa çıkar.', season: 1, episode: 1 },
+      { tmdbId: '214078', title: 'Şahmaran', originalTitle: 'Şahmaran', mediaType: 'tv', year: '2023', rating: '7.0', poster: 'https://image.tmdb.org/t/p/w500/1fKsga4dyvJ9W3w2b9M1bB9yG9v.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/k9V4d8r6a1b2c3d4e5f6g7h8i9j.jpg', overview: 'Şahsu büyükbabasıyla yüzleşmek için gittiği Adana\'da kendini efsanevi bir kehanetin içinde bulur.', season: 1, episode: 1 },
+      { tmdbId: '944152', title: 'Boğa Boğa', originalTitle: 'Boğa Boğa', mediaType: 'movie', year: '2023', rating: '5.6', poster: 'https://image.tmdb.org/t/p/w500/xPQPEac98OFi6T7hgy6sxp16QSr.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/b0K3L7M8v2G1y4n3a6B7c8D9e0f.jpg', overview: 'İstanbullu bir çift Assos\'ta bir köye taşınır ancak köylülerin düşmanca tavırlarıyla karşılaşır.' },
+      { tmdbId: '1026822', title: 'Cici', originalTitle: 'Cici', mediaType: 'movie', year: '2022', rating: '6.3', poster: 'https://image.tmdb.org/t/p/w500/fxNW0JZdqy39IjYMJixn9vj7B1d.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/1a2b3c4d5e6f7g8h9i0j1k2l3m4.jpg', overview: 'Yıllar önce yaşanan trajik bir kaybın ardından aile fertleri geçmişin izleriyle yüzleşmek için toplanır.' },
+      { tmdbId: '499461', title: 'Ölümlü Dünya', originalTitle: 'Ölümlü Dünya', mediaType: 'movie', year: '2018', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/6pUboTFJ6SNzrhb8sNcmc50fJCk.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/jF8pE1mO3hG6a5n8b9v2c4x1z7q.jpg', overview: 'Lokanta işleten sekiz kişilik Mermer Ailesi nesillerdir kiralık katil olarak çalışmaktadır.' },
+      { tmdbId: '629500', title: 'Cinayet Süsü', originalTitle: 'Cinayet Süsü', mediaType: 'movie', year: '2019', rating: '6.5', poster: 'https://image.tmdb.org/t/p/w500/fC1mwNNfL2c4r3y8Z9v1b7n4m5p.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/9a8b7c6d5e4f3g2h1i0j9k8l7m6.jpg', overview: 'Cinayet büro ekibi gizemli bir seri katili yakalamak için kahkaha dolu bir soruşturmaya girişir.' },
     ],
   },
   {
-    category: '🇹🇷 Türk Yapımı Netflix Dizi & Filmleri',
+    category: '🎬 4K Sinema & Netflix Orijinal Gişe Filmleri',
+    id: 'movies',
     items: [
-      { tmdbId: '137527', title: 'Kulüp', originalTitle: 'The Club', mediaType: 'tv', year: '2021-2023', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/q7Dvxa6v5d8j33P0BxAlr42Fd9S.jpg', url: 'https://www.netflix.com/watch/81387602', season: 1, episode: 1 },
-      { tmdbId: '113084', title: 'Bir Başkadır', originalTitle: 'Ethos', mediaType: 'tv', year: '2020', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/nwWad07qNqOwSJ8MuUThU2WGqUd.jpg', url: 'https://www.netflix.com/watch/81183494', season: 1, episode: 1 },
-      { tmdbId: '197679', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022-2024', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/AdmyBnD3GRBBAJ6F5EIcO6JjQO5.jpg', url: 'https://www.netflix.com/watch/81248035', season: 1, episode: 1 },
-      { tmdbId: '944152', title: 'Boğa Boğa', originalTitle: 'Chokehold', mediaType: 'movie', year: '2023', rating: '6.2', poster: 'https://image.tmdb.org/t/p/w500/s0VMKl4eB0KdQr2jPavPum5tVNP.jpg', url: 'https://www.netflix.com/watch/81616659' },
+      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/dK12GId1DS6AqRmuKeHR29xHGv2.jpg', overview: 'Benoit Blanc Yunan adasında bir teknoloji milyarderinin düzenlediği gizemli cinayet oyununu çözer.' },
+      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUQpNgKrkDzJpbnNS.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', overview: 'Ölümün kıyısından dönen paralı asker Tyler Rake, Gürcü bir gangsterin ailesini kurtarmak için göreve döner.' },
+      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/j42pUYxgO0zg414d3PG3ug6OcJG.jpg', overview: '1972 yılında And Dağlarına düşen ragbi takımının dondurucu soğukta hayatta kalma destanı.' },
+      { tmdbId: '763215', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/AgHbB9DCILBqYk5F56GZ7K5wN3k.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/h3jYanWMEJq6JJsCopy1h7cT2Hs.jpg', overview: 'Yakışıklı bir prensle evlenen genç kız kendini bir ejderhaya kurban edilmek üzere bulur.' },
+      { tmdbId: '725201', title: 'The Gray Man', originalTitle: 'The Gray Man', mediaType: 'movie', year: '2022', rating: '7.0', poster: 'https://image.tmdb.org/t/p/w500/8cXbitsS6dWQ5gfMTZdorpAAzEH.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', overview: 'CIA\'in en gizli suikastçısı kurumun karanlık sırlarını ortaya çıkarınca küresel bir insan avının hedefi olur.' },
+      { tmdbId: '646380', title: 'Don\'t Look Up', originalTitle: 'Don\'t Look Up', mediaType: 'movie', year: '2021', rating: '7.2', poster: 'https://image.tmdb.org/t/p/w500/j42pUYxgO0zg414d3PG3ug6OcJG.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', overview: 'Dünyayı yok edecek bir kuyruklu yıldız yaklaşırken iki astronom insanlığı uyarmaya çalışır.' },
     ],
   },
 ];
@@ -2399,474 +2410,647 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
   }
 
   const container = h('div', {
-    class: 'netflix-rave-portal-view',
+    class: 'netflix-rave-app-root',
     style: {
       display: 'flex',
       flexDirection: 'column',
-      gap: '20px',
-      maxWidth: '1200px',
+      gap: '24px',
+      maxWidth: '1280px',
       margin: '0 auto',
-      padding: '10px 0 40px',
+      padding: '4px 0 40px',
       color: '#ffffff',
-      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: '"Netflix Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
     },
   });
 
-  // 1. Top Brand & Status Header
-  const headerCard = h('div', {
+  // 1. Netflix App Top Bar (Netflix Logo, Category Tabs, Account status)
+  const navTabs = [
+    { id: 'all', label: 'Ana Sayfa' },
+    { id: 'turkish', label: '🇹🇷 Türk Yapımları' },
+    { id: 'trending', label: '🔥 Trendler' },
+    { id: 'movies', label: '🎬 4K Filmler' },
+    { id: 'series', label: '📺 Diziler' },
+  ];
+
+  let currentTab = 'all';
+
+  const tabPillsWrap = h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      flexWrap: 'wrap',
+    },
+  });
+
+  const renderNavTabs = () => {
+    tabPillsWrap.replaceChildren(
+      ...navTabs.map((t) => h('button', {
+        type: 'button',
+        class: `btn sm ${currentTab === t.id ? 'primary' : 'ghost'}`,
+        style: {
+          borderRadius: '20px',
+          padding: '6px 14px',
+          fontSize: '.82rem',
+          fontWeight: currentTab === t.id ? '800' : '600',
+          background: currentTab === t.id ? '#e50914' : 'rgba(255, 255, 255, 0.08)',
+          border: currentTab === t.id ? '1px solid #e50914' : '1px solid rgba(255, 255, 255, 0.12)',
+          color: currentTab === t.id ? '#ffffff' : '#cbd5e1',
+          cursor: 'pointer',
+          transition: 'all .2s ease',
+        },
+        onclick: () => {
+          currentTab = t.id;
+          renderNavTabs();
+          filterContent();
+        },
+      }, t.label))
+    );
+  };
+
+  const topBar = h('div', {
     style: {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       flexWrap: 'wrap',
-      gap: '16px',
-      padding: '20px 24px',
+      gap: '14px',
+      padding: '12px 20px',
+      background: 'rgba(18, 18, 18, 0.95)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
       borderRadius: '16px',
-      background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.28) 0%, rgba(13, 16, 27, 0.96) 100%)',
-      border: '1px solid rgba(229, 9, 20, 0.5)',
-      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+      boxShadow: '0 8px 30px rgba(0,0,0,0.6)',
     },
   },
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: '16px' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' } },
       h('div', {
         style: {
           display: 'flex',
           alignItems: 'center',
-          justifyContent: 'center',
-          width: '48px',
-          height: '48px',
-          minWidth: '48px',
-          borderRadius: '12px',
-          background: 'linear-gradient(135deg, #e50914, #b20710)',
-          color: '#ffffff',
-          fontWeight: '900',
-          fontSize: '1.4rem',
-          letterSpacing: '-0.5px',
-          boxShadow: '0 4px 16px rgba(229, 9, 20, 0.5)',
+          gap: '8px',
+          cursor: 'pointer',
         },
-      }, 'N'),
-      h('div', {},
-        h('div', { style: { fontWeight: '800', fontSize: '1.1rem', color: '#f8fafc' } }, 'Netflix Resmi İzleme & Canlı Oda Portalı'),
-        h('div', { style: { fontSize: '.84rem', color: '#94a3b8', marginTop: '2px' } },
-          'Rave.io doğrudan tarayıcı mimarisi: Resmi Netflix sitesinde dizi veya film seçin, odadaki herkesle 4K HDR canlı senkron izleyin.'
-        )
-      )
+        onclick: () => { currentTab = 'all'; renderNavTabs(); filterContent(); },
+      },
+        h('span', {
+          style: {
+            color: '#e50914',
+            fontWeight: '900',
+            fontSize: '1.75rem',
+            letterSpacing: '1px',
+            fontFamily: 'Impact, "Bebas Neue", sans-serif',
+          },
+        }, 'NETFLIX'),
+        h('span', {
+          style: {
+            fontSize: '.72rem',
+            background: 'rgba(229, 9, 20, 0.15)',
+            border: '1px solid rgba(229, 9, 20, 0.4)',
+            color: '#f87171',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            fontWeight: '700',
+          },
+        }, 'CANLI ODA')
+      ),
+      tabPillsWrap
     ),
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
       acct.loginSatisfied ? h('div', {
         style: {
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          background: 'rgba(16, 185, 129, 0.15)',
-          border: '1px solid rgba(16, 185, 129, 0.45)',
+          gap: '6px',
+          background: 'rgba(16, 185, 129, 0.12)',
+          border: '1px solid rgba(16, 185, 129, 0.35)',
           color: '#34d399',
-          padding: '8px 14px',
+          padding: '6px 12px',
           borderRadius: '10px',
-          fontSize: '.86rem',
+          fontSize: '.82rem',
           fontWeight: '700',
         },
       },
-        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 8px #10b981' } }),
-        acct.profileName || acct.accountEmail || '✓ Netflix Hesabı Aktif'
+        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' } }),
+        acct.profileName || acct.accountEmail || '✓ Netflix Aktif'
       ) : h('button', {
         type: 'button',
-        class: 'btn primary',
+        class: 'btn sm primary',
         style: {
           background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
           borderColor: '#e50914',
           fontWeight: '800',
-          padding: '10px 18px',
-          borderRadius: '10px',
-          boxShadow: '0 4px 14px rgba(229, 9, 20, 0.4)',
+          padding: '7px 14px',
+          borderRadius: '8px',
+          fontSize: '.82rem',
           cursor: 'pointer',
         },
         onclick: () => openProviderLoginModal(p, () => {
           body.replaceChildren();
           renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
         }),
-      }, '🔑 Netflix ile Giriş Yap'),
+      }, '🔑 Netflix Hesabı Bağla'),
       h('button', {
         type: 'button',
-        class: 'btn secondary',
-        style: { fontSize: '.84rem', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
+        class: 'btn sm ghost',
+        style: { fontSize: '.8rem', padding: '6px 12px', borderRadius: '8px' },
         onclick: () => openProviderLoginModal(p, () => {
           body.replaceChildren();
           renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
         }),
-      }, acct.loginSatisfied ? 'Profil / Hesap Değiştir' : 'Seçenekler')
+      }, 'Hesap')
     )
   );
 
-  // 2. Rave-Style 3-Step Guide Card
-  const guideCard = h('div', {
+  renderNavTabs();
+
+  // 2. Netflix Hero Showcase Spotlight Billboard (Featured: Organize İşler: Sazan Sarmalı)
+  const heroItem = {
+    tmdbId: '577990',
+    title: 'Organize İşler: Sazan Sarmalı',
+    originalTitle: 'Organize İşler: Sazan Sarmalı',
+    mediaType: 'movie',
+    year: '2019',
+    rating: '5.6',
+    duration: '121 dk',
+    tags: ['4K Ultra HD', '5.1 Dolby Audio', 'Komedi / Aksiyon', '2019'],
+    overview: 'İstanbul şehrinde Organize İşler tam gaz devam etmektedir. Sazanlar yem peşinde, oltalar Asım Noyan ve ekibinin elinde, daha büyük balıklar ise bu ekibin peşindedir. Dönen dolaplar içinde saflar, temizler ve kirliler birbirine karışır!',
+    backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+    poster: 'https://image.tmdb.org/t/p/w500/p5vsOFlPOfdBEXSgrW9fcxdfJNC.jpg',
+  };
+
+  const heroPlayBtn = h('button', {
+    type: 'button',
     style: {
-      background: 'rgba(15, 23, 42, 0.55)',
-      border: '1px solid rgba(255, 255, 255, 0.08)',
-      borderRadius: '14px',
-      padding: '16px 20px',
-      display: 'grid',
-      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-      gap: '14px',
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '10px',
+      background: '#ffffff',
+      color: '#000000',
+      border: 'none',
+      borderRadius: '8px',
+      padding: '12px 26px',
+      fontSize: '1.05rem',
+      fontWeight: '900',
+      cursor: 'pointer',
+      boxShadow: '0 4px 20px rgba(255, 255, 255, 0.35)',
+      transition: 'transform .15s ease, background .15s ease',
+    },
+    onmouseenter: (e) => { e.currentTarget.style.background = '#e6e6e6'; e.currentTarget.style.transform = 'scale(1.03)'; },
+    onmouseleave: (e) => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.transform = 'scale(1)'; },
+    onclick: async () => {
+      heroPlayBtn.disabled = true;
+      heroPlayBtn.style.opacity = '0.7';
+      toast(`🎬 "${heroItem.title}" hazırlanıyor, oda başlatılıyor...`);
+      try {
+        const res = await resolveCatalogItem(
+          { tmdbId: heroItem.tmdbId, title: heroItem.title, originalTitle: heroItem.originalTitle, mediaType: heroItem.mediaType, provider: 'netflix' },
+          p, 1, 1
+        );
+        if (res) {
+          await pick(res);
+        } else {
+          toast('İçerik akışı başlatılamadı, lütfen tekrar deneyin.');
+        }
+      } catch (err) {
+        toast('Oda başlatılırken bir sorun oluştu.');
+      } finally {
+        heroPlayBtn.disabled = false;
+        heroPlayBtn.style.opacity = '1';
+      }
     },
   },
-    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
-      h('div', { style: { background: 'rgba(229, 9, 20, 0.2)', color: '#ef4444', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '1'),
-      h('div', {},
-        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Netflix'te İstediğin İçeriği Aç"),
-        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Aşağıdaki butonla netflix.com'a gidin ve izlemek istediğiniz filmi veya diziyi açın.")
-      )
+    h('span', { style: { fontSize: '1.25rem' } }, '▶'),
+    h('span', {}, 'Oynat (Odayı Kur)')
+  );
+
+  const heroInfoBtn = h('button', {
+    type: 'button',
+    style: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '8px',
+      background: 'rgba(109, 109, 110, 0.7)',
+      color: '#ffffff',
+      border: 'none',
+      borderRadius: '8px',
+      padding: '12px 22px',
+      fontSize: '1rem',
+      fontWeight: '700',
+      cursor: 'pointer',
+      transition: 'background .15s ease, transform .15s ease',
+    },
+    onmouseenter: (e) => { e.currentTarget.style.background = 'rgba(109, 109, 110, 0.9)'; e.currentTarget.style.transform = 'scale(1.03)'; },
+    onmouseleave: (e) => { e.currentTarget.style.background = 'rgba(109, 109, 110, 0.7)'; e.currentTarget.style.transform = 'scale(1)'; },
+    onclick: () => {
+      toast(`ℹ️ ${heroItem.title} · Yılmaz Erdoğan, Kıvanç Tatlıtuğ, Ezgi Mola · Netflix Orijinal Yapımı`);
+    },
+  },
+    h('span', { style: { fontSize: '1.1rem' } }, 'ⓘ'),
+    h('span', {}, 'Daha Fazla Bilgi')
+  );
+
+  const heroBillboard = h('div', {
+    class: 'netflix-hero-billboard',
+    style: {
+      position: 'relative',
+      minHeight: '340px',
+      borderRadius: '20px',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-end',
+      padding: '36px 36px 32px',
+      boxShadow: '0 12px 40px rgba(0, 0, 0, 0.75)',
+      backgroundImage: `linear-gradient(to right, rgba(0, 0, 0, 0.92) 20%, rgba(0, 0, 0, 0.65) 55%, rgba(0, 0, 0, 0.15) 100%), linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 60%), url('${heroItem.backdrop}')`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center 20%',
+    },
+  },
+    h('div', {
+      style: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '8px',
+        marginBottom: '10px',
+      },
+    },
+      h('span', {
+        style: {
+          background: '#e50914',
+          color: '#fff',
+          fontWeight: '900',
+          fontSize: '.75rem',
+          padding: '3px 8px',
+          borderRadius: '4px',
+          letterSpacing: '0.5px',
+        },
+      }, 'TOP 10 FİLM'),
+      ...heroItem.tags.map((tg) => h('span', {
+        style: {
+          fontSize: '.75rem',
+          color: '#cbd5e1',
+          background: 'rgba(255, 255, 255, 0.15)',
+          padding: '3px 8px',
+          borderRadius: '4px',
+          fontWeight: '600',
+        },
+      }, tg))
     ),
-    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
-      h('div', { style: { background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '2'),
-      h('div', {},
-        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Bağlantıyı Kopyala (Ctrl+C / Paylaş)"),
-        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Adres çubuğundaki netflix.com/watch/... linkini kopyalayın.")
-      )
-    ),
-    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
-      h('div', { style: { background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '3'),
-      h('div', {},
-        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Watchlivo Otomatik Başlatır"),
-        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Sekmeye döndüğünüzde veya linki yapıştırdığınızda oda otomatik olarak senkronize başlar!")
-      )
+    h('h1', {
+      style: {
+        fontSize: '2.4rem',
+        fontWeight: '900',
+        letterSpacing: '-0.5px',
+        margin: '0 0 12px 0',
+        color: '#ffffff',
+        textShadow: '0 4px 16px rgba(0, 0, 0, 0.8)',
+        maxWidth: '720px',
+        lineHeight: '1.15',
+      },
+    }, heroItem.title),
+    h('p', {
+      style: {
+        fontSize: '.95rem',
+        color: '#e2e8f0',
+        lineHeight: '1.5',
+        maxWidth: '620px',
+        margin: '0 0 20px 0',
+        textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)',
+      },
+    }, heroItem.overview),
+    h('div', {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        flexWrap: 'wrap',
+      },
+    },
+      heroPlayBtn,
+      heroInfoBtn
     )
   );
 
-  // 3. Direct Link Runner & Instant Search Bar (Rave Link Parity)
-  const linkInput = h('input', {
+  // 3. Search & Instant Filter Bar
+  const searchInput = h('input', {
     class: 'input',
     type: 'text',
-    placeholder: 'netflix.com/watch/* bağlantısı yapıştırın veya dizi/film adı yazın (örn. Stranger Things)...',
+    placeholder: '🔍 Netflix kütüphanesinde film veya dizi ara (örn: Organize İşler, Stranger Things)...',
     value: presetQuery || '',
     style: {
-      flex: '1 1 340px',
+      flex: '1 1 360px',
       padding: '14px 18px',
       borderRadius: '12px',
       fontSize: '.95rem',
-      background: 'rgba(15, 23, 42, 0.85)',
+      background: 'rgba(24, 24, 27, 0.95)',
       border: '1px solid rgba(229, 9, 20, 0.4)',
-      color: '#fff',
+      color: '#ffffff',
       outline: 'none',
+      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
     },
   });
 
-  const launchBtn = h('button', {
+  const searchBtn = h('button', {
     type: 'button',
     class: 'btn primary',
     style: {
       background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
       borderColor: '#e50914',
-      padding: '14px 24px',
+      padding: '14px 22px',
       borderRadius: '12px',
       fontWeight: '800',
-      fontSize: '.95rem',
-      boxShadow: '0 4px 16px rgba(229, 9, 20, 0.45)',
+      fontSize: '.92rem',
       cursor: 'pointer',
+      boxShadow: '0 4px 14px rgba(229, 9, 20, 0.4)',
+    },
+  }, 'Ara');
+
+  const searchWrap = h('div', {
+    style: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
+      gap: '10px',
+      flexWrap: 'wrap',
+      padding: '4px 0',
     },
   },
-    h('span', {}, '🚀'),
-    h('span', {}, 'Odayı Başlat')
+    searchInput,
+    searchBtn
   );
 
-  const openPlayNetflixBtn = h('button', {
-    type: 'button',
-    class: 'btn secondary',
-    style: {
-      background: 'rgba(255, 255, 255, 0.08)',
-      border: '1px solid rgba(255, 255, 255, 0.2)',
-      padding: '14px 20px',
-      borderRadius: '12px',
-      fontWeight: '700',
-      fontSize: '.9rem',
-      color: '#f87171',
-      cursor: 'pointer',
-    },
-    onclick: () => {
-      window.open('https://www.netflix.com/browse', '_blank');
-      toast('netflix.com/browse açıldı. Dilediğiniz diziyi/filmi açıp linkini buraya yapıştırabilirsiniz.');
-    },
-  }, '🌐 netflix.com/browse Aç ↗');
-
-  // Quick categories launcher
-  const quickHubButtons = [
-    { label: '📺 Diziler', url: 'https://www.netflix.com/browse/genre/83' },
-    { label: '🍿 Filmler', url: 'https://www.netflix.com/browse/genre/34399' },
-    { label: '✨ Yeni & Popüler', url: 'https://www.netflix.com/latest' },
-    { label: '📋 Listem', url: 'https://www.netflix.com/browse/my-list' },
-  ].map((btnSpec) => h('button', {
-    type: 'button',
-    class: 'btn sm ghost',
-    style: {
-      background: 'rgba(255, 255, 255, 0.05)',
-      border: '1px solid rgba(255, 255, 255, 0.12)',
-      color: '#cbd5e1',
-      fontSize: '.78rem',
-      borderRadius: '8px',
-      padding: '6px 12px',
-      cursor: 'pointer',
-    },
-    onclick: () => {
-      window.open(btnSpec.url, '_blank');
-      toast(`Netflix ${btnSpec.label} sayfası yeni sekmede açıldı.`);
-    },
-  }, btnSpec.label));
-
-  const handleLaunch = async (overrideVal) => {
-    let rawVal = (typeof overrideVal === 'string' ? overrideVal : linkInput.value).trim();
-    if (!rawVal) {
-      toast('Lütfen bir Netflix bağlantısı yapıştırın veya film/dizi adı yazın');
-      linkInput.focus();
-      return;
-    }
-
-    // Auto prepend https if user pasted without scheme
-    if (/^netflix\.com/i.test(rawVal) || /^www\.netflix\.com/i.test(rawVal)) {
-      rawVal = `https://${rawVal}`;
-      linkInput.value = rawVal;
-    }
-
-    toast(`⏳ Netflix içeriği çözümleniyor: ${rawVal}...`);
-    launchBtn.disabled = true;
-    launchBtn.style.opacity = '0.6';
-
-    try {
-      if (rawVal.startsWith('http')) {
-        const parsed = parseVideoUrl(rawVal);
-        if (parsed && parsed.provider === 'netflix') {
-          // Direct URL pick
-          if (_pickFromUrl) {
-            await _pickFromUrl(rawVal, 'Netflix İçeriği');
-            return;
-          }
-        }
-      }
-
-      const res = await resolveCatalogItem(
-        { title: rawVal, originalTitle: rawVal, sourceUrl: rawVal.startsWith('http') ? rawVal : '', provider: 'netflix' },
-        p, 1, 1
-      );
-      if (res) {
-        toast(`✓ Oda başlatılıyor: ${res.title}`);
-        await pick(res);
-      } else {
-        toast('İçerik bulunamadı, lütfen Netflix bağlantısını doğrudan yapıştırın.');
-      }
-    } catch (err) {
-      toast('İçerik çözümlenemedi, lütfen tekrar deneyin');
-    } finally {
-      launchBtn.disabled = false;
-      launchBtn.style.opacity = '1';
-    }
-  };
-
-  launchBtn.onclick = () => handleLaunch();
-  linkInput.onkeydown = (e) => {
-    if (e.key === 'Enter') handleLaunch();
-  };
-
-  // Active Clipboard Watchdog
-  const checkClipboardForNetflix = async () => {
-    if (!document.hasFocus() || !navigator.clipboard?.readText) return;
-    try {
-      const clipText = (await navigator.clipboard.readText() || '').trim();
-      if (/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i.test(clipText)) {
-        if (linkInput.value !== clipText) {
-          linkInput.value = clipText;
-          toast('📋 Kopyalanan Netflix bağlantısı algılandı! "Odayı Başlat"a basarak izleyebilirsiniz.');
-        }
-      }
-    } catch (_) {}
-  };
-
-  const onWindowFocus = () => { checkClipboardForNetflix(); };
-  window.addEventListener('focus', onWindowFocus);
-
-  // Global Paste Listener
-  const onGlobalPaste = (e) => {
-    if (!container.isConnected) return;
-    const pasted = (e.clipboardData || window.clipboardData)?.getData('text');
-    if (pasted && /netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i.test(pasted.trim())) {
-      e.preventDefault();
-      linkInput.value = pasted.trim();
-      handleLaunch(pasted.trim());
-    }
-  };
-  document.addEventListener('paste', onGlobalPaste);
-
-  const runnerBar = h('div', {
-    style: {
-      background: 'rgba(15, 23, 42, 0.75)',
-      border: '1px solid rgba(229, 9, 20, 0.3)',
-      borderRadius: '16px',
-      padding: '20px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '14px',
-    },
-  },
-    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } },
-      h('div', { style: { fontWeight: '700', fontSize: '.94rem', color: '#e2e8f0' } },
-        '🔗 Doğrudan Netflix Bağlantısı veya Başlık ile Oda Kur:'
-      ),
-      h('div', { style: { fontSize: '.8rem', color: '#94a3b8' } },
-        'Desteklenen: netflix.com/watch/*, /title/* veya film/dizi adı'
-      )
-    ),
-    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },
-      linkInput,
-      launchBtn,
-      openPlayNetflixBtn
-    ),
-    h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
-      h('span', { style: { fontSize: '.78rem', color: '#94a3b8' } }, 'Hızlı Netflix Kategorileri:'),
-      ...quickHubButtons
-    )
-  );
-
-  // 4. Official Curated Netflix Showcase (Hubs)
-  const hubsWrap = h('div', {
-    style: { display: 'flex', flexDirection: 'column', gap: '28px', marginTop: '10px' },
-  });
-
-  for (const hub of NETFLIX_OFFICIAL_HUBS) {
-    const rowTitle = h('div', {
+  // 4. Interactive Card Factory (1-Click Instant Room Creation, Zero Link Copying)
+  const makeNetflixCard = (it) => {
+    const isTv = it.mediaType === 'tv';
+    const card = h('div', {
+      class: 'vcard netflix-catalog-card',
+      role: 'button',
+      tabindex: '0',
       style: {
-        fontSize: '1.15rem',
-        fontWeight: '800',
-        letterSpacing: '-0.3px',
-        color: '#f8fafc',
-        borderLeft: '4px solid #e50914',
-        paddingLeft: '12px',
-        marginBottom: '14px',
+        background: 'rgba(24, 24, 27, 0.85)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
+        borderRadius: '12px',
+        overflow: 'hidden',
+        cursor: 'pointer',
+        transition: 'all .22s cubic-bezier(0.4, 0, 0.2, 1)',
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'relative',
       },
-    }, hub.category);
-
-    const cardsGrid = h('div', {
-      style: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
-        gap: '16px',
+      onmouseenter: () => {
+        card.style.transform = 'translateY(-6px) scale(1.02)';
+        card.style.borderColor = '#e50914';
+        card.style.boxShadow = '0 12px 28px rgba(229, 9, 20, 0.35)';
       },
-    });
-
-    for (const it of hub.items) {
-      const card = h('div', {
-        class: 'vcard netflix-showcase-card',
-        role: 'button',
-        tabindex: '0',
-        style: {
-          background: 'rgba(15, 23, 42, 0.65)',
-          border: '1px solid rgba(255, 255, 255, 0.08)',
-          borderRadius: '12px',
-          overflow: 'hidden',
-          cursor: 'pointer',
-          transition: 'transform .2s, border-color .2s, box-shadow .2s',
-          display: 'flex',
-          flexDirection: 'column',
-        },
-        onmouseenter: () => {
-          card.style.transform = 'translateY(-4px)';
-          card.style.borderColor = '#e50914';
-          card.style.boxShadow = '0 12px 24px rgba(229, 9, 20, 0.35)';
-        },
-        onmouseleave: () => {
-          card.style.transform = 'translateY(0)';
-          card.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-          card.style.boxShadow = 'none';
-        },
-        onclick: async () => {
-          if (it.mediaType === 'tv') {
-            openTvSeriesModal(it, p, pick);
-            return;
-          }
-          toast(`🎬 Netflix içeriği odaya yükleniyor: ${it.title}`);
+      onmouseleave: () => {
+        card.style.transform = 'translateY(0) scale(1)';
+        card.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+        card.style.boxShadow = 'none';
+      },
+      onclick: async () => {
+        if (isTv) {
+          openTvSeriesModal(it, p, pick);
+          return;
+        }
+        toast(`🎬 Netflix "${it.title}" hazırlanıyor, oda başlatılıyor...`);
+        try {
           const res = await resolveCatalogItem(
             { tmdbId: it.tmdbId, title: it.title, originalTitle: it.originalTitle, mediaType: it.mediaType, provider: 'netflix' },
             p, 1, 1
           );
           if (res) {
             await pick(res);
+          } else {
+            toast('İçerik akışı açılamadı, lütfen tekrar deneyin.');
           }
-        },
+        } catch (err) {
+          toast('Oda başlatılırken bir sorun oluştu.');
+        }
       },
+    },
+      h('div', {
+        style: { position: 'relative', width: '100%', paddingTop: '148%', background: '#09090b', overflow: 'hidden' },
+      },
+        h('img', {
+          src: it.poster,
+          alt: it.title,
+          loading: 'lazy',
+          onerror: (e) => { e.currentTarget.src = '/static/watchlivo-poster.svg'; },
+          style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
+        }),
         h('div', {
-          style: { position: 'relative', width: '100%', paddingTop: '148%', background: '#070913', overflow: 'hidden' },
-        },
-          h('img', {
-            src: it.poster,
-            alt: it.title,
-            loading: 'lazy',
-            onerror: (e) => { e.currentTarget.src = '/static/watchlivo-poster.svg'; },
-            style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
-          }),
-          h('div', {
-            style: {
-              position: 'absolute',
-              top: '8px',
-              left: '8px',
-              background: 'linear-gradient(135deg, #e50914, #b20710)',
-              color: '#fff',
-              fontSize: '.68rem',
-              fontWeight: '900',
-              padding: '3px 7px',
-              borderRadius: '6px',
-              letterSpacing: '-0.3px',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-            },
-          }, 'N'),
-          h('div', {
-            style: {
-              position: 'absolute',
-              bottom: '8px',
-              right: '8px',
-              background: 'rgba(0, 0, 0, 0.75)',
-              color: '#fbbf24',
-              fontSize: '.72rem',
-              fontWeight: '800',
-              padding: '2px 6px',
-              borderRadius: '4px',
-            },
-          }, `★ ${it.rating}`)
-        ),
-        h('div', { style: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 } },
-          h('div', {
-            style: {
-              fontWeight: '800',
-              fontSize: '.88rem',
-              color: '#ffffff',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            },
-          }, it.title),
-          h('div', {
-            style: { fontSize: '.76rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' },
+          style: {
+            position: 'absolute',
+            top: '8px',
+            left: '8px',
+            background: 'linear-gradient(135deg, #e50914, #b20710)',
+            color: '#fff',
+            fontSize: '.7rem',
+            fontWeight: '900',
+            padding: '2px 7px',
+            borderRadius: '6px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.6)',
           },
-            h('span', {}, it.mediaType === 'tv' ? `Dizi · ${it.year}` : `Film · ${it.year}`),
-            h('span', { style: { color: '#f87171', fontWeight: '700' } }, '4K HDR')
-          )
+        }, 'N'),
+        h('div', {
+          style: {
+            position: 'absolute',
+            bottom: '8px',
+            right: '8px',
+            background: 'rgba(0, 0, 0, 0.8)',
+            color: '#fbbf24',
+            fontSize: '.72rem',
+            fontWeight: '800',
+            padding: '2px 6px',
+            borderRadius: '4px',
+          },
+        }, `★ ${it.rating}`),
+        h('div', {
+          style: {
+            position: 'absolute',
+            bottom: '8px',
+            left: '8px',
+            background: isTv ? 'rgba(59, 130, 246, 0.85)' : 'rgba(229, 9, 20, 0.85)',
+            color: '#ffffff',
+            fontSize: '.66rem',
+            fontWeight: '800',
+            padding: '2px 6px',
+            borderRadius: '4px',
+          },
+        }, isTv ? '📺 DİZİ' : '🎬 4K FİLM')
+      ),
+      h('div', { style: { padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 } },
+        h('div', {
+          style: {
+            fontWeight: '800',
+            fontSize: '.88rem',
+            color: '#ffffff',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          },
+        }, it.title),
+        h('div', {
+          style: { fontSize: '.74rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+        },
+          h('span', {}, it.year || '2024'),
+          h('span', { style: { color: '#f87171', fontWeight: '700' } }, isTv ? 'Sezon Seç' : '▶ Hemen İzle')
         )
-      );
+      )
+    );
+    return card;
+  };
 
-      cardsGrid.appendChild(card);
+  // 5. Dynamic Shelves Container
+  const shelvesContainer = h('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '30px' },
+  });
+
+  const filterContent = (customQuery = '') => {
+    const q = (customQuery || searchInput.value).trim().toLowerCase();
+    shelvesContainer.replaceChildren();
+
+    // If query is an active netflix url
+    if (/netflix\.com\/(?:[a-z-]+\/)?(?:watch|title)\/(\d+)/i.test(q)) {
+      toast('⏳ Netflix bağlantısı algılandı, oda otomatik başlatılıyor...');
+      resolveCatalogItem({ sourceUrl: q, title: q, provider: 'netflix' }, p, 1, 1).then((res) => {
+        if (res) pick(res);
+      });
+      return;
     }
 
-    const sectionBox = h('div', {},
-      rowTitle,
-      cardsGrid
-    );
-    hubsWrap.appendChild(sectionBox);
-  }
+    if (q) {
+      // Search matching across all hubs
+      const allItems = [];
+      const seen = new Set();
+      for (const hub of NETFLIX_OFFICIAL_HUBS) {
+        for (const it of hub.items) {
+          if (!seen.has(it.tmdbId)) {
+            seen.add(it.tmdbId);
+            allItems.push(it);
+          }
+        }
+      }
+      const matched = allItems.filter((it) =>
+        (it.title || '').toLowerCase().includes(q) ||
+        (it.originalTitle || '').toLowerCase().includes(q) ||
+        (it.overview || '').toLowerCase().includes(q)
+      );
+
+      const searchHead = h('div', {
+        style: {
+          fontSize: '1.2rem',
+          fontWeight: '800',
+          color: '#f8fafc',
+          borderLeft: '4px solid #e50914',
+          paddingLeft: '12px',
+          marginBottom: '16px',
+        },
+      }, `🔍 "${q}" için Netflix Sonuçları (${matched.length} İçerik Bulundu)`);
+
+      const searchGrid = h('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+          gap: '16px',
+        },
+      }, ...matched.map(makeNetflixCard));
+
+      if (!matched.length) {
+        shelvesContainer.append(
+          searchHead,
+          h('div', {
+            style: {
+              padding: '40px',
+              textAlign: 'center',
+              color: '#94a3b8',
+              background: 'rgba(24, 24, 27, 0.5)',
+              borderRadius: '14px',
+              border: '1px dashed rgba(255, 255, 255, 0.1)',
+            },
+          },
+            h('div', { style: { fontSize: '1.1rem', fontWeight: '700', color: '#fff', marginBottom: '8px' } }, `"${q}" için yerel sonuç bulunamadı`),
+            h('div', { style: { fontSize: '.88rem', marginBottom: '16px' } }, 'Genişletilmiş Netflix kütüphanesinden canlı arama yapılıyor...'),
+            h('button', {
+              type: 'button',
+              class: 'btn primary',
+              style: { background: '#e50914', borderColor: '#e50914', fontWeight: '800' },
+              onclick: async () => {
+                toast(`🔍 Netflix genel arşivinde aranıyor: "${q}"...`);
+                const res = await resolveCatalogItem({ title: q, originalTitle: q, provider: 'netflix' }, p, 1, 1);
+                if (res) await pick(res);
+                else toast('İçerik bulunamadı.');
+              },
+            }, `🌐 "${q}" Başlığını Odada Canlı Başlat`)
+          )
+        );
+        return;
+      }
+
+      shelvesContainer.append(searchHead, searchGrid);
+      return;
+    }
+
+    // Normal Browsing by currentTab
+    for (const hub of NETFLIX_OFFICIAL_HUBS) {
+      if (currentTab !== 'all') {
+        if (currentTab === 'turkish' && hub.id !== 'turkish') continue;
+        if (currentTab === 'trending' && hub.id !== 'trending') continue;
+        if (currentTab === 'movies' && hub.id !== 'movies') continue;
+        if (currentTab === 'series' && hub.id === 'movies') continue;
+      }
+
+      const rowTitle = h('div', {
+        style: {
+          fontSize: '1.15rem',
+          fontWeight: '800',
+          letterSpacing: '-0.3px',
+          color: '#f8fafc',
+          borderLeft: '4px solid #e50914',
+          paddingLeft: '12px',
+          marginBottom: '14px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        },
+      },
+        h('span', {}, hub.category),
+        h('span', { style: { fontSize: '.8rem', color: '#94a3b8', fontWeight: '600' } }, `${hub.items.length} Yapım`)
+      );
+
+      const cardsGrid = h('div', {
+        style: {
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+          gap: '16px',
+        },
+      }, ...hub.items.map(makeNetflixCard));
+
+      const shelfBox = h('div', {},
+        rowTitle,
+        cardsGrid
+      );
+      shelvesContainer.appendChild(shelfBox);
+    }
+  };
+
+  searchBtn.onclick = () => filterContent();
+  searchInput.onkeydown = (e) => {
+    if (e.key === 'Enter') filterContent();
+  };
+  let searchDebounce = null;
+  searchInput.oninput = () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(() => filterContent(), 220);
+  };
+
+  // Initial populate
+  filterContent(presetQuery || '');
 
   container.append(
-    headerCard,
-    guideCard,
-    runnerBar,
-    hubsWrap
+    topBar,
+    heroBillboard,
+    searchWrap,
+    shelvesContainer
   );
 
   body.replaceChildren(container);

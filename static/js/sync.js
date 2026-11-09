@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261109_v160';
+import { isRoomMediaPlaying } from './store.js?v=20261109_v161';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
