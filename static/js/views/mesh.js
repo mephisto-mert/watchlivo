@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261109_v161';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261109_v161';
-import { resolveMusicItem } from './selection-kinds.js?v=20261109_v161';
-import { MeshConnection } from '../realtime.js?v=20261109_v161';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261109_v161';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261109_v161';
-import { buildLayout } from './mesh-layout.js?v=20261109_v161';
-import { getAccount } from '../accounts.js?v=20261109_v161';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261109_v161';
-import { Voice } from '../voice.js?v=20261109_v161';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261109_v161';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261109_v161';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261109_v161';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261109_v162';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261109_v162';
+import { resolveMusicItem } from './selection-kinds.js?v=20261109_v162';
+import { MeshConnection } from '../realtime.js?v=20261109_v162';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261109_v162';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261109_v162';
+import { buildLayout } from './mesh-layout.js?v=20261109_v162';
+import { getAccount } from '../accounts.js?v=20261109_v162';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261109_v162';
+import { Voice } from '../voice.js?v=20261109_v162';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261109_v162';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261109_v162';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261109_v162';
 
 let ctx = null;
 

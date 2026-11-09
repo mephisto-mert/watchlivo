@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v161';
-import { api, qs } from '../api.js?v=20261109_v161';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v161';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v161';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v161';
-import { profileSetup } from '../profile.js?v=20261109_v161';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v161';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v162';
+import { api, qs } from '../api.js?v=20261109_v162';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v162';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v162';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v162';
+import { profileSetup } from '../profile.js?v=20261109_v162';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v162';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v161';
+} from '../store.js?v=20261109_v162';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v161');
+                  const { setView } = await import('../state.js?v=20261109_v162');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v161');
+                  const { setView } = await import('../state.js?v=20261109_v162');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v161');
+                  const { setView } = await import('../state.js?v=20261109_v162');
                   setView('left', 'Room');
                 }
               },
@@ -3046,11 +3046,44 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
   // Initial populate
   filterContent(presetQuery || '');
 
+    // 6. Rave.io Nominative Fair Use & Legal Safe Harbor Disclaimer Banner
+  const legalSafeHarborBanner = h('div', {
+    class: 'netflix-legal-safeharbor-banner',
+    style: {
+      marginTop: '28px',
+      padding: '16px 20px',
+      borderRadius: '14px',
+      background: 'rgba(15, 23, 42, 0.65)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      fontSize: '.78rem',
+      color: '#94a3b8',
+      lineHeight: '1.5',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+    },
+  },
+    h('div', { style: { fontWeight: '800', color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '.84rem' } },
+      h('span', {}, '⚖️'),
+      h('span', {}, 'Rave.io Birlikte İzleme Modeli & Yasal Safe Harbor Beyanı (5651 Sayılı Kanun & DMCA)')
+    ),
+    h('div', {},
+      'Netflix, Netflix Inc.\'in tescilli ticari markasıdır. Watchlivo, Netflix Inc. ile doğrudan bağlantılı, sponsorlu veya onaylı bir kuruluş değildir. Platformumuz sunucularında hiçbir video veya medya dosyası barındırmaz (Non-Hosting Provider). Kullanıcıların yetkili hesapları veya açık kaynaklar üzerinden gerçek zamanlı birlikte izleme (Watch Party) ve oynatma zamanı senkronizasyonu sağlayan bağımsız bir köprü yazılımdır.'
+    ),
+    h('div', { style: { display: 'flex', gap: '14px', flexWrap: 'wrap', marginTop: '4px' } },
+      h('a', { href: '/dmca', target: '_blank', style: { color: '#ef4444', textDecoration: 'underline', fontWeight: '700' } }, 'Telif Hakkı & DMCA Uyar-Kaldır Bildirimi'),
+      h('a', { href: '/terms', target: '_blank', style: { color: '#94a3b8', textDecoration: 'underline' } }, 'Kullanım Koşulları'),
+      h('a', { href: '/privacy', target: '_blank', style: { color: '#94a3b8', textDecoration: 'underline' } }, 'Gizlilik & KVKK'),
+      h('span', { style: { color: '#64748b' } }, '· İletişim: abuse@watchlivo.online')
+    )
+  );
+
   container.append(
     topBar,
     heroBillboard,
     searchWrap,
-    shelvesContainer
+    shelvesContainer,
+    legalSafeHarborBanner
   );
 
   body.replaceChildren(container);
