@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v155';
-import { api, qs } from '../api.js?v=20261109_v155';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v155';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v155';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v155';
-import { profileSetup } from '../profile.js?v=20261109_v155';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v155';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v156';
+import { api, qs } from '../api.js?v=20261109_v156';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v156';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v156';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v156';
+import { profileSetup } from '../profile.js?v=20261109_v156';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v156';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v155';
+} from '../store.js?v=20261109_v156';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -579,6 +579,9 @@ function itemMatchesCat(it, catId) {
 }
 
 export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
+  if (p.id === 'max') {
+    return renderMaxRavePortal(p, body, presetQuery, pick, pickFromUrl);
+  }
   if (window.vortexDesktop?.isElectron && !p.freeNoAuth && p.id !== 'cinema') { renderDesktopKind(p, body, pick); return; }
   const authHolder = h('div', {});
   const input = h('input', { id: 'hub-search-q', placeholder: p.placeholder || `${p.name} içinde binlerce dizi veya film ara...`, value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
@@ -716,7 +719,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v155');
+                  const { setView } = await import('../state.js?v=20261109_v156');
                   setView('left', 'Room');
                 }
               },
@@ -731,7 +734,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v155');
+                  const { setView } = await import('../state.js?v=20261109_v156');
                   setView('left', 'Room');
                 }
               },
@@ -746,7 +749,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v155');
+                  const { setView } = await import('../state.js?v=20261109_v156');
                   setView('left', 'Room');
                 }
               },
@@ -1733,3 +1736,384 @@ export function renderRaveDjKind(p, body, pick) {
   );
 }
 
+
+
+// ============================================================================
+// RAVE-PARITY HBO MAX PORTAL & DIRECT IN-APP LINK/TITLE SELECTOR
+// ============================================================================
+const MAX_OFFICIAL_HUBS = [
+  {
+    category: '🔥 HBO Orijinal Yapımları (4K Ultra HD)',
+    items: [
+      { tmdbId: '100088', title: 'The Last of Us', originalTitle: 'The Last of Us', mediaType: 'tv', season: 2, episode: 1, year: '2025', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', desc: 'Joel ve Ellie’nin distopik dünyadaki destansı mücadelesi.' },
+      { tmdbId: '94997', title: 'House of the Dragon', originalTitle: 'House of the Dragon', mediaType: 'tv', season: 2, episode: 1, year: '2024', rating: 8.4, poster: 'https://image.tmdb.org/t/p/w500/t9Xke5724fqBY842wwOGPpZ2XaF.jpg', desc: 'Targaryen hanedanının Ejderhaların Dansı iç savaşı.' },
+      { tmdbId: '118956', title: 'The Penguin', originalTitle: 'The Penguin', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/l0LzJb330nQ0b2B7q5hUfR0W7uL.jpg', desc: 'Gotham yeraltı dünyasının yeni lideri Oswald Cobblepot.' },
+      { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 7.9, poster: 'https://image.tmdb.org/t/p/w500/y3P0vM7Pj1yLg1F24P8l6d7Jb1y.jpg', desc: 'Efsanevi Tanrıkent hikayesi 20 yıl sonra devam ediyor.' },
+      { tmdbId: '76331', title: 'Succession', originalTitle: 'Succession', mediaType: 'tv', season: 4, episode: 1, year: '2023', rating: 8.9, poster: 'https://image.tmdb.org/t/p/w500/7Tafv0v1V1kQ4P3d7r6r4v5m7w.jpg', desc: 'Roy ailesinin medya imparatorluğundaki acımasız taht kavgası.' },
+      { tmdbId: '1399', title: 'Game of Thrones', originalTitle: 'Game of Thrones', mediaType: 'tv', season: 1, episode: 1, year: '2019', rating: 9.2, poster: 'https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg', desc: 'Demir Taht için 7 Krallığın amansız savaşı.' },
+    ]
+  },
+  {
+    category: '🎬 Warner Bros. 4K Sinema Gişesi (IMAX)',
+    items: [
+      { tmdbId: '693134', title: 'Dune: Part Two', originalTitle: 'Dune: Part Two', mediaType: 'movie', year: '2024', rating: 8.5, poster: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg', desc: 'Paul Atreides’in Arrakis ve Fremen halkıyla intikam savaşı.' },
+      { tmdbId: '414906', title: 'The Batman', originalTitle: 'The Batman', mediaType: 'movie', year: '2022', rating: 7.7, poster: 'https://image.tmdb.org/t/p/w500/74xTEgt7R36Fpooo50r9T25onhq.jpg', desc: 'Gotham sokaklarındaki yozlaşma ve Riddler cinayetleri.' },
+      { tmdbId: '346698', title: 'Barbie', originalTitle: 'Barbie', mediaType: 'movie', year: '2023', rating: 7.0, poster: 'https://image.tmdb.org/t/p/w500/iuFNMS8U5cb6xfzi51Dbkovj7vM.jpg', desc: 'Barbie Land’den gerçek dünyaya uzanan renkli yolculuk.' },
+      { tmdbId: '787699', title: 'Wonka', originalTitle: 'Wonka', mediaType: 'movie', year: '2023', rating: 7.1, poster: 'https://image.tmdb.org/t/p/w500/qhb1qY7Y57ffmgJ2LrIDOXG9Myb.jpg', desc: 'Willy Wonka’nın dünyanın en büyük çikolatacısı olma hikayesi.' },
+      { tmdbId: '823464', title: 'Godzilla x Kong: The New Empire', originalTitle: 'Godzilla x Kong: The New Empire', mediaType: 'movie', year: '2024', rating: 7.2, poster: 'https://image.tmdb.org/t/p/w500/bQ2ywkchCe0JqR2OC0L8BMuhu0d.jpg', desc: 'Devasa canavarların içi boş dünyadaki yeni ittifakı.' },
+      { tmdbId: '974635', title: 'Bir Minecraft Filmi', originalTitle: 'A Minecraft Movie', mediaType: 'movie', year: '2025', rating: 6.8, poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg', desc: 'Overworld dünyasındaki büyülü ve eğlenceli Minecraft macerası.' },
+    ]
+  }
+];
+
+export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
+  const acct = getAccount('max');
+
+  // Electron Desktop Mode: Native webview tag parity
+  if (window.vortexDesktop?.isElectron) {
+    renderDesktopKind(p, body, pick);
+    return;
+  }
+
+  const container = h('div', {
+    class: 'max-rave-portal-view',
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '20px',
+      maxWidth: '1200px',
+      margin: '0 auto',
+      padding: '10px 0 40px',
+      color: '#ffffff',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    },
+  });
+
+  // 1. Top Brand & Status Header
+  const headerCard = h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '16px',
+      padding: '20px 24px',
+      borderRadius: '16px',
+      background: 'linear-gradient(135deg, rgba(0, 43, 231, 0.28) 0%, rgba(13, 16, 27, 0.96) 100%)',
+      border: '1px solid rgba(0, 43, 231, 0.5)',
+      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+    },
+  },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '16px' } },
+      h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: '4px',
+          background: 'rgba(0, 43, 231, 0.3)',
+          padding: '8px 16px',
+          borderRadius: '10px',
+          border: '1px solid rgba(59, 130, 246, 0.4)',
+        },
+      },
+        h('span', { style: { fontSize: '26px', fontWeight: '900', letterSpacing: '-0.5px', color: '#ffffff' } }, 'HBO'),
+        h('span', { style: { fontSize: '26px', fontWeight: '300', fontStyle: 'italic', color: '#ffffff' } }, 'max')
+      ),
+      h('div', {},
+        h('div', { style: { fontWeight: '800', fontSize: '1.1rem', color: '#f8fafc' } }, 'HBO Max Resmi İzleme & Oda Portalı'),
+        h('div', { style: { fontSize: '.84rem', color: '#94a3b8', marginTop: '2px' } }, 'Rave çoklu izleyici protokolü: Resmi Max kütüphanesinden içerik seçip odada canlı senkron başlatın.')
+      )
+    ),
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+      acct.loginSatisfied ? h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'rgba(16, 185, 129, 0.15)',
+          border: '1px solid rgba(16, 185, 129, 0.45)',
+          color: '#34d399',
+          padding: '8px 14px',
+          borderRadius: '10px',
+          fontSize: '.86rem',
+          fontWeight: '700',
+        },
+      },
+        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 8px #10b981' } }),
+        acct.accountEmail || '✓ Max Hesabı Aktif'
+      ) : h('button', {
+        type: 'button',
+        class: 'btn primary',
+        style: { background: 'linear-gradient(135deg, #002be7, #4f46e5)', fontWeight: '800', padding: '10px 18px', borderRadius: '10px' },
+        onclick: () => openProviderLoginModal(p, () => {
+          body.replaceChildren();
+          renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+        }),
+      }, '🔑 HBO Max ile Giriş Yap'),
+      h('button', {
+        type: 'button',
+        class: 'btn secondary',
+        style: { fontSize: '.84rem', padding: '9px 14px', borderRadius: '10px' },
+        onclick: () => openProviderLoginModal(p, () => {
+          body.replaceChildren();
+          renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+        }),
+      }, acct.loginSatisfied ? 'Hesap Değiştir' : 'Seçenekler')
+    )
+  );
+
+  // 2. Direct Link Runner & Instant Search Bar (Rave Link Parity)
+  const linkInput = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'play.max.com video bağlantısı yapıştırın veya film/dizi adı yazın (örn. The Last of Us)...',
+    value: presetQuery || '',
+    style: {
+      flex: '1 1 340px',
+      padding: '14px 18px',
+      borderRadius: '12px',
+      fontSize: '.95rem',
+      background: 'rgba(15, 23, 42, 0.85)',
+      border: '1px solid rgba(59, 130, 246, 0.35)',
+      color: '#fff',
+      outline: 'none',
+    },
+  });
+
+  const launchBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      background: 'linear-gradient(135deg, #002be7 0%, #1d4ed8 100%)',
+      padding: '14px 24px',
+      borderRadius: '12px',
+      fontWeight: '800',
+      fontSize: '.95rem',
+      boxShadow: '0 4px 16px rgba(0, 43, 231, 0.45)',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+    },
+  },
+    h('span', {}, '🚀'),
+    h('span', {}, 'Odayı Başlat')
+  );
+
+  const openPlayMaxBtn = h('button', {
+    type: 'button',
+    class: 'btn secondary',
+    style: {
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      padding: '14px 20px',
+      borderRadius: '12px',
+      fontWeight: '700',
+      fontSize: '.9rem',
+      color: '#93c5fd',
+      cursor: 'pointer',
+    },
+    onclick: () => {
+      window.open('https://play.max.com', '_blank');
+      toast('play.max.com açıldı. Dilediğiniz filmi açıp bağlantısını buraya yapıştırabilirsiniz.');
+    },
+  }, '🌐 play.max.com Aç ↗');
+
+  const handleLaunch = async () => {
+    const rawVal = linkInput.value.trim();
+    if (!rawVal) {
+      toast('Lütfen bir Max bağlantısı yapıştırın veya film/dizi adı yazın');
+      linkInput.focus();
+      return;
+    }
+
+    toast(`⏳ HBO Max içeriği çözümleniyor: ${rawVal}...`);
+    launchBtn.disabled = true;
+    launchBtn.style.opacity = '0.6';
+
+    try {
+      const res = await resolveCatalogItem(
+        { title: rawVal, originalTitle: rawVal, sourceUrl: rawVal.startsWith('http') ? rawVal : '', provider: 'max' },
+        p, 1, 1
+      );
+      if (res) {
+        toast(`✓ Oda başlatılıyor: ${res.title}`);
+        await pick(res);
+      }
+    } catch (err) {
+      toast('İçerik çözümlenemedi, lütfen tekrar deneyin');
+    } finally {
+      launchBtn.disabled = false;
+      launchBtn.style.opacity = '1';
+    }
+  };
+
+  launchBtn.onclick = handleLaunch;
+  linkInput.onkeydown = (e) => {
+    if (e.key === 'Enter') handleLaunch();
+  };
+
+  const runnerBar = h('div', {
+    style: {
+      background: 'rgba(15, 23, 42, 0.75)',
+      border: '1px solid rgba(255, 255, 255, 0.1)',
+      borderRadius: '16px',
+      padding: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '14px',
+    },
+  },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } },
+      h('div', { style: { fontWeight: '700', fontSize: '.94rem', color: '#e2e8f0' } },
+        '🔗 Doğrudan Max Bağlantısı veya Başlık ile Oda Kur:'
+      ),
+      h('div', { style: { fontSize: '.8rem', color: '#94a3b8' } },
+        'Desteklenen: play.max.com/video/watch/*, /movie/*, /show/* veya başlık adı'
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },
+      linkInput,
+      launchBtn,
+      openPlayMaxBtn
+    )
+  );
+
+  // 3. Official Curated HBO Max Showcase (Hubs)
+  const hubsWrap = h('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '28px', marginTop: '10px' },
+  });
+
+  for (const hub of MAX_OFFICIAL_HUBS) {
+    const rowTitle = h('div', {
+      style: {
+        fontSize: '1.15rem',
+        fontWeight: '800',
+        letterSpacing: '-0.3px',
+        color: '#f8fafc',
+        borderLeft: '4px solid #002be7',
+        paddingLeft: '12px',
+        marginBottom: '14px',
+      },
+    }, hub.category);
+
+    const cardsGrid = h('div', {
+      style: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+        gap: '16px',
+      },
+    });
+
+    for (const it of hub.items) {
+      const card = h('div', {
+        class: 'vcard max-showcase-card',
+        role: 'button',
+        tabindex: '0',
+        style: {
+          background: 'rgba(15, 23, 42, 0.65)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          cursor: 'pointer',
+          transition: 'transform .2s, border-color .2s, box-shadow .2s',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+        onmouseenter: () => {
+          card.style.transform = 'translateY(-4px)';
+          card.style.borderColor = '#3b82f6';
+          card.style.boxShadow = '0 12px 24px rgba(0, 43, 231, 0.35)';
+        },
+        onmouseleave: () => {
+          card.style.transform = 'translateY(0)';
+          card.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          card.style.boxShadow = 'none';
+        },
+        onclick: async () => {
+          toast(`🎬 HBO Max içeriği odaya yükleniyor: ${it.title}`);
+          const res = await resolveCatalogItem(
+            { tmdbId: it.tmdbId, title: it.title, originalTitle: it.originalTitle, mediaType: it.mediaType, provider: 'max' },
+            p, it.season || 1, it.episode || 1
+          );
+          if (res) {
+            await pick(res);
+          }
+        },
+      },
+        h('div', {
+          style: { position: 'relative', width: '100%', paddingTop: '148%', background: '#070913', overflow: 'hidden' },
+        },
+          h('img', {
+            src: it.poster,
+            alt: it.title,
+            loading: 'lazy',
+            style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
+          }),
+          h('div', {
+            style: {
+              position: 'absolute',
+              top: '8px',
+              left: '8px',
+              background: 'linear-gradient(135deg, #002be7, #4f46e5)',
+              color: '#fff',
+              fontSize: '.68rem',
+              fontWeight: '900',
+              padding: '3px 7px',
+              borderRadius: '6px',
+              letterSpacing: '-0.3px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+            },
+          }, 'MAX'),
+          h('div', {
+            style: {
+              position: 'absolute',
+              bottom: '8px',
+              right: '8px',
+              background: 'rgba(0, 0, 0, 0.75)',
+              color: '#fbbf24',
+              fontSize: '.72rem',
+              fontWeight: '800',
+              padding: '2px 6px',
+              borderRadius: '4px',
+            },
+          }, `★ ${it.rating}`)
+        ),
+        h('div', { style: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 } },
+          h('div', {
+            style: {
+              fontWeight: '800',
+              fontSize: '.88rem',
+              color: '#ffffff',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            },
+          }, it.title),
+          h('div', {
+            style: { fontSize: '.76rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' },
+          },
+            h('span', {}, it.mediaType === 'tv' ? `Dizi · ${it.year}` : `Film · ${it.year}`),
+            h('span', { style: { color: '#60a5fa', fontWeight: '700' } }, '4K HDR')
+          )
+        )
+      );
+
+      cardsGrid.appendChild(card);
+    }
+
+    const sectionBox = h('div', {},
+      rowTitle,
+      cardsGrid
+    );
+    hubsWrap.appendChild(sectionBox);
+  }
+
+  container.append(
+    headerCard,
+    runnerBar,
+    hubsWrap
+  );
+
+  body.replaceChildren(container);
+}

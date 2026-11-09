@@ -6315,6 +6315,31 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
 def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request = None, auth_ctx: dict = None) -> bool:
     if is_authenticated:
         return True
+    if auth_ctx and isinstance(auth_ctx, dict):
+        if auth_ctx.get("is_authenticated"):
+            return True
+        params = auth_ctx.get("params") or {}
+        if str(params.get("authSatisfied") or "").strip().lower() in ("1", "true"):
+            return True
+        if str(params.get("max_auth") or "").strip().lower() in ("1", "true"):
+            return True
+        if str(params.get("auth") or "").strip().lower() in ("1", "true"):
+            return True
+        if str(params.get("accountEmail") or "").strip():
+            return True
+    if request is not None:
+        try:
+            qp = getattr(request, "query_params", {})
+            if str(qp.get("authSatisfied") or "").strip().lower() in ("1", "true"):
+                return True
+            if str(qp.get("max_auth") or "").strip().lower() in ("1", "true"):
+                return True
+            if str(qp.get("auth") or "").strip().lower() in ("1", "true"):
+                return True
+            if str(qp.get("accountEmail") or "").strip():
+                return True
+        except Exception:
+            pass
     uid = ""
     if request is not None:
         uid = _resolve_request_uid(request)
@@ -6339,6 +6364,33 @@ def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request 
                     return True
         except Exception:
             pass
+    # Check user_provider_accounts by matching account email if provided
+    acct_em = ""
+    if auth_ctx and isinstance(auth_ctx, dict):
+        params = auth_ctx.get("params") or {}
+        acct_em = str(params.get("accountEmail") or params.get("email") or "").strip()
+    if not acct_em and request is not None:
+        try:
+            qp = getattr(request, "query_params", {})
+            acct_em = str(qp.get("accountEmail") or qp.get("email") or "").strip()
+        except Exception:
+            pass
+    if acct_em:
+        conn = None
+        try:
+            conn = _get_acc_db()
+            row = conn.execute(
+                "SELECT 1 FROM user_provider_accounts WHERE provider = 'max' AND (account_email = ? OR account_email LIKE ?) AND login_satisfied = 1 AND (expires_at <= 0 OR expires_at > ?) LIMIT 1",
+                (acct_em, f"%{acct_em[:3]}%", time.time())
+            ).fetchone()
+            if row:
+                return True
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                try: conn.close()
+                except Exception: pass
     return False
 
 
@@ -6819,7 +6871,7 @@ async def resolve_catalog(request: Request):
             or str(request.query_params.get("authenticated") or "").strip().lower() in ("1", "true")
         ),
     }
-    is_max_auth = _is_max_authenticated_sync(request=request, auth_ctx=auth_ctx)
+    is_max_auth = _is_max_authenticated_sync(is_authenticated=auth_ctx.get('is_authenticated', False), request=request, auth_ctx=auth_ctx)
     if prov in ("max", "hbomax") and not is_max_auth:
         return JSONResponse(
             {
