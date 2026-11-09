@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v157';
-import { api, qs } from '../api.js?v=20261109_v157';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v157';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v157';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v157';
-import { profileSetup } from '../profile.js?v=20261109_v157';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v157';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v158';
+import { api, qs } from '../api.js?v=20261109_v158';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v158';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v158';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v158';
+import { profileSetup } from '../profile.js?v=20261109_v158';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v158';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v157';
+} from '../store.js?v=20261109_v158';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -19,6 +19,15 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     if (!maxAcct?.loginSatisfied) {
       toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
       const targetProv = (provId === 'max') ? prov : (getProvider('max') || { id: 'max', name: 'Max' });
+      openProviderLoginModal(targetProv);
+      return null;
+    }
+  }
+  if (provId === 'netflix' || it?.provider === 'netflix' || it?.catalogProvider === 'netflix') {
+    const nfAcct = getAccount('netflix');
+    if (!nfAcct?.loginSatisfied) {
+      toast('Netflix içeriklerini izlemek için önce Netflix hesabınızı bağlamalısınız.');
+      const targetProv = (provId === 'netflix') ? prov : (getProvider('netflix') || { id: 'netflix', name: 'Netflix' });
       openProviderLoginModal(targetProv);
       return null;
     }
@@ -711,6 +720,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   if (p.id === 'max') {
     return renderMaxRavePortal(p, body, presetQuery, pick, pickFromUrl);
   }
+  if (p.id === 'netflix') {
+    return renderNetflixRavePortal(p, body, presetQuery, pick, pickFromUrl);
+  }
   if (window.vortexDesktop?.isElectron && !p.freeNoAuth && p.id !== 'cinema') { renderDesktopKind(p, body, pick); return; }
   const authHolder = h('div', {});
   const input = h('input', { id: 'hub-search-q', placeholder: p.placeholder || `${p.name} içinde binlerce dizi veya film ara...`, value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
@@ -918,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v157');
+                  const { setView } = await import('../state.js?v=20261109_v158');
                   setView('left', 'Room');
                 }
               },
@@ -933,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v157');
+                  const { setView } = await import('../state.js?v=20261109_v158');
                   setView('left', 'Room');
                 }
               },
@@ -948,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v157');
+                  const { setView } = await import('../state.js?v=20261109_v158');
                   setView('left', 'Room');
                 }
               },
@@ -2311,6 +2323,517 @@ export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
 
   container.append(
     headerCard,
+    runnerBar,
+    hubsWrap
+  );
+
+  body.replaceChildren(container);
+}
+
+
+export const NETFLIX_OFFICIAL_HUBS = [
+  {
+    category: '🔥 Netflix Trend Dizi & Popüler Yapımlar',
+    items: [
+      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg', url: 'https://www.netflix.com/watch/80057281', season: 1, episode: 1 },
+      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '8.0', poster: 'https://image.tmdb.org/t/p/w500/dDlG1T7aW6gDk49hG1e4c9ZqG.jpg', url: 'https://www.netflix.com/watch/81040344', season: 1, episode: 1 },
+      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.4', poster: 'https://image.tmdb.org/t/p/w500/9PFonB99qQwygh2Zej7ov0xw8eZ.jpg', url: 'https://www.netflix.com/watch/81231974', season: 1, episode: 1 },
+      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/reEMJA1uzscCbk5r6iMbtLM83MN.jpg', url: 'https://www.netflix.com/watch/80192098', season: 1, episode: 1 },
+      { tmdbId: '125910', title: 'Griselda', originalTitle: 'Griselda', mediaType: 'tv', year: '2024', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/1XddXPg822h84x7c94bA764.jpg', url: 'https://www.netflix.com/watch/81435684', season: 1, episode: 1 },
+    ],
+  },
+  {
+    category: '🎬 4K Sinema & Netflix Orijinal Filmleri',
+    items: [
+      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/wdE6duaDUWFyXxVI4ndyW0q32vW.jpg', url: 'https://www.netflix.com/watch/81161626' },
+      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/vDGr1YdrlfbU9wxTOdpf3zChmv9.jpg', url: 'https://www.netflix.com/watch/81076756' },
+      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUwYeCuVmACistURM.jpg', url: 'https://www.netflix.com/watch/80230399' },
+      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/275Mt5eqO9dJ9Wq0iB2y.jpg', url: 'https://www.netflix.com/watch/81218770' },
+      { tmdbId: '969492', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/sMp34cNKjIb18UBOCoAv4CGnwM.jpg', url: 'https://www.netflix.com/watch/81436868' },
+    ],
+  },
+  {
+    category: '🇹🇷 Türk Yapımı Netflix Dizi & Filmleri',
+    items: [
+      { tmdbId: '137527', title: 'Kulüp', originalTitle: 'The Club', mediaType: 'tv', year: '2021-2023', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/z0T0bFhVj739e8F7s.jpg', url: 'https://www.netflix.com/watch/81387602', season: 1, episode: 1 },
+      { tmdbId: '113084', title: 'Bir Başkadır', originalTitle: 'Ethos', mediaType: 'tv', year: '2020', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/4cKq9N4g86fE3bY2u.jpg', url: 'https://www.netflix.com/watch/81183494', season: 1, episode: 1 },
+      { tmdbId: '197158', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022-2024', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/gWvR53M0o2t9Y9m.jpg', url: 'https://www.netflix.com/watch/81248035', season: 1, episode: 1 },
+      { tmdbId: '1097268', title: 'Boğa Boğa', originalTitle: 'Chokehold', mediaType: 'movie', year: '2023', rating: '6.2', poster: 'https://image.tmdb.org/t/p/w500/rY3LhN6k884dG2a.jpg', url: 'https://www.netflix.com/watch/81616659' },
+    ],
+  },
+];
+
+export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
+  const acct = getAccount('netflix');
+
+  // Electron Desktop Mode: Native webview tag parity
+  if (window.vortexDesktop?.isElectron) {
+    renderDesktopKind(p, body, pick);
+    return;
+  }
+
+  const container = h('div', {
+    class: 'netflix-rave-portal-view',
+    style: {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '20px',
+      maxWidth: '1200px',
+      margin: '0 auto',
+      padding: '10px 0 40px',
+      color: '#ffffff',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    },
+  });
+
+  // 1. Top Brand & Status Header
+  const headerCard = h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      flexWrap: 'wrap',
+      gap: '16px',
+      padding: '20px 24px',
+      borderRadius: '16px',
+      background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.28) 0%, rgba(13, 16, 27, 0.96) 100%)',
+      border: '1px solid rgba(229, 9, 20, 0.5)',
+      boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+    },
+  },
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '16px' } },
+      h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: '48px',
+          height: '48px',
+          minWidth: '48px',
+          borderRadius: '12px',
+          background: 'linear-gradient(135deg, #e50914, #b20710)',
+          color: '#ffffff',
+          fontWeight: '900',
+          fontSize: '1.4rem',
+          letterSpacing: '-0.5px',
+          boxShadow: '0 4px 16px rgba(229, 9, 20, 0.5)',
+        },
+      }, 'N'),
+      h('div', {},
+        h('div', { style: { fontWeight: '800', fontSize: '1.1rem', color: '#f8fafc' } }, 'Netflix Resmi İzleme & Canlı Oda Portalı'),
+        h('div', { style: { fontSize: '.84rem', color: '#94a3b8', marginTop: '2px' } },
+          'Rave.io doğrudan tarayıcı mimarisi: Resmi Netflix sitesinde dizi veya film seçin, odadaki herkesle 4K HDR canlı senkron izleyin.'
+        )
+      )
+    ),
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' } },
+      acct.loginSatisfied ? h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'rgba(16, 185, 129, 0.15)',
+          border: '1px solid rgba(16, 185, 129, 0.45)',
+          color: '#34d399',
+          padding: '8px 14px',
+          borderRadius: '10px',
+          fontSize: '.86rem',
+          fontWeight: '700',
+        },
+      },
+        h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 8px #10b981' } }),
+        acct.profileName || acct.accountEmail || '✓ Netflix Hesabı Aktif'
+      ) : h('button', {
+        type: 'button',
+        class: 'btn primary',
+        style: {
+          background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
+          borderColor: '#e50914',
+          fontWeight: '800',
+          padding: '10px 18px',
+          borderRadius: '10px',
+          boxShadow: '0 4px 14px rgba(229, 9, 20, 0.4)',
+          cursor: 'pointer',
+        },
+        onclick: () => openProviderLoginModal(p, () => {
+          body.replaceChildren();
+          renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+        }),
+      }, '🔑 Netflix ile Giriş Yap'),
+      h('button', {
+        type: 'button',
+        class: 'btn secondary',
+        style: { fontSize: '.84rem', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
+        onclick: () => openProviderLoginModal(p, () => {
+          body.replaceChildren();
+          renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+        }),
+      }, acct.loginSatisfied ? 'Profil / Hesap Değiştir' : 'Seçenekler')
+    )
+  );
+
+  // 2. Rave-Style 3-Step Guide Card
+  const guideCard = h('div', {
+    style: {
+      background: 'rgba(15, 23, 42, 0.55)',
+      border: '1px solid rgba(255, 255, 255, 0.08)',
+      borderRadius: '14px',
+      padding: '16px 20px',
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+      gap: '14px',
+    },
+  },
+    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
+      h('div', { style: { background: 'rgba(229, 9, 20, 0.2)', color: '#ef4444', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '1'),
+      h('div', {},
+        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Netflix'te İstediğin İçeriği Aç"),
+        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Aşağıdaki butonla netflix.com'a gidin ve izlemek istediğiniz filmi veya diziyi açın.")
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
+      h('div', { style: { background: 'rgba(59, 130, 246, 0.2)', color: '#60a5fa', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '2'),
+      h('div', {},
+        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Bağlantıyı Kopyala (Ctrl+C / Paylaş)"),
+        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Adres çubuğundaki netflix.com/watch/... linkini kopyalayın.")
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'flex-start' } },
+      h('div', { style: { background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', borderRadius: '8px', padding: '6px 10px', fontWeight: '900', fontSize: '.9rem' } }, '3'),
+      h('div', {},
+        h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc' } }, "Watchlivo Otomatik Başlatır"),
+        h('div', { style: { fontSize: '.78rem', color: '#94a3b8', marginTop: '2px' } }, "Sekmeye döndüğünüzde veya linki yapıştırdığınızda oda otomatik olarak senkronize başlar!")
+      )
+    )
+  );
+
+  // 3. Direct Link Runner & Instant Search Bar (Rave Link Parity)
+  const linkInput = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'netflix.com/watch/* bağlantısı yapıştırın veya dizi/film adı yazın (örn. Stranger Things)...',
+    value: presetQuery || '',
+    style: {
+      flex: '1 1 340px',
+      padding: '14px 18px',
+      borderRadius: '12px',
+      fontSize: '.95rem',
+      background: 'rgba(15, 23, 42, 0.85)',
+      border: '1px solid rgba(229, 9, 20, 0.4)',
+      color: '#fff',
+      outline: 'none',
+    },
+  });
+
+  const launchBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
+      borderColor: '#e50914',
+      padding: '14px 24px',
+      borderRadius: '12px',
+      fontWeight: '800',
+      fontSize: '.95rem',
+      boxShadow: '0 4px 16px rgba(229, 9, 20, 0.45)',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+    },
+  },
+    h('span', {}, '🚀'),
+    h('span', {}, 'Odayı Başlat')
+  );
+
+  const openPlayNetflixBtn = h('button', {
+    type: 'button',
+    class: 'btn secondary',
+    style: {
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      padding: '14px 20px',
+      borderRadius: '12px',
+      fontWeight: '700',
+      fontSize: '.9rem',
+      color: '#f87171',
+      cursor: 'pointer',
+    },
+    onclick: () => {
+      window.open('https://www.netflix.com/browse', '_blank');
+      toast('netflix.com/browse açıldı. Dilediğiniz diziyi/filmi açıp linkini buraya yapıştırabilirsiniz.');
+    },
+  }, '🌐 netflix.com/browse Aç ↗');
+
+  // Quick categories launcher
+  const quickHubButtons = [
+    { label: '📺 Diziler', url: 'https://www.netflix.com/browse/genre/83' },
+    { label: '🍿 Filmler', url: 'https://www.netflix.com/browse/genre/34399' },
+    { label: '✨ Yeni & Popüler', url: 'https://www.netflix.com/latest' },
+    { label: '📋 Listem', url: 'https://www.netflix.com/browse/my-list' },
+  ].map((btnSpec) => h('button', {
+    type: 'button',
+    class: 'btn sm ghost',
+    style: {
+      background: 'rgba(255, 255, 255, 0.05)',
+      border: '1px solid rgba(255, 255, 255, 0.12)',
+      color: '#cbd5e1',
+      fontSize: '.78rem',
+      borderRadius: '8px',
+      padding: '6px 12px',
+      cursor: 'pointer',
+    },
+    onclick: () => {
+      window.open(btnSpec.url, '_blank');
+      toast(`Netflix ${btnSpec.label} sayfası yeni sekmede açıldı.`);
+    },
+  }, btnSpec.label));
+
+  const handleLaunch = async (overrideVal) => {
+    let rawVal = (typeof overrideVal === 'string' ? overrideVal : linkInput.value).trim();
+    if (!rawVal) {
+      toast('Lütfen bir Netflix bağlantısı yapıştırın veya film/dizi adı yazın');
+      linkInput.focus();
+      return;
+    }
+
+    // Auto prepend https if user pasted without scheme
+    if (/^netflix\.com/i.test(rawVal) || /^www\.netflix\.com/i.test(rawVal)) {
+      rawVal = `https://${rawVal}`;
+      linkInput.value = rawVal;
+    }
+
+    toast(`⏳ Netflix içeriği çözümleniyor: ${rawVal}...`);
+    launchBtn.disabled = true;
+    launchBtn.style.opacity = '0.6';
+
+    try {
+      if (rawVal.startsWith('http')) {
+        const parsed = parseVideoUrl(rawVal);
+        if (parsed && parsed.provider === 'netflix') {
+          // Direct URL pick
+          if (_pickFromUrl) {
+            await _pickFromUrl(rawVal, 'Netflix İçeriği');
+            return;
+          }
+        }
+      }
+
+      const res = await resolveCatalogItem(
+        { title: rawVal, originalTitle: rawVal, sourceUrl: rawVal.startsWith('http') ? rawVal : '', provider: 'netflix' },
+        p, 1, 1
+      );
+      if (res) {
+        toast(`✓ Oda başlatılıyor: ${res.title}`);
+        await pick(res);
+      } else {
+        toast('İçerik bulunamadı, lütfen Netflix bağlantısını doğrudan yapıştırın.');
+      }
+    } catch (err) {
+      toast('İçerik çözümlenemedi, lütfen tekrar deneyin');
+    } finally {
+      launchBtn.disabled = false;
+      launchBtn.style.opacity = '1';
+    }
+  };
+
+  launchBtn.onclick = () => handleLaunch();
+  linkInput.onkeydown = (e) => {
+    if (e.key === 'Enter') handleLaunch();
+  };
+
+  // Active Clipboard Watchdog
+  const checkClipboardForNetflix = async () => {
+    if (!document.hasFocus() || !navigator.clipboard?.readText) return;
+    try {
+      const clipText = (await navigator.clipboard.readText() || '').trim();
+      if (/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i.test(clipText)) {
+        if (linkInput.value !== clipText) {
+          linkInput.value = clipText;
+          toast('📋 Kopyalanan Netflix bağlantısı algılandı! "Odayı Başlat"a basarak izleyebilirsiniz.');
+        }
+      }
+    } catch (_) {}
+  };
+
+  const onWindowFocus = () => { checkClipboardForNetflix(); };
+  window.addEventListener('focus', onWindowFocus);
+
+  // Global Paste Listener
+  const onGlobalPaste = (e) => {
+    if (!container.isConnected) return;
+    const pasted = (e.clipboardData || window.clipboardData)?.getData('text');
+    if (pasted && /netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i.test(pasted.trim())) {
+      e.preventDefault();
+      linkInput.value = pasted.trim();
+      handleLaunch(pasted.trim());
+    }
+  };
+  document.addEventListener('paste', onGlobalPaste);
+
+  const runnerBar = h('div', {
+    style: {
+      background: 'rgba(15, 23, 42, 0.75)',
+      border: '1px solid rgba(229, 9, 20, 0.3)',
+      borderRadius: '16px',
+      padding: '20px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '14px',
+    },
+  },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } },
+      h('div', { style: { fontWeight: '700', fontSize: '.94rem', color: '#e2e8f0' } },
+        '🔗 Doğrudan Netflix Bağlantısı veya Başlık ile Oda Kur:'
+      ),
+      h('div', { style: { fontSize: '.8rem', color: '#94a3b8' } },
+        'Desteklenen: netflix.com/watch/*, /title/* veya film/dizi adı'
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },
+      linkInput,
+      launchBtn,
+      openPlayNetflixBtn
+    ),
+    h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '4px' } },
+      h('span', { style: { fontSize: '.78rem', color: '#94a3b8' } }, 'Hızlı Netflix Kategorileri:'),
+      ...quickHubButtons
+    )
+  );
+
+  // 4. Official Curated Netflix Showcase (Hubs)
+  const hubsWrap = h('div', {
+    style: { display: 'flex', flexDirection: 'column', gap: '28px', marginTop: '10px' },
+  });
+
+  for (const hub of NETFLIX_OFFICIAL_HUBS) {
+    const rowTitle = h('div', {
+      style: {
+        fontSize: '1.15rem',
+        fontWeight: '800',
+        letterSpacing: '-0.3px',
+        color: '#f8fafc',
+        borderLeft: '4px solid #e50914',
+        paddingLeft: '12px',
+        marginBottom: '14px',
+      },
+    }, hub.category);
+
+    const cardsGrid = h('div', {
+      style: {
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+        gap: '16px',
+      },
+    });
+
+    for (const it of hub.items) {
+      const card = h('div', {
+        class: 'vcard netflix-showcase-card',
+        role: 'button',
+        tabindex: '0',
+        style: {
+          background: 'rgba(15, 23, 42, 0.65)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          cursor: 'pointer',
+          transition: 'transform .2s, border-color .2s, box-shadow .2s',
+          display: 'flex',
+          flexDirection: 'column',
+        },
+        onmouseenter: () => {
+          card.style.transform = 'translateY(-4px)';
+          card.style.borderColor = '#e50914';
+          card.style.boxShadow = '0 12px 24px rgba(229, 9, 20, 0.35)';
+        },
+        onmouseleave: () => {
+          card.style.transform = 'translateY(0)';
+          card.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+          card.style.boxShadow = 'none';
+        },
+        onclick: async () => {
+          toast(`🎬 Netflix içeriği odaya yükleniyor: ${it.title}`);
+          const res = await resolveCatalogItem(
+            { tmdbId: it.tmdbId, title: it.title, originalTitle: it.originalTitle, mediaType: it.mediaType, provider: 'netflix' },
+            p, it.season || 1, it.episode || 1
+          );
+          if (res) {
+            await pick(res);
+          }
+        },
+      },
+        h('div', {
+          style: { position: 'relative', width: '100%', paddingTop: '148%', background: '#070913', overflow: 'hidden' },
+        },
+          h('img', {
+            src: it.poster,
+            alt: it.title,
+            loading: 'lazy',
+            style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
+          }),
+          h('div', {
+            style: {
+              position: 'absolute',
+              top: '8px',
+              left: '8px',
+              background: 'linear-gradient(135deg, #e50914, #b20710)',
+              color: '#fff',
+              fontSize: '.68rem',
+              fontWeight: '900',
+              padding: '3px 7px',
+              borderRadius: '6px',
+              letterSpacing: '-0.3px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+            },
+          }, 'N'),
+          h('div', {
+            style: {
+              position: 'absolute',
+              bottom: '8px',
+              right: '8px',
+              background: 'rgba(0, 0, 0, 0.75)',
+              color: '#fbbf24',
+              fontSize: '.72rem',
+              fontWeight: '800',
+              padding: '2px 6px',
+              borderRadius: '4px',
+            },
+          }, `★ ${it.rating}`)
+        ),
+        h('div', { style: { padding: '12px 10px', display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 } },
+          h('div', {
+            style: {
+              fontWeight: '800',
+              fontSize: '.88rem',
+              color: '#ffffff',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            },
+          }, it.title),
+          h('div', {
+            style: { fontSize: '.76rem', color: '#94a3b8', display: 'flex', justifyContent: 'space-between' },
+          },
+            h('span', {}, it.mediaType === 'tv' ? `Dizi · ${it.year}` : `Film · ${it.year}`),
+            h('span', { style: { color: '#f87171', fontWeight: '700' } }, '4K HDR')
+          )
+        )
+      );
+
+      cardsGrid.appendChild(card);
+    }
+
+    const sectionBox = h('div', {},
+      rowTitle,
+      cardsGrid
+    );
+    hubsWrap.appendChild(sectionBox);
+  }
+
+  container.append(
+    headerCard,
+    guideCard,
     runnerBar,
     hubsWrap
   );

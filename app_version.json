@@ -10,5 +10,6 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-04T03:39:14.022390+00:00",
-  "changelog": "v153: Direct in-room HLS playback for authenticated Max (HBO) titles (Html5Adapter) — 0 external windows, 0 bridge cards."
+  "changelog": "v158: Production Release — Full Rave-parity Netflix official portal, zero-fake-password web bridge, active clipboard watchdog, and CDN cache buster.",
+  "version": "20261109_v158"
 }

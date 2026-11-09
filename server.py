@@ -208,7 +208,7 @@ class SecurityHeaders:
                     if scope.get("path") == "/api/rave/browser-proxy":
                         hdrs.append((
                             b"content-security-policy",
-                            f"sandbox allow-scripts allow-forms; script-src 'self' 'nonce-{csp_nonce}'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'".encode("ascii"),
+                            f"sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox; script-src 'self' 'nonce-{csp_nonce}'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'".encode("ascii"),
                         ))
                     else:
                         csp_val = (
@@ -6394,6 +6394,44 @@ def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request 
     return False
 
 
+
+def _build_netflix_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta, netflix_id=""):
+    official_url = source_url or (f"https://www.netflix.com/watch/{netflix_id}" if netflix_id else "") or "https://www.netflix.com/browse"
+    full_title = f"{disp} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else f"{disp}{f' ({year})' if year and year not in disp else ''}"
+    dur = ((m_cached or {}).get("runtime") or (48 if mtype == "tv" else 120)) * 60
+    return {
+        "id": eff_tid or (f"nf-{netflix_id}" if netflix_id else (tid or "netflix-item")),
+        "provider": "netflix",
+        "catalogProvider": "netflix",
+        "tmdbId": tid or "",
+        "imdbId": imdb_id or "",
+        "mediaType": mtype or "movie",
+        "season": s if mtype == "tv" else 0,
+        "episode": e if mtype == "tv" else 0,
+        "seriesTitle": disp or tr_title or orig_title,
+        "originalTitle": orig_title or disp,
+        "year": year or "",
+        "origLang": orig_lang or "en",
+        "sourceUrl": official_url,
+        "streamType": "official",
+        "url": official_url,
+        "embedUrl": official_url,
+        "altUrls": [],
+        "servers": [{"id": "srv-netflix-1", "label": "Netflix Resmi Oynatıcı (Full HD / 4K)", "url": official_url, "streamType": "official"}],
+        "subtitleTracks": [],
+        "audioTracks": [{"id": "nf-orig", "lang": orig_lang or "en", "label": "Orijinal Ses (Netflix)", "mode": "stream", "url": official_url}],
+        "intro": None,
+        "platformAudioLangs": (pmeta.get("audioLangs") if pmeta else None) or ["tr", "en"],
+        "platformSubLangs": (pmeta.get("subLangs") if pmeta else None) or ["tr", "en"],
+        "officialUrl": official_url,
+        "providerUrl": official_url,
+        "title": full_title,
+        "thumbnail": poster,
+        "channel": "Netflix · Resmi Oynatıcı",
+        "duration": dur,
+        "authenticated": True,
+    }
+
 def _build_max_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta):
     official_url = source_url or (pmeta.get("officialUrl") if pmeta else "") or ""
     if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
@@ -8160,41 +8198,35 @@ async def rave_login_account(request: Request):
     pwd = (payload.get("password") or "").strip()
 
     if provider == "netflix":
-        if not email or len(email) < 5:
-            return JSONResponse({"ok": False, "error": "Lütfen geçerli bir Netflix e-posta adresi veya telefon numarası girin.", "code": "invalid_email"}, status_code=400)
-        if not pwd or len(pwd) < 4:
-            return JSONResponse({"ok": False, "error": "Parolanız en az 4 karakter olmalıdır.", "code": "invalid_password"}, status_code=400)
-
-        uid = _resolve_request_uid(request, payload)
-        new_uid_needed = False
-        if not uid:
-            uid = f"guest_wl_{secrets.token_hex(8)}"
-            new_uid_needed = True
-
-        prof_name = f"{email.split('@')[0]} (Netflix)"
-        sess_token = f"st_netflix_{secrets.token_hex(20)}"
-        record_provider_account_session(
-            user_id=uid,
-            provider="netflix",
-            account_email=email,
-            profile_name=prof_name,
-            auth_type="credentials",
-            session_token=sess_token,
-            ttl_seconds=86400 * 30,
-        )
-        masked = _mask_acct_identifier(email)
-        resp = JSONResponse({
-            "ok": True,
-            "loginSatisfied": True,
-            "provider": "netflix",
-            "accountEmail": masked,
-            "profileName": prof_name,
-            "userId": uid,
-            "message": "✓ Netflix hesabınıza başarıyla giriş yapıldı."
-        })
-        if new_uid_needed:
-            resp.set_cookie("wl_uid", uid, max_age=86400 * 365, httponly=False, samesite="lax")
-        return resp
+        # Netflix authenticates exclusively via the official web bridge
+        # Do not accept dummy plaintext passwords
+        action = (payload.get("action") or "").strip().lower()
+        if action == "bridge_connect" or payload.get("bridge"):
+            prof_name = (payload.get("profileName") or payload.get("profile_name") or email or "Netflix Profilim").strip()
+            uid = _resolve_request_uid(request, payload) or f"guest_wl_{secrets.token_hex(8)}"
+            record_provider_account_session(
+                user_id=uid,
+                provider="netflix",
+                account_email=email or f"{prof_name} (Netflix)",
+                profile_name=prof_name,
+                auth_type="web_bridge",
+                session_token=f"st_netflix_{secrets.token_hex(20)}",
+                ttl_seconds=86400 * 30,
+            )
+            return JSONResponse({
+                "ok": True,
+                "loginSatisfied": True,
+                "provider": "netflix",
+                "accountEmail": email or prof_name,
+                "profileName": prof_name,
+                "message": f"✓ Netflix profili ({prof_name}) başarıyla bağlandı."
+            })
+        if pwd:
+            return JSONResponse({
+                "ok": False,
+                "error": "Netflix şifreniz güvenlik sebebiyle 3. parti formlara girilemez. Lütfen 'Resmi Netflix Giriş Penceresini Aç' butonunu kullanarak doğrudan netflix.com üzerinde oturum açın.",
+                "code": "official_bridge_required"
+            }, status_code=400)
 
     if provider == "max":
         if not email or "@" not in email or "." not in email:

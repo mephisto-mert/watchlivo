@@ -273,7 +273,7 @@ export const PROVIDERS = [
   { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
     homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
     idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
-  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Dizi & Film Vitrini', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
+  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Netflix Hesabı Gerekir', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: false,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
   { id: 'disney', name: 'Disney+', cat: 'global', badge: 'Orijinal & Sinema Vitrini', logo: LOGOS.disney, bg: '#10121a', accent: '#0063e5', web: true, kind: 'catalog', freeNoAuth: true,
