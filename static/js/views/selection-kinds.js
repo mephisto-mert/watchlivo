@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261108_v154';
-import { api, qs } from '../api.js?v=20261108_v154';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261108_v154';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261108_v154';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261108_v154';
-import { profileSetup } from '../profile.js?v=20261108_v154';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261108_v154';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v155';
+import { api, qs } from '../api.js?v=20261109_v155';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v155';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v155';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v155';
+import { profileSetup } from '../profile.js?v=20261109_v155';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v155';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261108_v154';
+} from '../store.js?v=20261109_v155';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -658,44 +658,26 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           h('button', {
             type: 'button',
             class: 'btn primary',
-            style: { background: 'linear-gradient(135deg, #10b981, #059669)', borderColor: '#10b981', color: '#ffffff', fontWeight: '800', padding: '10px 18px', borderRadius: '10px', boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)', cursor: 'pointer' },
-            onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v154');
-              const local = readLocalAccounts();
-              local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
-              saveLocalAccounts(local);
-              try { await api('/api/rave/accounts/verify', { method: 'POST', body: { provider: 'max', accountEmail: 'max.abone@watchlivo.online', sessionToken: 'max_instant' } }); } catch (_) {}
-              await fetchAccounts();
-              toast('✓ Max resmi oturumu bağlandı!');
-              refreshAuth();
+            style: {
+              background: 'linear-gradient(135deg, #002be7, #4f46e5)',
+              borderColor: '#3b82f6',
+              color: '#ffffff',
+              fontWeight: '800',
+              padding: '11px 22px',
+              borderRadius: '10px',
+              boxShadow: '0 4px 18px rgba(0, 43, 231, 0.45)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '.94rem',
             },
-          }, '🎉 Max\'e Giriş Yaptım (1-Tık Bağla)'),
-          h('button', {
-            type: 'button',
-            class: 'btn sm',
-            style: { background: 'rgba(0, 43, 231, 0.35)', border: '1px solid #3b82f6', color: '#93c5fd', fontWeight: '700', padding: '9px 14px', borderRadius: '10px', cursor: 'pointer' },
-            onclick: async () => {
-              const { readLocalAccounts, saveLocalAccounts, fetchAccounts } = await import('../accounts.js?v=20261108_v154');
-              const local = readLocalAccounts();
-              local.max = { loginSatisfied: true, userAuthenticated: true, accountEmail: 'max.abone@watchlivo.online', profileName: 'Max Profilim', updatedAt: Date.now() };
-              saveLocalAccounts(local);
-              await fetchAccounts();
-              const resolved = await resolveCatalogItem(
-                { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', provider: 'max' },
-                { id: 'max', name: 'Max' }, 1, 1
-              );
-              if (resolved) {
-                const { setView } = await import('../state.js?v=20261108_v154');
-                setView('left', 'Room');
-              }
-            },
-          }, '🎬 City of God (Tanrıkent) İzle'),
-          h('button', {
-            type: 'button',
-            class: 'btn secondary',
-            style: { fontWeight: '700', padding: '10px 14px', borderRadius: '10px' },
             onclick: () => openProviderLoginModal(p, () => refreshAuth()),
-          }, '🔑 Seçenekler'))
+          },
+            h('span', {}, '🔑'),
+            h('span', {}, 'HBO Max Hesabıyla Giriş Yap')
+          )
+        )
       );
       authHolder.replaceChildren(hero);
     } else {
@@ -734,7 +716,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v154');
+                  const { setView } = await import('../state.js?v=20261109_v155');
                   setView('left', 'Room');
                 }
               },
@@ -749,7 +731,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v154');
+                  const { setView } = await import('../state.js?v=20261109_v155');
                   setView('left', 'Room');
                 }
               },
@@ -764,7 +746,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261108_v154');
+                  const { setView } = await import('../state.js?v=20261109_v155');
                   setView('left', 'Room');
                 }
               },

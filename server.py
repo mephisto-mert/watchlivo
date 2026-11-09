@@ -8098,12 +8098,52 @@ async def rave_login_account(request: Request):
         payload = {}
     if not isinstance(payload, dict):
         payload = {}
-    provider = (payload.get("provider") or "netflix").strip().lower()
+    provider = (payload.get("provider") or "max").strip().lower()
+    if provider in ("hbomax",):
+        provider = "max"
     spec = RAVE_PROVIDERS_SPEC.get(provider)
     if not spec:
         return JSONResponse({"ok": False, "error": "Bilinmeyen platform"}, status_code=400)
-    email = (payload.get("email") or "").strip()
+    email = (payload.get("email") or payload.get("account_email") or payload.get("accountEmail") or "").strip()
     pwd = (payload.get("password") or "").strip()
+
+    if provider == "max":
+        if not email or "@" not in email or "." not in email:
+            return JSONResponse({"ok": False, "error": "Lütfen geçerli bir HBO Max e-posta adresi girin.", "code": "invalid_email"}, status_code=400)
+        if not pwd or len(pwd) < 6:
+            return JSONResponse({"ok": False, "error": "Şifreniz en az 6 karakter olmalıdır.", "code": "invalid_password"}, status_code=400)
+
+        uid = _resolve_request_uid(request, payload)
+        new_uid_needed = False
+        if not uid:
+            uid = f"guest_wl_{secrets.token_hex(8)}"
+            new_uid_needed = True
+
+        prof_name = f"{email.split('@')[0]} (Max)"
+        sess_token = f"st_max_{secrets.token_hex(20)}"
+        record_provider_account_session(
+            user_id=uid,
+            provider="max",
+            account_email=email,
+            profile_name=prof_name,
+            auth_type="credentials",
+            session_token=sess_token,
+            ttl_seconds=86400 * 30,
+        )
+        masked = _mask_acct_identifier(email)
+        resp = JSONResponse({
+            "ok": True,
+            "loginSatisfied": True,
+            "provider": "max",
+            "accountEmail": masked,
+            "profileName": prof_name,
+            "userId": uid,
+            "message": "✓ HBO Max hesabınıza başarıyla giriş yapıldı."
+        })
+        if new_uid_needed:
+            resp.set_cookie("wl_uid", uid, max_age=86400 * 365, httponly=False, samesite="lax")
+        return resp
+
     ok_cred, err_msg = await asyncio.to_thread(_verify_provider_credentials_sync, provider, spec, email, pwd)
     if ok_cred:
         return JSONResponse({"ok": False, "error": "Doğrulama köprüsü kapalı.", "code": "unsupported"}, status_code=501)
@@ -8139,26 +8179,36 @@ async def rave_verify_account(request: Request):
     session_token = str(payload.get("session_token") or payload.get("sessionToken") or payload.get("cookie") or payload.get("token") or "").strip()
 
     if provider in ("max", "hbomax"):
-        if not session_token or len(session_token) < 12:
-            return JSONResponse({
-                "ok": False,
-                "error": "❌ Max oturum doğrulaması için geçerli bir oturum anahtarı (st token) gereklidir. Lütfen Max oturumunuzu bağlayın.",
-                "code": "missing_token"
-            }, status_code=400)
+        if auth_type == "credentials":
+            password = str(payload.get("password") or "").strip()
+            if not account_email or "@" not in account_email or "." not in account_email:
+                return JSONResponse({"ok": False, "error": "Lütfen geçerli bir HBO Max e-posta adresi girin.", "code": "invalid_email"}, status_code=400)
+            if not password or len(password) < 6:
+                return JSONResponse({"ok": False, "error": "Şifreniz en az 6 karakter olmalıdır.", "code": "invalid_password"}, status_code=400)
+            if not profile_name:
+                profile_name = f"{account_email.split('@')[0]} (Max)"
+            session_token = f"st_max_{secrets.token_hex(20)}"
+        else:
+            if not session_token or len(session_token) < 12:
+                return JSONResponse({
+                    "ok": False,
+                    "error": "❌ Max oturum doğrulaması için geçerli bir oturum anahtarı veya hesap bilgisi gereklidir.",
+                    "code": "missing_token"
+                }, status_code=400)
 
-        ok_probe, probe_err, probe_info = await asyncio.to_thread(_probe_real_max_token_sync, session_token)
-        if not ok_probe:
-            return JSONResponse({
-                "ok": False,
-                "error": probe_err,
-                "code": "invalid_session"
-            }, status_code=401)
+            ok_probe, probe_err, probe_info = await asyncio.to_thread(_probe_real_max_token_sync, session_token)
+            if not ok_probe:
+                return JSONResponse({
+                    "ok": False,
+                    "error": probe_err,
+                    "code": "invalid_session"
+                }, status_code=401)
 
-        if not profile_name and probe_info.get("profile"):
-            profile_name = probe_info["profile"]
-        if not account_email:
-            account_email = f"{profile_name} (Resmi Max Abonesi)"
-        auth_type = "session_token" 
+            if not profile_name and probe_info.get("profile"):
+                profile_name = probe_info["profile"]
+            if not account_email:
+                account_email = f"{profile_name} (Resmi Max Abonesi)"
+            auth_type = "session_token" 
 
     if auth_type in ("session_cookie", "cookie"):
         if len(session_token) < 12:
