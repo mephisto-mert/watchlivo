@@ -6692,6 +6692,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     return _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
                 mp4_fb = [(u, st) for u, st in direct_list if str(st).startswith("mp4")]
                 if not mp4_fb:
+                    if mtype == "tv" and s > 1:
+                        try:
+                            s1_res = _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, 1, 1, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
+                            if s1_res and s1_res.get("streamType") != "official":
+                                return s1_res
+                        except Exception:
+                            pass
                     if is_max_prov and is_auth_user:
                         return _build_max_official_item(eff_tid or tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta)
                     return None
@@ -6836,6 +6843,13 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "channel": f"{label} · {yt_res['channel']} (1080p HD)",
                     "duration": dur,
                 }
+        if mtype == "tv" and s > 1:
+            try:
+                s1_res = _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, 1, 1, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
+                if s1_res and s1_res.get("streamType") != "official":
+                    return s1_res
+            except Exception:
+                pass
         # If Max provider and user is authenticated, fall back to official player metadata
         if is_max_prov and is_auth_user:
             return _build_max_official_item(eff_tid or tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta)

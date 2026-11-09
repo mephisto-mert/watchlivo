@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261109_v159';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261109_v159';
-import { api, qs } from '../api.js?v=20261109_v159';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261109_v159';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261109_v159';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261109_v159';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v159';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261109_v160';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261109_v160';
+import { api, qs } from '../api.js?v=20261109_v160';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261109_v160';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261109_v160';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261109_v160';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v160';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261109_v159';
+} from '../store.js?v=20261109_v160';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   const provId = String(itemOrProv?.catalogProvider || itemOrProv?.provider || itemOrProv?.id || defaultProv?.id || '').trim().toLowerCase();

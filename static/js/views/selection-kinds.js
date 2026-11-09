@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v159';
-import { api, qs } from '../api.js?v=20261109_v159';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v159';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v159';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v159';
-import { profileSetup } from '../profile.js?v=20261109_v159';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v159';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v160';
+import { api, qs } from '../api.js?v=20261109_v160';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v160';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v160';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v160';
+import { profileSetup } from '../profile.js?v=20261109_v160';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v160';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v159';
+} from '../store.js?v=20261109_v160';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v159');
+                  const { setView } = await import('../state.js?v=20261109_v160');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v159');
+                  const { setView } = await import('../state.js?v=20261109_v160');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v159');
+                  const { setView } = await import('../state.js?v=20261109_v160');
                   setView('left', 'Room');
                 }
               },
@@ -1953,27 +1953,48 @@ export function renderRaveDjKind(p, body, pick) {
 // ============================================================================
 // RAVE-PARITY HBO MAX PORTAL & DIRECT IN-APP LINK/TITLE SELECTOR
 // ============================================================================
+export function openTvSeriesModal(tvItem, tvProv, pickFn) {
+  const box = h('div', { style: { minHeight: '340px' } });
+  const modalRef = popup({
+    title: `📺 ${tvItem.title} — Sezon & Bölüm Seç`,
+    content: box,
+    wide: true,
+    options: [{ label: 'Kapat' }],
+  });
+  renderSeriesPicker(
+    tvItem,
+    tvProv || getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' },
+    box,
+    () => modalRef?.close?.(),
+    async (media) => {
+      modalRef?.close?.();
+      if (pickFn) await pickFn(media);
+    },
+    resolveCatalogItem
+  );
+}
+
 const MAX_OFFICIAL_HUBS = [
   {
     category: '🔥 HBO Orijinal Yapımları (4K Ultra HD)',
     items: [
-      { tmdbId: '100088', title: 'The Last of Us', originalTitle: 'The Last of Us', mediaType: 'tv', season: 2, episode: 1, year: '2025', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', desc: 'Joel ve Ellie’nin distopik dünyadaki destansı mücadelesi.' },
-      { tmdbId: '94997', title: 'House of the Dragon', originalTitle: 'House of the Dragon', mediaType: 'tv', season: 2, episode: 1, year: '2024', rating: 8.4, poster: 'https://image.tmdb.org/t/p/w500/t9Xke5724fqBY842wwOGPpZ2XaF.jpg', desc: 'Targaryen hanedanının Ejderhaların Dansı iç savaşı.' },
-      { tmdbId: '118956', title: 'The Penguin', originalTitle: 'The Penguin', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/l0LzJb330nQ0b2B7q5hUfR0W7uL.jpg', desc: 'Gotham yeraltı dünyasının yeni lideri Oswald Cobblepot.' },
-      { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 7.9, poster: 'https://image.tmdb.org/t/p/w500/y3P0vM7Pj1yLg1F24P8l6d7Jb1y.jpg', desc: 'Efsanevi Tanrıkent hikayesi 20 yıl sonra devam ediyor.' },
-      { tmdbId: '76331', title: 'Succession', originalTitle: 'Succession', mediaType: 'tv', season: 4, episode: 1, year: '2023', rating: 8.9, poster: 'https://image.tmdb.org/t/p/w500/7Tafv0v1V1kQ4P3d7r6r4v5m7w.jpg', desc: 'Roy ailesinin medya imparatorluğundaki acımasız taht kavgası.' },
-      { tmdbId: '1399', title: 'Game of Thrones', originalTitle: 'Game of Thrones', mediaType: 'tv', season: 1, episode: 1, year: '2019', rating: 9.2, poster: 'https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg', desc: 'Demir Taht için 7 Krallığın amansız savaşı.' },
+      { tmdbId: '100088', title: 'The Last of Us', originalTitle: 'The Last of Us', mediaType: 'tv', season: 1, episode: 1, year: '2023', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', desc: 'Joel ve Ellie’nin distopik dünyadaki destansı mücadelesi.' },
+      { tmdbId: '94997', title: 'House of the Dragon', originalTitle: 'House of the Dragon', mediaType: 'tv', season: 1, episode: 1, year: '2022', rating: 8.4, poster: 'https://image.tmdb.org/t/p/w500/6YM292PX2gSIBk16hufmlGT3iQW.jpg', desc: 'Targaryen hanedanının Ejderhaların Dansı iç savaşı.' },
+      { tmdbId: '118956', title: 'The Penguin', originalTitle: 'The Penguin', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/s1wP1YeQS9fgSHiXZ3yJb2ufB2D.jpg', desc: 'Gotham yeraltı dünyasının yeni lideri Oswald Cobblepot.' },
+      { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 7.9, poster: 'https://image.tmdb.org/t/p/w500/58qiZruozysI2b7ZZV68m3wvxEO.jpg', desc: 'Efsanevi Tanrıkent hikayesi 20 yıl sonra devam ediyor.' },
+      { tmdbId: '76331', title: 'Succession', originalTitle: 'Succession', mediaType: 'tv', season: 1, episode: 1, year: '2018', rating: 8.9, poster: 'https://image.tmdb.org/t/p/w500/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg', desc: 'Roy ailesinin medya imparatorluğundaki acımasız taht kavgası.' },
+      { tmdbId: '1399', title: 'Game of Thrones', originalTitle: 'Game of Thrones', mediaType: 'tv', season: 1, episode: 1, year: '2011', rating: 9.2, poster: 'https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg', desc: 'Demir Taht için 7 Krallığın amansız savaşı.' },
     ]
   },
   {
     category: '🎬 Warner Bros. 4K Sinema Gişesi (IMAX)',
     items: [
-      { tmdbId: '693134', title: 'Dune: Part Two', originalTitle: 'Dune: Part Two', mediaType: 'movie', year: '2024', rating: 8.5, poster: 'https://image.tmdb.org/t/p/w500/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg', desc: 'Paul Atreides’in Arrakis ve Fremen halkıyla intikam savaşı.' },
-      { tmdbId: '414906', title: 'The Batman', originalTitle: 'The Batman', mediaType: 'movie', year: '2022', rating: 7.7, poster: 'https://image.tmdb.org/t/p/w500/74xTEgt7R36Fpooo50r9T25onhq.jpg', desc: 'Gotham sokaklarındaki yozlaşma ve Riddler cinayetleri.' },
-      { tmdbId: '346698', title: 'Barbie', originalTitle: 'Barbie', mediaType: 'movie', year: '2023', rating: 7.0, poster: 'https://image.tmdb.org/t/p/w500/iuFNMS8U5cb6xfzi51Dbkovj7vM.jpg', desc: 'Barbie Land’den gerçek dünyaya uzanan renkli yolculuk.' },
-      { tmdbId: '787699', title: 'Wonka', originalTitle: 'Wonka', mediaType: 'movie', year: '2023', rating: 7.1, poster: 'https://image.tmdb.org/t/p/w500/qhb1qY7Y57ffmgJ2LrIDOXG9Myb.jpg', desc: 'Willy Wonka’nın dünyanın en büyük çikolatacısı olma hikayesi.' },
-      { tmdbId: '823464', title: 'Godzilla x Kong: The New Empire', originalTitle: 'Godzilla x Kong: The New Empire', mediaType: 'movie', year: '2024', rating: 7.2, poster: 'https://image.tmdb.org/t/p/w500/bQ2ywkchCe0JqR2OC0L8BMuhu0d.jpg', desc: 'Devasa canavarların içi boş dünyadaki yeni ittifakı.' },
-      { tmdbId: '974635', title: 'Bir Minecraft Filmi', originalTitle: 'A Minecraft Movie', mediaType: 'movie', year: '2025', rating: 6.8, poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg', desc: 'Overworld dünyasındaki büyülü ve eğlenceli Minecraft macerası.' },
+      { tmdbId: '693134', title: 'Dune: Part Two', originalTitle: 'Dune: Part Two', mediaType: 'movie', year: '2024', rating: 8.5, poster: 'https://image.tmdb.org/t/p/w500/tihf8Trht9zP3scmUQfvGlAY9FU.jpg', desc: 'Paul Atreides’in Arrakis ve Fremen halkıyla intikam savaşı.' },
+      { tmdbId: '414906', title: 'The Batman', originalTitle: 'The Batman', mediaType: 'movie', year: '2022', rating: 7.7, poster: 'https://image.tmdb.org/t/p/w500/3B19RaHTSpyNEcjWtsAPqgJsQ0h.jpg', desc: 'Gotham sokaklarındaki yozlaşma ve Riddler cinayetleri.' },
+      { tmdbId: '346698', title: 'Barbie', originalTitle: 'Barbie', mediaType: 'movie', year: '2023', rating: 7.0, poster: 'https://image.tmdb.org/t/p/w500/iPtla6hJOerwsgw0zMxyEI6pR3Q.jpg', desc: 'Barbie Land’den gerçek dünyaya uzanan renkli yolculuk.' },
+      { tmdbId: '787699', title: 'Wonka', originalTitle: 'Wonka', mediaType: 'movie', year: '2023', rating: 7.1, poster: 'https://image.tmdb.org/t/p/w500/lfYTDWhYeUTWMznPMgWD2DFCACL.jpg', desc: 'Willy Wonka’nın dünyanın en büyük çikolatacısı olma hikayesi.' },
+      { tmdbId: '823464', title: 'Godzilla x Kong: The New Empire', originalTitle: 'Godzilla x Kong: The New Empire', mediaType: 'movie', year: '2024', rating: 7.2, poster: 'https://image.tmdb.org/t/p/w500/6Hwzl9hP58DQcgju1MbqhADLo4Z.jpg', desc: 'Devasa canavarların içi boş dünyadaki yeni ittifakı.' },
+      { tmdbId: '974635', title: 'Bir Minecraft Filmi', originalTitle: 'A Minecraft Movie', mediaType: 'movie', year: '2025', rating: 6.8, poster: 'https://image.tmdb.org/t/p/w500/5AC3hYF7Yd8wBtwxZHNaOD0biDB.jpg', desc: 'Overworld dünyasındaki büyülü ve eğlenceli Minecraft macerası.' },
     ]
   }
 ];
@@ -2243,10 +2264,14 @@ export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
           card.style.boxShadow = 'none';
         },
         onclick: async () => {
+          if (it.mediaType === 'tv') {
+            openTvSeriesModal(it, p, pick);
+            return;
+          }
           toast(`🎬 HBO Max içeriği odaya yükleniyor: ${it.title}`);
           const res = await resolveCatalogItem(
             { tmdbId: it.tmdbId, title: it.title, originalTitle: it.originalTitle, mediaType: it.mediaType, provider: 'max' },
-            p, it.season || 1, it.episode || 1
+            p, 1, 1
           );
           if (res) {
             await pick(res);
@@ -2260,6 +2285,7 @@ export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
             src: it.poster,
             alt: it.title,
             loading: 'lazy',
+            onerror: (e) => { e.currentTarget.src = '/static/watchlivo-poster.svg'; },
             style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
           }),
           h('div', {
@@ -2335,30 +2361,30 @@ export const NETFLIX_OFFICIAL_HUBS = [
   {
     category: '🔥 Netflix Trend Dizi & Popüler Yapımlar',
     items: [
-      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg', url: 'https://www.netflix.com/watch/80057281', season: 1, episode: 1 },
-      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '8.0', poster: 'https://image.tmdb.org/t/p/w500/dDlG1T7aW6gDk49hG1e4c9ZqG.jpg', url: 'https://www.netflix.com/watch/81040344', season: 1, episode: 1 },
-      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.4', poster: 'https://image.tmdb.org/t/p/w500/9PFonB99qQwygh2Zej7ov0xw8eZ.jpg', url: 'https://www.netflix.com/watch/81231974', season: 1, episode: 1 },
-      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/reEMJA1uzscCbk5r6iMbtLM83MN.jpg', url: 'https://www.netflix.com/watch/80192098', season: 1, episode: 1 },
-      { tmdbId: '125910', title: 'Griselda', originalTitle: 'Griselda', mediaType: 'tv', year: '2024', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/1XddXPg822h84x7c94bA764.jpg', url: 'https://www.netflix.com/watch/81435684', season: 1, episode: 1 },
+      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg', url: 'https://www.netflix.com/watch/80057281', season: 1, episode: 1 },
+      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '8.0', poster: 'https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg', url: 'https://www.netflix.com/watch/81040344', season: 1, episode: 1 },
+      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.4', poster: 'https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg', url: 'https://www.netflix.com/watch/81231974', season: 1, episode: 1 },
+      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg', url: 'https://www.netflix.com/watch/80192098', season: 1, episode: 1 },
+      { tmdbId: '125910', title: 'Griselda', originalTitle: 'Griselda', mediaType: 'tv', year: '2024', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/uGGAoM8ojRHOXj16n6xWiccKr34.jpg', url: 'https://www.netflix.com/watch/81435684', season: 1, episode: 1 },
     ],
   },
   {
     category: '🎬 4K Sinema & Netflix Orijinal Filmleri',
     items: [
-      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/wdE6duaDUWFyXxVI4ndyW0q32vW.jpg', url: 'https://www.netflix.com/watch/81161626' },
-      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/vDGr1YdrlfbU9wxTOdpf3zChmv9.jpg', url: 'https://www.netflix.com/watch/81076756' },
-      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUwYeCuVmACistURM.jpg', url: 'https://www.netflix.com/watch/80230399' },
-      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/275Mt5eqO9dJ9Wq0iB2y.jpg', url: 'https://www.netflix.com/watch/81218770' },
-      { tmdbId: '969492', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/sMp34cNKjIb18UBOCoAv4CGnwM.jpg', url: 'https://www.netflix.com/watch/81436868' },
+      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', url: 'https://www.netflix.com/watch/81161626' },
+      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', url: 'https://www.netflix.com/watch/81076756' },
+      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUQpNgKrkDzJpbnNS.jpg', url: 'https://www.netflix.com/watch/80230399' },
+      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', url: 'https://www.netflix.com/watch/81218770' },
+      { tmdbId: '969492', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/h3jYanWMEJq6JJsCopy1h7cT2Hs.jpg', url: 'https://www.netflix.com/watch/81436868' },
     ],
   },
   {
     category: '🇹🇷 Türk Yapımı Netflix Dizi & Filmleri',
     items: [
-      { tmdbId: '137527', title: 'Kulüp', originalTitle: 'The Club', mediaType: 'tv', year: '2021-2023', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/z0T0bFhVj739e8F7s.jpg', url: 'https://www.netflix.com/watch/81387602', season: 1, episode: 1 },
-      { tmdbId: '113084', title: 'Bir Başkadır', originalTitle: 'Ethos', mediaType: 'tv', year: '2020', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/4cKq9N4g86fE3bY2u.jpg', url: 'https://www.netflix.com/watch/81183494', season: 1, episode: 1 },
-      { tmdbId: '197158', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022-2024', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/gWvR53M0o2t9Y9m.jpg', url: 'https://www.netflix.com/watch/81248035', season: 1, episode: 1 },
-      { tmdbId: '1097268', title: 'Boğa Boğa', originalTitle: 'Chokehold', mediaType: 'movie', year: '2023', rating: '6.2', poster: 'https://image.tmdb.org/t/p/w500/rY3LhN6k884dG2a.jpg', url: 'https://www.netflix.com/watch/81616659' },
+      { tmdbId: '137527', title: 'Kulüp', originalTitle: 'The Club', mediaType: 'tv', year: '2021-2023', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/q7Dvxa6v5d8j33P0BxAlr42Fd9S.jpg', url: 'https://www.netflix.com/watch/81387602', season: 1, episode: 1 },
+      { tmdbId: '113084', title: 'Bir Başkadır', originalTitle: 'Ethos', mediaType: 'tv', year: '2020', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/nwWad07qNqOwSJ8MuUThU2WGqUd.jpg', url: 'https://www.netflix.com/watch/81183494', season: 1, episode: 1 },
+      { tmdbId: '197679', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022-2024', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/AdmyBnD3GRBBAJ6F5EIcO6JjQO5.jpg', url: 'https://www.netflix.com/watch/81248035', season: 1, episode: 1 },
+      { tmdbId: '944152', title: 'Boğa Boğa', originalTitle: 'Chokehold', mediaType: 'movie', year: '2023', rating: '6.2', poster: 'https://image.tmdb.org/t/p/w500/s0VMKl4eB0KdQr2jPavPum5tVNP.jpg', url: 'https://www.netflix.com/watch/81616659' },
     ],
   },
 ];
@@ -2753,10 +2779,14 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
           card.style.boxShadow = 'none';
         },
         onclick: async () => {
+          if (it.mediaType === 'tv') {
+            openTvSeriesModal(it, p, pick);
+            return;
+          }
           toast(`🎬 Netflix içeriği odaya yükleniyor: ${it.title}`);
           const res = await resolveCatalogItem(
             { tmdbId: it.tmdbId, title: it.title, originalTitle: it.originalTitle, mediaType: it.mediaType, provider: 'netflix' },
-            p, it.season || 1, it.episode || 1
+            p, 1, 1
           );
           if (res) {
             await pick(res);
@@ -2770,6 +2800,7 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
             src: it.poster,
             alt: it.title,
             loading: 'lazy',
+            onerror: (e) => { e.currentTarget.src = '/static/watchlivo-poster.svg'; },
             style: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover' },
           }),
           h('div', {
