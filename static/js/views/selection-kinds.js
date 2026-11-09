@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v162';
-import { api, qs } from '../api.js?v=20261109_v162';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v162';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v162';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v162';
-import { profileSetup } from '../profile.js?v=20261109_v162';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v162';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v163';
+import { api, qs } from '../api.js?v=20261109_v163';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v163';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v163';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v163';
+import { profileSetup } from '../profile.js?v=20261109_v163';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v163';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v162';
+} from '../store.js?v=20261109_v163';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v162');
+                  const { setView } = await import('../state.js?v=20261109_v163');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v162');
+                  const { setView } = await import('../state.js?v=20261109_v163');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v162');
+                  const { setView } = await import('../state.js?v=20261109_v163');
                   setView('left', 'Room');
                 }
               },

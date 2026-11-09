@@ -8834,6 +8834,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
 
 
 _STREAM_MANIFEST_LIMIT = RateLimiter(900, 60.0, name="stream_manifest")
+_STREAM_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 async def rave_stream_manifest(request: Request):
@@ -9549,18 +9550,30 @@ async def rave_stream_manifest(request: Request):
                     out_lines.append(inf_l)
                     out_lines.append(uri_l)
             return "\n".join(out_lines)
-        body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=15.0)
-        body_bytes = body.encode("utf-8")
-        if body_bytes:
-            if len(_M3U8_CACHE) >= 240:
-                oldest_m = min(_M3U8_CACHE, key=lambda k: _M3U8_CACHE[k][0])
-                _M3U8_CACHE.pop(oldest_m, None)
-            _M3U8_CACHE[m3u8_ckey] = (time.time(), body_bytes)
-        return Response(b"" if request.method == "HEAD" else body_bytes, media_type="application/vnd.apple.mpegurl", headers={
-            "Access-Control-Allow-Origin": "*",
-            "Content-Length": str(len(body_bytes)),
-            "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
-        })
+        if len(_STREAM_LOCKS) > 300:
+            _STREAM_LOCKS.clear()
+        _manifest_lock = _STREAM_LOCKS.setdefault(m3u8_ckey, asyncio.Lock())
+        async with _manifest_lock:
+            cached_m2 = _M3U8_CACHE.get(m3u8_ckey)
+            if cached_m2 and time.time() - cached_m2[0] < ttl_m:
+                body_bytes2 = cached_m2[1] if isinstance(cached_m2[1], bytes) else str(cached_m2[1]).encode("utf-8")
+                return Response(b"" if request.method == "HEAD" else body_bytes2, media_type="application/vnd.apple.mpegurl", headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Content-Length": str(len(body_bytes2)),
+                    "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
+                })
+            body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=15.0)
+            body_bytes = body.encode("utf-8")
+            if body_bytes:
+                if len(_M3U8_CACHE) >= 240:
+                    oldest_m = min(_M3U8_CACHE, key=lambda k: _M3U8_CACHE[k][0])
+                    _M3U8_CACHE.pop(oldest_m, None)
+                _M3U8_CACHE[m3u8_ckey] = (time.time(), body_bytes)
+            return Response(b"" if request.method == "HEAD" else body_bytes, media_type="application/vnd.apple.mpegurl", headers={
+                "Access-Control-Allow-Origin": "*",
+                "Content-Length": str(len(body_bytes)),
+                "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
+            })
     except Exception:
         return JSONResponse({"error": "Seçilen içerik akışına ulaşılamadı"}, status_code=502, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
 
