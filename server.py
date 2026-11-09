@@ -6903,23 +6903,6 @@ async def resolve_catalog(request: Request):
     q_iid = (request.query_params.get("imdbId") or request.query_params.get("imdb_id") or "").strip()[:30]
     if not title and not q_tid and not q_iid and not (request.query_params.get("sourceUrl") or "").strip():
         return JSONResponse({"error": "İçerik başlığı veya kimliği gerekli"}, status_code=400)
-    # Auto-resolve Netflix URLs into real Title & TMDB metadata
-    _nf_q_check = title if "netflix.com" in title else (request.query_params.get("sourceUrl") or "")
-    if "netflix.com" in _nf_q_check:
-        _nf_q_m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:watch|title)/(\d+)", _nf_q_check)
-        if _nf_q_m:
-            _nf_scraped = _get_netflix_title_by_id_sync(_nf_q_m.group(1))
-            if _nf_scraped:
-                title = _nf_scraped
-                display_title = _nf_scraped
-                if not q_tid:
-                    _q_hits = _tmdb_sync(_nf_scraped)
-                    if _q_hits:
-                        q_tid = str(_q_hits[0].get("tmdbId") or _q_hits[0].get("id") or "")
-                        if not raw_mtype_q:
-                            raw_mtype_q = _q_hits[0].get("mediaType") or "movie"
-                        if not year:
-                            year = str(_q_hits[0].get("year") or "")
     display_title = (request.query_params.get("displayTitle") or title).strip()[:160]
     year = (request.query_params.get("year") or "").strip()[:10]
     tmdb_id = q_tid
@@ -6929,6 +6912,23 @@ async def resolve_catalog(request: Request):
         raw_mtype_q = "tv"
     elif raw_mtype_q in ("film", "movies"):
         raw_mtype_q = "movie"
+    # Auto-resolve Netflix URLs into real Title & TMDB metadata
+    _nf_q_check = title if "netflix.com" in title else (request.query_params.get("sourceUrl") or "")
+    if "netflix.com" in _nf_q_check:
+        _nf_q_m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:watch|title)/(\d+)", _nf_q_check)
+        if _nf_q_m:
+            _nf_scraped = _get_netflix_title_by_id_sync(_nf_q_m.group(1))
+            if _nf_scraped:
+                title = _nf_scraped
+                display_title = _nf_scraped
+                if not tmdb_id:
+                    _q_hits = _tmdb_sync(_nf_scraped)
+                    if _q_hits:
+                        tmdb_id = str(_q_hits[0].get("tmdbId") or _q_hits[0].get("id") or "")
+                        if not raw_mtype_q:
+                            raw_mtype_q = _q_hits[0].get("mediaType") or "movie"
+                        if not year:
+                            year = str(_q_hits[0].get("year") or "")
     has_ep_q = bool((request.query_params.get("season") or request.query_params.get("s") or "").strip()) or bool((request.query_params.get("episode") or request.query_params.get("e") or "").strip())
     if raw_mtype_q:
         media_type = raw_mtype_q
