@@ -6688,23 +6688,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     audio_tracks = []
             alive_direct = [(u, st) for u, st in direct_list if _STREAM_RES_HINT.get(u, 0) != -1]
             if not alive_direct:
-                if not refresh:
-                    return _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
-                mp4_fb = [(u, st) for u, st in direct_list if str(st).startswith("mp4")]
-                if not mp4_fb:
-                    if mtype == "tv" and s > 1:
-                        try:
-                            s1_res = _resolve_catalog_sync(prov, title, year, tmdb_id, media_type, poster, 1, 1, imdb_id, display_title, source_url, refresh=True, request=request, is_authenticated=is_authenticated, auth_ctx=auth_ctx)
-                            if s1_res and s1_res.get("streamType") != "official":
-                                return s1_res
-                        except Exception:
-                            pass
-                    if is_max_prov and is_auth_user:
-                        return _build_max_official_item(eff_tid or tid, tid, imdb_id, mtype, s, e, disp, tr_title, orig_title, year, orig_lang, source_url, m_cached, poster, pmeta)
-                    return None
-                direct_list = mp4_fb[:3]
-            else:
-                direct_list = alive_direct
+                alive_direct = direct_list
+            direct_list = alive_direct
             late_embeds = _EMBED_SUB_CACHE.get(f"{mtype}:{eff_tid}:{s}:{e}") or []
             if late_embeds:
                 meta_q_late = f"&tmdbId={urllib.parse.quote(str(eff_tid or ''))}&imdbId={urllib.parse.quote(str(imdb_id or ''))}&mtype={mtype}&s={s}&e={e}"
