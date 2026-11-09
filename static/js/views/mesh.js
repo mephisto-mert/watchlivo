@@ -1,18 +1,40 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261109_v158';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261109_v158';
-import { resolveMusicItem } from './selection-kinds.js?v=20261109_v158';
-import { MeshConnection } from '../realtime.js?v=20261109_v158';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261109_v158';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261109_v158';
-import { buildLayout } from './mesh-layout.js?v=20261109_v158';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261109_v158';
-import { Voice } from '../voice.js?v=20261109_v158';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261109_v158';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261109_v158';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261109_v158';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261109_v159';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261109_v159';
+import { resolveMusicItem } from './selection-kinds.js?v=20261109_v159';
+import { MeshConnection } from '../realtime.js?v=20261109_v159';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261109_v159';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261109_v159';
+import { buildLayout } from './mesh-layout.js?v=20261109_v159';
+import { getAccount } from '../accounts.js?v=20261109_v159';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261109_v159';
+import { Voice } from '../voice.js?v=20261109_v159';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261109_v159';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261109_v159';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261109_v159';
 
 let ctx = null;
+
+export function checkRoomMediaAuth(media) {
+  if (!media) return { required: false };
+  const rawProv = String(media.catalogProvider || media.sourceProvider || media.provider || '').trim().toLowerCase();
+  const rawUrl = String(media.url || '').toLowerCase();
+  const isNf = rawProv === 'netflix' || rawUrl.includes('netflix.com');
+  const isMax = rawProv === 'max' || rawUrl.includes('max.com');
+  if (isNf) {
+    const acct = getAccount('netflix');
+    if (!acct?.loginSatisfied) {
+      return { required: true, provider: 'netflix' };
+    }
+  }
+  if (isMax) {
+    const acct = getAccount('max');
+    if (!acct?.loginSatisfied) {
+      return { required: true, provider: 'max' };
+    }
+  }
+  return { required: false };
+}
 
 // Sohbet yenilemede ve uygulama geçişlerinde korunur (sessionStorage + localStorage).
 const chatKey = (id) => `vortex_chat_${id}`;
@@ -349,6 +371,34 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   if (room?.media) room.media = normalizeRoomMediaState(curRoom?.media, room.media);
   saveChat(room);
   rememberRoom(room);
+  const authReq = checkRoomMediaAuth(room?.media);
+  if (authReq.required) {
+    ctx?.layout?.showDrmGate?.(authReq.provider, {
+      media: room.media,
+      onSuccess: () => {
+        ctx.layout?.hideDrmGate?.();
+        if (ctx.host?.adapter) {
+          try { ctx.host.adapter.setMuted?.(false); } catch (_) {}
+          const target = expectedPosition(room.media);
+          if (Number.isFinite(target)) {
+            try { ctx.host.adapter.seek?.(target); } catch (_) {}
+          }
+          try { ctx.host.adapter.play?.(); } catch (_) {}
+        }
+        toast(`🎉 ${authReq.provider === 'netflix' ? 'Netflix' : 'HBO Max'} hesabınız bağlandı! Canlı yayına bağlanıyorsunuz...`);
+      },
+      onLeave: () => {
+        leaveMeshView(false);
+        window.vortexNavigate('/');
+      },
+    });
+    if (ctx?.host?.adapter) {
+      try { ctx.host.adapter.pause?.(); } catch (_) {}
+      try { ctx.host.adapter.setMuted?.(true); } catch (_) {}
+    }
+  } else {
+    ctx?.layout?.hideDrmGate?.();
+  }
   const key = mediaKey(room.media);
   const prevUrl = String(curRoom?.media?.url || '');
   const nextUrl = String(room.media?.url || '');
@@ -515,6 +565,30 @@ async function loadMedia(media) {
   }
   pushPresenceHeartbeat().catch(() => {});
   await ctx.host.setMedia(media, finalStart, playing);
+  const authGateReq = checkRoomMediaAuth(media);
+  if (authGateReq.required) {
+    try { ctx.host?.adapter?.pause?.(); } catch (_) {}
+    try { ctx.host?.adapter?.setMuted?.(true); } catch (_) {}
+    ctx.layout?.showDrmGate?.(authGateReq.provider, {
+      media,
+      onSuccess: () => {
+        ctx.layout?.hideDrmGate?.();
+        if (ctx.host?.adapter) {
+          try { ctx.host.adapter.setMuted?.(false); } catch (_) {}
+          const target = expectedPosition(media);
+          if (Number.isFinite(target)) {
+            try { ctx.host.adapter.seek?.(target); } catch (_) {}
+          }
+          try { ctx.host.adapter.play?.(); } catch (_) {}
+        }
+        toast(`🎉 ${authGateReq.provider === 'netflix' ? 'Netflix' : 'HBO Max'} hesabınız bağlandı! Canlı yayına bağlanıyorsunuz...`);
+      },
+      onLeave: () => {
+        leaveMeshView(false);
+        window.vortexNavigate('/');
+      },
+    });
+  }
   if (!ctx || ctx.loadSeq !== mySeq) return;
   if (!isTimeKeeper()) {
     const ad = ctx.host?.adapter;
@@ -1377,6 +1451,25 @@ export async function enterMesh(app, params) {
     }
     ctx.layout.playerEvent?.('loading');
   }
+  const onAccountUpdated = () => {
+    if (state.mesh?.media && ctx?.layout) {
+      const chk = checkRoomMediaAuth(state.mesh.media);
+      if (!chk.required) {
+        ctx.layout.hideDrmGate();
+        if (ctx.host?.adapter) {
+          try { ctx.host.adapter.setMuted?.(false); } catch (_) {}
+          const target = expectedPosition(state.mesh.media);
+          if (Number.isFinite(target)) {
+            try { ctx.host.adapter.seek?.(target); } catch (_) {}
+          }
+          try { ctx.host.adapter.play?.(); } catch (_) {}
+        }
+      }
+    }
+  };
+  ctx._onAccountUpdated = onAccountUpdated;
+  window.addEventListener('storage', onAccountUpdated);
+  window.addEventListener('vortex_account_updated', onAccountUpdated);
   sync.start();
   ctx.conn.p2pBroadcast = (pkt) => ctx?.voice?.broadcastP2p?.(pkt);
   if (params.autocall === '1') {
@@ -1529,6 +1622,10 @@ export function leaveMeshView(explicitLeave = false) {
     ctx.initFallbackTimer = null;
   }
   clearInterval(ctx.progressTimer);
+  if (typeof window !== 'undefined' && ctx?._onAccountUpdated) {
+    window.removeEventListener('storage', ctx._onAccountUpdated);
+    window.removeEventListener('vortex_account_updated', ctx._onAccountUpdated);
+  }
   try { ctx.conn?.close(Boolean(explicitLeave), shouldClose); } catch (e) { /* ignore */ }
   try { ctx.sync?.stop?.(); } catch (_) {}
   try { ctx.host?.destroy?.(); } catch (_) {}

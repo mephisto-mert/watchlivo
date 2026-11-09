@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261109_v158';
-import { api, qs } from './api.js?v=20261109_v158';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261109_v158';
+import { h, toast, popup } from './ui.js?v=20261109_v159';
+import { api, qs } from './api.js?v=20261109_v159';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261109_v159';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -54,6 +54,7 @@ export function setConnectedAccount(providerId, { accountEmail = '', profileName
     ...extra,
   };
   saveLocalAccounts(local);
+  try { window.dispatchEvent(new CustomEvent('vortex_account_updated', { detail: { provider: providerId } })); } catch (_) {}
   return local[providerId];
 }
 
@@ -170,6 +171,7 @@ export async function logoutAccount(providerId, onReload) {
   saveLocalAccounts(local);
   try { await api('/api/rave/accounts/logout', { method: 'POST', body: { provider: providerId } }); } catch (e) { /* ignore */ }
   await fetchAccounts();
+  try { window.dispatchEvent(new CustomEvent('vortex_account_updated', { detail: { provider: providerId } })); } catch (_) {}
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
@@ -389,14 +391,35 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser) {
     },
     onclick: async () => {
       const prName = profInput.value.trim() || 'Netflix Profilim';
-      const em = emailInput.value.trim() || `${prName} (Netflix)`;
+      const em = emailInput.value.trim();
 
+      if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/i.test(em)) {
+        statusBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        statusBox.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+        statusBox.style.color = '#f87171';
+        statusBox.textContent = '❌ Lütfen geçerli bir e-posta adresi girin (örn. ad@ornek.com)';
+        emailInput.focus();
+        toast('Geçerli bir e-posta formatı giriniz.');
+        return;
+      }
+
+      if (!officialOpened && !em) {
+        statusBox.style.background = 'rgba(245, 158, 11, 0.15)';
+        statusBox.style.borderColor = 'rgba(245, 158, 11, 0.5)';
+        statusBox.style.color = '#fbbf24';
+        statusBox.textContent = '⚠️ Önce "1. Adım: Resmi Netflix Giriş Penceresini Aç" butonuna tıklayarak resmi sitede oturum açmalı veya Netflix e-postanızı girmelisiniz.';
+        toast('Önce resmi Netflix giriş penceresini açın veya e-postanızı girin.');
+        return;
+      }
+
+      const finalEmail = em || `${prName} (Netflix)`;
       setConnectedAccount('netflix', {
-        accountEmail: em,
+        accountEmail: finalEmail,
         profileName: prName,
       });
 
       await fetchAccounts();
+      try { window.dispatchEvent(new CustomEvent('vortex_account_updated', { detail: { provider: 'netflix' } })); } catch (_) {}
       toast(`✓ Netflix profili (${prName}) başarıyla bağlandı!`);
       closeModal();
       onReload?.();
@@ -1412,7 +1435,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261109_v158',
+        v: '20261109_v159',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

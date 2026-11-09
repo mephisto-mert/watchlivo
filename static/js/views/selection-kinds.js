@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v158';
-import { api, qs } from '../api.js?v=20261109_v158';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v158';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v158';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v158';
-import { profileSetup } from '../profile.js?v=20261109_v158';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v158';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v159';
+import { api, qs } from '../api.js?v=20261109_v159';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v159';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v159';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v159';
+import { profileSetup } from '../profile.js?v=20261109_v159';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v159';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v158';
+} from '../store.js?v=20261109_v159';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -144,7 +144,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         : 'YouTube / Google ile Giriş Yap (Şifre Doğrulamalı)';
     const subCount = prefs.subscriptions.length;
     const likeCount = prefs.likedVideos.length;
-    authHolder.replaceChildren(
+    fill(authHolder, 
       h('div', {
         style: {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px',
@@ -447,7 +447,7 @@ const LINK_HELP = {
 export function renderLinkKind(p, body, pickFromUrl) {
   const authHolder = h('div', {});
   if (p.id !== 'web') {
-    const refreshAuth = () => authHolder.replaceChildren(renderAccountBar(p, refreshAuth));
+    const refreshAuth = () => fill(authHolder, renderAccountBar(p, refreshAuth));
     refreshAuth();
   }
   const input = h('input', { placeholder: p.placeholder, 'aria-label': `${p.name} bağlantısı` });
@@ -823,7 +823,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           )
         )
       );
-      authHolder.replaceChildren(hero);
+      fill(authHolder, hero);
     } else if (p.id === 'netflix' && !acct.loginSatisfied) {
       const hero = h('div', {
         class: 'netflix-gating-hero',
@@ -889,7 +889,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           )
         )
       );
-      authHolder.replaceChildren(hero);
+      fill(authHolder, hero);
     } else {
       const children = [
         renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it))
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v158');
+                  const { setView } = await import('../state.js?v=20261109_v159');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v158');
+                  const { setView } = await import('../state.js?v=20261109_v159');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v158');
+                  const { setView } = await import('../state.js?v=20261109_v159');
                   setView('left', 'Room');
                 }
               },
@@ -968,7 +968,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           )
         ));
       }
-      authHolder.replaceChildren(...children.filter(Boolean));
+      fill(authHolder, ...children.filter(Boolean));
     }
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {
