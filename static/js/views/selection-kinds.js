@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v156';
-import { api, qs } from '../api.js?v=20261109_v156';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v156';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v156';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v156';
-import { profileSetup } from '../profile.js?v=20261109_v156';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v156';
+import { h, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v157';
+import { api, qs } from '../api.js?v=20261109_v157';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v157';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v157';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v157';
+import { profileSetup } from '../profile.js?v=20261109_v157';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v157';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v156';
+} from '../store.js?v=20261109_v157';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -578,6 +578,135 @@ function itemMatchesCat(it, catId) {
   return false;
 }
 
+function makeNetflixSpotlightBar(p, pick, pickFromUrl) {
+  const linkInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'netflix.com/watch/... bağlantısı yapıştırın veya film/dizi adı yazın...',
+    style: {
+      flex: '1 1 320px',
+      padding: '12px 16px',
+      borderRadius: '10px',
+      fontSize: '.9rem',
+      background: 'rgba(20, 20, 20, 0.95)',
+      border: '1px solid rgba(229, 9, 20, 0.45)',
+      color: '#fff',
+      outline: 'none',
+    },
+  });
+
+  const launchBtn = h('button', {
+    type: 'button',
+    class: 'btn primary',
+    style: {
+      background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
+      borderColor: '#e50914',
+      padding: '12px 20px',
+      borderRadius: '10px',
+      fontWeight: '800',
+      fontSize: '.9rem',
+      boxShadow: '0 4px 16px rgba(229, 9, 20, 0.45)',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+    },
+  },
+    h('span', {}, '🚀'),
+    h('span', {}, 'Odayı Başlat')
+  );
+
+  const openBrowseBtn = h('button', {
+    type: 'button',
+    class: 'btn secondary',
+    style: {
+      background: 'rgba(255, 255, 255, 0.08)',
+      border: '1px solid rgba(255, 255, 255, 0.2)',
+      padding: '12px 18px',
+      borderRadius: '10px',
+      fontWeight: '700',
+      fontSize: '.88rem',
+      color: '#ffffff',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+    },
+    onclick: () => {
+      window.open('https://www.netflix.com/browse', '_blank');
+      toast('netflix.com/browse açıldı. Dilediğiniz filmi açıp bağlantısını buraya yapıştırabilirsiniz.');
+    },
+  },
+    h('span', {}, '🌐'),
+    h('span', {}, 'netflix.com/browse Aç (Dizi & Film Seç) ↗')
+  );
+
+  const handleLaunch = async () => {
+    const rawVal = linkInp.value.trim();
+    if (!rawVal) {
+      toast('Lütfen bir Netflix bağlantısı yapıştırın veya film/dizi adı yazın');
+      linkInp.focus();
+      return;
+    }
+    toast(`⏳ Netflix içeriği çözümleniyor: ${rawVal}...`);
+    launchBtn.disabled = true;
+    launchBtn.style.opacity = '0.6';
+    try {
+      if (pickFromUrl && /^https?:\/\//i.test(rawVal)) {
+        await pickFromUrl(rawVal, 'Netflix İçeriği');
+      } else {
+        const res = await resolveCatalogItem(
+          { title: rawVal, originalTitle: rawVal, sourceUrl: rawVal.startsWith('http') ? rawVal : '', provider: 'netflix' },
+          p, 1, 1
+        );
+        if (res) {
+          toast(`✓ Oda başlatılıyor: ${res.title}`);
+          await pick(res);
+        }
+      }
+    } catch (err) {
+      toast('İçerik çözümlenemedi, lütfen tekrar deneyin');
+    } finally {
+      launchBtn.disabled = false;
+      launchBtn.style.opacity = '1';
+    }
+  };
+
+  launchBtn.onclick = handleLaunch;
+  linkInp.onkeydown = (e) => {
+    if (e.key === 'Enter') handleLaunch();
+  };
+
+  return h('div', {
+    class: 'netflix-spotlight-bar',
+    style: {
+      margin: '0 0 16px',
+      padding: '14px 18px',
+      borderRadius: '14px',
+      background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.22) 0%, rgba(20, 20, 20, 0.95) 100%)',
+      border: '1px solid rgba(229, 9, 20, 0.45)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '12px',
+    },
+  },
+    h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' } },
+      h('div', { style: { fontWeight: '700', fontSize: '.92rem', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '8px' } },
+        h('span', { style: { color: '#e50914', fontWeight: '900' } }, 'NETFLIX'),
+        h('span', {}, 'Doğrudan Netflix Bağlantısı veya Başlık ile Oda Kur:')
+      ),
+      h('div', { style: { fontSize: '.8rem', color: '#94a3b8' } },
+        'Desteklenen: netflix.com/watch/*, netflix.com/title/* veya film/dizi adı'
+      )
+    ),
+    h('div', { style: { display: 'flex', gap: '10px', flexWrap: 'wrap' } },
+      linkInp,
+      launchBtn,
+      openBrowseBtn
+    )
+  );
+}
+
 export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   if (p.id === 'max') {
     return renderMaxRavePortal(p, body, presetQuery, pick, pickFromUrl);
@@ -683,10 +812,80 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         )
       );
       authHolder.replaceChildren(hero);
+    } else if (p.id === 'netflix' && !acct.loginSatisfied) {
+      const hero = h('div', {
+        class: 'netflix-gating-hero',
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '16px',
+          padding: '18px 22px',
+          marginBottom: '16px',
+          borderRadius: '16px',
+          background: 'linear-gradient(135deg, rgba(229, 9, 20, 0.22) 0%, rgba(13, 16, 27, 0.95) 100%)',
+          border: '1px solid rgba(229, 9, 20, 0.45)',
+          boxShadow: '0 8px 30px rgba(229, 9, 20, 0.18)',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '14px', flex: '1 1 320px' } },
+          h('div', {
+            style: {
+              width: '48px',
+              height: '48px',
+              minWidth: '48px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #e50914, #b20710)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '900',
+              fontSize: '1.25rem',
+              letterSpacing: '-0.5px',
+              boxShadow: '0 4px 14px rgba(229, 9, 20, 0.45)',
+            },
+          }, 'N'),
+          h('div', {},
+            h('div', { style: { fontWeight: '800', fontSize: '1.02rem', color: '#f8fafc', marginBottom: '4px', letterSpacing: '-0.2px' } },
+              'Netflix Resmi Abonelik Alanı — Watchlivo\'da arkadaşlarınızla senkronize Netflix izlemek için Netflix hesabınızla giriş yapın.'),
+            h('div', { style: { fontSize: '.84rem', color: '#94a3b8', lineHeight: '1.45' } },
+              'Netflix arşivindeki 4K film, dizi ve orijinal yapımları odadaki arkadaşlarınızla canlı senkron izlemek için hesabınızı bağlayın.'))),
+        h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button',
+            class: 'btn primary',
+            style: {
+              background: 'linear-gradient(135deg, #e50914, #b20710)',
+              borderColor: '#e50914',
+              color: '#ffffff',
+              fontWeight: '800',
+              padding: '11px 22px',
+              borderRadius: '10px',
+              boxShadow: '0 4px 18px rgba(229, 9, 20, 0.45)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '.94rem',
+            },
+            onclick: () => openProviderLoginModal(p, () => refreshAuth()),
+          },
+            h('span', {}, '🔑'),
+            h('span', {}, 'Netflix Hesabıyla Giriş Yap')
+          )
+        )
+      );
+      authHolder.replaceChildren(hero);
     } else {
-      authHolder.replaceChildren(
-        renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it)),
-        (p.id === 'max') ? h('div', {
+      const children = [
+        renderAccountBar(p, refreshAuth, pickFromUrl, (it) => openDetail(it))
+      ];
+      if (p.id === 'netflix') {
+        children.push(makeNetflixSpotlightBar(p, pick, pickFromUrl));
+      } else if (p.id === 'max') {
+        children.push(h('div', {
           class: 'max-spotlight-bar',
           style: {
             margin: '0 0 16px',
@@ -719,7 +918,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v156');
+                  const { setView } = await import('../state.js?v=20261109_v157');
                   setView('left', 'Room');
                 }
               },
@@ -734,7 +933,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v156');
+                  const { setView } = await import('../state.js?v=20261109_v157');
                   setView('left', 'Room');
                 }
               },
@@ -749,14 +948,15 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v156');
+                  const { setView } = await import('../state.js?v=20261109_v157');
                   setView('left', 'Room');
                 }
               },
             }, '🎬 House of the Dragon')
           )
-        ) : null
-      );
+        ));
+      }
+      authHolder.replaceChildren(...children.filter(Boolean));
     }
     mainWrap.classList.remove('hidden');
     if (!catalogLoaded) {

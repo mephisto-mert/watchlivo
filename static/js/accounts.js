@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261109_v156';
-import { api, qs } from './api.js?v=20261109_v156';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261109_v156';
+import { h, toast, popup } from './ui.js?v=20261109_v157';
+import { api, qs } from './api.js?v=20261109_v157';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261109_v157';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -96,13 +96,14 @@ export function getAccount(providerId) {
   const local = readLocalAccounts()[providerId] || {};
   const spec = DEFAULT_SPECS[providerId] || { name: providerId, accent: '#8b5cf6', domain: `.${providerId}.com`, loginUrl: 'https://www.netflix.com/login', browseUrl: 'https://www.netflix.com/browse', authCookies: ['session'] };
   const isFree = Boolean(spec.freeNoAuth || FREE_NO_AUTH_IDS.has(providerId));
+  const isAuthed = isFree || Boolean(local.userAuthenticated || local.loginSatisfied);
   return {
     ...spec,
     provider: providerId,
     freeNoAuth: isFree,
-    loginSatisfied: Boolean(local.userAuthenticated || local.loginSatisfied),
-    accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : '',
-    profileName: local.profileName || state.self?.name || '4K UHD',
+    loginSatisfied: isAuthed,
+    accountEmail: isFree ? 'Üyeliksiz Açık Erişim' : (local.accountEmail ? maskAccountEmail(local.accountEmail) : ''),
+    profileName: isFree ? '🍿 Ücretsiz VIP Sinema' : (local.profileName || state.self?.name || '4K UHD'),
     cookieCount: 0,
     cookies: [],
   };
@@ -150,6 +151,425 @@ export async function logoutAccount(providerId, onReload) {
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
+export function openNetflixLoginModal(p, onReload, onOpenBrowser) {
+  const prov = (typeof p === 'string') ? { id: p, name: 'Netflix' } : (p || { id: 'netflix', name: 'Netflix' });
+  const acct = getAccount('netflix');
+  let modalHandle = null;
+
+  const closeModal = () => {
+    if (modalHandle?.close) modalHandle.close();
+    else document.querySelector('.popup-backdrop')?.remove();
+  };
+
+  // If already logged in, show connected status view
+  if (acct.loginSatisfied && acct.accountEmail) {
+    const connectedCard = h('div', {
+      style: {
+        background: '#141414',
+        color: '#ffffff',
+        borderRadius: '16px',
+        padding: '28px 24px',
+        maxWidth: '440px',
+        margin: '0 auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '20px',
+        boxShadow: '0 12px 36px rgba(0,0,0,0.7)',
+        border: '1px solid rgba(229, 9, 20, 0.3)',
+        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      },
+    },
+      h('div', {
+        style: {
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          paddingBottom: '14px',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('span', { style: { fontSize: '24px', fontWeight: '900', letterSpacing: '-0.5px', color: '#e50914' } }, 'NETFLIX')
+        ),
+        h('a', {
+          href: 'https://www.netflix.com/youraccount',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          style: { color: '#e50914', fontSize: '.84rem', textDecoration: 'none', fontWeight: '600' },
+        }, 'Hesap Yönetimi ↗')
+      ),
+      h('div', { style: { textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '10px' } },
+        h('div', { style: { fontSize: '36px' } }, '🎉'),
+        h('div', { style: { fontSize: '1.25rem', fontWeight: '800', color: '#34d399' } }, '✓ Netflix Hesabı Bağlı'),
+        h('div', { style: { fontSize: '.92rem', color: '#e2e8f0', fontWeight: '600' } }, acct.accountEmail),
+        h('div', { style: { fontSize: '.82rem', color: '#94a3b8', lineHeight: '1.5' } },
+          'Hesabınız başarıyla doğrulandı. Watchlivo odalarında tüm 4K Netflix dizi ve filmlerini arkadaşlarınızla canlı senkronize izleyebilirsiniz.')
+      ),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+        h('button', {
+          type: 'button',
+          style: {
+            background: '#e50914',
+            color: '#ffffff',
+            fontWeight: '700',
+            fontSize: '.92rem',
+            padding: '12px 20px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'opacity .2s',
+          },
+          onclick: () => {
+            window.open('https://www.netflix.com/browse', '_blank');
+            closeModal();
+            onReload?.();
+          },
+        }, '🌐 Netflix Arayüzünü Aç (Dizi & Film Seç)'),
+        h('button', {
+          type: 'button',
+          style: {
+            background: '#ffffff',
+            color: '#000000',
+            fontWeight: '700',
+            fontSize: '.92rem',
+            padding: '12px 20px',
+            borderRadius: '8px',
+            border: 'none',
+            cursor: 'pointer',
+          },
+          onclick: () => {
+            closeModal();
+            onReload?.();
+          },
+        }, '✓ İzlemeye Devam Et'),
+        h('button', {
+          type: 'button',
+          style: {
+            background: 'rgba(239, 68, 68, 0.12)',
+            color: '#f87171',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            fontWeight: '600',
+            fontSize: '.86rem',
+            padding: '10px 18px',
+            borderRadius: '8px',
+            cursor: 'pointer',
+          },
+          onclick: async () => {
+            closeModal();
+            await logoutAccount('netflix', onReload);
+          },
+        }, 'Hesaptan Çıkış Yap / Farklı Hesapla Gir')
+      )
+    );
+
+    modalHandle = popup({
+      content: connectedCard,
+      wide: false,
+      dismissable: true,
+      onClose: () => closeModal(),
+    });
+    return;
+  }
+
+  // Not logged in: Render authentic Netflix Login Card (Rave parity)
+  const statusBox = h('div', {
+    style: {
+      display: 'none',
+      fontSize: '.84rem',
+      lineHeight: '1.5',
+      padding: '10px 14px',
+      borderRadius: '8px',
+      textAlign: 'center',
+      marginBottom: '14px',
+    },
+  });
+
+  const showStatus = (msg, isErr = false, isLoading = false) => {
+    statusBox.style.display = 'block';
+    if (isLoading) {
+      statusBox.style.background = 'rgba(229, 9, 20, 0.15)';
+      statusBox.style.border = '1px solid rgba(229, 9, 20, 0.4)';
+      statusBox.style.color = '#fca5a5';
+      statusBox.textContent = `⏳ ${msg}`;
+    } else if (isErr) {
+      statusBox.style.background = 'rgba(239, 68, 68, 0.15)';
+      statusBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+      statusBox.style.color = '#fca5a5';
+      statusBox.textContent = msg.startsWith('❌') ? msg : `❌ ${msg}`;
+    } else {
+      statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
+      statusBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+      statusBox.style.color = '#34d399';
+      statusBox.textContent = `🎉 ${msg}`;
+    }
+  };
+
+  const emailInput = h('input', {
+    type: 'text',
+    autocomplete: 'email',
+    placeholder: 'E-posta veya telefon numarası',
+    style: {
+      width: '100%',
+      padding: '14px 16px',
+      borderRadius: '4px',
+      background: '#333333',
+      border: '1px solid #444444',
+      color: '#ffffff',
+      fontSize: '.95rem',
+      boxSizing: 'border-box',
+      outline: 'none',
+      transition: 'border-color .2s',
+    },
+    onfocus: () => { emailInput.style.borderColor = '#e50914'; },
+    onblur: () => { emailInput.style.borderColor = '#444444'; },
+  });
+
+  const pwInput = h('input', {
+    type: 'password',
+    autocomplete: 'current-password',
+    placeholder: 'Parola',
+    style: {
+      flex: '1',
+      padding: '14px 16px',
+      borderRadius: '4px',
+      background: '#333333',
+      border: 'none',
+      color: '#ffffff',
+      fontSize: '.95rem',
+      outline: 'none',
+    },
+  });
+
+  let showPw = false;
+  const togglePwBtn = h('button', {
+    type: 'button',
+    style: {
+      background: 'none',
+      border: 'none',
+      color: '#8c8c8c',
+      cursor: 'pointer',
+      padding: '0 14px',
+      fontSize: '.82rem',
+      fontWeight: '600',
+    },
+    onclick: () => {
+      showPw = !showPw;
+      pwInput.type = showPw ? 'text' : 'password';
+      togglePwBtn.textContent = showPw ? 'Gizle' : 'Göster';
+    },
+  }, 'Göster');
+
+  const pwWrapper = h('div', {
+    style: {
+      display: 'flex',
+      alignItems: 'center',
+      background: '#333333',
+      borderRadius: '4px',
+      border: '1px solid #444444',
+      transition: 'border-color .2s',
+      marginBottom: '14px',
+    },
+  }, pwInput, togglePwBtn);
+
+  const submitBtn = h('button', {
+    type: 'submit',
+    style: {
+      width: '100%',
+      padding: '14px 20px',
+      borderRadius: '4px',
+      background: '#e50914',
+      color: '#ffffff',
+      fontWeight: '700',
+      fontSize: '1rem',
+      border: 'none',
+      cursor: 'pointer',
+      marginTop: '6px',
+      transition: 'background .2s',
+    },
+    onmouseenter: () => { submitBtn.style.background = '#f40612'; },
+    onmouseleave: () => { submitBtn.style.background = '#e50914'; },
+  }, 'Oturum Aç');
+
+  const handleLogin = async (e) => {
+    e?.preventDefault?.();
+    const em = emailInput.value.trim();
+    if (!em || em.length < 5) {
+      showStatus('Lütfen geçerli bir e-posta adresi veya telefon numarası girin.', true);
+      emailInput.focus();
+      return;
+    }
+    const pw = pwInput.value.trim();
+    if (!pw || pw.length < 4) {
+      showStatus('Parolanız en az 4 karakterden oluşmalıdır.', true);
+      pwInput.focus();
+      return;
+    }
+
+    showStatus('Netflix resmi sunucularında oturum açılıyor...', false, true);
+    submitBtn.disabled = true;
+    submitBtn.style.opacity = '0.6';
+
+    try {
+      const res = await api('/api/rave/accounts/login', {
+        method: 'POST',
+        body: {
+          provider: 'netflix',
+          email: em,
+          password: pw,
+        },
+      });
+
+      if (res && res.ok) {
+        showStatus('✓ Giriş başarılı! Netflix hesabınız bağlandı.', false, false);
+        const local = readLocalAccounts();
+        const pName = res.profileName || `${em.split('@')[0]} (Netflix)`;
+        local.netflix = {
+          loginSatisfied: true,
+          userAuthenticated: true,
+          accountEmail: res.accountEmail || em,
+          profileName: pName,
+          updatedAt: Date.now(),
+        };
+        saveLocalAccounts(local);
+        await fetchAccounts();
+        toast(`✓ Netflix hesabına giriş yapıldı: ${res.accountEmail || em}`);
+        setTimeout(() => {
+          closeModal();
+          onReload?.();
+        }, 600);
+      } else {
+        showStatus(res?.error || 'Giriş yapılamadı. Lütfen bilgilerinizi kontrol edin.', true);
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+      }
+    } catch (err) {
+      const errTxt = err.data?.error || err.message || 'Netflix girişi başarısız oldu. E-posta veya şifre hatalı.';
+      showStatus(errTxt, true);
+      submitBtn.disabled = false;
+      submitBtn.style.opacity = '1';
+    }
+  };
+
+  const openOfficialBrowserBtn = h('button', {
+    type: 'button',
+    style: {
+      width: '100%',
+      padding: '12px 18px',
+      borderRadius: '4px',
+      background: 'rgba(255, 255, 255, 0.1)',
+      border: '1px solid rgba(255, 255, 255, 0.25)',
+      color: '#ffffff',
+      fontWeight: '600',
+      fontSize: '.88rem',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      transition: 'background .2s',
+    },
+    onclick: () => {
+      window.open('https://www.netflix.com/login', 'wl_netflix_login', 'width=540,height=700,noopener,noreferrer');
+      showStatus('⏳ Netflix resmi web giriş sayfası açıldı. Girişinizi orada tamamladıktan sonra hesabınızı burada kullanabilirsiniz.', false, true);
+    },
+  },
+    h('span', {}, '🌐'),
+    h('span', {}, 'Netflix Resmi Giriş Sayfasını Aç (Web Köprüsü)')
+  );
+
+  const loginCard = h('div', {
+    class: 'netflix-inapp-login-card',
+    style: {
+      background: '#141414',
+      color: '#ffffff',
+      borderRadius: '8px',
+      padding: '32px 28px 24px',
+      maxWidth: '440px',
+      width: '100%',
+      margin: '0 auto',
+      boxShadow: '0 16px 40px rgba(0,0,0,0.85)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      boxSizing: 'border-box',
+    },
+  },
+    h('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: '20px',
+      },
+    },
+      h('span', { style: { fontSize: '26px', fontWeight: '900', letterSpacing: '1px', color: '#e50914' } }, 'NETFLIX'),
+      h('a', {
+        href: 'https://help.netflix.com',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        style: { color: '#8c8c8c', fontSize: '.82rem', textDecoration: 'none' },
+      }, 'Yardım Al ↗')
+    ),
+    h('div', { style: { fontSize: '1.65rem', fontWeight: '700', color: '#ffffff', marginBottom: '8px' } }, 'Oturum Aç'),
+    h('div', { style: { fontSize: '.86rem', color: '#8c8c8c', marginBottom: '20px', lineHeight: '1.4' } },
+      'Watchlivo ve Rave protokolü ile arkadaşlarınızla canlı Netflix odası kurmak için giriş yapın.'
+    ),
+    h('form', {
+      onsubmit: handleLogin,
+      style: { display: 'flex', flexDirection: 'column' },
+    },
+      h('div', { style: { marginBottom: '14px' } }, emailInput),
+      pwWrapper,
+      statusBox,
+      submitBtn,
+      h('div', {
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          margin: '18px 0',
+          color: '#737373',
+          fontSize: '.8rem',
+          textTransform: 'uppercase',
+          fontWeight: '600',
+        },
+      },
+        h('div', { style: { flex: '1', height: '1px', background: '#333' } }),
+        'VEYA',
+        h('div', { style: { flex: '1', height: '1px', background: '#333' } })
+      ),
+      openOfficialBrowserBtn
+    ),
+    h('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: '16px',
+        fontSize: '.82rem',
+        color: '#b3b3b3',
+      },
+    },
+      h('label', { style: { display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' } },
+        h('input', { type: 'checkbox', checked: true, style: { accentColor: '#e50914' } }),
+        'Beni hatırla'
+      ),
+      h('a', {
+        href: 'https://www.netflix.com/LoginHelp',
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        style: { color: '#b3b3b3', textDecoration: 'none' },
+      }, 'Yardım ister misiniz?')
+    )
+  );
+
+  modalHandle = popup({
+    content: loginCard,
+    wide: false,
+    dismissable: true,
+    onClose: () => closeModal(),
+  });
+}
+
 export function openMaxLoginModal(p, onReload, onOpenBrowser) {
   const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
   const acct = getAccount('max');
@@ -564,6 +984,9 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
 
 export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   const pid = (typeof p === 'string') ? p : p?.id;
+  if (pid === 'netflix') {
+    return openNetflixLoginModal(p, onReload, onOpenBrowser);
+  }
   if (pid === 'max') {
     return openMaxLoginModal(p, onReload, onOpenBrowser);
   }
@@ -693,6 +1116,163 @@ export function openProviderLoginModal(p, onReload, onOpenBrowser) {
 
 export function renderAccountBar(p, onReload, _onPickUrl, _onPickItem) {
   const pid = (typeof p === 'string') ? p : p?.id;
+  if (pid === 'netflix') {
+    const prov = (typeof p === 'string') ? { id: p, name: 'Netflix' } : (p || { id: 'netflix', name: 'Netflix' });
+    const acct = getAccount('netflix');
+
+    // Case 1: Netflix Account Logged In
+    if (acct.loginSatisfied && acct.accountEmail) {
+      return h('div', { class: 'rave-auth-wrap netflix-auth-status-wrap', style: { padding: '.5em .8em', marginBottom: '.6em' } },
+        h('div', {
+          class: 'rave-auth-bar connected netflix-auth-bar-active',
+          style: {
+            background: 'linear-gradient(90deg, rgba(229, 9, 20, 0.16) 0%, rgba(16, 185, 129, 0.12) 100%), var(--card-surface)',
+            border: '1px solid rgba(229, 9, 20, 0.45)',
+            borderLeft: '4px solid #e50914',
+            borderRadius: '12px',
+            padding: '.75em 1.1em',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.35)',
+          },
+        },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            h('div', {
+              style: {
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                background: 'linear-gradient(135deg, #e50914, #b20710)',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: '900',
+                fontSize: '.85rem',
+                letterSpacing: '-0.5px',
+                boxShadow: '0 2px 10px rgba(229,9,20,0.5)',
+                flexShrink: 0,
+              },
+            }, 'N'),
+            h('div', {},
+              h('div', {
+                class: 'rave-auth-title ok',
+                style: { color: '#34d399', fontWeight: '800', fontSize: '.9rem', display: 'flex', alignItems: 'center', gap: '6px' },
+              },
+                h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', boxShadow: '0 0 8px #10b981', display: 'inline-block' } }),
+                `✓ Resmi Netflix Hesabı [Aktif]`
+              ),
+              h('div', {
+                class: 'rave-auth-sub',
+                style: { color: '#94a3b8', fontSize: '.75rem', marginTop: '2px' },
+              }, `${acct.accountEmail} · 4K Ultra HD Senkron İzleme Hazır`)
+            )
+          ),
+          h('div', { class: 'rave-auth-actions', style: { display: 'flex', gap: '8px', alignItems: 'center' } },
+            h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              style: {
+                background: '#e50914',
+                borderColor: '#e50914',
+                color: '#fff',
+                fontSize: '.78rem',
+                fontWeight: '700',
+                borderRadius: '8px',
+                padding: '.45em .9em',
+              },
+              onclick: () => window.open('https://www.netflix.com/browse', '_blank'),
+            }, '🌐 netflix.com/browse Aç'),
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              style: {
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.18)',
+                color: '#f1f5f9',
+                fontSize: '.78rem',
+                fontWeight: '600',
+                borderRadius: '8px',
+                padding: '.45em .9em',
+              },
+              onclick: () => openNetflixLoginModal(prov, onReload),
+            }, 'Hesap Değiştir / Çıkış Yap')
+          )
+        )
+      );
+    }
+
+    // Case 2: Netflix Account Not Logged In
+    return h('div', { class: 'rave-auth-wrap netflix-auth-status-wrap', style: { padding: '.5em .8em', marginBottom: '.6em' } },
+      h('div', {
+        class: 'rave-auth-bar netflix-auth-bar-locked',
+        style: {
+          background: 'linear-gradient(90deg, rgba(229, 9, 20, 0.24) 0%, rgba(15, 23, 42, 0.95) 100%), var(--card-surface)',
+          border: '1px solid rgba(229, 9, 20, 0.55)',
+          borderLeft: '4px solid #e50914',
+          borderRadius: '12px',
+          padding: '.85em 1.15em',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px',
+          flexWrap: 'wrap',
+          boxShadow: '0 6px 22px rgba(229, 9, 20, 0.2)',
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+          h('div', {
+            style: {
+              width: '34px',
+              height: '34px',
+              borderRadius: '8px',
+              background: 'linear-gradient(135deg, #e50914, #b20710)',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '900',
+              fontSize: '.85rem',
+              letterSpacing: '-0.5px',
+              boxShadow: '0 2px 10px rgba(229,9,20,0.6)',
+              flexShrink: 0,
+            },
+          }, 'N'),
+          h('div', {},
+            h('div', {
+              class: 'rave-auth-title',
+              style: { color: '#f8fafc', fontWeight: '800', fontSize: '.92rem' },
+            }, '🔒 Bu içerikleri izlemek için Netflix hesabınızla giriş yapmalısınız'),
+            h('div', {
+              class: 'rave-auth-sub',
+              style: { color: '#94a3b8', fontSize: '.75rem', marginTop: '2px' },
+            }, 'Netflix orijinal yapımlarını odadaki tüm arkadaşlarınızla kesintisiz izlemek için hesabınızı bağlayın.')
+          )
+        ),
+        h('div', { class: 'rave-auth-actions' },
+          h('button', {
+            type: 'button',
+            class: 'btn primary sm',
+            style: {
+              background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
+              borderColor: '#e50914',
+              color: '#fff',
+              fontWeight: '700',
+              fontSize: '.82rem',
+              padding: '.55em 1.1em',
+              borderRadius: '8px',
+              boxShadow: '0 4px 14px rgba(229, 9, 20, 0.4)',
+            },
+            onclick: () => openNetflixLoginModal(prov, onReload),
+          }, '🔑 Netflix ile Giriş Yap')
+        )
+      )
+    );
+  }
+
   if (pid === 'max') {
     const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
     const acct = getAccount('max');
@@ -879,7 +1459,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261109_v156',
+        v: '20261109_v157',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;
