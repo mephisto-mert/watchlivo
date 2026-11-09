@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261109_v163';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261109_v163';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261109_v163';
-import { getProvider } from '../providers.js?v=20261109_v163';
-import { expectedPosition } from '../sync.js?v=20261109_v163';
-import { thumbFor } from './lobby.js?v=20261109_v163';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261109_v163';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261109_v163';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261109_v163';
-import { avatar } from '../profile.js?v=20261109_v163';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261109_v164';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261109_v164';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261109_v164';
+import { getProvider } from '../providers.js?v=20261109_v164';
+import { expectedPosition } from '../sync.js?v=20261109_v164';
+import { thumbFor } from './lobby.js?v=20261109_v164';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261109_v164';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261109_v164';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261109_v164';
+import { avatar } from '../profile.js?v=20261109_v164';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2892,7 +2892,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261109_v163',
+            v: '20261109_v164',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

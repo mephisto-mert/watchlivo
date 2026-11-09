@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v163';
-import { api, qs } from '../api.js?v=20261109_v163';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v163';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v163';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v163';
-import { profileSetup } from '../profile.js?v=20261109_v163';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v163';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v164';
+import { api, qs } from '../api.js?v=20261109_v164';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v164';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v164';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v164';
+import { profileSetup } from '../profile.js?v=20261109_v164';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v164';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v163';
+} from '../store.js?v=20261109_v164';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -930,7 +930,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v163');
+                  const { setView } = await import('../state.js?v=20261109_v164');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +945,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v163');
+                  const { setView } = await import('../state.js?v=20261109_v164');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +960,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v163');
+                  const { setView } = await import('../state.js?v=20261109_v164');
                   setView('left', 'Room');
                 }
               },
@@ -2359,43 +2359,47 @@ export function renderMaxRavePortal(p, body, presetQuery, pick, _pickFromUrl) {
 
 export const NETFLIX_OFFICIAL_HUBS = [
   {
-    category: '🔥 Dünyaca Popüler Netflix Trend Yapımları',
-    id: 'trending',
+    category: "Amerika Yapımı Drama Dizileri",
+    id: "us_drama",
     items: [
-      { tmdbId: '66732', title: 'Stranger Things', originalTitle: 'Stranger Things', mediaType: 'tv', year: '2016-2025', rating: '8.5', poster: 'https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', overview: 'Ufak bir kasabada bir çocuk kaybolunca gizli deneyler ve doğaüstü güçler ortaya çıkar.', season: 1, episode: 1 },
-      { tmdbId: '93405', title: 'Squid Game', originalTitle: 'Squid Game', mediaType: 'tv', year: '2021-2024', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWFDx0O.jpg', overview: 'Para sıkıntısı çeken yüzlerce oyuncu, ölümcül çocuk oyunlarında yarışmayı kabul eder.', season: 1, episode: 1 },
-      { tmdbId: '119051', title: 'Wednesday', originalTitle: 'Wednesday', mediaType: 'tv', year: '2022', rating: '8.3', poster: 'https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg', overview: 'Wednesday Addams Nevermore Akademisinde yeni gizemleri ve doğaüstü cinayetleri çözer.', season: 1, episode: 1 },
-      { tmdbId: '71446', title: 'La Casa de Papel', originalTitle: 'Money Heist', mediaType: 'tv', year: '2017-2021', rating: '8.2', poster: 'https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gFZriCkpJYsApPwyQ9nxke46Gpu.jpg', overview: 'Profesör önderliğindeki sekiz hırsız, İspanya Kraliyet Darphanesine kusursuz bir soygun düzenler.', season: 1, episode: 1 },
-      { tmdbId: '236235', title: 'The Gentlemen', originalTitle: 'The Gentlemen', mediaType: 'tv', year: '2024', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/tw3tzfXaSpmUZIB8ZNqNEGzMBCy.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/4k487rA4sK8wD6s7X70hA6wJ9gU.jpg', overview: 'Eddie kendine miras kalan aristokrat mülkün dev bir kenevir imparatorluğuna yataklık ettiğini keşfeder.', season: 1, episode: 1 },
-      { tmdbId: '512195', title: 'Red Notice', originalTitle: 'Red Notice', mediaType: 'movie', year: '2021', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/dK12GId1DS6AqRmuKeHR29xHGv2.jpg', overview: 'Dünyanın en çok aranan sanat eseri hırsızı ve FBI profil uzmanı kurnaz bir soygun için birleşir.' },
+      { tmdbId: "1405", title: "Dexter", originalTitle: "Dexter", mediaType: "tv", year: "2006", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/58H6CtF0npS1nT502r9TqUe9z1B.jpg", backdrop: "https://image.tmdb.org/t/p/w780/58H6CtF0npS1nT502r9TqUe9z1B.jpg", overview: "Gündüzleri adli tıp uzmanı, geceleri ise adaletten kaçan katilleri avlayan bir seri katil.", season: 1, episode: 1 },
+      { tmdbId: "1408", title: "House M.D.", originalTitle: "House", mediaType: "tv", year: "2004", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/3r4LYFuXrg3G8f0vP8YvXm9f8.jpg", backdrop: "https://image.tmdb.org/t/p/w780/3r4LYFuXrg3G8f0vP8YvXm9f8.jpg", overview: "Sıra dışı ve alaycı Dr. Gregory House ve ekibi tıbbi bilmeceleri çözer.", season: 1, episode: 1 },
+      { tmdbId: "1396", title: "Breaking Bad", originalTitle: "Breaking Bad", mediaType: "tv", year: "2008", rating: "8.9", poster: "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg", backdrop: "https://image.tmdb.org/t/p/w780/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg", overview: "Kanser teşhisi konan bir kimya öğretmeni ailesinin geleceğini garantiye almak için metamfetamin üretimine başlar.", season: 1, episode: 1 },
+      { tmdbId: "60059", title: "Better Call Saul", originalTitle: "Better Call Saul", mediaType: "tv", year: "2015", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/fC2HDm5t0kHl7mTm7jxMR31b7by.jpg", backdrop: "https://image.tmdb.org/t/p/w780/fC2HDm5t0kHl7mTm7jxMR31b7by.jpg", overview: "Jimmy McGill'in ahlaki sınırları zorlayan avukat Saul Goodman'a dönüşüm serüveni.", season: 1, episode: 1 },
+      { tmdbId: "63351", title: "Narcos", originalTitle: "Narcos", mediaType: "tv", year: "2015", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/rTmal9fVEwh5x9hJ2Up78FS9v49.jpg", backdrop: "https://image.tmdb.org/t/p/w780/rTmal9fVEwh5x9hJ2Up78FS9v49.jpg", overview: "Kolombiya'nın kokain kartelleri ve Pablo Escobar'ın gerçek hayat hikayesi.", season: 1, episode: 1 },
+      { tmdbId: "67744", title: "Mindhunter", originalTitle: "Mindhunter", mediaType: "tv", year: "2017", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/fbKE87mojpIETWepSbD5Qt741d7.jpg", backdrop: "https://image.tmdb.org/t/p/w780/fbKE87mojpIETWepSbD5Qt741d7.jpg", overview: "FBI ajanları seri katillerin zihnini anlayarak yeni suç profili çıkarma teknikleri geliştirir.", season: 1, episode: 1 },
     ],
   },
   {
-    category: '🇹🇷 Netflix Türk Orijinal Dizi & Filmleri',
-    id: 'turkish',
+    category: "Tekrar Tekrar İzlenen Diziler",
+    id: "rewatch_classics",
     items: [
-      { tmdbId: '577990', title: 'Organize İşler: Sazan Sarmalı', originalTitle: 'Organize İşler: Sazan Sarmalı', mediaType: 'movie', year: '2019', rating: '5.6', poster: 'https://image.tmdb.org/t/p/w500/p5vsOFlPOfdBEXSgrW9fcxdfJNC.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg', overview: 'Asım Noyan ve çetesi sazan sarmalında dolandırıcılık peşinde koşarken beklenmedik belalarla karşılaşır.' },
-      { tmdbId: '136125', title: 'Kulüp', originalTitle: 'Kulüp', mediaType: 'tv', year: '2021', rating: '6.9', poster: 'https://image.tmdb.org/t/p/w500/jHgMj6mtMHEBrFhmZaQCGFGYnFx.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/AwEQ9wAOs1ZbvhpO7XxpGQHYvx5.jpg', overview: '1950\'lerin kozmopolit İstanbul\'unda bir gece kulübünde başlayan dokunaklı aile ve aşk hikayesi.', season: 1, episode: 1 },
-      { tmdbId: '112745', title: 'Bir Başkadır', originalTitle: 'Bir Başkadır', mediaType: 'tv', year: '2020', rating: '7.8', poster: 'https://image.tmdb.org/t/p/w500/9MzukREEyaCqW197buBrJr2LcTI.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/peOoKDVMbXdBMwZd9SeOxtOfCXD.jpg', overview: 'Farklı hayatlar yaşayan bir grup insanın İstanbul\'da kesişen yolları ve derin psikolojik yüzleşmeleri.', season: 1, episode: 1 },
-      { tmdbId: '197679', title: 'Erşan Kuneri', originalTitle: 'Erşan Kuneri', mediaType: 'tv', year: '2022', rating: '6.7', poster: 'https://image.tmdb.org/t/p/w500/8T40UoCYztenuMOGLSTdch903k4.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/e9iztxikysYdbx3gwGrMt05kFWV.jpg', overview: '70\'ler sinemasında efsaneleşen Erşan Kuneri ekibiyle birlikte farklı sinema türlerini dener.', season: 1, episode: 1 },
-      { tmdbId: '214079', title: 'Terzi', originalTitle: 'Terzi', mediaType: 'tv', year: '2023', rating: '6.8', poster: 'https://image.tmdb.org/t/p/w500/i8YLOXlSEm3a4jR3e3L9m8bM0sE.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/7kK1L7x7L3JmK1N4j4vH8lB2rZ.jpg', overview: 'Ünlü bir terzi en yakın arkadaşının müstakbel eşine gelinlik dikerken sırlar açığa çıkar.', season: 1, episode: 1 },
-      { tmdbId: '214078', title: 'Şahmaran', originalTitle: 'Şahmaran', mediaType: 'tv', year: '2023', rating: '7.0', poster: 'https://image.tmdb.org/t/p/w500/1fKsga4dyvJ9W3w2b9M1bB9yG9v.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/k9V4d8r6a1b2c3d4e5f6g7h8i9j.jpg', overview: 'Şahsu büyükbabasıyla yüzleşmek için gittiği Adana\'da kendini efsanevi bir kehanetin içinde bulur.', season: 1, episode: 1 },
-      { tmdbId: '944152', title: 'Boğa Boğa', originalTitle: 'Boğa Boğa', mediaType: 'movie', year: '2023', rating: '5.6', poster: 'https://image.tmdb.org/t/p/w500/xPQPEac98OFi6T7hgy6sxp16QSr.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/b0K3L7M8v2G1y4n3a6B7c8D9e0f.jpg', overview: 'İstanbullu bir çift Assos\'ta bir köye taşınır ancak köylülerin düşmanca tavırlarıyla karşılaşır.' },
-      { tmdbId: '1026822', title: 'Cici', originalTitle: 'Cici', mediaType: 'movie', year: '2022', rating: '6.3', poster: 'https://image.tmdb.org/t/p/w500/fxNW0JZdqy39IjYMJixn9vj7B1d.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/1a2b3c4d5e6f7g8h9i0j1k2l3m4.jpg', overview: 'Yıllar önce yaşanan trajik bir kaybın ardından aile fertleri geçmişin izleriyle yüzleşmek için toplanır.' },
-      { tmdbId: '499461', title: 'Ölümlü Dünya', originalTitle: 'Ölümlü Dünya', mediaType: 'movie', year: '2018', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/6pUboTFJ6SNzrhb8sNcmc50fJCk.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/jF8pE1mO3hG6a5n8b9v2c4x1z7q.jpg', overview: 'Lokanta işleten sekiz kişilik Mermer Ailesi nesillerdir kiralık katil olarak çalışmaktadır.' },
-      { tmdbId: '629500', title: 'Cinayet Süsü', originalTitle: 'Cinayet Süsü', mediaType: 'movie', year: '2019', rating: '6.5', poster: 'https://image.tmdb.org/t/p/w500/fC1mwNNfL2c4r3y8Z9v1b7n4m5p.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/9a8b7c6d5e4f3g2h1i0j9k8l7m6.jpg', overview: 'Cinayet büro ekibi gizemli bir seri katili yakalamak için kahkaha dolu bir soruşturmaya girişir.' },
+      { tmdbId: "5920", title: "The Mentalist", originalTitle: "The Mentalist", mediaType: "tv", year: "2008", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/acnHvslqBJa9g7W5z6YFm8UfW3z.jpg", backdrop: "https://image.tmdb.org/t/p/w780/acnHvslqBJa9g7W5z6YFm8UfW3z.jpg", overview: "Eski medyum Patrick Jane, keskin gözlem yeteneğini Kaliforniya Araştırma Bürosu için kullanır.", season: 7, episode: 8, epName: "Göz Akı" },
+      { tmdbId: "105248", title: "Cyberpunk: Edgerunners", originalTitle: "Cyberpunk: Edgerunners", mediaType: "tv", year: "2022", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/7vAOm412f8rR2Qo7q0v9b.jpg", backdrop: "https://image.tmdb.org/t/p/w780/sLWUTu2kO80V91zZlVf8iGkM4Yk.jpg", overview: "Geleceğin sokaklarında hayatta kalmak için kanun kaçağı bir paralı askere dönüşen gencin hikayesi.", season: 1, episode: 1 },
+      { tmdbId: "87083", title: "Vinland Saga", originalTitle: "Vinland Saga", mediaType: "tv", year: "2019", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/9kC1eR2B8e0L9Pz8kF0G.jpg", backdrop: "https://image.tmdb.org/t/p/w780/9kC1eR2B8e0L9Pz8kF0G.jpg", overview: "Genç Thorfinn intikam arayışında acımasız Viking savaşlarının ortasında büyür.", season: 1, episode: 1 },
+      { tmdbId: "30983", title: "Hajime no Ippo", originalTitle: "Hajime no Ippo", mediaType: "tv", year: "2000", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/7V9B7H6c5mJ4Z2a5vN4K8l0sE.jpg", backdrop: "https://image.tmdb.org/t/p/w780/7V9B7H6c5mJ4Z2a5vN4K8l0sE.jpg", overview: "Zorbalığa uğrayan utangaç Ippo, boksun büyülü dünyasında zirveye tırmanır.", season: 1, episode: 1 },
+      { tmdbId: "1976", title: "Monster", originalTitle: "Monster", mediaType: "tv", year: "2004", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/7wYh4T2a1b3c4d5e6f7g8h9i0j.jpg", backdrop: "https://image.tmdb.org/t/p/w780/7wYh4T2a1b3c4d5e6f7g8h9i0j.jpg", overview: "Başarılı beyin cerrahı Dr. Tenma, kurtardığı bir çocuğun acımasız bir canavar olduğunu anlar.", season: 1, episode: 1 },
+      { tmdbId: "1399", title: "Game of Thrones", originalTitle: "Game of Thrones", mediaType: "tv", year: "2011", rating: "8.5", poster: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", backdrop: "https://image.tmdb.org/t/p/w780/2OMB0ynKlyIenMJWI2Dy9IWT4c.jpg", overview: "Yedi Krallık'ın Demir Tahtı için verilen epik iktidar ve entrika mücadelesi.", season: 1, episode: 1 },
     ],
   },
   {
-    category: '🎬 4K Sinema & Netflix Orijinal Gişe Filmleri',
-    id: 'movies',
+    category: "🔥 Dünyaca Popüler Netflix Trend Yapımları",
+    id: "trending",
     items: [
-      { tmdbId: '661374', title: 'Glass Onion: A Knives Out Mystery', originalTitle: 'Glass Onion', mediaType: 'movie', year: '2022', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/dK12GId1DS6AqRmuKeHR29xHGv2.jpg', overview: 'Benoit Blanc Yunan adasında bir teknoloji milyarderinin düzenlediği gizemli cinayet oyununu çözer.' },
-      { tmdbId: '697843', title: 'Extraction 2', originalTitle: 'Extraction 2', mediaType: 'movie', year: '2023', rating: '7.5', poster: 'https://image.tmdb.org/t/p/w500/7gKI9hpEMcZUQpNgKrkDzJpbnNS.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', overview: 'Ölümün kıyısından dönen paralı asker Tyler Rake, Gürcü bir gangsterin ailesini kurtarmak için göreve döner.' },
-      { tmdbId: '906126', title: 'Society of the Snow', originalTitle: 'La sociedad de la nieve', mediaType: 'movie', year: '2023', rating: '7.9', poster: 'https://image.tmdb.org/t/p/w500/qTETfjO80wRtKIw4vMTVcw1irp5.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/j42pUYxgO0zg414d3PG3ug6OcJG.jpg', overview: '1972 yılında And Dağlarına düşen ragbi takımının dondurucu soğukta hayatta kalma destanı.' },
-      { tmdbId: '763215', title: 'Damsel', originalTitle: 'Damsel', mediaType: 'movie', year: '2024', rating: '7.1', poster: 'https://image.tmdb.org/t/p/w500/AgHbB9DCILBqYk5F56GZ7K5wN3k.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/h3jYanWMEJq6JJsCopy1h7cT2Hs.jpg', overview: 'Yakışıklı bir prensle evlenen genç kız kendini bir ejderhaya kurban edilmek üzere bulur.' },
-      { tmdbId: '725201', title: 'The Gray Man', originalTitle: 'The Gray Man', mediaType: 'movie', year: '2022', rating: '7.0', poster: 'https://image.tmdb.org/t/p/w500/8cXbitsS6dWQ5gfMTZdorpAAzEH.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/5nVRMEnjQ4yDOdDdRZehqqBac9p.jpg', overview: 'CIA\'in en gizli suikastçısı kurumun karanlık sırlarını ortaya çıkarınca küresel bir insan avının hedefi olur.' },
-      { tmdbId: '646380', title: 'Don\'t Look Up', originalTitle: 'Don\'t Look Up', mediaType: 'movie', year: '2021', rating: '7.2', poster: 'https://image.tmdb.org/t/p/w500/j42pUYxgO0zg414d3PG3ug6OcJG.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/kXWDfaKuw7dIdTDH7rK3BWoAZ53.jpg', overview: 'Dünyayı yok edecek bir kuyruklu yıldız yaklaşırken iki astronom insanlığı uyarmaya çalışır.' },
+      { tmdbId: "66732", title: "Stranger Things", originalTitle: "Stranger Things", mediaType: "tv", year: "2016-2025", rating: "8.5", poster: "https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg", backdrop: "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", overview: "Ufak bir kasabada bir çocuk kaybolunca gizli deneyler ve doğaüstü güçler ortaya çıkar.", season: 1, episode: 1 },
+      { tmdbId: "93405", title: "Squid Game", originalTitle: "Squid Game", mediaType: "tv", year: "2021-2024", rating: "7.9", poster: "https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg", backdrop: "https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWFDx0O.jpg", overview: "Para sıkıntısı çeken yüzlerce oyuncu, ölümcül çocuk oyunlarında yarışmayı kabul eder.", season: 1, episode: 1 },
+      { tmdbId: "119051", title: "Wednesday", originalTitle: "Wednesday", mediaType: "tv", year: "2022", rating: "8.3", poster: "https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg", backdrop: "https://image.tmdb.org/t/p/w780/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg", overview: "Wednesday Addams Nevermore Akademisinde yeni gizemleri ve doğaüstü cinayetleri çözer.", season: 1, episode: 1 },
+      { tmdbId: "71446", title: "La Casa de Papel", originalTitle: "Money Heist", mediaType: "tv", year: "2017-2021", rating: "8.2", poster: "https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg", backdrop: "https://image.tmdb.org/t/p/w780/gFZriCkpJYsApPwyQ9nxke46Gpu.jpg", overview: "Profesör önderliğindeki sekiz hırsız, İspanya Kraliyet Darphanesine kusursuz bir soygun düzenler.", season: 1, episode: 1 },
+    ],
+  },
+  {
+    category: "🇹🇷 Netflix Türk Orijinal Dizi & Filmleri",
+    id: "turkish",
+    items: [
+      { tmdbId: "577990", title: "Organize İşler: Karun Hazinesi", originalTitle: "Organize İşler: Karun Hazinesi", mediaType: "tv", year: "2026", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg", backdrop: "https://image.tmdb.org/t/p/w780/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg", overview: "Asım Noyan jübilesini yapıp mesleği bırakmadan önce son performansını sergilemeye hazırdır.", season: 1, episode: 1 },
+      { tmdbId: "136125", title: "Kulüp", originalTitle: "Kulüp", mediaType: "tv", year: "2021", rating: "6.9", poster: "https://image.tmdb.org/t/p/w500/jHgMj6mtMHEBrFhmZaQCGFGYnFx.jpg", backdrop: "https://image.tmdb.org/t/p/w780/AwEQ9wAOs1ZbvhpO7XxpGQHYvx5.jpg", overview: "1950'lerin kozmopolit İstanbul'unda bir gece kulübünde başlayan dokunaklı aile ve aşk hikayesi.", season: 1, episode: 1 },
+      { tmdbId: "112745", title: "Bir Başkadır", originalTitle: "Bir Başkadır", mediaType: "tv", year: "2020", rating: "7.8", poster: "https://image.tmdb.org/t/p/w500/9MzukREEyaCqW197buBrJr2LcTI.jpg", backdrop: "https://image.tmdb.org/t/p/w780/peOoKDVMbXdBMwZd9SeOxtOfCXD.jpg", overview: "Farklı hayatlar yaşayan bir grup insanın İstanbul'da kesişen yolları ve derin psikolojik yüzleşmeleri.", season: 1, episode: 1 },
+      { tmdbId: "499461", title: "Ölümlü Dünya", originalTitle: "Ölümlü Dünya", mediaType: "movie", year: "2018", rating: "7.1", poster: "https://image.tmdb.org/t/p/w500/6pUboTFJ6SNzrhb8sNcmc50fJCk.jpg", backdrop: "https://image.tmdb.org/t/p/w780/jF8pE1mO3hG6a5n8b9v2c4x1z7q.jpg", overview: "Lokanta işleten sekiz kişilik Mermer Ailesi nesillerdir kiralık katil olarak çalışmaktadır." },
     ],
   },
 ];
@@ -2566,16 +2570,18 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
   // 2. Netflix Hero Showcase Spotlight Billboard (Featured: Organize İşler: Sazan Sarmalı)
   const heroItem = {
     tmdbId: '577990',
-    title: 'Organize İşler: Sazan Sarmalı',
-    originalTitle: 'Organize İşler: Sazan Sarmalı',
-    mediaType: 'movie',
-    year: '2019',
-    rating: '5.6',
-    duration: '121 dk',
-    tags: ['4K Ultra HD', '5.1 Dolby Audio', 'Komedi / Aksiyon', '2019'],
-    overview: 'İstanbul şehrinde Organize İşler tam gaz devam etmektedir. Sazanlar yem peşinde, oltalar Asım Noyan ve ekibinin elinde, daha büyük balıklar ise bu ekibin peşindedir. Dönen dolaplar içinde saflar, temizler ve kirliler birbirine karışır!',
-    backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
-    poster: 'https://image.tmdb.org/t/p/w500/p5vsOFlPOfdBEXSgrW9fcxdfJNC.jpg',
+    title: 'Organize İşler: Karun Hazinesi',
+    originalTitle: 'Organize İşler: Karun Hazinesi',
+    mediaType: 'tv',
+    year: '2026',
+    rating: '8.8',
+    duration: '8 Bölüm',
+    tags: ['TOP 10 DİZİ', '4K Ultra HD', '5.1 Dolby Audio', '2026 · 16+'],
+    overview: 'Efsanevi Asım Noyan, jübilesini yapıp "mesleği" geride bırakmadan önce son performansını sergilemeye hazır. Peki ama usta dolandırıcı bu defa ateşle mi oynuyor?',
+    backdrop: 'https://image.tmdb.org/t/p/w1280/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
+    poster: 'https://image.tmdb.org/t/p/w500/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
+    officialUrl: 'https://www.netflix.com/title/81682705',
+    netflixId: '81682705',
   };
 
   const heroPlayBtn = h('button', {
@@ -2609,7 +2615,22 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
         if (res) {
           await pick(res);
         } else {
-          toast('İçerik akışı başlatılamadı, lütfen tekrar deneyin.');
+          await pick({
+            provider: 'netflix',
+            catalogProvider: 'netflix',
+            streamType: 'official',
+            title: heroItem.title,
+            originalTitle: heroItem.originalTitle || heroItem.title,
+            url: heroItem.officialUrl || 'https://www.netflix.com/browse',
+            officialUrl: heroItem.officialUrl || 'https://www.netflix.com/browse',
+            poster: heroItem.poster,
+            backdrop: heroItem.backdrop || heroItem.poster,
+            mediaType: heroItem.mediaType || 'tv',
+            season: 1,
+            episode: 1,
+            authenticated: true,
+            duration: 2880,
+          });
         }
       } catch (err) {
         toast('Oda başlatılırken bir sorun oluştu.');
@@ -2820,7 +2841,22 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
           if (res) {
             await pick(res);
           } else {
-            toast('İçerik akışı açılamadı, lütfen tekrar deneyin.');
+            await pick({
+              provider: 'netflix',
+              catalogProvider: 'netflix',
+              streamType: 'official',
+              title: it.title,
+              originalTitle: it.originalTitle || it.title,
+              url: it.officialUrl || (it.netflixId ? `https://www.netflix.com/watch/${it.netflixId}` : `https://www.netflix.com/search?q=${encodeURIComponent(it.title)}`),
+              officialUrl: it.officialUrl || 'https://www.netflix.com/browse',
+              poster: it.poster,
+              backdrop: it.backdrop || it.poster,
+              mediaType: it.mediaType || 'tv',
+              season: it.season || 1,
+              episode: it.episode || 1,
+              authenticated: true,
+              duration: 3600,
+            });
           }
         } catch (err) {
           toast('Oda başlatılırken bir sorun oluştu.');

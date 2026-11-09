@@ -145,22 +145,28 @@ export class WebviewAdapter {
       position:relative;overflow:hidden;
     `;
 
+    const isNf = /netflix\.com/i.test(this.mediaUrl) || media?.provider === 'netflix';
     const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
-    const provName = isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı');
+    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı'));
+    const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : '#38bdf8');
+    const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : 'rgba(56,189,248,0.2)');
+    const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : '#38bdf8');
+    const provDotBg = isNf ? '#ef4444' : '#38bdf8';
+    const openBtnColor = isNf ? '#e50914' : (isMax ? '#002be7' : '#2563eb');
+    const playBtnGrad = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : 'linear-gradient(135deg, #002be7, #2563eb)';
 
     bridge.innerHTML = `
-      <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.85);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,0.12);border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.6);">
-        <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:rgba(0,43,231,0.25);border:1px solid #002be7;border-radius:99px;font-size:12px;font-weight:700;color:#60a5fa;margin-bottom:14px;">
-          <span style="width:8px;height:8px;border-radius:50%;background:#38bdf8;box-shadow:0 0 8px #38bdf8;animation:pulse 2s infinite;"></span>
+      <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.92);backdrop-filter:blur(16px);border:1px solid ${isNf ? 'rgba(229,9,20,0.45)' : 'rgba(255,255,255,0.12)'};border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.7), 0 0 30px ${isNf ? 'rgba(229,9,20,0.25)' : 'rgba(0,43,231,0.2)'};">
+        <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:${provBadgeBg};border:1px solid ${provBadgeBorder};border-radius:99px;font-size:12px;font-weight:700;color:${provBadgeColor};margin-bottom:14px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:${provDotBg};box-shadow:0 0 8px ${provDotBg};animation:pulse 2s infinite;"></span>
           ${provName} Canlı Oda Köprüsü
         </div>
         <h2 style="margin:0 0 8px;font-size:22px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;">
-          ${media?.title || (isMax ? 'Max Yayını' : 'Resmi Oynatıcı')}
+          ${media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı'))}
         </h2>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#94a3b8;">
-          Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Max ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.
+          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Max ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.'}
         </p>
-
         <div style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
           <div style="text-align:left;">
             <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">Oda Zamanı</div>
@@ -178,7 +184,7 @@ export class WebviewAdapter {
           <button id="vortex-bridge-seek-back" type="button" style="padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;font-size:12px;font-weight:700;cursor:pointer;">
             ⏪ -10s
           </button>
-          <button id="vortex-bridge-play-toggle" type="button" style="padding:8px 20px;border-radius:8px;background:linear-gradient(135deg, #002be7, #2563eb);border:none;color:#ffffff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(0,43,231,0.4);">
+          <button id="vortex-bridge-play-toggle" type="button" style="padding:8px 20px;border-radius:8px;background:${playBtnGrad};border:none;color:#ffffff;font-size:13px;font-weight:800;cursor:pointer;box-shadow:0 4px 12px rgba(0,43,231,0.4);">
             ${this.paused ? '▶️ Odayı Oynat' : '⏸ Odayı Duraklat'}
           </button>
           <button id="vortex-bridge-seek-fwd" type="button" style="padding:8px 14px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#e2e8f0;font-size:12px;font-weight:700;cursor:pointer;">
@@ -187,8 +193,8 @@ export class WebviewAdapter {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
-          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:#002be7;color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
-            🎬 Max'te Aç (Yan Yana İzle)
+          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
+            🎬 ${provName}'te Aç (Yan Yana İzle)
           </button>
           <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
             ⚡ Canlı Eşitle
