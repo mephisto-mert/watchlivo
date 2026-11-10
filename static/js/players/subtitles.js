@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261111_v193';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261111_v194';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -638,8 +638,9 @@ export class SubtitleDubController {
     this.adapter.events.onTracksChanged?.();
   }
 
-  _applyNativeAudioSelection() {
-    const nativeTracks = this.adapter?.video?.audioTracks;
+  _applyNativeAudioSelection(targetEl = null) {
+    const mediaEl = targetEl || this.adapter?.video;
+    const nativeTracks = mediaEl?.audioTracks;
     if (!nativeTracks || nativeTracks.length <= 1) return;
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
     let targetIdx = typeof track?.nativeIndex === 'number' ? track.nativeIndex : -1;
@@ -657,8 +658,8 @@ export class SubtitleDubController {
     }
   }
 
-  _applyHlsAudioSelection() {
-    const hls = this.adapter.hls;
+  _applyHlsAudioSelection(targetHls = null) {
+    const hls = targetHls || this.adapter.hls;
     const hlsTracks = hls?.audioTracks;
     if (!hls || !Array.isArray(hlsTracks) || hlsTracks.length <= 1) return;
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
@@ -1355,6 +1356,13 @@ export class SubtitleDubController {
       this.adapter.iosPipVideo.muted = this.adapter._iosPipActive
         ? Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0)
         : true;
+    }
+    if (this.adapter?._bgAudioEl && this.adapter._bgAudioActive) {
+      const bgMuted = Boolean(this.adapter?.userExplicitMuted || basePct <= 0);
+      this.adapter._bgAudioEl.muted = bgMuted;
+      try {
+        this.adapter._bgAudioEl.volume = bgMuted ? 0 : Math.max(0, Math.min(1, (basePct * duckFactor) / 100));
+      } catch (e) { /* ignore */ }
     }
     if (this._ttsAudio) {
       const isMuted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);

@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v193';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261111_v193';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v193';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v194';
+import { applyElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261111_v194';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v194';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -213,27 +213,42 @@ export class YouTubeAdapter {
       if (!this._destroyed && this.video === v && this.wantPlaying) this.events.onBuffering?.(true);
     });
     v.addEventListener('pause', () => {
-      if (this._destroyed || this.video !== v || v.ended) return;
+      if (this._destroyed || this.video !== v || v.ended || this._bgAudioActive) return;
       if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         this._suppressYtPauseOnce = false;
         return;
       }
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && this.wantPlaying && !this._userPausedViaMediaSession) {
+      const visRecent = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1500);
+      const isHidden = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
+      if ((isHidden || visRecent) && this.wantPlaying && !this._userPausedViaMediaSession) {
         let bgOk = true;
         try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
         if (bgOk) {
-          setTimeout(() => {
-            if (!this._destroyed && this.video === v && this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
+          if (isHidden && !this.isPiP() && isIosWebKit()) {
+            if (this._startYtBgBridge()) return;
+          }
+          [140, 380].forEach((ms) => setTimeout(() => {
+            if (this._destroyed || this.video !== v || !this.wantPlaying || this._userPausedViaMediaSession) return;
+            const hidNow = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
+            if (hidNow && !this.isPiP() && ms >= 380 && v.paused && !v.ended) {
+              if (this._startYtBgBridge()) return;
+            }
+            if (v.paused && !v.ended) {
               ensureIosPlaybackAudioSession();
               v.play().catch(() => {});
             }
-          }, 150);
+          }, ms));
         }
         return;
       }
       this._syncPipBridgeState(false);
       this.events.onBuffering?.(false);
       this.events.onPause?.();
+    });
+    v.addEventListener('timeupdate', () => {
+      if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined' && !v.paused) {
+        window.__watchlivoBgSyncTick?.();
+      }
     });
     v.addEventListener('ended', () => {
       if (this._destroyed || this.video !== v) return;
@@ -246,6 +261,7 @@ export class YouTubeAdapter {
     });
     v.addEventListener('enterpictureinpicture', () => {
       this._pipActive = true;
+      this._stopYtBgBridge(true);
       this.subs?.syncNativeTrackToElement?.(v, true);
       this.events.onPipChange?.(true);
     });
@@ -259,6 +275,7 @@ export class YouTubeAdapter {
       if (this._destroyed || this.video !== v) return;
       const inPipNow = v.webkitPresentationMode === 'picture-in-picture';
       this._pipActive = inPipNow;
+      if (inPipNow) this._stopYtBgBridge(true);
       this.subs?.syncNativeTrackToElement?.(v, inPipNow);
       if (!inPipNow && this.wantPlaying && v.paused && !v.ended) v.play().catch(() => {});
       this.events.onPipChange?.(inPipNow);
@@ -266,16 +283,36 @@ export class YouTubeAdapter {
 
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
+      this._lastVisChangeAt = Date.now();
       if (document.visibilityState === 'visible') {
-        if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
+        if (this._bgAudioActive) this._stopYtBgBridge(true);
+        if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended && !this.isPiP()) {
           v.play().catch(() => {});
         }
       } else if (document.visibilityState === 'hidden' && this.wantPlaying && !v.ended && !this._userPausedViaMediaSession) {
         ensureIosPlaybackAudioSession();
+        resumeSharedAudioContext();
+        this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
         let bgOk = true;
         try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
-        if (bgOk && v.paused) v.play().catch(() => {});
-        this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
+        if (bgOk && !this.isPiP()) {
+          if (!isIosWebKit() && v.paused) v.play().catch(() => {});
+          [140, 360].forEach((ms) => setTimeout(() => {
+            if (this._destroyed || this.video !== v || !this.wantPlaying || this._userPausedViaMediaSession) return;
+            if (typeof document === 'undefined' || document.visibilityState !== 'hidden' || this.isPiP()) return;
+            if (this._bgAudioActive) {
+              if (this._bgAudioEl?.paused && !this._bgAudioEl.ended) this._bgAudioEl.play().catch(() => {});
+              return;
+            }
+            if (v.paused && !v.ended) {
+              if (isIosWebKit() || ms >= 360) {
+                if (!this._startYtBgBridge()) v.play().catch(() => {});
+              } else {
+                v.play().catch(() => {});
+              }
+            }
+          }, ms));
+        }
       }
     };
     this._pageHideHandler = () => {
@@ -445,9 +482,14 @@ export class YouTubeAdapter {
               this.events.onBuffering?.(false);
               this.events.onPlay?.();
             } else if (e.data === S.PAUSED) {
-              if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+              if (this._suppressYtPauseOnce || this._pipActive || this._bgAudioActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
                 this._suppressYtPauseOnce = false;
                 return;
+              }
+              if (typeof document !== 'undefined' && document.hidden && this.wantPlaying && !this._userPausedViaMediaSession) {
+                let bgOk = true;
+                try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
+                if (bgOk && this._startYtBgBridge()) return;
               }
               this._syncPipBridgeState(false);
               this.events.onBuffering?.(false);
@@ -872,9 +914,98 @@ export class YouTubeAdapter {
     return false;
   }
 
+  _activeMediaEl() {
+    if (this._bgAudioActive && this._bgAudioEl) return this._bgAudioEl;
+    if (this._pipActive && this.pipVideo) return this.pipVideo;
+    return this.video || this.audioEl || null;
+  }
+
+  _startYtBgBridge() {
+    if (this._destroyed || this._bgAudioActive || this.isPiP() || !this.wantPlaying || this._userPausedViaMediaSession) return false;
+    const vid = String(this.media?.videoId || '').trim();
+    const directSrc = String(this.video?.currentSrc || this.video?.src || '');
+    const bgUrl = /^[A-Za-z0-9_-]{11}$/.test(vid)
+      ? (this.media?.live ? `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(vid)}&live=1` : `/api/rave/yt-music-stream?v=${encodeURIComponent(vid)}&kind=audio`)
+      : directSrc;
+    if (!bgUrl || bgUrl.startsWith('blob:')) return false;
+    const bg = getBgRelayAudio();
+    if (!bg) return false;
+    const resumeT = Math.max(0, Number(this.getTime() || 0));
+    const curRate = Number(this.getRate() || 1);
+    this._bgAudioActive = true;
+    this._bgAudioEl = bg;
+    bg.dataset.bgActive = '1';
+    this._suppressYtPauseOnce = true;
+    try { this.video?.pause?.(); } catch (_) {}
+    try { this.player?.pauseVideo?.(); } catch (_) {}
+    const bgMuted = Boolean(this._muted || this.baseVolume <= 0);
+    bg.muted = bgMuted;
+    try { bg.volume = bgMuted ? 0 : Math.max(0, Math.min(1, (this.baseVolume || 100) / 100)); } catch (_) {}
+    const onTime = () => {
+      if (this._bgAudioActive && this._bgAudioEl === bg && typeof window !== 'undefined') {
+        window.__watchlivoBgSyncTick?.();
+      }
+    };
+    const onEnd = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
+      this.wantPlaying = false;
+      this.events.onEnded?.();
+    };
+    const onMeta = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
+      if (!this.media?.live && resumeT >= 0.5 && Math.abs((bg.currentTime || 0) - resumeT) > 0.8) {
+        try { bg.currentTime = resumeT; } catch (_) {}
+      }
+      try { bg.playbackRate = curRate > 0 ? curRate : 1; } catch (_) {}
+      ensureIosPlaybackAudioSession();
+      bg.play?.().catch?.(() => {});
+    };
+    bg.addEventListener('timeupdate', onTime);
+    bg.addEventListener('ended', onEnd);
+    bg.addEventListener('loadedmetadata', onMeta);
+    this._ytBgListeners = { onTime, onEnd, onMeta };
+    ensureIosPlaybackAudioSession();
+    bg.removeAttribute('crossorigin');
+    bg.src = bgUrl;
+    try { bg.load(); } catch (_) {}
+    bg.play?.().catch?.(() => {});
+    return true;
+  }
+
+  _stopYtBgBridge(syncBack = true) {
+    if (!this._bgAudioActive) return;
+    const bg = this._bgAudioEl;
+    const exitT = bg ? Number(bg.currentTime || 0) : 0;
+    this._bgAudioActive = false;
+    this._bgAudioEl = null;
+    if (bg) {
+      if (this._ytBgListeners) {
+        bg.removeEventListener('timeupdate', this._ytBgListeners.onTime);
+        bg.removeEventListener('ended', this._ytBgListeners.onEnd);
+        bg.removeEventListener('loadedmetadata', this._ytBgListeners.onMeta);
+        this._ytBgListeners = null;
+      }
+      try { bg.pause(); } catch (_) {}
+      bg.dataset.bgActive = '';
+      try { bg.removeAttribute('src'); bg.load(); } catch (_) {}
+    }
+    if (syncBack && !this._destroyed) {
+      if (!this.media?.live && exitT >= 0.5) {
+        if (this.video) { try { this.video.currentTime = exitT; } catch (_) {} }
+        else if (this.player) { try { this.player.seekTo?.(exitT, true); } catch (_) {} }
+      }
+      if (this.wantPlaying && !this._userPausedViaMediaSession) {
+        if (this.video) this._attemptDirectPlay(this.video);
+        else this.player?.playVideo?.();
+      }
+    }
+  }
+
   play() {
     this.wantPlaying = true;
+    if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) primeBgRelayAudio();
     resumeSharedAudioContext();
+    if (this._bgAudioActive && this._bgAudioEl) { ensureIosPlaybackAudioSession(); this._bgAudioEl.play().catch(() => {}); return; }
     if (this.video) { this._attemptDirectPlay(this.video); return; }
     if (this._pipActive && this.pipVideo) { this.pipVideo.play().catch(() => {}); return; }
     if (this.audioEl) this.audioEl.play().catch(() => {});
@@ -883,6 +1014,7 @@ export class YouTubeAdapter {
 
   pause() {
     this.wantPlaying = false;
+    if (this._bgAudioActive && this._bgAudioEl) { try { this._bgAudioEl.pause(); } catch (_) {} }
     if (this.video) { try { this.video.pause(); } catch (_) {} return; }
     if (this._pipActive && this.pipVideo) { this.pipVideo.pause(); return; }
     if (this.audioEl) this.audioEl.pause();
@@ -891,6 +1023,11 @@ export class YouTubeAdapter {
 
   seek(t) {
     const target = Math.max(0, Number(t) || 0);
+    if (this._bgAudioActive && this._bgAudioEl) {
+      try { this._bgAudioEl.currentTime = target; } catch (_) {}
+      this.subs?.onTimeUpdate(target, true);
+      return;
+    }
     if (this.video) {
       if (this.video.readyState < 1) {
         this.initialSeekPending = target;
@@ -914,12 +1051,16 @@ export class YouTubeAdapter {
   }
 
   getTime() {
+    if (this._bgAudioActive && this._bgAudioEl) return Number(this._bgAudioEl.currentTime || 0);
     if (this.video) return Number(this.video.currentTime || 0);
     if (this._pipActive && this.pipVideo) return Number(this.pipVideo.currentTime || 0);
     return this.audioEl ? Number(this.audioEl.currentTime || 0) : Number(this.player?.getCurrentTime?.() || 0);
   }
 
   getDuration() {
+    if (this._bgAudioActive && this._bgAudioEl && Number.isFinite(this._bgAudioEl.duration) && this._bgAudioEl.duration > 0) {
+      return Number(this._bgAudioEl.duration);
+    }
     if (this.video) {
       const d = Number(this.video.duration);
       return (Number.isFinite(d) && d > 0) ? d : Number(this.media?.duration || 0);
@@ -928,6 +1069,10 @@ export class YouTubeAdapter {
   }
 
   getBuffered() {
+    if (this._bgAudioActive && this._bgAudioEl) {
+      const b = this._bgAudioEl.buffered;
+      return (b && b.length) ? b.end(b.length - 1) : 0;
+    }
     if (this.video) {
       const b = this.video.buffered;
       return (b && b.length) ? b.end(b.length - 1) : 0;
@@ -936,6 +1081,7 @@ export class YouTubeAdapter {
   }
 
   isPaused() {
+    if (this._bgAudioActive && this._bgAudioEl) return Boolean(this._bgAudioEl.paused);
     if (this.video) return Boolean(this.video.paused);
     if (this._pipActive && this.pipVideo) return this.pipVideo.paused;
     if (this.audioEl) return this.audioEl.paused;
@@ -944,11 +1090,20 @@ export class YouTubeAdapter {
   }
 
   isBuffering() {
+    if (this._bgAudioActive && this._bgAudioEl) return Boolean(this.wantPlaying && !this._bgAudioEl.paused && this._bgAudioEl.readyState < 2);
     if (this.video) return Boolean(this.wantPlaying && !this.video.paused && this.video.readyState < 3);
     return (this._pipActive || this.audioEl) ? false : this.player?.getPlayerState?.() === 3;
   }
 
   isBuffered(t) {
+    if (this._bgAudioActive && this._bgAudioEl) {
+      const b = this._bgAudioEl.buffered;
+      if (!b) return false;
+      for (let i = 0; i < b.length; i += 1) {
+        if (t >= b.start(i) - 0.5 && t <= b.end(i) + 0.25) return true;
+      }
+      return false;
+    }
     if (this.video) {
       const b = this.video.buffered;
       if (!b) return false;
@@ -963,6 +1118,9 @@ export class YouTubeAdapter {
 
   setRate(r) {
     const numR = Math.max(0.25, Math.min(2.0, Number(r) || 1));
+    if (this._bgAudioActive && this._bgAudioEl) {
+      try { this._bgAudioEl.playbackRate = numR; } catch (_) {}
+    }
     if (this.video) {
       if (Math.abs((this.video.playbackRate || 1) - numR) > 0.004) {
         try { this.video.playbackRate = numR; } catch (_) {}
@@ -1025,6 +1183,7 @@ export class YouTubeAdapter {
 
   destroy() {
     this._destroyed = true;
+    this._stopYtBgBridge(false);
     clearTimeout(this.autoplayTimer);
     clearInterval(this.subTimer);
     this.subs?.stopDubAudio?.();

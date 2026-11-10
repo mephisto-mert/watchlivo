@@ -292,3 +292,66 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     node.gain.gain.value = Math.max(0, Math.min(2.0, clamped / 100));
   }
 }
+
+let _bgRelayAudio = null;
+let _bgRelayUnlocked = false;
+const _SILENT_WAV_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+
+export function getBgRelayAudio() {
+  if (typeof document === 'undefined') return null;
+  if (!_bgRelayAudio) {
+    const a = document.createElement('audio');
+    a.className = 'wl-bg-audio-relay';
+    a.preload = 'none';
+    a.playsInline = true;
+    a.preservesPitch = true;
+    try {
+      a.setAttribute('playsinline', '');
+      a.setAttribute('webkit-playsinline', '');
+    } catch (_) {}
+    _bgRelayAudio = a;
+  }
+  return _bgRelayAudio;
+}
+
+export function primeBgRelayAudio() {
+  if (_bgRelayUnlocked || typeof document === 'undefined') return;
+  const a = getBgRelayAudio();
+  if (!a || a.dataset?.bgActive === '1') return;
+  try {
+    ensureIosPlaybackAudioSession();
+    a.muted = true;
+    a.volume = 0;
+    a.src = _SILENT_WAV_URI;
+    const p = a.play();
+    if (p && typeof p.then === 'function') {
+      p.then(() => {
+        _bgRelayUnlocked = true;
+        if (a.dataset?.bgActive !== '1') {
+          try {
+            a.pause();
+            a.removeAttribute('src');
+            a.load();
+          } catch (_) {}
+        }
+      }).catch(() => {});
+    } else {
+      _bgRelayUnlocked = true;
+    }
+  } catch (_) {}
+}
+
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const _onceUnlockRelay = () => {
+    primeBgRelayAudio();
+    if (_bgRelayUnlocked) {
+      ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => {
+        window.removeEventListener(ev, _onceUnlockRelay, { capture: true });
+      });
+    }
+  };
+  ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => {
+    window.addEventListener(ev, _onceUnlockRelay, { capture: true, passive: true });
+  });
+}
+

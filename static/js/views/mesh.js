@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261111_v193';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261111_v193';
-import { resolveMusicItem } from './selection-kinds.js?v=20261111_v193';
-import { MeshConnection } from '../realtime.js?v=20261111_v193';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261111_v193';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261111_v193';
-import { buildLayout } from './mesh-layout.js?v=20261111_v193';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261111_v193';
-import { Voice } from '../voice.js?v=20261111_v193';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261111_v193';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261111_v193';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261111_v193';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261111_v194';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261111_v194';
+import { resolveMusicItem } from './selection-kinds.js?v=20261111_v194';
+import { MeshConnection } from '../realtime.js?v=20261111_v194';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261111_v194';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261111_v194';
+import { buildLayout } from './mesh-layout.js?v=20261111_v194';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261111_v194';
+import { Voice } from '../voice.js?v=20261111_v194';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261111_v194';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261111_v194';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261111_v194';
 
 let ctx = null;
 
@@ -1540,9 +1540,26 @@ function onPlayerEvent(ev, arg) {
     }
   }
   if (ev === 'pause' && arg?.userFullscreenPause && isLeader() && !ctx.host.loading && !ctx.userPaused) {
-    actions.pause();
+    clearTimeout(ctx._fsPauseBroadcastTimer);
+    const pauseCtx = ctx;
+    ctx._fsPauseBroadcastTimer = setTimeout(() => {
+      if (!pauseCtx || ctx !== pauseCtx || pauseCtx.host?.loading || pauseCtx.userPaused) return;
+      const hiddenNow = typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden');
+      const ad = pauseCtx.host?.adapter;
+      if (hiddenNow || ad?.isPiP?.() || ad?._bgAudioActive) {
+        if (ad && !ad._userPausedViaMediaSession) {
+          ad.wantPlaying = true;
+          ad._visHandler?.();
+        }
+        return;
+      }
+      if (ad?.isPaused?.() && !ad?.wantPlaying) {
+        actions.pause();
+      }
+    }, 280);
   }
   if (ev === 'play' && arg?.native && isLeader() && !ctx.host.loading && ctx.userPaused) {
+    clearTimeout(ctx._fsPauseBroadcastTimer);
     actions.play();
   }
   if (ev === 'ended') {
@@ -1605,6 +1622,7 @@ export function leaveMeshView(explicitLeave = false) {
     clearTimeout(ctx.initFallbackTimer);
     ctx.initFallbackTimer = null;
   }
+  clearTimeout(ctx._fsPauseBroadcastTimer);
   clearInterval(ctx.progressTimer);
   try { ctx.conn?.close(Boolean(explicitLeave), shouldClose); } catch (e) { /* ignore */ }
   try { ctx.sync?.stop?.(); } catch (_) {}

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261111_v193 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261111_v194 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261111_v193", index_html)
+        self.assertIn("20261111_v194", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2515,7 +2515,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261111_v193", sw_js)
+        self.assertIn("v20261111_v194", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2568,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261111_v193', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261111_v194', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261111_v193', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261111_v194', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261111_v193')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261111_v194')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3182,8 +3182,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261111_v193", index_html)
-        self.assertIn("20261111_v193", sw_js)
+        self.assertIn("20261111_v194", index_html)
+        self.assertIn("20261111_v194", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3418,6 +3418,41 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("isTransientGateway", api_js)
         self.assertIn("export function buildFallbackCuratedRooms()", lobby_js)
         self.assertIn("buildFallbackCuratedRooms()", home_js)
+
+    def test_v194_background_room_playback_continuity(self):
+        import json as _json
+        import pathlib as _pl
+
+        root = _pl.Path(__file__).resolve().parent.parent
+        app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
+        self.assertEqual(app_ver.get("version"), "20261111_v194")
+
+        sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        yt_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
+        gain_js = (root / "static" / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
+
+        # 1. SyncEngine keeps driving room playback in background when vortex_bg_audio !== 'off'
+        self.assertIn("bgAudioAllowed = localStorage.getItem('vortex_bg_audio') !== 'off'", sync_js)
+        self.assertIn("&& !bgAudioAllowed;", sync_js)
+        self.assertIn("const activeEl = ad._activeMediaEl?.() || ad.video;", sync_js)
+
+        # 2. Pre-unlocked background <audio> relay & seamless handoff bridge in Html5Adapter & YouTubeAdapter
+        self.assertIn("export function getBgRelayAudio()", gain_js)
+        self.assertIn("export function primeBgRelayAudio()", gain_js)
+        self.assertIn("_startBgAudioBridge()", html5_js)
+        self.assertIn("_stopBgAudioBridge(", html5_js)
+        self.assertIn("_setBgVideoTracksEnabled(", html5_js)
+        self.assertIn("if (this._bgAudioActive && this._bgAudioEl) return this._bgAudioEl;", html5_js)
+        self.assertIn("_startYtBgBridge()", yt_js)
+        self.assertIn("_stopYtBgBridge(", yt_js)
+
+        # 3. Fullscreen-to-background OS pause race never broadcasts actions.pause() to room or leaves room on bfcache
+        self.assertIn("_fsPauseBroadcastTimer", mesh_js)
+        self.assertIn("if (hiddenNow || ad?.isPiP?.() || ad?._bgAudioActive)", mesh_js)
+        self.assertIn("ev?.persisted", rt_js)
 
 
 if __name__ == '__main__':

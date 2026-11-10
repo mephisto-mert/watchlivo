@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261111_v193';
-import { Html5Adapter } from './html5.js?v=20261111_v193';
-import { VimeoAdapter } from './vimeo.js?v=20261111_v193';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261111_v193';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261111_v193';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261111_v193';
+import { YouTubeAdapter } from './youtube.js?v=20261111_v194';
+import { Html5Adapter } from './html5.js?v=20261111_v194';
+import { VimeoAdapter } from './vimeo.js?v=20261111_v194';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261111_v194';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261111_v194';
+import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261111_v194';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -141,6 +141,7 @@ export class PlayerHost {
       this._gDown = { x: e.clientX ?? 0, y: e.clientY ?? 0, t: Date.now() };
     };
     this._gestureHandler = (e) => {
+      primeBgRelayAudio();
       if (e?.type === 'keydown') {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const k = String(e.key || '').toLowerCase();

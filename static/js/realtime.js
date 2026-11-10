@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261111_v193';
-import { api } from './api.js?v=20261111_v193';
-import { state } from './store.js?v=20261111_v193';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261111_v193';
+import { clock } from './sync.js?v=20261111_v194';
+import { api } from './api.js?v=20261111_v194';
+import { state } from './store.js?v=20261111_v194';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261111_v194';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -165,8 +165,8 @@ export class MeshConnection {
       window.addEventListener('focus', this._visHandler);
     }
     if (!this._pageHideHandler && typeof window !== 'undefined') {
-      this._pageHideHandler = () => {
-        if (this.closed || !this.clientId || this.mode !== 'http') return;
+      this._pageHideHandler = (ev) => {
+        if (this.closed || !this.clientId || this.mode !== 'http' || ev?.persisted) return;
         try {
           const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
           const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };

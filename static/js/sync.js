@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261111_v193';
+import { isRoomMediaPlaying } from './store.js?v=20261111_v194';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -201,9 +201,10 @@ export class SyncEngine {
     }
     let timeout = CYCLE_MS;
 
+    const activeEl = ad._activeMediaEl?.() || ad.video;
     if (status !== 'PLAYING') {
       if (!ad.isPaused()) ad.pause();
-      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.25 && now > this.seekUntil) {
+      if (!leader && !ad.isBuffering() && !activeEl?.seeking && abs > 0.25 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
         ad.seek(expected);
@@ -219,16 +220,23 @@ export class SyncEngine {
     if (leader && Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
 
     if (ad.isPaused()) {
-      if (leader && ad.wantPlaying === false) {
+      if ((leader && ad.wantPlaying === false) || (leader && ad._userPausedViaMediaSession)) {
         this.mode = 'paused';
         this.onStatus({ mode: 'paused', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return timeout;
       }
-      const hiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !ad.isPiP?.() && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) && !ad.isMusic;
-      if (hiddenNonPip || ad.autoplayHardBlocked) {
+      let bgAudioAllowed = true;
+      try { bgAudioAllowed = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
+      const hiddenNonPip = typeof document !== 'undefined'
+        && document.visibilityState === 'hidden'
+        && !ad.isPiP?.()
+        && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)
+        && !ad.isMusic
+        && !bgAudioAllowed;
+      if (hiddenNonPip || ad.autoplayHardBlocked || ad._userPausedViaMediaSession) {
         return timeout;
       }
-      if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
+      if (!activeEl?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
         ad.play();
       }
@@ -270,7 +278,7 @@ export class SyncEngine {
         this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return CYCLE_MS;
       }
-      if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.()) {
+      if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !activeEl?.seeking && !ad.isBuffering?.()) {
         let anchorEveryMs = 9000;
         if (this.isSolo()) {
           anchorEveryMs = 12000;
@@ -314,7 +322,7 @@ export class SyncEngine {
     const seekWallElapsed = this.lastSeekWallAt ? Math.max(0, (now - this.lastSeekWallAt) / 1000) * base : 0;
     const expectedSinceLastSeek = Number.isFinite(this.lastSeekTarget) ? this.lastSeekTarget + seekWallElapsed : -999;
     const activelySeekingToTarget = Boolean(
-      (ad.video?.seeking || (ad.video && ad.video.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 3.5))
+      (activeEl?.seeking || (activeEl && activeEl.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 3.5))
       && Math.abs(expected - expectedSinceLastSeek) < 12.0
       && this.lastSeekWallAt
       && (now - this.lastSeekWallAt < 12000)

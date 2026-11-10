@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v193';
-import { expectedPosition } from '../sync.js?v=20261111_v193';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v193';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v193';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v193';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v194';
+import { expectedPosition } from '../sync.js?v=20261111_v194';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v194';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v194';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v194';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -47,6 +47,13 @@ export class Html5Adapter {
     this.iosPipVideo = null;
     this._iosPipActive = false;
     this._iosPipIsCanvasOnly = false;
+    this._bgAudioEl = null;
+    this._bgAudioActive = false;
+    this._bgHls = null;
+    this._bgCheckTimers = [];
+    this._videoTracksSuspendedBg = false;
+    this._savedVideoTrackIdx = 0;
+    this._fsPauseJustFiredAt = 0;
     this._musicPipTimer = null;
     this.wantPlaying = true;
     this.bufferingReported = false;
@@ -59,6 +66,7 @@ export class Html5Adapter {
   }
 
   async load(media, startAt = 0, autoplay = true) {
+    this._stopBgAudioBridge?.(false);
     if (this.hls) { try { this.hls.destroy(); } catch (_) {} this.hls = null; }
     if (this.mashupHlsB) { try { this.mashupHlsB.destroy(); } catch (_) {} this.mashupHlsB = null; }
     if (this.mashupDeckB) { try { this.mashupDeckB.pause(); this.mashupDeckB.removeAttribute('src'); } catch (_) {} this.mashupDeckB = null; }
@@ -319,6 +327,8 @@ export class Html5Adapter {
       }
       this._wasInPip = nowPip;
       if (nowPip) {
+        this._stopBgAudioBridge?.(true);
+        this._setBgVideoTracksEnabled?.(true);
         this.subs?.syncNativeTrackToElement?.(v, true);
         if (this.wantPlaying && v.paused && !v.ended) {
           v.play?.().catch?.(() => {});
@@ -340,31 +350,73 @@ export class Html5Adapter {
     const isBgAudioAllowed = () => {
       try { return localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) { return true; }
     };
+    const clearBgCheckTimers = () => {
+      if (Array.isArray(this._bgCheckTimers)) {
+        this._bgCheckTimers.forEach((tid) => clearTimeout(tid));
+      }
+      this._bgCheckTimers = [];
+    };
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
       this._lastVisChangeAt = Date.now();
+      clearBgCheckTimers();
       if (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) return;
-      const av = this._activeMediaEl();
       if (document.visibilityState === 'visible') {
+        this._setBgVideoTracksEnabled?.(true);
+        if (this._bgAudioActive) {
+          this._stopBgAudioBridge?.(true);
+        }
         if (this.wantPlaying && !this.hasEnded && !this.autoplayHardBlocked && !this._userPausedViaMediaSession && !this.isPiP()) {
           this._autoResumeCount = 0;
           this._requestWakeLock?.();
+          const av = this._activeMediaEl();
           if (av && av.paused && !av.ended) this.tryPlay();
         }
-      } else if (document.visibilityState === 'hidden' && this.wantPlaying && !this.hasEnded && !this._userPausedViaMediaSession) {
-        ensureIosPlaybackAudioSession();
-        if (isBgAudioAllowed() && av && av.paused && !av.ended) {
-          av.play?.().catch(() => {});
+      } else if (document.visibilityState === 'hidden') {
+        clearTimeout(this._pipPauseTimer);
+        if (!this.wantPlaying && this._fsPauseJustFiredAt && Date.now() - this._fsPauseJustFiredAt < 1400 && !this._userPausedViaMediaSession) {
+          this.wantPlaying = true;
         }
-        [140, 420].forEach((ms) => setTimeout(() => {
-          if (this._destroyed || this.video !== v || !this.wantPlaying || this.hasEnded || this._userPausedViaMediaSession) return;
-          const curAv = this._activeMediaEl();
-          if (isBgAudioAllowed() && curAv && curAv.paused && !curAv.ended) {
-            ensureIosPlaybackAudioSession();
-            curAv.play?.().catch(() => {});
+        if (this.wantPlaying && !this.hasEnded && !this._userPausedViaMediaSession) {
+          ensureIosPlaybackAudioSession();
+          resumeSharedAudioContext();
+          this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
+          if (isBgAudioAllowed()) {
+            if (!this.isPiP() && !isIosWebKit()) {
+              this._setBgVideoTracksEnabled?.(false);
+              const avNow = this._activeMediaEl();
+              if (avNow && avNow.paused && !avNow.ended) {
+                avNow.play?.().catch(() => {});
+              }
+            }
+            [130, 340, 760].forEach((ms) => {
+              const tid = setTimeout(() => {
+                if (this._destroyed || this.video !== v || !this.wantPlaying || this.hasEnded || this._userPausedViaMediaSession) return;
+                if (typeof document === 'undefined' || document.visibilityState !== 'hidden') return;
+                if (this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) return;
+                ensureIosPlaybackAudioSession();
+                if (this._bgAudioActive) {
+                  if (this._bgAudioEl && this._bgAudioEl.paused && !this._bgAudioEl.ended) {
+                    this._bgAudioEl.play?.().catch(() => {});
+                  }
+                  return;
+                }
+                if (v.paused && !v.ended) {
+                  if (isIosWebKit() || ms >= 340) {
+                    const bridged = this._startBgAudioBridge?.();
+                    if (!bridged) {
+                      v.play?.().catch(() => {});
+                    }
+                  } else {
+                    this._setBgVideoTracksEnabled?.(false);
+                    v.play?.().catch(() => {});
+                  }
+                }
+              }, ms);
+              this._bgCheckTimers.push(tid);
+            });
           }
-        }, ms));
-        this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
+        }
       }
     };
     this._pageHideHandler = () => {
@@ -471,6 +523,7 @@ export class Html5Adapter {
       this.subs.stopDubAudio();
       this.events.onEnded?.();
     };
+    this._fireEndedOnce = fireEndedOnce;
     v.addEventListener('webkitbeginfullscreen', () => {
       this._lastFsChangeAt = Date.now();
       this._lastFsEnterAt = Date.now();
@@ -480,7 +533,7 @@ export class Html5Adapter {
       this._lastFsExitAt = Date.now();
     });
     v.addEventListener('pause', () => {
-      if (this._destroyed || this.video !== v) return;
+      if (this._destroyed || this.video !== v || this._bgAudioActive) return;
       if (this._suppressInlinePauseOnce || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) || this._iosPipActive) {
         this._suppressInlinePauseOnce = false;
         return;
@@ -507,12 +560,24 @@ export class Html5Adapter {
         || this.isPiP()
         || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
       );
-      const isHiddenNow = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      const isHiddenNow = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
       if ((enteringPipNow || visJustChanged || isHiddenNow) && this.wantPlaying && !this._userPausedViaMediaSession) {
         if (isBgAudioAllowed() || this.isPiP() || this.isMusic) {
-          [140, 420].forEach((ms) => setTimeout(() => {
+          if (isHiddenNow && !this.isPiP() && isIosWebKit()) {
+            if (!this._startBgAudioBridge?.()) {
+              ensureIosPlaybackAudioSession();
+              v.play?.().catch?.(() => {});
+            }
+            return;
+          }
+          [140, 380].forEach((ms) => setTimeout(() => {
+            if (this._destroyed || this.video !== v || !this.wantPlaying || this._userPausedViaMediaSession) return;
+            const nowHid = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
+            if (nowHid && !this.isPiP() && ms >= 380 && v.paused && !v.ended) {
+              if (this._startBgAudioBridge?.()) return;
+            }
             const av = this._activeMediaEl();
-            if (this.video === v && this.wantPlaying && !this._userPausedViaMediaSession && av && av.paused && !av.ended) {
+            if (av && av.paused && !av.ended) {
               ensureIosPlaybackAudioSession();
               av.play?.().catch?.(() => {});
             }
@@ -524,6 +589,7 @@ export class Html5Adapter {
         clearTimeout(this._pipPauseTimer);
         this._pipPauseTimer = setTimeout(() => {
           if (this._destroyed || this.video !== v || !v.paused || v.ended || v.seeking) return;
+          const hiddenInTimer = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
           const leftPip = Boolean(this._lastPipExitAt && Date.now() - this._lastPipExitAt < 1400);
           const leftFs = Boolean(this._lastFsExitAt && Date.now() - this._lastFsExitAt < 1400);
           const enteredPip = Boolean(this._lastPipEnterAt && Date.now() - this._lastPipEnterAt < 1600);
@@ -533,14 +599,19 @@ export class Html5Adapter {
             || this.isPiP()
             || (typeof document !== 'undefined' && (document.fullscreenElement === v || document.webkitFullscreenElement === v))
           );
-          if (leftPip || leftFs || enteredPip || visFlip || !stillNativeUi) {
-            if (this.wantPlaying && !this.autoplayHardBlocked) {
-              const av = this._activeMediaEl();
-              if (this.isPiP() && av) av.play?.().catch?.(() => {});
-              else if (typeof document === 'undefined' || document.visibilityState === 'visible') this.tryPlay();
+          if (hiddenInTimer || leftPip || leftFs || enteredPip || visFlip || !stillNativeUi) {
+            if (this.wantPlaying && !this.autoplayHardBlocked && !this._userPausedViaMediaSession) {
+              if (hiddenInTimer && !this.isPiP() && isBgAudioAllowed()) {
+                if (!this._startBgAudioBridge?.()) v.play?.().catch?.(() => {});
+              } else {
+                const av = this._activeMediaEl();
+                if (this.isPiP() && av) av.play?.().catch?.(() => {});
+                else if (typeof document === 'undefined' || document.visibilityState === 'visible') this.tryPlay();
+              }
             }
             return;
           }
+          this._fsPauseJustFiredAt = Date.now();
           this.wantPlaying = false;
           clearTimeout(this.resumeTimer);
           this._syncNativeIosPip?.(false);
@@ -550,14 +621,19 @@ export class Html5Adapter {
       }
       if (this.wantPlaying && !this.hasEnded && !v.ended) {
         clearTimeout(this.resumeTimer);
-        const isHiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !this.isPiP() && !this.isMusic && !isBgAudioAllowed();
+        const hiddenNow = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
+        const isHiddenNonPip = hiddenNow && !this.isPiP() && !this.isMusic && !isBgAudioAllowed();
         if (isHiddenNonPip || this.autoplayHardBlocked || this._userPausedViaMediaSession) return;
+        if (hiddenNow && !this.isPiP() && isBgAudioAllowed()) {
+          if (this._startBgAudioBridge?.()) return;
+        }
         const nowMs = Date.now();
         if (nowMs - (this._lastAutoResumeWindowAt || 0) > 4500) {
           this._autoResumeCount = 0;
           this._lastAutoResumeWindowAt = nowMs;
         }
         if (this._autoResumeCount >= 2 && !v.seeking && !recentSeek) {
+          if (hiddenNow && isBgAudioAllowed() && this._startBgAudioBridge?.()) return;
           this.events.onPause?.();
           return;
         }
@@ -1310,7 +1386,7 @@ export class Html5Adapter {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
-      if (v.seeking) return;
+      if (v.seeking || this._bgAudioActive || this._videoTracksSuspendedBg || (typeof document !== 'undefined' && document.hidden)) return;
       if (!this._zeroDimPlayStartAt && !v.paused) {
         this._zeroDimPlayStartAt = performance.now();
         this._zeroDimPlayStartPos = Number(v.currentTime || 0);
@@ -1367,7 +1443,7 @@ export class Html5Adapter {
     v.addEventListener('timeupdate', checkZeroDimAudioOnly);
     const checkUniversalStall = () => {
       if (this.video !== v) return;
-      if (!this.wantPlaying || v.seeking || document.hidden || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+      if (!this.wantPlaying || v.seeking || document.hidden || this._bgAudioActive || this._videoTracksSuspendedBg || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         return;
       }
@@ -1431,7 +1507,7 @@ export class Html5Adapter {
         clearBuf();
         return;
       }
-      if (!this.wantPlaying || v.seeking || document.hidden || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+      if (!this.wantPlaying || v.seeking || document.hidden || this._bgAudioActive || this._videoTracksSuspendedBg || this.isPiP() || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         consecutiveMidStalls = 0;
         lastWatchdogPos = curT;
         return;
@@ -1544,7 +1620,196 @@ export class Html5Adapter {
   }
 
   _activeMediaEl() {
-    return (this._iosPipActive && this.iosPipVideo && !this._iosPipIsCanvasOnly) ? this.iosPipVideo : this.video;
+    if (this._iosPipActive && this.iosPipVideo && !this._iosPipIsCanvasOnly) return this.iosPipVideo;
+    if (this._bgAudioActive && this._bgAudioEl) return this._bgAudioEl;
+    return this.video;
+  }
+
+  _setBgVideoTracksEnabled(enabled) {
+    const v = this.video;
+    if (!v) return;
+    try {
+      const vt = v.videoTracks;
+      if (vt && vt.length > 0) {
+        if (!enabled) {
+          for (let i = 0; i < vt.length; i += 1) {
+            if (vt[i].selected) this._savedVideoTrackIdx = i;
+            vt[i].selected = false;
+          }
+          this._videoTracksSuspendedBg = true;
+        } else if (this._videoTracksSuspendedBg) {
+          const idx = (this._savedVideoTrackIdx >= 0 && this._savedVideoTrackIdx < vt.length) ? this._savedVideoTrackIdx : 0;
+          vt[idx].selected = true;
+          this._videoTracksSuspendedBg = false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  _startBgAudioBridge() {
+    if (this._destroyed || !this.video || this._bgAudioActive || this.isPiP()) return false;
+    if (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) return false;
+    if (!this.wantPlaying || this.hasEnded || this._userPausedViaMediaSession) return false;
+    const rawSrc = String(this.currentUrl || '');
+    if (!rawSrc || rawSrc.startsWith('blob:')) return false;
+    const bg = getBgRelayAudio();
+    if (!bg) return false;
+    const cleanPath = rawSrc.split('?')[0].split('#')[0].toLowerCase();
+    const isDirectProg = /[?&]ext=\.(?:mp4|webm|mkv|m4a|mp3|aac|ogg)\b/i.test(rawSrc)
+      || /[?&]stype=mp4/i.test(rawSrc)
+      || /\.(?:mp4|mkv|webm|m4a|mp3|aac|ogg)$/.test(cleanPath);
+    const isHlsSrc = !isDirectProg && (
+      /\.m3u8(\?|$)/i.test(rawSrc)
+      || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(rawSrc)
+      || this.media?.provider === 'hls'
+      || this.media?.streamType === 'hls'
+    );
+    const canNativeHls = Boolean(bg.canPlayType('application/vnd.apple.mpegurl') || bg.canPlayType('application/x-mpegURL'));
+    if (isHlsSrc && !canNativeHls && !(typeof window !== 'undefined' && window.Hls?.isSupported?.())) {
+      return false;
+    }
+    const srcUrl = (isHlsSrc && this._withProxySegs) ? this._withProxySegs(rawSrc) : rawSrc;
+    const resumeT = Math.max(0, Number(this.video.currentTime || this.highestPlayedPos || 0));
+    const curRate = Number(this.video.playbackRate || 1);
+
+    this._bgAudioActive = true;
+    this._bgAudioEl = bg;
+    bg.dataset.bgActive = '1';
+    this._suppressInlinePauseOnce = true;
+    try { this.video.pause(); } catch (_) {}
+    try { this.hls?.stopLoad?.(); } catch (_) {}
+
+    const basePct = Number.isFinite(Number(this.baseVolume)) ? Number(this.baseVolume) : (isIosWebKit() ? 100 : 80);
+    const bgMuted = Boolean(this.userExplicitMuted || basePct <= 0);
+    bg.muted = bgMuted;
+    try { bg.volume = bgMuted ? 0 : Math.max(0, Math.min(1, basePct / 100)); } catch (_) {}
+    try { bg.playbackRate = curRate > 0 ? curRate : 1; } catch (_) {}
+
+    const onTimeUpdate = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg || bg.seeking) return;
+      if (bg.currentTime > 2) {
+        this.highestPlayedPos = Math.max(this.highestPlayedPos || 0, bg.currentTime);
+      }
+      if (typeof window !== 'undefined') window.__watchlivoBgSyncTick?.();
+    };
+    const onEnded = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
+      this._fireEndedOnce?.();
+    };
+    const onPause = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg || bg.ended) return;
+      if (typeof document !== 'undefined' && document.hidden && this.wantPlaying && !this._userPausedViaMediaSession) {
+        setTimeout(() => {
+          if (this._bgAudioActive && this._bgAudioEl === bg && bg.paused && !bg.ended && this.wantPlaying && !this._userPausedViaMediaSession) {
+            ensureIosPlaybackAudioSession();
+            bg.play?.().catch?.(() => {});
+          }
+        }, 180);
+      }
+    };
+    const onLoadedMeta = () => {
+      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
+      this.subs?._applyNativeAudioSelection?.(bg);
+      if (!this.media?.live && resumeT >= 0.5 && Math.abs((bg.currentTime || 0) - resumeT) > 0.8) {
+        try { bg.currentTime = resumeT; } catch (_) {}
+      }
+      try { bg.playbackRate = this.video?.playbackRate || curRate || 1; } catch (_) {}
+      ensureIosPlaybackAudioSession();
+      bg.play?.().catch?.(() => {});
+    };
+    bg.addEventListener('timeupdate', onTimeUpdate);
+    bg.addEventListener('ended', onEnded);
+    bg.addEventListener('pause', onPause);
+    bg.addEventListener('loadedmetadata', onLoadedMeta);
+    this._bgListeners = { onTimeUpdate, onEnded, onPause, onLoadedMeta };
+
+    ensureIosPlaybackAudioSession();
+    if (!isHlsSrc || canNativeHls) {
+      bg.removeAttribute('crossorigin');
+      bg.src = srcUrl;
+      try { bg.load(); } catch (_) {}
+      bg.play?.().catch?.(() => {});
+    } else if (window.Hls?.isSupported?.()) {
+      const bgHls = new window.Hls({
+        enableWorker: false,
+        lowLatencyMode: false,
+        subtitleDisplay: false,
+        enableWebVTT: false,
+        startPosition: (!this.media?.live && resumeT >= 0.5) ? resumeT : -1,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+      });
+      this._bgHls = bgHls;
+      bgHls.on(window.Hls.Events.MANIFEST_PARSED, () => {
+        if (!this._bgAudioActive || this._bgHls !== bgHls) return;
+        this.subs?._applyHlsAudioSelection?.(bgHls);
+        if (!this.media?.live && resumeT >= 0.5 && bg.readyState >= 1 && Math.abs((bg.currentTime || 0) - resumeT) > 1.0) {
+          try { bg.currentTime = resumeT; } catch (_) {}
+        }
+        ensureIosPlaybackAudioSession();
+        bg.play?.().catch?.(() => {});
+      });
+      bgHls.loadSource(srcUrl);
+      bgHls.attachMedia(bg);
+    }
+    if (typeof navigator !== 'undefined' && navigator.mediaSession) {
+      try { navigator.mediaSession.playbackState = 'playing'; } catch (_) {}
+    }
+    return true;
+  }
+
+  _stopBgAudioBridge(syncBackToVideo = true) {
+    if (!this._bgAudioActive) return;
+    const bg = this._bgAudioEl;
+    const exitT = bg ? Number(bg.currentTime || 0) : 0;
+    this._bgAudioActive = false;
+    this._bgAudioEl = null;
+    if (bg) {
+      if (this._bgListeners) {
+        bg.removeEventListener('timeupdate', this._bgListeners.onTimeUpdate);
+        bg.removeEventListener('ended', this._bgListeners.onEnded);
+        bg.removeEventListener('pause', this._bgListeners.onPause);
+        bg.removeEventListener('loadedmetadata', this._bgListeners.onLoadedMeta);
+        this._bgListeners = null;
+      }
+      try { bg.pause(); } catch (_) {}
+      bg.dataset.bgActive = '';
+      if (this._bgHls) {
+        try { this._bgHls.detachMedia(); } catch (_) {}
+        try { this._bgHls.destroy(); } catch (_) {}
+        this._bgHls = null;
+      }
+      try {
+        bg.removeAttribute('src');
+        bg.load();
+      } catch (_) {}
+    }
+    if (syncBackToVideo && this.video && !this._destroyed) {
+      this._setBgVideoTracksEnabled(true);
+      let targetT = exitT > 0.5 ? exitT : Number(this.highestPlayedPos || 0);
+      const roomM = state.mesh?.media;
+      if (roomM && !roomM.live && isRoomMediaPlaying(roomM)) {
+        const exp = expectedPosition(roomM);
+        if (Number.isFinite(exp) && exp > 0.5 && Math.abs(exp - targetT) > 1.8 && Math.abs(exp - targetT) < 120) {
+          targetT = exp;
+        }
+      }
+      if (this.hls) {
+        try { this.hls.startLoad?.((!this.media?.live && targetT >= 0.5) ? targetT : -1); } catch (_) {}
+      }
+      if (!this.media?.live && targetT >= 0.5) {
+        if (this.video.readyState >= 1) {
+          if (Math.abs((this.video.currentTime || 0) - targetT) > 0.35) {
+            try { this.video.currentTime = targetT; } catch (_) {}
+          }
+        } else {
+          this.initialSeekPending = targetT;
+          this.loadedAtMs = Date.now();
+          this._bindInitSeekIfNeeded?.();
+        }
+      }
+      this.subs?.syncVideoVolume?.();
+    }
   }
 
   canControlVolume() {
@@ -1554,9 +1819,16 @@ export class Html5Adapter {
   play() {
     const av = this._activeMediaEl();
     if (this.hasEnded || av?.ended) return;
-    if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) this.autoplayHardBlocked = false;
+    if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) {
+      this.autoplayHardBlocked = false;
+      primeBgRelayAudio();
+    }
     this.wantPlaying = true;
-    if (av && av === this.iosPipVideo) { av.play()?.catch?.(() => {}); return; }
+    if (av && (av === this.iosPipVideo || av === this._bgAudioEl)) {
+      ensureIosPlaybackAudioSession();
+      av.play()?.catch?.(() => {});
+      return;
+    }
     this.tryPlay();
   }
   _nativeIosPipSourceUrl() {
@@ -1705,6 +1977,9 @@ export class Html5Adapter {
     this.wantPlaying = false;
     clearTimeout(this.resumeTimer);
     this._activeMediaEl()?.pause();
+    if (this._bgAudioActive && this.video) {
+      try { this.video.pause(); } catch (_) {}
+    }
     if (this._iosPipIsCanvasOnly) this.video?.pause();
     this._syncAndroidPipState(false);
     this._syncNativeIosPip(false);
@@ -1833,6 +2108,9 @@ export class Html5Adapter {
   setRate(r) {
     if (this.video && Math.abs(this.video.playbackRate - r) >= 0.005) this.video.playbackRate = r;
     if (this.iosPipVideo && Math.abs(this.iosPipVideo.playbackRate - r) >= 0.005) this.iosPipVideo.playbackRate = r;
+    if (this._bgAudioEl && Math.abs(this._bgAudioEl.playbackRate - r) >= 0.005) {
+      try { this._bgAudioEl.playbackRate = r; } catch (_) {}
+    }
   }
   getRate() { return Number(this._activeMediaEl()?.playbackRate || 1); }
   setVolume(v) {
@@ -1854,11 +2132,12 @@ export class Html5Adapter {
       this.subs.stopDubAudio();
     }
     if (this.video) this.video.muted = Boolean(m);
+    if (this._bgAudioEl && this._bgAudioActive) this._bgAudioEl.muted = Boolean(m || this.baseVolume <= 0);
     this.subs.syncVideoVolume();
     this._syncDeckBVolume?.();
     if (!m) this.events.onUnmuted?.();
   }
-  isMuted() { return !!this.video?.muted; }
+  isMuted() { return Boolean((this._bgAudioActive && this._bgAudioEl) ? this._bgAudioEl.muted : this.video?.muted); }
   getSubtitleTracks() { return this.subs.subtitleTracks; }
   getSelectedSubtitleId() { return this.subs.selectedSubId; }
   setSubtitleTrack(id) { return this.subs.setSubtitleTrack(id); }
@@ -1867,6 +2146,7 @@ export class Html5Adapter {
   setAudioTrack(id) { return this.subs.setAudioTrack(id); }
   switchStreamSource(newUrl) {
     if (!newUrl || !this.video) return;
+    if (this._bgAudioActive) this._stopBgAudioBridge(false);
     if (this.currentUrl && this.currentUrl !== newUrl) {
       this._pushFallbackAlt?.(this.currentUrl);
     }
@@ -2260,6 +2540,11 @@ export class Html5Adapter {
   }
   destroy() {
     this._releaseWakeLock();
+    if (Array.isArray(this._bgCheckTimers)) {
+      this._bgCheckTimers.forEach((tid) => clearTimeout(tid));
+      this._bgCheckTimers = [];
+    }
+    this._stopBgAudioBridge(false);
     if (this._visHandler && typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this._visHandler);
       this._visHandler = null;
