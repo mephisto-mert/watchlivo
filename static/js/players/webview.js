@@ -163,7 +163,7 @@ export class WebviewAdapter {
       let watchId = matchNf[1];
       // NSES-404 GUARD: If ID is short (< 7 digits, e.g. TMDB 1405), do not request /watch/{id} directly
       if (watchId && watchId.length < 7) {
-        const knownIds = { '1405': '70136126', '1396': '70143836', '1408': '70136117', '5920': '70140417', '105248': '81054853', '87083': '81249833', '428': '81427514', '577990': '81256740' };
+        const knownIds = { '1405': '70136126', '1396': '70143836', '1408': '70136117', '5920': '70155590', '105248': '81054853', '87083': '81249833', '428': '81427514', '577990': '81256740' };
         watchId = knownIds[watchId] || null;
       }
       let bridgePlayerUrl;

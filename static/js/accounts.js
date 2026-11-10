@@ -907,7 +907,7 @@ export const OFFICIAL_PLATFORM_MAP = {
       '1405': '70136126', // Dexter
       '1396': '70143836', // Breaking Bad
       '1408': '70136117', // House M.D.
-      '5920': '70140417', // The Mentalist
+      '5920': '70155590', // The Mentalist
       '105248': '81054853', // Cyberpunk: Edgerunners
       '87083': '81249833', // Vinland Saga
       '428': '81427514', // Monster
@@ -917,7 +917,7 @@ export const OFFICIAL_PLATFORM_MAP = {
       '63351': '80077209', // Narcos
       '71446': '80186863', // Money Heist
       '93405': '81040344', // Squid Game
-      '110316': '81144121', // Alice in Borderland
+      '110316': '80200575', // Alice in Borderland
     }
   },
   disney: {
