@@ -5,7 +5,7 @@ ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
-req = urllib.request.Request("https://watchlivo.online/static/js/views/selection-kinds.js?v=20261110_v177", headers={"User-Agent": "Mozilla/5.0"})
+req = urllib.request.Request("https://watchlivo.online/static/js/views/selection-kinds.js?v=20261110_v178", headers={"User-Agent": "Mozilla/5.0"})
 with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
     code = resp.read().decode("utf-8")
     assert "vOWcqC4oDQws1doDWLO7d3dh5qc" in code, "The Penguin authentic poster missing in live JS"
