@@ -7641,7 +7641,7 @@ _LATEST_EPS_MEM_CACHE: dict[str, object] = {"ts": 0.0, "items": []}
 
 _CURATED_ACTIVE_SERIES_SEEDS = [
     {"tmdbId": "95479", "title": "Jujutsu Kaisen", "originalTitle": "Jujutsu Kaisen", "season": 2, "episode": 23, "episodeTitle": "Shibuya Incident", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg", "year": "2024", "rating": 8.6},
-    {"tmdbId": "127532", "title": "Solo Leveling", "originalTitle": "Ore dake Level Up na Ken", "season": 2, "episode": 12, "episodeTitle": "Arise from the Shadow", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg", "year": "2025", "rating": 8.7},
+    {"tmdbId": "127532", "title": "Solo Leveling", "originalTitle": "Ore dake Level Up na Ken", "season": 2, "episode": 12, "episodeTitle": "Arise from the Shadow", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/eCD7WS9h4lCT8N4Xavc9u8R1IGk.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg", "year": "2025", "rating": 8.7},
     {"tmdbId": "37854", "title": "One Piece", "originalTitle": "One Piece", "season": 1, "episode": 1122, "episodeTitle": "Egghead Arc", "sourceBadge": "⛩️ Güncel Anime", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/cMD9Ygz11zjJzAovURpO75Qg7rT.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2rmK7mnchw9Xr3XdiTFSxTTLXqv.jpg", "year": "2025", "rating": 8.8},
     {"tmdbId": "228853", "title": "Prens", "originalTitle": "Prens", "season": 3, "episode": 1, "episodeTitle": "Yeni Sezon Bölümü", "sourceBadge": "🇹🇷 Yeni Yerli Bölüm", "provider": "blutv", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg", "year": "2025", "rating": 8.6},
     {"tmdbId": "115678", "title": "Gibi", "originalTitle": "Gibi", "season": 5, "episode": 13, "episodeTitle": "Sezon Finali", "sourceBadge": "🇹🇷 Exxen Yeni Bölüm", "provider": "exxen", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg", "year": "2025", "rating": 8.9},
@@ -9790,6 +9790,8 @@ def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title
     for raw_t in (orig_title, title):
         s = re.sub(r"\(\d{4}\)", "", str(raw_t or "")).strip()
         s = re.sub(r"\b(izle|full|hd|turkce|dublaj|altyazili)\b", "", s, flags=re.I).strip()
+        s = re.sub(r"\s*(?:[—–-]\s*)?(?:\d+\.\s*Sezon|\d+\.\s*Bölüm|S\d+\s*:\s*B\d+|Sezon\s*\d+|Bölüm\s*\d+).*$", "", s, flags=re.I).strip()
+        s = s.split(" — ")[0].split(" - ")[0].strip()
         s2 = re.sub(r"\s+\d{4}$", "", s).strip()
         for c in (s, s2):
             if len(c) >= 2 and c.lower() not in {x.lower() for x in cands}:
@@ -9812,7 +9814,7 @@ def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title
             for lang in ("tr-TR", "en-US"):
                 try:
                     u_tm = f"https://api.themoviedb.org/3/search/{ep}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "query": q, "language": lang})
-                    res_list = _http_json(u_tm, timeout=3.2).get("results") or []
+                    res_list = (_http_json(u_tm, timeout=3.2) or {}).get("results") or []
                     if year and len(year) == 4:
                         yr_m = [r for r in res_list if r.get("poster_path") and str(r.get("release_date") or r.get("first_air_date") or "")[:4] == year]
                         if yr_m:
@@ -12148,15 +12150,20 @@ _NETFLIX_BRIDGE_INJECTED_JS = r"""<base href="/api/netflix-bridge/">
 
 async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
     """Rave-parity Option B: In-browser reverse proxy for Netflix web session."""
+    client_origin = request.headers.get("origin")
+    cors_origin = client_origin if client_origin else "*"
+
     if request.method == "OPTIONS":
         return Response(
             b"",
             status_code=204,
             headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Origin": cors_origin,
+                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
                 "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Cookie",
                 "Access-Control-Allow-Credentials": "true",
+                "X-Frame-Options": "ALLOWALL",
+                "Content-Security-Policy": "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; media-src * blob: data:;",
             },
         )
 
@@ -12180,6 +12187,7 @@ async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
         "User-Agent": request.headers.get("user-agent") or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": request.headers.get("accept") or "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": request.headers.get("accept-language") or "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.netflix.com/",
     }
 
     client_cookie = request.headers.get("cookie", "")
@@ -12206,12 +12214,16 @@ async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
     except Exception as exc:
         return JSONResponse({"error": f"Netflix proxy connection error: {str(exc)}"}, status_code=502)
 
-    resp_content = resp.content
+    resp_content = resp.content or b""
     content_type = resp.headers.get("content-type", "")
 
     # Inject bridge script into HTML pages
-    if "text/html" in content_type.lower():
-        html_str = resp.text
+    if "text/html" in content_type.lower() and resp_content:
+        try:
+            html_str = resp.text
+        except Exception:
+            html_str = resp_content.decode("utf-8", errors="replace")
+
         head_tag_idx = html_str.lower().find("<head")
         if head_tag_idx != -1:
             close_head = html_str.find(">", head_tag_idx)
@@ -12222,17 +12234,29 @@ async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
         resp_content = html_str.encode("utf-8", errors="replace")
 
     out_headers = {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": cors_origin,
         "Access-Control-Allow-Credentials": "true",
         "X-Frame-Options": "ALLOWALL",
         "Content-Security-Policy": "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; media-src * blob: data:;",
     }
-    if content_type:
+
+    status_code = resp.status_code
+    if status_code in (204, 304):
+        resp_content = b""
+    elif content_type:
         out_headers["Content-Type"] = content_type
+
+    loc = resp.headers.get("location")
+    if loc:
+        if loc.startswith("https://www.netflix.com/"):
+            loc = loc.replace("https://www.netflix.com/", "/api/netflix-bridge/")
+        elif loc.startswith("/") and not loc.startswith("/api/netflix-bridge"):
+            loc = "/api/netflix-bridge" + loc
+        out_headers["Location"] = loc
 
     response = Response(
         content=resp_content,
-        status_code=resp.status_code,
+        status_code=status_code,
         headers=out_headers,
     )
 
@@ -12252,6 +12276,7 @@ async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
         pass
 
     return response
+
 
 def _is_admin_request(request: Request) -> bool:
     adm_secret = os.environ.get("ADMIN_SECRET", "").strip()
@@ -12758,8 +12783,8 @@ app = Starlette(
         Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
-        Route("/api/netflix-bridge", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
-        Route("/api/netflix-bridge/{rest:path}", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]),
+        Route("/api/netflix-bridge", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
+        Route("/api/netflix-bridge/{rest:path}", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         Route("/manifest.json", manifest_json, methods=["GET", "HEAD"]),
         Route("/manifest.webmanifest", manifest_json, methods=["GET", "HEAD"]),
         Route("/sw.js", service_worker),
