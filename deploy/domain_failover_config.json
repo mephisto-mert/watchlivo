@@ -1,0 +1,32 @@
+{
+  "project": "Watchlivo",
+  "version": "20261110_v168",
+  "active_domain": "https://watchlivo.online",
+  "failover_mirrors": [
+    "https://watchlivo.me",
+    "https://watchlivo.net",
+    "https://watchlivo.cc"
+  ],
+  "dmca_safe_registrars": [
+    {
+      "name": "Njalla",
+      "website": "https://njal.la",
+      "notes": "Privacy-by-design registrar, accepts Monero/Bitcoin, completely shields WHOIS & domain ownership"
+    },
+    {
+      "name": "FlokiNET",
+      "website": "https://flokinet.is",
+      "notes": "Iceland/Romania based DMCA-resistant bulletproof infrastructure"
+    },
+    {
+      "name": "IncogNet",
+      "website": "https://incognet.io",
+      "notes": "Privacy first, free speech DNS"
+    }
+  ],
+  "dns_proxy_rules": {
+    "cloudflare_orange_cloud": true,
+    "origin_ip_hidden": true,
+    "ssl_tls_mode": "Full (Strict)"
+  }
+}

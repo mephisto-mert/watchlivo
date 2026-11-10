@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261110_v167
+// Watchlivo Service Worker v20261110_v168
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">
