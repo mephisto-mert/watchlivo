@@ -3785,7 +3785,7 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
     if time.time() < _DDIZIMAG_DEAD_UNTIL:
         return []
     res = []
-    raw_cands = [_clean_query_title(x) for x in ([disp_title, title] + list(extra_titles or [])) if _clean_query_title(x)]
+    raw_cands = [_clean_query_title(x) for x in ([title, disp_title] + list(extra_titles or [])) if _clean_query_title(x)]
     q_cands = []
     for x in raw_cands:
         if ":" in x:
@@ -3990,7 +3990,7 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
 def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: str, ekey: str, year: str = "", imdb_id: str = "", extra_titles: list = None, source_url: str = "") -> list:
     import base64, hashlib
     res = []
-    raw_cands = [_clean_query_title(x) for x in ([disp_title, title] + list(extra_titles or [])) if _clean_query_title(x)]
+    raw_cands = [_clean_query_title(x) for x in ([title, disp_title] + list(extra_titles or [])) if _clean_query_title(x)]
     q_cands = []
     for x in raw_cands:
         if ":" in x:
@@ -4302,7 +4302,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
     res = []
     fallback_res = []
     es_list = _EMBED_SUB_CACHE.setdefault(ekey, [])
-    q_cands = [_clean_query_title(x) for x in ([disp_title, title] + list(extra_titles or [])) if _clean_query_title(x)]
+    q_cands = [_clean_query_title(x) for x in ([title, disp_title] + list(extra_titles or [])) if _clean_query_title(x)]
     for qc in list(q_cands):
         if "&" in qc:
             q_cands.append(qc.replace("&", " "))
@@ -6014,7 +6014,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         return (grp, x[0], x[1], var)
     picked.sort(key=_sub_sort_key)
     pre_tracks = [x[3] for x in picked[:14]]
-    live_tracks = _filter_live_subs(pre_tracks) if pre_tracks else []
+    live_tracks = list(pre_tracks) if pre_tracks else []
     if not any(t.get("lang") == "tr" for t in live_tracks) and live_tracks:
         fb_src_track = next((t for t in live_tracks if t.get("lang") == "en"), live_tracks[0])
         q_fb = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_src_track.get("url") or "")).query)
@@ -6174,17 +6174,21 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         orig_item = next((a for a in ((pmeta or {}).get("audioLangs") or []) if "[Orijinal]" in a), "")
         orig_lang = _norm_audio_lang(orig_item.split("[")[0])
     srcs = list(direct_list or [])[:10]
-    probe_targets = [(u, st) for u, st in srcs if not str(st).startswith("mp4") and u not in _AUDIO_LANG_HINT][:2]
+    _KNOWN_ST_LANGS = ("hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_fhd_multi", "hls_fhd_tr", "hls_fhd", "hls_hfnl_multi", "hls_hfnl", "hls_dl", "hls_dp", "hls_dbx", "hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_vm", "mp4_ac_sub", "mp4_ac_dub", "mp4_ar_tr", "mp4_ar")
+    probe_targets = [(u, st) for u, st in srcs if not str(st).startswith(("mp4", "hls_fp:")) and str(st) not in _KNOWN_ST_LANGS and u not in _AUDIO_LANG_HINT][:2]
     lang_map = {}
     if probe_targets:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(probe_targets)) as ppool:
+        ppool = concurrent.futures.ThreadPoolExecutor(max_workers=len(probe_targets))
+        try:
             futs = {ppool.submit(_probe_audio_langs, u, st, prov, tid, s, e, mtype): u for u, st in probe_targets}
-            done, _ = concurrent.futures.wait(futs, timeout=1.4)
+            done, _ = concurrent.futures.wait(futs, timeout=0.55)
             for f in done:
                 try:
-                    lang_map[futs[f]] = f.result()
+                    lang_map[futs[f]] = f.result(timeout=0.05)
                 except Exception:
                     lang_map[futs[f]] = None
+        finally:
+            ppool.shutdown(wait=False, cancel_futures=True)
     alive_srcs = [(u, st) for u, st in srcs if _STREAM_RES_HINT.get(u, 0) != -1]
     if alive_srcs:
         srcs = alive_srcs
@@ -6925,7 +6929,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         existing_sub_ids.add(cand_sid)
                         prepended_late.append({"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
                 if prepended_late:
-                    sub_tracks = sub_tracks + _filter_live_subs(prepended_late[:4])
+                    sub_tracks = sub_tracks + prepended_late[:4]
             if sub_tracks and not any(t.get("lang") == "tr" for t in sub_tracks):
                 fb_t = next((t for t in sub_tracks if t.get("lang") == "en"), sub_tracks[0])
                 q_t = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_t.get("url") or "")).query)
@@ -7063,6 +7067,8 @@ _RESOLVE_RESP_CACHE: dict[str, tuple[float, dict]] = {}
 _RESOLVE_LOCKS: dict[str, asyncio.Lock] = {}
 _CATALOG_LOCKS: dict[str, asyncio.Lock] = {}
 _SUPERSEARCH_CACHE: dict[str, tuple[float, dict]] = {}
+import concurrent.futures as _cf_mod
+_RESOLVE_EXECUTOR = _cf_mod.ThreadPoolExecutor(max_workers=32, thread_name_prefix="wl_resolve")
 
 
 def _is_origin_allowed(request: Request) -> bool:
@@ -7205,7 +7211,15 @@ async def resolve_catalog(request: Request):
             if cached and time.time() - cached[0] < 120:
                 return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
         try:
-            res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh, request, is_max_auth, auth_ctx), timeout=25)
+            loop_rc = asyncio.get_running_loop()
+            res = await asyncio.wait_for(
+                loop_rc.run_in_executor(
+                    _RESOLVE_EXECUTOR,
+                    _resolve_catalog_sync,
+                    prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh, request, is_max_auth, auth_ctx,
+                ),
+                timeout=25,
+            )
         except Exception:
             res = None
         if not res and valid_custom_stream:
@@ -7234,7 +7248,7 @@ async def resolve_catalog(request: Request):
     if isinstance(res, dict) and res.get("authRequired"):
         return JSONResponse(res, status_code=401, headers={"Cache-Control": "no-store"})
     try:
-        _track_analytics_sync("watch", title=(display_title or title), media_type=media_type)
+        _RESOLVE_EXECUTOR.submit(_track_analytics_sync, "watch", title=(display_title or title), media_type=media_type)
     except Exception:
         pass
     return JSONResponse(social_engine.rank_servers_by_health(res), headers=cc_hdrs)

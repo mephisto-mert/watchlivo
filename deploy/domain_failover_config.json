@@ -1,6 +1,6 @@
 {
   "project": "Watchlivo",
-  "version": "20261110_v187",
+  "version": "20261110_v188",
   "active_domain": "https://watchlivo.online",
   "failover_mirrors": [
     "https://watchlivo.me",
