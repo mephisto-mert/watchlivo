@@ -337,7 +337,7 @@ class SecurityHeaders:
                 if b"x-frame-options" not in existing_keys:
                     hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
                 if b"permissions-policy" not in existing_keys:
-                    hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*, encrypted-media=*"))
+                    hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"))
                 if b"strict-transport-security" not in existing_keys:
                     hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 if b"cross-origin-opener-policy" not in existing_keys:
@@ -2415,11 +2415,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     v_cat = _MAIN_SITES_VAULT.get("catalog") or {}
 
-    def _safe_poster_url(u_img: str, meta_it: dict | None = None, is_backdrop: bool = False) -> str:
+    def _safe_poster_url(u_img: str, meta_it: dict | None = None) -> str:
         u_img = str(u_img or "").strip()
-        if u_img.startswith("/") and not (u_img.startswith("/api/") or u_img.startswith("/static/")):
-            size = "w780" if is_backdrop else "w500"
-            return f"https://image.tmdb.org/t/p/{size}{u_img}"
         if u_img.startswith("/"):
             return u_img
         if "wsrv.nl/?url=" in u_img:
@@ -2584,8 +2581,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     seen_final_ids = set()
     seen_final_titles = set()
     for it_x in items:
-        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "", it_x, False)
-        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "", it_x, True)
+        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "", it_x)
+        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "", it_x)
         mt_x = "tv" if it_x.get("mediaType") == "tv" else "movie"
         tid_x = str(it_x.get("tmdbId") or "").strip()
         nt_x = _norm_title(it_x.get("title") or "")
@@ -3099,7 +3096,6 @@ JW_PROV = {
     "disney": (["dnp"], "TR"),
     "prime": (["prv"], "TR"),
     "max": (["mxx", "hbm"], "US"),
-    "apple": (["atp"], "TR"),
     "crunchyroll": (["cru"], "US"),
     "tubi": (["tbv"], "US"),
 }
@@ -3215,10 +3211,9 @@ _STREAM_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
 
 OFFICIAL_SEARCH_URLS = {
     "netflix": "https://www.netflix.com/search?q={q}",
-    "disney": "https://www.disneyplus.com/search?q={q}",
+    "disney": "https://www.disneyplus.com/search",
     "prime": "https://www.primevideo.com/search/ref=atv_nb_sr?phrase={q}",
     "max": "https://play.max.com/search?q={q}",
-    "apple": "https://tv.apple.com/search?q={q}",
     "crunchyroll": "https://www.crunchyroll.com/search?q={q}",
     "tubi": "https://tubitv.com/search/{q}",
     "cinema": "https://www.hdfilmcehennemi.nl/?s={q}",
@@ -5683,7 +5678,7 @@ def _fetch_platform_meta_sync(prov: str, title: str, tid: str, mtype: str = "mov
         hits = _justwatch_sync(q_clean, pkgs, country, 6) if q_clean else []
         if not hits and q_clean:
             hits = _justwatch_sync(q_clean, None, "TR", 6) or _justwatch_sync(q_clean, None, "US", 6)
-        match = next((h for h in hits if (tid and str(h.get("tmdbId") or "") == str(tid)) or (_norm_title(h.get("title") or "") == _norm_title(title))), None)
+        match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
         if match and match.get("offers"):
             pkg_set = set(pkgs or [])
             off = next((o for o in match["offers"] if o.get("short") in pkg_set), match["offers"][0])
@@ -6619,7 +6614,7 @@ def _build_max_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title,
     official_url = source_url or (pmeta.get("officialUrl") if pmeta else "") or ""
     if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
         hits = _justwatch_sync(_clean_query_title(disp or tr_title or orig_title), ["mxx", "hbm"], "US", 6)
-        match = next((h for h in hits if (tid and str(h.get("tmdbId") or "") == str(tid)) or (_norm_title(h.get("title") or "") == _norm_title(title))), None)
+        match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
         if match and match.get("officialUrl"):
             official_url = match["officialUrl"]
     if not official_url:
@@ -7089,19 +7084,13 @@ def _is_origin_allowed(request: Request) -> bool:
         allowed_origins = (
             "https://watchlivo.online",
             "http://watchlivo.online",
-            "https://watchlivo.me",
-            "https://watchlivo.net",
-            "https://watchlivo.cc",
-            "http://watchlivo.me",
-            "http://watchlivo.net",
-            "http://watchlivo.cc",
             "http://localhost",
             "http://127.0.0.1",
             "https://localhost",
             "https://127.0.0.1",
             "null",
         )
-        if not (any(origin.startswith(ao) for ao in allowed_origins) or origin.endswith(".vercel.app")):
+        if not any(origin.startswith(ao) for ao in allowed_origins):
             return False
 
     referer = (request.headers.get("referer") or "").strip().lower()
@@ -7109,19 +7098,13 @@ def _is_origin_allowed(request: Request) -> bool:
         allowed_refs = (
             "https://watchlivo.online",
             "http://watchlivo.online",
-            "https://watchlivo.me",
-            "https://watchlivo.net",
-            "https://watchlivo.cc",
-            "http://watchlivo.me",
-            "http://watchlivo.net",
-            "http://watchlivo.cc",
             "http://localhost",
             "http://127.0.0.1",
             "https://localhost",
             "https://127.0.0.1",
             "android-app://",
         )
-        if not (any(referer.startswith(ar) for ar in allowed_refs) or ".vercel.app" in referer):
+        if not any(referer.startswith(ar) for ar in allowed_refs):
             return False
 
     return True
@@ -7658,7 +7641,7 @@ _LATEST_EPS_MEM_CACHE: dict[str, object] = {"ts": 0.0, "items": []}
 
 _CURATED_ACTIVE_SERIES_SEEDS = [
     {"tmdbId": "95479", "title": "Jujutsu Kaisen", "originalTitle": "Jujutsu Kaisen", "season": 2, "episode": 23, "episodeTitle": "Shibuya Incident", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg", "year": "2024", "rating": 8.6},
-    {"tmdbId": "127532", "title": "Solo Leveling", "originalTitle": "Ore dake Level Up na Ken", "season": 2, "episode": 12, "episodeTitle": "Arise from the Shadow", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/eCD7WS9h4lCT8N4Xavc9u8R1IGk.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg", "year": "2025", "rating": 8.7},
+    {"tmdbId": "127532", "title": "Solo Leveling", "originalTitle": "Ore dake Level Up na Ken", "season": 2, "episode": 12, "episodeTitle": "Arise from the Shadow", "sourceBadge": "⛩️ Yeni Anime Bölümü", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg", "year": "2025", "rating": 8.7},
     {"tmdbId": "37854", "title": "One Piece", "originalTitle": "One Piece", "season": 1, "episode": 1122, "episodeTitle": "Egghead Arc", "sourceBadge": "⛩️ Güncel Anime", "provider": "cinema", "poster": "https://image.tmdb.org/t/p/w500/cMD9Ygz11zjJzAovURpO75Qg7rT.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2rmK7mnchw9Xr3XdiTFSxTTLXqv.jpg", "year": "2025", "rating": 8.8},
     {"tmdbId": "228853", "title": "Prens", "originalTitle": "Prens", "season": 3, "episode": 1, "episodeTitle": "Yeni Sezon Bölümü", "sourceBadge": "🇹🇷 Yeni Yerli Bölüm", "provider": "blutv", "poster": "https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg", "year": "2025", "rating": 8.6},
     {"tmdbId": "115678", "title": "Gibi", "originalTitle": "Gibi", "season": 5, "episode": 13, "episodeTitle": "Sezon Finali", "sourceBadge": "🇹🇷 Exxen Yeni Bölüm", "provider": "exxen", "poster": "https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg", "year": "2025", "rating": 8.9},
@@ -9807,8 +9790,6 @@ def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title
     for raw_t in (orig_title, title):
         s = re.sub(r"\(\d{4}\)", "", str(raw_t or "")).strip()
         s = re.sub(r"\b(izle|full|hd|turkce|dublaj|altyazili)\b", "", s, flags=re.I).strip()
-        s = re.sub(r"\s*(?:[—–-]\s*)?(?:\d+\.\s*Sezon|\d+\.\s*Bölüm|S\d+\s*:\s*B\d+|Sezon\s*\d+|Bölüm\s*\d+).*$", "", s, flags=re.I).strip()
-        s = s.split(" — ")[0].split(" - ")[0].strip()
         s2 = re.sub(r"\s+\d{4}$", "", s).strip()
         for c in (s, s2):
             if len(c) >= 2 and c.lower() not in {x.lower() for x in cands}:
@@ -9831,7 +9812,7 @@ def _resolve_fallback_poster_cdn_sync(url: str = "", title: str = "", orig_title
             for lang in ("tr-TR", "en-US"):
                 try:
                     u_tm = f"https://api.themoviedb.org/3/search/{ep}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "query": q, "language": lang})
-                    res_list = (_http_json(u_tm, timeout=3.2) or {}).get("results") or []
+                    res_list = _http_json(u_tm, timeout=3.2).get("results") or []
                     if year and len(year) == 4:
                         yr_m = [r for r in res_list if r.get("poster_path") and str(r.get("release_date") or r.get("first_air_date") or "")[:4] == year]
                         if yr_m:
@@ -12014,373 +11995,6 @@ async def rave_ga_collect_proxy(request: Request) -> Response:
     return Response(b"", status_code=204, headers={"Cache-Control": "no-store", "Access-Control-Allow-Origin": "*"})
 
 
-_NETFLIX_BRIDGE_LIMIT = RateLimiter(600, 60.0, name="netflix_bridge")
-
-_NETFLIX_BRIDGE_INJECTED_JS = r"""<base href="/api/netflix-bridge/">
-<script id="watchlivo-netflix-bridge-agent">
-(function() {
-  console.log('[Watchlivo Netflix Bridge] Active in Netflix session context');
-
-  // 1. Monkey-patch fetch and XMLHttpRequest for relative routes
-  const origFetch = window.fetch;
-  window.fetch = function(resource, init) {
-    try {
-      if (typeof resource === 'string') {
-        if (resource.startsWith('https://www.netflix.com/')) {
-          resource = resource.replace('https://www.netflix.com/', '/api/netflix-bridge/');
-        } else if (resource.startsWith('/') && !resource.startsWith('/api/netflix-bridge')) {
-          resource = '/api/netflix-bridge' + resource;
-        }
-      } else if (resource && resource.url) {
-        let u = resource.url;
-        if (u.startsWith('https://www.netflix.com/')) {
-          u = u.replace('https://www.netflix.com/', '/api/netflix-bridge/');
-          resource = new Request(u, resource);
-        } else if (u.startsWith('/') && !u.startsWith('/api/netflix-bridge')) {
-          u = '/api/netflix-bridge' + u;
-          resource = new Request(u, resource);
-        }
-      }
-    } catch (_) {}
-    return origFetch.call(this, resource, init);
-  };
-
-  const origXhrOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-    try {
-      if (typeof url === 'string') {
-        if (url.startsWith('https://www.netflix.com/')) {
-          url = url.replace('https://www.netflix.com/', '/api/netflix-bridge/');
-        } else if (url.startsWith('/') && !url.startsWith('/api/netflix-bridge')) {
-          url = '/api/netflix-bridge' + url;
-        }
-      }
-    } catch (_) {}
-    return origXhrOpen.call(this, method, url, ...rest);
-  };
-
-  // 2. Intercept navigation and clicks to catch watch IDs
-  function checkCurrentWatch() {
-    try {
-      const curUrl = location.href;
-      const m = curUrl.match(/(?:netflix\.com)?\/(?:[a-z-]+\/)?(?:watch|title)\/(\d+)/i) || location.pathname.match(/\/(?:watch|title)\/(\d+)/i);
-      if (m && m[1]) {
-        const watchId = m[1];
-        const titleEl = document.querySelector('.video-title, [data-uia="video-title"], .previewModal--player_title_treatment_wrapper, h4, h1') || document.title;
-        const title = (typeof titleEl === 'string' ? titleEl : titleEl?.innerText) || document.title || ('Netflix #' + watchId);
-        window.parent.postMessage({
-          type: 'WATCHLIVO_NETFLIX_PICK',
-          watchId: watchId,
-          url: 'https://www.netflix.com/watch/' + watchId,
-          title: String(title).replace(' - Netflix', '').trim()
-        }, '*');
-      }
-    } catch (_) {}
-  }
-
-  const origPushState = history.pushState;
-  history.pushState = function(state, unused, url) {
-    if (typeof url === 'string') {
-      if (url.startsWith('https://www.netflix.com/')) {
-        url = url.replace('https://www.netflix.com/', '/api/netflix-bridge/');
-      } else if (url.startsWith('/') && !url.startsWith('/api/netflix-bridge')) {
-        url = '/api/netflix-bridge' + url;
-      }
-    }
-    const res = origPushState.call(this, state, unused, url);
-    setTimeout(checkCurrentWatch, 300);
-    return res;
-  };
-
-  const origReplaceState = history.replaceState;
-  history.replaceState = function(state, unused, url) {
-    if (typeof url === 'string') {
-      if (url.startsWith('https://www.netflix.com/')) {
-        url = url.replace('https://www.netflix.com/', '/api/netflix-bridge/');
-      } else if (url.startsWith('/') && !url.startsWith('/api/netflix-bridge')) {
-        url = '/api/netflix-bridge' + url;
-      }
-    }
-    const res = origReplaceState.call(this, state, unused, url);
-    setTimeout(checkCurrentWatch, 300);
-    return res;
-  };
-
-  window.addEventListener('popstate', () => setTimeout(checkCurrentWatch, 300));
-  document.addEventListener('click', (e) => {
-    setTimeout(checkCurrentWatch, 500);
-    const link = e.target.closest('a');
-    if (link && link.href) {
-      const match = link.href.match(/(?:watch|title)\/(\d+)/i);
-      if (match && match[1]) {
-        const watchId = match[1];
-        const titleEl = link.querySelector('.fallback-text, img') || link;
-        const titleText = titleEl.getAttribute?.('alt') || titleEl.innerText || document.title;
-        window.parent.postMessage({
-          type: 'WATCHLIVO_NETFLIX_PICK',
-          watchId: watchId,
-          url: 'https://www.netflix.com/watch/' + watchId,
-          title: String(titleText).replace(' - Netflix', '').trim()
-        }, '*');
-      }
-    }
-  }, true);
-
-  // 3. Monitor HTML5 video playback for real-time room sync
-  let hookedVideo = null;
-  function hookVideo() {
-    const v = document.querySelector('video');
-    if (v && v !== hookedVideo) {
-      hookedVideo = v;
-      v.addEventListener('play', () => {
-        window.parent.postMessage({ type: 'WATCHLIVO_NETFLIX_SYNC', action: 'play', currentTime: v.currentTime }, '*');
-      });
-      v.addEventListener('pause', () => {
-        window.parent.postMessage({ type: 'WATCHLIVO_NETFLIX_SYNC', action: 'pause', currentTime: v.currentTime }, '*');
-      });
-      v.addEventListener('seeked', () => {
-        window.parent.postMessage({ type: 'WATCHLIVO_NETFLIX_SYNC', action: 'seeked', currentTime: v.currentTime }, '*');
-      });
-    }
-  }
-  setInterval(hookVideo, 1000);
-
-  // 4. Listen for commands from parent Watchlivo window
-  window.addEventListener('message', (ev) => {
-    if (!ev.data || typeof ev.data !== 'object') return;
-    const v = document.querySelector('video');
-    if (!v) return;
-    if (ev.data.action === 'play') v.play().catch(() => {});
-    if (ev.data.action === 'pause') v.pause();
-    if (ev.data.action === 'seek' && typeof ev.data.time === 'number') {
-      if (Math.abs(v.currentTime - ev.data.time) > 1.2) {
-        v.currentTime = ev.data.time;
-      }
-    }
-  });
-
-  window.parent.postMessage({ type: 'WATCHLIVO_NETFLIX_READY', url: location.href }, '*');
-  setTimeout(checkCurrentWatch, 1200);
-})();
-</script>"""
-
-
-
-_NETFLIX_KNOWN_IDS = {
-    "1405": "70136126",    # Dexter
-    "1396": "70143836",    # Breaking Bad
-    "1408": "70136117",    # House M.D.
-    "5920": "70155590",    # The Mentalist (Fixed NSES-404)
-    "105248": "81054853",  # Cyberpunk: Edgerunners
-    "87083": "81249833",   # Vinland Saga
-    "428": "81427514",     # Monster
-    "577990": "81256740",  # Organize İşler: Karun Hazinesi
-    "66732": "80057281",   # Stranger Things
-    "94605": "80241318",   # Wednesday
-    "63351": "80077209",   # Narcos
-    "71446": "80186863",   # Money Heist
-    "93405": "81040344",   # Squid Game
-    "110316": "80200575",  # Alice in Borderland (Fixed NSES-404)
-}
-_NETFLIX_RESOLVED_CACHE: dict[str, str] = {}
-
-def _resolve_netflix_watch_id_sync(title: str, tmdb_id: str = "") -> str | None:
-    tid_clean = str(tmdb_id or "").strip()
-    if tid_clean and tid_clean in _NETFLIX_KNOWN_IDS:
-        return _NETFLIX_KNOWN_IDS[tid_clean]
-    clean_t = re.sub(r"\s*\(\d{4}\)\s*$", "", title).strip() or title
-    ckey = f"{clean_t.lower()}|{tid_clean}"
-    if ckey in _NETFLIX_RESOLVED_CACHE:
-        return _NETFLIX_RESOLVED_CACHE[ckey]
-    resolved_nid = None
-    target_norm = _norm_title(clean_t)
-    for country in ("TR", "US", "GB"):
-        try:
-            hits = _justwatch_sync(clean_t, packages=["nfx"], country=country, first=6)
-            for h in (hits or []):
-                h_tid = str(h.get("tmdbId") or "").strip()
-                h_norm = _norm_title(h.get("title") or "")
-                if tid_clean and h_tid:
-                    if h_tid != tid_clean:
-                        continue
-                elif target_norm and h_norm:
-                    if h_norm != target_norm:
-                        continue
-                else:
-                    continue
-                u = h.get("officialUrl") or ""
-                m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:title|watch)/(\d+)", u)
-                if m:
-                    resolved_nid = m.group(1)
-                    break
-        except Exception:
-            pass
-        if resolved_nid:
-            break
-    _NETFLIX_RESOLVED_CACHE[ckey] = resolved_nid
-    return resolved_nid
-
-async def resolve_netflix_id_endpoint(request: Request) -> JSONResponse:
-    title = (request.query_params.get("title") or "").strip()
-    tmdb_id = (request.query_params.get("tmdbId") or "").strip()
-    netflix_id = await asyncio.to_thread(_resolve_netflix_watch_id_sync, title, tmdb_id)
-    if netflix_id:
-        return JSONResponse({
-            "ok": True,
-            "netflixId": netflix_id,
-            "watchUrl": f"https://www.netflix.com/watch/{netflix_id}",
-            "titleUrl": f"https://www.netflix.com/title/{netflix_id}",
-            "searchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
-        })
-    return JSONResponse({
-        "ok": False,
-        "netflixId": None,
-        "watchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
-        "searchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
-    })
-
-async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
-    """Rave-parity Option B: In-browser reverse proxy for Netflix web session."""
-    client_origin = request.headers.get("origin")
-    cors_origin = client_origin if client_origin else "*"
-
-    if request.method == "OPTIONS":
-        return Response(
-            b"",
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": cors_origin,
-                "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, Cookie",
-                "Access-Control-Allow-Credentials": "true",
-                "X-Frame-Options": "ALLOWALL",
-                "Content-Security-Policy": "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; media-src * blob: data:;",
-            },
-        )
-
-    allowed, _ = _NETFLIX_BRIDGE_LIMIT.hit(client_ip(request))
-    if not allowed:
-        return JSONResponse({"error": "Rate limit exceeded on netflix bridge"}, status_code=429)
-
-    rest = request.path_params.get("rest", "").strip("/")
-    # NSES-404 PRE-FETCH GUARD: If short TMDB ID is requested as watch ID, rewrite to real Netflix ID or search
-    m_watch = re.match(r"^watch/(\d+)$", rest)
-    if m_watch:
-        w_id = m_watch.group(1)
-        if len(w_id) < 7:
-            q_title = request.query_params.get("title") or ""
-            real_nid = _resolve_netflix_watch_id_sync(q_title, w_id)
-            if real_nid:
-                rest = f"watch/{real_nid}"
-            else:
-                q_term = q_title or "browse"
-                rest = f"search?q={urllib.parse.quote(q_term)}"
-    if not rest or rest in ("login", "browse"):
-        target_path = rest if rest else "browse"
-    else:
-        target_path = rest
-
-    target_url = f"https://www.netflix.com/{target_path}"
-    if request.url.query:
-        target_url += f"?{request.url.query}"
-
-    from curl_cffi import requests as cffi_requests
-
-    fwd_headers = {
-        "User-Agent": request.headers.get("user-agent") or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": request.headers.get("accept") or "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": request.headers.get("accept-language") or "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.netflix.com/",
-    }
-
-    client_cookie = request.headers.get("cookie", "")
-    if client_cookie:
-        fwd_headers["Cookie"] = client_cookie
-
-    req_body = await request.body() if request.method in ("POST", "PUT", "PATCH") else None
-    if req_body and "content-type" in request.headers:
-        fwd_headers["Content-Type"] = request.headers["content-type"]
-
-    try:
-        def _fetch_sync():
-            return cffi_requests.request(
-                method=request.method,
-                url=target_url,
-                headers=fwd_headers,
-                data=req_body,
-                impersonate="chrome124",
-                allow_redirects=True,
-                timeout=20,
-            )
-
-        resp = await asyncio.to_thread(_fetch_sync)
-    except Exception as exc:
-        return JSONResponse({"error": f"Netflix proxy connection error: {str(exc)}"}, status_code=502)
-
-    resp_content = resp.content or b""
-    content_type = resp.headers.get("content-type", "")
-
-    # Inject bridge script into HTML pages
-    if "text/html" in content_type.lower() and resp_content:
-        try:
-            html_str = resp.text
-        except Exception:
-            html_str = resp_content.decode("utf-8", errors="replace")
-
-        head_tag_idx = html_str.lower().find("<head")
-        if head_tag_idx != -1:
-            close_head = html_str.find(">", head_tag_idx)
-            if close_head != -1:
-                html_str = html_str[:close_head+1] + "\n" + _NETFLIX_BRIDGE_INJECTED_JS + "\n" + html_str[close_head+1:]
-        else:
-            html_str = _NETFLIX_BRIDGE_INJECTED_JS + "\n" + html_str
-        resp_content = html_str.encode("utf-8", errors="replace")
-
-    out_headers = {
-        "Access-Control-Allow-Origin": cors_origin,
-        "Access-Control-Allow-Credentials": "true",
-        "X-Frame-Options": "ALLOWALL",
-        "Content-Security-Policy": "frame-ancestors *; default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; media-src * blob: data:;",
-    }
-
-    status_code = resp.status_code
-    if status_code in (204, 304):
-        resp_content = b""
-    elif content_type:
-        out_headers["Content-Type"] = content_type
-
-    loc = resp.headers.get("location")
-    if loc:
-        if loc.startswith("https://www.netflix.com/"):
-            loc = loc.replace("https://www.netflix.com/", "/api/netflix-bridge/")
-        elif loc.startswith("/") and not loc.startswith("/api/netflix-bridge"):
-            loc = "/api/netflix-bridge" + loc
-        out_headers["Location"] = loc
-
-    response = Response(
-        content=resp_content,
-        status_code=status_code,
-        headers=out_headers,
-    )
-
-    # Persist session cookies directly to the client domain
-    try:
-        if hasattr(resp, "cookies") and resp.cookies:
-            for ck, cv in resp.cookies.items():
-                response.set_cookie(
-                    key=ck,
-                    value=cv,
-                    path="/",
-                    secure=True,
-                    httponly=False,
-                    samesite="lax",
-                )
-    except Exception:
-        pass
-
-    return response
-
-
 def _is_admin_request(request: Request) -> bool:
     adm_secret = os.environ.get("ADMIN_SECRET", "").strip()
     if not adm_secret:
@@ -12886,9 +12500,6 @@ app = Starlette(
         Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
-        Route("/api/rave/resolve-netflix-id", resolve_netflix_id_endpoint),
-        Route("/api/netflix-bridge", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
-        Route("/api/netflix-bridge/{rest:path}", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         Route("/manifest.json", manifest_json, methods=["GET", "HEAD"]),
         Route("/manifest.webmanifest", manifest_json, methods=["GET", "HEAD"]),
         Route("/sw.js", service_worker),
@@ -13020,7 +12631,6 @@ app = Starlette(
         Route("/api/rooms/{room_id}/poll", rooms.http_sync, methods=["GET", "POST"]),
         Route("/api/rooms/{room_id}/action", rooms.http_sync, methods=["POST"]),
         WebSocketRoute("/ws/{room_id}", rooms.ws_endpoint),
-        WebSocketRoute("/ws/room/{room_id}", rooms.ws_endpoint),
         Mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), check_dir=False), name="uploads"),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],

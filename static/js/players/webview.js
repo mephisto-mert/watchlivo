@@ -87,17 +87,7 @@ export class WebviewAdapter {
     clearInterval(this.timer);
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
-    const _DEFAULT_PROV_URLS = {
-      netflix: 'https://www.netflix.com/browse',
-      max: 'https://play.max.com',
-      hbomax: 'https://play.max.com',
-      disney: 'https://www.disneyplus.com',
-      prime: 'https://www.primevideo.com',
-      apple: 'https://tv.apple.com',
-      crunchyroll: 'https://www.crunchyroll.com',
-    };
-    const defaultUrl = _DEFAULT_PROV_URLS[media?.provider] || 'https://play.max.com';
-    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : defaultUrl;
+    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : 'https://play.max.com';
     this.baseTime = Math.max(0, Number(startAt) || 0);
     this.state.t = this.baseTime;
     this.duration = Number(media?.duration) || (media?.mediaType === 'tv' ? 2700 : 7200);
@@ -155,91 +145,15 @@ export class WebviewAdapter {
       position:relative;overflow:hidden;
     `;
 
-        const isNf = /netflix.com/i.test(this.mediaUrl) || media?.provider === 'netflix';
-
-    // Option B: Direct embedded Netflix playback inside room for web users (Rave parity)
-    if (isNf && !this._isDesktop) {
-      const matchNf = (this.mediaUrl || '').match(/watch\/(\d+)/i) || (media?.id || '').match(/netflix-(\d+)/i) || [];
-      let watchId = matchNf[1];
-      // NSES-404 GUARD: If ID is short (< 7 digits, e.g. TMDB 1405), do not request /watch/{id} directly
-      if (watchId && watchId.length < 7) {
-        const knownIds = { '1405': '70136126', '1396': '70143836', '1408': '70136117', '5920': '70155590', '105248': '81054853', '87083': '81249833', '428': '81427514', '577990': '81256740' };
-        watchId = knownIds[watchId] || null;
-      }
-      let bridgePlayerUrl;
-      if (watchId) {
-        bridgePlayerUrl = `/api/netflix-bridge/watch/${watchId}`;
-      } else if (media?.title) {
-        bridgePlayerUrl = `/api/netflix-bridge/search?q=${encodeURIComponent(media.title)}`;
-      } else {
-        bridgePlayerUrl = (this.mediaUrl && this.mediaUrl.startsWith('/api/netflix-bridge')) ? this.mediaUrl : `/api/netflix-bridge/browse`;
-      }
-
-      this.container.replaceChildren();
-      const wrap = document.createElement('div');
-      wrap.className = 'netflix-bridge-embedded-player';
-      wrap.style.cssText = 'width:100%;height:100%;display:flex;flex-direction:column;background:#000;position:relative;overflow:hidden;';
-
-      const bar = document.createElement('div');
-      bar.className = 'netflix-bridge-top-bar';
-      bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:rgba(10,10,14,0.95);border-bottom:1px solid rgba(229,9,20,0.3);font-size:12px;color:#cbd5e1;flex-shrink:0;z-index:10;';
-      bar.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-weight:900;color:#e50914;letter-spacing:1px;font-size:13px;">NETFLIX</span>
-          <span style="background:rgba(229,9,20,0.15);color:#f87171;padding:2px 8px;border-radius:4px;font-weight:700;font-size:11px;">Rave Köprüsü (Canlı Senkron)</span>
-          <span style="color:#94a3b8;">·</span>
-          <span style="color:#ffffff;font-weight:700;">${media?.title || 'Netflix'}</span>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <button id="nf-player-reload-btn" type="button" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;">🔄 Yenile</button>
-          <button id="nf-player-popup-btn" type="button" style="background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;">Ayrı Pencerede Aç ↗</button>
-        </div>
-      `;
-
-      const iframe = document.createElement('iframe');
-      iframe.id = 'watchlivo-netflix-video-frame';
-      iframe.src = bridgePlayerUrl;
-      iframe.allow = 'autoplay; encrypted-media; fullscreen; picture-in-picture';
-      iframe.style.cssText = 'width:100%;flex:1;border:none;background:#000;';
-
-      wrap.appendChild(bar);
-      wrap.appendChild(iframe);
-      this.container.appendChild(wrap);
-      this.bridgeIframe = iframe;
-
-      const reloadBtn = bar.querySelector('#nf-player-reload-btn');
-      if (reloadBtn) reloadBtn.onclick = () => { iframe.src = iframe.src; };
-
-      const popupBtn = bar.querySelector('#nf-player-popup-btn');
-      if (popupBtn) popupBtn.onclick = () => {
-        window.open(this.mediaUrl || `https://www.netflix.com/watch/${watchId}`, 'vortex_netflix_pop', 'width=1280,height=760');
-      };
-
-      this.timer = setInterval(() => {
-        const cur = this.getTime();
-        this.state.t = cur;
-        this.state.d = this.duration;
-        this.state.paused = this.paused;
-      }, 500);
-
-      this.events.onBuffering?.(false);
-      this.events.onReady?.();
-      if (shouldPlay) this.events.onPlay?.();
-      return;
-    }
-
-        const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
-    const isPrime = /primevideo\.com|amazon\./i.test(this.mediaUrl) || media?.provider === 'prime';
-    const isApple = /tv\.apple\.com/i.test(this.mediaUrl) || media?.provider === 'apple';
-    const isDisney = /disneyplus\.com/i.test(this.mediaUrl) || media?.provider === 'disney';
-    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (isPrime ? 'Prime Video' : (isApple ? 'Apple TV+' : (isDisney ? 'Disney+' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı')))));
-    const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : (isApple ? '#f8fafc' : (isDisney ? '#60a5fa' : '#38bdf8')));
-    const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : (isApple ? 'rgba(255,255,255,0.12)' : (isDisney ? 'rgba(0,99,229,0.25)' : 'rgba(56,189,248,0.2)')));
-    const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : (isApple ? '#ffffff' : (isDisney ? '#0063e5' : '#38bdf8')));
-    const provDotBg = isNf ? '#ef4444' : (isApple ? '#ffffff' : (isDisney ? '#0063e5' : '#38bdf8'));
-    const openBtnColor = isNf ? '#e50914' : (isMax ? '#002be7' : (isApple ? '#ffffff' : (isPrime ? '#00a8e1' : (isDisney ? '#0063e5' : '#2563eb'))));
-    const openBtnTextColor = isApple ? '#000000' : '#ffffff';
-    const playBtnGrad = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : (isMax ? 'linear-gradient(135deg, #002be7, #2563eb)' : (isDisney ? 'linear-gradient(135deg, #0063e5, #002be7)' : 'linear-gradient(135deg, #2563eb, #1d4ed8)'));
+    const isNf = /netflix\.com/i.test(this.mediaUrl) || media?.provider === 'netflix';
+    const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
+    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı'));
+    const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : '#38bdf8');
+    const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : 'rgba(56,189,248,0.2)');
+    const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : '#38bdf8');
+    const provDotBg = isNf ? '#ef4444' : '#38bdf8';
+    const openBtnColor = isNf ? '#e50914' : (isMax ? '#002be7' : '#2563eb');
+    const playBtnGrad = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : 'linear-gradient(135deg, #002be7, #2563eb)';
 
     bridge.innerHTML = `
       <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.92);backdrop-filter:blur(16px);border:1px solid ${isNf ? 'rgba(229,9,20,0.45)' : 'rgba(255,255,255,0.12)'};border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.7), 0 0 30px ${isNf ? 'rgba(229,9,20,0.25)' : 'rgba(0,43,231,0.2)'};">
@@ -251,7 +165,7 @@ export class WebviewAdapter {
           ${media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı'))}
         </h2>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#94a3b8;">
-          Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle ${provName} ayrı pencerede veya sekmede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.
+          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Max ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.'}
         </p>
         <div style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
           <div style="text-align:left;">
@@ -279,7 +193,7 @@ export class WebviewAdapter {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
-          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:${openBtnTextColor};font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
+          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
             🎬 ${provName}'te Aç (Yan Yana İzle)
           </button>
           <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
@@ -303,7 +217,7 @@ export class WebviewAdapter {
     const openBtn = bridge.querySelector('#vortex-bridge-open-btn');
     if (openBtn) {
       openBtn.onclick = () => {
-        this.targetWindow = window.open(this.mediaUrl, `vortex_${media?.provider || 'drm'}_player`, 'width=1280,height=760,menubar=no,toolbar=no');
+        this.targetWindow = window.open(this.mediaUrl, 'vortex_max_player', 'width=1280,height=760,menubar=no,toolbar=no');
         this.play();
       };
     }
@@ -445,7 +359,6 @@ export class WebviewAdapter {
     };
     try { this.syncChannel?.postMessage(packet); } catch (_) {}
     try { this.targetWindow?.postMessage(packet, '*'); } catch (_) {}
-    try { this.bridgeIframe?.contentWindow?.postMessage({ action, time: this.getTime(), currentTime: this.getTime() }, '*'); } catch (_) {}
   }
 
   play() {

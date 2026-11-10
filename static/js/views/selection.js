@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v180';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v180';
-import { api, qs } from '../api.js?v=20261110_v180';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261110_v180';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v180';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v180';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v180';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v181';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v181';
+import { api, qs } from '../api.js?v=20261110_v181';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261110_v181';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v181';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v181';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v181';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v180';
+} from '../store.js?v=20261110_v181';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -489,7 +489,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let trendingLoading = false;
   let latestEpsItems = [
     { id: 'ep-95479-s2e23', tmdbId: '95479', mediaType: 'tv', title: 'Jujutsu Kaisen', originalTitle: 'Jujutsu Kaisen', season: 2, episode: 23, episodeLabel: 'S2:B23', episodeTitle: 'Shibuya Incident', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg', year: '2024', rating: 8.6 },
-    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/eCD7WS9h4lCT8N4Xavc9u8R1IGk.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg', year: '2025', rating: 8.7 },
+    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/4Mt7WHox67uJ1yErwTBFcV8KWgG.jpg', year: '2025', rating: 8.7 },
     { id: 'ep-228853-s3e1', tmdbId: '228853', mediaType: 'tv', title: 'Prens', originalTitle: 'Prens', season: 3, episode: 1, episodeLabel: 'S3:B1', episodeTitle: 'Yeni Sezon Bölümü', sourceBadge: '🇹🇷 Yeni Yerli Bölüm', provider: 'blutv', poster: 'https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg', year: '2025', rating: 8.6 },
     { id: 'ep-115678-s5e13', tmdbId: '115678', mediaType: 'tv', title: 'Gibi', originalTitle: 'Gibi', season: 5, episode: 13, episodeLabel: 'S5:B13', episodeTitle: 'Sezon Finali', sourceBadge: '🇹🇷 Exxen Yeni Bölüm', provider: 'exxen', poster: 'https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg', year: '2025', rating: 8.9 },
     { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },

@@ -26,7 +26,7 @@ for i in range(50):
         req = urllib.request.Request("https://watchlivo.online/", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0"})
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
-            if "20261110_v180" in body:
+            if "20261110_v181" in body:
                 print(f"\n[LIVE CONFIRMED] v169 is LIVE on watchlivo.online in {int(time.time() - start)}s!")
                 deployed = True
                 break

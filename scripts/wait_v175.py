@@ -3,7 +3,7 @@ import time
 
 HOOK = "https://api.render.com/deploy/srv-dbmnb7etlv9c73bgmfi0?key=W3Qbb8j__WQ"
 PROD = "https://watchlivo.online/static/index.html"
-VERSION_TARGET = "20261110_v180"
+VERSION_TARGET = "20261110_v181"
 
 print("Triggering Render deploy for v175...", flush=True)
 req = urllib.request.Request(HOOK, method="POST")

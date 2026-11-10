@@ -1,13 +1,13 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261110_v180';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261110_v180';
-import { navIcon, logo } from './home.js?v=20261110_v180';
-import { createSelection } from './selection.js?v=20261110_v180';
-import { buildControls } from './controls.js?v=20261110_v180';
-import { buildChat } from './chat.js?v=20261110_v180';
-import { PANELS } from './panels.js?v=20261110_v180';
-import { getAccount, openNetflixLoginModal, openProviderLoginModal } from '../accounts.js?v=20261110_v180';
-import { getProvider } from '../providers.js?v=20261110_v180';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261110_v181';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261110_v181';
+import { navIcon, logo } from './home.js?v=20261110_v181';
+import { createSelection } from './selection.js?v=20261110_v181';
+import { buildControls } from './controls.js?v=20261110_v181';
+import { buildChat } from './chat.js?v=20261110_v181';
+import { PANELS } from './panels.js?v=20261110_v181';
+import { getAccount, openNetflixLoginModal, openProviderLoginModal } from '../accounts.js?v=20261110_v181';
+import { getProvider } from '../providers.js?v=20261110_v181';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };

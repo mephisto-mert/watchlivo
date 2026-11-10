@@ -27,7 +27,7 @@ for t, mt in titles:
         print(f"[FAIL] {t} -> {e}")
 
 print("\n=== 2. VERIFYING LIVE SELECTION-KINDS.JS CONTENT ===")
-js_url = "https://watchlivo.online/static/js/views/selection-kinds.js?v=20261110_v180"
+js_url = "https://watchlivo.online/static/js/views/selection-kinds.js?v=20261110_v181"
 req = urllib.request.Request(js_url, headers={'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache'})
 with urllib.request.urlopen(req, timeout=12) as resp:
     js_text = resp.read().decode('utf-8', errors='ignore')

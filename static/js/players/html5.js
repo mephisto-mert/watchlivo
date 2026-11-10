@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v180';
-import { expectedPosition } from '../sync.js?v=20261110_v180';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v180';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v180';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v180';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v181';
+import { expectedPosition } from '../sync.js?v=20261110_v181';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v181';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v181';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v181';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -799,13 +799,13 @@ export class Html5Adapter {
         if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
         const targetPos = this.initialSeekPending;
         const curT = Number(v.currentTime || 0);
-        if (Math.abs(curT - targetPos) <= 1.5) {
+        if (curT >= targetPos - 1.5) {
           clearInitSeekListeners();
           return;
         }
         try {
           v.currentTime = targetPos;
-          if (Math.abs(Number(v.currentTime || 0) - targetPos) <= 1.5) {
+          if (Number(v.currentTime || 0) >= targetPos - 1.5) {
             clearInitSeekListeners();
           }
         } catch (e) { /* ignore */ }

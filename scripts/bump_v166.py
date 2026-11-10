@@ -10,8 +10,8 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-OLD_VERSION = "20261110_v165"
-NEW_VERSION = "20261110_v180"
+OLD_VERSION = "20261110_v181"
+NEW_VERSION = "20261110_v181"
 exclude_dirs = {".git", ".pytest_cache", "node_modules", "__pycache__", ".vercel", "uploads", "desktop_old_versions_backup"}
 self_path = Path(__file__).resolve()
 

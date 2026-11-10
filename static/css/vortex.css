@@ -7754,31 +7754,3 @@ body.tv-nav-active .dock-item:focus {
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
 }
-
-
-/* Full-Width Billboard for Mobile Screens (< 768px) */
-@media (max-width: 768px) {
-  .rave-platform-hero-billboard {
-    margin: 8px 0 !important;
-    border-radius: 0 !important;
-    min-height: 240px !important;
-    padding: 20px 14px 16px !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-  }
-  .rave-platform-hero-billboard h2 {
-    font-size: 22px !important;
-    line-height: 1.2 !important;
-  }
-  .rave-platform-hero-billboard p {
-    font-size: 12px !important;
-    display: -webkit-box !important;
-    -webkit-line-clamp: 2 !important;
-    -webkit-box-orient: vertical !important;
-    overflow: hidden !important;
-  }
-  .rave-platform-hero-billboard button {
-    padding: 8px 16px !important;
-    font-size: 13px !important;
-  }
-}

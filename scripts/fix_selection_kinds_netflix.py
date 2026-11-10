@@ -8,8 +8,8 @@ with open(FILE_PATH, "r", encoding="utf-8") as f:
     content = f.read()
 
 # 1. Fix import on line 6
-old_import = "import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v180';"
-new_import = "import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal } from '../accounts.js?v=20261110_v180';"
+old_import = "import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v181';"
+new_import = "import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal } from '../accounts.js?v=20261110_v181';"
 
 if old_import in content:
     content = content.replace(old_import, new_import, 1)

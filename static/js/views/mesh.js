@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v180';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v180';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v180';
-import { MeshConnection } from '../realtime.js?v=20261110_v180';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v180';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v180';
-import { buildLayout } from './mesh-layout.js?v=20261110_v180';
-import { getAccount } from '../accounts.js?v=20261110_v180';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v180';
-import { Voice } from '../voice.js?v=20261110_v180';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v180';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v180';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v180';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v181';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v181';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v181';
+import { MeshConnection } from '../realtime.js?v=20261110_v181';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v181';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v181';
+import { buildLayout } from './mesh-layout.js?v=20261110_v181';
+import { getAccount } from '../accounts.js?v=20261110_v181';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v181';
+import { Voice } from '../voice.js?v=20261110_v181';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v181';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v181';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v181';
 
 let ctx = null;
 
@@ -515,7 +515,7 @@ async function loadMedia(media) {
                 rememberRoom(updatedMesh);
               }
               if (ctx) ctx.lastResolvePushAt = Date.now();
-              if (isTimeKeeper()) { ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart }); }
+              ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
               break;
             }
           }
