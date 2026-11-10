@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v168';
-import { api, qs } from '../api.js?v=20261110_v168';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v168';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v168';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v168';
-import { profileSetup } from '../profile.js?v=20261110_v168';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v168';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v169';
+import { api, qs } from '../api.js?v=20261110_v169';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v169';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v169';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v169';
+import { profileSetup } from '../profile.js?v=20261110_v169';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v169';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v168';
+} from '../store.js?v=20261110_v169';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -912,7 +912,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v168');
+                  const { setView } = await import('../state.js?v=20261110_v169');
                   setView('left', 'Room');
                 }
               },
@@ -927,7 +927,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v168');
+                  const { setView } = await import('../state.js?v=20261110_v169');
                   setView('left', 'Room');
                 }
               },
@@ -942,7 +942,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v168');
+                  const { setView } = await import('../state.js?v=20261110_v169');
                   setView('left', 'Room');
                 }
               },
@@ -1953,7 +1953,7 @@ const MAX_OFFICIAL_HUBS = [
     items: [
       { tmdbId: '100088', title: 'The Last of Us', originalTitle: 'The Last of Us', mediaType: 'tv', season: 1, episode: 1, year: '2023', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', desc: 'Joel ve Ellie’nin distopik dünyadaki destansı mücadelesi.' },
       { tmdbId: '94997', title: 'House of the Dragon', originalTitle: 'House of the Dragon', mediaType: 'tv', season: 1, episode: 1, year: '2022', rating: 8.4, poster: 'https://image.tmdb.org/t/p/w500/6YM292PX2gSIBk16hufmlGT3iQW.jpg', desc: 'Targaryen hanedanının Ejderhaların Dansı iç savaşı.' },
-      { tmdbId: '118956', title: 'The Penguin', originalTitle: 'The Penguin', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/s1wP1YeQS9fgSHiXZ3yJb2ufB2D.jpg', desc: 'Gotham yeraltı dünyasının yeni lideri Oswald Cobblepot.' },
+      { tmdbId: '194764', title: 'The Penguin', originalTitle: 'The Penguin', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 8.8, poster: 'https://image.tmdb.org/t/p/w500/vOWcqC4oDQws1doDWLO7d3dh5qc.jpg', desc: 'Gotham yeraltı dünyasının yeni lideri Oswald Cobblepot.' },
       { tmdbId: '223397', title: 'City of God: The Fight Rages On', originalTitle: 'Cidade de Deus: A Luta Não Para', mediaType: 'tv', season: 1, episode: 1, year: '2024', rating: 7.9, poster: 'https://image.tmdb.org/t/p/w500/58qiZruozysI2b7ZZV68m3wvxEO.jpg', desc: 'Efsanevi Tanrıkent hikayesi 20 yıl sonra devam ediyor.' },
       { tmdbId: '76331', title: 'Succession', originalTitle: 'Succession', mediaType: 'tv', season: 1, episode: 1, year: '2018', rating: 8.9, poster: 'https://image.tmdb.org/t/p/w500/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg', desc: 'Roy ailesinin medya imparatorluğundaki acımasız taht kavgası.' },
       { tmdbId: '1399', title: 'Game of Thrones', originalTitle: 'Game of Thrones', mediaType: 'tv', season: 1, episode: 1, year: '2011', rating: 9.2, poster: 'https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg', desc: 'Demir Taht için 7 Krallığın amansız savaşı.' },
@@ -2335,23 +2335,23 @@ export const NETFLIX_OFFICIAL_HUBS = [
     category: "Amerika Yapımı Drama Dizileri",
     id: "us_drama",
     items: [
-      { tmdbId: "1405", title: "Dexter", originalTitle: "Dexter", mediaType: "tv", year: "2006", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/58H6CtF0npS1nT502r9TqUe9z1B.jpg", backdrop: "https://image.tmdb.org/t/p/w780/58H6CtF0npS1nT502r9TqUe9z1B.jpg", overview: "Gündüzleri adli tıp uzmanı, geceleri ise adaletten kaçan katilleri avlayan bir seri katil.", season: 1, episode: 1 },
-      { tmdbId: "1408", title: "House M.D.", originalTitle: "House", mediaType: "tv", year: "2004", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/3r4LYFuXrg3G8f0vP8YvXm9f8.jpg", backdrop: "https://image.tmdb.org/t/p/w780/3r4LYFuXrg3G8f0vP8YvXm9f8.jpg", overview: "Sıra dışı ve alaycı Dr. Gregory House ve ekibi tıbbi bilmeceleri çözer.", season: 1, episode: 1 },
+      { tmdbId: "1405", title: "Dexter", originalTitle: "Dexter", mediaType: "tv", year: "2006", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/i8ORB1biusVy703lGxUi5Rle6zA.jpg", backdrop: "https://image.tmdb.org/t/p/w780/i8ORB1biusVy703lGxUi5Rle6zA.jpg", overview: "Gündüzleri adli tıp uzmanı, geceleri ise adaletten kaçan katilleri avlayan bir seri katil.", season: 1, episode: 1 },
+      { tmdbId: "1408", title: "House M.D.", originalTitle: "House", mediaType: "tv", year: "2004", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/3Cz7ySOQJmqiuTdrc6CY0r65yDI.jpg", backdrop: "https://image.tmdb.org/t/p/w780/3Cz7ySOQJmqiuTdrc6CY0r65yDI.jpg", overview: "Sıra dışı ve alaycı Dr. Gregory House ve ekibi tıbbi bilmeceleri çözer.", season: 1, episode: 1 },
       { tmdbId: "1396", title: "Breaking Bad", originalTitle: "Breaking Bad", mediaType: "tv", year: "2008", rating: "8.9", poster: "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg", backdrop: "https://image.tmdb.org/t/p/w780/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg", overview: "Kanser teşhisi konan bir kimya öğretmeni ailesinin geleceğini garantiye almak için metamfetamin üretimine başlar.", season: 1, episode: 1 },
       { tmdbId: "60059", title: "Better Call Saul", originalTitle: "Better Call Saul", mediaType: "tv", year: "2015", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/fC2HDm5t0kHl7mTm7jxMR31b7by.jpg", backdrop: "https://image.tmdb.org/t/p/w780/fC2HDm5t0kHl7mTm7jxMR31b7by.jpg", overview: "Jimmy McGill'in ahlaki sınırları zorlayan avukat Saul Goodman'a dönüşüm serüveni.", season: 1, episode: 1 },
-      { tmdbId: "63351", title: "Narcos", originalTitle: "Narcos", mediaType: "tv", year: "2015", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/rTmal9fVEwh5x9hJ2Up78FS9v49.jpg", backdrop: "https://image.tmdb.org/t/p/w780/rTmal9fVEwh5x9hJ2Up78FS9v49.jpg", overview: "Kolombiya'nın kokain kartelleri ve Pablo Escobar'ın gerçek hayat hikayesi.", season: 1, episode: 1 },
-      { tmdbId: "67744", title: "Mindhunter", originalTitle: "Mindhunter", mediaType: "tv", year: "2017", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/fbKE87mojpIETWepSbD5Qt741d7.jpg", backdrop: "https://image.tmdb.org/t/p/w780/fbKE87mojpIETWepSbD5Qt741d7.jpg", overview: "FBI ajanları seri katillerin zihnini anlayarak yeni suç profili çıkarma teknikleri geliştirir.", season: 1, episode: 1 },
+      { tmdbId: "63351", title: "Narcos", originalTitle: "Narcos", mediaType: "tv", year: "2015", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/rTmal9fDbwh5F0waol2hq35U4ah.jpg", backdrop: "https://image.tmdb.org/t/p/w780/rTmal9fDbwh5F0waol2hq35U4ah.jpg", overview: "Kolombiya'nın kokain kartelleri ve Pablo Escobar'ın gerçek hayat hikayesi.", season: 1, episode: 1 },
+      { tmdbId: "67744", title: "Mindhunter", originalTitle: "Mindhunter", mediaType: "tv", year: "2017", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/lpDVJuIro21gtMj9iXMFKHuroZN.jpg", backdrop: "https://image.tmdb.org/t/p/w780/lpDVJuIro21gtMj9iXMFKHuroZN.jpg", overview: "FBI ajanları seri katillerin zihnini anlayarak yeni suç profili çıkarma teknikleri geliştirir.", season: 1, episode: 1 },
     ],
   },
   {
     category: "Tekrar Tekrar İzlenen Diziler",
     id: "rewatch_classics",
     items: [
-      { tmdbId: "5920", title: "The Mentalist", originalTitle: "The Mentalist", mediaType: "tv", year: "2008", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/acnHvslqBJa9g7W5z6YFm8UfW3z.jpg", backdrop: "https://image.tmdb.org/t/p/w780/acnHvslqBJa9g7W5z6YFm8UfW3z.jpg", overview: "Eski medyum Patrick Jane, keskin gözlem yeteneğini Kaliforniya Araştırma Bürosu için kullanır.", season: 7, episode: 8, epName: "Göz Akı" },
-      { tmdbId: "105248", title: "Cyberpunk: Edgerunners", originalTitle: "Cyberpunk: Edgerunners", mediaType: "tv", year: "2022", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/7vAOm412f8rR2Qo7q0v9b.jpg", backdrop: "https://image.tmdb.org/t/p/w780/sLWUTu2kO80V91zZlVf8iGkM4Yk.jpg", overview: "Geleceğin sokaklarında hayatta kalmak için kanun kaçağı bir paralı askere dönüşen gencin hikayesi.", season: 1, episode: 1 },
-      { tmdbId: "87083", title: "Vinland Saga", originalTitle: "Vinland Saga", mediaType: "tv", year: "2019", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/9kC1eR2B8e0L9Pz8kF0G.jpg", backdrop: "https://image.tmdb.org/t/p/w780/9kC1eR2B8e0L9Pz8kF0G.jpg", overview: "Genç Thorfinn intikam arayışında acımasız Viking savaşlarının ortasında büyür.", season: 1, episode: 1 },
-      { tmdbId: "30983", title: "Hajime no Ippo", originalTitle: "Hajime no Ippo", mediaType: "tv", year: "2000", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/7V9B7H6c5mJ4Z2a5vN4K8l0sE.jpg", backdrop: "https://image.tmdb.org/t/p/w780/7V9B7H6c5mJ4Z2a5vN4K8l0sE.jpg", overview: "Zorbalığa uğrayan utangaç Ippo, boksun büyülü dünyasında zirveye tırmanır.", season: 1, episode: 1 },
-      { tmdbId: "1976", title: "Monster", originalTitle: "Monster", mediaType: "tv", year: "2004", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/7wYh4T2a1b3c4d5e6f7g8h9i0j.jpg", backdrop: "https://image.tmdb.org/t/p/w780/7wYh4T2a1b3c4d5e6f7g8h9i0j.jpg", overview: "Başarılı beyin cerrahı Dr. Tenma, kurtardığı bir çocuğun acımasız bir canavar olduğunu anlar.", season: 1, episode: 1 },
+      { tmdbId: "5920", title: "The Mentalist", originalTitle: "The Mentalist", mediaType: "tv", year: "2008", rating: "8.4", poster: "https://image.tmdb.org/t/p/w500/acYXu4KaDj1NIkMgObnhe4C4a0T.jpg", backdrop: "https://image.tmdb.org/t/p/w780/acYXu4KaDj1NIkMgObnhe4C4a0T.jpg", overview: "Eski medyum Patrick Jane, keskin gözlem yeteneğini Kaliforniya Araştırma Bürosu için kullanır.", season: 7, episode: 8, epName: "Göz Akı" },
+      { tmdbId: "105248", title: "Cyberpunk: Edgerunners", originalTitle: "Cyberpunk: Edgerunners", mediaType: "tv", year: "2022", rating: "8.6", poster: "https://image.tmdb.org/t/p/w500/v3JuB15WybKmxDeT1hWdK3j6eSJ.jpg", backdrop: "https://image.tmdb.org/t/p/w780/bknKZO7DWVYKeByuJMnGI46PFZg.jpg", overview: "Geleceğin sokaklarında hayatta kalmak için kanun kaçağı bir paralı askere dönüşen gencin hikayesi.", season: 1, episode: 1 },
+      { tmdbId: "87083", title: "Vinland Saga", originalTitle: "Vinland Saga", mediaType: "tv", year: "2019", rating: "8.7", poster: "https://image.tmdb.org/t/p/w500/vUHlpA5c1NXkds59reY3HMb4Abs.jpg", backdrop: "https://image.tmdb.org/t/p/w780/vUHlpA5c1NXkds59reY3HMb4Abs.jpg", overview: "Genç Thorfinn intikam arayışında acımasız Viking savaşlarının ortasında büyür.", season: 1, episode: 1 },
+      { tmdbId: "30983", title: "Hajime no Ippo", originalTitle: "Hajime no Ippo", mediaType: "tv", year: "2000", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/gW14n6xxONXrya8CIDhRe5Ada7U.jpg", backdrop: "https://image.tmdb.org/t/p/w780/gW14n6xxONXrya8CIDhRe5Ada7U.jpg", overview: "Zorbalığa uğrayan utangaç Ippo, boksun büyülü dünyasında zirveye tırmanır.", season: 1, episode: 1 },
+      { tmdbId: "1976", title: "Monster", originalTitle: "Monster", mediaType: "tv", year: "2004", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/kF0DWjx3MfYRncPGSBoaL41StPe.jpg", backdrop: "https://image.tmdb.org/t/p/w780/kF0DWjx3MfYRncPGSBoaL41StPe.jpg", overview: "Başarılı beyin cerrahı Dr. Tenma, kurtardığı bir çocuğun acımasız bir canavar olduğunu anlar.", season: 1, episode: 1 },
       { tmdbId: "1399", title: "Game of Thrones", originalTitle: "Game of Thrones", mediaType: "tv", year: "2011", rating: "8.5", poster: "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg", backdrop: "https://image.tmdb.org/t/p/w780/2OMB0ynKlyIenMJWI2Dy9IWT4c.jpg", overview: "Yedi Krallık'ın Demir Tahtı için verilen epik iktidar ve entrika mücadelesi.", season: 1, episode: 1 },
     ],
   },
@@ -2360,19 +2360,19 @@ export const NETFLIX_OFFICIAL_HUBS = [
     id: "trending",
     items: [
       { tmdbId: "66732", title: "Stranger Things", originalTitle: "Stranger Things", mediaType: "tv", year: "2016-2025", rating: "8.5", poster: "https://image.tmdb.org/t/p/w500/hjVNQA2a12OxkpDEOQTBMbKVZ1K.jpg", backdrop: "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", overview: "Ufak bir kasabada bir çocuk kaybolunca gizli deneyler ve doğaüstü güçler ortaya çıkar.", season: 1, episode: 1 },
-      { tmdbId: "93405", title: "Squid Game", originalTitle: "Squid Game", mediaType: "tv", year: "2021-2024", rating: "7.9", poster: "https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg", backdrop: "https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWFDx0O.jpg", overview: "Para sıkıntısı çeken yüzlerce oyuncu, ölümcül çocuk oyunlarında yarışmayı kabul eder.", season: 1, episode: 1 },
+      { tmdbId: "93405", title: "Squid Game", originalTitle: "Squid Game", mediaType: "tv", year: "2021-2024", rating: "7.9", poster: "https://image.tmdb.org/t/p/w500/yACIAqAkSLkX4coHafpyLWAtQjw.jpg", backdrop: "https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWKmXhY.jpg", overview: "Para sıkıntısı çeken yüzlerce oyuncu, ölümcül çocuk oyunlarında yarışmayı kabul eder.", season: 1, episode: 1 },
       { tmdbId: "119051", title: "Wednesday", originalTitle: "Wednesday", mediaType: "tv", year: "2022", rating: "8.3", poster: "https://image.tmdb.org/t/p/w500/9PFonBhy4cQy7Jz20NpMygczOkv.jpg", backdrop: "https://image.tmdb.org/t/p/w780/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg", overview: "Wednesday Addams Nevermore Akademisinde yeni gizemleri ve doğaüstü cinayetleri çözer.", season: 1, episode: 1 },
-      { tmdbId: "71446", title: "La Casa de Papel", originalTitle: "Money Heist", mediaType: "tv", year: "2017-2021", rating: "8.2", poster: "https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg", backdrop: "https://image.tmdb.org/t/p/w780/gFZriCkpJYsApPwyQ9nxke46Gpu.jpg", overview: "Profesör önderliğindeki sekiz hırsız, İspanya Kraliyet Darphanesine kusursuz bir soygun düzenler.", season: 1, episode: 1 },
+      { tmdbId: "71446", title: "La Casa de Papel", originalTitle: "Money Heist", mediaType: "tv", year: "2017-2021", rating: "8.2", poster: "https://image.tmdb.org/t/p/w500/z01Dc0Ly2GmCpLe6Scx4d3dPP1S.jpg", backdrop: "https://image.tmdb.org/t/p/w780/xGexTKCJDkl12dTW4YCBDXWb1AD.jpg", overview: "Profesör önderliğindeki sekiz hırsız, İspanya Kraliyet Darphanesine kusursuz bir soygun düzenler.", season: 1, episode: 1 },
     ],
   },
   {
     category: "🇹🇷 Netflix Türk Orijinal Dizi & Filmleri",
     id: "turkish",
     items: [
-      { tmdbId: "577990", title: "Organize İşler: Karun Hazinesi", originalTitle: "Organize İşler: Karun Hazinesi", mediaType: "tv", year: "2026", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg", backdrop: "https://image.tmdb.org/t/p/w780/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg", overview: "Asım Noyan jübilesini yapıp mesleği bırakmadan önce son performansını sergilemeye hazırdır.", season: 1, episode: 1 },
+      { tmdbId: "577990", title: "Organize İşler: Karun Hazinesi", originalTitle: "Organize İşler: Karun Hazinesi", mediaType: "tv", year: "2026", rating: "8.8", poster: "https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg", backdrop: "https://image.tmdb.org/t/p/w780/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg", overview: "Asım Noyan jübilesini yapıp mesleği bırakmadan önce son performansını sergilemeye hazırdır.", season: 1, episode: 1 },
       { tmdbId: "136125", title: "Kulüp", originalTitle: "Kulüp", mediaType: "tv", year: "2021", rating: "6.9", poster: "https://image.tmdb.org/t/p/w500/jHgMj6mtMHEBrFhmZaQCGFGYnFx.jpg", backdrop: "https://image.tmdb.org/t/p/w780/AwEQ9wAOs1ZbvhpO7XxpGQHYvx5.jpg", overview: "1950'lerin kozmopolit İstanbul'unda bir gece kulübünde başlayan dokunaklı aile ve aşk hikayesi.", season: 1, episode: 1 },
       { tmdbId: "112745", title: "Bir Başkadır", originalTitle: "Bir Başkadır", mediaType: "tv", year: "2020", rating: "7.8", poster: "https://image.tmdb.org/t/p/w500/9MzukREEyaCqW197buBrJr2LcTI.jpg", backdrop: "https://image.tmdb.org/t/p/w780/peOoKDVMbXdBMwZd9SeOxtOfCXD.jpg", overview: "Farklı hayatlar yaşayan bir grup insanın İstanbul'da kesişen yolları ve derin psikolojik yüzleşmeleri.", season: 1, episode: 1 },
-      { tmdbId: "499461", title: "Ölümlü Dünya", originalTitle: "Ölümlü Dünya", mediaType: "movie", year: "2018", rating: "7.1", poster: "https://image.tmdb.org/t/p/w500/6pUboTFJ6SNzrhb8sNcmc50fJCk.jpg", backdrop: "https://image.tmdb.org/t/p/w780/jF8pE1mO3hG6a5n8b9v2c4x1z7q.jpg", overview: "Lokanta işleten sekiz kişilik Mermer Ailesi nesillerdir kiralık katil olarak çalışmaktadır." },
+      { tmdbId: "499461", title: "Ölümlü Dünya", originalTitle: "Ölümlü Dünya", mediaType: "movie", year: "2018", rating: "7.1", poster: "https://image.tmdb.org/t/p/w500/6pUboTFJ6SNzrhb8sNcmc50fJCk.jpg", backdrop: "https://image.tmdb.org/t/p/w780/6V9AbZvuHi4vEFSnLMr1NnGCzic.jpg", overview: "Lokanta işleten sekiz kişilik Mermer Ailesi nesillerdir kiralık katil olarak çalışmaktadır." },
     ],
   },
 ];
@@ -2493,6 +2493,24 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
       tabPillsWrap
     ),
     h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+      h('button', {
+        type: 'button',
+        class: 'btn sm primary',
+        style: {
+          background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
+          borderColor: '#e50914',
+          fontWeight: '800',
+          padding: '7px 14px',
+          borderRadius: '8px',
+          fontSize: '.82rem',
+          cursor: 'pointer',
+          boxShadow: '0 4px 14px rgba(229,9,20,0.35)',
+        },
+        onclick: () => openNetflixLoginModal(p, () => {
+          body.replaceChildren();
+          renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+        }, null, pick),
+      }, '🎬 Canlı Netflix Portalı (Rave Görünümü)'),
       acct.loginSatisfied ? h('div', {
         style: {
           display: 'flex',
@@ -2509,31 +2527,15 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
       },
         h('span', { style: { width: '8px', height: '8px', borderRadius: '50%', background: '#10b981', display: 'inline-block' } }),
         acct.profileName || acct.accountEmail || '✓ Netflix Aktif'
-      ) : h('button', {
-        type: 'button',
-        class: 'btn sm primary',
-        style: {
-          background: 'linear-gradient(135deg, #e50914 0%, #b20710 100%)',
-          borderColor: '#e50914',
-          fontWeight: '800',
-          padding: '7px 14px',
-          borderRadius: '8px',
-          fontSize: '.82rem',
-          cursor: 'pointer',
-        },
-        onclick: () => openProviderLoginModal(p, () => {
-          body.replaceChildren();
-          renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
-        }),
-      }, '🔑 Netflix Hesabı Bağla'),
+      ) : null,
       h('button', {
         type: 'button',
         class: 'btn sm ghost',
         style: { fontSize: '.8rem', padding: '6px 12px', borderRadius: '8px' },
-        onclick: () => openProviderLoginModal(p, () => {
+        onclick: () => openNetflixLoginModal(p, () => {
           body.replaceChildren();
           renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
-        }),
+        }, null, pick),
       }, 'Hesap')
     )
   );
@@ -2551,8 +2553,8 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
     duration: '8 Bölüm',
     tags: ['TOP 10 DİZİ', '4K Ultra HD', '5.1 Dolby Audio', '2026 · 16+'],
     overview: 'Efsanevi Asım Noyan, jübilesini yapıp "mesleği" geride bırakmadan önce son performansını sergilemeye hazır. Peki ama usta dolandırıcı bu defa ateşle mi oynuyor?',
-    backdrop: 'https://image.tmdb.org/t/p/w1280/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
-    poster: 'https://image.tmdb.org/t/p/w500/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
+    backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+    poster: 'https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
     officialUrl: 'https://www.netflix.com/title/81682705',
     netflixId: '81682705',
   };

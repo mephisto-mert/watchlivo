@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261110_v168';
-import { api, qs } from './api.js?v=20261110_v168';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v168';
+import { h, toast, popup } from './ui.js?v=20261110_v169';
+import { api, qs } from './api.js?v=20261110_v169';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v169';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -210,7 +210,10 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
   };
 
   // State Machine: 'login' | 'challenge' | 'profiles' | 'browse'
-  let currentStep = acct.loginSatisfied ? 'browse' : 'login';
+  // Option B: Default to live in-app Netflix bridge session (Rave parity)
+  let currentStep = 'bridge';
+  let bridgeUrl = acct.loginSatisfied ? '/api/netflix-bridge/browse' : '/api/netflix-bridge/login';
+
   let loginIdentifier = acct.accountEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : 'mertcan@gmail.com');
   let challengeMode = 'otp'; // 'otp' or 'password'
   let activeProfile = acct.profileName || NETFLIX_PROFILES[0].name;
@@ -328,6 +331,84 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
   // RENDER VIEWS
   const renderView = () => {
     bodyArea.replaceChildren();
+
+    // OPTION B: LIVE IN-APP NETFLIX BRIDGE (RAVE PARITY)
+    if (currentStep === 'bridge') {
+      const bridgeToolbar = h('div', {
+        class: 'rave-bridge-toolbar',
+        style: {
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '8px 16px',
+          background: '#0d0d0f',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          fontSize: '12px',
+          color: '#94a3b8',
+          flexShrink: 0,
+        },
+      },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('span', { style: { color: '#e50914', fontWeight: '900', letterSpacing: '0.5px' } }, 'NETFLIX LIVE PORTAL'),
+          h('span', { style: { width: '6px', height: '6px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' } }),
+          h('span', { style: { color: '#cbd5e1', fontSize: '11px' } }, 'Rave Köprüsü Aktif')
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          h('button', {
+            type: 'button',
+            style: { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', fontSize: '11px' },
+            onclick: () => {
+              const fr = bodyArea.querySelector('#watchlivo-netflix-bridge-frame');
+              if (fr) fr.src = fr.src;
+            },
+          }, '🔄 Yenile'),
+          h('button', {
+            type: 'button',
+            style: { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', fontSize: '11px' },
+            onclick: () => {
+              const fr = bodyArea.querySelector('#watchlivo-netflix-bridge-frame');
+              if (fr) fr.src = '/api/netflix-bridge/browse';
+            },
+          }, '🏠 Ana Sayfa'),
+          h('button', {
+            type: 'button',
+            style: { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: '#fff', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', fontSize: '11px' },
+            onclick: () => {
+              const fr = bodyArea.querySelector('#watchlivo-netflix-bridge-frame');
+              if (fr) fr.src = '/api/netflix-bridge/login';
+            },
+          }, '🔑 Giriş Yap'),
+          h('button', {
+            type: 'button',
+            style: { background: 'rgba(229,9,20,0.15)', border: '1px solid rgba(229,9,20,0.4)', color: '#f87171', borderRadius: '4px', padding: '3px 8px', cursor: 'pointer', fontSize: '11px', fontWeight: '700' },
+            onclick: () => {
+              currentStep = 'profiles';
+              renderView();
+            },
+          }, '⚡ Hızlı Profil Modu')
+        )
+      );
+
+      const bridgeIframe = h('iframe', {
+        id: 'watchlivo-netflix-bridge-frame',
+        src: bridgeUrl,
+        allow: 'autoplay; encrypted-media; fullscreen; picture-in-picture',
+        sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
+        style: {
+          width: '100%',
+          height: '580px',
+          minHeight: '520px',
+          border: 'none',
+          background: '#141414',
+          flex: 1,
+        },
+      });
+
+      bodyArea.appendChild(bridgeToolbar);
+      bodyArea.appendChild(bridgeIframe);
+      return;
+    }
+
 
     // VIEW 1: NETFLIX LOGIN (SCREENSHOT 2 PARITY)
     if (currentStep === 'login') {
@@ -840,7 +921,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
           position: 'relative',
           width: '100%',
           minHeight: '280px',
-          backgroundImage: 'linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.2) 70%), url("https://image.tmdb.org/t/p/w1280/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg"), url("/static/brand/organize_isler.jpg")',
+          backgroundImage: 'linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.2) 70%), url("https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg"), url("/static/brand/organize_isler.jpg")',
           backgroundSize: 'cover',
           backgroundPosition: 'center 20%',
           display: 'flex',
@@ -912,8 +993,8 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
                 originalTitle: 'Organize İşler: Karun Hazinesi',
                 url: 'https://www.netflix.com/watch/81682705',
                 officialUrl: 'https://www.netflix.com/title/81682705',
-                poster: 'https://image.tmdb.org/t/p/w500/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
-                backdrop: 'https://image.tmdb.org/t/p/w1280/8YFLbXvHl686Yg5fI1PZ2W7v2.jpg',
+                poster: 'https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+                backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
                 mediaType: 'tv',
                 season: 1,
                 episode: 1,
@@ -949,12 +1030,12 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
 
       // Rows matching Screenshot 4 & 5
       const DRAMA_SERIES = [
-        { title: 'The Mentalist', meta: 'S7 : B8 "Göz Akı" · 11 / 42 dk.', ep: 'S7:B8', poster: 'https://image.tmdb.org/t/p/w500/acnHvslqBJa9g7W5z6YFm8UfW3z.jpg' },
-        { title: 'Dexter', meta: 'Dizi · Suç / Gerilim', poster: 'https://image.tmdb.org/t/p/w500/58H6CtF0npS1nT502r9TqUe9z1B.jpg' },
-        { title: 'House M.D.', meta: 'Dizi · Medikal Drama', poster: 'https://image.tmdb.org/t/p/w500/3r4LYFuXrg3G8f0vP8YvXm9f8.jpg' },
+        { title: 'The Mentalist', meta: 'S7 : B8 "Göz Akı" · 11 / 42 dk.', ep: 'S7:B8', poster: 'https://image.tmdb.org/t/p/w500/acYXu4KaDj1NIkMgObnhe4C4a0T.jpg' },
+        { title: 'Dexter', meta: 'Dizi · Suç / Gerilim', poster: 'https://image.tmdb.org/t/p/w500/i8ORB1biusVy703lGxUi5Rle6zA.jpg' },
+        { title: 'House M.D.', meta: 'Dizi · Medikal Drama', poster: 'https://image.tmdb.org/t/p/w500/3Cz7ySOQJmqiuTdrc6CY0r65yDI.jpg' },
         { title: 'Breaking Bad', meta: 'Dizi · Suç Klasiği', poster: 'https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg' },
-        { title: 'Cyberpunk: Edgerunners', meta: 'Anime · Bilim Kurgu', poster: 'https://image.tmdb.org/t/p/w500/7vAOm412f8rR2Qo7q0v9b.jpg' },
-        { title: 'Vinland Saga', meta: 'Anime · Tarihi Macera', poster: 'https://image.tmdb.org/t/p/w500/9kC1eR2B8e0L9Pz8kF0G.jpg' },
+        { title: 'Cyberpunk: Edgerunners', meta: 'Anime · Bilim Kurgu', poster: 'https://image.tmdb.org/t/p/w500/v3JuB15WybKmxDeT1hWdK3j6eSJ.jpg' },
+        { title: 'Vinland Saga', meta: 'Anime · Tarihi Macera', poster: 'https://image.tmdb.org/t/p/w500/vUHlpA5c1NXkds59reY3HMb4Abs.jpg' },
       ];
 
       const makeCard = (item) => {
@@ -1111,6 +1192,52 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
   modalContainer.appendChild(renderRaveHeader());
   modalContainer.appendChild(bodyArea);
   modalContainer.appendChild(backNavBtn);
+
+  // Bridge event listener for Netflix picking inside Option B iframe
+  const onNetflixBridgeMsg = (ev) => {
+    if (!ev.data || typeof ev.data !== 'object') return;
+    if (ev.data.type === 'WATCHLIVO_NETFLIX_PICK') {
+      const { watchId, url, title } = ev.data;
+      if (!watchId) return;
+      toast(`🎬 Netflix "${title || ('#' + watchId)}" seçildi! Canlı oda başlatılıyor...`);
+      setConnectedAccount('netflix', {
+        loginSatisfied: true,
+        userAuthenticated: true,
+        accountEmail: 'Netflix Aktif Oturum',
+        profileName: 'Netflix',
+        extra: { watchId, url },
+      });
+      window.removeEventListener('message', onNetflixBridgeMsg);
+      closeModal();
+      onReload?.();
+
+      const mediaObj = {
+        id: `netflix-${watchId}`,
+        title: title || `Netflix #${watchId}`,
+        originalTitle: title || `Netflix #${watchId}`,
+        provider: 'netflix',
+        catalogProvider: 'netflix',
+        streamType: 'official',
+        sourceUrl: url || `https://www.netflix.com/watch/${watchId}`,
+        url: url || `https://www.netflix.com/watch/${watchId}`,
+        mediaType: 'movie',
+        authenticated: true,
+      };
+
+      if (typeof onPickContent === 'function') {
+        onPickContent(mediaObj);
+      } else {
+        location.hash = `#/mesh/netflix-${watchId}`;
+      }
+    }
+  };
+  window.addEventListener('message', onNetflixBridgeMsg);
+
+  const origCloseModal = closeModal;
+  closeModal = () => {
+    window.removeEventListener('message', onNetflixBridgeMsg);
+    origCloseModal();
+  };
 
   renderView();
 
@@ -1756,7 +1883,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261110_v168',
+        v: '20261110_v169',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;
