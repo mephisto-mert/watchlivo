@@ -561,7 +561,59 @@ export async function syncCloudUserMedia(force = false) {
 export function getWatchHistory() {
   try {
     const raw = JSON.parse(localStorage.getItem(_historyKey()) || '[]');
-    return Array.isArray(raw) ? raw : [];
+    if (!Array.isArray(raw)) return [];
+    let modified = false;
+    const sanitized = raw.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      let itMod = false;
+      let poster = typeof item.poster === 'string' ? item.poster.trim() : '';
+      let thumb = typeof item.thumbnail === 'string' ? item.thumbnail.trim() : '';
+      let bdrop = typeof item.backdrop === 'string' ? item.backdrop.trim() : '';
+      const titleStr = String(item.title || '');
+
+      // Fix Solo Leveling mismatched One Piece backdrop/poster
+      if (/solo leveling/i.test(titleStr) && (bdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || thumb.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG') || poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))) {
+        poster = 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg';
+        bdrop = 'https://image.tmdb.org/t/p/w780/xMNH87maNLt9n2bMDYeI6db5VFm.jpg';
+        thumb = poster;
+        itMod = true;
+      }
+
+      // Purge dark fallback svg / undefined strings so dynamic poster route takes over
+      if (poster.includes('watchlivo-poster.svg') || poster === 'undefined' || poster === 'null') {
+        poster = '';
+        itMod = true;
+      }
+      if (thumb.includes('watchlivo-poster.svg') || thumb === 'undefined' || thumb === 'null') {
+        thumb = '';
+        itMod = true;
+      }
+      if (bdrop.includes('watchlivo-poster.svg') || bdrop === 'undefined' || bdrop === 'null') {
+        bdrop = '';
+        itMod = true;
+      }
+
+      // If all images are missing/blank, populate authentic dynamic poster route
+      if (!poster && !thumb && !bdrop && titleStr) {
+        const cleanT = titleStr.replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim();
+        const yr = item.year || (titleStr.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
+        const mt = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(titleStr) ? 'tv' : 'movie');
+        const qp = `tid=${encodeURIComponent(item.tmdbId || '')}&t=${encodeURIComponent(cleanT || titleStr)}&y=${encodeURIComponent(yr)}&mt=${encodeURIComponent(mt)}`;
+        poster = `/api/rave/poster?${qp}`;
+        thumb = poster;
+        itMod = true;
+      }
+
+      if (itMod) {
+        modified = true;
+        return { ...item, poster, thumbnail: thumb || poster, backdrop: bdrop || poster };
+      }
+      return item;
+    });
+    if (modified) {
+      try { localStorage.setItem(_historyKey(), JSON.stringify(sanitized)); } catch (e) { /* ignore */ }
+    }
+    return sanitized;
   } catch (e) {
     return [];
   }

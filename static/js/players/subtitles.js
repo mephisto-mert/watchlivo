@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261110_v166';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261110_v167';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -203,8 +203,16 @@ export class SubtitleDubController {
       const raw = localStorage.getItem(this._syncStorageKey(media));
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Number.isFinite(Number(parsed.offsetSec))) this.offsetSec = Number(parsed.offsetSec);
-        if (Number.isFinite(Number(parsed.fpsScale)) && parsed.fpsScale > 0.8 && parsed.fpsScale < 1.2) {
+        if (Number.isFinite(Number(parsed.offsetSec))) {
+          const off = Number(parsed.offsetSec);
+          if (Math.abs(off) <= 5.0) {
+            this.offsetSec = off;
+          } else {
+            this.offsetSec = 0;
+            this._saveMediaSyncPrefs();
+          }
+        }
+        if (Number.isFinite(Number(parsed.fpsScale)) && parsed.fpsScale > 0.85 && parsed.fpsScale < 1.15) {
           this.fpsScale = Number(parsed.fpsScale);
         }
       }
