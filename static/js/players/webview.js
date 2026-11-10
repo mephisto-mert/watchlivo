@@ -150,8 +150,20 @@ export class WebviewAdapter {
     // Option B: Direct embedded Netflix playback inside room for web users (Rave parity)
     if (isNf && !this._isDesktop) {
       const matchNf = (this.mediaUrl || '').match(/watch\/(\d+)/i) || (media?.id || '').match(/netflix-(\d+)/i) || [];
-      const watchId = matchNf[1];
-      const bridgePlayerUrl = watchId ? `/api/netflix-bridge/watch/${watchId}` : (this.mediaUrl.startsWith('/api/netflix-bridge') ? this.mediaUrl : `/api/netflix-bridge/browse`);
+      let watchId = matchNf[1];
+      // NSES-404 GUARD: If ID is short (< 7 digits, e.g. TMDB 1405), do not request /watch/{id} directly
+      if (watchId && watchId.length < 7) {
+        const knownIds = { '1405': '70136126', '1396': '70143836', '1408': '70136117', '5920': '70140417', '105248': '81054853', '87083': '81249833', '428': '81427514', '577990': '81256740' };
+        watchId = knownIds[watchId] || null;
+      }
+      let bridgePlayerUrl;
+      if (watchId) {
+        bridgePlayerUrl = `/api/netflix-bridge/watch/${watchId}`;
+      } else if (media?.title) {
+        bridgePlayerUrl = `/api/netflix-bridge/search?q=${encodeURIComponent(media.title)}`;
+      } else {
+        bridgePlayerUrl = (this.mediaUrl && this.mediaUrl.startsWith('/api/netflix-bridge')) ? this.mediaUrl : `/api/netflix-bridge/browse`;
+      }
 
       this.container.replaceChildren();
       const wrap = document.createElement('div');

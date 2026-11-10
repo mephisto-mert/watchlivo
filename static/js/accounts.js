@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261110_v176';
-import { api, qs } from './api.js?v=20261110_v176';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v176';
+import { h, toast, popup } from './ui.js?v=20261110_v177';
+import { api, qs } from './api.js?v=20261110_v177';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v177';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -240,8 +240,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2006",
             "rating": "8.7",
-            "poster": "https://image.tmdb.org/t/p/w500/58H6CtF0npS1nTIXVF1w5n6z5qU.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/hT3lqpT227hA4XF2QzJ7V1YvWfN.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/i8ORB1biusVy703lGxUi5Rle6zA.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/lY2DhbA7Hy44fAKddr06UrXWWaQ.jpg"
           },
           {
             "tmdbId": "1408",
@@ -249,8 +249,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2004",
             "rating": "8.6",
-            "poster": "https://image.tmdb.org/t/p/w500/3Cz7kk8t59GuflHgHQ9ua9CzYNY.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/hiKmpZMGZsrkA3cdKspnlTeiL88.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/3Cz7ySOQJmqiuTdrc6CY0r65yDI.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/r0Q6eeN9L1ORL9QsV0Sg8ZV3vnv.jpg"
           },
           {
             "tmdbId": "1396",
@@ -259,7 +259,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "year": "2008",
             "rating": "8.9",
             "poster": "https://image.tmdb.org/t/p/w500/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/9faGSFi5jam6pDWGNd0p8J25Aq5.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg"
           }
         ]
       },
@@ -272,8 +272,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2008",
             "rating": "8.4",
-            "poster": "https://image.tmdb.org/t/p/w500/acYv83d3j7VzV2eJ3Y9C5lM2r6X.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/7RyHsO4yDXtBv1z9qKzY6vV2eJ3.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/acYXu4KaDj1NIkMgObnhe4C4a0T.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/rJFqKcmMSttdNP58l0dVzY2NcTA.jpg"
           },
           {
             "tmdbId": "105248",
@@ -281,8 +281,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2022",
             "rating": "8.6",
-            "poster": "https://image.tmdb.org/t/p/w500/7jswUvGf05q9b4d3lM2r6XacYv8.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/s16H6TpK2utvwDtzZ8Qy4qm5Emw.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/v3JuB15WybKmxDeT1hWdK3j6eSJ.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/bknKZO7DWVYKeByuJMnGI46PFZg.jpg"
           },
           {
             "tmdbId": "87083",
@@ -290,8 +290,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2019",
             "rating": "8.8",
-            "poster": "https://image.tmdb.org/t/p/w500/yox206E88A1r8gC8yZ7h0qF12.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/vI67kM5j8vV1z9qKzY6vV2eJ3Y9.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/xGOGjJFYYeRSoOpnhN9IHZTXIxj.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/xefmNmSGCApfRPaqhIRTaAjFlpo.jpg"
           },
           {
             "tmdbId": "428",
@@ -299,8 +299,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2004",
             "rating": "8.8",
-            "poster": "https://image.tmdb.org/t/p/w500/w44vW0eM9mJ2r8gC8yZ7h0qF12y.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/8BvV2eJ3Y9C5lM2r6XacYv83d3j.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/1zecxYJyYAgM03w6skRb1p7SOHo.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/Lkw5pP0qg6iJGUjFObnpqSgUKV.jpg"
           }
         ]
       }
@@ -368,7 +368,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "year": "2021",
             "rating": "8.2",
             "poster": "https://image.tmdb.org/t/p/w500/kEl2t3OhXc3Zb9FBh1AuYzRTgZp.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/b3mdmsRJb07z2bUfkmj0bRyY03M.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/q3jHCb4dMfYF6ojikKuHd6LscxC.jpg"
           },
           {
             "tmdbId": "85271",
@@ -376,8 +376,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2021",
             "rating": "8.2",
-            "poster": "https://image.tmdb.org/t/p/w500/glKDVuukZ0q4AVzFiqmA9HgumKf.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/57vVjteucIF3LGnptxqYemjr0vJ.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/ijWWwINc8h71NQ8j1LTJMFSj5wr.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/fSCb3lzRbHknuKD7apdH4RYJLkc.jpg"
           },
           {
             "tmdbId": "92749",
@@ -385,7 +385,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2022",
             "rating": "8.0",
-            "poster": "https://image.tmdb.org/t/p/w500/x6FsYvt33846G729muylwdXd2Yr.jpg",
+            "poster": "https://image.tmdb.org/t/p/w500/bJ7GUEAaOuX90Py88wuGWFot4Fs.jpg",
             "backdrop": "https://image.tmdb.org/t/p/w780/14QbnygCuTO0vl7CAFmPf1fgZfV.jpg"
           }
         ]
@@ -399,8 +399,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2019",
             "rating": "8.5",
-            "poster": "https://image.tmdb.org/t/p/w500/eU1i6eHXlzMOlEq0ku1R07YQ7Ma.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/9IJWTV1kU41pPqH0bQ98u3gQh7M.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/sWgBv7LV2PRoQgkxwlibdGXKz1S.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/9zcbqSxdsRMZWHYtyCd1nXPr2xq.jpg"
           },
           {
             "tmdbId": "83867",
@@ -408,8 +408,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2022",
             "rating": "8.3",
-            "poster": "https://image.tmdb.org/t/p/w500/59SVNwL2O7wsp2Nu47GFO9E5i80.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/ajztm40qDP5xR4zQ0Zk0R4Z3.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/n649NH6UQv3etlgc0pRgzs1ual0.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/quCeAmVQHfsdcYkicbxZWVauCVb.jpg"
           },
           {
             "tmdbId": "114479",
@@ -417,8 +417,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2021",
             "rating": "7.3",
-            "poster": "https://image.tmdb.org/t/p/w500/gNbdjDi1HamTCevv2vV83n36h.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/sjx6zjJ33i8590K0K192.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/mztdt3y6GBsJR69zHtszFezTCLT.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/kwronSXO1ogMqHHFvY2eBxfFLdn.jpg"
           }
         ]
       }
@@ -471,8 +471,8 @@ export const PLATFORM_RAVE_CONFIGS = {
       "tag": "AMAZON ORIGINAL",
       "meta": "4K HDR · 5.1 Dolby Ses · 2024 · 18+ · Sezon 4",
       "overview": "Süper kahramanların güçlerini kötüye kullandığı karanlık bir dünyada, 'The Boys' adı verilen bir grup kanunsuz, Vought holdingini ve The Seven'ı devirmek için kanlı bir savaşa girer.",
-      "poster": "https://image.tmdb.org/t/p/w500/7nsGpa0q5pmAeV04kZtw2g12i9H.jpg",
-      "backdrop": "https://image.tmdb.org/t/p/w1280/2meX1nMdScFOoV4370rqHWFDxZ.jpg",
+      "poster": "https://image.tmdb.org/t/p/w500/in1R2dDc421JxsoRWaIIAqVI2KE.jpg",
+      "backdrop": "https://image.tmdb.org/t/p/w780/bq28ajZaoMyzEIm6REelqyqtEDZ.jpg",
       "mediaType": "tv",
       "season": 4,
       "episode": 1
@@ -487,8 +487,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2024",
             "rating": "8.4",
-            "poster": "https://image.tmdb.org/t/p/w500/AnsSKR9LuK0T9bA0Pwh4j73M.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/8Z8q94p33A9K0Z2P4.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/c15BtJxCXMrISLVmysdsnZUPQft.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/coaPCIqQBPUZsOnJcWZxhaORcDT.jpg"
           },
           {
             "tmdbId": "108978",
@@ -496,8 +496,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2022",
             "rating": "8.1",
-            "poster": "https://image.tmdb.org/t/p/w500/jrnItLglQ0pUvFf2vY.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/j8847uU43M0P2Z9.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/f1VCQIG2iCyOookdgOzwtUpwWC0.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/pF0qkRsrHkdYadPWY9AMeFZfcwk.jpg"
           },
           {
             "tmdbId": "95557",
@@ -505,8 +505,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2021",
             "rating": "8.7",
-            "poster": "https://image.tmdb.org/t/p/w500/dMOpdkrDC5dQwqSp0io.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/6UH52FvlzTr2Stj.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/4tblBrslcKSifMVZ3TmtT2ukMor.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/9qrroces8C6R9aKr08hACNPVXdZ.jpg"
           }
         ]
       },
@@ -519,8 +519,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2022",
             "rating": "7.4",
-            "poster": "https://image.tmdb.org/t/p/w500/mYLOqiStMxDK3fYZ.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/hpU2cHC9tk90F4z.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/7daMA65eFTxcTg58E0YoCMyAj63.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/achmETPRJZc9QVXsMPgHwYEyNar.jpg"
           },
           {
             "tmdbId": "71914",
@@ -528,8 +528,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2021",
             "rating": "7.5",
-            "poster": "https://image.tmdb.org/t/p/w500/mpgDeLhl8HUKNEi.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/179420367.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/rlNwsszuCWqYzoTYALnf46KEdn6.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/1P3QtW1IkivqDrKbbwuR0zCYIf8.jpg"
           }
         ]
       }
@@ -582,8 +582,8 @@ export const PLATFORM_RAVE_CONFIGS = {
       "tag": "HBO ORİJİNAL DİZİSİ",
       "meta": "4K UHD · Dolby Atmos · 2024 · 18+ · Colin Farrell",
       "overview": "The Batman evreninin devamında, Carmine Falcone'un ölümünün ardından Gotham'ın suç dünyasında yükselişe geçen Oswald Cobblepot'un acımasız ve karanlık güç savaşı.",
-      "poster": "https://image.tmdb.org/t/p/w500/yrpPYK555470thS9E0kI6g70hN0.jpg",
-      "backdrop": "https://image.tmdb.org/t/p/w1280/3xskpbaO5yQp3jG1wD6jYvH3uW9.jpg",
+      "poster": "https://image.tmdb.org/t/p/w500/sz4VLexK1winah1e9mu0BURa9wS.jpg",
+      "backdrop": "https://image.tmdb.org/t/p/w780/uyfR8hSLS5ec180K5MYBgf73W83.jpg",
       "mediaType": "tv",
       "season": 1,
       "episode": 1
@@ -599,7 +599,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "year": "2022",
             "rating": "8.4",
             "poster": "https://image.tmdb.org/t/p/w500/7QMsOTMUswlwxJP0rTTZfmz2tX2.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/etj5CuMuam3hD9P8G455.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/577eXC8wFQT0eUrJcgznSiFPRmk.jpg"
           },
           {
             "tmdbId": "1399",
@@ -607,7 +607,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2011",
             "rating": "8.4",
-            "poster": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1rl1uP.jpg",
+            "poster": "https://image.tmdb.org/t/p/w500/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg",
             "backdrop": "https://image.tmdb.org/t/p/w780/2OMB0ynKlyIenMJWI2Dy9IWT4c.jpg"
           },
           {
@@ -616,8 +616,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2023",
             "rating": "8.6",
-            "poster": "https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2V7J78ED.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/hT3lqpT227hA4XF2QzJ7V1YvWfN.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/cdbDsn2hqLL7x804GixzPP8AiBE.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/lY2DhbA7Hy44fAKddr06UrXWWaQ.jpg"
           }
         ]
       },
@@ -630,8 +630,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2018",
             "rating": "8.6",
-            "poster": "https://image.tmdb.org/t/p/w500/7TJW54nB88W6sT9X9.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/84052.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/z0XiwdrCQ9yVIr4O0pxzaAYRxdW.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/d87JXX3DLkRJMfm5StCmmnmhHuX.jpg"
           },
           {
             "tmdbId": "87108",
@@ -639,8 +639,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2019",
             "rating": "9.0",
-            "poster": "https://image.tmdb.org/t/p/w500/hlLXt2tOPT6RR4Z.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/8Z8q94p.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/vDwYRtmfBgM9zq4o0xbeUuVo3DL.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/900tHlUYUkp7Ol04XFSoAaEIXcT.jpg"
           }
         ]
       }
@@ -693,8 +693,8 @@ export const PLATFORM_RAVE_CONFIGS = {
       "tag": "APPLE ORİGİNAL",
       "meta": "4K HDR · Uzamsal Ses · 2022 · 16+ · 9 Emmy Adaylığı",
       "overview": "Lumon Industries çalışanlarının iş hayatı ile kişisel hayatını cerrahi bir müdahaleyle ayıran 'Ayrılık' prosedürü, çalışanların zihninde gizemli ve tehlikeli bir uyanış başlatır.",
-      "poster": "https://image.tmdb.org/t/p/w500/32hD4uG1V7E0eX6fG7hM9qF5oH.jpg",
-      "backdrop": "https://image.tmdb.org/t/p/w1280/9faGSFi5jam6pDWGNd0p8J25Aq5.jpg",
+      "poster": "https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg",
+      "backdrop": "https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg",
       "mediaType": "tv",
       "season": 1,
       "episode": 1
@@ -709,8 +709,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2020",
             "rating": "8.5",
-            "poster": "https://image.tmdb.org/t/p/w500/5fhZdwP1DVJ0FyV.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/j8847u.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/uRHsiw1wLxPHFXkkv4Ix1s0O6f4.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/4bG49jVR7NrCNQjahDUsDqvIwle.jpg"
           },
           {
             "tmdbId": "125988",
@@ -718,8 +718,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2023",
             "rating": "8.2",
-            "poster": "https://image.tmdb.org/t/p/w500/1Nne6q4e4c2g6k.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/hiKmpZM.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/r2QXomqKjkKHVtYGGtkf2l2Y7go.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/4XccmjsOmQZw8S2iW1wvlvmb5v1.jpg"
           },
           {
             "tmdbId": "93740",
@@ -727,8 +727,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2021",
             "rating": "7.9",
-            "poster": "https://image.tmdb.org/t/p/w500/tg0mK5Z4a.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/b3mdmsR.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/kQZNzw4fvpSuIMz0FOqQ96Qur63.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/7NNNXo0qG2SqH4JoG7GPvJ2hzes.jpg"
           }
         ]
       }
@@ -807,7 +807,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "year": "2019",
             "rating": "8.7",
             "poster": "https://image.tmdb.org/t/p/w500/xUfRZu2mi8jH6SzQEJGP6tjBuYj.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/nTvM4mhqZlHIaeNGI94Zp68tW.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/nTvM4mhqNlHIvUkI1gVnW6XP7GG.jpg"
           },
           {
             "tmdbId": "1429",
@@ -816,7 +816,7 @@ export const PLATFORM_RAVE_CONFIGS = {
             "year": "2013",
             "rating": "8.7",
             "poster": "https://image.tmdb.org/t/p/w500/hTP1DtLGFamjfu8WqjnuQdP1n4i.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/yvM5j8vV1z9qKzY6.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/rqbCbjB19amtOtFQbb3K2lgm2zv.jpg"
           }
         ]
       },
@@ -838,8 +838,8 @@ export const PLATFORM_RAVE_CONFIGS = {
             "mediaType": "tv",
             "year": "2009",
             "rating": "8.9",
-            "poster": "https://image.tmdb.org/t/p/w500/5ZFUEOULaVuxQi2i94M7n0.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/1794203671.jpg"
+            "poster": "https://image.tmdb.org/t/p/w500/vIkH7fUQf8Olo8Apq56FQLGDXOo.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/2UG177tWHy7xRmMKWJHB7nAUmKd.jpg"
           }
         ]
       }
@@ -1598,7 +1598,8 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
                   provider: provId,
                   catalogProvider: provId,
                   streamType: 'official',
-                  url: `https://www.${provId}.com/watch/${hb.tmdbId}`,
+                  officialUrl: buildSafePlatformWatchUrl(provId, hb),
+                  url: buildSafePlatformWatchUrl(provId, hb),
                   poster: hb.poster,
                   backdrop: hb.backdrop || hb.poster,
                   mediaType: hb.mediaType || 'tv',
@@ -1659,7 +1660,8 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
               provider: provId,
               catalogProvider: provId,
               streamType: 'official',
-              url: `https://www.${provId}.com/watch/${item.tmdbId}`,
+              officialUrl: buildSafePlatformWatchUrl(provId, item),
+              url: buildSafePlatformWatchUrl(provId, item),
               poster: item.poster,
               backdrop: item.backdrop || item.poster,
               mediaType: item.mediaType || 'tv',
@@ -1672,9 +1674,21 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
           },
         },
           h('img', {
-            src: item.backdrop || item.poster,
-            alt: item.title,
-            style: { width: '100%', height: '105px', objectFit: 'cover', display: 'block' },
+            src: item.backdrop || item.poster || `https://image.tmdb.org/t/p/w500/${item.poster_path || ''}`,
+            alt: item.title || '',
+            loading: 'lazy',
+            style: { width: '100%', height: '105px', objectFit: 'cover', display: 'block', background: '#18181b' },
+            onerror: (e) => {
+              const el = e.currentTarget || e.target;
+              if (!el.dataset.fallback) {
+                el.dataset.fallback = '1';
+                if (item.poster && el.src !== item.poster) {
+                  el.src = item.poster;
+                } else {
+                  el.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="175" viewBox="0 0 300 175"><rect width="300" height="175" fill="%2318181b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23ffffff" font-family="sans-serif" font-weight="bold" font-size="14">${encodeURIComponent(item.title || '4K')}</text></svg>`;
+                }
+              }
+            },
           }),
           h('div', { style: { padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '3px' } },
             h('span', { style: { fontSize: '13px', fontWeight: '800', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
@@ -2417,7 +2431,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261110_v176',
+        v: '20261110_v177',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

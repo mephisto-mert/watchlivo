@@ -5,7 +5,7 @@ ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
 url = "https://watchlivo.online/?_t="
-target_v = "20261110_v176"
+target_v = "20261110_v177"
 
 print("Waiting for Render deployment to complete...")
 for i in range(12):

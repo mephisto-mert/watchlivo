@@ -1,8 +1,8 @@
 import os
 
 target_dir = r"c:\Users\pc\Documents\projelerim\rave_web_platform"
-old_v = "20261110_v176"
-new_v = "20261110_v176"
+old_v = "20261110_v177"
+new_v = "20261110_v177"
 
 count = 0
 for root, dirs, files in os.walk(target_dir):

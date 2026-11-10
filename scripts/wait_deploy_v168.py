@@ -28,7 +28,7 @@ for i in range(50):
         with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
             body = resp.read().decode("utf-8", errors="ignore")
             headers = dict(resp.headers)
-            if "20261110_v176" in body:
+            if "20261110_v177" in body:
                 print(f"\n[LIVE CONFIRMED] v168 is LIVE on watchlivo.online in {int(time.time() - start)}s!")
                 print("Live X-Robots-Tag:", headers.get("X-Robots-Tag") or headers.get("x-robots-tag"))
                 deployed = True

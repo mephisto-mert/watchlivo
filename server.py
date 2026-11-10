@@ -2415,8 +2415,11 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     v_streams = _MAIN_SITES_VAULT.get("streams") or {}
     v_cat = _MAIN_SITES_VAULT.get("catalog") or {}
 
-    def _safe_poster_url(u_img: str, meta_it: dict | None = None) -> str:
+    def _safe_poster_url(u_img: str, meta_it: dict | None = None, is_backdrop: bool = False) -> str:
         u_img = str(u_img or "").strip()
+        if u_img.startswith("/") and not (u_img.startswith("/api/") or u_img.startswith("/static/")):
+            size = "w780" if is_backdrop else "w500"
+            return f"https://image.tmdb.org/t/p/{size}{u_img}"
         if u_img.startswith("/"):
             return u_img
         if "wsrv.nl/?url=" in u_img:
@@ -2581,8 +2584,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     seen_final_ids = set()
     seen_final_titles = set()
     for it_x in items:
-        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "", it_x)
-        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "", it_x)
+        it_x["poster"] = _safe_poster_url(it_x.get("poster") or "", it_x, False)
+        it_x["backdrop"] = _safe_poster_url(it_x.get("backdrop") or it_x.get("poster") or "", it_x, True)
         mt_x = "tv" if it_x.get("mediaType") == "tv" else "movie"
         tid_x = str(it_x.get("tmdbId") or "").strip()
         nt_x = _norm_title(it_x.get("title") or "")
@@ -3096,6 +3099,7 @@ JW_PROV = {
     "disney": (["dnp"], "TR"),
     "prime": (["prv"], "TR"),
     "max": (["mxx", "hbm"], "US"),
+    "apple": (["atp"], "TR"),
     "crunchyroll": (["cru"], "US"),
     "tubi": (["tbv"], "US"),
 }
@@ -3211,9 +3215,10 @@ _STREAM_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
 
 OFFICIAL_SEARCH_URLS = {
     "netflix": "https://www.netflix.com/search?q={q}",
-    "disney": "https://www.disneyplus.com/search",
+    "disney": "https://www.disneyplus.com/search?q={q}",
     "prime": "https://www.primevideo.com/search/ref=atv_nb_sr?phrase={q}",
     "max": "https://play.max.com/search?q={q}",
+    "apple": "https://tv.apple.com/search?q={q}",
     "crunchyroll": "https://www.crunchyroll.com/search?q={q}",
     "tubi": "https://tubitv.com/search/{q}",
     "cinema": "https://www.hdfilmcehennemi.nl/?s={q}",
@@ -7084,13 +7089,19 @@ def _is_origin_allowed(request: Request) -> bool:
         allowed_origins = (
             "https://watchlivo.online",
             "http://watchlivo.online",
+            "https://watchlivo.me",
+            "https://watchlivo.net",
+            "https://watchlivo.cc",
+            "http://watchlivo.me",
+            "http://watchlivo.net",
+            "http://watchlivo.cc",
             "http://localhost",
             "http://127.0.0.1",
             "https://localhost",
             "https://127.0.0.1",
             "null",
         )
-        if not any(origin.startswith(ao) for ao in allowed_origins):
+        if not (any(origin.startswith(ao) for ao in allowed_origins) or origin.endswith(".vercel.app")):
             return False
 
     referer = (request.headers.get("referer") or "").strip().lower()
@@ -7098,13 +7109,19 @@ def _is_origin_allowed(request: Request) -> bool:
         allowed_refs = (
             "https://watchlivo.online",
             "http://watchlivo.online",
+            "https://watchlivo.me",
+            "https://watchlivo.net",
+            "https://watchlivo.cc",
+            "http://watchlivo.me",
+            "http://watchlivo.net",
+            "http://watchlivo.cc",
             "http://localhost",
             "http://127.0.0.1",
             "https://localhost",
             "https://127.0.0.1",
             "android-app://",
         )
-        if not any(referer.startswith(ar) for ar in allowed_refs):
+        if not (any(referer.startswith(ar) for ar in allowed_refs) or ".vercel.app" in referer):
             return False
 
     return True
@@ -12148,6 +12165,60 @@ _NETFLIX_BRIDGE_INJECTED_JS = r"""<base href="/api/netflix-bridge/">
 </script>"""
 
 
+
+_NETFLIX_KNOWN_IDS = {
+    "1405": "70136126",    # Dexter
+    "1396": "70143836",    # Breaking Bad
+    "1408": "70136117",    # House M.D.
+    "5920": "70140417",    # The Mentalist
+    "105248": "81054853",  # Cyberpunk: Edgerunners
+    "87083": "81249833",   # Vinland Saga
+    "428": "81427514",     # Monster
+    "577990": "81256740",  # Organize İşler: Karun Hazinesi
+}
+_NETFLIX_RESOLVED_CACHE: dict[str, str] = {}
+
+def _resolve_netflix_watch_id_sync(title: str, tmdb_id: str = "") -> str | None:
+    if tmdb_id and str(tmdb_id) in _NETFLIX_KNOWN_IDS:
+        return _NETFLIX_KNOWN_IDS[str(tmdb_id)]
+    ckey = f"{title.lower()}|{tmdb_id}"
+    if ckey in _NETFLIX_RESOLVED_CACHE:
+        return _NETFLIX_RESOLVED_CACHE[ckey]
+    for country in ("TR", "US", "GB"):
+        try:
+            hits = _justwatch_sync(title, packages=["nfx"], country=country, first=6)
+            for h in (hits or []):
+                t_match = not tmdb_id or str(h.get("tmdbId") or "") == str(tmdb_id)
+                if t_match or _norm_title(h.get("title") or "") == _norm_title(title):
+                    u = h.get("officialUrl") or ""
+                    m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:title|watch)/(\d+)", u)
+                    if m:
+                        nid = m.group(1)
+                        _NETFLIX_RESOLVED_CACHE[ckey] = nid
+                        return nid
+        except Exception:
+            pass
+    return None
+
+async def resolve_netflix_id_endpoint(request: Request) -> JSONResponse:
+    title = (request.query_params.get("title") or "").strip()
+    tmdb_id = (request.query_params.get("tmdbId") or "").strip()
+    netflix_id = await asyncio.to_thread(_resolve_netflix_watch_id_sync, title, tmdb_id)
+    if netflix_id:
+        return JSONResponse({
+            "ok": True,
+            "netflixId": netflix_id,
+            "watchUrl": f"https://www.netflix.com/watch/{netflix_id}",
+            "titleUrl": f"https://www.netflix.com/title/{netflix_id}",
+            "searchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
+        })
+    return JSONResponse({
+        "ok": False,
+        "netflixId": None,
+        "watchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
+        "searchUrl": f"https://www.netflix.com/search?q={urllib.parse.quote(title)}",
+    })
+
 async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
     """Rave-parity Option B: In-browser reverse proxy for Netflix web session."""
     client_origin = request.headers.get("origin")
@@ -12172,6 +12243,18 @@ async def netflix_bridge_proxy_endpoint(request: Request) -> Response:
         return JSONResponse({"error": "Rate limit exceeded on netflix bridge"}, status_code=429)
 
     rest = request.path_params.get("rest", "").strip("/")
+    # NSES-404 PRE-FETCH GUARD: If short TMDB ID is requested as watch ID, rewrite to real Netflix ID or search
+    m_watch = re.match(r"^watch/(\d+)$", rest)
+    if m_watch:
+        w_id = m_watch.group(1)
+        if len(w_id) < 7:
+            q_title = request.query_params.get("title") or ""
+            real_nid = _resolve_netflix_watch_id_sync(q_title, w_id)
+            if real_nid:
+                rest = f"watch/{real_nid}"
+            else:
+                q_term = q_title or "browse"
+                rest = f"search?q={urllib.parse.quote(q_term)}"
     if not rest or rest in ("login", "browse"):
         target_path = rest if rest else "browse"
     else:
@@ -12783,6 +12866,7 @@ app = Starlette(
         Route("/api/rave/ga-collect", rave_ga_collect_proxy, methods=["GET", "POST", "OPTIONS"]),
         Route("/r/{room_id}", room_share_landing),
         Route("/join/{room_id}", room_share_landing),
+        Route("/api/rave/resolve-netflix-id", resolve_netflix_id_endpoint),
         Route("/api/netflix-bridge", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         Route("/api/netflix-bridge/{rest:path}", netflix_bridge_proxy_endpoint, methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]),
         Route("/manifest.json", manifest_json, methods=["GET", "HEAD"]),
