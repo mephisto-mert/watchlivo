@@ -366,7 +366,7 @@ class SecurityHeaders:
                     if req_path.startswith("/api/rave/browser-proxy"):
                         hdrs.append((
                             b"content-security-policy",
-                            f"sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox; script-src 'self' 'nonce-{csp_nonce}'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'".encode("ascii"),
+                            f"sandbox allow-scripts allow-forms; script-src 'self' 'nonce-{csp_nonce}'; frame-ancestors 'self'; object-src 'none'; base-uri 'none'".encode("ascii"),
                         ))
                     else:
                         csp_val = (
@@ -3236,28 +3236,6 @@ PROV_BROWSE = {
     "yabancidizi": "https://yabancidizi.tv",
     "music": "https://music.youtube.com",
 }
-
-
-class BoundedTTLCache(BoundedTTLCache):
-    def __init__(self, maxsize: int = 1000, ttl: float = 3600.0):
-        super().__init__(maxsize=maxsize, ttl=ttl)
-        self._lock = threading.RLock()
-
-    def get(self, key: object, default: object = None) -> object:
-        with self._lock:
-            return super().get(key, default)
-
-    def __setitem__(self, key: object, value: object) -> None:
-        with self._lock:
-            super().__setitem__(key, value)
-
-    def pop(self, key: object, *args: object) -> object:
-        with self._lock:
-            return super().pop(key, *args)
-
-    def clear(self) -> None:
-        with self._lock:
-            super().clear()
 
 
 _VE_SEED_CACHE = BoundedTTLCache(maxsize=500, ttl=3600.0)
@@ -7009,7 +6987,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             or prov in ("exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv", "youtube")
             or (not tid.isdigit() and any(ch in f"{orig_title} {title}" for ch in "çğıöşüÇĞİÖŞÜ"))
         )
-        if not direct_list:
+        if not direct_list and is_tr_yt_eligible:
             yt_res = _extract_official_yt_sync(tr_title or orig_title or disp or title, s, e, mtype, [orig_title, tr_title, disp, title])
             if yt_res:
                 vid = yt_res["videoId"]
@@ -8461,14 +8439,14 @@ async def rave_login_account(request: Request):
     email = (payload.get("email") or payload.get("account_email") or payload.get("accountEmail") or "").strip()
     pwd = (payload.get("password") or "").strip()
 
-    if provider in ("netflix", "max", "hbomax"):
-        prof_name = (payload.get("profileName") or payload.get("profile_name") or (email.split("@")[0] if "@" in email else "") or ("Netflix Profilim" if provider == "netflix" else "Max Profilim")).strip()
+    if provider in ("netflix", "max", "hbomax") and not pwd and not email:
+        prof_name = (payload.get("profileName") or payload.get("profile_name") or ("Netflix Profilim" if provider == "netflix" else "Max Profilim")).strip()
         uid = _resolve_request_uid(request, payload) or f"guest_wl_{secrets.token_hex(8)}"
         sess_token = f"st_{provider}_{secrets.token_hex(20)}"
         record_provider_account_session(
             user_id=uid,
             provider="max" if provider == "hbomax" else provider,
-            account_email=email or f"sifresiz@{provider}.watchlivo",
+            account_email=f"sifresiz@{provider}.watchlivo",
             profile_name=prof_name,
             auth_type="sso",
             session_token=sess_token,
@@ -8478,7 +8456,7 @@ async def rave_login_account(request: Request):
             "ok": True,
             "loginSatisfied": True,
             "provider": provider,
-            "accountEmail": email or "Şifresiz Açık Erişim",
+            "accountEmail": "Şifresiz Açık Erişim",
             "profileName": prof_name,
             "userId": uid,
             "message": f"✓ {provider.upper()} şifresiz hesabı başarıyla bağlandı."

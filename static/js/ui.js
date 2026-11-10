@@ -101,10 +101,9 @@ export function h(tag, attrs = {}, ...children) {
       if (k === 'srcdoc') continue;
       if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
         const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
+        const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
         const isTrustedStaticSvg = (
-          k === 'src' &&
-          String(tag).toLowerCase() === 'img' &&
-          /^data:image\/svg\+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww\.w3\.org%2F2000%2Fsvg%22%20viewBox%3D/i.test(cleanV) &&
+          isSafeSvgImg &&
           !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed|use)|onload\s*=|onerror\s*=|javascript:|data:/i.test(cleanV)
         );
         if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;

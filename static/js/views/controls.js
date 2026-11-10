@@ -405,10 +405,16 @@ export function buildControls(frame, ctx) {
       toast('⏳ Video hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
       return;
     }
-    if (ok === 'entered' || ok === 'exited' || ok === true) {
+    if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video) {
       const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
       update();
       showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
+      return;
+    }
+    if (ok === 'entered' || ok === 'exited' || ok === true) {
+      const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
+      update();
+      showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık' : '⧉ PiP Kapatıldı', 2400);
       return;
     }
     if (isIosDevice || (typeof window !== 'undefined' && window.Android)) {

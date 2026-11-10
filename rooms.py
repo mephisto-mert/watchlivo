@@ -2131,15 +2131,11 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         if is_host and data.get("privacy") in VALID_PRIVACY:
             room["privacy"] = data["privacy"]
         is_anchor_hb = _as_bool(data.get("anchor"))
-        if (
-            prev_playing
-            and want_play
-            and not is_anchor_hb
-            and cur_live > 2.0
-            and inc_t < cur_live - 2.0
-            and (cur_live - inc_t) < 15.0
-            and (t_now - float(room["media"].get("updatedAt") or 0.0)) < 1.5
-        ):
+        if prev_playing and want_play and not is_anchor_hb and cur_live > 2.0 and inc_t < cur_live - 2.0:
+            room["media"]["currentTime"] = cur_live
+            room["media"]["updatedAt"] = t_now
+            room["media"]["playbackAnchored"] = True
+            room["_tok_sig"] = ""
             return out
         _apply_time(room, data)
         room["media"]["playing"] = want_play

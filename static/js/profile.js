@@ -2404,9 +2404,15 @@ export function openUserProfileModal(targetUser) {
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
-export async function syncGoogleYoutubeOAuth(expectedPassword = '', expectedEmail = '') {
-  const cleanPw = String(expectedPassword || '').trim();
-  const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
+export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') {
+  let rawPw = String(password || '').trim();
+  let rawEm = String(expectedEmail || '').trim();
+  if (rawPw.includes('@') && !rawEm) {
+    rawEm = rawPw;
+    rawPw = '';
+  }
+  const cleanPw = rawPw;
+  const cleanEmail = rawEm.toLowerCase();
   const fb = await getFirebaseAuth();
   if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {
     throw new Error('Google kimlik doğrulama modülü yüklenemedi.');

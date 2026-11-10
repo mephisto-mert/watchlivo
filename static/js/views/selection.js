@@ -1488,6 +1488,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); })),
         ...(moreTile ? [moreTile] : [])));
 
+    const showYtHome = false;
     root.replaceChildren(
       topBar,
       ...(!compact ? [cmdkDropdown] : []),
@@ -2002,7 +2003,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     root.replaceChildren(
       h('div', { class: 'wl-history-isolation-banner' },
         h('span', {}, authed
-          ? `🔒 Kişiye Özel Bulut Senkron (@${String(me.handle || me.name || 'hesap').replace(/^@+/, '')}) — Yalnızca sana görünür`
+          ? `🔒 Bulut Senkron — Kişiye Özel (@${String(me.handle || me.name || 'hesap').replace(/^@+/, '')}) — Yalnızca sana görünür`
           : '📱 Bu Cihaza Özel Geçmiş — Hesabınla giriş yaparak tüm cihazlarında senkronla'),
         !authed ? h('button', {
           type: 'button',

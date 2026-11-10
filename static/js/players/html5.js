@@ -1987,6 +1987,29 @@ export class Html5Adapter {
     return pv;
   }
 
+  _switchIosNativeToInlineMse() {
+    if (isIosWebKit() || !this._canAppleMseHls || !this.useNativeHls || !this.video || this.isPiP() || !window.Hls?.isSupported?.()) return;
+    const v = this.video;
+    const srcUrl = this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
+    if (!srcUrl) return;
+    const curT = this.getTime();
+    const wasPlaying = this.wantPlaying || !v.paused;
+    this._ensureIosPipStandby(this.currentUrl);
+    this._forceIosMseInline = true;
+    this.useNativeHls = false;
+    v.removeAttribute('x-webkit-airplay');
+    try { v.disableRemotePlayback = true; } catch (_) {}
+    v.crossOrigin = 'anonymous';
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
+    if (typeof this._attachHlsJsInline === 'function') {
+      this._attachHlsJsInline(srcUrl, () => {
+        resumeSharedAudioContext();
+        this.subs?.syncVideoVolume?.();
+        if (wasPlaying) this.tryPlay();
+      }, curT);
+    }
+  }
+
   canPiP() {
     const v = this.video;
     if (!v) return false;
