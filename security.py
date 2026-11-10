@@ -382,6 +382,28 @@ class RateLimiter:
             self._hits.pop(key, None)
 
 
+_DOC_TEST_NETS = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+)
+
+
+def _is_trusted_proxy_peer(peer: str) -> bool:
+    p = (peer or "").strip()
+    if not p:
+        return False
+    if p in ("127.0.0.1", "::1", "localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(p)
+        if isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in _DOC_TEST_NETS):
+            return False
+        return bool(ip.is_private or ip.is_loopback)
+    except Exception:
+        return False
+
+
 def client_ip(scope_or_request) -> str:
     """Best-effort client IP honouring verified proxy headers without client spoofing."""
     headers: Dict[str, str] = {}
@@ -407,8 +429,27 @@ def client_ip(scope_or_request) -> str:
                     return edge_ip[:64]
                 except Exception:
                     continue
+    peer = ""
+    try:
+        client = getattr(scope_or_request, "client", None)
+        if client and getattr(client, "host", None):
+            peer = str(client.host).strip()[:64]
+    except Exception:
+        pass
+    if not peer:
+        scope = scope_or_request if isinstance(scope_or_request, dict) else (getattr(scope_or_request, "scope", None) or {})
+        try:
+            client = scope.get("client")
+            if client and client[0]:
+                peer = str(client[0]).strip()[:64]
+        except Exception:
+            pass
     trust_vercel = os.environ.get("VERCEL") == "1"
-    trust_proxy = os.environ.get("WATCHLIVO_TRUST_PROXY") == "1" or bool(os.environ.get("RENDER"))
+    trust_proxy = (
+        os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
+        or bool(os.environ.get("RENDER"))
+        or _is_trusted_proxy_peer(peer)
+    )
     if trust_vercel and not trust_proxy:
         v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
         if v_ip:
@@ -418,39 +459,38 @@ def client_ip(scope_or_request) -> str:
             except Exception:
                 pass
     elif trust_proxy:
-        if headers.get("cf-ray"):
-            cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
-            if cf_ip:
-                try:
-                    ipaddress.ip_address(cf_ip)
-                    return cf_ip[:64]
-                except Exception:
-                    pass
+        cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
+        if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
+            try:
+                ipaddress.ip_address(cf_ip)
+                return cf_ip[:64]
+            except Exception:
+                pass
         xff = headers.get("x-forwarded-for") or ""
         if xff:
+            fallback_cand = ""
             for raw_part in reversed(xff.split(",")):
                 cand = raw_part.strip()
                 if not cand:
                     continue
                 try:
                     ipaddress.ip_address(cand)
-                    return cand[:64]
+                    if not fallback_cand:
+                        fallback_cand = cand[:64]
+                    if not _is_trusted_proxy_peer(cand):
+                        return cand[:64]
                 except Exception:
                     continue
-    try:
-        client = getattr(scope_or_request, "client", None)
-        if client and getattr(client, "host", None):
-            return str(client.host)[:64]
-    except Exception:
-        pass
-    scope = scope_or_request if isinstance(scope_or_request, dict) else (getattr(scope_or_request, "scope", None) or {})
-    try:
-        client = scope.get("client")
-        if client:
-            return str(client[0])[:64]
-    except Exception:
-        pass
-    return "unknown"
+            if fallback_cand:
+                return fallback_cand
+        real_ip = (headers.get("x-real-ip") or "").split(",")[0].strip()
+        if real_ip:
+            try:
+                ipaddress.ip_address(real_ip)
+                return real_ip[:64]
+            except Exception:
+                pass
+    return peer or "unknown"
 
 
 def too_many_response(retry_after: float):

@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261110_v181';
-import { avatar, openDmModal } from '../profile.js?v=20261110_v181';
-import { getProvider } from '../providers.js?v=20261110_v181';
-import { api, qs } from '../api.js?v=20261110_v181';
+import { h, icons, popup, toast } from '../ui.js?v=20261110_v182';
+import { avatar, openDmModal } from '../profile.js?v=20261110_v182';
+import { getProvider } from '../providers.js?v=20261110_v182';
+import { api, qs } from '../api.js?v=20261110_v182';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261110_v181';
-import { expectedPosition } from '../sync.js?v=20261110_v181';
+} from '../store.js?v=20261110_v182';
+import { expectedPosition } from '../sync.js?v=20261110_v182';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -33,22 +33,28 @@ const LIVE_BRANDS = {
   'radyo-alem-fm':  { label: 'ALEM FM',      sub: 'HİT MÜZİK & EĞLENCE',    c1: '#eab308', c2: '#422006' },
 };
 
+const LIVE_BRAND_CARDS = LIVE_BRANDS;
+
 function makeLiveBrandSvg({ label, sub, c1, c2 }) {
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient><radialGradient id="r" cx="25%" cy="15%" r="75%"><stop offset="0%" stop-color="#ffffff" stop-opacity="0.22"/><stop offset="100%" stop-color="#000000" stop-opacity="0.35"/></radialGradient></defs><rect width="320" height="180" fill="url(#g)"/><rect width="320" height="180" fill="url(#r)"/><circle cx="285" cy="35" r="55" fill="#ffffff" fill-opacity="0.06"/><text x="160" y="102" text-anchor="middle" fill="#ffffff" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-weight="900" font-size="29" letter-spacing="1">${esc(label)}</text><text x="160" y="132" text-anchor="middle" fill="rgba(255,255,255,0.88)" font-family="system-ui,-apple-system,Segoe UI,Roboto,sans-serif" font-weight="700" font-size="11.5" letter-spacing="1.5">${esc(sub)}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-export function thumbFor(media, roomId = '') {
-  if (!media) return '';
-  const brand = LIVE_BRANDS[roomId];
-  const primaryImg = media.thumbnail || media.poster || media.backdrop || media.still || '';
-  if (brand && (!primaryImg || primaryImg.includes('watchlivo-poster.svg'))) {
-    return '/static/watchlivo-poster.svg';
+export function thumbFor(roomOrMedia, roomId = '') {
+  if (!roomOrMedia) return '';
+  const isRoomObj = Boolean(roomOrMedia.media || roomOrMedia.curated || LIVE_BRAND_CARDS[roomOrMedia.id]);
+  const m = isRoomObj ? (roomOrMedia.media || {}) : roomOrMedia;
+  const effRoomId = roomId || (isRoomObj ? roomOrMedia.id : '') || '';
+  const brandSpec = LIVE_BRAND_CARDS[m.videoId || effRoomId];
+  const primaryImg = m.thumbnail || m.poster || m.backdrop || m.still || '';
+  if (brandSpec && (!primaryImg || primaryImg.includes('watchlivo-poster.svg'))) {
+    return makeLiveBrandSvg(brandSpec);
   }
   if (primaryImg) return primaryImg;
-  if (media.provider === 'youtube' && media.videoId) return `https://i.ytimg.com/vi/${media.videoId}/hqdefault.jpg`;
-  return '';
+  if (brandSpec) return makeLiveBrandSvg(brandSpec);
+  if (m.provider === 'youtube' && m.videoId) return `https://i.ytimg.com/vi/${m.videoId}/hqdefault.jpg`;
+  return m.thumbnail || '/static/watchlivo-poster.svg';
 }
 
 function fmtRoomClock(sec) {
@@ -304,7 +310,17 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
   const renderFriendRow = (f) => {
     const fUid = f.uid || f.id || '';
     const activeRoom = findFriendActiveRoom(f);
-    const inMyRoom = Boolean(state.mesh?.id && activeRoom?.id !== state.mesh.id);
+    const inSameRoom = Boolean(
+      state.mesh?.id && (
+        f.roomId === state.mesh.id ||
+        activeRoom?.id === state.mesh.id ||
+        (state.mesh.participants || []).some((p) =>
+          (p.uid && f.uid && p.uid === f.uid) ||
+          (p.handle && f.handle && String(p.handle).replace(/^@+/, '').toLowerCase() === String(f.handle).replace(/^@+/, '').toLowerCase())
+        )
+      )
+    );
+    const inMyRoom = Boolean(state.mesh?.id && !inSameRoom);
     const invId = sentRoomInvites.get(fUid);
     const pState = f.presenceState || (f.online ? 'online' : 'offline');
     const dotClass = `wl-pres-dot is-${pState}`;
@@ -327,17 +343,19 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
               },
             }, f.bestFriend ? '⭐' : '☆')),
           h('div', { class: `wl-friend-status is-${pState}` },
-            activeRoom ? `🎬 ${activeRoom.media?.title || activeRoom.name} izliyor` : (f.status || (f.online ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı'))))),
+            inSameRoom ? '✅ Şu an bu odada' : (activeRoom ? `🎬 ${activeRoom.media?.title || activeRoom.name} izliyor` : (f.status || (f.online ? '🟢 Çevrimiçi' : '⚫ Çevrimdışı')))))),
       h('div', { class: 'wl-friend-actions' },
-        activeRoom ? h('button', {
-          type: 'button',
-          class: 'btn sm primary',
-          onclick: () => {
-            modalRef?.close?.();
-            rememberRoom(activeRoom);
-            window.vortexNavigate?.(`/mesh/${encodeURIComponent(activeRoom.id)}`);
-          },
-        }, '▶ Katıl') : null,
+        inSameRoom
+          ? h('span', { class: 'wl-friend-pill ok' }, '✅ Odada')
+          : (activeRoom ? h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              onclick: () => {
+                modalRef?.close?.();
+                rememberRoom(activeRoom);
+                window.vortexNavigate?.(`/mesh/${encodeURIComponent(activeRoom.id)}`);
+              },
+            }, '▶ Katıl') : null),
         inMyRoom ? h('button', {
           type: 'button',
           class: `btn sm ${invId ? '' : 'primary'}`,
@@ -461,6 +479,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
               onclick: async () => {
                 await updateFriendAction('accept', { requestId: req.id, targetUid: req.fromUid });
                 toast(`🎉 ${req.fromName} ile artık arkadaşsınız!`);
+                if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
                 renderModalContent();
                 onRefresh?.();
               },
@@ -537,7 +556,7 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
                   h('div', { class: `wl-friend-status is-${uCard.presenceState || 'offline'}` }, uCard.status || ''))),
               st === 'FRIENDS' ? h('span', { class: 'wl-friend-pill ok' }, '✓ Arkadaş')
                 : st === 'OUTGOING_PENDING' ? h('button', { type: 'button', class: 'btn sm ghost', onclick: async () => { await updateFriendAction('cancel', { targetUid: uCard.uid }); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '⏳ İstek Gönderildi · İptal')
-                : st === 'INCOMING_PENDING' ? h('button', { type: 'button', class: 'btn sm primary', onclick: async () => { await updateFriendAction('accept', { targetUid: uCard.uid }); toast(`🎉 ${uCard.name} ile artık arkadaşsınız!`); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '✓ Seni Ekledi · Onayla')
+                : st === 'INCOMING_PENDING' ? h('button', { type: 'button', class: 'btn sm primary', onclick: async () => { await updateFriendAction('accept', { targetUid: uCard.uid }); toast(`🎉 ${uCard.name} ile artık arkadaşsınız!`); if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated')); searchResults = await searchUsersServer(searchQuery); renderModalContent(); } }, '✓ Seni Ekledi · Onayla')
                 : h('button', { type: 'button', class: 'btn sm primary', onclick: () => triggerSendReq(uCard.handle || uCard.name, { targetUid: uCard.uid }) }, '+ Arkadaş Ekle'));
           })) : (searchQuery.length >= 2 && !searching ? h('div', { class: 'dim', style: { fontSize: '.8rem', padding: '8px 2px' } }, `"${searchQuery}" ile eşleşen kayıtlı kullanıcı bulunamadı.`) : null));
     } else {
@@ -573,7 +592,17 @@ export function openFriendsManagerModal(onRefresh, initialTab = 'friends') {
             h('button', { type: 'button', class: 'btn sm', onclick: async () => { await updateFriendAction('unblock', { targetUid: b.uid }); renderModalContent(); } }, 'Engeli Kaldır')))) : null);
     }
 
+    const wasInpFocused = typeof document !== 'undefined' && document.activeElement?.id === 'friend-name-input';
+    const inpStart = wasInpFocused ? document.activeElement.selectionStart : null;
+    const inpEnd = wasInpFocused ? document.activeElement.selectionEnd : null;
     box.replaceChildren(tabBar, bodyNode);
+    if (wasInpFocused) {
+      const nextInp = box.querySelector('#friend-name-input');
+      if (nextInp) {
+        nextInp.focus({ preventScroll: true });
+        try { nextInp.setSelectionRange(inpStart, inpEnd); } catch (_) {}
+      }
+    }
   };
 
   renderModalContent();
@@ -634,12 +663,15 @@ export function renderHomeFriendsStrip(onOpenRoom) {
         ...friends.map((f) => {
           const pState = f.presenceState || (f.online ? 'online' : 'offline');
           const wRoom = f.hideWatching ? null : f.watchingRoom;
+          const fRoomId = wRoom?.roomId || f.roomId || '';
+          const inCurrentRoom = Boolean(state.mesh?.id && (f.roomId === state.mesh.id || fRoomId === state.mesh.id));
           return h('div', {
             class: `wl-hfs-chip is-${pState}`,
             onclick: () => {
-              if (wRoom?.roomId && onOpenRoom) {
-                const liveMatch = (lastLobbyRooms || []).find((r) => r && r.id === wRoom.roomId);
-                onOpenRoom(liveMatch || { id: wRoom.roomId, name: wRoom.roomName });
+              if (inCurrentRoom) return;
+              if (fRoomId && onOpenRoom) {
+                const liveMatch = (lastLobbyRooms || []).find((r) => r && r.id === fRoomId);
+                onOpenRoom(liveMatch || { id: fRoomId, name: wRoom?.roomName || f.roomName });
               } else {
                 openDmModal(f.uid);
               }
@@ -650,8 +682,10 @@ export function renderHomeFriendsStrip(onOpenRoom) {
               h('span', { class: `wl-pres-dot is-${pState}` })),
             h('div', { class: 'wl-hfs-chip-meta' },
               h('b', {}, f.name),
-              h('span', {}, wRoom ? `🎬 ${wRoom.mediaTitle || wRoom.roomName}` : (f.online ? (pState === 'idle' ? '🌙 Uzakta' : '🟢 Çevrimiçi') : (f.status || '⚫ Çevrimdışı')))),
-            wRoom?.roomId ? h('span', { class: 'wl-hfs-join-tag' }, 'Katıl →') : null);
+              h('span', {}, inCurrentRoom ? '✅ Odada' : (wRoom ? `🎬 ${wRoom.mediaTitle || wRoom.roomName}` : (f.online ? (pState === 'idle' ? '🌙 Uzakta' : '🟢 Çevrimiçi') : (f.status || '⚫ Çevrimdışı'))))),
+            inCurrentRoom
+              ? h('span', { class: 'wl-hfs-join-tag' }, '✅ Odada')
+              : (fRoomId ? h('span', { class: 'wl-hfs-join-tag' }, '▶ Katıl') : null));
         })) : h('div', { class: 'wl-hfs-empty' },
         'Arkadaşlarını @kullaniciadi ile ekle; çevrimiçi olduklarında gör, mesajlaş ve tek tıkla odalarına davet et.'));
   };
@@ -743,8 +777,35 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     return;
   }
 
+  const wasSearchFocused = typeof document !== 'undefined' && (
+    document.activeElement?.id === 'wl-lobby-room-search' ||
+    document.activeElement?.id === 'lobby-search'
+  );
+  const focusedSearchId = wasSearchFocused ? document.activeElement.id : '';
+  const selStart = wasSearchFocused ? document.activeElement.selectionStart : null;
+  const selEnd = wasSearchFocused ? document.activeElement.selectionEnd : null;
+  const hadInlineSearch = Boolean(container.querySelector?.('#wl-lobby-room-search'));
+
   container.dataset.layoutSig = layoutSig;
   container.replaceChildren();
+
+  let searchInput = null;
+  if (hadInlineSearch || (typeof document !== 'undefined' && !document.getElementById('lobby-search') && !document.getElementById('wl-lobby-room-search'))) {
+    searchInput = h('input', {
+      id: 'wl-lobby-room-search',
+      class: 'input lobby-search-compact',
+      value: query,
+      placeholder: 'Katılacak yeni odalar keşfet...',
+      'aria-label': 'Katılacak yeni odalar keşfet',
+      oninput: (e) => {
+        container.dataset.layoutSig = '';
+        renderLobbySections(container, rooms, onOpen, { filter, query: e.target.value });
+      },
+    });
+    container.append(h('div', { class: 'lobby-inline-search-row', style: { display: 'none' } }, searchInput));
+  } else if (typeof document !== 'undefined') {
+    searchInput = document.getElementById(focusedSearchId) || document.getElementById('wl-lobby-room-search') || document.getElementById('lobby-search');
+  }
 
   if (filter === 'friends' || (filter === 'all' && friends.length > 0)) {
     const friendsBar = h('div', { class: 'friends-strip' },
@@ -778,6 +839,10 @@ export function renderLobbySections(container, rooms, onOpen, { filter = 'all', 
     if (!list.length) container.append(h('div', { class: 'lobby-empty' }, s.empty));
     else if (s.key === 'tv' || s.key === 'radio') container.append(h('div', { class: 'tv-channels-grid' }, list.map((r) => tvGlassCard(r, onOpen))));
     else container.append(h('div', { class: 'lobby-grid' }, list.map((r) => meshThumb(r, onOpen))));
+  }
+  if (wasSearchFocused && searchInput) {
+    searchInput.focus({ preventScroll: true });
+    try { searchInput.setSelectionRange(selStart, selEnd); } catch (_) {}
   }
   requestAnimationFrame(() => container.classList.add('is-hydrated'));
 }

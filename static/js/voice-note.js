@@ -129,6 +129,11 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
     onError?.(err?.name === 'NO_GUM' ? 'Tarayıcınız mikrofon erişimini desteklemiyor' : 'Mikrofon izni verilmedi — tarayıcı adres çubuğundan mikrofon iznini açın');
     return null;
   }
+  if (typeof window !== 'undefined') window.vortexSetVoiceNotePlaying?.(true);
+  const cleanupStreams = () => {
+    try { stream?.getTracks?.().forEach((t) => t.stop()); } catch (_) {}
+    if (typeof window !== 'undefined') window.vortexSetVoiceNotePlaying?.(false);
+  };
   const Ctx = window.AudioContext || window.webkitAudioContext;
   const startedAt = Date.now();
   const peaks = [];
@@ -176,7 +181,7 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
         stopped = true;
         clearInterval(timer);
         try { proc.disconnect(); srcNode.disconnect(); muteGain.disconnect(); } catch (_) {}
-        try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+        cleanupStreams();
         try { await ac.close(); } catch (_) {}
         if (!shouldSend) return;
         if (totalFrames < 600) {
@@ -222,7 +227,7 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
   }
 
   if (typeof MediaRecorder === 'undefined') {
-    try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    cleanupStreams();
     onError?.('Tarayıcınız ses kaydını desteklemiyor');
     return null;
   }
@@ -237,12 +242,22 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
   const chunks = [];
   let wantSend = false;
   rec.ondataavailable = (ev) => { if (ev.data && ev.data.size > 0) chunks.push(ev.data); };
+  rec.onerror = () => {
+    clearInterval(timer);
+    cleanupStreams();
+    onError?.('Ses kaydı sırasında hata oluştu');
+  };
   rec.onstop = () => {
-    try { stream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+    cleanupStreams();
     if (!wantSend || !chunks.length) return;
-    const durSec = Math.max(0.8, Math.min(maxSeconds + 1, (Date.now() - startedAt) / 1000));
+    const elapsedMs = Date.now() - startedAt;
     const rawMime = (rec.mimeType || mimeType || 'audio/mp4').replace(/^video\/mp4/i, 'audio/mp4');
     const blob = new Blob(chunks, { type: rawMime });
+    if (elapsedMs < 350 || blob.size < 400) {
+      onError?.('Ses kaydı çok kısa');
+      return;
+    }
+    const durSec = Math.max(0.8, Math.min(maxSeconds + 1, elapsedMs / 1000));
     const reader = new FileReader();
     reader.onloadend = async () => {
       let dataUrl = String(reader.result || '').replace(/^data:video\/mp4/i, 'data:audio/mp4');
@@ -252,7 +267,10 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
       if (typeof apiFn === 'function') {
         try {
           const up = await apiFn('/api/rave/voice-note', { method: 'POST', body: payload });
-          if (up?.ok && up.audioNote?.url) payload = { ...payload, id: up.audioNote.id, url: up.audioNote.url };
+          if (up?.ok && up.audioNote?.url) {
+            payload = { ...payload, id: up.audioNote.id, url: up.audioNote.url, mime: up.audioNote.mime || rawMime };
+            if (payload.url && dataUrl.length > 36000) delete payload.dataUrl;
+          }
         } catch (_) {}
       }
       onFinish?.(payload);
@@ -276,7 +294,16 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
       stopped = true;
       wantSend = Boolean(sendIt);
       clearInterval(timer);
-      try { if (rec.state !== 'inactive') { rec.requestData?.(); rec.stop(); } } catch (_) {}
+      try {
+        if (rec.state !== 'inactive') {
+          rec.requestData?.();
+          rec.stop();
+        } else {
+          cleanupStreams();
+        }
+      } catch (_) {
+        cleanupStreams();
+      }
     },
   };
 }
@@ -295,10 +322,15 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
   let blobFallbackTried = false;
   let rateIdx = 0;
   const rates = [1, 1.5, 2];
-  const revokeBlob = () => {
+  const revokeBlob = (resetAudio = true) => {
     if (activeBlobUrl) {
+      const usedByAudio = audioEl && audioEl.src === activeBlobUrl;
       try { URL.revokeObjectURL(activeBlobUrl); } catch (_) {}
       activeBlobUrl = '';
+      if (resetAudio && usedByAudio) {
+        try { audioEl.removeAttribute('src'); audioEl.load?.(); } catch (_) {}
+        audioEl = null;
+      }
     }
   };
   const fmtSec = (s) => {
@@ -351,7 +383,7 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
       timeEl.textContent = fmtSec(Math.max(0, Math.ceil(d - audioEl.currentTime)));
     };
     const onStop = () => {
-      try { audioEl.currentTime = 0; } catch (_) {}
+      try { if (audioEl) audioEl.currentTime = 0; } catch (_) {}
       playBtn.textContent = '▶';
       syncBars(0);
       timeEl.textContent = fmtSec(totalDur);
@@ -359,7 +391,7 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
         activeGlobalVoiceAudio = null;
         window.vortexSetVoiceNotePlaying?.(false);
       }
-      if (!playBtn.isConnected) revokeBlob();
+      revokeBlob(true);
     };
     audioEl.onended = onStop;
     audioEl.onpause = () => {
@@ -368,12 +400,12 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
         activeGlobalVoiceAudio = null;
         window.vortexSetVoiceNotePlaying?.(false);
       }
-      if (!playBtn.isConnected) revokeBlob();
+      if (!playBtn.isConnected || audioEl?.ended) revokeBlob(true);
     };
     audioEl.onerror = () => {
       if (!blobFallbackTried && hasDataUrl) {
         blobFallbackTried = true;
-        revokeBlob();
+        revokeBlob(false);
         const bUrl = dataUrlToBlobUrl(an.dataUrl);
         if (bUrl) {
           activeBlobUrl = bUrl;
@@ -400,15 +432,17 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
       el.play().catch(() => {
         if (!blobFallbackTried && hasDataUrl) {
           blobFallbackTried = true;
-          const bUrl = dataUrlToBlobUrl(an.dataUrl);
-          if (bUrl) {
-            el.src = bUrl;
-            el.play().catch(() => { playBtn.textContent = '▶'; window.vortexSetVoiceNotePlaying?.(false); });
+          revokeBlob(false);
+          activeBlobUrl = dataUrlToBlobUrl(an.dataUrl);
+          if (activeBlobUrl) {
+            el.src = activeBlobUrl;
+            el.play().catch(() => { playBtn.textContent = '▶'; window.vortexSetVoiceNotePlaying?.(false); revokeBlob(true); });
             return;
           }
         }
         playBtn.textContent = '▶';
         window.vortexSetVoiceNotePlaying?.(false);
+        revokeBlob(true);
       });
     } else {
       el.pause();

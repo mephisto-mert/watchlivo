@@ -121,15 +121,31 @@ export function set(patch) {
     if (nextScope !== _activeAccountScope) {
       if (prevScope && prevScope.startsWith('guest_') && nextScope.startsWith('acct_')) {
         try {
+          const nowTs = Date.now();
           for (const keyFn of [_historyKey, _favKey, _musicKey, _ytPrefsKey]) {
-            const gVal = localStorage.getItem(keyFn(prevScope));
+            const gKey = keyFn(prevScope);
+            const gVal = localStorage.getItem(gKey);
             const aKey = keyFn(nextScope);
             const aVal = localStorage.getItem(aKey);
             if (gVal && gVal !== '[]' && gVal !== '{}' && (!aVal || aVal === '[]' || aVal === '{}')) {
-              localStorage.setItem(aKey, gVal);
+              if (keyFn === _historyKey || keyFn === _favKey) {
+                try {
+                  const parsed = JSON.parse(gVal);
+                  if (Array.isArray(parsed)) {
+                    const stamped = parsed.map((it) => (it && typeof it === 'object' ? { ...it, cloudSynced: false, updatedAt: nowTs } : it));
+                    localStorage.setItem(aKey, JSON.stringify(stamped));
+                  } else {
+                    localStorage.setItem(aKey, gVal);
+                  }
+                } catch (_) {
+                  localStorage.setItem(aKey, gVal);
+                }
+              } else {
+                localStorage.setItem(aKey, gVal);
+              }
             }
+            localStorage.removeItem(gKey);
           }
-
         } catch (_) {}
       }
       _activeAccountScope = nextScope;
@@ -397,9 +413,32 @@ export async function syncCloudUserMedia(force = false) {
     const verifiedUid = String(pRes.value?.uid || wRes.value?.uid || mRes.value?.uid || '').trim().toLowerCase();
     if (verifiedUid && state.self && !state.self.isGuest && String(state.self.uid || '').toLowerCase() !== verifiedUid) {
       state.self.uid = verifiedUid;
+      state.self.id = verifiedUid;
       _activeAccountScope = getAccountStorageScope();
+      try {
+        const rawProf = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
+        if (rawProf && !rawProf.isGuest) {
+          rawProf.uid = verifiedUid;
+          rawProf.id = verifiedUid;
+          localStorage.setItem('vortex_profile_v2', JSON.stringify(rawProf));
+        }
+      } catch (_) {}
     }
     const effScope = getAccountStorageScope();
+    if (effScope !== startScope) {
+      try {
+        for (const keyFn of [_historyKey, _favKey, _musicKey, _ytPrefsKey]) {
+          const oldKey = keyFn(startScope);
+          const newKey = keyFn(effScope);
+          const oldVal = localStorage.getItem(oldKey);
+          const newVal = localStorage.getItem(newKey);
+          if (oldVal && oldVal !== '[]' && oldVal !== '{}' && (!newVal || newVal === '[]' || newVal === '{}')) {
+            localStorage.setItem(newKey, oldVal);
+          }
+          localStorage.removeItem(oldKey);
+        }
+      } catch (_) {}
+    }
     const validP = pRes.status === 'fulfilled' && pRes.value?.authenticated === true && Array.isArray(pRes.value?.items) ? pRes.value.items : null;
     if (validP) {
       const cloudProg = validP;
@@ -411,12 +450,18 @@ export async function syncCloudUserMedia(force = false) {
       }
       const localList = getWatchHistory();
       const byKey = new Map();
+      const toPush = [];
       for (const loc of localList) {
         const k = _boundProgressKey(loc.historyId || loc.key || '');
         if (!k) continue;
-        if (!cloudKeys.has(k) && (loc.cloudSynced || (cloudProg.length === 0 && _normTs(loc.updatedAt) < now - 4000))) {
+        if (!cloudKeys.has(k) && loc.cloudSynced) {
           historyChanged = true;
           continue;
+        }
+        if (!cloudKeys.has(k) && !loc.cloudSynced) {
+          toPush.push({ ...loc, key: k, historyId: k });
+          loc.cloudSynced = true;
+          historyChanged = true;
         }
         byKey.set(k, loc);
       }
@@ -470,25 +515,81 @@ export async function syncCloudUserMedia(force = false) {
           historyChanged = true;
         }
       }
+      for (const item of toPush.slice(0, 20)) {
+        fetch('/api/user/progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+          body: JSON.stringify({
+            action: 'upsert',
+            key: item.key,
+            tmdbId: String(item.tmdbId || ''),
+            imdbId: String(item.imdbId || ''),
+            mediaType: item.mediaType === 'tv' ? 'tv' : 'movie',
+            provider: item.catalogProvider || item.provider || 'cinema',
+            catalogProvider: item.catalogProvider || item.provider || 'cinema',
+            streamType: item.streamType || '',
+            videoId: String(item.videoId || ''),
+            title: item.title || 'Video',
+            originalTitle: item.originalTitle || '',
+            seriesTitle: item.seriesTitle || '',
+            channel: String(item.channel || ''),
+            channelId: String(item.channelId || ''),
+            channelAvatar: String(item.channelAvatar || ''),
+            thumbnail: item.thumbnail || item.poster || '',
+            poster: item.poster || item.thumbnail || '',
+            backdrop: item.backdrop || '',
+            year: String(item.year || ''),
+            season: Number(item.season || 1),
+            episode: Number(item.episode || 1),
+            position: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
+            currentTime: Math.max(0, Math.floor(Number(item.currentTime ?? item.position ?? 0))),
+            duration: Math.max(0, Math.floor(Number(item.duration || 0))),
+            percent: Number(item.percent || 0),
+            completed: Boolean(item.completed),
+            epProgress: item.epProgress || {},
+            url: item.url || '',
+            sourceUrl: item.officialUrl || item.url || '',
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      }
       if (historyChanged || effScope !== startScope) {
         const merged = [...byKey.values()].sort((a, b) => _normTs(b.updatedAt) - _normTs(a.updatedAt)).slice(0, 50);
         try { localStorage.setItem(_historyKey(effScope), JSON.stringify(merged)); } catch (e) { /* ignore */ }
       }
     }
     const validW = wRes.status === 'fulfilled' && wRes.value?.authenticated === true && Array.isArray(wRes.value?.items) ? wRes.value.items : null;
-    if (validW && validW.length) {
+    if (Array.isArray(validW)) {
       const cloudWlist = validW;
+      const cloudFavKeys = new Set();
+      for (const cw of cloudWlist) {
+        const mtype = cw.mediaType === 'tv' ? 'tv' : 'movie';
+        const fk = _boundProgressKey(cw.key || (cw.tmdbId ? `${mtype}:${cw.tmdbId}` : cw.title || ''));
+        if (fk) cloudFavKeys.add(fk);
+      }
       const localFavs = getFavorites();
       const byFav = new Map();
+      const favsToPush = [];
       for (const f of localFavs) {
-        const fk = String(f.key || (f.tmdbId ? `${f.mediaType || 'movie'}:${f.tmdbId}` : f.favId || ''));
-        if (fk) byFav.set(fk, f);
+        const fk = _boundProgressKey(f.key || (f.tmdbId ? `${f.mediaType || 'movie'}:${f.tmdbId}` : f.favId || ''));
+        if (!fk) continue;
+        if (!cloudFavKeys.has(fk) && f.cloudSynced) {
+          favsChanged = true;
+          continue;
+        }
+        if (!cloudFavKeys.has(fk) && !f.cloudSynced) {
+          favsToPush.push({ ...f, key: fk });
+          f.cloudSynced = true;
+          favsChanged = true;
+        }
+        byFav.set(fk, { ...f, key: fk });
       }
       for (const cw of cloudWlist) {
         const mtype = cw.mediaType === 'tv' ? 'tv' : 'movie';
-        const fk = String(cw.key || (cw.tmdbId ? `${mtype}:${cw.tmdbId}` : cw.title || ''));
+        const fk = _boundProgressKey(cw.key || (cw.tmdbId ? `${mtype}:${cw.tmdbId}` : cw.title || ''));
         if (!fk) continue;
-        if (!byFav.has(fk)) {
+        const prevFav = byFav.get(fk);
+        if (!prevFav) {
           const favId = String(cw.tmdbId || fk.split(':')[1] || fk);
           byFav.set(fk, {
             favId,
@@ -498,7 +599,7 @@ export async function syncCloudUserMedia(force = false) {
             imdbId: cw.imdbId || '',
             mediaType: mtype,
             title: cw.title || 'Yapım',
-            originalTitle: cw.title || '',
+            originalTitle: cw.originalTitle || cw.title || '',
             channel: cw.channel || '',
             channelId: cw.channelId || '',
             channelAvatar: cw.channelAvatar || '',
@@ -508,14 +609,55 @@ export async function syncCloudUserMedia(force = false) {
             rating: Number(cw.rating || 8.0) || 8.0,
             thumbnail: cw.thumbnail || cw.poster || '',
             poster: cw.poster || cw.thumbnail || '',
-            backdrop: cw.poster || cw.thumbnail || '',
+            backdrop: cw.backdrop || cw.poster || cw.thumbnail || '',
             provider: cw.provider || 'cinema',
+            cloudSynced: true,
             addedAt: _normTs(cw.addedAt) || now,
           });
           favsChanged = true;
+        } else {
+          const mergedRating = Number(prevFav.rating || 0) > 0 ? Number(prevFav.rating) : (Number(cw.rating || 0) > 0 ? Number(cw.rating) : 8.0);
+          byFav.set(fk, {
+            ...prevFav,
+            key: fk,
+            title: cw.title || prevFav.title || 'Yapım',
+            originalTitle: prevFav.originalTitle || cw.originalTitle || cw.title || '',
+            backdrop: prevFav.backdrop || cw.backdrop || cw.poster || cw.thumbnail || '',
+            poster: cw.poster || cw.thumbnail || prevFav.poster || prevFav.thumbnail || '',
+            thumbnail: cw.thumbnail || cw.poster || prevFav.thumbnail || prevFav.poster || '',
+            rating: mergedRating,
+            cloudSynced: true,
+          });
+          if (!prevFav.cloudSynced) favsChanged = true;
         }
       }
-      if (favsChanged) {
+      for (const fav of favsToPush.slice(0, 30)) {
+        fetch('/api/user/watchlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ..._authHdrs() },
+          body: JSON.stringify({
+            action: 'add',
+            key: fav.key,
+            tmdbId: String(fav.tmdbId || fav.favId || ''),
+            videoId: String(fav.videoId || ''),
+            imdbId: String(fav.imdbId || ''),
+            mediaType: fav.mediaType === 'tv' ? 'tv' : 'movie',
+            provider: fav.provider || 'cinema',
+            title: fav.title || 'Yapım',
+            channel: String(fav.channel || ''),
+            channelId: String(fav.channelId || ''),
+            channelAvatar: String(fav.channelAvatar || ''),
+            duration: Number(fav.duration || 0) || 0,
+            url: String(fav.url || ''),
+            thumbnail: fav.thumbnail || fav.poster || '',
+            poster: fav.poster || fav.thumbnail || '',
+            year: String(fav.year || ''),
+            rating: Number(fav.rating || 8.0) || 8.0,
+          }),
+          keepalive: true,
+        }).catch(() => {});
+      }
+      if (favsChanged || effScope !== startScope) {
         const mergedFavs = [...byFav.values()].sort((a, b) => _normTs(b.addedAt) - _normTs(a.addedAt)).slice(0, 60);
         try { localStorage.setItem(_favKey(effScope), JSON.stringify(mergedFavs)); } catch (e) { /* ignore */ }
       }
@@ -545,7 +687,7 @@ export async function syncCloudUserMedia(force = false) {
     const validY = yRes?.status === 'fulfilled' && yRes.value?.authenticated === true && yRes.value?.prefs ? yRes.value.prefs : null;
     if (validY) {
       const localY = getYtPrefs();
-      if (Number(validY.updatedAt || 0) >= Number(localY.updatedAt || 0) || !(localY.subscriptions?.length || localY.likedVideos?.length)) {
+      if (_normTs(validY.updatedAt) >= _normTs(localY.updatedAt) || !(localY.subscriptions?.length || localY.likedVideos?.length)) {
         try {
           localStorage.setItem(_ytPrefsKey(effScope), JSON.stringify(validY));
           _ytFeedCache.clear();
@@ -684,9 +826,11 @@ export function findSavedProgress(mediaOrItem, season = null, episode = null) {
     const sNum = Math.max(1, Number(effSeason) || 1);
     const eNum = Math.max(1, Number(effEpisode) || 1);
     if (Number(hit.season || 1) === sNum && Number(hit.episode || 1) === eNum) {
+      if (hit.completed || Number(hit.percent || 0) >= 95) return null;
       return hit;
     }
     const epSaved = hit.epProgress && typeof hit.epProgress === 'object' ? hit.epProgress[`${sNum}:${eNum}`] : null;
+    if (epSaved && Number(epSaved.pct ?? epSaved.percent ?? 0) >= 95) return null;
     const epSec = Math.floor(Number(epSaved?.currentTime ?? epSaved?.position ?? epSaved?.pos ?? 0));
     if (epSaved && epSec > 3) {
       return {
@@ -701,6 +845,7 @@ export function findSavedProgress(mediaOrItem, season = null, episode = null) {
     }
     return null;
   }
+  if (hit.completed || Number(hit.percent || 0) >= 95) return null;
   return hit;
 }
 
@@ -709,76 +854,90 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const rawDur = Math.floor(Number(duration || media.duration || 0));
   const rawTime = Number.isFinite(Number(currentTime)) && Number(currentTime) > 3 ? Math.floor(Number(currentTime)) : 0;
   const mtype = media.mediaType === 'tv' ? 'tv' : 'movie';
+  const isSeries = mtype === 'tv';
   const id = _boundProgressKey(media.tmdbId ? `${mtype}:${media.tmdbId}` : String(media.key || media.videoId || media.url || media.title || ''));
   const existingList = getWatchHistory();
   const prev = existingList.find((item) => String(item.historyId || item.key || '') === id);
   const sNum = Math.max(1, Number(media.season || 1));
   const eNum = Math.max(1, Number(media.episode || 1));
-  const sameEp = Boolean(prev && (mtype !== 'tv' || (Number(prev.season || 1) === sNum && Number(prev.episode || 1) === eNum)));
-  const prevEpObj = (!sameEp && mtype === 'tv' && prev?.epProgress) ? prev.epProgress[`${sNum}:${eNum}`] : null;
+  const sameEp = Boolean(prev && (!isSeries || (Number(prev.season || 1) === sNum && Number(prev.episode || 1) === eNum)));
+  const prevEpObj = (!sameEp && isSeries && prev?.epProgress) ? prev.epProgress[`${sNum}:${eNum}`] : null;
   const prevTime = sameEp
     ? Math.max(0, Math.floor(Number(prev.currentTime ?? prev.position ?? prev.pos ?? 0)))
     : Math.max(0, Math.floor(Number(prevEpObj?.currentTime ?? prevEpObj?.position ?? prevEpObj?.pos ?? 0)));
   const preserveExistingPos = !opts?.resetPosition && opts?.preserveExistingPos !== false;
-  const resumeTime = (rawTime === 0 && prevTime > 3 && preserveExistingPos) ? prevTime : rawTime;
+  const resumeTime = ((rawTime === 0 && prevTime > 3 && preserveExistingPos) || (prevTime > 30 && rawTime > 0 && rawTime < 15 && preserveExistingPos && !opts?.allowRewind))
+    ? prevTime
+    : rawTime;
   const dur = rawDur > 0 ? rawDur : (sameEp ? Math.max(0, Math.floor(Number(prev?.duration || 0))) : Math.max(0, Math.floor(Number(prevEpObj?.duration || 0))));
   const prevEpPct = sameEp ? Number(prev?.percent || 8) : Number(prevEpObj?.percent || 8);
   const pct = dur > 30 ? Math.min(100, Math.round((resumeTime / dur) * 1000) / 10) : (resumeTime > 0 ? Math.max(8, prevEpPct) : 4);
-  const completed = Boolean(opts?.completed || (dur > 180 && pct >= 95));
+  const epFinished = Boolean(opts?.completed || (dur > 180 && pct >= 95) || (isSeries && pct >= 95));
+  const completed = isSeries ? false : Boolean(opts?.completed || (dur > 180 && pct >= 95));
   const epMap = { ...(prev?.epProgress && typeof prev.epProgress === 'object' ? prev.epProgress : {}) };
-  if (mtype === 'tv') {
+  if (isSeries) {
     epMap[`${sNum}:${eNum}`] = {
       currentTime: resumeTime,
+      position: resumeTime,
+      pos: resumeTime,
       duration: dur,
-      percent: pct,
+      dur,
+      percent: epFinished ? 100 : pct,
+      pct: epFinished ? 100 : pct,
       updatedAt: Date.now(),
     };
   }
+  const savedSeason = sNum;
+  const savedEpisode = isSeries && epFinished ? eNum + 1 : eNum;
+  const savedTime = isSeries && epFinished ? 0 : resumeTime;
+  const savedPct = isSeries && epFinished ? 0 : pct;
   const origTitle = media.originalTitle || prev?.originalTitle || '';
-  const serTitle = mtype === 'tv' ? (media.seriesTitle || prev?.seriesTitle || String(media.title || prev?.title || '').split(' — ')[0].trim()) : '';
+  const serTitle = isSeries ? (media.seriesTitle || prev?.seriesTitle || String(media.title || prev?.title || '').split(' — ')[0].trim()) : '';
   const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || 'cinema';
   const sType = media.streamType || prev?.streamType || '';
+  const now = Date.now();
+  const prevPush = _lastCloudProgPush.get(id) || 0;
+  const shouldPushCloud = Boolean(typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || completed || epFinished || now - prevPush >= 12000));
   try {
     const list = existingList.filter((item) => String(item.historyId || item.key || '') !== id);
-      const effSavedPoster = media.poster || media.thumbnail || prev?.poster || prev?.thumbnail || (media.title ? `/api/rave/poster?tid=${encodeURIComponent(media.tmdbId || '')}&t=${encodeURIComponent(media.title || '')}&y=${encodeURIComponent(media.year || '')}&mt=${encodeURIComponent(mtype)}` : '');
-      const effSavedBackdrop = media.backdrop || prev?.backdrop || effSavedPoster || '';
-      list.unshift({
-        historyId: id,
-        key: id,
-        title: media.title || prev?.title || 'Video',
-        originalTitle: origTitle,
-        seriesTitle: serTitle,
-        channel: media.channel || media.artist || prev?.channel || '',
-        channelId: media.channelId || prev?.channelId || '',
-        channelAvatar: media.channelAvatar || prev?.channelAvatar || '',
-        thumbnail: effSavedPoster,
-        poster: effSavedPoster,
-        backdrop: effSavedBackdrop,
+    const effSavedPoster = media.poster || media.thumbnail || prev?.poster || prev?.thumbnail || (media.title ? `/api/rave/poster?tid=${encodeURIComponent(media.tmdbId || '')}&t=${encodeURIComponent(media.title || '')}&y=${encodeURIComponent(media.year || '')}&mt=${encodeURIComponent(mtype)}` : '');
+    const effSavedBackdrop = media.backdrop || prev?.backdrop || effSavedPoster || '';
+    list.unshift({
+      historyId: id,
+      key: id,
+      title: media.title || prev?.title || 'Video',
+      originalTitle: origTitle,
+      seriesTitle: serTitle,
+      channel: media.channel || media.artist || prev?.channel || '',
+      channelId: media.channelId || prev?.channelId || '',
+      channelAvatar: media.channelAvatar || prev?.channelAvatar || '',
+      thumbnail: effSavedPoster,
+      poster: effSavedPoster,
+      backdrop: effSavedBackdrop,
       provider: catProv,
       catalogProvider: catProv,
       streamType: sType,
       tmdbId: media.tmdbId || prev?.tmdbId || '',
       imdbId: media.imdbId || prev?.imdbId || '',
       mediaType: mtype,
-      season: sNum,
-      episode: eNum,
+      season: savedSeason,
+      episode: savedEpisode,
       year: media.year || prev?.year || '',
       url: media.url || prev?.url || '',
       officialUrl: media.officialUrl || prev?.officialUrl || '',
       videoId: media.videoId || prev?.videoId || '',
-      currentTime: resumeTime,
-      position: resumeTime,
+      currentTime: savedTime,
+      position: savedTime,
       duration: dur,
-      percent: pct,
+      percent: savedPct,
       completed,
       epProgress: epMap,
-      updatedAt: Date.now(),
+      cloudSynced: shouldPushCloud,
+      updatedAt: now,
     });
     localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 50)));
   } catch (e) { /* ignore */ }
-  const now = Date.now();
-  const prevPush = _lastCloudProgPush.get(id) || 0;
-  if (typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || completed || now - prevPush >= 12000)) {
+  if (shouldPushCloud) {
     _lastCloudProgPush.set(id, now);
     fetch('/api/user/progress', {
       method: 'POST',
@@ -803,12 +962,12 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
         poster: media.poster || media.thumbnail || '',
         backdrop: media.backdrop || '',
         year: String(media.year || ''),
-        season: sNum,
-        episode: eNum,
-        position: resumeTime,
-        currentTime: resumeTime,
+        season: savedSeason,
+        episode: savedEpisode,
+        position: savedTime,
+        currentTime: savedTime,
         duration: dur,
-        percent: pct,
+        percent: savedPct,
         completed,
         epProgress: epMap,
         url: media.url || prev?.url || '',
@@ -828,8 +987,8 @@ export function isFavoriteMedia(item) {
   const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
   const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '').trim();
   if (!id) return false;
-  const ikey = String(item.key || (item.tmdbId || item.id ? `${mtype}:${item.tmdbId || item.id}` : `${mtype}:${id}`)).trim();
-  return getFavorites().some((f) => (id && String(f.favId || '').trim() === id) || (ikey && String(f.key || '').trim() === ikey));
+  const ikey = _boundProgressKey(item.key || (item.tmdbId || item.id ? `${mtype}:${item.tmdbId || item.id}` : `${mtype}:${id}`));
+  return getFavorites().some((f) => (id && String(f.favId || '').trim() === id) || (ikey && _boundProgressKey(f.key || '') === ikey));
 }
 
 export function toggleFavoriteMedia(item) {
@@ -837,11 +996,12 @@ export function toggleFavoriteMedia(item) {
   const mtype = item.mediaType === 'tv' || item.type === 'SHOW' ? 'tv' : 'movie';
   const id = String(item.tmdbId || item.id || item.videoId || item.url || item.title || '').trim();
   if (!id) return false;
-  const ikey = item.key || `${mtype}:${id}`;
+  const ikey = _boundProgressKey(item.key || `${mtype}:${id}`);
   const list = getFavorites();
-  const exists = list.some((f) => String(f.favId) === id || String(f.key || '') === ikey);
+  const exists = list.some((f) => String(f.favId) === id || _boundProgressKey(f.key || '') === ikey);
+  const isAuthed = Boolean(typeof fetch === 'function' && isCloudAuthenticated());
   const next = exists
-    ? list.filter((f) => String(f.favId) !== id && String(f.key || '') !== ikey)
+    ? list.filter((f) => String(f.favId) !== id && _boundProgressKey(f.key || '') !== ikey)
     : [{
         favId: id,
         key: ikey,
@@ -862,6 +1022,7 @@ export function toggleFavoriteMedia(item) {
         poster: item.poster || item.thumbnail || '',
         backdrop: item.backdrop || item.poster || item.thumbnail || '',
         provider: item.catalogProvider || item.provider || 'netflix',
+        cloudSynced: isAuthed,
         addedAt: Date.now(),
       }, ...list].slice(0, 60);
   try { localStorage.setItem(_favKey(), JSON.stringify(next)); } catch (e) { /* ignore */ }

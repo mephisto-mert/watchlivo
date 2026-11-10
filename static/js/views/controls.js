@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261110_v181';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261110_v181';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261110_v181';
-import { getProvider } from '../providers.js?v=20261110_v181';
-import { expectedPosition } from '../sync.js?v=20261110_v181';
-import { thumbFor } from './lobby.js?v=20261110_v181';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261110_v181';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261110_v181';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261110_v181';
-import { avatar } from '../profile.js?v=20261110_v181';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261110_v182';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261110_v182';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261110_v182';
+import { getProvider } from '../providers.js?v=20261110_v182';
+import { expectedPosition } from '../sync.js?v=20261110_v182';
+import { thumbFor } from './lobby.js?v=20261110_v182';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261110_v182';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261110_v182';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261110_v182';
+import { avatar } from '../profile.js?v=20261110_v182';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -18,23 +18,8 @@ const VIDEO_FILTERS = {
   vhs:    { label: '📼 Retro VHS / 90lar', css: 'contrast(1.15) saturate(0.82) sepia(0.22) hue-rotate(-6deg)' },
 };
 
-const PLAYER_THEMES = [
-  { id: '#E50914', label: 'Netflix Red' },
-  { id: '#3B82F6', label: 'Electric Blue' },
-  { id: '#6366f1', label: 'Emerald Green' },
-  { id: '#F59E0B', label: 'Amber Gold' },
-];
-
 const SN_ICONS = {
-  back: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>',
-  server: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>',
-  nextEp: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19" stroke="currentColor" stroke-width="2.5"></line></svg>',
-  captions: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/></svg>',
-  customize: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
-  download: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
-  embed: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>',
   fit: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M7 9h3M7 9v3M17 15h-3M17 15v-3"/></svg>',
-  playTriangle: '<svg width="36" height="36" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>',
 };
 
 export function buildControls(frame, ctx) {
@@ -165,7 +150,7 @@ export function buildControls(frame, ctx) {
       onpointerdown: (e) => {
         e.stopPropagation();
         if (e.pointerType === 'touch' || e.pointerType === 'pen') lastAnyTouchAt = Date.now();
-        if (!isIosFixedVol) resumeSharedAudioContext();
+        resumeSharedAudioContext();
         startX = e.clientX || 0;
         startY = e.clientY || 0;
         if (!opts.noAutoReveal) revealControls(3600);
@@ -173,7 +158,7 @@ export function buildControls(frame, ctx) {
       ontouchstart: (e) => {
         e.stopPropagation();
         lastAnyTouchAt = Date.now();
-        if (!isIosFixedVol) resumeSharedAudioContext();
+        resumeSharedAudioContext();
         const t = e.touches?.[0];
         if (t) { startX = t.clientX; startY = t.clientY; }
         if (!opts.noAutoReveal) revealControls(3600);
@@ -384,7 +369,8 @@ export function buildControls(frame, ctx) {
     },
   }, seekPreview, h('div', { class: 'track' }, buf, cur, knob));
   const time = h('span', { class: 'ctl-time' }, '0:00 / 0:00');
-  const isIosFixedVol = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const isIosDevice = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+  const isIosFixedVol = Boolean(isIosDevice && !host.canControlVolume?.());
   const volRange = h('input', { type: 'range', min: '0', max: '200', step: '1', value: String(Math.min(200, Math.max(0, Number(host.volume ?? 80)))), 'aria-label': 'Ses', oninput: (e) => { setRealVolume(e.target.value, { showHud: true }); } });
   const volBtn = h('button', { class: 'ctl-action', id: 'ctl-vol', 'aria-label': 'Sessiz', ...tapProps(() => { if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }) });
   const skipBtn = h('button', { class: 'ctl-action', id: 'ctl-skip', 'data-tip': 'Atla oyu', 'aria-label': 'Atla', ...tapProps(() => actions.skip()) }, ico('skip'));
@@ -396,7 +382,7 @@ export function buildControls(frame, ctx) {
     let lastRun = 0;
     return {
       onpointerdown: (e) => { e.stopPropagation(); revealControls(3600); },
-      ontouchstart: (e) => { e.stopPropagation(); lastAnyTouchAt = Date.now(); if (!isIosFixedVol) resumeSharedAudioContext(); revealControls(3600); },
+      ontouchstart: (e) => { e.stopPropagation(); lastAnyTouchAt = Date.now(); resumeSharedAudioContext(); revealControls(3600); },
       onclick: (e) => {
         e.stopPropagation();
         const now = Date.now();
@@ -419,19 +405,13 @@ export function buildControls(frame, ctx) {
       toast('⏳ Video hazırlanıyor — 1 saniye sonra tekrar PiP simgesine dokunun');
       return;
     }
-    if ((ok === 'entered' || ok === 'exited' || ok === true) && host.adapter?.video) {
-      const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
-      update();
-      showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
-      return;
-    }
     if (ok === 'entered' || ok === 'exited' || ok === true) {
       const entered = ok === 'entered' || (ok === true && Boolean(host.isPiP?.()));
       update();
       showOverlay(entered ? '⧉ Mini Pencere (PiP) Açık — Ana ekrana veya diğer uygulamalara geçebilirsiniz' : '⧉ PiP Kapatıldı', 2400);
       return;
     }
-    if (isIosFixedVol || (typeof window !== 'undefined' && window.Android)) {
+    if (isIosDevice || (typeof window !== 'undefined' && window.Android)) {
       const v = host.adapter?.video;
       if (v && v.readyState < 1) {
         try { v.load(); v.play?.().catch?.(() => {}); } catch (_) {}
@@ -650,12 +630,18 @@ export function buildControls(frame, ctx) {
       const c2d = c.getContext('2d');
       c2d.drawImage(v, 0, 0, c.width, c.height);
       if (subCue.textContent) {
-        c2d.font = `bold ${Math.round(c.height * 0.04)}px Inter, sans-serif`;
+        const fontSize = Math.round(c.height * 0.04);
+        c2d.font = `bold ${fontSize}px Inter, sans-serif`;
         c2d.fillStyle = '#ffffff';
         c2d.textAlign = 'center';
         c2d.shadowColor = '#000';
         c2d.shadowBlur = 8;
-        c2d.fillText(subCue.textContent, c.width / 2, c.height - Math.round(c.height * 0.07));
+        const subLines = subCue.textContent.split('\n').map((l) => l.trim()).filter(Boolean);
+        const lineStep = Math.round(fontSize * 1.25);
+        const baseY = c.height - Math.round(c.height * 0.07) - (subLines.length - 1) * lineStep;
+        subLines.forEach((line, idx) => {
+          c2d.fillText(line, c.width / 2, baseY + idx * lineStep);
+        });
       }
       const cSmall = document.createElement('canvas');
       cSmall.width = 360;
@@ -1164,6 +1150,24 @@ export function buildControls(frame, ctx) {
     'aria-label': 'Mikrofonu Aç / Kapat',
     onclick: (e) => {
       e.stopPropagation();
+      if (!ctx.voice?.micOn) {
+        const vMode = state.mesh?.voipMode || 'all';
+        if (vMode === 'off') {
+          toast('Bu odada sesli sohbet kapalı');
+          return;
+        }
+        if (vMode === 'leader' && !isLeader()) {
+          toast('Bu odada yalnızca oda lideri konuşabilir');
+          return;
+        }
+        if (vMode === 'stage' && !isLeader()) {
+          const meP = (state.mesh?.participants || []).find((x) => x && x.id === state.clientId);
+          if (!meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
+            toast("🎤 Sahne Modu açık — konuşmak için '✋ Söz İste' butonunu kullanın");
+            return;
+          }
+        }
+      }
       ctx.voice?.toggleMic?.().then?.(() => update()).catch?.(() => {});
     },
   }, '🎙️');
@@ -1322,6 +1326,7 @@ export function buildControls(frame, ctx) {
     else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePiP(); }
     else if (e.key === 't' || e.key === 'T') { e.preventDefault(); ctx.toggleTheaterMode?.(); }
     else if (e.key === 'm' || e.key === 'M') { e.preventDefault(); if (isActuallyMuted()) doUnlockAudio(); else { host.setMuted(true, true); update(); } }
+    else if (e.key === 'v' || e.key === 'V') { e.preventDefault(); miniMicBtn.click(); }
     else if (e.key === '[' || e.key === '{' || e.key === 'z' || e.key === 'Z' || e.key === ',') {
       e.preventDefault();
       const isFast = e.key === '{' || (e.key === '[' && e.shiftKey);
@@ -1535,7 +1540,7 @@ export function buildControls(frame, ctx) {
     const activeIntro = getActiveIntro();
     skipIntroBtn.classList.toggle('hidden', !(activeIntro && p >= Number(activeIntro.start || 0) && p <= Number(activeIntro.end || 0) - 2));
     const rem = d > 300 ? d - p : 9999;
-    const curEpKey = m ? `${m.tmdbId || m.id || m.title}:${m.season || 1}:${m.episode || 1}` : '';
+    const curEpKey = m ? `${m.tmdbId || m.id || m.title}_${m.season || 1}_${m.episode || 1}` : '';
     const nextSpecBanner = (m?.mediaType === 'tv' && m?.tmdbId) ? computeNextEpSpec(m, Number(m.season || 1), Number(m.episode || 1)) : null;
     if (nextSpecBanner && !nextSpecBanner.isFinale && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
       const nextEp = nextSpecBanner.episode;
@@ -1581,7 +1586,7 @@ export function buildControls(frame, ctx) {
         const progEl = nextEpBanner.querySelector('.next-ep-progress-bar');
         if (progEl) progEl.style.width = `${pctCountdown.toFixed(1)}%`;
       }
-      if (rem <= 1.2 && isHostOnly()) triggerNextEpisode();
+      if (rem <= 1.2 && isLeader()) triggerNextEpisode();
     } else {
       nextEpBanner.classList.add('hidden');
     }
@@ -1854,10 +1859,10 @@ export function buildControls(frame, ctx) {
     const curSubId = host.adapter?.getSelectedSubtitleId?.() || 'off';
     const curSubObj = subTracks.find((t) => t.id === curSubId);
     const rawAudioTracks = host.adapter?.getAudioTracks?.() || m.audioTracks || [];
-    const isAnimeMedia = m.provider === 'anime' || m.origLang === 'ja' || m.type === 'anime';
+    const isAnimeMedia = (cm) => Boolean(cm && (cm.provider === 'anime' || cm.origLang === 'ja' || cm.type === 'anime' || cm.catalogProvider === 'anime' || /anime/i.test(String(cm.category || cm.genre || ''))));
     const audioTracks = rawAudioTracks.length
       ? rawAudioTracks
-      : (m.isMusic || m.isLive || !isAnimeMedia
+      : (m.isMusic || m.isLive || !isAnimeMedia(m)
           ? [{ id: 'orig', label: '🎬 Orijinal Ses (HD)' }]
           : [
               { id: 'orig', label: '🎬 Orijinal Ses' },
@@ -1899,7 +1904,8 @@ export function buildControls(frame, ctx) {
       if (curSubId !== 'off') subOverlay.classList.remove('hidden');
       const prefBtn = h('button', { class: 'ctl-menu-subbtn', onclick: (e) => { e.stopPropagation(); renderMenuView('subtitlePreferences'); } }, '🎨 Gelişmiş');
       const prefs = getSubPrefs();
-      const isAnimeContent = host.media?.provider === 'anime' || host.media?.origLang === 'ja' || host.media?.type === 'anime';
+      const curMedia = state.mesh?.media || host.adapter?.media || host.media || {};
+      const isAnimeContent = curMedia.provider === 'anime' || curMedia.origLang === 'ja' || curMedia.type === 'anime' || isAnimeMedia(curMedia);
       const visibleAudioTracks = audioTracks.filter((t) => isAnimeContent || (t.id !== 'tr-ai-dub' && t.id !== 'en-ai-dub' && t.mode !== 'tts'));
       const audioSection = [
         h('div', { class: 'dim', style: { fontSize: '.74em', fontWeight: '700', padding: '.25em .7em .15em', color: '#a5b4fc' } }, '🎙️ Ses & Dublaj Seçimi'),
@@ -2013,7 +2019,8 @@ export function buildControls(frame, ctx) {
     }
 
     if (view === 'audio') {
-      const isAnimeContent = host.media?.provider === 'anime' || host.media?.origLang === 'ja' || host.media?.type === 'anime';
+      const curMedia = state.mesh?.media || host.adapter?.media || host.media || {};
+      const isAnimeContent = curMedia.provider === 'anime' || curMedia.origLang === 'ja' || curMedia.type === 'anime' || isAnimeMedia(curMedia);
       const visibleAudioTracks = audioTracks.filter((t) => isAnimeContent || (t.id !== 'tr-ai-dub' && t.id !== 'en-ai-dub' && t.mode !== 'tts'));
       const rows = visibleAudioTracks.map((t) => h('div', {
         class: `opt ${curAudioId === t.id ? 'on' : ''}`,
@@ -2083,7 +2090,7 @@ export function buildControls(frame, ctx) {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
             let nextSrvUrl = srv.url;
-            const stickyPref = host.adapter?.subs?.userAudioPref || localStorage.getItem('vortex_audio_lang') || localStorage.getItem('watchlivo_audio_pref') || '';
+            const stickyPref = host.adapter?.subs?.userAudioPref || localStorage.getItem('vortex_audio_proxy_pref') || localStorage.getItem('watchlivo_audio_pref') || 'tr';
             const wantTrAud = curAudioId === 'tr-dub'
               || String(curAudioId || '').startsWith('tr-dub-')
               || stickyPref === 'tr-dub'
@@ -2270,7 +2277,8 @@ export function buildControls(frame, ctx) {
           onclick: (e) => {
             e.stopPropagation();
             const next = !duckOn;
-            try { localStorage.setItem('vortex_voice_duck', next ? 'on' : 'off'); } catch (err) { /* ignore */ }
+            if (typeof host.setAutoDuckEnabled === 'function') host.setAutoDuckEnabled(next);
+            else { try { localStorage.setItem('vortex_voice_duck', next ? 'on' : 'off'); } catch (_) {} }
             renderMenuView('effects');
           },
         }, h('span', {}, '🎙️ Konuşurken Film Sesini Kıs'), h('span', {}, duckOn ? 'Açık' : 'Kapalı')),
@@ -2409,7 +2417,7 @@ export function buildControls(frame, ctx) {
     },
       optIconLbl('volume', 'Akıllı Ses Kısma (Konuşmada)'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, autoDuckOn ? 'Açık ✓' : 'Kapalı')));
-    if (isIosFixedVol) {
+    if (isIosDevice && !host.canControlVolume?.()) {
       const mutedNow = isActuallyMuted();
       items.push(h('div', {
         class: `opt ${!mutedNow ? 'on' : ''}`,
@@ -2456,10 +2464,6 @@ export function buildControls(frame, ctx) {
     );
   }
 
-  let lastMobileLandscape = typeof window !== 'undefined' && window.innerWidth > window.innerHeight * 1.15;
-  let lastStageW = 0;
-  let lastStageH = 0;
-
   function syncVideoStageBounds(_forceReflow = false) {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     const ae = document.activeElement;
@@ -2498,17 +2502,6 @@ export function buildControls(frame, ctx) {
         document.documentElement.scrollTop = 0;
         document.body.scrollTop = 0;
       } catch (e) { /* ignore */ }
-    }
-    if (typeof window !== 'undefined' && !isInputFocused) {
-      const isLandscape = window.innerWidth > window.innerHeight * 1.15;
-      if (lastMobileLandscape && !isLandscape && isFullscreenActive() && frame.dataset.fsMode === 'auto-rotate') {
-        frame.classList.remove('fullscreen');
-        document.body.classList.remove('vortex-fs');
-        frame.dataset.fsMode = '';
-        if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-        if (document.webkitFullscreenElement) document.webkitExitFullscreen?.();
-      }
-      lastMobileLandscape = isLandscape;
     }
     syncMenuPortal();
     syncVideoStageBounds(true);
@@ -3249,8 +3242,13 @@ export function buildControls(frame, ctx) {
           revealControls(3000);
         }
       }
-      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isHostOnly()) {
-        triggerNextEpisode();
+      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isLeader()) {
+        const m = state.mesh.media;
+        const curS = Number(m.season || 1);
+        const curE = Number(m.episode || 1);
+        if (cancelledNextEpKey !== `${m.tmdbId || m.id || m.title}_${curS}_${curE}`) {
+          triggerNextEpisode();
+        }
       }
       if (ev === 'unmuted') unmute.classList.add('hidden');
       if (ev === 'autoplay-blocked') unmute.classList.remove('hidden');

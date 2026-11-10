@@ -487,15 +487,21 @@ body.in-room:not(.mesh-minimized) .bg-img { display: none !important; }
 .poster .offers span { font-size: .6em; padding: .1em .4em; border-radius: 99px; background: rgba(255,255,255,.08); }
 
 /* Popup (Rave PopUp: centered acrylic card with option buttons) */
-.popup-backdrop { position: fixed; inset: 0; z-index: 100050; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; animation: fade-in .15s ease; }
+#popup-root, .popup-overlay { z-index: 200000; }
+.popup-backdrop { position: fixed; inset: 0; z-index: 200000; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; animation: fade-in .15s ease; }
 .popup { width: min(440px, 92vw); max-height: 86vh; overflow: auto; border-radius: 18px; padding: 1.3em; }
 .popup h3 { margin: 0 0 .5em; font-size: 1.1em; }
 .popup p { margin: 0 0 1em; opacity: .85; line-height: 1.45; }
 .popup-options { display: flex; flex-direction: column; gap: .5em; }
 .popup-options .btn { width: 100%; padding: .75em 1em; }
 .popup-row { display: flex; gap: .5em; justify-content: flex-end; margin-top: .6em; }
-.toast-root { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 100060; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+#toast-root, .toast-root { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 210000; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
 .toast { padding: .6em 1.1em; border-radius: 99px; font-size: .88em; font-weight: 600; animation: fade-in .2s ease; pointer-events: auto; }
+.context-menu { min-width: 180px; padding: 6px; border-radius: 12px; display: flex; flex-direction: column; gap: 2px; z-index: 215000; }
+.ctx-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: none; border-radius: 8px; background: transparent; color: #f8fafc; font-size: .84rem; font-weight: 600; text-align: left; cursor: pointer; }
+.ctx-item:hover { background: rgba(255,255,255,.1); }
+.ctx-item.danger { color: #ff5b79; }
+.ctx-sep { height: 1px; background: rgba(255,255,255,.1); margin: 4px 0; }
 
 /* Profile setup */
 .avatar-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: .6em 0 1em; }
@@ -2588,8 +2594,8 @@ html.is-apk #nav-download-btn,
 html.is-apk .wl-btn-apk {
   display: none !important;
 }
-.popup-backdrop { z-index: 100050 !important; }
-.toast-root { z-index: 100060 !important; }
+#popup-root, .popup-backdrop, .popup-overlay { z-index: 200000 !important; }
+#toast-root, .toast-root { z-index: 210000 !important; }
 @media (max-width: 440px) {
   .floating-dock {
     gap: 4px;
@@ -7067,6 +7073,7 @@ body.tv-nav-active .dock-item:focus {
 }
 
 .wl-seo-article-box {
+  display: none !important;
   background: linear-gradient(180deg, rgba(11, 17, 29, 0.68), rgba(7, 11, 19, 0.82));
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 18px;
@@ -7416,6 +7423,8 @@ body.tv-nav-active .dock-item:focus {
   gap: 10px 12px;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
 }
+body:has(#mesh-root:not(.hidden)) .wl-cookie-banner,
+body:has(#popup-root:not(:empty)) .wl-cookie-banner,
 #mesh-root:not(.hidden) ~ .wl-cookie-banner,
 #popup-root:not(:empty) ~ .wl-cookie-banner {
   display: none !important;
@@ -7614,12 +7623,16 @@ body.tv-nav-active .dock-item:focus {
     min-height: 0 !important;
     height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
     max-height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
+    padding-bottom: calc(64px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 8px))) !important;
+    box-sizing: border-box !important;
     overflow: hidden !important;
   }
 
   .home-scroll.glass-home-shell {
     height: 100% !important;
     max-height: 100% !important;
+    padding-bottom: calc(76px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 8px))) !important;
+    box-sizing: border-box !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
   }

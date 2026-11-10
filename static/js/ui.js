@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v181';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v182';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -101,9 +101,13 @@ export function h(tag, attrs = {}, ...children) {
       if (k === 'srcdoc') continue;
       if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
         const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
-        const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
-        if (isSafeSvgImg && /(?:%3c|<)\s*script|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)) continue;
-        if (!isSafeSvgImg && /^(?:javascript:|vbscript:|data:text\/html|data:image\/svg|data:application\/xhtml)/i.test(cleanV)) continue;
+        const isTrustedStaticSvg = (
+          k === 'src' &&
+          String(tag).toLowerCase() === 'img' &&
+          /^data:image\/svg\+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww\.w3\.org%2F2000%2Fsvg%22%20viewBox%3D/i.test(cleanV) &&
+          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed|use)|onload\s*=|onerror\s*=|javascript:|data:/i.test(cleanV)
+        );
+        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
       }
       el.setAttribute(k, v === true ? '' : v);
     }
@@ -639,4 +643,57 @@ export function openDownloadModal() {
     ) : null
   );
   popup({ title: 'Watchlivo İndir', content: box, options: [{ label: 'Kapat', primary: true }] });
+}
+
+let _activeCtxCleanup = null;
+
+export function openContextMenu(x, y, items = []) {
+  if (typeof _activeCtxCleanup === 'function') {
+    try { _activeCtxCleanup(); } catch (_) {}
+    _activeCtxCleanup = null;
+  }
+  document.querySelectorAll('.context-menu').forEach((m) => m.remove());
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', close, true);
+    document.removeEventListener('contextmenu', close, true);
+    window.removeEventListener('keydown', onEsc, true);
+    if (_activeCtxCleanup === close) _activeCtxCleanup = null;
+  };
+  const onEsc = (e) => {
+    if (e.key === 'Escape') close();
+  };
+  const menu = h('div', {
+    class: 'context-menu acrylic',
+    role: 'menu',
+    style: { position: 'fixed', left: `${x}px`, top: `${y}px`, zIndex: 215000 },
+  }, (items || []).filter(Boolean).map((it) =>
+    it.sep
+      ? h('div', { class: 'ctx-sep', role: 'separator' })
+      : h('button', {
+          type: 'button',
+          class: `ctx-item ${it.danger ? 'danger' : ''}`.trim(),
+          role: 'menuitem',
+          onclick: (e) => {
+            e.stopPropagation();
+            close();
+            it.onClick?.();
+          },
+        }, it.icon ? icon(it.icon) : null, h('span', {}, it.label || ''))
+  ));
+  document.body.append(menu);
+  const rect = menu.getBoundingClientRect();
+  const clampedLeft = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const clampedTop = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${clampedLeft}px`;
+  menu.style.top = `${clampedTop}px`;
+  _activeCtxCleanup = close;
+  setTimeout(() => {
+    if (_activeCtxCleanup === close) {
+      document.addEventListener('click', close, true);
+      document.addEventListener('contextmenu', close, true);
+      window.addEventListener('keydown', onEsc, true);
+    }
+  }, 0);
+  return { close, menu };
 }

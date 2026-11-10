@@ -432,6 +432,16 @@ def _ensure_user_social(
     return u
 
 
+def _save_user_social(u: Dict[str, Any]) -> None:
+    if not isinstance(u, dict):
+        return
+    uid_c = _clean(u.get("uid"), 64)
+    if not uid_c:
+        return
+    _SOCIAL_USERS[uid_c] = u
+    _kv_set(f"wl:soc:u:{uid_c}", u, ttl_sec=2592000)
+
+
 def _format_last_seen(last_ts: float, now_ts: float) -> str:
     if not last_ts or last_ts <= 0:
         return "Çevrimdışı"
@@ -447,11 +457,20 @@ def _format_last_seen(last_ts: float, now_ts: float) -> str:
 
 def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: bool = False) -> Dict[str, Any]:
     t_uid = _clean(target_uid, 64)
+    v_uid = _clean(viewer_uid, 64)
     now_t = _now()
     pres = _kv_get(f"wl:soc:pres:{t_uid}", None, max_age=2.5)
     if not isinstance(pres, dict):
         pres = _PRESENCE_MAP.get(t_uid) or {}
     t_u = _SOCIAL_USERS.get(t_uid) or _kv_get(f"wl:soc:u:{t_uid}", None, max_age=6.0) or {}
+    if not is_friend and v_uid and isinstance(t_u, dict):
+        for f_entry in (t_u.get("friends") or []):
+            if isinstance(f_entry, dict) and str(f_entry.get("uid") or "").lower() == v_uid.lower():
+                is_friend = True
+                break
+            if isinstance(f_entry, str) and f_entry.lower() == v_uid.lower():
+                is_friend = True
+                break
     priv = (t_u.get("privacy") if isinstance(t_u, dict) else None) or {}
     vis = str(pres.get("visibility") or priv.get("presenceVisibility") or "friends").lower()
     hide_watch = bool(pres.get("hideWatching") if "hideWatching" in pres else priv.get("hideWatching", False))
@@ -484,7 +503,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
     except Exception:
         active_room_hit = None
 
-    is_self = bool(viewer_uid and viewer_uid == t_uid)
+    is_self = bool(v_uid and v_uid == t_uid)
     can_see_presence = is_self or vis == "everyone" or (vis == "friends" and is_friend)
     if not can_see_presence or raw_state == "offline" or (now_t - last_seen) > 75.0 or last_seen <= 0:
         ls_lbl = _format_last_seen(last_seen, now_t) if can_see_presence else "Çevrimdışı"
@@ -496,6 +515,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
             "lastSeenLabel": ls_lbl,
             "roomId": "",
             "mediaTitle": "",
+            "watchingTitle": "",
             "watchingRoom": None,
         }
     if raw_state == "idle":
@@ -507,15 +527,16 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
             "lastSeenLabel": "Uzakta",
             "roomId": "",
             "mediaTitle": "",
+            "watchingTitle": "",
             "watchingRoom": None,
         }
     room_id = _clean(pres.get("roomId"), 80)
     room_priv = _clean(pres.get("roomPrivacy") or "public", 16).lower()
-    media_title = _clean(pres.get("mediaTitle"), 140)
+    media_title = _clean(pres.get("mediaTitle") or pres.get("watchingTitle"), 140)
     room_name = _clean(pres.get("roomName"), 100)
     media_poster = _clean(pres.get("mediaPoster"), 800)
     media_prov = _clean(pres.get("mediaProvider") or "cinema", 32)
-    room_locked = bool(pres.get("roomLocked"))
+    room_locked = bool(pres.get("roomLocked") or pres.get("hasPassword"))
     try:
         import rooms as rooms_mod
         closed_map = getattr(rooms_mod, "_CLOSED_ROOMS", {}) or {}
@@ -524,7 +545,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
         elif not room_id and isinstance(active_room_hit, dict):
             room_id = _clean(active_room_hit.get("id"), 80)
             room_priv = _clean(active_room_hit.get("privacy") or "public", 16).lower()
-            room_locked = bool(rooms_mod.has_password(active_room_hit))
+            room_locked = bool(rooms_mod.has_password(active_room_hit) or active_room_hit.get("hasPassword"))
             room_name = _clean(active_room_hit.get("name"), 100)
             rm_m = active_room_hit.get("media") or {}
             if isinstance(rm_m, dict):
@@ -533,10 +554,10 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
                 media_prov = _clean(rm_m.get("provider") or "cinema", 32)
         if room_id:
             rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
-            live_rm = rm_dict.get(room_id)
+            live_rm = rm_dict.get(room_id) or (active_room_hit if isinstance(active_room_hit, dict) and _clean(active_room_hit.get("id"), 80) == room_id else None)
             if isinstance(live_rm, dict):
                 room_priv = _clean(live_rm.get("privacy") or room_priv or "public", 16).lower()
-                if rooms_mod.has_password(live_rm):
+                if rooms_mod.has_password(live_rm) or live_rm.get("hasPassword"):
                     room_locked = True
                 room_name = _clean(live_rm.get("name") or room_name, 100)
                 rm_media = live_rm.get("media") or {}
@@ -544,10 +565,8 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
                     media_title = _clean(rm_media.get("title"), 140)
     except Exception:
         pass
-    if room_id and not hide_watch and (
-        is_self
-        or (room_priv not in ("private", "friends") and not room_locked)
-        or (room_priv == "friends" and is_friend and not room_locked)
+    if room_id and not hide_watch and room_priv != "private" and not room_locked and (
+        room_priv != "friends" or is_friend
     ):
         label = media_title or room_name or "Sinema Odası"
         return {
@@ -558,6 +577,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
             "lastSeenLabel": "Şu an izliyor",
             "roomId": room_id,
             "mediaTitle": label,
+            "watchingTitle": label,
             "hideWatching": False,
             "watchingRoom": {
                 "roomId": room_id,
@@ -575,8 +595,31 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
         "lastSeenLabel": "Şu an çevrimiçi",
         "roomId": "",
         "mediaTitle": "",
+        "watchingTitle": "",
         "hideWatching": bool(hide_watch),
         "watchingRoom": None,
+    }
+
+
+def _user_card_with_presence(uid: str, viewer_uid: str = "") -> Dict[str, Any]:
+    t_uid = _clean(uid, 64)
+    v_uid = _clean(viewer_uid, 64)
+    t_u = _SOCIAL_USERS.get(t_uid) or _kv_get(f"wl:soc:u:{t_uid}", None, max_age=6.0) or {}
+    d_card = _load_social_dir().get(t_uid) or {}
+    friends_list = (t_u.get("friends") if isinstance(t_u, dict) else None) or []
+    is_fr = any(
+        (isinstance(f, dict) and str(f.get("uid") or "").lower() == v_uid.lower())
+        or (isinstance(f, str) and f.lower() == v_uid.lower())
+        for f in friends_list
+    ) if v_uid else False
+    pres = _compute_live_presence(t_uid, v_uid, is_friend=is_fr)
+    return {
+        "uid": t_uid,
+        "name": _clean(d_card.get("name") or (t_u.get("name") if isinstance(t_u, dict) else "") or "İzleyici", 32),
+        "handle": _norm_handle_tag(d_card.get("handle") or (t_u.get("handle") if isinstance(t_u, dict) else "") or "", d_card.get("name") or ""),
+        "color": _clean(d_card.get("color") or (t_u.get("color") if isinstance(t_u, dict) else "") or "#27DCC8", 16),
+        "avatarUrl": _clean_avatar(d_card.get("avatarUrl")) or _clean_avatar((t_u.get("avatarUrl") if isinstance(t_u, dict) else "")),
+        **pres,
     }
 
 
@@ -909,11 +952,14 @@ async def social_user_search(request: Request) -> JSONResponse:
 async def social_presence(request: Request) -> JSONResponse:
     if request.method == "GET":
         q = request.query_params
-        uid = _caller_uid(request, q.get("uid"), "guest_default")
-        target_uid = _clean(q.get("targetUid") or uid, 64)
-        u = _ensure_user_social(uid, persist=False)
-        is_fr = _friendship_state(u, target_uid) == "FRIENDS"
-        return JSONResponse({"ok": True, "uid": target_uid, "presence": _compute_live_presence(target_uid, uid, is_friend=is_fr)})
+        caller_uid = _caller_uid(request, q.get("callerUid") or q.get("viewerUid") or (q.get("uid") if not q.get("targetUid") and request.scope.get("wl_uid") else ""), "guest_default")
+        target_uid = _clean(q.get("targetUid") or q.get("uid") or caller_uid, 64)
+        if target_uid.startswith("@") or not target_uid.startswith(("u_", "guest_")):
+            tc = _resolve_social_target(target_uid)
+            if tc and tc.get("uid"):
+                target_uid = _clean(tc["uid"], 64)
+        card = _user_card_with_presence(target_uid, caller_uid)
+        return JSONResponse({"ok": True, "uid": target_uid, "presence": card, "user": card})
     try:
         body = await request.json()
     except Exception:
@@ -942,7 +988,9 @@ async def social_presence(request: Request) -> JSONResponse:
         "roomId": _clean(body.get("roomId"), 80) if raw_st in ("watching", "online") else "",
         "roomName": _clean(body.get("roomName"), 100),
         "roomPrivacy": _clean(body.get("roomPrivacy") or "public", 16),
-        "mediaTitle": _clean(body.get("mediaTitle"), 140),
+        "roomLocked": bool(body.get("roomLocked") or body.get("hasPassword")),
+        "mediaTitle": _clean(body.get("mediaTitle") or body.get("watchingTitle"), 140),
+        "watchingTitle": _clean(body.get("watchingTitle") or body.get("mediaTitle"), 140),
         "mediaPoster": _clean(body.get("mediaPoster"), 800),
         "mediaProvider": _clean(body.get("mediaProvider"), 32),
         "statusText": _clean(body.get("statusText"), 60),
@@ -953,11 +1001,12 @@ async def social_presence(request: Request) -> JSONResponse:
     _PRESENCE_MAP[uid] = rec
     _kv_set(f"wl:soc:pres:{uid}", rec, ttl_sec=180)
     u["lastSeen"] = now_t
-    _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+    _save_user_social(u)
+    card = _user_card_with_presence(uid, uid)
     return JSONResponse({
         "ok": True,
         "uid": uid,
-        "presence": _compute_live_presence(uid, uid, is_friend=True),
+        "presence": card,
         "requestCount": len(u.get("requests") or []),
         "totalUnread": sum(_safe_int(v, 0, lo=0) for v in (u.get("unread") or {}).values()),
     })
@@ -1049,10 +1098,22 @@ async def social_friends_action(request: Request) -> JSONResponse:
         })
         return _resp({"pending": True, "friendshipState": "OUTGOING_PENDING", "status": "OUTGOING_PENDING", "target": target_card, "request": out_req})
 
-    elif action in ("accept", "decline"):
-        req_id = _clean(body.get("requestId") or body.get("targetUid"), 64)
+    elif action in ("accept", "decline", "reject"):
+        req_id = _clean(body.get("requestId") or body.get("targetUid") or body.get("targetHandle") or body.get("target"), 64)
+        if req_id and (req_id.startswith("@") or not req_id.startswith(("u_", "guest_", "req_"))):
+            tc = _resolve_social_target(req_id)
+            if tc and tc.get("uid"):
+                req_id = _clean(tc["uid"], 64)
         reqs = u.get("requests", [])
-        target_req = next((r for r in reqs if r.get("id") == req_id or r.get("fromUid") == req_id), None)
+        target_req = next(
+            (
+                r for r in reqs
+                if r.get("id") == req_id
+                or r.get("fromUid") == req_id
+                or (req_id and str(r.get("fromHandle") or "").lstrip("@").lower() == req_id.lstrip("@").lower())
+            ),
+            None,
+        )
         if not target_req:
             return _resp({"error": "İstek bulunamadı veya zaten işlendi."}, 404)
         from_uid = _clean(target_req.get("fromUid"), 64)
@@ -1076,44 +1137,69 @@ async def social_friends_action(request: Request) -> JSONResponse:
                 "fromColor": u.get("color", "#27DCC8"),
                 "fromAvatarUrl": u.get("avatarUrl", ""),
             })
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        _save_user_social(u)
         if s_u and from_uid:
-            _kv_set(f"wl:soc:u:{from_uid}", s_u, ttl_sec=2592000)
+            _save_user_social(s_u)
         res_state = "FRIENDS" if action == "accept" else "NONE"
         return _resp({"friendshipState": res_state, "status": res_state})
 
     elif action == "cancel":
-        req_id = _clean(body.get("requestId") or body.get("targetUid"), 64)
+        req_id = _clean(body.get("requestId") or body.get("targetUid") or body.get("targetHandle") or body.get("target"), 64)
+        if req_id and (req_id.startswith("@") or not req_id.startswith(("u_", "guest_", "req_"))):
+            tc = _resolve_social_target(req_id)
+            if tc and tc.get("uid"):
+                req_id = _clean(tc["uid"], 64)
         out_reqs = u.get("outgoingRequests", [])
-        hit = next((r for r in out_reqs if r.get("id") == req_id or r.get("toUid") == req_id), None)
-        u["outgoingRequests"] = [r for r in out_reqs if r.get("id") != req_id and r.get("toUid") != req_id]
-        if hit and hit.get("toUid"):
-            t_u = _ensure_user_social(hit["toUid"])
-            t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid and r.get("id") != hit.get("id")]
-            _kv_set(f"wl:soc:u:{hit['toUid']}", t_u, ttl_sec=2592000)
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        hit = next(
+            (
+                r for r in out_reqs
+                if r.get("id") == req_id
+                or r.get("toUid") == req_id
+                or (req_id and str(r.get("toHandle") or "").lstrip("@").lower() == req_id.lstrip("@").lower())
+            ),
+            None,
+        )
+        hit_uid = _clean(hit.get("toUid") if hit else req_id, 64)
+        u["outgoingRequests"] = [r for r in out_reqs if r.get("id") != req_id and r.get("toUid") != req_id and r.get("toUid") != hit_uid]
+        if hit_uid and hit_uid.startswith(("u_", "guest_")):
+            t_u = _ensure_user_social(hit_uid)
+            t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid and (not hit or r.get("id") != hit.get("id"))]
+            _save_user_social(t_u)
+        _save_user_social(u)
         return _resp({"friendshipState": "NONE"})
 
     elif action == "remove":
-        target_uid = _clean(body.get("targetUid"), 64)
-        u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid and f.get("name") != target_uid]
+        target_uid = _clean(body.get("targetUid") or body.get("targetHandle") or body.get("target"), 64)
+        if target_uid and (target_uid.startswith("@") or not target_uid.startswith(("u_", "guest_"))):
+            tc = _resolve_social_target(target_uid)
+            if tc and tc.get("uid"):
+                target_uid = _clean(tc["uid"], 64)
+        u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid and f.get("name") != target_uid and str(f.get("handle") or "").lstrip("@").lower() != target_uid.lstrip("@").lower()]
         if target_uid:
             t_u = _ensure_user_social(target_uid)
             t_u["friends"] = [f for f in t_u.get("friends", []) if f.get("uid") != uid]
-            _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+            _save_user_social(t_u)
+        _save_user_social(u)
         return _resp({"friendshipState": "NONE"})
 
     elif action == "toggle_best":
-        target_uid = _clean(body.get("targetUid"), 64)
+        target_uid = _clean(body.get("targetUid") or body.get("targetHandle") or body.get("target"), 64)
+        if target_uid and (target_uid.startswith("@") or not target_uid.startswith(("u_", "guest_"))):
+            tc = _resolve_social_target(target_uid)
+            if tc and tc.get("uid"):
+                target_uid = _clean(tc["uid"], 64)
         for f in u.get("friends", []):
             if f.get("uid") == target_uid:
                 f["bestFriend"] = not bool(f.get("bestFriend", False))
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+        _save_user_social(u)
         return _resp()
 
     elif action in ("block", "unblock"):
-        target_uid = _clean(body.get("targetUid"), 64)
+        target_uid = _clean(body.get("targetUid") or body.get("targetHandle") or body.get("target"), 64)
+        if target_uid and (target_uid.startswith("@") or not target_uid.startswith(("u_", "guest_"))):
+            tc = _resolve_social_target(target_uid)
+            if tc and tc.get("uid"):
+                target_uid = _clean(tc["uid"], 64)
         if action == "block" and target_uid and target_uid != uid:
             u["friends"] = [f for f in u.get("friends", []) if f.get("uid") != target_uid]
             u["requests"] = [r for r in u.get("requests", []) if r.get("fromUid") != target_uid]
@@ -1124,10 +1210,10 @@ async def social_friends_action(request: Request) -> JSONResponse:
             t_u["friends"] = [f for f in t_u.get("friends", []) if f.get("uid") != uid]
             t_u["requests"] = [r for r in t_u.get("requests", []) if r.get("fromUid") != uid]
             t_u["outgoingRequests"] = [r for r in t_u.get("outgoingRequests", []) if r.get("toUid") != uid]
-            _kv_set(f"wl:soc:u:{target_uid}", t_u, ttl_sec=2592000)
+            _save_user_social(t_u)
         elif action == "unblock" and target_uid:
-            u["blocked"] = [b for b in u.get("blocked", []) if b.get("uid") != target_uid]
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+            u["blocked"] = [b for b in u.get("blocked", []) if b.get("uid") != target_uid and str(b.get("name") or "").lstrip("@").lower() != target_uid.lstrip("@").lower()]
+        _save_user_social(u)
         return _resp()
 
     elif action == "privacy":
@@ -1164,8 +1250,13 @@ def _get_dm_expiry(tk: str) -> int:
 async def social_dm_get(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
-    explicit_peer = bool(_clean(q.get("peerId"), 64))
-    peer_id = _clean(q.get("peerId"), 64)
+    raw_peer_q = _clean(q.get("peerId"), 64)
+    explicit_peer = bool(raw_peer_q)
+    peer_id = raw_peer_q
+    if peer_id and (peer_id.startswith("@") or not peer_id.startswith(("u_", "guest_"))):
+        tc = _resolve_social_target(peer_id)
+        if tc and tc.get("uid"):
+            peer_id = _clean(tc["uid"], 64)
     u = _ensure_user_social(uid)
     if not peer_id:
         first_fr = (u.get("friends") or [None])[0]
@@ -1191,9 +1282,12 @@ async def social_dm_get(request: Request) -> JSONResponse:
             "settings": {"expirySec": exp_val},
             "messages": [],
         })
-    if explicit_peer and isinstance(u.get("unread"), dict) and peer_id in u["unread"]:
-        u["unread"].pop(peer_id, None)
-        _kv_set(f"wl:soc:u:{uid}", u, ttl_sec=2592000)
+    if isinstance(u.get("unread"), dict):
+        removed_unr = u["unread"].pop(peer_id, None)
+        if raw_peer_q and raw_peer_q != peer_id:
+            removed_unr = u["unread"].pop(raw_peer_q, None) or removed_unr
+        if removed_unr is not None:
+            _save_user_social(u)
     persisted_dm = _kv_get(f"wl:soc:dm:{tk}", None, max_age=2.0)
     if isinstance(persisted_dm, list):
         _DM_THREADS[tk] = persisted_dm
@@ -1485,9 +1579,7 @@ async def social_invite(request: Request) -> JSONResponse:
             if fr.get("online") and fr.get("uid"):
                 targets.append(fr["uid"])
         if not targets:
-            for fr in enriched_friends:
-                if fr.get("uid"):
-                    targets.append(fr["uid"])
+            return JSONResponse({"ok": True, "invited": 0, "onlineCount": 0, "sentCount": 0, "invites": []})
     else:
         raw_t = body.get("targetUids")
         if isinstance(raw_t, list):
@@ -1722,8 +1814,8 @@ async def translate_chat(request: Request) -> JSONResponse:
 # ---------------------------------------------------------------------------
 async def youtube_playlist(request: Request) -> JSONResponse:
     raw = _clean(request.query_params.get("url") or request.query_params.get("list"), 600)
-    m = re.search(r"(?:[?&]list=|^)(PL[A-Za-z0-9_-]{10,}|UU[A-Za-z0-9_-]{10,}|OLAK5uy_[A-Za-z0-9_-]{10,}|RD[A-Za-z0-9_-]{8,})", raw)
-    list_id = m.group(1) if m else raw.strip()
+    m = re.search(r"(?:[?&]list=|^)((?:PL|UU|FL|OLAK|RD)[A-Za-z0-9_-]{8,120})", raw)
+    list_id = m.group(1) if m else ""
     if not list_id:
         return JSONResponse({"ok": False, "error": "Geçerli bir YouTube Playlist bağlantısı veya ID'si girin."}, status_code=400)
 
@@ -1738,15 +1830,34 @@ async def youtube_playlist(request: Request) -> JSONResponse:
         if tm:
             playlist_title = _clean(html_mod.unescape(tm.group(1)), 120)
         seen_vids = set()
-        for vm in re.finditer(r'"playlistVideoRenderer":\{"videoId":"([A-Za-z0-9_-]{11})".*?"title":\{"runs":\[\{"text":"((?:\\.|[^"\\])*)"\}', html_str):
-            vid = vm.group(1)
+        parts_pl = html_str.split('"playlistVideoRenderer":{')[1:]
+        for blk in parts_pl:
+            chunk = blk[:2400]
+            vm_id = re.search(r'"videoId":"([A-Za-z0-9_-]{11})"', chunk)
+            if not vm_id:
+                continue
+            vid = vm_id.group(1)
             if vid in seen_vids:
                 continue
             seen_vids.add(vid)
+            vm_t = re.search(r'"title":\{"runs":\[\{"text":"((?:\\.|[^"\\])*)"\}', chunk) or re.search(r'"title":\{"simpleText":"((?:\\.|[^"\\])*)"\}', chunk)
+            raw_vt = vm_t.group(1) if vm_t else ""
             try:
-                v_title = json.loads(f'"{vm.group(2)}"')
+                v_title = json.loads(f'"{raw_vt}"') if raw_vt else ""
             except Exception:
-                v_title = vm.group(2)
+                v_title = raw_vt
+            dur_sec = 0
+            m_lsec = re.search(r'"lengthSeconds":"(\d+)"', chunk)
+            if m_lsec:
+                dur_sec = _safe_int(m_lsec.group(1), 0, lo=0, hi=86400)
+            if dur_sec <= 0:
+                m_ltxt = re.search(r'"lengthText":\{[^{}]*?"simpleText":"([0-9:]+)"', chunk)
+                if m_ltxt:
+                    t_parts = [int(p) for p in m_ltxt.group(1).split(":") if p.isdigit()]
+                    if t_parts:
+                        dur_sec = sum(v * (60 ** idx) for idx, v in enumerate(reversed(t_parts)))
+            if dur_sec <= 0:
+                dur_sec = 210
             items.append({
                 "provider": "youtube",
                 "videoId": vid,
@@ -1754,7 +1865,7 @@ async def youtube_playlist(request: Request) -> JSONResponse:
                 "title": _clean(v_title, 140) or f"YouTube #{len(items) + 1}",
                 "channel": playlist_title,
                 "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                "duration": 210,
+                "duration": dur_sec,
             })
             if len(items) >= 30:
                 break
@@ -1897,9 +2008,107 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 })
     except Exception:
         pass
-    if out:
-        _RAVEDJ_TREND_CACHE["ts"] = now_t
-        _RAVEDJ_TREND_CACHE["items"] = out
+    if not out:
+        out = [
+            {
+                "id": "wldj_preset_01",
+                "title": "🎧 Watchlivo DJ: Blinding Lights × Take On Me — The Weeknd & a-ha",
+                "songTitle": "Blinding Lights × Take On Me",
+                "artist": "The Weeknd & a-ha",
+                "trackA": "The Weeknd - Blinding Lights",
+                "trackB": "a-ha - Take On Me",
+                "bpm": 126,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "4NRXx6U8ABQ",
+                "url": "https://www.youtube.com/watch?v=4NRXx6U8ABQ",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=4NRXx6U8ABQ&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
+                "duration": 200,
+            },
+            {
+                "id": "wldj_preset_02",
+                "title": "🎧 Watchlivo DJ: Starboy × Get Lucky — The Weeknd & Daft Punk",
+                "songTitle": "Starboy × Get Lucky",
+                "artist": "The Weeknd & Daft Punk",
+                "trackA": "The Weeknd - Starboy",
+                "trackB": "Daft Punk - Get Lucky",
+                "bpm": 120,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "34Na4j8AVgA",
+                "url": "https://www.youtube.com/watch?v=34Na4j8AVgA",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=34Na4j8AVgA&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/34Na4j8AVgA/hqdefault.jpg",
+                "duration": 230,
+            },
+            {
+                "id": "wldj_preset_03",
+                "title": "🎧 Watchlivo DJ: Levitating × Treasure — Dua Lipa & Bruno Mars",
+                "songTitle": "Levitating × Treasure",
+                "artist": "Dua Lipa & Bruno Mars",
+                "trackA": "Dua Lipa - Levitating",
+                "trackB": "Bruno Mars - Treasure",
+                "bpm": 118,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "TUVcZfQe-Kw",
+                "url": "https://www.youtube.com/watch?v=TUVcZfQe-Kw",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=TUVcZfQe-Kw&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/TUVcZfQe-Kw/hqdefault.jpg",
+                "duration": 203,
+            },
+            {
+                "id": "wldj_preset_04",
+                "title": "🎧 Watchlivo DJ: Can't Feel My Face × Billie Jean — The Weeknd & Michael Jackson",
+                "songTitle": "Can't Feel My Face × Billie Jean",
+                "artist": "The Weeknd & Michael Jackson",
+                "trackA": "The Weeknd - Can't Feel My Face",
+                "trackB": "Michael Jackson - Billie Jean",
+                "bpm": 116,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "KEI4qSrkPAs",
+                "url": "https://www.youtube.com/watch?v=KEI4qSrkPAs",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=KEI4qSrkPAs&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/KEI4qSrkPAs/hqdefault.jpg",
+                "duration": 213,
+            },
+            {
+                "id": "wldj_preset_05",
+                "title": "🎧 Watchlivo DJ: Titanium × In The End — David Guetta & Linkin Park",
+                "songTitle": "Titanium × In The End",
+                "artist": "David Guetta & Linkin Park",
+                "trackA": "David Guetta ft Sia - Titanium",
+                "trackB": "Linkin Park - In The End",
+                "bpm": 124,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "JRfuAukYTKg",
+                "url": "https://www.youtube.com/watch?v=JRfuAukYTKg",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=JRfuAukYTKg&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/JRfuAukYTKg/hqdefault.jpg",
+                "duration": 245,
+            },
+            {
+                "id": "wldj_preset_06",
+                "title": "🎧 Watchlivo DJ: One More Time × Around The World — Daft Punk",
+                "songTitle": "One More Time × Around The World",
+                "artist": "Daft Punk",
+                "trackA": "Daft Punk - One More Time",
+                "trackB": "Daft Punk - Around The World",
+                "bpm": 123,
+                "provider": "youtube",
+                "streamType": "youtube",
+                "videoId": "FGBhQbmPwH8",
+                "url": "https://www.youtube.com/watch?v=FGBhQbmPwH8",
+                "audioPreviewUrl": "/api/rave/yt-music-stream?v=FGBhQbmPwH8&kind=audio",
+                "thumbnail": "https://i.ytimg.com/vi/FGBhQbmPwH8/hqdefault.jpg",
+                "duration": 320,
+            },
+        ]
+    _RAVEDJ_TREND_CACHE["ts"] = now_t
+    _RAVEDJ_TREND_CACHE["items"] = out
     return out
 
 
@@ -2007,7 +2216,14 @@ def _sign_drive_proxy(dl_u: str) -> str:
         import server
         return server._proxy_u(dl_u)
     except Exception:
-        return f"/api/rave/stream-proxy?u={urllib.parse.quote(dl_u, safe='')}"
+        from security import server_secret
+        sec = server_secret("PROXY_SECRET")
+        exp = ((int(time.time()) // 3600) + 6) * 3600
+        sig = hmac.new(sec, f"{dl_u}||{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24] + f".{exp}"
+        return f"/api/rave/stream-proxy?url={urllib.parse.quote(dl_u, safe='')}&sig={sig}"
+
+
+_NON_VIDEO_DRIVE_RE = re.compile(r"\.(?:pdf|jpg|jpeg|png|gif|webp|zip|rar|7z|doc|docx|xls|xlsx|ppt|pptx|txt)$", re.I)
 
 
 async def gdrive_folder_browse(request: Request) -> JSONResponse:
@@ -2029,23 +2245,26 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
             seen_ids = set()
             for dm in re.finditer(r'data-id="([A-Za-z0-9_-]{15,45})".*?data-tooltip="([^"]+)"', html_str, re.S):
                 d_id, d_name = dm.group(1), html_mod.unescape(dm.group(2))
-                if d_id in seen_ids:
+                clean_t = _clean(d_name, 140)
+                if d_id in seen_ids or _NON_VIDEO_DRIVE_RE.search(clean_t):
                     continue
                 seen_ids.add(d_id)
-                ext = d_name.rsplit(".", 1)[-1].lower() if "." in d_name else "mp4"
+                ext = clean_t.rsplit(".", 1)[-1].lower() if "." in clean_t else "mp4"
                 dl_u = f"https://drive.usercontent.google.com/download?id={d_id}&export=download&confirm=t"
                 p_main = _sign_drive_proxy(dl_u)
                 p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
+                p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
                 items.append({
                     "id": d_id,
-                    "title": _clean(d_name, 140),
+                    "title": clean_t,
                     "format": ext.upper(),
                     "mime": "video/x-matroska" if ext == "mkv" else ("video/webm" if ext == "webm" else "video/mp4"),
                     "url": p_main,
                     "directUrl": dl_u,
                     "qualities": [
-                        {"label": "1080p Orijinal (Direct)", "url": p_main},
-                        {"label": "720p HD Stream", "url": p_720},
+                        {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": p_main},
+                        {"label": "720p HD Stream", "quality": "720p", "url": p_720},
+                        {"label": "480p SD Stream", "quality": "480p", "url": p_480},
                     ],
                 })
                 if len(items) >= 24:
@@ -2056,9 +2275,14 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
             return JSONResponse({"ok": True, "type": "folder", "folderId": fid, "items": [], "warning": "Klasörde herkese açık video dosyası bulunamadı. Paylaşım ayarının 'Bağlantıya sahip olan herkes' olduğundan emin olun."})
         return JSONResponse({"ok": True, "type": "folder", "folderId": fid, "items": items})
 
-    fid_single = (file_m.group(1) or file_m.group(2)) if file_m else raw_url.strip()
+    id_fallback_m = re.search(r"([A-Za-z0-9_-]{15,45})", raw_url)
+    fid_single = (file_m.group(1) or file_m.group(2)) if file_m else (id_fallback_m.group(1) if id_fallback_m else "")
+    if not fid_single:
+        return JSONResponse({"ok": False, "error": "Geçerli bir Google Drive dosya veya klasör bağlantısı girin."}, status_code=400)
     dl_u = f"https://drive.usercontent.google.com/download?id={urllib.parse.quote(fid_single)}&export=download&confirm=t"
     proxied = _sign_drive_proxy(dl_u)
+    p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
+    p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
     items.append({
         "id": fid_single,
         "title": f"Google Drive Video ({fid_single[:10]})",
@@ -2067,8 +2291,9 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
         "url": proxied,
         "directUrl": dl_u,
         "qualities": [
-            {"label": "1080p Orijinal", "url": proxied},
-            {"label": "720p HD", "url": proxied},
+            {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": proxied},
+            {"label": "720p HD Stream", "quality": "720p", "url": p_720},
+            {"label": "480p SD Stream", "quality": "480p", "url": p_480},
         ],
     })
     return JSONResponse({"ok": True, "type": "file", "fileId": fid_single, "items": items})
@@ -2247,8 +2472,11 @@ def _purge_legacy_shared_guest() -> None:
 
 def _verified_account_key(request: Request) -> str:
     _purge_legacy_shared_guest()
+    claims = request.scope.get("wl_claims") or {}
+    if isinstance(claims, dict) and claims.get("guest"):
+        return ""
     verified = _clean(request.scope.get("wl_uid"), 64)
-    if not verified:
+    if not verified or verified.lower().startswith("guest_"):
         return ""
     return re.sub(r"[^a-zA-Z0-9_.@-]", "", verified.lower())[:64]
 
@@ -2386,13 +2614,14 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
     mtype = "tv" if _clean(src.get("mediaType"), 12).lower() == "tv" else "movie"
     tid = _clean(src.get("tmdbId") or src.get("id"), 40)
     title = _clean(src.get("title"), 160)
-    ikey = _norm_prog_key(_clean(src.get("key") or body.get("key"), 512) or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}")
-    existed = any(str(it.get("key") or "") == ikey for it in items)
+    raw_wkey = str(src.get("key") or body.get("key") or "").strip() or f"{mtype}:{tid or re.sub(r'[^a-z0-9]+', '-', title.lower())}"
+    ikey = _norm_prog_key(raw_wkey)
+    existed = any(_norm_prog_key(it.get("key")) == ikey for it in items)
     if action == "remove" or (action == "toggle" and existed):
-        items = [it for it in items if str(it.get("key") or "") != ikey]
+        items = [it for it in items if _norm_prog_key(it.get("key")) != ikey]
         added = False
     else:
-        items = [it for it in items if str(it.get("key") or "") != ikey]
+        items = [it for it in items if _norm_prog_key(it.get("key")) != ikey]
         items.insert(0, {
             "key": ikey,
             "tmdbId": tid,
@@ -2957,7 +3186,7 @@ def _detect_audio_mime(raw_bytes: bytes, declared_mime: str = "") -> str:
 
 _VN_UPLOAD_LIMIT = RateLimiter(30, 60.0, name="vn_upload")
 _VR_POST_LIMIT = RateLimiter(25, 5.0, name="vr_post")
-_VR_GET_LIMIT = RateLimiter(60, 5.0, name="vr_get")
+_VR_GET_LIMIT = RateLimiter(90, 10.0, name="vr_get")
 _VR_AUTH_FAIL_LIMIT = RateLimiter(20, 60.0, name="vr_fail")
 _RELAY_HEADERS = {
     **_PRIVATE_HEADERS,
@@ -3166,7 +3395,7 @@ async def voice_relay_endpoint(request: Request):
                 "Access-Control-Allow-Headers": "Content-Type, Authorization",
             },
         )
-    room_id = re.sub(r"[^a-z0-9\-]", "", str(request.path_params.get("room_id") or "").lower())[:48]
+    room_id = re.sub(r"[^a-z0-9_\-]", "", str(request.path_params.get("room_id") or request.query_params.get("roomId") or "").lower())[:48]
     if not room_id:
         return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=_RELAY_HEADERS)
     kv_key = f"wl:vrelay:{room_id}"
@@ -3232,12 +3461,13 @@ async def voice_relay_endpoint(request: Request):
             rlock = asyncio.Lock()
             lock_map[room_id] = rlock
         async with rlock:
+            now_t = time.time()
             cur = _kv_get(kv_key, None, max_age=0.12)
             buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
             buf = [p for p in buf if isinstance(p, dict) and (now_t - float(p.get("ts") or 0.0) < 10.0)]
             pkt = {"id": f"{cid}_{seq}_{int(now_t * 1000)}", "fromId": cid, "seq": seq, "ts": round(now_t, 4), "mime": mime, "b64": b64}
             buf.append(pkt)
-            buf = buf[-16:]
+            buf = buf[-64:]
             _VOICE_RELAY_MEM[room_id] = buf
             _kv_set(kv_key, buf, ttl_sec=20)
         return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_RELAY_HEADERS)
@@ -3273,15 +3503,22 @@ async def voice_relay_endpoint(request: Request):
             since_ts = 0.0
     except (TypeError, ValueError):
         since_ts = 0.0
-    cur = _kv_get(kv_key, None, max_age=0.12)
-    buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
-    out_pkts = [
-        p for p in buf
-        if isinstance(p, dict)
-        and p.get("fromId") != cid_q
-        and float(p.get("ts") or 0.0) > since_ts
-        and (now_t - float(p.get("ts") or 0.0) < 10.0)
-    ]
+    lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
+    rlock = lock_map.get(room_id)
+    if rlock is None:
+        rlock = asyncio.Lock()
+        lock_map[room_id] = rlock
+    async with rlock:
+        now_t = time.time()
+        cur = _kv_get(kv_key, None, max_age=0.12)
+        buf = list(cur) if isinstance(cur, list) else list(_VOICE_RELAY_MEM.get(room_id, []))
+        out_pkts = [
+            p for p in buf
+            if isinstance(p, dict)
+            and p.get("fromId") != cid_q
+            and float(p.get("ts") or 0.0) > since_ts
+            and (now_t - float(p.get("ts") or 0.0) < 10.0)
+        ]
     return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_RELAY_HEADERS)
 
 

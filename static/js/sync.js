@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v181';
+import { isRoomMediaPlaying } from './store.js?v=20261110_v182';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -139,21 +139,24 @@ export class SyncEngine {
     const delta = expected - curr;
     const abs = Math.abs(delta);
     const leader = Boolean(this.isLeader());
-    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').split(' — ')[0].trim().toLowerCase();
+    const epMatch = String(media.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
+    const s = Math.max(1, Number(media.season || epMatch?.[1] || epMatch?.[3]) || 1);
+    const e = Math.max(1, Number(media.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
+    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').split(' — ')[0].trim().toLowerCase();
     const rawTitleSig = ['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitleCandidate)
       ? ''
       : rawTitleCandidate;
     const mediaIdSig = media.tmdbId
-      ? `tmdb|${media.tmdbId}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
+      ? `tmdb|${media.tmdbId}|${media.mediaType || 'movie'}|${s}|${e}`
       : media.imdbId
-        ? `imdb|${media.imdbId}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
-        : (media.id && /^(fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)-/i.test(String(media.id)))
-          ? `cat|${media.id}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
+        ? `imdb|${media.imdbId}|${media.mediaType || 'movie'}|${s}|${e}`
+        : (media.id && /^(cat|t24|fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)[-_]/i.test(String(media.id)))
+          ? `cat|${media.id}|${s}|${e}`
           : media.videoId
-            ? `vid|${media.videoId}|${media.season || 1}|${media.episode || 1}`
+            ? `vid|${media.provider || 'ext'}|${media.videoId}|${s}|${e}`
             : (rawTitleSig && !media.isMusic && media.mediaType !== 'music' && !media.live)
-              ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${media.season || 1}|${media.episode || 1}`
-              : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${media.season || ''}|${media.episode || ''}`;
+              ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${s}|${e}`
+              : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${s}|${e}`;
     const isUnresolvedUrl = String(media.url || '').startsWith('/api/rave/resolve-catalog');
     const justResolvedUrl = Boolean(this.wasUnresolvedUrl && !isUnresolvedUrl);
     this.wasUnresolvedUrl = isUnresolvedUrl;
@@ -196,7 +199,7 @@ export class SyncEngine {
 
     if (status !== 'PLAYING') {
       if (!ad.isPaused()) ad.pause();
-      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.08 && now > this.seekUntil) {
+      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.25 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
         ad.seek(expected);
@@ -294,7 +297,7 @@ export class SyncEngine {
         this.lastSeekWallAt = now;
         ad.seek(expected);
         this.pendingSeekAt = inBufInit ? 0 : now;
-        this.seekUntil = now + (inBufInit ? 2200 : 3200);
+        this.seekUntil = now + (inBufInit ? 2200 : 6500);
         this.lastJumpAt = now;
         this.reJumps = 0;
         this.inSyncCount = 0;

@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v181';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v181';
-import { api, qs } from '../api.js?v=20261110_v181';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261110_v181';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v181';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v181';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v181';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v182';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v182';
+import { api, qs } from '../api.js?v=20261110_v182';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v182';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v182';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v182';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v182';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v181';
+} from '../store.js?v=20261110_v182';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -355,15 +355,9 @@ export function openYtPersonalizeModal(onUpdated) {
   const ytEmailInp = h('input', {
     class: 'input',
     type: 'email',
-    placeholder: 'Google / YouTube E-posta Adresiniz (örn. ad@gmail.com)',
+    placeholder: 'Google / YouTube E-posta Adresiniz (opsiyonel, örn. ad@gmail.com)',
     autocomplete: 'email',
     value: getYtPrefs().googleEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : ''),
-  });
-  const ytPwInp = h('input', {
-    class: 'input',
-    type: 'password',
-    placeholder: 'Hesap Şifreniz (en az 6 karakter — zorunlu)',
-    autocomplete: 'current-password',
   });
   const ytErrBox = h('div', {
     style: { fontSize: '.78rem', color: '#fb7185', minHeight: '18px', fontWeight: '600' },
@@ -406,13 +400,12 @@ export function openYtPersonalizeModal(onUpdated) {
   chInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustomCh(); });
 
   const modalRef = popup({
-    title: '🔴 YouTube & Google Şifreli Giriş ve Kanal Eşitleme',
+    title: '🔴 YouTube & Google Hesabı ve Kanal Eşitleme',
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
       h('div', { class: 'yt-oauth-banner', style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
         h('div', { style: { fontSize: '.82rem', lineHeight: '1.45', color: '#e2e8f0' } },
-          '🔐 Güvenlik gereği şifre yazmadan YouTube / Google girişi yapılamaz. Google e-posta adresinizi ve en az 6 karakterli hesap şifrenizi girerek YouTube hesabınızı bağlayın:'),
+          '🔗 Google / YouTube hesabınızı tek tıkla OAuth penceresi üzerinden bağlayarak aboneliklerinizi ve beğenilerinizi eşitleyin:'),
         ytEmailInp,
-        ytPwInp,
         ytErrBox,
         h('button', {
           type: 'button',
@@ -420,35 +413,29 @@ export function openYtPersonalizeModal(onUpdated) {
           style: { width: '100%', justifyContent: 'center', marginTop: '2px', background: '#ff0033', borderColor: '#ff0033', color: '#fff' },
           onclick: async (e) => {
             ytErrBox.textContent = '';
-            const em = ytEmailInp.value.trim();
-            const pw = ytPwInp.value;
-            if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) {
-              ytErrBox.textContent = '⚠️ Lütfen geçerli bir Google / YouTube e-posta adresi girin.';
+            const expectedEmail = ytEmailInp.value.trim();
+            if (expectedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(expectedEmail)) {
+              ytErrBox.textContent = '⚠️ Lütfen geçerli bir Google / YouTube e-posta adresi girin veya alanı boş bırakın.';
               ytEmailInp.focus();
-              return;
-            }
-            if (!pw || pw.length < 6) {
-              ytErrBox.textContent = '⚠️ Şifre yazmadan YouTube / Google girişi yapılamaz! Lütfen en az 6 karakterli şifrenizi girin.';
-              ytPwInp.focus();
               return;
             }
             const btn = e.currentTarget;
             btn.disabled = true;
-            btn.textContent = '⏳ Şifre Doğrulanıyor & YouTube Eşitleniyor...';
+            btn.textContent = '⏳ Google OAuth Açılıyor & YouTube Eşitleniyor...';
             try {
-              const res = await syncGoogleYoutubeOAuth(pw, em);
-              toast(`🔴 Google YouTube şifreyle doğrulandı ve eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
+              const res = await syncGoogleYoutubeOAuth(expectedEmail, '');
+              toast(`🔴 Google YouTube hesabı eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
               renderSubsList();
               onUpdated?.();
               modalRef?.close?.();
             } catch (err) {
-              ytErrBox.textContent = err?.message || 'Google / YouTube girişi doğrulanamadı. Lütfen bilgilerinizi kontrol edin.';
+              ytErrBox.textContent = err?.message || 'Google / YouTube girişi doğrulanamadı. Lütfen tekrar deneyin.';
             } finally {
               btn.disabled = false;
-              btn.textContent = '🔴 Şifreyi Doğrula & Google YouTube Hesabını Eşitle';
+              btn.textContent = '🔴 Google ile Bağlan & YouTube Hesabını Eşitle';
             }
           },
-        }, '🔴 Şifreyi Doğrula & Google YouTube Hesabını Eşitle')),
+        }, '🔴 Google ile Bağlan & YouTube Hesabını Eşitle')),
       h('div', { style: { display: 'flex', gap: '8px' } },
         chInp,
         h('button', { type: 'button', class: 'btn primary', onclick: addCustomCh }, '+ Takip Et')),
@@ -489,7 +476,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let trendingLoading = false;
   let latestEpsItems = [
     { id: 'ep-95479-s2e23', tmdbId: '95479', mediaType: 'tv', title: 'Jujutsu Kaisen', originalTitle: 'Jujutsu Kaisen', season: 2, episode: 23, episodeLabel: 'S2:B23', episodeTitle: 'Shibuya Incident', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg', year: '2024', rating: 8.6 },
-    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/4Mt7WHox67uJ1yErwTBFcV8KWgG.jpg', year: '2025', rating: 8.7 },
+    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/od5S7r2v306B2eR0E5t6vP8K2wG.jpg', year: '2025', rating: 8.7 },
     { id: 'ep-228853-s3e1', tmdbId: '228853', mediaType: 'tv', title: 'Prens', originalTitle: 'Prens', season: 3, episode: 1, episodeLabel: 'S3:B1', episodeTitle: 'Yeni Sezon Bölümü', sourceBadge: '🇹🇷 Yeni Yerli Bölüm', provider: 'blutv', poster: 'https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg', year: '2025', rating: 8.6 },
     { id: 'ep-115678-s5e13', tmdbId: '115678', mediaType: 'tv', title: 'Gibi', originalTitle: 'Gibi', season: 5, episode: 13, episodeLabel: 'S5:B13', episodeTitle: 'Sezon Finali', sourceBadge: '🇹🇷 Exxen Yeni Bölüm', provider: 'exxen', poster: 'https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg', year: '2025', rating: 8.9 },
     { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },
@@ -504,132 +491,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   let autoRotateTicks = 0;
   let autoRotateTimer = null;
   let superSearchSeq = 0;
-  let ytHomeChip = 'all';
-  let ytHomeExpanded = false;
-  let ytHomeData = null;
-  let ytHomeSeq = 0;
-  let ytLastScope = '';
-  const ytHomeMount = h('div', { id: 'wl-yt-home-mount' });
-
-  function renderYtHomeDOM(loading = false) {
-    if (compact || state.mesh) { ytHomeMount.replaceChildren(); return; }
-    const signedIn = Boolean(state.self && !state.self.isGuest);
-    if (!signedIn) {
-      ytHomeMount.replaceChildren(
-        h('section', { class: 'wl-yt-guest-cta' },
-          h('div', { class: 'wl-yt-guest-left' },
-            h('span', { class: 'wl-yt-play-pill' }, '▶'),
-            h('div', {},
-              h('div', { class: 'wl-yt-guest-title' }, 'Senin İçin Kişiselleştirilmiş YouTube Akışı'),
-              h('div', { class: 'wl-yt-guest-sub' }, 'Hesabınla giriş yaptığında aynı YouTube gibi izleme geçmişine, beğenilerine ve takip ettiğin kanallara özel videolar burada otomatik açılır.'))),
-          h('button', {
-            type: 'button',
-            class: 'btn primary sm',
-            onclick: () => profileSetup({ current: state.self, initialTab: 'login', onDone: () => refreshYtHomeSection(true) }),
-          }, '🔑 Giriş Yap & Aç'))
-      );
-      return;
-    }
-    const uHandle = state.self.handle ? `@${state.self.handle}` : (state.self.name || 'Hesabın');
-    const chips = ytHomeData?.chips?.length ? ytHomeData.chips : [
-      { id: 'all', label: 'Tümü' },
-      { id: 'for_you', label: '✨ Sana Özel' },
-      { id: 'subscriptions', label: '🔔 Takip Edilenler' },
-      { id: 'recent', label: '🆕 Yeni Yüklenenler' },
-      { id: 'music', label: '🎵 Müzik' },
-      { id: 'cinema', label: '🎬 Sinema & Fragman' },
-      { id: 'gaming', label: '🎮 Oyun' },
-    ];
-    const allItems = (ytHomeData?.items || []).map(ytToMedia);
-    const visibleItems = ytHomeExpanded ? allItems.slice(0, 24) : allItems.slice(0, 8);
-    ytHomeMount.replaceChildren(
-      h('section', { class: 'wl-yt-home-section', id: 'wl-yt-home-section' },
-        h('div', { class: 'wl-yt-home-head' },
-          h('div', { class: 'wl-yt-home-title-wrap' },
-            h('span', { class: 'wl-yt-play-pill' }, '▶'),
-            h('div', {},
-              h('div', { class: 'wl-yt-home-heading' },
-                h('span', {}, 'Senin İçin Önerilenler'),
-                h('span', { class: 'wl-yt-user-badge' }, uHandle),
-                h('span', { class: 'wl-yt-adfree-badge' }, '🛡️ Reklamsız 1080p')),
-              h('div', { class: 'wl-yt-home-sub' },
-                ytHomeData?.personalized
-                  ? 'İzleme geçmişin, beğenilerin ve takip ettiğin kanallara göre canlı güncellenir'
-                  : 'İzledikçe, beğendikçe ve kanal takip ettikçe akışın tamamen sana özel şekillenir'))),
-          h('div', { class: 'wl-yt-home-actions' },
-            h('button', {
-              type: 'button',
-              class: 'btn sm ghost',
-              onclick: () => openYtPersonalizeModal(() => refreshYtHomeSection(true)),
-            }, '🔗 Kanal & Google Eşitle'),
-            h('button', {
-              type: 'button',
-              class: 'btn sm ghost',
-              title: 'Önerileri yenile',
-              onclick: () => refreshYtHomeSection(true),
-            }, '🔄 Yenile'),
-            h('button', {
-              type: 'button',
-              class: 'btn sm primary',
-              onclick: () => { provider = getProvider('youtube'); render(); },
-            }, 'Tüm YouTube →'))),
-        h('div', { class: 'yt-chip-bar' },
-          ...chips.map((ch) => h('button', {
-            type: 'button',
-            class: `yt-filter-chip ${ytHomeChip === ch.id ? 'active' : ''}`,
-            onclick: () => {
-              ytHomeChip = ch.id;
-              refreshYtHomeSection(false, true);
-            },
-          }, ch.label))),
-        loading && !visibleItems.length
-          ? buildShimmerGrid(4)
-          : (visibleItems.length
-              ? h('div', { class: 'card-grid yt-feed-grid' },
-                  ...visibleItems.map((m) => videoCard(m, pickSafe, {
-                    allowDismiss: true,
-                    onChannelFilter: (med) => {
-                      ytHomeChip = `ch:${med.channelId || ''}:${med.channel || ''}`;
-                      refreshYtHomeSection(false, true);
-                    },
-                  })))
-              : h('div', { class: 'lobby-empty' }, 'Bu filtrede henüz video bulunamadı — başka bir kategori seçebilir veya kanal ekleyebilirsin.')),
-        allItems.length > 8 ? h('div', { class: 'wl-yt-more-row' },
-          h('button', {
-            type: 'button',
-            class: 'btn sm ghost',
-            onclick: () => { ytHomeExpanded = !ytHomeExpanded; renderYtHomeDOM(false); },
-          }, ytHomeExpanded ? '▲ Daha Az Göster' : `▼ Daha Fazla Sana Özel Video Göster (${Math.min(24, allItems.length)})`)) : null)
-    );
-  }
-
-  async function refreshYtHomeSection(force = false, chipChanged = false) {
-    if (compact || state.mesh) { ytHomeMount.replaceChildren(); return; }
-    const signedIn = Boolean(state.self && !state.self.isGuest);
-    if (!signedIn) {
-      ytHomeData = null;
-      ytLastScope = '';
-      renderYtHomeDOM(false);
-      return;
-    }
-    const curScope = `${getAccountStorageScope()}|${ytHomeChip}`;
-    if (!force && !chipChanged && ytHomeData && ytLastScope === curScope) {
-      renderYtHomeDOM(false);
-      return;
-    }
-    const seqId = ++ytHomeSeq;
-    if (chipChanged) ytHomeData = { ...(ytHomeData || {}), items: [] };
-    renderYtHomeDOM(true);
-    try {
-      const data = await fetchPersonalizedYtFeed(ytHomeChip, force);
-      if (seqId !== ytHomeSeq) return;
-      ytHomeData = data;
-      ytLastScope = curScope;
-      renderYtHomeDOM(false);
-    } catch (e) {
-      if (seqId === ytHomeSeq) renderYtHomeDOM(false);
-    }
-  }
 
   let _lastAuthWatchSig = `${Boolean(state.self && !state.self.isGuest)}|${getAccountStorageScope()}|${state.cloudSyncedAt || 0}`;
   const _unsubHomeYt = subscribe((st) => {
@@ -1102,7 +963,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×'))),
       h('div', { class: 'trending-strip-row' },
         ...trendingItems.map((item) => {
-          const prov = getProvider(item.provider || 'netflix') || { id: 'netflix', name: 'Netflix' };
+          const prov = getProvider(item.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
           return h('div', {
             class: 'trending-mini-card',
             role: 'button',
@@ -1184,6 +1045,20 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
               else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
               try {
+                if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
+                  const ytVid = item.videoId || item.id;
+                  await pickSafe({
+                    provider: 'youtube',
+                    videoId: ytVid,
+                    url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
+                    title: item.title,
+                    thumbnail: item.poster || item.thumbnail,
+                    duration: item.duration || 0,
+                    currentTime: resumeSec,
+                    meshStatePosition: resumeSec,
+                  });
+                  return;
+                }
                 const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
                 const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
                 const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
@@ -1191,7 +1066,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
 
                 let resolved = null;
-                if (item.provider !== 'youtube' && !item.isMusic) {
+                if (!item.isMusic) {
                   const resolvePayload = {
                     tmdbId: item.tmdbId || '',
                     imdbId: item.imdbId || '',
@@ -1203,13 +1078,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                     year: histYear,
                   };
                   try {
-                    // Fast resolve race capped at 3.5s so user never hangs on the home page
                     resolved = await Promise.race([
                       resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-                      new Promise((r) => setTimeout(() => r(null), 3500)),
+                      new Promise((r) => setTimeout(() => r(null), 12000)),
                     ]);
                   } catch (e) {
-                    console.warn('Continue resolve fast error:', e);
+                    console.warn('Continue resolve error:', e);
                   }
                 }
                 if (resolved) {
@@ -1218,39 +1092,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   await pickSafe(resolved);
                   return;
                 }
-
-                // Smooth direct room launch with dynamic catalog resolve inside the room
-                const effPoster = (item.poster && !item.poster.includes('watchlivo-poster.svg') && !item.poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
-                  ? item.poster
-                  : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, ot: item.originalTitle || '', y: histYear, mt: resolvedMediaType })}`;
-                const fallbackMedia = {
-                  ...item,
-                  title: item.title || cleanHistTitle,
-                  originalTitle: item.originalTitle || cleanHistTitle,
-                  seriesTitle: item.seriesTitle || (resolvedMediaType === 'tv' ? cleanHistTitle : ''),
-                  mediaType: resolvedMediaType,
-                  provider: targetProv.id || 'cinema',
-                  catalogProvider: targetProv.id || 'cinema',
-                  streamType: 'hls',
-                  currentTime: resumeSec,
-                  meshStatePosition: resumeSec,
-                  poster: effPoster,
-                  thumbnail: effPoster,
-                  backdrop: (item.backdrop && !item.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG')) ? item.backdrop : effPoster,
-                  url: `/api/rave/resolve-catalog?${qs({
-                    provider: targetProv.id || 'cinema',
-                    title: cleanHistTitle,
-                    originalTitle: item.originalTitle || cleanHistTitle,
-                    displayTitle: item.title || cleanHistTitle,
-                    year: histYear,
-                    tmdbId: item.tmdbId || '',
-                    imdbId: item.imdbId || '',
-                    mediaType: resolvedMediaType,
-                    season: item.season || 1,
-                    episode: item.episode || 1,
-                  })}`,
-                };
-                await pickSafe(fallbackMedia);
+                toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
+                return;
               } finally {
                 cardEl.classList.remove('busy');
               }
@@ -1527,14 +1370,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const heroProv = getProvider(activeHero.provider || 'cinema') || defProv;
                 if (!checkProviderAuthGate(activeHero, heroProv)) return;
                 if (activeHero.mediaType === 'tv') {
-                  openTvSeriesModal(activeHero, defProv);
+                  openTvSeriesModal(activeHero, heroProv);
                   return;
                 }
                 const btn = e.currentTarget;
                 btn.disabled = true;
                 toast(`🎬 ${activeHero.title} odası hazırlanıyor...`);
                 try {
-                  const media = await resolveCatalogItem(activeHero, defProv, 1, 1);
+                  const media = await resolveCatalogItem(activeHero, heroProv, 1, 1);
                   if (media) await pickSafe(media);
                 } finally {
                   btn.disabled = false;
@@ -1642,10 +1485,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: () => { showAllProviders = !showAllProviders; renderGrid(); },
           }, showAllProviders ? '▲ Kompakt Görünüm (12)' : `▼ Tüm Platformları Göster (${orderedAll.length})`) : null)) : null,
       h('div', { class: compact ? 'provider-grid compact' : 'provider-grid rave-home-provider-grid' },
-        ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); }, () => renderGrid())),
+        ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); })),
         ...(moreTile ? [moreTile] : [])));
 
-    const showYtHome = false;
     root.replaceChildren(
       topBar,
       ...(!compact ? [cmdkDropdown] : []),
@@ -1667,13 +1509,36 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     let data = {};
     try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
     if (mySearch !== superSearchSeq) return;
-    const tmdb = (data.tmdb || []).slice(0, 40);
-    const titles = tmdb.length ? [] : (data.justwatch || []).filter((t) => t.title).slice(0, 24);
+    const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '').trim();
+    const jwList = (data.justwatch || []).filter((t) => t && t.title);
+    const jwByTitle = new Map();
+    for (const jw of jwList) {
+      const k = normTitle(jw.title);
+      if (k && !jwByTitle.has(k)) jwByTitle.set(k, jw);
+    }
+    const matchedJwKeys = new Set();
+    const tmdb = (data.tmdb || []).slice(0, 40).map((t) => {
+      const k1 = normTitle(t.title);
+      const k2 = normTitle(t.originalTitle);
+      const matchedJw = (k1 && jwByTitle.get(k1)) || (k2 && jwByTitle.get(k2)) || null;
+      if (matchedJw) {
+        if (k1) matchedJwKeys.add(k1);
+        if (k2) matchedJwKeys.add(k2);
+      }
+      const mergedOffers = (Array.isArray(t.offers) && t.offers.length)
+        ? t.offers
+        : (matchedJw?.offers || []);
+      return { ...t, tmdbId: String(t.tmdbId || t.id || ''), offers: mergedOffers };
+    });
+    const titles = jwList.filter((jw) => {
+      const k = normTitle(jw.title);
+      return k && !matchedJwKeys.has(k);
+    }).slice(0, 24);
     const yt = (data.youtube || []).slice(0, 12).map(ytToMedia);
     const hasAny = Boolean(tmdb.length || titles.length || yt.length);
     fill(box,
       tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
-      tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard({ ...t, tmdbId: String(t.tmdbId || t.id || ''), offers: [] }, box)), ...titles.map((t) => posterCard(t, box))]) : null,
+      tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard(t, box)), ...titles.map((t) => posterCard(t, box))]) : null,
       yt.length ? h('div', { class: 'section-head' }, h('h2', {}, 'YouTube'), h('span', { class: 'dim' }, `${yt.length} video`)) : null,
       yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : (!hasAny ? h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen içerik bulunamadı.') : null));
   }
@@ -1834,13 +1699,13 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     return resolveMusicItem({ url, videoId: provider === 'ytmusic' ? id : '', title: fallbackTitle || `${p?.name || 'Müzik'} Parçası` }, p);
   }
   if (provider === 'youtube') return { provider, videoId: id, url: `https://www.youtube.com/watch?v=${id}`, title: fallbackTitle || 'YouTube videosu', thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, channel: 'YouTube' };
-  if (provider === 'twitch') return { provider, videoId: id, url: `https://www.twitch.tv/${/^\d+$/.test(id) ? 'videos/' + id : id}`, title: fallbackTitle || `Twitch · ${id}`, channel: 'Twitch', thumbnail: /^\d+$/.test(id) ? '' : `https://static-cdn.jtvnw.net/previews-ttv/live_user_${id.toLowerCase()}-640x360.jpg` };
+  if (provider === 'twitch') return { provider, videoId: id, url: `https://www.twitch.tv/${id.startsWith('v') ? 'videos/' + id.slice(1) : (/^\d+$/.test(id) ? 'videos/' + id : id)}`, embedUrl: id.startsWith('v') ? 'https://player.twitch.tv/?video=' + id.slice(1) + '&parent=' + location.hostname : 'https://player.twitch.tv/?channel=' + id + '&parent=' + location.hostname, title: fallbackTitle || `Twitch · ${id}`, channel: 'Twitch', thumbnail: (id.startsWith('v') || /^\d+$/.test(id)) ? '' : `https://static-cdn.jtvnw.net/previews-ttv/live_user_${id.toLowerCase()}-640x360.jpg` };
   if (provider === 'kick') return { provider, videoId: id, url: `https://kick.com/${id}`, embedUrl: `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true`, title: fallbackTitle || `Kick · ${id}`, channel: 'Kick', live: true };
-  if (provider === 'dailymotion') return { provider, videoId: id, url: `https://www.dailymotion.com/video/${id}`, embedUrl: `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(id)}&autoplay=1`, title: fallbackTitle || `Dailymotion · ${id}`, thumbnail: `https://www.dailymotion.com/thumbnail/video/${id}`, channel: 'Dailymotion' };
-  if (provider === 'tiktok') return { provider, videoId: id, url, embedUrl: `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?autoplay=1&rel=0`, title: fallbackTitle || `TikTok · #${id}`, channel: 'TikTok' };
+  if (provider === 'dailymotion') return { provider, videoId: id, url: `https://www.dailymotion.com/video/${id}`, embedUrl: `https://www.dailymotion.com/embed/video/${id}`, title: fallbackTitle || `Dailymotion · ${id}`, thumbnail: `https://www.dailymotion.com/thumbnail/video/${id}`, channel: 'Dailymotion' };
+  if (provider === 'tiktok') return { provider, videoId: id, url, embedUrl: `https://www.tiktok.com/embed/v2/${id}`, title: fallbackTitle || `TikTok · #${id}`, channel: 'TikTok' };
   if (provider === 'vk') return { provider: 'vk', videoId: id, url, embedUrl: `https://vk.com/video_ext.php?oid=${String(id).split('_')[0]}&id=${String(id).split('_')[1] || id}&hd=2`, title: fallbackTitle || `VK Video · ${id}`, channel: 'VK Video' };
   if (provider === 'rutube') return { provider: 'rutube', videoId: id, url, embedUrl: `https://rutube.ru/play/embed/${encodeURIComponent(id)}`, title: fallbackTitle || `Rutube · ${id}`, channel: 'Rutube' };
-  if (provider === 'drive') return { provider, videoId: id, url, title: fallbackTitle || 'Google Drive videosu', channel: 'Google Drive', thumbnail: `https://drive.google.com/thumbnail?id=${id}&sz=w640` };
+  if (provider === 'drive') return { provider, videoId: id, url, embedUrl: 'https://drive.google.com/file/d/' + id + '/preview', title: fallbackTitle || 'Google Drive videosu', channel: 'Google Drive', thumbnail: `https://drive.google.com/thumbnail?id=${id}&sz=w640` };
   if (provider === 'dropbox') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');
     return { provider: 'direct', videoId: id, url: directUrl, streamType: 'mp4', title: fallbackTitle || 'Dropbox Videosu', channel: 'Dropbox' };
@@ -1935,6 +1800,11 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
 
   const root = h('div', { class: 'HistorySelection wl-history-hub' });
   let modalRef = null;
+  const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
+  const openTvSeriesModal = (tvItem, tvProv) => {
+    modalRef?.close?.();
+    openCatalogTvSeriesModal(tvItem, tvProv || defProv, pickFn);
+  };
 
   const playHistoryItem = async (item) => {
     const prov = getProvider(item.catalogProvider || item.provider || 'cinema') || getProvider('cinema');
@@ -1944,13 +1814,27 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     modalRef?.close?.();
     if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
     else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
+    if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
+      const ytVid = item.videoId || item.id;
+      await pickFn({
+        provider: 'youtube',
+        videoId: ytVid,
+        url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
+        title: item.title,
+        thumbnail: item.poster || item.thumbnail,
+        duration: item.duration || 0,
+        currentTime: resumeSec,
+        meshStatePosition: resumeSec,
+      });
+      return;
+    }
     const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
     const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
     const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
     const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
     const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
     let resolved = null;
-    if (item.provider !== 'youtube' && !item.isMusic) {
+    if (!item.isMusic) {
       try {
         const resolvePayload = {
           tmdbId: item.tmdbId || '',
@@ -1964,10 +1848,10 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
         };
         resolved = await Promise.race([
           resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-          new Promise((r) => setTimeout(() => r(null), 3500)),
+          new Promise((r) => setTimeout(() => r(null), 12000)),
         ]);
       } catch (err) {
-        console.warn('History modal resolve error, falling back:', err);
+        console.warn('History modal resolve error:', err);
       }
     }
     if (resolved) {
@@ -1976,37 +1860,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
       await pickFn(resolved);
       return;
     }
-    const effPoster = (item.poster && !item.poster.includes('watchlivo-poster.svg') && !item.poster.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
-      ? item.poster
-      : `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, ot: item.originalTitle || '', y: histYear, mt: resolvedMediaType })}`;
-    const fallbackMedia = {
-      ...item,
-      title: item.title || cleanHistTitle,
-      originalTitle: item.originalTitle || cleanHistTitle,
-      seriesTitle: item.seriesTitle || (resolvedMediaType === 'tv' ? cleanHistTitle : ''),
-      mediaType: resolvedMediaType,
-      provider: targetProv.id || 'cinema',
-      catalogProvider: targetProv.id || 'cinema',
-      streamType: 'hls',
-      currentTime: resumeSec,
-      meshStatePosition: resumeSec,
-      poster: effPoster,
-      thumbnail: effPoster,
-      backdrop: (item.backdrop && !item.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG')) ? item.backdrop : effPoster,
-      url: `/api/rave/resolve-catalog?${qs({
-        provider: targetProv.id || 'cinema',
-        title: cleanHistTitle,
-        originalTitle: item.originalTitle || cleanHistTitle,
-        displayTitle: item.title || cleanHistTitle,
-        year: histYear,
-        tmdbId: item.tmdbId || '',
-        imdbId: item.imdbId || '',
-        mediaType: resolvedMediaType,
-        season: item.season || 1,
-        episode: item.episode || 1,
-      })}`,
-    };
-    await pickFn(fallbackMedia);
+    toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
   };
 
   const renderHub = () => {
@@ -2106,7 +1960,17 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
             h('strong', { class: 'wl-history-title' }, fav.title || 'Yapım'),
             h('div', { class: 'wl-history-sub' }, `${fav.year || '2025'} · ${fav.mediaType === 'tv' ? '📺 Dizi' : '🎬 Film'}`)),
           h('div', { class: 'wl-history-actions' },
-            h('button', { type: 'button', class: 'btn primary sm', onclick: () => playHistoryItem(fav) }, '▶ Başlat'),
+            h('button', {
+              type: 'button',
+              class: 'btn primary sm',
+              onclick: () => {
+                if (fav.mediaType === 'tv' && !Number(fav.currentTime ?? fav.position ?? 0)) {
+                  openTvSeriesModal(fav, getProvider(fav.provider || 'cinema') || defProv);
+                  return;
+                }
+                playHistoryItem(fav);
+              },
+            }, '▶ Başlat'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { toggleFavoriteMedia(fav); renderHub(); } }, '✕')))));
       }
     } else {

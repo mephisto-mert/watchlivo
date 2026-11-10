@@ -35,8 +35,10 @@ export class EmbedAdapter {
     this._onMsg = (ev) => this._handleMessage(ev);
   }
 
-  buildSrc(media, startAt = 0) {
+  buildSrc(media, startAt = 0, shouldPlay = true) {
     const host = location.hostname;
+    const autoBool = shouldPlay ? 'true' : 'false';
+    const autoBit = shouldPlay ? '1' : '0';
     if (media.provider === 'twitch') {
       const id = String(media.videoId || '').trim();
       if (!/^[A-Za-z0-9_]{1,64}$/.test(id)) return 'about:blank';
@@ -44,27 +46,27 @@ export class EmbedAdapter {
       this.caps.live = !isVod;
       this.caps.seek = isVod;
       return isVod
-        ? `https://player.twitch.tv/?video=v${id}&parent=${encodeURIComponent(host)}&autoplay=true`
-        : `https://player.twitch.tv/?channel=${encodeURIComponent(id)}&parent=${encodeURIComponent(host)}&autoplay=true&muted=false`;
+        ? `https://player.twitch.tv/?video=v${id}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}`
+        : `https://player.twitch.tv/?channel=${encodeURIComponent(id)}&parent=${encodeURIComponent(host)}&autoplay=${autoBool}&muted=false`;
     }
     if (media.provider === 'kick') {
       const id = String(media.videoId || '').trim();
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(id)) return 'about:blank';
       this.caps.live = true;
       this.caps.seek = false;
-      return `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true&muted=false`;
+      return `https://player.kick.com/${encodeURIComponent(id)}?autoplay=${autoBool}&muted=false`;
     }
     if (media.provider === 'dailymotion') {
       const id = String(media.videoId || '').trim();
       if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) return 'about:blank';
       this.caps.seek = false;
-      return `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(id)}&autoplay=1`;
+      return `https://geo.dailymotion.com/player.html?video=${encodeURIComponent(id)}&autoplay=${autoBit}`;
     }
     if (media.provider === 'tiktok') {
       const id = String(media.videoId || '').trim();
       if (!/^\d{5,32}$/.test(id)) return 'about:blank';
       this.caps.seek = false;
-      return `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?autoplay=1&rel=0`;
+      return `https://www.tiktok.com/player/v1/${encodeURIComponent(id)}?autoplay=${autoBit}&rel=0`;
     }
     if (media.provider === 'drive') {
       this.caps.seek = false;
@@ -104,7 +106,7 @@ export class EmbedAdapter {
     this.anchorPerf = performance.now();
     this.paused = !shouldPlay;
     this.duration = Number(media.duration) || (media.mediaType === 'tv' ? 2700 : 7200);
-    const src = this.buildSrc(media, this.baseTime);
+    const src = this.buildSrc(media, this.baseTime, shouldPlay);
     try { this._expectedOrigin = src.startsWith('http') ? new URL(src).origin : ''; } catch (_) { this._expectedOrigin = ''; }
     const f = document.createElement('iframe');
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
@@ -127,7 +129,7 @@ export class EmbedAdapter {
       sw.onclick = (e) => {
         e.stopPropagation();
         idx = (idx + 1) % allSrcs.length;
-        this.baseTime = 0;
+        this.baseTime = this.getTime();
         this.anchorPerf = performance.now();
         const nextSrc = allSrcs[idx];
         try { this._expectedOrigin = nextSrc.startsWith('http') ? new URL(nextSrc).origin : ''; } catch (_) { this._expectedOrigin = ''; }

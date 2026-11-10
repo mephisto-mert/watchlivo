@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261110_v181';
-import { Html5Adapter } from './html5.js?v=20261110_v181';
-import { VimeoAdapter } from './vimeo.js?v=20261110_v181';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v181';
-import { WebviewAdapter } from './webview.js?v=20261110_v181';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v181';
+import { YouTubeAdapter } from './youtube.js?v=20261110_v182';
+import { Html5Adapter } from './html5.js?v=20261110_v182';
+import { VimeoAdapter } from './vimeo.js?v=20261110_v182';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v182';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261110_v182';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v182';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -15,18 +15,20 @@ export function adapterFor(media) {
   if (!media) return EmbedAdapter;
   const url = String(media.url || '');
   const vid = String(media.videoId || '');
+  const isYtDirectStream = /\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8/i.test(url);
   if (
-    !(/youtube\.com|youtu\.be/i.test(url)) && (
+    !(/youtube\.com|youtu\.be/i.test(url)) &&
+    !(media.provider === 'youtube' && !isYtDirectStream) && (
       ['direct', 'hls', 'upload', 'web-direct'].includes(media.provider) ||
       media.streamType === 'hls' ||
       media.streamType === 'mp4' ||
-      /\.(mp4|m4v|m4a|mp3|aac|webm|m3u8|mov|ogg)(\?|$)/i.test(url) ||
-      /\/proxy\?data=|\/api\/rave\/stream|\/api\/rave\/yt-music-stream|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
+      /\.(mp4|m4v|m4a|mp3|aac|webm|m3u8|mov|ogg|mkv|wav|flac|opus)(\?|$)/i.test(url) ||
+      /\/proxy\?data=|\/api\/rave\/stream|\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
     )
   ) {
     return Html5Adapter;
   }
-  if (DRM_PROVS.has(media.provider) && url && !/youtube\.com|youtu\.be/i.test(url)) {
+  if (DRM_PROVS.has(media.provider) && url && isAllowedWebviewUrl(url)) {
     return WebviewAdapter;
   }
   if (media.provider === 'vimeo') return VimeoAdapter;
@@ -43,7 +45,7 @@ export const mediaKey = (m) => {
   const e = Math.max(1, Number(m.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
   if (m.tmdbId) return `tmdb|${m.tmdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
   if (m.imdbId) return `imdb|${m.imdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
-  if (m.id && /^(fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)-/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
+  if (m.id && /^(cat|t24|fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)[-_]/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
   if (m.videoId) return `vid|${m.provider || 'ext'}|${m.videoId}|${s}|${e}`;
   const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/'));
   const rawTitle = String(m.seriesTitle || m.originalTitle || m.title || '').trim().toLowerCase();
@@ -64,6 +66,7 @@ export class PlayerHost {
     };
     if (typeof window !== 'undefined') window.__kinoxHost = this;
     this.adapter = null;
+    this.media = null;
     this.key = '';
     const rawVol = localStorage.getItem('vortex_volume');
     const parsedVol = (rawVol !== null && rawVol !== '') ? Number(rawVol) : NaN;
@@ -115,7 +118,9 @@ export class PlayerHost {
             if (this.adapter?.player) {
               this.adapter._suppressYtPauseOnce = true;
               this.adapter.player.pauseVideo?.();
+              this.adapter.player.pause?.();
             }
+            this.adapter?.audioEl?.pause?.();
           } catch (_) {}
           this.onEvent('pip-change', true);
         } else if (ev.state === 'stopped') {
@@ -236,6 +241,7 @@ export class PlayerHost {
   }
 
   async setMedia(media, startAt = 0, shouldPlay = true) {
+    this.media = media || null;
     const key = mediaKey(media);
     const nextUrl = String(media?.url || media?.videoId || '');
     const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
@@ -248,6 +254,7 @@ export class PlayerHost {
       return false;
     }
     this.destroyAdapterOnly();
+    this.media = media || null;
     this.key = key;
     this.loadedUrl = nextUrl;
     this.requestedUrl = nextUrl;
@@ -453,12 +460,14 @@ export class PlayerHost {
         const parent = this.container.parentElement;
         const nextSib = this.container.nextSibling;
         pipWin.document.body.appendChild(this.container);
+        this.adapter?.subs?.syncNativeTrackToElement?.(this.adapter.video, true);
         this.adapter?.video?.play?.().catch?.(() => {});
         this.onEvent('pip-change', true);
         pipWin.addEventListener('pagehide', () => {
           if (parent && this.container.ownerDocument !== document) {
             if (nextSib && nextSib.parentNode === parent) parent.insertBefore(this.container, nextSib);
             else parent.prepend(this.container);
+            this.adapter?.subs?._disableAllNativeTextTracks?.();
             if (this.adapter?.wantPlaying) this.adapter?.video?.play?.().catch?.(() => {});
           }
           this._docPipWin = null;

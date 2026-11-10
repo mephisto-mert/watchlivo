@@ -267,12 +267,11 @@ export const PROVIDERS = [
       (u.match(/dizi\d*\.(?:life|plus|com|org)\/((?:dizi|film)\/[\w-]+)/i) || [])[1] ||
       (u.match(/(?:fullhdfilmizlesene|jetfilmizle)\.[a-z.]+\/(?:film\/)?([\w-]+)/i) || [])[1] ||
       (u.match(/yabancidizi\.[a-z.]+\/(?:dizi|izle)\/([\w-]+)/i) || [])[1] ||
-      (u.match(/animecix\.[a-z.]+\/(?:titles|watch)\/([\w-]+)/i) || [])[1] ||
-      (u.match(/plex\.tv\/(?:movie|show|watch)\/([\w-]+)/i) || [])[1] || null
+      (u.match(/animecix\.[a-z.]+\/(?:titles|watch)\/([\w-]+)/i) || [])[1] || null
     ) },
   { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
     homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
-    idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
+    idParser: (u) => (!/music\.youtube\.com/i.test(u) && (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1]) || null },
   { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · 1080p TR Dublaj & Altyazı', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
@@ -333,6 +332,9 @@ export const PROVIDERS = [
   { id: 'vk', name: 'VK Video', cat: 'global', badge: 'Dizi · Anime · 1080p Arşiv', logo: LOGOS.vk, bg: '#10121a', accent: '#0077ff', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://vkvideo.ru', placeholder: "VK Video'da Türkçe altyazılı dizi, anime veya film bağlantısı yapıştır...",
     idParser: (u) => (u.match(/(?:vk\.com|vkvideo\.ru)\/(?:video|clip)(-?\d+_\d+)/i) || [])[1] || null },
+  { id: 'plex', name: 'Plex', cat: 'global', badge: 'Ücretsiz Sinema & VOD', logo: LOGOS.plex, bg: '#10121a', accent: '#e5a00d', web: true, kind: 'catalog', freeNoAuth: true,
+    homeUrl: 'https://watch.plex.tv', placeholder: "Plex'te ücretsiz film veya dizi ara...",
+    idParser: (u) => (u.match(/plex\.tv\/.*?(?:movie|show|watch)\/([\w-]+)/i) || [])[1] || null },
   { id: 'pluto', name: 'Pluto TV', cat: 'global', badge: 'Ücretsiz Canlı TV & VOD', logo: LOGOS.pluto, bg: '#10121a', accent: '#facc15', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://pluto.tv', placeholder: "Pluto TV'de ücretsiz film veya kanal ara...",
     idParser: (u) => (u.match(/pluto\.tv\/.*?(?:movies|series|live-tv)\/([\w-]+)/i) || [])[1] || null },
@@ -345,33 +347,61 @@ export const PROVIDERS = [
   { id: 'ravedj', name: 'Watchlivo DJ', cat: 'global', badge: '2 Şarkıyı AI ile Birleştir · Mashup & Mix', logo: LOGOS.ravedj, bg: '#10121a', accent: '#00f5d4', web: true, kind: 'ravedj', freeNoAuth: true,
     homeUrl: 'https://rave.dj', placeholder: "Watchlivo DJ Mashup için şarkı veya YouTube bağlantısı gir...",
     idParser: (u) => (u.match(/rave\.dj\/([\w-]+)/i) || [])[1] || null },
+  { id: 'music', name: 'Müzik & Karaoke', cat: 'global', badge: 'Spotify · YouTube Music · Klip & Sözler', logo: LOGOS.music, bg: '#10121a', accent: '#1db954', web: true, kind: 'music', freeNoAuth: true,
+    homeUrl: '', placeholder: 'Şarkı, sanatçı, klip ara veya bağlantı yapıştır...',
+    idParser: () => null },
+  { id: 'upload', name: 'Dosya Yükle', cat: 'global', badge: 'MP4 · WebM · MOV Bulut Senkron', logo: LOGOS.upload, bg: '#10121a', accent: '#6366f1', web: true, kind: 'upload', freeNoAuth: true,
+    homeUrl: '', placeholder: 'MP4 / WebM / MOV dosyası seç...',
+    idParser: () => null },
 ];
 
 const INTERNAL_FALLBACK_PROVIDERS = [
-  { id: 'youtube', name: 'YouTube', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
-    idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
+  { id: 'ytmusic', name: 'YouTube Music', logo: LOGOS.ytmusic, bg: '#10121a', accent: '#ff0033', web: true, kind: 'music', freeNoAuth: true,
+    placeholder: "YouTube Music'te şarkı, sanatçı veya klip ara...",
+    idParser: (u) => /music\.youtube\.com/i.test(u) ? ((u.match(/[?&]v=([^"&?/\s]{11})/i) || u.match(/music\.youtube\.com\/(?:watch\?v=|playlist\?list=|browse\/)?([\w-]+)/i) || [])[1] || u) : null },
+  { id: 'spotify', name: 'Spotify', logo: LOGOS.spotify, bg: '#10121a', accent: '#1db954', web: true, kind: 'music', freeNoAuth: true,
+    placeholder: "Spotify'da şarkı, sanatçı veya bağlantı ara...",
+    idParser: (u) => (u.match(/open\.spotify\.com\/(?:intl-[a-z]{2}\/)?(?:track|album|playlist|artist)\/([a-zA-Z0-9]+)/i) || [])[1] || (/open\.spotify\.com/i.test(u) ? u : null) },
+  { id: 'deezer', name: 'Deezer', logo: LOGOS.deezer, bg: '#10121a', accent: '#a238ff', web: true, kind: 'music', freeNoAuth: true,
+    placeholder: "Deezer'da şarkı, sanatçı veya bağlantı ara...",
+    idParser: (u) => (u.match(/deezer\.com\/(?:[a-z]{2}\/)?(?:track|album|playlist)\/(\d+)/i) || [])[1] || (/deezer\.com/i.test(u) ? u : null) },
+  { id: 'applemusic', name: 'Apple Music', logo: LOGOS.applemusic, bg: '#10121a', accent: '#fa243c', web: true, kind: 'music', freeNoAuth: true,
+    placeholder: "Apple Music'te şarkı, sanatçı veya bağlantı ara...",
+    idParser: (u) => (u.match(/music\.apple\.com\/[a-z]{2}\/(?:album|playlist|song)\/[^/]+\/(\d+)/i) || [])[1] || (/music\.apple\.com/i.test(u) ? u : null) },
+  { id: 'soundcloud', name: 'SoundCloud', logo: LOGOS.soundcloud, bg: '#10121a', accent: '#ff5500', web: true, kind: 'music', freeNoAuth: true,
+    placeholder: "SoundCloud'da parça veya bağlantı ara...",
+    idParser: (u) => (u.match(/soundcloud\.com\/([\w-]+\/[\w-]+)/i) || [])[1] || (/soundcloud\.com/i.test(u) ? u : null) },
   { id: 'vimeo', name: 'Vimeo', logo: LOGOS.vimeo, bg: '#10121a', accent: '#1ab7ea', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'Vimeo video bağlantısı yapıştır...',
     idParser: (u) => (u.match(/vimeo\.com\/(?:video\/)?(\d+)/i) || [])[1] || null },
   { id: 'twitch', name: 'Twitch', logo: LOGOS.twitch, bg: '#10121a', accent: '#9146ff', web: true, kind: 'link', freeNoAuth: true,
-    idParser: (u) => (u.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i) || [])[1] || (u.match(/twitch\.tv\/([a-zA-Z0-9_]+)/i) || [])[1] || null },
+    placeholder: 'Twitch kanal adı veya video bağlantısı yapıştır...',
+    idParser: (u) => {
+      const m = u.match(/twitch\.tv\/(?:videos\/(\d+)|([a-zA-Z0-9_]+))/i);
+      return m ? (m[1] || m[2] || null) : null;
+    } },
   { id: 'kick', name: 'Kick', logo: LOGOS.kick, bg: '#10121a', accent: '#53fc18', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'Kick kanal adı veya bağlantısı yapıştır...',
     idParser: (u) => (u.match(/kick\.com\/([a-zA-Z0-9_-]+)/i) || [])[1] || null },
   { id: 'dailymotion', name: 'Dailymotion', logo: LOGOS.dailymotion, bg: '#10121a', accent: '#0066dc', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'Dailymotion video bağlantısı yapıştır...',
     idParser: (u) => (u.match(/(?:dailymotion\.com\/video\/|dai\.ly\/)([a-zA-Z0-9]+)/i) || [])[1] || null },
   { id: 'tiktok', name: 'TikTok', logo: LOGOS.tiktok, bg: '#10121a', accent: '#ff0050', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'TikTok video bağlantısı yapıştır...',
     idParser: (u) => (u.match(/tiktok\.com\/.*\/video\/(\d+)/i) || [])[1] || null },
-  { id: 'vk', name: 'VK Video', logo: LOGOS.vk, bg: '#10121a', accent: '#0077ff', web: true, kind: 'link', freeNoAuth: true,
-    idParser: (u) => (u.match(/(?:vk\.com|vkvideo\.ru)\/(?:video|clip)(-?\d+_\d+)/i) || [])[1] || null },
+  { id: 'dropbox', name: 'Dropbox', logo: LOGOS.dropbox, bg: '#10121a', accent: '#0061ff', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'Dropbox paylaşılan video bağlantısı yapıştır...',
+    idParser: (u) => (u.match(/dropbox\.com\/(?:s|scl\/fi)\/([\w-]+)/i) || [])[1] || (/dropbox\.com/i.test(u) ? u : null) },
   { id: 'rutube', name: 'Rutube', logo: LOGOS.rutube, bg: '#10121a', accent: '#e11d48', web: true, kind: 'link', freeNoAuth: true,
-    idParser: (u) => (u.match(/rutube\.ru\/(?:video|play\/embed)\/([a-f0-9]{16,36})/i) || [])[1] || null },
-  { id: 'drive', name: 'Google Drive', logo: LOGOS.drive, bg: '#10121a', accent: '#34a853', web: true, kind: 'drive', freeNoAuth: true,
-    idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
+    placeholder: 'Rutube video bağlantısı yapıştır...',
+    idParser: (u) => (u.match(/rutube\.ru\/(?:video|play\/embed|shorts)\/([a-zA-Z0-9_-]{16,36})/i) || [])[1] || (/rutube\.ru/i.test(u) ? u : null) },
   { id: 'web', name: 'Web', logo: LOGOS.web, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'link', freeNoAuth: true,
+    placeholder: 'Web sayfası veya doğrudan .mp4 / .m3u8 bağlantısı yapıştır...',
     idParser: (u) => (/^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i.test(u) ? u : null) },
 ];
 
 const _WEB_URL_RE = /^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i;
-const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi', 'plex'];
+const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi'];
 export const getProvider = (id) => {
   const norm = CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id);
   return PROVIDERS.find((p) => p.id === norm) || INTERNAL_FALLBACK_PROVIDERS.find((p) => p.id === norm) || null;

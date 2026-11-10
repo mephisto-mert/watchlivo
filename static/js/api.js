@@ -8,7 +8,6 @@ function _getAuthToken() {
         if (!p2.isGuest && p2.authToken) return String(p2.authToken);
         if (p2.isGuest && p2.guestToken) return String(p2.guestToken);
       }
-      return '';
     }
     const tmpGuestRaw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('vortex_temp_guest_v1') : null;
     if (tmpGuestRaw) {

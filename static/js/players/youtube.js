@@ -1,7 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v181';
-import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261110_v181';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v181';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v182';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261110_v182';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v182';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -62,7 +62,6 @@ export class YouTubeAdapter {
     this._muted = false;
     this.userExplicitMuted = false;
     this.autoplayTimer = null;
-    this.stallTimer = null;
     this.subTimer = null;
     this._visHandler = null;
     this._pageHideHandler = null;
@@ -198,6 +197,10 @@ export class YouTubeAdapter {
 
     const validStart = (!this.media?.live && Number.isFinite(startAt) && startAt > 0.5) ? Number(startAt) : 0;
 
+    v.addEventListener('seeking', () => {
+      this.subs?.clearActiveCue?.();
+      this.subs?.stopDubAudio?.();
+    });
     v.addEventListener('playing', () => {
       if (this._destroyed || this.video !== v) return;
       this.ready = true;
@@ -243,6 +246,7 @@ export class YouTubeAdapter {
     });
     v.addEventListener('enterpictureinpicture', () => {
       this._pipActive = true;
+      this.subs?.syncNativeTrackToElement?.(v, true);
       this.events.onPipChange?.(true);
     });
     v.addEventListener('leavepictureinpicture', () => {
@@ -603,7 +607,7 @@ export class YouTubeAdapter {
     if (autoplay && a.src) {
       a.play().catch(() => { a.muted = true; this.events.onAutoplayBlocked?.(); a.play().catch(() => {}); });
     } else {
-      this.events.onPlay?.();
+      this.events.onPause?.();
     }
   }
 
@@ -1005,10 +1009,12 @@ export class YouTubeAdapter {
       if (!m) this.events.onUnmuted?.();
     } else if (this.audioEl) {
       applyElementVolume(this.audioEl, this.baseVolume, this._muted);
+      if (!m) this.events.onUnmuted?.();
     } else if (m) {
       this.player?.mute?.();
     } else {
       this.player?.unMute?.();
+      this.events.onUnmuted?.();
     }
   }
 
@@ -1020,7 +1026,6 @@ export class YouTubeAdapter {
   destroy() {
     this._destroyed = true;
     clearTimeout(this.autoplayTimer);
-    clearTimeout(this.stallTimer);
     clearInterval(this.subTimer);
     this.subs?.stopDubAudio?.();
     this.subs?.destroy?.();

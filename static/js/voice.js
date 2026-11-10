@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261110_v181';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261110_v181';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261110_v181';
+import { toast } from './ui.js?v=20261110_v182';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261110_v182';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261110_v182';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -9,6 +9,9 @@ const ICE = [
   { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:global.stun.twilio.com:3478' },
 ];
+const getIceServers = () => (typeof window !== 'undefined' && Array.isArray(window.WATCHLIVO_ICE_SERVERS) && window.WATCHLIVO_ICE_SERVERS.length)
+  ? window.WATCHLIVO_ICE_SERVERS
+  : ICE;
 
 export class Voice {
   constructor({ send, getSelfId, getRoomId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
@@ -23,20 +26,26 @@ export class Voice {
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
+    this._avatarCamCanvasStream = null;
     this.synthTimer = null;
     this.screenSynthTimer = null;
     this.micSynthTimer = null;
     this.micOn = false;
     this.camOn = false;
     this.screenOn = false;
+    this.camPending = false;
+    this.screenPending = false;
     this.inCall = false;
     this.destroyed = false;
     this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
     this.stageGridMode = false;
     this.stripMode = false;
     this.selfSpeaking = false;
     this.speakTimer = null;
     this.audioCtx = null;
+    this.analyser = null;
     this.relayPlayCtx = null;
     this.relayPollTimer = null;
     this.relaySinceTs = 0;
@@ -81,6 +90,9 @@ export class Voice {
 
   _syncStoreVoice() {
     try {
+      if (typeof window !== 'undefined') {
+        window.__vortexVoiceDeafened = Boolean(this.deafened && !this.destroyed);
+      }
       const stObj = typeof window !== 'undefined' ? window.__wlStoreSingleton?.state : null;
       if (stObj) {
         stObj.voice = {
@@ -121,10 +133,17 @@ export class Voice {
     } catch (e) { /* ignore */ }
   }
 
-  toggleDeafen() {
+  async toggleDeafen() {
     this.deafened = !this.deafened;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = this.deafened;
     if (this.deafened && this.micOn) {
-      this.toggleMic().catch(() => {});
+      this._mutedByDeafen = true;
+      await this.toggleMic().catch(() => {});
+    } else if (!this.deafened && this._mutedByDeafen && !this.micOn) {
+      this._mutedByDeafen = false;
+      await this.toggleMic().catch(() => {});
+    } else if (!this.deafened) {
+      this._mutedByDeafen = false;
     }
     if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
       if (this.deafened) this.relayPlayCtx.suspend().catch(() => {});
@@ -136,6 +155,7 @@ export class Voice {
         const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
         applyStreamBoost(st.audio, st.audio.srcObject, effVol);
         st.audio.muted = !this.inCall || this.deafened || effVol === 0 || effVol > 100;
+        if (effVol <= 100) st.audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
       }
     }
     this._updateDuckState();
@@ -269,8 +289,16 @@ export class Voice {
     this.peerVolumes.set(id, val);
     const st = this.peers.get(id);
     if (st?.audio) {
-      applyStreamBoost(st.audio, st.audio.srcObject, this.deafened ? 0 : val);
-      if (val <= 100) st.audio.muted = this.deafened || val === 0;
+      if (!this.inCall || this.deafened) {
+        applyStreamBoost(st.audio, st.audio.srcObject, 0);
+        st.audio.muted = true;
+      } else {
+        applyStreamBoost(st.audio, st.audio.srcObject, val);
+        st.audio.muted = val === 0 || val > 100;
+        if (val <= 100) {
+          st.audio.volume = Math.min(1.0, Math.max(0, val / 100));
+        }
+      }
     }
     return val;
   }
@@ -580,25 +608,46 @@ export class Voice {
   }
 
   async _negotiate(id, st) {
-    const { pc } = st;
-    if (this.destroyed || !pc || st.makingOffer || pc.signalingState !== 'stable') return;
-    try {
-      st.makingOffer = true;
-      if (!st.audioSender && !st.audioTransceiver && (this.inCall || this.micOn)) {
-        try {
-          st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
-          st.audioSender = st.audioTransceiver.sender;
-        } catch (e) { /* ignore */ }
-      }
-      const offer = await pc.createOffer();
-      if (pc.signalingState !== 'stable') return;
-      await pc.setLocalDescription(offer);
-      this.send('webrtc_offer', { targetId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
-    } catch (err) {
-      console.warn('[voice] offer', err);
-    } finally {
-      st.makingOffer = false;
+    if (this.destroyed || !st?.pc) return;
+    if (st.makingOffer || st.pc.signalingState !== 'stable') {
+      st.needsNegotiation = true;
+      return;
     }
+    st.sigChain = (st.sigChain || Promise.resolve()).then(async () => {
+      const { pc } = st;
+      if (this.destroyed || !pc || this.peers.get(id) !== st) return;
+      if (st.makingOffer || pc.signalingState !== 'stable') {
+        st.needsNegotiation = true;
+        return;
+      }
+      try {
+        st.makingOffer = true;
+        if (!st.audioSender && !st.audioTransceiver && (this.inCall || this.micOn)) {
+          try {
+            st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+            st.audioSender = st.audioTransceiver.sender;
+          } catch (e) { /* ignore */ }
+        }
+        const offerOpts = st.iceRestartPending ? { iceRestart: true } : undefined;
+        st.iceRestartPending = false;
+        const offer = await pc.createOffer(offerOpts);
+        if (pc.signalingState !== 'stable') {
+          st.needsNegotiation = true;
+          return;
+        }
+        await pc.setLocalDescription(offer);
+        this.send('webrtc_offer', { targetId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+      } catch (err) {
+        console.warn('[voice] offer', err);
+      } finally {
+        st.makingOffer = false;
+        if (st.needsNegotiation && !st.makingOffer && st.pc.signalingState === 'stable') {
+          st.needsNegotiation = false;
+          this._negotiate(id, st);
+        }
+      }
+    }).catch(() => {});
+    return st.sigChain;
   }
 
   _orderedPeerTargets() {
@@ -612,15 +661,16 @@ export class Voice {
   peer(id, { forOffer = false } = {}) {
     if (this.peers.has(id)) return this.peers.get(id);
     if (this.peers.size >= 12) return null;
-    const pc = new RTCPeerConnection({ iceServers: ICE });
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
     const audio = document.createElement('audio');
     audio.autoplay = true;
     audio.playsInline = true;
     audio.setAttribute('playsinline', '');
     this._ensureAudioHost().appendChild(audio);
-    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
+    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, needsNegotiation: false, iceRestartPending: false, _recovering: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
     this.peers.set(id, st);
-    if (!forOffer) {
+    const activeVid = this.screenStream || this.camStream;
+    if (!forOffer || activeVid) {
       try {
         const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
         st.audioTransceiver = pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
@@ -650,7 +700,6 @@ export class Voice {
         } catch (e) { /* ignore */ }
       };
     } catch (e) { /* ignore */ }
-    const activeVid = this.screenStream || this.camStream;
     if (activeVid) {
       for (const t of activeVid.getVideoTracks()) {
         st.videoSender = pc.addTrack(t, activeVid);
@@ -674,6 +723,7 @@ export class Voice {
         const volPct = this.getPeerVolume(id);
         const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
         if (effVol > 100) {
+          audio.muted = true;
           applyStreamBoost(audio, aStream, effVol);
         } else {
           releaseStreamBoost(audio);
@@ -689,23 +739,27 @@ export class Voice {
       }
     };
     pc.onnegotiationneeded = () => this._negotiate(id, st);
-    pc.onconnectionstatechange = async () => {
-      if (pc.connectionState === 'failed') {
-        try {
-          if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
-        } catch (e) { /* ignore */ }
-        try { pc.restartIce?.(); } catch (e) { /* ignore */ }
-        this._negotiate(id, st);
+    const recoverPeer = async () => {
+      if (this.destroyed || st._recovering || this.peers.get(id) !== st) return;
+      st._recovering = true;
+      try {
+        if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
+      } catch (e) { /* ignore */ }
+      try { pc.restartIce?.(); } catch (e) { /* ignore */ }
+      st.iceRestartPending = true;
+      try {
+        await this._negotiate(id, st);
+      } finally {
+        setTimeout(() => { st._recovering = false; }, 2000);
       }
     };
-    pc.oniceconnectionstatechange = async () => {
-      if (pc.iceConnectionState === 'failed') {
-        try {
-          if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
-        } catch (e) { /* ignore */ }
-        try { pc.restartIce?.(); } catch (e) { /* ignore */ }
-        this._negotiate(id, st);
-      }
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') st._recovering = false;
+      else if (pc.connectionState === 'failed') recoverPeer();
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') st._recovering = false;
+      else if (pc.iceConnectionState === 'failed') recoverPeer();
     };
     return st;
   }
@@ -720,7 +774,7 @@ export class Voice {
       const old = this.peers.get(from);
       const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if ((newU && oldU && newU !== oldU) || (!old.pc.remoteDescription && old.pc.signalingState === 'stable')) {
+      if (old.pc.connectionState === 'closed' || (newU && oldU && newU !== oldU)) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { releaseStreamBoost(old.audio); old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
@@ -770,6 +824,10 @@ export class Voice {
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+          }
+          if (st.needsNegotiation && !st.makingOffer && st.pc.signalingState === 'stable') {
+            st.needsNegotiation = false;
+            this._negotiate(from, st);
           }
         } else if (data.type === 'webrtc_ice' && data.candidate) {
           if (st.ignoreOffer) return;
@@ -867,14 +925,18 @@ export class Voice {
   }
 
   _createAvatarCamStream() {
+    if (this._avatarCamCanvasStream) {
+      try { this._avatarCamCanvasStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      this._avatarCamCanvasStream = null;
+    }
     const c = document.createElement('canvas');
     c.width = 320;
     c.height = 240;
     const ctx2d = c.getContext('2d');
-    const prof = this.getSelfProfile();
     let tick = 0;
     clearInterval(this.synthTimer);
     const draw = () => {
+      const prof = this.getSelfProfile() || { name: 'Sen', color: '#6366f1' };
       tick += 0.08;
       const g = ctx2d.createLinearGradient(0, 0, 320, 240);
       g.addColorStop(0, '#0b0e18');
@@ -904,7 +966,8 @@ export class Voice {
     };
     draw();
     this.synthTimer = setInterval(draw, 66);
-    return c.captureStream ? c.captureStream(15) : null;
+    this._avatarCamCanvasStream = c.captureStream ? c.captureStream(15) : null;
+    return this._avatarCamCanvasStream;
   }
 
   async _attachOrReplaceVideoTrack(stream) {
@@ -915,6 +978,14 @@ export class Voice {
         if (st.videoSender) {
           await st.videoSender.replaceTrack(vTrack);
         } else if (vTrack) {
+          if (!st.audioSender && !st.audioTransceiver) {
+            try {
+              const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
+              st.audioTransceiver = st.pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
+              st.audioSender = st.audioTransceiver.sender;
+              if (aTrack) st.audioSender.replaceTrack(aTrack).catch(() => {});
+            } catch (_) {}
+          }
           st.videoSender = st.pc.addTrack(vTrack, stream);
         }
         await this._negotiate(id, st);
@@ -972,83 +1043,107 @@ export class Voice {
   }
 
   async toggleCamera() {
-    if (this.camOn) {
-      clearInterval(this.synthTimer);
-      this.camStream?.getTracks().forEach((t) => t.stop());
-      this.camStream = null;
-      this.camOn = false;
-      this._removeVideoBubble('self');
-      await this._attachOrReplaceVideoTrack(this.screenStream || null);
-      this.send('voice_state', { cam: false, inCall: Boolean(this.inCall || this.micOn || this.screenOn) });
-      this.onStateChange?.();
-      toast('📷 Kamera kapatıldı');
-      return false;
-    }
+    if (this.camPending) return this.camOn;
+    this.camPending = true;
     try {
-      this._isAvatarCam = false;
-      const freshCam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
-      if (this.destroyed) { freshCam.getTracks().forEach((t) => t.stop()); return false; }
-      this.camStream = freshCam;
-      toast('📷 Kamera açıldı');
-    } catch (e) {
-      this._isAvatarCam = true;
-      this.camStream = this._createAvatarCamStream();
-      if (!this.camStream) {
-        toast('⚠️ Kamera cihazı bulunamadı.');
+      if (this.camOn) {
+        clearInterval(this.synthTimer);
+        this.camStream?.getTracks().forEach((t) => t.stop());
+        this.camStream = null;
+        this.camOn = false;
+        this._removeVideoBubble('self');
+        await this._attachOrReplaceVideoTrack(this.screenStream || null);
+        this.send('voice_state', { cam: false, inCall: Boolean(this.inCall || this.micOn || this.screenOn) });
+        this.onStateChange?.();
+        toast('📷 Kamera kapatıldı');
         return false;
       }
-      toast('📷 Canlı Avatar Kamerası açıldı');
+      try {
+        this._isAvatarCam = false;
+        const freshCam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
+        if (this.destroyed) { freshCam.getTracks().forEach((t) => t.stop()); return false; }
+        if (this.camStream && this.camStream !== freshCam) {
+          this.camStream.getTracks().forEach((t) => t.stop());
+        }
+        this.camStream = freshCam;
+        toast('📷 Kamera açıldı');
+      } catch (e) {
+        this._isAvatarCam = true;
+        if (this.camStream) {
+          this.camStream.getTracks().forEach((t) => t.stop());
+        }
+        this.camStream = this._createAvatarCamStream();
+        if (!this.camStream) {
+          toast('⚠️ Kamera cihazı bulunamadı.');
+          return false;
+        }
+        toast('📷 Canlı Avatar Kamerası açıldı');
+      }
+      this.camOn = true;
+      this.inCall = true;
+      this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
+      await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
+      this.send('voice_state', { cam: true, inCall: true });
+      this.onStateChange?.();
+      return true;
+    } finally {
+      this.camPending = false;
     }
-    this.camOn = true;
-    this.inCall = true;
-    this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
-    await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
-    this.send('voice_state', { cam: true, inCall: true });
-    this.onStateChange?.();
-    return true;
   }
 
   async toggleScreenShare() {
-    if (this.screenOn) {
-      clearInterval(this.screenSynthTimer);
-      this.screenStream?.getTracks().forEach((t) => t.stop());
-      this.screenStream = null;
-      this.screenOn = false;
-      this._removeVideoBubble('self-screen');
-      await this._attachOrReplaceVideoTrack(this.camStream || null);
-      this.send('voice_state', { screen: false, inCall: Boolean(this.inCall || this.micOn || this.camOn) });
-      this.onStateChange?.();
-      toast('🖥️ Ekran yansıtma durduruldu');
-      return false;
-    }
+    if (this.screenPending) return this.screenOn;
+    this.screenPending = true;
     try {
-      if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
-        const freshScreen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
-        if (this.destroyed) { freshScreen?.getTracks?.().forEach((t) => t.stop()); return false; }
-        this.screenStream = freshScreen;
-      } else if (navigator.webdriver) {
-        this.screenStream = this._createScreenShareFallbackStream();
-      } else {
-        toast('⚠️ Bu tarayıcı ekran paylaşımını desteklemiyor');
+      if (this.screenOn) {
+        clearInterval(this.screenSynthTimer);
+        this.screenStream?.getTracks().forEach((t) => t.stop());
+        this.screenStream = null;
+        this.screenOn = false;
+        this._removeVideoBubble('self-screen');
+        await this._attachOrReplaceVideoTrack(this.camStream || null);
+        this.send('voice_state', { screen: false, inCall: Boolean(this.inCall || this.micOn || this.camOn) });
+        this.onStateChange?.();
+        toast('🖥️ Ekran yansıtma durduruldu');
         return false;
       }
-    } catch (e) {
-      toast('Ekran paylaşımı iptal edildi');
-      return false;
+      try {
+        if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
+          const freshScreen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
+          if (this.destroyed) { freshScreen?.getTracks?.().forEach((t) => t.stop()); return false; }
+          if (this.screenStream && this.screenStream !== freshScreen) {
+            this.screenStream.getTracks().forEach((t) => t.stop());
+          }
+          this.screenStream = freshScreen;
+        } else if (navigator.webdriver) {
+          if (this.screenStream) {
+            this.screenStream.getTracks().forEach((t) => t.stop());
+          }
+          this.screenStream = this._createScreenShareFallbackStream();
+        } else {
+          toast('⚠️ Bu tarayıcı ekran paylaşımını desteklemiyor');
+          return false;
+        }
+      } catch (e) {
+        toast('Ekran paylaşımı iptal edildi');
+        return false;
+      }
+      if (!this.screenStream) {
+        toast('⚠️ Ekran paylaşımı başlatılamadı');
+        return false;
+      }
+      this.screenOn = true;
+      this.inCall = true;
+      this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
+      this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
+      await this._attachOrReplaceVideoTrack(this.screenStream);
+      this.send('voice_state', { screen: true, inCall: true });
+      this.onStateChange?.();
+      toast('🖥️ Ekran yansıtma başlatıldı — odadaki herkes ekranını görebilir');
+      return true;
+    } finally {
+      this.screenPending = false;
     }
-    if (!this.screenStream) {
-      toast('⚠️ Ekran paylaşımı başlatılamadı');
-      return false;
-    }
-    this.screenOn = true;
-    this.inCall = true;
-    this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
-    this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
-    await this._attachOrReplaceVideoTrack(this.screenStream);
-    this.send('voice_state', { screen: true, inCall: true });
-    this.onStateChange?.();
-    toast('🖥️ Ekran yansıtma başlatıldı — odadaki herkes ekranını görebilir');
-    return true;
   }
 
   _createSyntheticAudioStream() {
@@ -1075,10 +1170,12 @@ export class Voice {
       const isIos = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       if (isIos) {
         clearInterval(this.speakTimer);
+        this.speakTimer = null;
         try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
         this._relayProc = null;
         this._relaySrc = null;
         this._relayMute = null;
+        this.analyser = null;
         this.audioCtx?.close?.().catch(() => {});
         this.audioCtx = null;
         this.stream?.getAudioTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
@@ -1106,11 +1203,20 @@ export class Voice {
           const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 9000));
           const freshStream = await Promise.race([acquireMicStreamSafe(), timeoutPromise]);
           if (this.destroyed) { freshStream?.getTracks?.().forEach((t) => t.stop()); return false; }
+          if (this.stream && this.stream !== freshStream) {
+            this.stream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+          }
           if (this._usingSynthStream) {
-            this.stream?.getTracks().forEach((t) => t.stop());
             this.synthAudioCtx?.close?.().catch(() => {});
             this.synthAudioCtx = null;
           }
+          clearInterval(this.speakTimer);
+          this.speakTimer = null;
+          try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+          this._relayProc = null;
+          this._relaySrc = null;
+          this._relayMute = null;
+          this.analyser = null;
           this.stream = freshStream;
           this._usingSynthStream = false;
           realMicAcquired = true;
@@ -1134,8 +1240,25 @@ export class Voice {
         return false;
       }
       this.stream?.getTracks().forEach((t) => { t.enabled = true; });
-      this.micOn = true;
       this.inCall = true;
+      if (!this.micOn && this.deafened) {
+        this.deafened = false;
+        this._mutedByDeafen = false;
+        if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
+        if (this.relayPlayCtx && this.relayPlayCtx.state === 'suspended') {
+          this.relayPlayCtx.resume().catch(() => {});
+        }
+        for (const [id, st] of this.peers.entries()) {
+          if (st?.audio) {
+            const volPct = this.getPeerVolume(id);
+            applyStreamBoost(st.audio, st.audio.srcObject, volPct);
+            st.audio.muted = volPct === 0 || volPct > 100;
+            if (volPct <= 100) st.audio.volume = Math.min(1.0, Math.max(0, volPct / 100));
+          }
+        }
+        this._updateDuckState();
+      }
+      this.micOn = true;
       this._ensureRelayPlayCtx();
       for (const p of this._orderedPeerTargets()) this.peer(p.id);
       const aTrack = this.stream?.getAudioTracks?.()[0];
@@ -1163,7 +1286,7 @@ export class Voice {
         }
       }
       this._ensureRelayLoops();
-      this.send('voice_state', { muted: false, inCall: true });
+      this.send('voice_state', { muted: false, deafened: this.deafened, inCall: true });
       this.onStateChange?.();
       toast('🎙️ Mikrofon açıldı — sesin odaya iletiliyor');
       return true;
@@ -1194,7 +1317,10 @@ export class Voice {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
         const effVol = this.deafened ? 0 : volPct;
-        st.audio.muted = Boolean(this.deafened) || volPct === 0;
+        st.audio.muted = Boolean(this.deafened) || volPct === 0 || effVol > 100;
+        if (effVol <= 100) {
+          st.audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
+        }
         if (st.audio.srcObject) {
           applyStreamBoost(st.audio, st.audio.srcObject, effVol);
           st.audio.play?.().catch(() => {});
@@ -1217,6 +1343,7 @@ export class Voice {
     if (this.camOn) await this.toggleCamera();
     if (this.screenOn) await this.toggleScreenShare();
     clearInterval(this.speakTimer);
+    this.speakTimer = null;
     clearInterval(this.relayPollTimer);
     this.relayPollTimer = null;
     this.relayNextPlayAtByPeer.clear();
@@ -1224,6 +1351,7 @@ export class Voice {
     this._relayProc = null;
     this._relaySrc = null;
     this._relayMute = null;
+    this.analyser = null;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this._usingSynthStream = false;
@@ -1235,6 +1363,8 @@ export class Voice {
     this.synthAudioCtx = null;
     this.inCall = false;
     this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
     this.selfSpeaking = false;
     this._removeVideoBubble('self');
     this._removeVideoBubble('self-screen');
@@ -1382,6 +1512,7 @@ export class Voice {
       const an = this.audioCtx.createAnalyser();
       an.fftSize = 256;
       src.connect(an);
+      this.analyser = an;
 
       const srcRate = this.audioCtx.sampleRate || 48000;
       const relayProc = this.audioCtx.createScriptProcessor(4096, 1, 1);
@@ -1487,9 +1618,13 @@ export class Voice {
     this.micOn = false;
     this.camOn = false;
     this.screenOn = false;
+    this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
     this.selfSpeaking = false;
     this.onDuckChange?.(false);
     clearInterval(this.speakTimer);
+    this.speakTimer = null;
     clearInterval(this.synthTimer);
     clearInterval(this.screenSynthTimer);
     clearInterval(this.relayPollTimer);
@@ -1511,9 +1646,12 @@ export class Voice {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.camStream?.getTracks().forEach((t) => t.stop());
     this.screenStream?.getTracks().forEach((t) => t.stop());
+    this._avatarCamCanvasStream?.getTracks?.().forEach((t) => t.stop());
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
+    this._avatarCamCanvasStream = null;
+    this.analyser = null;
     document.getElementById('vortex-cam-dock')?.remove();
     document.getElementById('vortex-audio-host')?.remove();
     try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}

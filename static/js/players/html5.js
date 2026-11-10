@@ -1,15 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v181';
-import { expectedPosition } from '../sync.js?v=20261110_v181';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v181';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v181';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v181';
-
-function setReferrerMeta(policy) {
-  let m = document.querySelector('meta[name="referrer"]');
-  if (!m) { m = document.createElement('meta'); m.name = 'referrer'; document.head.appendChild(m); }
-  m.content = policy;
-}
+import { SubtitleDubController } from './subtitles.js?v=20261110_v182';
+import { expectedPosition } from '../sync.js?v=20261110_v182';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v182';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v182';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v182';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -216,6 +210,7 @@ export class Html5Adapter {
         const bSrc = bProg || trB?.url || trB?.audioPreviewUrl || bAlts[0] || '';
         if (bSrc && bSrc !== media.url) {
           const deckB = document.createElement('audio');
+          deckB.crossOrigin = 'anonymous';
           deckB.preload = 'auto';
           deckB.loop = true;
           deckB.volume = 0.28;
@@ -384,8 +379,6 @@ export class Html5Adapter {
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', this._pageHideHandler);
     }
-    v.addEventListener('noop', () => {
-    });
     const reportReadyOnce = () => {
       clearBuf();
       if (!this.readyReported) {
@@ -670,11 +663,12 @@ export class Html5Adapter {
     }
     const url = initialCandidate || (alts[nativeAltIdx++] || '') || ((!isDrmUrl(media.url) && !isDemoTestUrl(media.url) && (canBrowserPlayHevc || !isHevcUrl(media.url))) ? String(media.url || '') : '');
     this.currentUrl = url;
+    this._currentIsDirectProxy = Boolean(/\/api\/rave\//i.test(String(url || '')));
     if (this.isMusic) {
       const wantClip = !media.live && media.musicMode === 'video' && Boolean(this.bgMvEl || this.bgYtEl || !isAudioOnlyUrl(url));
       this._setMusicVisualMode?.(wantClip ? 'clip' : ((media.live || isAudioOnlyUrl(url)) ? 'vinyl' : 'clip'));
     }
-    this.subs.initForMedia(media);
+    this.subs.initForMedia(media, { skipInitialStreamSwitch: true });
 
     let triedHlsFallback = false;
     const isUrlHls = (u) => {
@@ -772,6 +766,8 @@ export class Html5Adapter {
         this.loadedAtMs = Date.now();
       }
       this.currentUrl = nextUrl;
+      this._currentIsDirectProxy = Boolean(/\/api\/rave\//i.test(String(nextUrl || '')));
+      this._zeroDimPlayStartAt = 0;
       this.subs?.onStreamFallbackUrl?.(nextUrl);
       syncVideoCors(nextUrl, useNativeHls && isUrlHls(nextUrl));
       if (this.isMusic) {
@@ -1222,16 +1218,19 @@ export class Html5Adapter {
     const stallWindowMs = this.isMusic ? 4500 : (isMobViewport ? 16500 : 13000);
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
+    this._zeroDimPlayStartAt = 0;
     const checkZeroDimAudioOnly = () => {
       if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
+      if (v.seeking) return;
+      if (!this._zeroDimPlayStartAt && !v.paused) this._zeroDimPlayStartAt = performance.now();
+      const elapsedAfterStart = this._zeroDimPlayStartAt ? (performance.now() - this._zeroDimPlayStartAt) / 1000 : 0;
       const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
       const decFrames = q && typeof q.totalVideoFrames === 'number'
         ? q.totalVideoFrames
         : (typeof v.webkitDecodedFrameCount === 'number' ? v.webkitDecodedFrameCount : -1);
-      const elapsedAfterStart = (v.currentTime || 0) - (startAt || 0);
       if (v.videoWidth > 0 && v.videoHeight > 0 && (decFrames > 2 || decFrames < 0) && elapsedAfterStart > 1.5) {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
@@ -1454,11 +1453,7 @@ export class Html5Adapter {
   }
 
   canControlVolume() {
-    if (!isIosWebKit()) return true;
-    if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume) return true;
-    if (this._canAppleMseHls) return true;
-    if (this.video && !this.useNativeHls) return true;
-    return true;
+    return canControlElementVolume(this.video, Boolean(this._currentIsDirectProxy));
   }
 
   play() {
@@ -1796,75 +1791,6 @@ export class Html5Adapter {
         }
         this.subs?.onTimeUpdate?.(this.getTime(), true);
       });
-      return;
-    }
-    const expT = expectedPosition(state.mesh?.media);
-    const curT = (Number.isFinite(expT) && expT > 0.5) ? expT : Math.max(this.getTime() || 0, this.highestPlayedPos || 0);
-    if (curT >= 0.5) {
-      this.lastSeekTarget = curT;
-      this.lastSeekAt = Date.now();
-    }
-    const wasPlaying = this.wantPlaying || !this.isPaused();
-    this.wantPlaying = wasPlaying;
-    this.currentUrl = newUrl;
-    const getFreshTarget = () => {
-      const liveExp = expectedPosition(state.mesh?.media);
-      return (Number.isFinite(liveExp) && liveExp > 0.5) ? liveExp : curT;
-    };
-    const reattachSubs = () => {
-      if (this.subs?.selectedSubId && this.subs.selectedSubId !== 'off') {
-        const trk = this.subs.subtitleTracks.find((t) => t.id === this.subs.selectedSubId);
-        if (trk) this.subs._attachNativeTrack(trk);
-      }
-      this.subs?.onTimeUpdate?.(this.getTime(), true);
-    };
-    const isNextHls = /\.m3u8(\?|$)/i.test(String(newUrl || '')) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(String(newUrl || ''));
-    const isNextAudioOnly = /\.(m4a|mp3|aac|ogg|wav)(\?|$)/i.test(String(newUrl || '')) || /audio-ssl\.itunes\.apple\.com|p\.scdn\.co\/mp3-preview|soundcloud\.cloud|sndcdn\.com/i.test(String(newUrl || ''));
-    if (this.isMusic) {
-      this._setMusicVisualMode?.(isNextAudioOnly ? 'vinyl' : 'clip');
-    }
-    if (!this.hls && isNextHls && !/stream-proxy/i.test(newUrl) && window.Hls && window.Hls.isSupported() && !this.useNativeHls) {
-      this.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, subtitleDisplay: false, enableWebVTT: false });
-      this.video._hls = this.hls;
-      this.hls.on(window.Hls.Events.ERROR, (_ev, data) => {
-        if (!data?.fatal || !this.hls) return;
-        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR) {
-          try { this.hls.recoverMediaError(); } catch (_) {}
-        } else if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-          try { this.hls.startLoad(); } catch (_) {}
-        }
-      });
-      this.hls.attachMedia(this.video);
-    }
-    if (this.hls && isNextHls && !/stream-proxy/i.test(newUrl)) {
-      this.hls.loadSource(newUrl);
-      const targetLoad = getFreshTarget();
-      this.hls.startLoad(targetLoad >= 0.5 ? targetLoad : -1);
-      this.video.addEventListener('loadedmetadata', () => {
-        const fresh = getFreshTarget();
-        if (fresh >= 0.5 && Math.abs((this.video?.currentTime || 0) - fresh) > 0.8) {
-          try { this.video.currentTime = fresh; } catch (e) { /* ignore */ }
-        }
-        this.subs._applyHlsAudioSelection();
-        reattachSubs();
-        if (wasPlaying) this.tryPlay();
-      }, { once: true });
-      if (wasPlaying) this.tryPlay();
-    } else {
-      try { this.hls?.destroy(); } catch (e) { /* ignore */ }
-      this.hls = null;
-      const effUrl = (this.useNativeHls && this._withProxySegs)
-        ? this._withProxySegs(newUrl)
-        : newUrl;
-      this.video.src = effUrl;
-      try { this.video.load(); } catch (e) { /* ignore */ }
-      this.video.addEventListener('loadedmetadata', () => {
-        const fresh = getFreshTarget();
-        if (fresh >= 0.5) { try { this.video.currentTime = fresh; } catch (e) { /* ignore */ } }
-        reattachSubs();
-        if (wasPlaying) this.tryPlay();
-      }, { once: true });
-      if (wasPlaying) this.tryPlay();
     }
   }
   getQualityLevels() {
@@ -2059,29 +1985,6 @@ export class Html5Adapter {
       try { pv.load(); } catch (_) {}
     }
     return pv;
-  }
-
-  _switchIosNativeToInlineMse() {
-    if (isIosWebKit() || !this._canAppleMseHls || !this.useNativeHls || !this.video || this.isPiP() || !window.Hls?.isSupported?.()) return;
-    const v = this.video;
-    const srcUrl = this._withProxySegs ? this._withProxySegs(this.currentUrl) : this.currentUrl;
-    if (!srcUrl) return;
-    const curT = this.getTime();
-    const wasPlaying = this.wantPlaying || !v.paused;
-    this._ensureIosPipStandby(this.currentUrl);
-    this._forceIosMseInline = true;
-    this.useNativeHls = false;
-    v.removeAttribute('x-webkit-airplay');
-    try { v.disableRemotePlayback = true; } catch (_) {}
-    v.crossOrigin = 'anonymous';
-    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (_) {}
-    if (typeof this._attachHlsJsInline === 'function') {
-      this._attachHlsJsInline(srcUrl, () => {
-        resumeSharedAudioContext();
-        this.subs?.syncVideoVolume?.();
-        if (wasPlaying) this.tryPlay();
-      }, curT);
-    }
   }
 
   canPiP() {

@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v181';
-import { api } from './api.js?v=20261110_v181';
-import { state } from './store.js?v=20261110_v181';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v181';
+import { clock } from './sync.js?v=20261110_v182';
+import { api } from './api.js?v=20261110_v182';
+import { state } from './store.js?v=20261110_v182';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v182';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -59,8 +59,12 @@ export class MeshConnection {
               sessionStorage.removeItem(`vortex_ct_${roomId}`);
               sessionStorage.removeItem(`vortex_creator_${roomId}`);
             } catch (e) { /* ignore */ }
-            if (this.mode === 'http' && !this.closed) {
-              this.httpSend({ type: 'init' }, true);
+            if (!this.closed) {
+              if (this.mode === 'http') {
+                this.httpSend({ type: 'init' }, true);
+              } else if (this.mode === 'ws') {
+                this.startWs();
+              }
             }
             return;
           }
@@ -99,7 +103,7 @@ export class MeshConnection {
   onP2pPacket(pkt) {
     if (!pkt || this.closed) return;
     if (pkt._cidProbe || pkt._cidConflict) return;
-    if (pkt.fromCid === this.clientId) return;
+    if (!this.clientId || !pkt.fromCid || pkt.fromCid === this.clientId) return;
     if (pkt._id && this.seenP2pIds.has(pkt._id)) return;
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
     if (pkt.event) {
@@ -148,6 +152,29 @@ export class MeshConnection {
       window.addEventListener('pageshow', this._visHandler);
       window.addEventListener('focus', this._visHandler);
     }
+    if (!this._pageHideHandler && typeof window !== 'undefined') {
+      this._pageHideHandler = () => {
+        if (this.closed || !this.clientId || this.mode !== 'http') return;
+        try {
+          const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
+          const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
+          if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
+          fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+            method: 'POST',
+            keepalive: true,
+            headers: leaveHeaders,
+            body: JSON.stringify({
+              type: 'leave',
+              clientId: this.clientId,
+              username: this.profile?.name || '',
+              clientToken: this.clientToken || undefined,
+              gracefulClose: true,
+            }),
+          }).catch(() => {});
+        } catch (e) { /* ignore */ }
+      };
+      window.addEventListener('pagehide', this._pageHideHandler);
+    }
     const preferHttp = /(\.vercel\.app|watchlivo\.online)$/i.test(location.hostname) || localStorage.getItem('vortex_transport') === 'http';
     if (preferHttp) this.startHttp(); else this.startWs();
   }
@@ -167,6 +194,8 @@ export class MeshConnection {
   startWs() {
     clearInterval(this.pingTimer);
     clearTimeout(this.wsRetryTimer);
+    clearTimeout(this.pollTimer);
+    clearInterval(this.pollTimer);
     if (this.ws && this.ws.readyState <= 1) {
       try { this.ws.onclose = null; this.ws.close(); } catch (_) {}
     }
@@ -248,6 +277,11 @@ export class MeshConnection {
   ping() { this.sendRaw({ type: 'ping', t0: performance.now(), t0Epoch: Date.now() / 1000 }); }
 
   startHttp() {
+    clearInterval(this.pingTimer);
+    clearTimeout(this.wsRetryTimer);
+    if (this.ws && this.ws.readyState <= 1) {
+      try { this.ws.onclose = null; this.ws.close(); } catch (_) {}
+    }
     this.mode = 'http';
     this.emitStatus('connecting');
     if (!this.clientId) {
@@ -315,10 +349,28 @@ export class MeshConnection {
         const payload = items.length === 1 ? items[0] : { type: 'batch', items };
         const ok = await this.httpSend(payload, false);
         if (!ok && !this.closed) {
-          const retryable = items.filter((it) => it && ['chat', 'msg_react', 'poll_create', 'poll_vote', 'change_media'].includes(it.type) && (it._retries = (it._retries || 0) + 1) <= 3);
+          const retryTypes = ['chat', 'msg_react', 'poll_create', 'poll_vote', 'change_media', 'play', 'pause', 'seek', 'rate', 'resolve_media', 'host_action'];
+          const retryable = items.filter((it) => it && retryTypes.includes(it.type) && (it._retries = (it._retries || 0) + 1) <= 3);
           if (retryable.length) {
-            this.outQueue.unshift(...retryable);
-            await new Promise((r) => setTimeout(r, 800));
+            const hasNewerPlayPauseSeek = this.outQueue.some((q) => q && ['play', 'pause', 'seek', 'change_media'].includes(q.type));
+            const dedupedRetry = [];
+            let seenPlayPause = false;
+            let seenSeek = false;
+            for (let i = retryable.length - 1; i >= 0; i -= 1) {
+              const it = retryable[i];
+              if (['play', 'pause'].includes(it.type)) {
+                if (hasNewerPlayPauseSeek || seenPlayPause) continue;
+                seenPlayPause = true;
+              } else if (it.type === 'seek') {
+                if (hasNewerPlayPauseSeek || seenSeek) continue;
+                seenSeek = true;
+              }
+              dedupedRetry.unshift(it);
+            }
+            if (dedupedRetry.length) {
+              this.outQueue.unshift(...dedupedRetry);
+              await new Promise((r) => setTimeout(r, 800));
+            }
           }
         }
         if (this.outQueue.length) await new Promise((r) => setTimeout(r, 15));
@@ -331,7 +383,6 @@ export class MeshConnection {
   async httpSend(payload, isInit = false) {
     const isPoll = payload.type === 'poll';
     if (isPoll && (this.inFlight || this.flushing)) return true;
-    if (!isPoll) this.actionSeq = (this.actionSeq || 0) + 1;
     const reqSeq = this.actionSeq || 0;
     this.inFlight = true;
     const t0 = Date.now() / 1000;
@@ -424,6 +475,7 @@ export class MeshConnection {
         return;
       }
       if (res.unchanged && this.lastRoom) {
+        this.lastRoom = { ...this.lastRoom, media: { ...(this.lastRoom.media || {}) } };
         if (res.syncToken) {
           this.syncToken = res.syncToken;
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
@@ -472,6 +524,7 @@ export class MeshConnection {
             setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
             return;
           }
+          const urlChanged = Boolean(srvUrl && srvUrl !== prevUrl);
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
           const nowSec = clock.now();
           const normNext = normalizeRoomMediaState(prevMedia, res.media);
@@ -488,7 +541,7 @@ export class MeshConnection {
           const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
-          if (statusChanged || significantJump || speedChanged) {
+          if (statusChanged || significantJump || speedChanged || urlChanged) {
             this.onMessage?.({ type: 'sync', action: 'poll_sync', media: this.lastRoom.media });
           } else if (state.mesh?.media) {
             const isSelfHost = Boolean((res.host_id || this.lastRoom.host_id) && this.clientId && (res.host_id || this.lastRoom.host_id) === this.clientId);
@@ -518,6 +571,9 @@ export class MeshConnection {
         return;
       }
       if (res.room) {
+        if ((isInit || payload.type === 'init') && reqSeq !== this.actionSeq && this.lastRoom?.media && (this.lastRoom.media.url || this.lastRoom.media.videoId)) {
+          res.room = { ...res.room, media: this.lastRoom.media };
+        }
         this.lastRoom = res.room;
         this.participantCount = Number(res.room.participantCount || res.room.count || (res.room.participants || []).length || 1);
         this._dispatchHttpEvents(res.room, isInit);
@@ -692,6 +748,10 @@ export class MeshConnection {
       window.removeEventListener('pageshow', this._visHandler);
       window.removeEventListener('focus', this._visHandler);
       this._visHandler = null;
+    }
+    if (this._pageHideHandler && typeof window !== 'undefined') {
+      window.removeEventListener('pagehide', this._pageHideHandler);
+      this._pageHideHandler = null;
     }
     clearInterval(this.pingTimer); clearInterval(this.pollTimer); clearTimeout(this.pollTimer); clearTimeout(this.wsRetryTimer);
     try { this.bc?.close(); } catch (e) { /* ignore */ }

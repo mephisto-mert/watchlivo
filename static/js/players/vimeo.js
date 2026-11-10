@@ -19,12 +19,13 @@ export class VimeoAdapter {
     this.container = container;
     this.events = events;
     this.player = null;
-    this.t = 0; this.tAt = 0; this.paused = true; this.rate = 1; this.duration = 0; this.buffered = 0; this.muted = false;
+    this.t = 0; this.tAt = 0; this.paused = true; this.buffering = false; this.rate = 1; this.duration = 0; this.buffered = 0; this.muted = false;
     this.caps = { seek: true, rate: true, overlayClicks: true };
   }
 
   async load(media, startAt = 0, autoplay = true) {
     this._destroyed = false;
+    this.buffering = false;
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(autoplay);
     this.initialSeekPending = Number(startAt) > 0.5 ? Number(startAt) : 0;
@@ -44,6 +45,7 @@ export class VimeoAdapter {
     p.on('progress', (d) => { this.buffered = d.seconds; });
     p.on('play', () => {
       this.paused = false;
+      this.buffering = false;
       this.tAt = performance.now();
       if (this.initialSeekPending > 0.5 && Math.abs((this.t || 0) - this.initialSeekPending) > 2) {
         const target = this.initialSeekPending;
@@ -54,11 +56,21 @@ export class VimeoAdapter {
       }
       this.events.onPlay?.();
     });
-    p.on('pause', () => { this.paused = true; this.events.onPause?.(); });
-    p.on('bufferstart', () => this.events.onBuffering?.(true));
-    p.on('bufferend', () => this.events.onBuffering?.(false));
-    p.on('ended', () => { this.wantPlaying = false; this.events.onEnded?.(); });
-    p.on('playbackratechange', (d) => { this.rate = d.playbackRate; });
+    p.on('pause', () => {
+      this.t = this.getTime();
+      this.tAt = performance.now();
+      this.paused = true;
+      this.buffering = false;
+      this.events.onPause?.();
+    });
+    p.on('bufferstart', () => { this.buffering = true; this.events.onBuffering?.(true); });
+    p.on('bufferend', () => { this.buffering = false; this.events.onBuffering?.(false); });
+    p.on('ended', () => { this.wantPlaying = false; this.buffering = false; this.events.onEnded?.(); });
+    p.on('playbackratechange', (d) => {
+      this.t = this.getTime();
+      this.tAt = performance.now();
+      this.rate = d.playbackRate;
+    });
     p.on('error', (e) => this.events.onError?.(`Vimeo: ${e?.message || 'oynatma hatası'}`));
     try {
       await p.ready();
@@ -93,11 +105,22 @@ export class VimeoAdapter {
   getDuration() { return this.duration || 0; }
   getBuffered() { return this.buffered || 0; }
   isPaused() { return this.paused; }
-  isBuffering() { return false; }
-  setRate(r) { if (Math.abs(this.rate - r) > 0.001) { this.rate = r; this.player?.setPlaybackRate(r).catch(() => {}); } }
+  isBuffering() { return Boolean(this.buffering); }
+  setRate(r) {
+    if (Math.abs(this.rate - r) > 0.001) {
+      this.t = this.getTime();
+      this.tAt = performance.now();
+      this.rate = r;
+      this.player?.setPlaybackRate(r).catch(() => {});
+    }
+  }
   getRate() { return this.rate; }
   setVolume(v) { this.player?.setVolume(Math.min(1, Math.max(0, v / 100))).catch(() => {}); }
-  setMuted(m) { this.muted = m; this.player?.setMuted(m).catch(() => {}); }
+  setMuted(m) {
+    this.muted = Boolean(m);
+    this.player?.setMuted(this.muted).catch(() => {});
+    if (!this.muted) this.events.onUnmuted?.();
+  }
   isMuted() { return this.muted; }
   destroy() { this._destroyed = true; try { this.player?.destroy(); } catch (e) { /* ignore */ } this.player = null; this.container.replaceChildren(); }
 }

@@ -1,9 +1,9 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v181';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v181';
-import { renderHome, destroyHome } from './views/home.js?v=20261110_v181';
-import { api } from './api.js?v=20261110_v181';
-import { h, toast } from './ui.js?v=20261110_v181';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v182';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v182';
+import { renderHome, destroyHome } from './views/home.js?v=20261110_v182';
+import { api } from './api.js?v=20261110_v182';
+import { h, toast } from './ui.js?v=20261110_v182';
 
 const MODULE_VER = (() => {
   try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261110_v181')
+    _meshModPromise = import('./views/mesh.js?v=20261110_v182')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -185,6 +185,7 @@ async function route() {
     }
     homeRoot.classList.remove('hidden');
     renderHome(homeRoot);
+    homeRoot.querySelectorAll('.wl-seo-article-box').forEach((el) => el.remove());
   }
   current = r.name;
 }
@@ -510,14 +511,29 @@ function initRaveNotifications() {
     navigator.serviceWorker.register(`/sw.js?v=${encodeURIComponent(MODULE_VER)}`, { updateViaCache: 'none' }).then((reg) => {
       swReg = reg;
     }).catch(() => {});
-    navigator.serviceWorker.addEventListener('message', (event) => {
-      const d = event.data || {};
-      if (d.type === 'WATCHLIVO_NOTIFICATION_CLICK' && d.url) {
+    navigator.serviceWorker.addEventListener('message', (ev) => {
+      const d = ev.data || {};
+      if ((d.type === 'VORTEX_NAVIGATE' || d.type === 'WATCHLIVO_NOTIFICATION_CLICK') && d.url) {
         const cleanHash = String(d.url).replace(/^https?:\/\/[^/]+/i, '').replace(/^\/?#/, '');
-        if (cleanHash) navigate(cleanHash);
+        if (cleanHash) window.vortexNavigate?.(cleanHash);
       }
     });
   }
+
+  window.showSystemNotification = (title, opts = {}) => {
+    const targetUrl = opts.url || (state.mesh?.id ? `/#/mesh/${state.mesh.id}` : location.href);
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const regPromise = swReg ? Promise.resolve(swReg) : navigator.serviceWorker?.ready;
+    regPromise?.then((reg) => {
+      reg?.showNotification?.(title, {
+        body: opts.body || '',
+        icon: opts.icon || '/static/watchlivo-icon-192.png',
+        badge: opts.badge || '/static/watchlivo-icon-192.png',
+        tag: opts.tag || 'watchlivo-notif',
+        data: { url: targetUrl },
+      }).catch(() => {});
+    }).catch(() => {});
+  };
 
   const ensureStack = () => {
     let st = document.getElementById('rave-notif-stack');
@@ -639,15 +655,18 @@ function initRaveNotifications() {
     setTimeout(() => { if (card.isConnected) closeCard(); }, 12000);
 
     if (typeof Notification !== 'undefined' && Notification.permission === 'granted' && (document.visibilityState === 'hidden' || payload.forceOsNotification)) {
+      const fallbackUrl = roomId ? `/#/mesh/${encodeURIComponent(roomId)}` : (state.mesh?.id ? `/#/mesh/${state.mesh.id}` : location.href);
+      const notifPayload = { ...payload, url: payload.url || fallbackUrl };
       if (swReg?.active) {
-        swReg.active.postMessage({ type: 'WATCHLIVO_SHOW_NOTIFICATION', payload });
+        swReg.active.postMessage({ type: 'WATCHLIVO_SHOW_NOTIFICATION', payload: notifPayload });
       } else {
         try {
-          const n = new Notification(title, { body, icon: '/static/watchlivo-icon-192.png' });
+          const n = new Notification(title, { body, icon: '/static/watchlivo-icon-192.png', data: { url: notifPayload.url } });
           n.onclick = () => {
             window.focus();
             if (roomId) navigate(`/mesh/${encodeURIComponent(roomId)}`);
             else if (payload.fromUid) openDmModal(payload.fromUid);
+            else if (notifPayload.url) window.vortexNavigate?.(notifPayload.url);
             n.close();
           };
         } catch (e) { /* ignore */ }
@@ -666,12 +685,17 @@ function initRaveNotifications() {
     }
     if (perm === 'granted') {
       try { localStorage.setItem('vortex_push_enabled', 'on'); } catch (e) { /* ignore */ }
+      let sub = null;
+      try {
+        const reg = swReg || (await navigator.serviceWorker?.ready);
+        sub = await reg?.pushManager?.getSubscription?.();
+      } catch (_) {}
       await api('/api/rave/notifications/subscribe', {
         method: 'POST',
         body: {
           uid: state.self?.uid || state.self?.id || state.clientId,
           name: state.self?.name || 'İzleyici',
-          subscription: { granted: true, ts: Date.now() },
+          subscription: sub ? sub.toJSON() : { granted: true, ts: Date.now() },
         },
       }).catch(() => {});
       toast('🔔 Arka plan ve masaüstü bildirimleri açıldı!');
@@ -701,9 +725,10 @@ function initRaveNotifications() {
       if (!pwd) pwd = sessionStorage.getItem('vortex_pwd_' + rid) || '';
       if (!rtok) rtok = sessionStorage.getItem('vortex_st_' + rid) || '';
     } catch (_) {}
-    if (pwd) qp.set('pwd', pwd);
+    const hasValidRtok = Boolean(rtok && rtok.length < 6000);
+    if (pwd && !hasValidRtok) qp.set('pwd', pwd);
     if (rTitle) qp.set('t', rTitle);
-    if (rtok && rtok.length < 6000) qp.set('r_tok', rtok);
+    if (hasValidRtok) qp.set('r_tok', rtok);
     const qs = qp.toString();
     const res = await api('/api/rave/notifications/send', {
       method: 'POST',

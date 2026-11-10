@@ -210,7 +210,8 @@ def _itunes_music_video_sync(term: str, limit: int = 8, country: str = "TR") -> 
             continue
         art100 = it.get("artworkUrl100") or ""
         poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/watchlivo-poster.svg"
-        dur_sec = max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
+        is_prev = bool(re.search(r"mzstatic\.com|itunes\.apple\.com|apple\.com/itunes-assets|Video\d+|mzvf_|AudioPreview", mv_url, re.I))
+        dur_sec = 30 if is_prev else max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
         out.append({
             "id": f"amv_{tid}",
             "trackId": tid,
@@ -221,8 +222,9 @@ def _itunes_music_video_sync(term: str, limit: int = 8, country: str = "TR") -> 
             "year": (it.get("releaseDate") or "2025")[:4],
             "genre": it.get("primaryGenreName") or "Video Klip",
             "sourcePlatform": "Apple Music",
-            "sourceBadge": "🍎 Apple Music Klip",
+            "sourceBadge": "🍎 Apple Music · Önizleme (30 sn)" if is_prev else "🍎 Apple Music Klip",
             "duration": dur_sec,
+            "isPreview": is_prev,
             "poster": poster,
             "backdrop": poster,
             "thumbnail": poster,
@@ -1388,15 +1390,19 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     fmt_m, fmt_s = divmod(full_dur, 60)
     fmt_dur_lbl = f"{fmt_m}:{fmt_s:02d}"
 
+    def _is_preview_clip(u_val: str) -> bool:
+        return bool(u_val and re.search(r"mzstatic\.com|itunes\.apple\.com|apple\.com/itunes-assets|dzcdn\.net|Video\d+|mzvf_|AudioPreview", str(u_val), re.I))
+
+    is_preview_mv = _is_preview_clip(exact_mv)
     audio_tracks = []
     if sc_url:
         audio_tracks.append({"id": "full-studio", "lang": "orig", "targetLang": "orig", "label": f"🎵 {var_badge} Stüdyo Ses ({fmt_dur_lbl} · Hi-Fi)", "mode": "stream", "url": sc_url})
     for idx_alt, alt_u in enumerate(sc_alts[:2]):
         audio_tracks.append({"id": f"full-alt-{idx_alt + 1}", "lang": "orig", "targetLang": "orig", "label": f"🎵 Alternatif Tam Süre Kaynak #{idx_alt + 2} ({fmt_dur_lbl})", "mode": "stream", "url": alt_u})
     if exact_mv:
-        audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": "🎬 Resmi HD Video Klip (Apple Music 1080p)", "mode": "stream", "url": exact_mv})
+        mv_track_lbl = "🎬 Video Klip · Önizleme (30 sn)" if is_preview_mv else "🎬 Resmi HD Video Klip (Apple Music 1080p)"
+        audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": mv_track_lbl, "mode": "stream", "url": exact_mv})
 
-    is_preview_mv = bool(exact_mv and re.search(r"Video211|mzvf_|AudioPreview", str(exact_mv), re.I))
     if mode_norm == "video" and exact_mv and not is_preview_mv:
         primary_prov = "direct"
         primary_stype = "mp4"
@@ -1433,6 +1439,10 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         primary_url = audio_stream or exact_mv or artist_mv or preview_url or mv_url_param or url
         alt_urls = [u for u in [audio_stream, exact_mv, artist_mv, preview_url, mv_url_param] if u and u != primary_url]
 
+    is_preview_only = bool(not sc_url and not primary_vid and _is_preview_clip(primary_url))
+    eff_dur = 30 if is_preview_only else full_dur
+    channel_dur_lbl = "Önizleme (30 sn)" if is_preview_only else f"Tam Süre ({fmt_dur_lbl})"
+
     disp_song = _ensure_variant_title(song_title, want_remix, var_badge)
     disp_title = f"{artist} — {disp_song}" if artist and disp_song and artist.lower() not in disp_song.lower() else (disp_song or clean_q)
     lyrics_vtt_url = "/api/rave/music-lyrics.vtt?" + urllib.parse.urlencode({"artist": artist, "title": song_title})
@@ -1441,11 +1451,12 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         "provider": primary_prov,
         "streamType": primary_stype,
         "catalogProvider": "music",
-        "musicPlatformLabel": f"{source_plat} · {var_badge}",
+        "musicPlatformLabel": f"{source_plat} · Önizleme (30 sn)" if is_preview_only else f"{source_plat} · {var_badge}",
         "isMusic": True,
-        "musicMode": mode_norm or ("video" if (exact_mv and not sc_url) else "audio"),
+        "isPreview": is_preview_only,
+        "musicMode": mode_norm or ("video" if (exact_mv and not is_preview_mv and not sc_url) else "audio"),
         "isRemix": want_remix,
-        "versionBadge": var_badge,
+        "versionBadge": "Önizleme (30 sn)" if is_preview_only else var_badge,
         "mediaType": "music",
         "url": primary_url,
         "altUrls": alt_urls,
@@ -1459,9 +1470,9 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         "poster": poster or (f"https://i.ytimg.com/vi/{primary_vid}/hqdefault.jpg" if primary_vid else "/static/watchlivo-poster.svg"),
         "thumbnail": poster or (f"https://i.ytimg.com/vi/{primary_vid}/hqdefault.jpg" if primary_vid else "/static/watchlivo-poster.svg"),
         "audioPreviewUrl": sc_url or audio_stream or exact_mv,
-        "mvUrl": exact_mv or artist_mv or "",
-        "duration": full_dur,
-        "channel": f"{artist or 'Sanatçı'} · {var_badge} · Tam Süre ({fmt_dur_lbl})",
+        "mvUrl": (exact_mv if not is_preview_mv else "") or artist_mv or "",
+        "duration": eff_dur,
+        "channel": f"{artist or 'Sanatçı'} · {var_badge} · {channel_dur_lbl}",
         "subtitleTracks": [{"id": "lyrics-tr", "lang": "tr", "label": "🎤 Senkron Şarkı Sözleri (Karaoke)", "url": lyrics_vtt_url, "default": True}],
         "similar": sim,
     }

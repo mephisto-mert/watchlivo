@@ -39,7 +39,7 @@ export function getSharedAudioContext(createIfMissing = false) {
 }
 
 export function resumeSharedAudioContext() {
-  if (typeof document !== 'undefined' && document.hidden) return _audioCtx;
+  if (typeof document !== 'undefined' && document.hidden && !_audioCtx) return null;
   const ctx = getSharedAudioContext(true);
   if (ctx && (ctx.state === 'suspended' || ctx.state === 'interrupted')) {
     ctx.resume().catch(() => {});
@@ -55,16 +55,15 @@ export function suspendSharedAudioContext() {
 
 export function closeSharedAudioContext() {
   if (_audioCtx) {
-    const c = _audioCtx;
-    _audioCtx = null;
     try {
-      if (c.state !== 'closed') c.close().catch(() => {});
+      if (_audioCtx.state !== 'closed') _audioCtx.suspend().catch(() => {});
     } catch (_) {}
   }
 }
 
-export function isCorsSafeMediaElement(el, opts = {}) {
+export function isCorsSafeMediaElement(el, rawOpts = {}) {
   if (!el) return false;
+  const opts = (rawOpts && typeof rawOpts === 'object') ? rawOpts : { isDirectProxy: Boolean(rawOpts) };
   if (el.srcObject) return true;
   if (opts.retriedNoCors || el._retriedNoCors) return false;
   const src = String(el.currentSrc || el.src || '').trim();
@@ -79,20 +78,21 @@ export function isCorsSafeMediaElement(el, opts = {}) {
   if (typeof window !== 'undefined') {
     try {
       const u = new URL(src, window.location.origin);
-      if (u.origin === window.location.origin && !/^\/api\/rave\//i.test(u.pathname)) {
-        return true;
+      if (u.origin === window.location.origin) {
+        return u.pathname.startsWith('/api/rave/') || u.pathname.startsWith('/uploads/') || Boolean(el.crossOrigin);
       }
     } catch (e) { /* ignore */ }
   }
   return el.crossOrigin === 'anonymous';
 }
 
-export function canControlElementVolume(el, opts = {}) {
+export function canControlElementVolume(el, rawOpts = {}) {
   if (!isIosWebKit()) return true;
   if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.watchlivoVolume) return true;
   if (!el) return false;
   if (el.tagName === 'VIDEO') return true;
   if (_mediaNodes.has(el)) return true;
+  const opts = (rawOpts && typeof rawOpts === 'object') ? rawOpts : { isDirectProxy: Boolean(rawOpts) };
   return isCorsSafeMediaElement(el, opts);
 }
 
@@ -279,6 +279,7 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     }
   }
   if (node) {
+    audioEl.muted = true;
     if (node.ctx.state === 'suspended' || node.ctx.state === 'interrupted') {
       node.ctx.resume().catch(() => {});
     }

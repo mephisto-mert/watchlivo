@@ -409,7 +409,11 @@ def _user_create(row: Dict[str, Any]) -> bool:
     if store_backend() == "redis":
         if _kv("SET", f"{_kp()}email:{email}", uid, "NX") != "OK":
             return False
-        row["handle"] = _claim_handle(row["handle"], uid)
+        try:
+            row["handle"] = _claim_handle(row["handle"], uid)
+        except Exception:
+            _kv("DEL", f"{_kp()}email:{email}")
+            raise
         _kv("SET", f"{_kp()}user:{uid}", json.dumps(row, ensure_ascii=False))
         try:
             _kv("SADD", f"{_kp()}uids", uid)
@@ -904,6 +908,7 @@ async def auth_login(request: Request) -> JSONResponse:
     )
     if local_verified:
         fb_verified = True
+        _clear_pw_reset_pending(target_email)
     if not row and store_backend() == "sqlite":
         vault_tok = str(body.get("vaultToken") or "").strip()
         v_claims = verify_auth_token(vault_tok) if vault_tok else None
@@ -967,9 +972,7 @@ async def auth_login(request: Request) -> JSONResponse:
                         if not lk_users or lk_users[0].get("emailVerified") is not True:
                             break
                     fb_verified = True
-                    _PASSWORD_RESET_PENDING.delete(target_email)
-                    if store_backend() == "redis":
-                        _kv("DEL", f"{_kp()}pwreset:{target_email}")
+                    _clear_pw_reset_pending(target_email)
                     salt = _new_salt()
                     pw_hash = _hash_pw(password, salt)
                     if row:
@@ -1083,7 +1086,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
             req = urllib.request.Request(g_url, headers={"User-Agent": "WatchlivoAuth/1.0"})
             with urllib.request.urlopen(req, timeout=5) as gr:
                 g_info = json.loads(gr.read().decode("utf-8"))
-                aud_ok = (not GOOGLE_OAUTH_CLIENT_ID) or (str(g_info.get("aud") or "") == GOOGLE_OAUTH_CLIENT_ID)
+                aud_ok = (not GOOGLE_OAUTH_CLIENT_ID) or (g_info.get("aud") in (GOOGLE_OAUTH_CLIENT_ID, FIREBASE_PROJECT_ID))
                 if aud_ok and g_info.get("email") and (str(g_info.get("email_verified")).lower() in ("true", "1")):
                     fb_email = str(g_info.get("email")).strip().lower()
                     fb_name = str(g_info.get("name") or g_info.get("given_name") or "").strip()[:24]
@@ -1114,14 +1117,16 @@ async def auth_oauth(request: Request) -> JSONResponse:
                 new_hash = _hash_pw(password, new_salt)
                 ex = _user_update(uid, {"password_hash": new_hash, "salt": new_salt, "password_set": 1}) or ex
             user = _row_to_user(ex)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+            _sync_user_to_social(user)
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
     else:
         uid = "u_wl_" + hashlib.sha256(f"{provider}:{handle}".encode("utf-8")).hexdigest()[:12]
         raw_email = f"{handle}@{provider}.watchlivo.online"
         ex = _user_get(uid)
         if ex:
             user = _row_to_user(ex)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+            _sync_user_to_social(user)
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
     salt = _new_salt()
     pw_hash = _hash_pw(password or _new_salt(), salt)
     now_ts = time.time()
@@ -1136,7 +1141,8 @@ async def auth_oauth(request: Request) -> JSONResponse:
     except Exception:
         pass
     user = _row_to_user(row)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user)})
+    _sync_user_to_social(user)
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(row.get("password_hash") or ""), str(row.get("salt") or "")))})
 
 
 _PHONE_CODES = BoundedTTLCache(maxsize=1000, default_ttl=300.0)
@@ -1542,6 +1548,15 @@ async def auth_profile(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_keep)})
 
 
+def _clear_pw_reset_pending(email: str) -> None:
+    em = str(email or "").strip().lower()
+    if not em:
+        return
+    _PASSWORD_RESET_PENDING.delete(em)
+    if store_backend() == "redis":
+        _kv("DEL", f"{_kp()}pwreset:{em}")
+
+
 def _purge_uid_cache(token: str = "", uid: str = "") -> None:
     try:
         import server
@@ -1582,6 +1597,7 @@ async def auth_change_password(request: Request) -> JSONResponse:
     if has_pw:
         if not cur_pw or not constant_time_eq(row["password_hash"], _hash_pw(cur_pw, row["salt"])):
             return JSONResponse({"ok": False, "error": "Mevcut şifreniz hatalı."}, status_code=401)
+    _clear_pw_reset_pending(str(row.get("email") or ""))
     salt = _new_salt()
     pw_hash = _hash_pw(new_pw, salt)
     rev_ts = revoke_all_user_tokens(uid)
@@ -1622,9 +1638,9 @@ async def auth_delete_account(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "Hesap bulunamadı."}, status_code=401)
     supplied_pw = str(body.get("password") or "")[:256]
     has_pw = bool(row.get("password_set")) or str(row.get("auth_provider") or "") == "email"
-    if supplied_pw and has_pw:
-        if not constant_time_eq(row["password_hash"], _hash_pw(supplied_pw, row["salt"])):
-            return JSONResponse({"ok": False, "error": "Şifre doğrulanamadı."}, status_code=401)
+    if has_pw:
+        if not supplied_pw or not constant_time_eq(row["password_hash"], _hash_pw(supplied_pw, row["salt"])):
+            return JSONResponse({"ok": False, "error": "Hesap silme işlemi için mevcut şifrenizi doğrulamalısınız."}, status_code=401)
     if token:
         revoke_auth_token(token)
     _user_delete(uid)
@@ -1751,7 +1767,7 @@ def public_user_card(row: Any) -> Dict[str, Any]:
 
 
 def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
-    """Resolve a registered Watchlivo account by uid, @handle, exact email, or exact display name."""
+    """Resolve a registered Watchlivo account by uid, @handle, or exact display name."""
     raw = str(identifier or "").strip()
     if not raw or len(raw) > 120:
         return None
@@ -1761,11 +1777,7 @@ def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
             if row:
                 return public_user_card(row)
         if "@" in raw and not raw.startswith("@"):
-            uid_em = _uid_for("email", raw.lower())
-            if uid_em:
-                row = _user_get(uid_em)
-                if row:
-                    return public_user_card(row)
+            return None
         stripped = _strip_discrim_tag(raw.lstrip("@").strip())
         clean_h = stripped.lower()
         folded_h = _tr_fold(stripped)
@@ -1784,8 +1796,8 @@ def resolve_public_user(identifier: str) -> Optional[Dict[str, Any]]:
             conn = _get_db()
             try:
                 row = conn.execute(
-                    "SELECT * FROM watchlivo_users WHERE lower(handle) = ? OR lower(name) = ? OR lower(email) = ? LIMIT 1",
-                    (clean_h, raw_stripped.lower(), raw.lower()),
+                    "SELECT * FROM watchlivo_users WHERE lower(handle) = ? OR lower(name) = ? LIMIT 1",
+                    (clean_h, raw_stripped.lower()),
                 ).fetchone()
                 if row:
                     return public_user_card(row)

@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261110_v181';
-import { api } from './api.js?v=20261110_v181';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261110_v181';
+import { h, icons, popup, toast } from './ui.js?v=20261110_v182';
+import { api } from './api.js?v=20261110_v182';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261110_v182';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261110_v181';
+} from './store.js?v=20261110_v182';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -41,7 +41,7 @@ export function sanitizeAvatarUrl(raw = '') {
   if (/^(?:javascript:|vbscript:|data:text\/|data:application\/|data:image\/svg)/i.test(compact)) return '';
   if (/\.svg(?:$|[?#])/i.test(compact)) return '';
   if (/^data:image\/(?:png|jpeg|jpg|webp|gif);base64,[a-z0-9+/=]+$/i.test(compact)) {
-    return compact.length <= 62000 ? compact : '';
+    return compact.length <= 45000 ? compact : '';
   }
   if (/^https:\/\//i.test(s) && s.length <= 2048) return s;
   if ((s.startsWith('/static/') || s.startsWith('/uploads/')) && !s.startsWith('//') && s.length <= 512) return s;
@@ -173,6 +173,7 @@ export function saveGuestProfile(data = {}) {
   _syncLiveSelfEverywhere(p);
   if (!data._skipProvision && typeof fetch === 'function') {
     setTimeout(() => {
+      if (state.self && !state.self.isGuest) return;
       const gHdrs = { 'Content-Type': 'application/json' };
       if (p.guestToken) gHdrs.Authorization = `Bearer ${p.guestToken}`;
       fetch('/api/rave/social/guest', {
@@ -190,8 +191,11 @@ export function saveGuestProfile(data = {}) {
           statusEmoji: p.statusEmoji,
         }),
       }).then((r) => (r.ok ? r.json() : null)).then((d) => {
-        if (d?.guestToken) {
-          p.guestToken = String(d.guestToken);
+        if (!state.self?.isGuest) return;
+        if (d) {
+          if (d.uid) { p.uid = String(d.uid); p.id = String(d.uid); }
+          if (d.handle) p.handle = String(d.handle);
+          if (d.guestToken) p.guestToken = String(d.guestToken);
           try {
             localStorage.setItem(KEY, JSON.stringify(p));
             sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(p));
@@ -343,7 +347,6 @@ export function logoutProfile() {
     verified: false,
     authToken: '',
   };
-  try { sessionStorage.setItem('vortex_temp_guest_v1', JSON.stringify(guest)); } catch (_) {}
   try {
     set({
       self: guest,
@@ -361,8 +364,9 @@ export function logoutProfile() {
       },
     });
   } catch (_) {}
-  _syncLiveSelfEverywhere(guest);
-  return guest;
+  const provisionedGuest = saveGuestProfile({ ...guest, guestConfirmed: true });
+  _syncLiveSelfEverywhere(provisionedGuest);
+  return provisionedGuest;
 }
 
 export async function verifyAndRefreshSession() {
@@ -385,9 +389,12 @@ export async function verifyAndRefreshSession() {
       if (r.ok) {
         const d = await r.json().catch(() => null);
         if (d?.authenticated && d?.user) {
+          const preservedAvatar = d.user.avatarUrl || (String(s.avatarUrl || '').startsWith('data:image/') ? s.avatarUrl : '');
           const refreshed = saveProfile({
             ...s,
             ...d.user,
+            avatar: preservedAvatar,
+            avatarUrl: preservedAvatar,
             authToken: d.authToken || s.authToken,
             isGuest: false,
             verified: true,
@@ -484,12 +491,6 @@ export async function checkRedirectAuth() {
   if (!isPending) return null;
   const pendingPw = sessionStorage.getItem('watchlivo_auth_pending_pw') || '';
   const pendingEmail = sessionStorage.getItem('watchlivo_auth_pending_email') || '';
-  if (pendingPw.length < 6) {
-    localStorage.removeItem('watchlivo_auth_pending_redirect');
-    sessionStorage.removeItem('watchlivo_auth_pending_pw');
-    sessionStorage.removeItem('watchlivo_auth_pending_email');
-    return null;
-  }
 
   return Promise.race([
     (async () => {
@@ -503,7 +504,7 @@ export async function checkRedirectAuth() {
           const fbName = cred.user.displayName || '';
           const res = await api('/api/auth/oauth', {
             method: 'POST',
-            body: { provider: 'google', idToken, email: pendingEmail || fbEmail, name: fbName, password: pendingPw },
+            body: { provider: 'google', idToken, email: pendingEmail || fbEmail, name: fbName, password: pendingPw.length >= 6 ? pendingPw : '' },
           });
           if (res?.ok && res.user) {
             localStorage.removeItem('watchlivo_auth_pending_redirect');
@@ -550,7 +551,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     onDone?.(prof);
   };
 
-  const doSocialLogin = async (provider, fallbackName, { password = '', expectedEmail = '', errEl = null } = {}) => {
+  const doSocialLogin = async (provider, fallbackName, { password = '', expectedEmail = '', email = '', errEl = null } = {}) => {
     const showErr = (msg) => {
       if (errEl) {
         errEl.style.color = '#fb7185';
@@ -568,7 +569,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         return;
       }
       const cleanPw = String(password || '');
-      const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
+      const cleanEmail = String(expectedEmail || email || '').trim().toLowerCase();
       if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
         showErr('Lütfen geçerli bir Google e-posta adresi girin (örn. ad@gmail.com).');
         return;
@@ -677,7 +678,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
     finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
   };
 
-  const renderSocialButtons = ({ hideGuestBtn = false } = {}) => {
+  function renderSocialButtons({ hideGuestBtn = false, getFormCreds = null } = {}) {
     return h('div', { class: 'wl-social-stack' },
       h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Hızlı Giriş' : 'veya Diğer Giriş Seçenekleri')),
       h('div', { class: 'wl-social-row' },
@@ -686,7 +687,8 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           id: 'wl-google-signin-btn',
           class: 'wl-social-btn wl-social-google',
           onclick: () => {
-            doSocialLogin('google', 'GmailÜyesi');
+            const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
+            doSocialLogin('google', 'GmailÜyesi', creds);
           },
         },
         h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
@@ -1045,11 +1047,12 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
                 const sx = Math.max(0, ((img.width || sz) - minSide) / 2);
                 const sy = Math.max(0, ((img.height || sz) - minSide) / 2);
                 cctx.drawImage(img, sx, sy, minSide, minSide, 0, 0, sz, sz);
-                const outUrl = canvas.toDataURL('image/jpeg', 0.85);
-                syncAvatarEverywhere(outUrl && outUrl.length > 64 ? outUrl : sanitizeAvatarUrl(rawDataUrl));
+                let outUrl = canvas.toDataURL('image/jpeg', 0.85);
+                if (outUrl.length > 45000) outUrl = canvas.toDataURL('image/jpeg', 0.65);
+                syncAvatarEverywhere(outUrl && outUrl.length > 64 && outUrl.length <= 45000 ? outUrl : sanitizeAvatarUrl(rawDataUrl));
                 toast('📷 Profil fotoğrafın galeriden yüklendi ve kaydedildi!');
               } catch (_) {
-                const safeFallback = sanitizeAvatarUrl(rawDataUrl);
+                const safeFallback = rawDataUrl.length <= 45000 ? sanitizeAvatarUrl(rawDataUrl) : '';
                 if (safeFallback) {
                   syncAvatarEverywhere(safeFallback);
                   toast('📷 Profil fotoğrafın güncellendi!');
@@ -1659,10 +1662,12 @@ export async function openDmModal(initialPeerId = null) {
   dmInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendDmNow(); });
 
   let dmVoiceRec = null;
+  let isRecordingDmVoice = false;
   const joinRoomById = (rid, autoCall = false, rawUrl = '') => {
     if (!rid && !rawUrl) return;
     dmVoiceRec?.stop?.(false);
     dmVoiceRec = null;
+    isRecordingDmVoice = false;
     dmModal?.close?.();
     let navTarget = `/mesh/${encodeURIComponent(rid)}`;
     if (rawUrl) {
@@ -1916,6 +1921,7 @@ export async function openDmModal(initialPeerId = null) {
           },
           onFinish: async (audioNote) => {
             dmVoiceRec = null;
+            isRecordingDmVoice = false;
             dmVoiceBtn.classList.remove('recording');
             dmVoiceBtn.textContent = '🎙️';
             if (!root.isConnected) return;
@@ -1923,6 +1929,7 @@ export async function openDmModal(initialPeerId = null) {
           },
           onError: (msg) => {
             dmVoiceRec = null;
+            isRecordingDmVoice = false;
             dmVoiceBtn.classList.remove('recording');
             dmVoiceBtn.textContent = '🎙️';
             toast(msg || 'Mikrofon izni gerekli');
@@ -1930,6 +1937,7 @@ export async function openDmModal(initialPeerId = null) {
         });
         if (handle) {
           dmVoiceRec = handle;
+          isRecordingDmVoice = true;
           dmVoiceBtn.classList.add('recording');
           dmVoiceBtn.textContent = '🔴 0:00';
         }
@@ -2041,7 +2049,8 @@ export async function openDmModal(initialPeerId = null) {
       (socialData.threads || []).map((t) => `${t.peer?.uid}:${t.unreadCount || 0}:${t.lastMessage?.id || ''}`),
       activeMessages.map((m) => `${m.id}:${m.readAt || 0}:${JSON.stringify(m.reactions || {})}`),
     ]);
-    if (sig !== lastRenderSig || forceScroll) {
+    const isPlayingDmAudio = Array.from(msgListEl.querySelectorAll('audio')).some((el) => !el.paused);
+    if ((sig !== lastRenderSig || forceScroll) && !isRecordingDmVoice && !isPlayingDmAudio) {
       const hadFocus = document.activeElement === dmInp;
       lastRenderSig = sig;
       renderParts(forceScroll);
@@ -2066,6 +2075,7 @@ export async function openDmModal(initialPeerId = null) {
       try { dmVoiceRec.stop(false); } catch (_) {}
       dmVoiceRec = null;
     }
+    isRecordingDmVoice = false;
     stopActiveVoiceNoteGlobal();
   };
 
@@ -2286,36 +2296,68 @@ export function openUserProfileModal(targetUser) {
           (safeSocialUid && o.toUid === safeSocialUid) ||
           (o.toHandle && normalizeHandle(o.toHandle) === uHandle)
         );
-        const targetUid = safeSocialUid || matchedFriend?.uid || matchedOutReq?.toUid || '';
-        const isMutual = Boolean(matchedFriend) || isFriend(targetUser);
-        const isPendingOut = Boolean(matchedOutReq);
-        return h('button', {
+        const matchedInReq = (state.social?.requests || []).find((req) =>
+          (safeSocialUid && req.fromUid === safeSocialUid) ||
+          (req.fromHandle && normalizeHandle(req.fromHandle) === uHandle)
+        );
+        let targetUid = safeSocialUid || matchedFriend?.uid || matchedOutReq?.toUid || matchedInReq?.fromUid || '';
+        let isMutual = Boolean(matchedFriend) || isFriend(targetUser);
+        let isPendingOut = Boolean(matchedOutReq);
+        let isPendingIn = Boolean(matchedInReq);
+        const friendActionBtn = h('button', {
           type: 'button',
           class: `btn ${isMutual || isPendingOut ? '' : 'primary'}`,
           style: { flex: '1', justifyContent: 'center' },
           onclick: async (e) => {
             const btn = e.currentTarget;
             if (isMutual && targetUid) {
-              await updateFriendAction('remove', { targetUid });
-              btn.textContent = '👥 + Arkadaş Ekle';
-              toast(`${uName} arkadaş listesinden çıkarıldı`);
+              const res = await updateFriendAction('remove', { targetUid });
+              if (res?.ok !== false) {
+                isMutual = false;
+                isPendingOut = false;
+                btn.classList.add('primary');
+                btn.textContent = '👥 + Arkadaş Ekle';
+                toast(`${uName} arkadaş listesinden çıkarıldı`);
+              }
               return;
             }
             if (isPendingOut && targetUid) {
-              await updateFriendAction('cancel', { targetUid });
-              btn.textContent = '👥 + Arkadaş Ekle';
-              toast('Arkadaşlık isteği geri çekildi');
+              const res = await updateFriendAction('cancel', { targetUid });
+              if (res?.ok !== false) {
+                isPendingOut = false;
+                isMutual = false;
+                btn.classList.add('primary');
+                btn.textContent = '👥 + Arkadaş Ekle';
+                toast('Arkadaşlık isteği geri çekildi');
+              }
+              return;
+            }
+            if (isPendingIn && targetUid) {
+              const res = await updateFriendAction('accept', { requestId: matchedInReq?.id, targetUid });
+              if (res?.ok !== false) {
+                isPendingIn = false;
+                isMutual = true;
+                isPendingOut = false;
+                btn.classList.remove('primary');
+                btn.textContent = '✓ Arkadaşsınız';
+                toast(`🎉 ${uName} ile artık arkadaşsınız!`);
+              }
               return;
             }
             const r = await sendFriendRequest(targetUid || `@${uHandle}`);
             if (r?.ok) {
-              btn.textContent = r.status === 'FRIENDS' ? '✓ Arkadaşsınız' : '⏳ Onay Bekleniyor';
-              toast(r.status === 'FRIENDS' ? `🎉 ${uName} ile artık arkadaşsınız!` : `📩 ${uName} kişisine arkadaşlık isteği gönderildi`);
+              if (r.friend?.uid || r.target?.uid) targetUid = r.friend?.uid || r.target?.uid || targetUid;
+              isMutual = r.status === 'FRIENDS';
+              isPendingOut = r.status !== 'FRIENDS';
+              btn.classList.remove('primary');
+              btn.textContent = isMutual ? '✓ Arkadaşsınız' : '⏳ Onay Bekleniyor';
+              toast(isMutual ? `🎉 ${uName} ile artık arkadaşsınız!` : `📩 ${uName} kişisine arkadaşlık isteği gönderildi`);
             } else {
               toast(r?.error || 'İstek gönderilemedi');
             }
           },
-        }, isMutual ? '✓ Arkadaşsınız' : (isPendingOut ? '⏳ Onay Bekleniyor' : '👥 + Arkadaş Ekle'));
+        }, isMutual ? '✓ Arkadaşsınız' : (isPendingOut ? '⏳ Onay Bekleniyor' : (isPendingIn ? '✓ İsteği Kabul Et' : '👥 + Arkadaş Ekle')));
+        return friendActionBtn;
       })(),
       state.mesh?.id ? h('button', {
         type: 'button',
@@ -2362,8 +2404,8 @@ export function openUserProfileModal(targetUser) {
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
-export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') {
-  const cleanPw = String(password || '');
+export async function syncGoogleYoutubeOAuth(expectedPassword = '', expectedEmail = '') {
+  const cleanPw = String(expectedPassword || '').trim();
   const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
   const fb = await getFirebaseAuth();
   if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {
@@ -2387,7 +2429,7 @@ export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') 
   const idToken = await cred.user.getIdToken(true);
   const authRes = await api('/api/auth/oauth', {
     method: 'POST',
-    body: { provider: 'google', idToken, email: cleanEmail || fbEmail, name: fbName, password: cleanPw },
+    body: { provider: 'google', idToken, email: cleanEmail || fbEmail, name: fbName, password: cleanPw.length >= 6 ? cleanPw : '' },
   });
   if (authRes?.ok && authRes.user) {
     saveProfile({ ...authRes.user, authToken: authRes.authToken, isGuest: false, verified: true });

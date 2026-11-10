@@ -54,6 +54,8 @@ export class WebviewAdapter {
     this.targetWindow = null;
 
     this._onWindowMessage = (ev) => {
+      if (this.targetWindow && ev.source !== this.targetWindow && !isAllowedWebviewUrl(ev.origin)) return;
+      if (!this.targetWindow && ev?.origin && ev.origin !== window.location.origin && !isAllowedWebviewUrl(ev.origin)) return;
       const d = ev?.data;
       if (!d || typeof d !== 'object') return;
       if (d.type === 'VORTEX_DRM_SYNC' || d.type === 'MAX_SYNC') {
@@ -145,9 +147,12 @@ export class WebviewAdapter {
       position:relative;overflow:hidden;
     `;
 
+    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const isNf = /netflix\.com/i.test(this.mediaUrl) || media?.provider === 'netflix';
     const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
     const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı'));
+    const safeProvName = esc(provName);
+    const safeTitle = esc(media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı')));
     const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : '#38bdf8');
     const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : 'rgba(56,189,248,0.2)');
     const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : '#38bdf8');
@@ -159,13 +164,13 @@ export class WebviewAdapter {
       <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.92);backdrop-filter:blur(16px);border:1px solid ${isNf ? 'rgba(229,9,20,0.45)' : 'rgba(255,255,255,0.12)'};border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.7), 0 0 30px ${isNf ? 'rgba(229,9,20,0.25)' : 'rgba(0,43,231,0.2)'};">
         <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:${provBadgeBg};border:1px solid ${provBadgeBorder};border-radius:99px;font-size:12px;font-weight:700;color:${provBadgeColor};margin-bottom:14px;">
           <span style="width:8px;height:8px;border-radius:50%;background:${provDotBg};box-shadow:0 0 8px ${provDotBg};animation:pulse 2s infinite;"></span>
-          ${provName} Canlı Oda Köprüsü
+          ${safeProvName} Canlı Oda Köprüsü
         </div>
         <h2 style="margin:0 0 8px;font-size:22px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;">
-          ${media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı'))}
+          ${safeTitle}
         </h2>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#94a3b8;">
-          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Max ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.'}
+          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : `Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle ${safeProvName} ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.`}
         </p>
         <div style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
           <div style="text-align:left;">
@@ -194,7 +199,7 @@ export class WebviewAdapter {
 
         <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
           <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
-            🎬 ${provName}'te Aç (Yan Yana İzle)
+            🎬 ${safeProvName}'te Aç (Yan Yana İzle)
           </button>
           <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
             ⚡ Canlı Eşitle
@@ -248,7 +253,7 @@ export class WebviewAdapter {
     const syncBtn = bridge.querySelector('#vortex-bridge-sync-btn');
     if (syncBtn) {
       syncBtn.onclick = async () => {
-        const syncBookmarklet = `javascript:(function(){const bc=new BroadcastChannel('vortex_drm_sync');const v=document.querySelector('video');if(!v){alert('Video bulunamadı!');return;}alert('✓ Watchlivo Senkronizasyonu Bağlandı!');const s=()=>bc.postMessage({type:'MAX_SYNC',currentTime:v.currentTime,duration:v.duration,paused:v.paused});v.addEventListener('play',s);v.addEventListener('pause',s);v.addEventListener('seeked',s);bc.onmessage=(e)=>{if(!e.data)return;if(e.data.action==='play')v.play();if(e.data.action==='pause')v.pause();if(e.data.action==='seek'&&Math.abs(v.currentTime-e.data.currentTime)>1.5)v.currentTime=e.data.currentTime;};})();`;
+        const syncBookmarklet = `javascript:(function(){const bc=new BroadcastChannel('vortex_drm_sync');const v=document.querySelector('video');if(!v){alert('Video bulunamadı!');return;}alert('✓ Watchlivo Senkronizasyonu Bağlandı!');const s=()=>{const p={type:'VORTEX_DRM_SYNC',currentTime:v.currentTime,duration:v.duration||0,paused:v.paused,playbackRate:v.playbackRate||1};try{bc.postMessage(p);}catch(_){}window.opener?.postMessage(p,'*');};v.addEventListener('play',s);v.addEventListener('pause',s);v.addEventListener('seeked',s);v.addEventListener('ratechange',s);const h=(d)=>{if(!d)return;const c=d.cmd||d.action;if(c==='play')v.play();else if(c==='pause')v.pause();else if(c==='seek'){const t=typeof d.time==='number'?d.time:(typeof d.seekTo==='number'?d.seekTo:d.currentTime);if(typeof t==='number'&&Math.abs(v.currentTime-t)>1.5)v.currentTime=t;}else if(c==='rate'&&d.rate)v.playbackRate=d.rate;};bc.onmessage=(e)=>h(e.data);window.addEventListener('message',(e)=>{const d=e.data;if(!d||(d.type!=='VORTEX_DRM_CMD'&&d.type!=='MAX_CMD'&&d.type!=='VORTEX_DRM_SYNC'))return;const v=document.querySelector('video');if(!v)return;if(d.cmd==='play')v.play();else if(d.cmd==='pause')v.pause();else if(d.cmd==='seek'&&typeof d.time==='number')v.currentTime=d.time;else if(d.cmd==='rate'&&d.rate)v.playbackRate=d.rate;else h(d);});})();`;
         try {
           await navigator.clipboard.writeText(syncBookmarklet);
           syncBtn.textContent = '✓ Senkron Kodu Kopyalandı!';
@@ -295,6 +300,10 @@ export class WebviewAdapter {
       statusEl.style.color = this.paused ? '#f87171' : '#4ade80';
       statusEl.textContent = this.paused ? '⏸ Duraklatıldı' : '▶️ Oynatılıyor';
     }
+    const playToggleBtn = this.bridgeEl.querySelector('#vortex-bridge-play-toggle');
+    if (playToggleBtn) {
+      playToggleBtn.textContent = this.paused ? '▶️ Odayı Oynat' : '⏸ Odayı Duraklat';
+    }
 
     if (cur >= this.duration && this.duration > 0 && !this.paused) {
       this.pause();
@@ -323,8 +332,16 @@ export class WebviewAdapter {
         };
       })()`);
       if (s) {
+        const prevPaused = Boolean(this.state?.paused);
+        const prevBuf = Boolean(this.state?.buffering);
         const wasEnded = Boolean(this.state?.ended);
         this.state = s;
+        this.paused = Boolean(s.paused);
+        if (s.d > 0) this.duration = s.d;
+        if (s.rate) this.rate = s.rate;
+        if (Boolean(s.buffering) !== prevBuf) this.events.onBuffering?.(Boolean(s.buffering));
+        if (prevPaused && !s.paused) this.events.onPlay?.();
+        else if (!prevPaused && s.paused && !s.ended) this.events.onPause?.();
         if (s.ended && !wasEnded) this.events.onEnded?.();
       }
     } catch (e) {
@@ -348,12 +365,15 @@ export class WebviewAdapter {
 
   _broadcastSync(action, payload = {}) {
     const packet = {
-      type: 'VORTEX_DRM_SYNC',
+      type: 'VORTEX_DRM_CMD',
       action,
+      cmd: action,
+      time: typeof payload.seekTo === 'number' ? payload.seekTo : this.getTime(),
       currentTime: this.getTime(),
       duration: this.getDuration(),
       paused: this.isPaused(),
       playbackRate: this.getRate(),
+      rate: payload.rate ?? this.getRate(),
       timestamp: Date.now(),
       ...payload,
     };

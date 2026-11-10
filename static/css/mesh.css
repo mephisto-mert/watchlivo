@@ -531,7 +531,7 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
 }
 
 /* Mobile: stack video over chat (Rave layout-direction column), side panels become sheets */
-@media (max-width: 960px), (orientation: landscape) and (max-height: 560px) {
+@media (max-width: 960px), (max-width: 960px) and (orientation: landscape) and (max-height: 560px) {
   :root { --vvh: 100%; }
   .mesh { width: 100%; height: 100%; }
   .ctl-mid { touch-action: none; }
@@ -660,7 +660,7 @@ body.vortex-fs .video-frame .ctl-fs-reactions { display: inline-flex; }
     padding-left: max(12px, env(safe-area-inset-left, 0px));
     padding-right: max(12px, env(safe-area-inset-right, 0px));
     padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    z-index: 40;
+    z-index: 520;
     border-radius: 18px 18px 0 0;
     transform: translateY(105%);
     transition: transform .35s var(--ease-out);

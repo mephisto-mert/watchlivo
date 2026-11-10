@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v181';
-import { state, isLeader, setView, getMusicHistory } from '../store.js?v=20261110_v181';
-import { avatar } from '../profile.js?v=20261110_v181';
-import { api, qs } from '../api.js?v=20261110_v181';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v181';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v181';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v182';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261110_v182';
+import { avatar } from '../profile.js?v=20261110_v182';
+import { api, qs } from '../api.js?v=20261110_v182';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v182';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v182';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -17,6 +17,7 @@ const SOUNDBOARD = [
 let _sfxAudioCtx = null;
 
 export function playRoomSfx(sfx) {
+  if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -35,6 +36,7 @@ export function playRoomSfx(sfx) {
         const g = ac.createGain();
         g.gain.setValueAtTime(0.18, now + i * 0.075);
         src.buffer = buf;
+        src.onended = () => { try { src.disconnect(); g.disconnect(); } catch (_) {} };
         src.connect(g).connect(ac.destination);
         src.start(now + i * 0.075);
       }
@@ -80,6 +82,7 @@ export function playRoomSfx(sfx) {
 }
 
 export function playEmojiSfx(emoji) {
+  if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
   try {
     if (emoji === '👏') { playRoomSfx('clap'); return; }
     if (emoji === '😂') { playRoomSfx('laugh'); return; }
@@ -243,6 +246,14 @@ export function buildChat(ctx) {
     title: 'Odada Canlı Anket Başlat',
     onclick: () => { closeToolsPopover(); openPollModal(); },
   }, h('span', { html: icons.poll, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Anket');
+  const canClearChat = () => Boolean(
+    state.mesh && (
+      state.mesh.host_id === state.clientId ||
+      (state.mesh.co_hosts || []).includes(state.clientId) ||
+      (state.self?.uid && state.mesh.creatorId === state.self.uid) ||
+      isHostOnly()
+    )
+  );
   const clearChatBtn = h('button', {
     type: 'button',
     class: 'sfx-pill',
@@ -250,7 +261,7 @@ export function buildChat(ctx) {
     title: 'Oda Sohbetini Temizle (Lider)',
     onclick: () => {
       closeToolsPopover();
-      if (!isLeader()) {
+      if (!canClearChat()) {
         toast('⚠️ Sohbeti yalnızca oda lideri temizleyebilir');
         return;
       }
@@ -523,8 +534,18 @@ export function buildChat(ctx) {
     replyDraftBar.replaceChildren();
   }
 
+  let mutedLiveCallForVoiceNote = false;
+  function restoreLiveCallMicAfterVoiceNote() {
+    if (!mutedLiveCallForVoiceNote) return;
+    mutedLiveCallForVoiceNote = false;
+    if (ctx.voice?.micOn && !ctx.voice?.deafened) {
+      ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = true; });
+    }
+  }
+
   function stopVoiceRecorder(sendIt = false) {
     const st = voiceRecState;
+    restoreLiveCallMicAfterVoiceNote();
     if (!st) return;
     voiceRecState = null;
     voiceRecBtn.classList.remove('recording');
@@ -541,6 +562,10 @@ export function buildChat(ctx) {
       stopVoiceRecorder(true);
       return;
     }
+    if (ctx.voice?.micOn) {
+      mutedLiveCallForVoiceNote = true;
+      ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
+    }
     const timerLbl = h('span', { class: 'voice-rec-timer' }, '🔴 0:00');
     const cancelBtn = h('button', { type: 'button', class: 'voice-rec-cancel', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(false); } }, 'İptal');
     const doneBtn = h('button', { type: 'button', class: 'voice-rec-send', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(true); } }, 'Gönder ➤');
@@ -552,6 +577,7 @@ export function buildChat(ctx) {
       },
       onFinish: (audioNote) => {
         voiceRecState = null;
+        restoreLiveCallMicAfterVoiceNote();
         voiceRecBtn.classList.remove('recording');
         voiceRecOverlay.classList.add('hidden');
         input.classList.remove('hidden');
@@ -562,13 +588,17 @@ export function buildChat(ctx) {
       },
       onError: (msg) => {
         voiceRecState = null;
+        restoreLiveCallMicAfterVoiceNote();
         voiceRecBtn.classList.remove('recording');
         voiceRecOverlay.classList.add('hidden');
         input.classList.remove('hidden');
         toast(msg || 'Sesli mesaj için mikrofon izni gerekli');
       },
     });
-    if (!handle) return;
+    if (!handle) {
+      restoreLiveCallMicAfterVoiceNote();
+      return;
+    }
     voiceRecState = handle;
     voiceRecOverlay.replaceChildren(timerLbl, cancelBtn, doneBtn);
     input.classList.add('hidden');
@@ -804,11 +834,49 @@ export function buildChat(ctx) {
     ctx.voice.onStateChange = () => syncVoiceUi();
   }
 
+  function canActivateVoip(kind = 'mic') {
+    const voipMode = state.mesh?.voipMode;
+    if (voipMode === 'off') {
+      toast('Bu odada sesli ve görüntülü sohbet kapalı');
+      return false;
+    }
+    if (voipMode === 'leader' && !isLeader()) {
+      toast('Sadece oda başkanı mikrofon/kamera açabilir');
+      return false;
+    }
+    const selfId = ctx.voice?.getSelfId?.() || state.clientId;
+    const meP = (state.mesh?.participants || []).find((x) => x.id === selfId);
+    if (voipMode === 'stage' && !isLeader()) {
+      if (!meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
+        if (!meP?.handRaised) actions.raiseHand?.();
+        else toast('🎤 Sahne Modu açık — oda liderinin söz vermesi bekleniyor ✋');
+        return false;
+      }
+    }
+    const alreadyActive = Boolean(ctx.voice?.micOn || ctx.voice?.camOn || ctx.voice?.screenOn);
+    if (!alreadyActive && !isLeader() && !meP?.isHost && !meP?.isCoHost) {
+      const activeSpeakers = (state.mesh?.participants || []).filter((p) => p && p.id !== selfId && (!p.muted || p.cam || p.screen)).length;
+      if (activeSpeakers >= 8) {
+        toast('Odada aynı anda en fazla 8 aktif konuşmacı olabilir');
+        return false;
+      }
+    }
+    return true;
+  }
+
   async function toggleCallJoin() {
     if (!ctx.voice) return;
     const isAct = Boolean(ctx.voice.inCall || ctx.voice.micOn || ctx.voice.camOn || ctx.voice.screenOn);
-    if (isAct) await ctx.voice.leaveCall();
-    else await ctx.voice.joinCall({ withMic: true });
+    if (isAct) {
+      await ctx.voice.leaveCall();
+    } else {
+      if (state.mesh?.voipMode === 'off') {
+        toast('Bu odada sesli ve görüntülü sohbet kapalı');
+        return;
+      }
+      const allowMic = canActivateVoip('mic');
+      await ctx.voice.joinCall({ withMic: allowMic });
+    }
     syncVoiceUi();
   }
 
@@ -818,25 +886,19 @@ export function buildChat(ctx) {
   }
 
   async function toggleMic() {
-    if (state.mesh?.voipMode === 'stage' && !isLeader()) {
-      const selfId = ctx.voice?.getSelfId?.() || state.clientId;
-      const meP = (state.mesh?.participants || []).find((x) => x.id === selfId);
-      if (!meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
-        if (!meP?.handRaised) actions.raiseHand?.();
-        else toast('🎤 Sahne Modu açık — oda liderinin söz vermesi bekleniyor ✋');
-        return;
-      }
-    }
+    if (!ctx.voice?.micOn && !canActivateVoip('mic')) return;
     await ctx.voice?.toggleMic();
     syncVoiceUi();
   }
 
   async function toggleCam() {
+    if (!ctx.voice?.camOn && !canActivateVoip('cam')) return;
     await ctx.voice?.toggleCamera?.();
     syncVoiceUi();
   }
 
   async function toggleScreen() {
+    if (!ctx.voice?.screenOn && !canActivateVoip('screen')) return;
     await ctx.voice?.toggleScreenShare?.();
     syncVoiceUi();
   }
@@ -1180,8 +1242,10 @@ export function buildChat(ctx) {
         dispTime ? h('time', { class: 'sysmsg-time' }, dispTime) : null);
       return t;
     }
-    const cont = lastUser === m.user && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote;
-    lastUser = (m.pollId || m.snapshot || m.audioNote) ? null : m.user;
+    const msgAuthorKey = String(m.cid || m.uid || m.user || '');
+    const isCont = Boolean(msgAuthorKey && lastUser === msgAuthorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
+    const cont = isCont;
+    lastUser = (m.pollId || m.snapshot || m.audioNote) ? null : msgAuthorKey;
     const reactWrap = h('div', { class: 'msg-reactions empty', 'data-react-for': m.id });
     fillReactionBadges(reactWrap, m.id);
     let row = null;
@@ -1213,9 +1277,58 @@ export function buildChat(ctx) {
         },
       }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Yanıtla'));
 
+    const isSelfMsg = Boolean(
+      (m.cid && state.clientId && m.cid === state.clientId) ||
+      (m.uid && (state.self?.uid || state.self?.id) && m.uid === (state.self?.uid || state.self?.id)) ||
+      (!m.cid && !m.uid && m.user && state.self?.name && m.user === state.self.name)
+    );
+    const isBotMsg = String(m.cid || m.uid || '').startsWith('bot_') || m.cid === 'kinox_bot';
+    const isAlreadyFriend = (state.social?.friends || []).some((f) =>
+      (f.uid && m.uid && f.uid === m.uid) ||
+      (f.handle && m.handle && f.handle.toLowerCase() === m.handle.toLowerCase()) ||
+      f.name === m.user
+    );
+    const incomingFriendReq = (state.social?.requests || []).find((r) =>
+      (r.fromUid && m.uid && r.fromUid === m.uid) ||
+      (r.fromHandle && m.handle && r.fromHandle.toLowerCase() === m.handle.toLowerCase()) ||
+      r.fromName === m.user
+    );
+    const addFriendInlineBtn = (!isSelfMsg && !isBotMsg && !isAlreadyFriend) ? h('button', {
+      type: 'button',
+      class: 'chat-inline-friend-btn',
+      style: { marginLeft: '6px', padding: '1px 6px', fontSize: '.68rem', borderRadius: '999px', border: '1px solid rgba(39,220,200,0.35)', background: 'rgba(39,220,200,0.1)', color: '#5eead4', cursor: 'pointer' },
+      title: incomingFriendReq ? `${m.user} arkadaşlık isteğini kabul et` : `${m.user} kişisini arkadaş ekle`,
+      onclick: async (ev) => {
+        ev.stopPropagation();
+        const btn = ev.currentTarget;
+        const reqUid = incomingFriendReq?.fromUid || m.uid || '';
+        if (incomingFriendReq && reqUid) {
+          const r = await updateFriendAction('accept', { requestId: incomingFriendReq.id, targetUid: reqUid });
+          if (r?.ok) {
+            toast(`🎉 ${m.user} ile artık arkadaşsınız!`);
+            if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
+            btn.remove();
+          }
+          return;
+        }
+        const targetIdent = m.uid || m.handle || m.user || '';
+        if (!targetIdent) return;
+        const res = await sendFriendRequest(targetIdent, m.uid ? { targetUid: m.uid } : {});
+        if (res?.ok) {
+          toast(res.mutualAccepted || res.status === 'FRIENDS' ? `🎉 ${m.user} ile artık arkadaşsınız!` : `📩 ${m.user} kişisine arkadaşlık isteği gönderildi`);
+          if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
+          btn.textContent = (res.mutualAccepted || res.status === 'FRIENDS') ? '✓ Arkadaş' : '⏳ İstekli';
+          btn.disabled = true;
+        } else {
+          toast(res?.error || 'Arkadaşlık isteği gönderilemedi');
+        }
+      },
+    }, incomingFriendReq ? '✓ Onayla' : '+ Arkadaş') : null;
+
     row = h('div', {
       class: `msg ${cont ? 'cont' : ''}`,
       'data-id': m.id,
+      'data-author-key': msgAuthorKey,
       'data-ts': String(m.ts || (Date.now() / 1000)),
       onmouseleave: () => row.classList.remove('msg-closing'),
       ondblclick: (e) => {
@@ -1275,6 +1388,7 @@ export function buildChat(ctx) {
                 window.vortexOpenUserProfile?.(msgPeer);
               },
             }, m.user),
+            addFriendInlineBtn,
             h('time', {}, dispTime)),
           actionBar),
         buildQuoteBlock(m.replyTo),
@@ -1339,10 +1453,17 @@ export function buildChat(ctx) {
     const node = msgNode(m);
     const lastChild = list.lastElementChild;
     const lastTs = lastChild ? Number(lastChild.dataset?.ts || 0) : 0;
+    let insertBeforeNode = null;
     if (lastTs > 0 && curTs > 0 && curTs < lastTs - 1) {
-      const nextSibling = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs);
-      if (nextSibling) list.insertBefore(node, nextSibling);
-      else list.append(node);
+      insertBeforeNode = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs) || null;
+    }
+    if (!m.system) {
+      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : list.lastElementChild?.dataset?.authorKey;
+      const isCont = Boolean(node.dataset?.authorKey && prevAuthorKey === node.dataset.authorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
+      node.classList.toggle('cont', isCont);
+    }
+    if (insertBeforeNode) {
+      list.insertBefore(node, insertBeforeNode);
     } else {
       list.append(node);
     }

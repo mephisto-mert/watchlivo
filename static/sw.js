@@ -18,15 +18,17 @@ const OFFLINE_HTML = `<!doctype html>
   <main class="card">
     <h1>📡 İnternet Bağlantısı Yok</h1>
     <p>Watchlivo canlı senkronizasyon odalarına bağlanmak için internet bağlantınızı kontrol edip tekrar deneyin.</p>
-    <a href="" style="display:inline-block;text-decoration:none;border-radius:12px;padding:12px 22px;background:#27dcc8;color:#041014;font-weight:800;font-size:.95rem;">Yeniden Dene</a>
+    <a href="/" onclick="location.reload();return false" class="btn" style="display:inline-block;text-decoration:none;border-radius:12px;padding:12px 22px;background:#27dcc8;color:#041014;font-weight:800;font-size:.95rem;">Yeniden Dene</a>
   </main>
 </body>
 </html>`;
 
 self.addEventListener('install', (event) => {
-  self.skipWaiting();
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k)))).catch(() => {})
+    caches.keys()
+      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => self.skipWaiting())
+      .catch(() => self.skipWaiting())
   );
 });
 
@@ -117,6 +119,10 @@ self.addEventListener('notificationclick', (event) => {
       for (const client of clientList) {
         if ('focus' in client) {
           try { await client.focus(); } catch (_) {}
+          if ('navigate' in client && targetUrl) {
+            try { await client.navigate(targetUrl); } catch (_) {}
+          }
+          client.postMessage({ type: 'VORTEX_NAVIGATE', url: targetUrl });
           client.postMessage({ type: 'WATCHLIVO_NOTIFICATION_CLICK', url: targetUrl });
           return;
         }

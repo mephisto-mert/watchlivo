@@ -1,13 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261110_v181';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261110_v181';
-import { navIcon, logo } from './home.js?v=20261110_v181';
-import { createSelection } from './selection.js?v=20261110_v181';
-import { buildControls } from './controls.js?v=20261110_v181';
-import { buildChat } from './chat.js?v=20261110_v181';
-import { PANELS } from './panels.js?v=20261110_v181';
-import { getAccount, openNetflixLoginModal, openProviderLoginModal } from '../accounts.js?v=20261110_v181';
-import { getProvider } from '../providers.js?v=20261110_v181';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261110_v182';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261110_v182';
+import { navIcon, logo } from './home.js?v=20261110_v182';
+import { createSelection } from './selection.js?v=20261110_v182';
+import { buildControls } from './controls.js?v=20261110_v182';
+import { buildChat } from './chat.js?v=20261110_v182';
+import { PANELS } from './panels.js?v=20261110_v182';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -19,8 +17,6 @@ export function buildLayout(app, ctx) {
   const rightPanel = h('aside', { class: 'panel-side panel-right', 'aria-label': 'Sağ panel' });
   ctx.host.container.className = 'player-host';
   const frame = h('div', { class: 'video-frame', id: 'video-frame' }, ctx.host.container);
-  const drmGateEl = h('div', { class: 'wl-room-drm-gate-overlay hidden', id: 'room-drm-gate' });
-  frame.appendChild(drmGateEl);
 
   let theaterMode = false;
   let controls = null;
@@ -29,239 +25,6 @@ export function buildLayout(app, ctx) {
   const chatPanel = h('div', { class: 'panel-chat' });
   const videoChat = h('div', { class: 'video-chat' }, h('div', { class: 'panel-video' }, frame), handle, chatPanel);
   const layout = h('div', { class: 'mesh-layout' }, leftPanel, h('div'), videoChat, h('div'), rightPanel);
-
-  function showDrmGate(provId, { media, onSuccess, onLeave } = {}) {
-    const isNf = provId === 'netflix';
-    const brandName = isNf ? 'Netflix' : 'HBO Max';
-    const brandGradient = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : 'linear-gradient(135deg, #002be7, #4f46e5)';
-    const brandLogoLetter = isNf ? 'N' : 'MAX';
-    const officialBrowseUrl = isNf ? 'https://www.netflix.com/browse' : 'https://play.max.com';
-
-    drmGateEl.replaceChildren(
-      h('div', {
-        class: 'wl-drm-gate-backdrop',
-        style: {
-          position: 'absolute',
-          inset: '0',
-          zIndex: '95',
-          background: 'rgba(5, 7, 13, 0.96)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '24px 16px',
-          boxSizing: 'border-box',
-          overflowY: 'auto',
-        },
-      },
-        h('div', {
-          class: 'wl-drm-gate-card',
-          style: {
-            width: '100%',
-            maxWidth: '520px',
-            background: 'linear-gradient(145deg, rgba(20, 24, 38, 0.98) 0%, rgba(10, 12, 20, 0.99) 100%)',
-            border: `1px solid ${isNf ? 'rgba(229, 9, 20, 0.5)' : 'rgba(0, 43, 231, 0.5)'}`,
-            borderRadius: '20px',
-            padding: '32px 28px',
-            boxShadow: `0 24px 60px rgba(0,0,0,0.85), 0 0 40px ${isNf ? 'rgba(229, 9, 20, 0.2)' : 'rgba(0, 43, 231, 0.2)'}`,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            textAlign: 'center',
-            gap: '18px',
-            color: '#f8fafc',
-            fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          },
-        },
-          h('div', { style: { position: 'relative', display: 'inline-flex' } },
-            h('div', {
-              style: {
-                width: '64px',
-                height: '64px',
-                borderRadius: '16px',
-                background: brandGradient,
-                color: '#fff',
-                fontWeight: '900',
-                fontSize: isNf ? '2rem' : '1.25rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                letterSpacing: '-0.5px',
-                boxShadow: `0 8px 24px ${isNf ? 'rgba(229, 9, 20, 0.5)' : 'rgba(0, 43, 231, 0.5)'}`,
-              },
-            }, brandLogoLetter),
-            h('div', {
-              style: {
-                position: 'absolute',
-                bottom: '-6px',
-                right: '-6px',
-                width: '26px',
-                height: '26px',
-                borderRadius: '50%',
-                background: '#0f172a',
-                border: '2px solid #ef4444',
-                color: '#ef4444',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '.75rem',
-                fontWeight: '900',
-              },
-            }, '🔒')
-          ),
-          h('div', {
-            style: {
-              fontSize: '.74rem',
-              fontWeight: '800',
-              textTransform: 'uppercase',
-              letterSpacing: '0.8px',
-              padding: '4px 12px',
-              borderRadius: '999px',
-              background: isNf ? 'rgba(229, 9, 20, 0.15)' : 'rgba(0, 43, 231, 0.15)',
-              border: `1px solid ${isNf ? 'rgba(229, 9, 20, 0.4)' : 'rgba(0, 43, 231, 0.4)'}`,
-              color: isNf ? '#f87171' : '#60a5fa',
-            },
-          }, 'Rave.io Çoklu İzleyici Lisans Protokolü'),
-          h('h2', {
-            style: {
-              margin: '0',
-              fontSize: '1.35rem',
-              fontWeight: '800',
-              color: '#ffffff',
-              lineHeight: '1.3',
-            },
-          }, `Bu Odayı İzlemek İçin ${brandName} Hesabı Gerekir`),
-          h('p', {
-            style: {
-              margin: '0',
-              fontSize: '.88rem',
-              color: '#94a3b8',
-              lineHeight: '1.55',
-              maxWidth: '440px',
-            },
-          }, `Bu odadaki yayın resmi ${brandName} içeriğidir. Rave protokolü ve telif hakları gereğince, odadaki herkesin kendi resmi ${brandName} hesabıyla oturum açmış olması zorunludur. Hesabınız bağlandıktan sonra yayın odadaki diğer izleyicilerle aynı saniyede canlı senkronize açılacaktır.`),
-          media?.title ? h('div', {
-            style: {
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '12px',
-              background: 'rgba(255, 255, 255, 0.04)',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              width: '100%',
-              maxWidth: '440px',
-              boxSizing: 'border-box',
-              textAlign: 'left',
-            },
-          },
-            media.poster || media.thumbnail ? h('img', {
-              src: media.poster || media.thumbnail,
-              alt: media.title,
-              style: { width: '40px', height: '56px', borderRadius: '6px', objectFit: 'cover' },
-            }) : null,
-            h('div', { style: { flex: 1, minWidth: 0 } },
-              h('div', {
-                style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
-              }, media.title),
-              h('div', {
-                style: { fontSize: '.76rem', color: isNf ? '#f87171' : '#60a5fa', fontWeight: '600', marginTop: '2px' },
-              }, `4K Ultra HD · ${brandName} Resmi Yayını`)
-            )
-          ) : null,
-          h('div', {
-            style: {
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              width: '100%',
-              maxWidth: '440px',
-              marginTop: '4px',
-            },
-          },
-            h('button', {
-              type: 'button',
-              class: 'btn primary',
-              style: {
-                background: brandGradient,
-                border: 'none',
-                color: '#ffffff',
-                fontWeight: '800',
-                fontSize: '.95rem',
-                padding: '14px 20px',
-                borderRadius: '12px',
-                cursor: 'pointer',
-                boxShadow: `0 6px 20px ${isNf ? 'rgba(229, 9, 20, 0.45)' : 'rgba(0, 43, 231, 0.45)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '8px',
-              },
-              onclick: () => {
-                if (isNf) {
-                  openNetflixLoginModal(getProvider('netflix') || { id: 'netflix', name: 'Netflix' }, () => {
-                    const chk = getAccount('netflix');
-                    if (chk.loginSatisfied) onSuccess?.();
-                  });
-                } else {
-                  openProviderLoginModal(getProvider('max') || { id: 'max', name: 'Max' }, () => {
-                    const chk = getAccount('max');
-                    if (chk.loginSatisfied) onSuccess?.();
-                  });
-                }
-              },
-            },
-              h('span', {}, '🔑'),
-              h('span', {}, `${brandName} Hesabını Bağla (Resmi Giriş)`)
-            ),
-            h('button', {
-              type: 'button',
-              class: 'btn secondary',
-              style: {
-                background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.16)',
-                color: '#f8fafc',
-                fontWeight: '700',
-                fontSize: '.88rem',
-                padding: '11px 18px',
-                borderRadius: '10px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '6px',
-              },
-              onclick: () => window.open(officialBrowseUrl, '_blank'),
-            },
-              h('span', {}, '🌐'),
-              h('span', {}, `${brandName.toLowerCase()}.com Aç ↗`)
-            ),
-            h('button', {
-              type: 'button',
-              style: {
-                background: 'transparent',
-                border: 'none',
-                color: '#64748b',
-                fontWeight: '600',
-                fontSize: '.82rem',
-                padding: '8px 12px',
-                cursor: 'pointer',
-                textDecoration: 'underline',
-              },
-              onclick: () => onLeave?.(),
-            }, '🚪 Odadan Ayrıl (Ana Sayfaya Dön)')
-          )
-        )
-      )
-    );
-    drmGateEl.classList.remove('hidden');
-  }
-
-  function hideDrmGate() {
-    drmGateEl.classList.add('hidden');
-    drmGateEl.replaceChildren();
-  }
 
   function toggleTheaterMode(force) {
     theaterMode = typeof force === 'boolean' ? force : !theaterMode;
@@ -279,7 +42,7 @@ export function buildLayout(app, ctx) {
   controls = buildControls(frame, ctx);
   chat = buildChat(ctx);
   chatPanel.appendChild(chat.el);
-  initResize(handle, chatPanel);
+  const cleanupResize = initResize(handle, chatPanel);
 
   let leftKey = '', rightKey = '';
   let leftInst = null, rightInst = null;
@@ -287,9 +50,10 @@ export function buildLayout(app, ctx) {
 
   function panelContent(name, side) {
     if (name === 'Search') {
+      selection?.destroy?.();
       selection = createSelection({ compact: true, onPick: async (m) => actions.pickMedia(m) });
       selection.render();
-      return { el: selection };
+      return { el: selection, destroy: () => selection?.destroy?.() };
     }
     const factory = PANELS[name];
     return factory ? factory(ctx) : { el: h('div', { class: 'lobby-empty' }, 'Yakında') };
@@ -432,8 +196,6 @@ export function buildLayout(app, ctx) {
   return {
     update,
     toggleTheaterMode,
-    showDrmGate,
-    hideDrmGate,
     chatAppended: (msg) => chat.append(msg),
     clearChatDom: () => chat.clear?.(),
     pollsUpdated: () => chat.renderPolls?.(),
@@ -449,10 +211,12 @@ export function buildLayout(app, ctx) {
     showUnmute: (b) => controls.showUnmute(b),
     destroy: () => {
       document.body.classList.remove('theater-mode');
+      try { cleanupResize?.(); } catch (_) {}
       try { controls.destroy?.(); } catch (_) {}
       try { chat.destroy?.(); } catch (_) {}
       try { leftInst?.destroy?.(); } catch (_) {}
       try { rightInst?.destroy?.(); } catch (_) {}
+      try { selection?.destroy?.(); } catch (_) {}
     },
     openSearch: () => { if (state.view.left !== 'Search') { setView('left', 'Search'); update(); } },
   };
@@ -465,8 +229,22 @@ function initResize(handle, chatPanel) {
     chatPanel.style.setProperty('--chat-w', `${Math.max(240, Math.min(maxSaved, saved))}px`);
   }
   handle.style.touchAction = 'none';
+  let activeMove = null;
+  let activeUp = null;
+  const cleanupDragListeners = () => {
+    if (activeMove) {
+      window.removeEventListener('pointermove', activeMove);
+      activeMove = null;
+    }
+    if (activeUp) {
+      window.removeEventListener('pointerup', activeUp);
+      window.removeEventListener('pointercancel', activeUp);
+      activeUp = null;
+    }
+  };
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    cleanupDragListeners();
     handle.classList.add('dragging');
     try { handle.setPointerCapture(e.pointerId); } catch (_) {}
     const startX = e.clientX, startW = chatPanel.getBoundingClientRect().width;
@@ -478,12 +256,13 @@ function initResize(handle, chatPanel) {
       handle.classList.remove('dragging');
       try { handle.releasePointerCapture(ev.pointerId); } catch (_) {}
       localStorage.setItem('vortex_chat_w', String(Math.round(chatPanel.getBoundingClientRect().width)));
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+      cleanupDragListeners();
     };
+    activeMove = move;
+    activeUp = up;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   });
+  return cleanupDragListeners;
 }
