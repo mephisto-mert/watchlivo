@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v191';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v191';
-import { renderHome, destroyHome } from './views/home.js?v=20261110_v191';
-import { api } from './api.js?v=20261110_v191';
-import { h, toast } from './ui.js?v=20261110_v191';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v192';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v192';
+import { renderHome, destroyHome } from './views/home.js?v=20261110_v192';
+import { api } from './api.js?v=20261110_v192';
+import { h, toast } from './ui.js?v=20261110_v192';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v191'; } catch (_) { return '20261110_v191'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v192'; } catch (_) { return '20261110_v192'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261110_v191')
+    _meshModPromise = import('./views/mesh.js?v=20261110_v192')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -761,39 +761,47 @@ function initRaveNotifications() {
     } catch (_) {}
   };
 
+  let notifPollBusy = false;
   setInterval(async () => {
+    if (notifPollBusy) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const uid = state.self?.uid || state.self?.id || state.clientId || '';
     if (!uid) return;
-    const name = state.self?.name || '';
-    const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
-    if (!res?.ok) return;
+    notifPollBusy = true;
+    try {
+      const name = state.self?.name || '';
+      const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
+      if (!res?.ok) return;
 
-    const prevReq = Number(state.social?.requestCount || 0);
-    const prevUnr = Number(state.social?.totalUnread || 0);
-    const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
-    const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
-    if (nextReq !== prevReq || nextUnr !== prevUnr) {
-      set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
-    }
-
-    if (Array.isArray(res.notifications) && res.notifications.length) {
-      let needSocialRefresh = false;
-      for (const item of res.notifications) {
-        if (!item?.id || seenNotifIds.has(item.id)) continue;
-        rememberSeen(item.id);
-        lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
-        if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
-          needSocialRefresh = true;
-        }
-        if (item.type === 'invite_cancelled') continue;
-        if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
-        if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
-        window.vortexShowNotificationCard?.({ ...item });
+      const prevReq = Number(state.social?.requestCount || 0);
+      const prevUnr = Number(state.social?.totalUnread || 0);
+      const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
+      const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
+      if (nextReq !== prevReq || nextUnr !== prevUnr) {
+        set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
       }
-      if (needSocialRefresh) syncSocialState(true).catch(() => {});
+
+      if (Array.isArray(res.notifications) && res.notifications.length) {
+        let needSocialRefresh = false;
+        for (const item of res.notifications) {
+          if (!item?.id || seenNotifIds.has(item.id)) continue;
+          rememberSeen(item.id);
+          lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
+          if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
+            needSocialRefresh = true;
+          }
+          if (item.type === 'invite_cancelled') continue;
+          if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
+          if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
+          window.vortexShowNotificationCard?.({ ...item });
+        }
+        if (needSocialRefresh) syncSocialState(true).catch(() => {});
+      }
+      if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+    } finally {
+      notifPollBusy = false;
     }
-    if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
-  }, 4500);
+  }, 8500);
 
   initSpatialTvNavigation();
 }

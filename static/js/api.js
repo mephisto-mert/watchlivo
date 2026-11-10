@@ -1,4 +1,6 @@
-// HTTP API helpers with explicit timeouts and automatic Bearer token injection.
+// HTTP API helpers with explicit timeouts, GET deduplication, 429/5xx auto-retry, and Bearer injection.
+const _inflightGets = new Map();
+
 function _getAuthToken() {
   try {
     const v2Raw = localStorage.getItem('vortex_profile_v2');
@@ -31,43 +33,77 @@ function _isSameOriginPath(path) {
   return false;
 }
 
-export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeout);
-  const onExtAbort = () => ctl.abort();
-  if (extSignal) {
-    if (extSignal.aborted) ctl.abort();
-    else extSignal.addEventListener('abort', onExtAbort, { once: true });
-  }
-  try {
-    const hdrs = { ...(extraHeaders || {}) };
-    if (body) hdrs['Content-Type'] = 'application/json';
-    const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
-    if (tok && !hdrs.Authorization && !hdrs.authorization) {
-      hdrs.Authorization = `Bearer ${tok}`;
-    }
-    const res = await fetch(path, {
-      method,
-      cache: 'no-store',
-      credentials: 'same-origin',
-      headers: Object.keys(hdrs).length ? hdrs : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: ctl.signal,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = new Error(data.error || `HTTP ${res.status}`);
-      err.status = res.status;
-      err.data = data;
-      throw err;
-    }
-    return data;
-  } finally {
-    clearTimeout(timer);
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function _execApi(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
+  const isPollSync = String(path || '').includes('/sync');
+  const maxRetries = isPollSync ? 0 : 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), timeout);
+    const onExtAbort = () => ctl.abort();
     if (extSignal) {
-      try { extSignal.removeEventListener('abort', onExtAbort); } catch (_) {}
+      if (extSignal.aborted) ctl.abort();
+      else extSignal.addEventListener('abort', onExtAbort, { once: true });
+    }
+    try {
+      const hdrs = { ...(extraHeaders || {}) };
+      if (body) hdrs['Content-Type'] = 'application/json';
+      const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
+      if (tok && !hdrs.Authorization && !hdrs.authorization) {
+        hdrs.Authorization = `Bearer ${tok}`;
+      }
+      const res = await fetch(path, {
+        method,
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: Object.keys(hdrs).length ? hdrs : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: ctl.signal,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const isTransientGateway = (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) && !data?.error;
+        if (isTransientGateway && attempt < maxRetries && !extSignal?.aborted) {
+          const retryHdr = Number(res.headers?.get?.('retry-after') || 0);
+          const baseWait = retryHdr > 0 ? Math.min(2200, retryHdr * 1000) : (attempt === 0 ? 600 : 1300);
+          await _sleep(baseWait + Math.floor(Math.random() * 250));
+          continue;
+        }
+        const msg = data.error || (res.status === 429
+          ? 'Sunucu şu an yoğun, lütfen birkaç saniye sonra tekrar deneyin.'
+          : `HTTP ${res.status}`);
+        const err = new Error(msg);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    } finally {
+      clearTimeout(timer);
+      if (extSignal) {
+        try { extSignal.removeEventListener('abort', onExtAbort); } catch (_) {}
+      }
     }
   }
+  throw new Error('İstek tamamlanamadı');
+}
+
+export async function api(path, opts = {}) {
+  const method = String(opts?.method || 'GET').toUpperCase();
+  if (method === 'GET' && !opts?.body && !opts?.signal) {
+    const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
+    const dedupKey = `${path}|${tok.slice(-16)}`;
+    const existing = _inflightGets.get(dedupKey);
+    if (existing) return existing;
+    const p = _execApi(path, { ...opts, method }).finally(() => {
+      _inflightGets.delete(dedupKey);
+    });
+    _inflightGets.set(dedupKey, p);
+    return p;
+  }
+  return _execApi(path, { ...opts, method });
 }
 
 export const qs = (obj) => new URLSearchParams(Object.entries(obj).filter(([, v]) => v !== undefined && v !== null && v !== '')).toString();

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261110_v191 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261110_v192 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261110_v191", index_html)
+        self.assertIn("20261110_v192", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2515,7 +2515,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261110_v191", sw_js)
+        self.assertIn("v20261110_v192", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2568,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261110_v191', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261110_v192', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261110_v191', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261110_v192', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261110_v191')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261110_v192')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3182,8 +3182,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261110_v191", index_html)
-        self.assertIn("20261110_v191", sw_js)
+        self.assertIn("20261110_v192", index_html)
+        self.assertIn("20261110_v192", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3325,6 +3325,99 @@ console.log('HA_UNIT_TESTS_PASSED');
         cp1254_srt = "1\r\n00:00:01,000 --> 00:00:03,000\r\nŞampiyon ğüşiöç İĞÜŞÖÇ\r\n\r\n".encode("cp1254") + b"\x81"
         vtt_out = server._srt_to_vtt(cp1254_srt)
         self.assertIn("Şampiyon ğüşiöç İĞÜŞÖÇ", vtt_out)
+
+    def test_v192_upstash_circuit_breaker_and_429_resilience(self):
+        """v192: Upstash circuit breaker eliminates 45s lock stalls & 429 bursts, isolates CF Worker egress IPs, and guards frontend GETs."""
+        import asyncio as _aio
+        import json as _json
+        import os as _os
+        import pathlib as _pl
+        import time as _time
+        import urllib.request as _ureq
+        from unittest.mock import patch
+        import security
+
+        fake_url = "https://quota-test-v192.upstash.io"
+        http_calls = []
+
+        class _QuotaExceededResp:
+            def read(self):
+                return _json.dumps({"error": "ERR max daily request limit exceeded"}).encode("utf-8")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_a):
+                return False
+
+        def _fake_urlopen(req, timeout=5):
+            http_calls.append(getattr(req, "full_url", str(req)))
+            return _QuotaExceededResp()
+
+        try:
+            security.mark_upstash_ok(fake_url)
+            with patch.dict(
+                _os.environ,
+                {"UPSTASH_REDIS_REST_URL": fake_url, "UPSTASH_REDIS_REST_TOKEN": "tok_v192", "VERCEL": "1"},
+                clear=False,
+            ), patch.object(_ureq, "urlopen", side_effect=_fake_urlopen):
+                rl = security.RateLimiter(5, 60.0, name="v192_cb")
+                t0 = _time.perf_counter()
+                allowed, retry = rl.hit("88.241.10.20")
+                self.assertTrue(allowed)
+                self.assertEqual(retry, 0.0)
+                self.assertTrue(security.is_upstash_down(fake_url))
+                # Circuit breaker tripped on first EVAL -> zero fallback INCR calls!
+                self.assertEqual(len(http_calls), 1)
+                self.assertEqual(auth_engine.store_backend(), "sqlite")
+
+                rs = rooms.RedisStore(fake_url, "tok_v192")
+                async def _lock_and_put():
+                    async with rs.lock("v192-cb-room", remote=True):
+                        await rs.put(rooms.new_room("v192-cb-room", "CB Oda", "public", "leader", "Tris", "h_cb"))
+                        got = await rs.get("v192-cb-room")
+                        return got
+
+                got_room = _aio.run(_lock_and_put())
+                elapsed_ms = (_time.perf_counter() - t0) * 1000.0
+                self.assertIsNotNone(got_room)
+                self.assertEqual(got_room["name"], "CB Oda")
+                # Must finish in <150ms with zero additional network calls while breaker is open
+                self.assertLess(elapsed_ms, 150.0)
+                self.assertEqual(len(http_calls), 1)
+        finally:
+            security.mark_upstash_ok(fake_url)
+
+        # 2. Cloudflare Worker egress IP (2a06:98c0:3600::103) isolates real client IP on Render without allowing external spoofing
+        class _FakeReq:
+            def __init__(self, headers, peer="10.20.30.40"):
+                self.headers = headers
+                self.client = type("C", (), {"host": peer})()
+
+        with patch.dict(_os.environ, {"RENDER": "true", "EDGE_ORIGIN_SECRET": "", "ADMIN_SECRET": "", "VERCEL": ""}, clear=False):
+            worker_proxied_ip = security.client_ip(_FakeReq({
+                "cf-connecting-ip": "2a06:98c0:3600::103",
+                "cf-ray": "99abc-FRA",
+                "x-watchlivo-client-ip": "88.241.55.12",
+                "x-forwarded-for": "88.241.55.12, 2a06:98c0:3600::103",
+            }))
+            direct_spoof_attempt = security.client_ip(_FakeReq({
+                "cf-connecting-ip": "198.51.100.99",
+                "cf-ray": "99def-FRA",
+                "x-watchlivo-client-ip": "1.1.1.1",
+            }))
+        self.assertEqual(worker_proxied_ip, "88.241.55.12")
+        self.assertEqual(direct_spoof_attempt, "198.51.100.99")
+
+        # 3. Frontend GET deduplication, transient 429 retry, and instant curated fallback rooms
+        root = _pl.Path(__file__).resolve().parent.parent
+        api_js = (root / "static" / "js" / "api.js").read_text(encoding="utf-8")
+        lobby_js = (root / "static" / "js" / "views" / "lobby.js").read_text(encoding="utf-8")
+        home_js = (root / "static" / "js" / "views" / "home.js").read_text(encoding="utf-8")
+        self.assertIn("_inflightGets", api_js)
+        self.assertIn("isTransientGateway", api_js)
+        self.assertIn("export function buildFallbackCuratedRooms()", lobby_js)
+        self.assertIn("buildFallbackCuratedRooms()", home_js)
 
 
 if __name__ == '__main__':

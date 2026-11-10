@@ -31,7 +31,17 @@ IS_VERCEL = bool(os.environ.get("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 AUTH_DB_PATH = pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
 
-from security import BoundedTTLCache, RateLimiter, client_ip, constant_time_eq, server_secret, too_many_response
+from security import (
+    BoundedTTLCache,
+    RateLimiter,
+    client_ip,
+    constant_time_eq,
+    is_upstash_down,
+    mark_upstash_down,
+    mark_upstash_ok,
+    server_secret,
+    too_many_response,
+)
 
 # Fail-closed: no public fallback secret. Without AUTH_SECRET the process uses an
 # unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
@@ -46,6 +56,7 @@ _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
 _PW_CHANGE_LIMIT = RateLimiter(10, 600.0, name="pw_change")
 _PASSWORD_RESET_PENDING = BoundedTTLCache(maxsize=1000, default_ttl=3600.0)
 _DELETED_UIDS = BoundedTTLCache(maxsize=4096, default_ttl=86400 * 30)
+_DELETED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=30.0)
 _USER_REVOKED_AFTER = BoundedTTLCache(maxsize=4096, default_ttl=TOKEN_TTL)
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
@@ -242,7 +253,7 @@ def _kv_cfg():
 
 def _kv(*cmd):
     url, tok = _kv_cfg()
-    if not url or not tok:
+    if not url or not tok or is_upstash_down(url):
         return None
     try:
         req = urllib.request.Request(
@@ -250,12 +261,15 @@ def _kv(*cmd):
             data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with urllib.request.urlopen(req, timeout=1.5) as r:
             out = json.loads(r.read().decode("utf-8"))
         if isinstance(out, dict) and out.get("error"):
+            mark_upstash_down(url, 60.0)
             return None
+        mark_upstash_ok(url)
         return out.get("result") if isinstance(out, dict) else None
     except (OSError, TimeoutError, ValueError, RuntimeError, urllib.error.URLError):
+        mark_upstash_down(url, 60.0)
         return None
 
 
@@ -264,7 +278,13 @@ def _kp() -> str:
 
 
 def store_backend() -> str:
-    return "redis" if _kv_cfg()[0] else "sqlite"
+    url, _ = _kv_cfg()
+    return "redis" if (url and not is_upstash_down(url)) else "sqlite"
+
+
+def _can_self_heal_from_claims() -> bool:
+    url, _ = _kv_cfg()
+    return store_backend() == "sqlite" and (IS_VERCEL or bool(url and is_upstash_down(url)))
 
 
 def _user_get(uid: str) -> Optional[Dict[str, Any]]:
@@ -323,11 +343,14 @@ def is_uid_deleted(uid: str) -> bool:
         return False
     if _DELETED_UIDS.get(uid):
         return True
+    if _DELETED_NEG_CACHE.get(uid):
+        return False
     if store_backend() == "redis":
         raw = _kv("GET", f"{_kp()}del_uid:{uid}")
         if raw:
             _DELETED_UIDS.set(uid, float(raw) if str(raw).replace(".", "", 1).isdigit() else time.time())
             return True
+        _DELETED_NEG_CACHE.set(uid, 1, ttl=30.0)
         return False
     try:
         conn = _get_db()
@@ -336,6 +359,7 @@ def is_uid_deleted(uid: str) -> bool:
             if row:
                 _DELETED_UIDS.set(uid, float(row["deleted_at"] or time.time()))
                 return True
+            _DELETED_NEG_CACHE.set(uid, 1, ttl=30.0)
         finally:
             conn.close()
     except Exception:
@@ -347,6 +371,7 @@ def clear_uid_deleted(uid: str) -> None:
     if not uid:
         return
     _DELETED_UIDS.delete(uid)
+    _DELETED_NEG_CACHE.delete(uid)
     _USER_REVOKED_AFTER.delete(uid)
     if store_backend() == "redis":
         _kv("DEL", f"{_kp()}del_uid:{uid}")
@@ -369,6 +394,7 @@ def _user_delete(uid: str) -> bool:
     now_ts = round(time.time(), 3)
     row = _user_get(uid)
     _DELETED_UIDS.set(uid, now_ts)
+    _DELETED_NEG_CACHE.delete(uid)
     _USER_REVOKED_AFTER.set(uid, now_ts)
     if store_backend() == "redis":
         if row:
@@ -1496,7 +1522,7 @@ async def auth_profile(request: Request) -> JSONResponse:
         row = None
         upd_failed = True
     if not row:
-        if not (IS_VERCEL and store_backend() == "sqlite" and not upd_failed and not is_uid_deleted(uid)):
+        if not (_can_self_heal_from_claims() and not upd_failed and not is_uid_deleted(uid)):
             return JSONResponse({"ok": False, "error": "Hesap bulunamadı. Lütfen tekrar giriş yapın."}, status_code=401)
         user = {
             "uid": uid,
@@ -1699,7 +1725,7 @@ async def auth_me(request: Request) -> JSONResponse:
         u_obj = _row_to_user(row)
         _sync_user_to_social(u_obj)
         return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj, pw_verifier=pwh_keep)}, headers=priv_hdrs)
-    if not (IS_VERCEL and store_backend() == "sqlite" and not lookup_failed and not is_uid_deleted(str(claims["uid"]))):
+    if not (_can_self_heal_from_claims() and not lookup_failed and not is_uid_deleted(str(claims["uid"]))):
         return JSONResponse({"ok": False, "authenticated": False}, status_code=401, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],

@@ -240,6 +240,49 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
 
 
 # ---------------------------------------------------------------------------
+# Upstash Redis circuit-breaker (zero-latency fallback when quota/network fails)
+# ---------------------------------------------------------------------------
+_UPSTASH_CB_LOCK = threading.Lock()
+_UPSTASH_DOWN_UNTIL: dict[str, float] = {}
+_CF_WORKER_EGRESS_NETS = (
+    ipaddress.ip_network("2a06:98c0::/29"),
+)
+
+
+def is_upstash_down(url: Optional[str]) -> bool:
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return False
+    exp = _UPSTASH_DOWN_UNTIL.get(u, 0.0)
+    if exp <= 0.0:
+        return False
+    if time.time() < exp:
+        return True
+    with _UPSTASH_CB_LOCK:
+        if time.time() >= _UPSTASH_DOWN_UNTIL.get(u, 0.0):
+            _UPSTASH_DOWN_UNTIL.pop(u, None)
+            return False
+    return True
+
+
+def mark_upstash_down(url: Optional[str], cooldown_sec: float = 60.0) -> None:
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return
+    until = time.time() + max(5.0, float(cooldown_sec))
+    with _UPSTASH_CB_LOCK:
+        _UPSTASH_DOWN_UNTIL[u] = max(until, _UPSTASH_DOWN_UNTIL.get(u, 0.0))
+
+
+def mark_upstash_ok(url: Optional[str]) -> None:
+    u = (url or "").strip().rstrip("/")
+    if not u or u not in _UPSTASH_DOWN_UNTIL:
+        return
+    with _UPSTASH_CB_LOCK:
+        _UPSTASH_DOWN_UNTIL.pop(u, None)
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
 class RateLimiter:
@@ -272,7 +315,7 @@ class RateLimiter:
 
     def _kv(self, *cmd) -> Optional[object]:
         url, tok = self._kv_cfg()
-        if not url:
+        if not url or is_upstash_down(url):
             return None
         try:
             req = urllib.request.Request(
@@ -280,17 +323,22 @@ class RateLimiter:
                 data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
                 headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=2.5) as r:
+            with urllib.request.urlopen(req, timeout=1.2) as r:
                 out = json.loads(r.read().decode("utf-8"))
+            if isinstance(out, dict) and out.get("error"):
+                mark_upstash_down(url, 60.0)
+                return None
+            mark_upstash_ok(url)
             return out.get("result") if isinstance(out, dict) else None
         except Exception:
+            mark_upstash_down(url, 60.0)
             return None
 
     def hit(self, key: str) -> Tuple[bool, float]:
         """Register one attempt. Returns (allowed, retry_after_seconds)."""
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url:
+        if url and not is_upstash_down(url):
             win_ms = max(1000, int(round(self.window * 1000)))
             eval_res = self._kv("EVAL", self._LUA_HIT, "1", key, str(win_ms))
             if isinstance(eval_res, list) and len(eval_res) >= 2:
@@ -305,26 +353,27 @@ class RateLimiter:
                         retry = (pttl_ms / 1000.0) if pttl_ms > 0 else self.window
                         return False, max(1.0, retry)
                     return True, 0.0
-            win_sec = int(self.window) or 1
-            count = self._kv("INCR", key)
-            try:
-                count_int = int(count)  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                count_int = None
-            if count_int == 1:
-                self._kv("EXPIRE", key, win_sec)
-            if count_int is not None:
-                if count_int > self.limit:
-                    ttl = self._kv("TTL", key)
-                    try:
-                        retry = float(ttl)  # type: ignore[arg-type]
-                    except (TypeError, ValueError):
-                        retry = self.window
-                    if retry < 0:
-                        self._kv("EXPIRE", key, win_sec)
-                        retry = self.window
-                    return False, max(1.0, retry)
-                return True, 0.0
+            if not is_upstash_down(url):
+                win_sec = int(self.window) or 1
+                count = self._kv("INCR", key)
+                try:
+                    count_int = int(count)  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    count_int = None
+                if count_int == 1:
+                    self._kv("EXPIRE", key, win_sec)
+                if count_int is not None:
+                    if count_int > self.limit:
+                        ttl = self._kv("TTL", key)
+                        try:
+                            retry = float(ttl)  # type: ignore[arg-type]
+                        except (TypeError, ValueError):
+                            retry = self.window
+                        if retry < 0:
+                            self._kv("EXPIRE", key, win_sec)
+                            retry = self.window
+                        return False, max(1.0, retry)
+                    return True, 0.0
         t = time.time()
         with self._lock:
             bucket = self._hits.get(key)
@@ -350,20 +399,21 @@ class RateLimiter:
         """Check whether key is currently rate-limited without consuming a token."""
         full_key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url:
+        if url and not is_upstash_down(url):
             raw_cnt = self._kv("GET", full_key)
-            try:
-                cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
-            except (TypeError, ValueError):
-                cnt_int = 0
-            if cnt_int >= self.limit:
-                ttl = self._kv("TTL", full_key)
+            if not is_upstash_down(url):
                 try:
-                    retry = max(1.0, float(ttl))  # type: ignore[arg-type]
+                    cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
                 except (TypeError, ValueError):
-                    retry = self.window
-                return False, retry
-            return True, 0.0
+                    cnt_int = 0
+                if cnt_int >= self.limit:
+                    ttl = self._kv("TTL", full_key)
+                    try:
+                        retry = max(1.0, float(ttl))  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        retry = self.window
+                    return False, retry
+                return True, 0.0
         t = time.time()
         with self._lock:
             bucket = self._hits.get(full_key) or []
@@ -376,7 +426,7 @@ class RateLimiter:
     def reset(self, key: str) -> None:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url:
+        if url and not is_upstash_down(url):
             self._kv("DEL", key)
         with self._lock:
             self._hits.pop(key, None)
@@ -387,6 +437,17 @@ _DOC_TEST_NETS = (
     ipaddress.ip_network("198.51.100.0/24"),
     ipaddress.ip_network("203.0.113.0/24"),
 )
+
+
+def _is_cf_worker_egress_ip(raw_ip: str) -> bool:
+    s = (raw_ip or "").strip()
+    if not s:
+        return False
+    try:
+        ip = ipaddress.ip_address(s)
+        return isinstance(ip, ipaddress.IPv6Address) and any(ip in net for net in _CF_WORKER_EGRESS_NETS)
+    except Exception:
+        return False
 
 
 def _is_trusted_proxy_peer(peer: str) -> bool:
@@ -452,7 +513,7 @@ def client_ip(scope_or_request) -> str:
     )
     if trust_vercel and not trust_proxy:
         v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
-        if v_ip:
+        if v_ip and not (not edge_secret and _is_cf_worker_egress_ip(v_ip)):
             try:
                 ipaddress.ip_address(v_ip)
                 return v_ip[:64]
@@ -461,11 +522,20 @@ def client_ip(scope_or_request) -> str:
     elif trust_proxy:
         cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
         if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
-            try:
-                ipaddress.ip_address(cf_ip)
-                return cf_ip[:64]
-            except Exception:
-                pass
+            if not edge_secret and _is_cf_worker_egress_ip(cf_ip):
+                wl_ip = (headers.get("x-watchlivo-client-ip") or "").split(",")[0].strip()
+                if wl_ip and not _is_cf_worker_egress_ip(wl_ip):
+                    try:
+                        ipaddress.ip_address(wl_ip)
+                        return wl_ip[:64]
+                    except Exception:
+                        pass
+            else:
+                try:
+                    ipaddress.ip_address(cf_ip)
+                    return cf_ip[:64]
+                except Exception:
+                    pass
         xff = headers.get("x-forwarded-for") or ""
         if xff:
             fallback_cand = ""
@@ -477,7 +547,7 @@ def client_ip(scope_or_request) -> str:
                     ipaddress.ip_address(cand)
                     if not fallback_cand:
                         fallback_cand = cand[:64]
-                    if not _is_trusted_proxy_peer(cand):
+                    if not _is_trusted_proxy_peer(cand) and not (not edge_secret and _is_cf_worker_egress_ip(cand)):
                         return cand[:64]
                 except Exception:
                     continue

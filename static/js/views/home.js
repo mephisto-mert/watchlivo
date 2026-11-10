@@ -1,21 +1,23 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261110_v191';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261110_v192';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261110_v191';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261110_v191';
-import { api } from '../api.js?v=20261110_v191';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261110_v191';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v191';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261110_v191';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261110_v191';
+} from '../store.js?v=20261110_v192';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261110_v192';
+import { api } from '../api.js?v=20261110_v192';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261110_v192';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v192';
+import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261110_v192';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261110_v192';
 
 let refreshTimer = null;
+let retryLoadTimer = null;
 let homeDrawTimer = null;
 let unsubHomeStore = null;
+let onHomeVisibility = null;
 let activeSelection = null;
 let tubelightCleanups = [];
 let rooms = [];
@@ -62,7 +64,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261110_v191', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261110_v192', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -516,7 +518,11 @@ export function renderHome(app) {
   updateMiniPip();
   initCookieConsentBanner();
   let emptyStreak = 0;
-  const load = async () => {
+  let loadInFlight = false;
+  const load = async (isAuto = false) => {
+    if (loadInFlight) return;
+    if (isAuto && typeof document !== 'undefined' && document.hidden && rooms.length > 0) return;
+    loadInFlight = true;
     try {
       const next = await fetchRooms();
       if (next.length === 0 && rooms.length > 0 && emptyStreak < 2) {
@@ -527,18 +533,43 @@ export function renderHome(app) {
       rooms = next;
       draw();
       updateMiniPip();
-    } catch (e) { if (!rooms.length) lobbyBox.replaceChildren(h('div', { class: 'lobby-empty' }, 'Odalar yüklenemedi.')); }
+    } catch (e) {
+      if (!rooms.length) {
+        rooms = buildFallbackCuratedRooms();
+        draw(true);
+      }
+      clearTimeout(retryLoadTimer);
+      retryLoadTimer = setTimeout(() => {
+        if (home.isConnected) load(false);
+      }, 2500);
+    } finally {
+      loadInFlight = false;
+    }
   };
   lobbyBox.append(h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.5em' } }, h('div', { class: 'spinner' })));
-  load();
-  refreshTimer = setInterval(load, 8000);
+  load(false);
+  refreshTimer = setInterval(() => load(true), 10000);
+  onHomeVisibility = () => {
+    if (typeof document !== 'undefined' && !document.hidden && home.isConnected) {
+      load(false);
+    }
+  };
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', onHomeVisibility);
+  }
 }
 
 export function destroyHome() {
   clearInterval(refreshTimer);
   refreshTimer = null;
+  clearTimeout(retryLoadTimer);
+  retryLoadTimer = null;
   clearTimeout(homeDrawTimer);
   homeDrawTimer = null;
+  if (onHomeVisibility && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', onHomeVisibility);
+    onHomeVisibility = null;
+  }
   if (activeSelection && typeof activeSelection.destroy === 'function') {
     try { activeSelection.destroy(); } catch (_) {}
   }

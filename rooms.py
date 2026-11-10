@@ -21,7 +21,17 @@ import uuid
 import zlib
 from typing import Any, Dict, List, Optional, Tuple
 
-from security import BoundedTTLCache, RateLimiter, client_ip, constant_time_eq, is_ip_public_global, server_secret
+from security import (
+    BoundedTTLCache,
+    RateLimiter,
+    client_ip,
+    constant_time_eq,
+    is_ip_public_global,
+    is_upstash_down,
+    mark_upstash_down,
+    mark_upstash_ok,
+    server_secret,
+)
 
 # No hard-coded fallback: without VORTEX_SECRET the process gets an unguessable
 # per-instance secret (or refuses to boot when WATCHLIVO_STRICT_SECRETS=1).
@@ -46,7 +56,7 @@ _CLOSED_ROOMS = BoundedTTLCache(maxsize=4096, default_ttl=7200.0)
 SYNC_TOKEN_TTL = 86400.0
 CLIENT_TOKEN_TTL = 86400.0
 _JOIN_LIMITER = RateLimiter(12, 300.0, name="room_pwd")
-_CREATE_ROOM_LIMIT = RateLimiter(120, 60.0, name="room_create")
+_CREATE_ROOM_LIMIT = RateLimiter(240, 60.0, name="room_create")
 _PWD_ITERATIONS = 120_000
 
 
@@ -1415,18 +1425,22 @@ class _RedisLock:
 
     async def __aenter__(self):
         await self.local_lock.acquire()
-        if self.remote:
-            for _ in range(45):
+        if self.remote and not is_upstash_down(self.store.url):
+            for _ in range(8):
+                if is_upstash_down(self.store.url):
+                    break
                 res = await self.store.cmd("SET", self.key, self.token, "NX", "PX", "12000")
                 if res == "OK":
                     self.acquired_remote = True
+                    break
+                if is_upstash_down(self.store.url):
                     break
                 await asyncio.sleep(0.035)
         return self
 
     async def __aexit__(self, *exc):
         try:
-            if self.acquired_remote:
+            if self.acquired_remote and not is_upstash_down(self.store.url):
                 await self.store.cmd("EVAL", self._UNLOCK_LUA, "1", self.key, self.token)
         except Exception:
             pass
@@ -1459,18 +1473,44 @@ class RedisStore:
         return self.locks[room_id]
 
     def _call(self, args: List[str]) -> Any:
-        req = urllib.request.Request(self.url, data=json.dumps(args).encode(), method="POST",
-                                     headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=3.5) as r:
-            return json.loads(r.read().decode()).get("result")
+        if is_upstash_down(self.url):
+            return None
+        try:
+            req = urllib.request.Request(self.url, data=json.dumps(args).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=1.5) as r:
+                out = json.loads(r.read().decode())
+            if isinstance(out, dict) and out.get("error"):
+                mark_upstash_down(self.url, 60.0)
+                return None
+            mark_upstash_ok(self.url)
+            return out.get("result") if isinstance(out, dict) else None
+        except Exception:
+            mark_upstash_down(self.url, 60.0)
+            return None
 
     def _pipeline_call(self, commands: List[List[str]]) -> Any:
-        req = urllib.request.Request(f"{self.url}/pipeline", data=json.dumps(commands).encode(), method="POST",
-                                     headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=4.0) as r:
-            return json.loads(r.read().decode())
+        if is_upstash_down(self.url):
+            return None
+        try:
+            req = urllib.request.Request(f"{self.url}/pipeline", data=json.dumps(commands).encode(), method="POST",
+                                         headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=1.8) as r:
+                out = json.loads(r.read().decode())
+            if (isinstance(out, dict) and out.get("error")) or (
+                isinstance(out, list) and any(isinstance(item, dict) and item.get("error") for item in out)
+            ):
+                mark_upstash_down(self.url, 60.0)
+                return None
+            mark_upstash_ok(self.url)
+            return out
+        except Exception:
+            mark_upstash_down(self.url, 60.0)
+            return None
 
     async def cmd(self, *args: str) -> Any:
+        if is_upstash_down(self.url):
+            return None
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(_REDIS_EXECUTOR, self._call, [str(a) for a in args])
@@ -1478,14 +1518,17 @@ class RedisStore:
             return None
 
     async def pipeline(self, commands: List[List[str]]) -> Any:
+        if is_upstash_down(self.url):
+            return None
         try:
             loop = asyncio.get_running_loop()
             return await loop.run_in_executor(_REDIS_EXECUTOR, self._pipeline_call, [[str(x) for x in c] for c in commands])
         except Exception:
             return None
 
-    def lock(self, room_id: str, remote: bool = True):
-        return _RedisLock(self, room_id, remote=remote)
+    def lock(self, room_id: str, remote: Optional[bool] = None):
+        use_remote = (os.environ.get("VERCEL") == "1") if remote is None else bool(remote)
+        return _RedisLock(self, room_id, remote=use_remote)
 
     async def get(self, room_id: str, force_fresh: bool = False) -> Optional[Dict[str, Any]]:
         t = now()
@@ -1494,6 +1537,8 @@ class RedisStore:
             self.l1_rooms.pop(room_id, None)
             return None
         cached = self.l1_rooms.get(room_id)
+        if is_upstash_down(self.url):
+            return cached or await self.fallback.get(room_id)
         cached_has_media = bool(cached and isinstance(cached.get("media"), dict) and (cached["media"].get("url") or cached["media"].get("videoId")))
         if not force_fresh and cached and cached_has_media and (t - self.l1_read_ts.get(room_id, 0.0) < 0.2):
             return cached
@@ -1584,6 +1629,9 @@ class RedisStore:
         self.l1_rooms[rid] = room
         self.l1_read_ts[rid] = t
         self.fallback.rooms[rid] = room
+        if is_upstash_down(self.url):
+            await self.fallback.put(room, force_disk=force_disk)
+            return
         is_serverless = os.environ.get("VERCEL") == "1"
         if not force_disk and not is_serverless and (t - self.l1_write_ts.get(rid, 0.0) < 0.25):
             return
@@ -1605,6 +1653,8 @@ class RedisStore:
         self.l1_read_ts.pop(room_id, None)
         self.l1_write_ts.pop(room_id, None)
         await self.fallback.delete(room_id, mark_closed=mark_closed)
+        if is_upstash_down(self.url):
+            return
         cmds = [
             ["DEL", f"vortex:room:{room_id}"],
             ["SREM", "vortex:rooms", room_id],
@@ -1614,10 +1664,23 @@ class RedisStore:
         await self.pipeline(cmds)
 
     async def all(self) -> List[Dict[str, Any]]:
+        if is_upstash_down(self.url):
+            for rid_mem, r_mem in list(self.l1_rooms.items()):
+                if rid_mem not in _CLOSED_ROOMS and isinstance(r_mem, dict):
+                    self.fallback.rooms[rid_mem] = r_mem
+            return await self.fallback.all()
         ids = await self.cmd("SMEMBERS", "vortex:rooms") or []
         if not ids:
+            for rid_mem, r_mem in list(self.l1_rooms.items()):
+                if rid_mem not in _CLOSED_ROOMS and isinstance(r_mem, dict):
+                    self.fallback.rooms[rid_mem] = r_mem
             return await self.fallback.all()
         raws = await self.cmd("MGET", *[f"vortex:room:{i}" for i in ids]) or []
+        if not raws and is_upstash_down(self.url):
+            for rid_mem, r_mem in list(self.l1_rooms.items()):
+                if rid_mem not in _CLOSED_ROOMS and isinstance(r_mem, dict):
+                    self.fallback.rooms[rid_mem] = r_mem
+            return await self.fallback.all()
         out = []
         dead_ids = []
         for rid, raw in zip(ids, raws):
@@ -3113,6 +3176,8 @@ def _mark_room_local_events_delivered(room: Dict[str, Any]) -> None:
 async def _ws_redis_fanout_step() -> None:
     if not getattr(STORE, "shared", False) or not hasattr(STORE, "cmd"):
         return
+    if is_upstash_down(getattr(STORE, "url", "")):
+        return
     active_rids = [rid for rid, m in list(SOCKETS.items()) if m]
     if not active_rids:
         return
@@ -3969,7 +4034,10 @@ async def create_room(request: Request):
     creator_uid = verified_uid or raw_creator_id or creator_cid
     if verified_uid or req_cid:
         try:
-            all_existing = await STORE.all()
+            if hasattr(STORE, "l1_rooms") and STORE.l1_rooms and os.environ.get("VERCEL") != "1":
+                all_existing = list(STORE.l1_rooms.values())
+            else:
+                all_existing = await STORE.all()
             stale_creator_rooms = []
             for cand in all_existing:
                 if not isinstance(cand, dict) or cand.get("curated"):
@@ -4100,11 +4168,11 @@ def _render_lobby_for_caller(request: Request, raw_rooms: List[Dict[str, Any]]) 
 
 async def list_rooms(request: Request):
     t = now()
-    if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 0.6:
+    if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 2.5:
         return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
     async with _LOBBY_LOCK:
         t = now()
-        if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 0.6:
+        if _LOBBY_CACHE.get("raw_rooms") is not None and t - float(_LOBBY_CACHE["ts"] or 0.0) < 2.5:
             return _render_lobby_for_caller(request, _LOBBY_CACHE["raw_rooms"])
         all_rooms = await STORE.all()
         existing_ids = {r.get("id") for r in all_rooms if isinstance(r, dict)}

@@ -1,13 +1,13 @@
 // Lobby (Rave Lobby + MeshThumbFC): sectioned grid of live rooms + 7/24 cinema + Friends & Nearby.
-import { h, icons, popup, toast } from '../ui.js?v=20261110_v191';
-import { avatar, openDmModal } from '../profile.js?v=20261110_v191';
-import { getProvider } from '../providers.js?v=20261110_v191';
-import { api, qs } from '../api.js?v=20261110_v191';
+import { h, icons, popup, toast } from '../ui.js?v=20261110_v192';
+import { avatar, openDmModal } from '../profile.js?v=20261110_v192';
+import { getProvider } from '../providers.js?v=20261110_v192';
+import { api, qs } from '../api.js?v=20261110_v192';
 import {
   state, getFriends, isFriend, getRecentRoomsKey, getRoomSnapshotsKey,
   syncSocialState, searchUsersServer, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from '../store.js?v=20261110_v191';
-import { expectedPosition } from '../sync.js?v=20261110_v191';
+} from '../store.js?v=20261110_v192';
+import { expectedPosition } from '../sync.js?v=20261110_v192';
 
 const LIVE_BRANDS = {
   'tv-trt1':        { label: 'TRT 1',        sub: 'ULUSAL · DİZİ & MAÇ',    c1: '#e11d48', c2: '#4c0519' },
@@ -261,8 +261,32 @@ const recentIds = () => { try { return JSON.parse(localStorage.getItem(getRecent
 
 let lastLobbyRooms = [];
 
+export function buildFallbackCuratedRooms() {
+  return Object.entries(LIVE_BRANDS).map(([id, brand]) => {
+    const isRadio = id.startsWith('radyo-');
+    return {
+      id,
+      name: `7/24 ${brand.label} ${isRadio ? 'Canlı Radyo' : 'Canlı Yayın'}`,
+      creator: isRadio ? 'Watchlivo Canlı Radyo' : 'Watchlivo Canlı TV',
+      privacy: 'public',
+      playMode: 'leader',
+      curated: true,
+      count: 0,
+      participants: [],
+      media: {
+        provider: 'hls',
+        streamType: isRadio ? 'mp3' : 'hls',
+        title: `${isRadio ? '📻' : '📺'} ${brand.label} · ${isRadio ? 'Canlı Radyo' : 'Canlı Yayın'}`,
+        live: true,
+        isMusic: isRadio,
+        mediaType: isRadio ? 'music' : 'live',
+      },
+    };
+  });
+}
+
 export async function fetchRooms() {
-  const res = await api(`/api/rooms?${qs({ user: state.self?.name })}`, { timeout: 8000 });
+  const res = await api(`/api/rooms?${qs({ user: state.self?.name })}`, { timeout: 10000 });
   lastLobbyRooms = res.rooms || [];
   return lastLobbyRooms;
 }

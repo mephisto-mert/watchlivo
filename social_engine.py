@@ -30,7 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import auth_engine
-from security import BoundedTTLCache, RateLimiter, client_ip, is_safe_public_url, too_many_response
+from security import BoundedTTLCache, RateLimiter, client_ip, is_safe_public_url, is_upstash_down, too_many_response
 
 UA_CHROME = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,11 +66,18 @@ _PRIVATE_HEADERS = {"Cache-Control": "private, no-store, no-cache, must-revalida
 _SERVER_HEALTH: Dict[str, Dict[str, Any]] = {}
 
 
+_KV_MISS_SENTINEL = ("__wl_kv_empty__",)
+
+
 def _get_redis_store():
     try:
         import rooms
         st = getattr(rooms, "STORE", None)
-        return st if getattr(st, "shared", False) else None
+        if not getattr(st, "shared", False):
+            return None
+        if is_upstash_down(getattr(st, "url", "")):
+            return None
+        return st
     except Exception:
         return None
 
@@ -79,7 +86,7 @@ def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
     now_t = time.time()
     mem_val = _KV_MEM.get(key, None)
     if mem_val is not None and (now_t - float(_KV_READ_TS.get(key) or 0.0) < max_age):
-        return mem_val
+        return default if mem_val == _KV_MISS_SENTINEL else mem_val
     st = _get_redis_store()
     if st is not None:
         try:
@@ -90,8 +97,15 @@ def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
                 _KV_MEM.set(key, val, ttl=mem_ttl)
                 _KV_READ_TS.set(key, now_t, ttl=mem_ttl)
                 return val
+            if not is_upstash_down(getattr(st, "url", "")):
+                neg_ttl = min(15.0, max(0.2, float(max_age)))
+                _KV_MEM.set(key, _KV_MISS_SENTINEL, ttl=neg_ttl)
+                _KV_READ_TS.set(key, now_t, ttl=neg_ttl)
+                return default
         except Exception:
             pass
+    if mem_val == _KV_MISS_SENTINEL:
+        return default
     return mem_val if mem_val is not None else default
 
 
