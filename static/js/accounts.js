@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261110_v171';
-import { api, qs } from './api.js?v=20261110_v171';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v171';
+import { h, toast, popup } from './ui.js?v=20261110_v172';
+import { api, qs } from './api.js?v=20261110_v172';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v172';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -181,7 +181,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
   const acct = getAccount('netflix');
   let modalHandle = null;
 
-  const closeModal = () => {
+  let closeModal = () => {
     if (modalHandle?.close) modalHandle.close();
     else document.querySelector('.popup-backdrop')?.remove();
   };
@@ -1181,11 +1181,10 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
       zIndex: '15',
     },
     onclick: () => {
-      if (currentStep === 'challenge') currentStep = 'login';
-      else if (currentStep === 'profiles') currentStep = 'challenge';
-      else if (currentStep === 'browse') currentStep = 'profiles';
-      else closeModal();
-      renderView();
+      if (currentStep === 'challenge') { currentStep = 'login'; renderView(); }
+      else if (currentStep === 'profiles') { currentStep = 'challenge'; renderView(); }
+      else if (currentStep === 'browse') { currentStep = 'profiles'; renderView(); }
+      else { closeModal(); }
     },
   }, '<');
 
@@ -1255,7 +1254,7 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
   const acct = getAccount('max');
   let modalHandle = null;
 
-  const closeModal = () => {
+  let closeModal = () => {
     if (modalHandle?.close) modalHandle.close();
     else document.querySelector('.popup-backdrop')?.remove();
   };
@@ -1883,7 +1882,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261110_v171',
+        v: '20261110_v172',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;
