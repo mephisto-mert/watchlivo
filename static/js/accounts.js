@@ -176,14 +176,15 @@ export async function logoutAccount(providerId, onReload) {
   toast('Hesap bağlantısı kapatıldı');
   onReload?.();
 }
-export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent) {
+export function buildNetflixRaveWindow(p, onPickContent, onReload, isModal = false, onClose = null) {
   const prov = (typeof p === 'string') ? { id: p, name: 'Netflix' } : (p || { id: 'netflix', name: 'Netflix' });
   const acct = getAccount('netflix');
-  let modalHandle = null;
+  let isCleanedUp = false;
 
   let closeModal = () => {
-    if (modalHandle?.close) modalHandle.close();
-    else document.querySelector('.popup-backdrop')?.remove();
+    if (typeof onClose === 'function') onClose();
+    else if (isModal) document.querySelector('.popup-backdrop')?.remove();
+    else location.hash = '#/';
   };
 
   // 5 Canonical Netflix Smileys matching Rave
@@ -209,12 +210,12 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
     return s;
   };
 
-  // State Machine: 'login' | 'challenge' | 'profiles' | 'browse'
-  // Option B: Default to live in-app Netflix bridge session (Rave parity)
-  let currentStep = 'bridge';
+  // State Machine: 'login' | 'challenge' | 'profiles' | 'browse' | 'bridge'
+  // Starts with 'login' if not authenticated, or 'browse' if active
+  let currentStep = acct.loginSatisfied ? 'browse' : 'login';
   let bridgeUrl = acct.loginSatisfied ? '/api/netflix-bridge/browse' : '/api/netflix-bridge/login';
 
-  let loginIdentifier = acct.accountEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : 'mertcan@gmail.com');
+  let loginIdentifier = acct.accountEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : '');
   let challengeMode = 'otp'; // 'otp' or 'password'
   let activeProfile = acct.profileName || NETFLIX_PROFILES[0].name;
 
@@ -222,9 +223,9 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
     class: 'rave-inapp-netflix-window',
     style: {
       width: '100%',
-      maxWidth: '820px',
-      minHeight: '520px',
-      maxHeight: '90vh',
+      maxWidth: isModal ? '820px' : '960px',
+      minHeight: '580px',
+      maxHeight: isModal ? '90vh' : 'none',
       background: '#141414',
       borderRadius: '16px',
       border: '1px solid rgba(255, 255, 255, 0.12)',
@@ -244,7 +245,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
     return h('div', {
       class: 'rave-native-header',
       style: {
-        height: '46px',
+        height: '48px',
         background: '#050507',
         borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
         display: 'flex',
@@ -295,18 +296,49 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         h('span', { style: { textTransform: 'lowercase' } }, 'v'),
         h('span', { style: { textTransform: 'uppercase' } }, 'E')
       ),
-      // Right: Settings, Friends & Close
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+      // Right: Profiles switch, Bridge toggle, Settings & Close
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+        h('button', {
+          type: 'button',
+          title: 'Kim İzliyor (Profil Değiştir)',
+          style: {
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '6px',
+            color: '#cbd5e1',
+            fontSize: '11px',
+            fontWeight: '700',
+            padding: '4px 10px',
+            cursor: 'pointer',
+          },
+          onclick: () => {
+            currentStep = 'profiles';
+            renderView();
+          },
+        }, '👥 Profiller'),
+        h('button', {
+          type: 'button',
+          title: currentStep === 'bridge' ? 'Rave Görünümüne Dön' : 'Resmi Canlı Netflix Web Oturumu',
+          style: {
+            background: currentStep === 'bridge' ? 'rgba(229,9,20,0.3)' : 'rgba(255,255,255,0.06)',
+            border: currentStep === 'bridge' ? '1px solid #e50914' : '1px solid rgba(255,255,255,0.12)',
+            borderRadius: '6px',
+            color: '#fff',
+            fontSize: '11px',
+            fontWeight: '700',
+            padding: '4px 10px',
+            cursor: 'pointer',
+          },
+          onclick: () => {
+            currentStep = (currentStep === 'bridge') ? (acct.loginSatisfied ? 'browse' : 'login') : 'bridge';
+            renderView();
+          },
+        }, currentStep === 'bridge' ? '📱 Rave Arayüzü' : '🌐 Web Oturumu'),
         h('button', {
           type: 'button',
           style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '17px', cursor: 'pointer' },
           onclick: () => toast('Rave Ayarları'),
         }, '⚙'),
-        h('button', {
-          type: 'button',
-          style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '17px', cursor: 'pointer' },
-          onclick: () => toast('Rave Arkadaşlar'),
-        }, '👥'),
         h('button', {
           type: 'button',
           style: { background: 'none', border: 'none', color: '#cbd5e1', fontSize: '18px', cursor: 'pointer', marginLeft: '6px', fontWeight: '700' },
@@ -409,8 +441,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
       return;
     }
 
-
-    // VIEW 1: NETFLIX LOGIN (SCREENSHOT 2 PARITY)
+    // VIEW 1: NETFLIX LOGIN (SCREENSHOT 1 PARITY)
     if (currentStep === 'login') {
       const emailInput = h('input', {
         type: 'text',
@@ -461,19 +492,6 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         },
       }, 'Yardım Al ⌵');
 
-      const instantConnect = (chosenVal) => {
-        const emailVal = chosenVal || loginIdentifier || 'Şifresiz Açık Erişim';
-        setConnectedAccount('netflix', {
-          accountEmail: emailVal,
-          profileName: activeProfile || 'Netflix Profilim',
-          extra: { avatarColor: '#e50914' },
-        });
-        toast('🎉 Netflix şifresiz hesabı başarıyla bağlandı!');
-        onReload?.();
-        currentStep = 'profiles';
-        renderView();
-      };
-
       const submitBtn = h('button', {
         type: 'button',
         style: {
@@ -491,11 +509,21 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
           marginTop: '4px',
         },
         onclick: () => {
-          const val = emailInput.value.trim() || 'sifresiz@netflix.watchlivo';
+          const val = emailInput.value.trim();
+          if (!val) {
+            toast('Lütfen geçerli bir e-posta veya telefon numarası girin.');
+            emailInput.focus();
+            return;
+          }
           loginIdentifier = val;
-          instantConnect(val);
+          currentStep = 'challenge';
+          renderView();
         },
-      }, '⚡ Şifresiz 1-Tıkla Giriş Yap (Devam Et)');
+      }, 'Devam Et');
+
+      emailInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitBtn.click();
+      });
 
       const contentBox = h('div', {
         style: {
@@ -526,39 +554,36 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
             fontSize: '24px',
             fontWeight: '700',
             color: '#ffffff',
-            lineHeight: '1.25',
           },
         }, 'Oturum açmak için bilgilerinizi girin'),
-        h('div', {
+        h('p', {
           style: {
+            margin: '-6px 0 6px',
             fontSize: '14px',
-            color: '#8c8c8c',
-            marginTop: '-6px',
-            marginBottom: '4px',
+            color: '#b3b3b3',
           },
         }, 'Veya yeni bir hesap oluşturun.'),
-        // Form
+        // Input & Submit
         emailInput,
         submitBtn,
         helpToggle,
         helpArea,
-        // Google reCAPTCHA notice
-        h('div', {
+        // Google reCAPTCHA text
+        h('p', {
           style: {
-            fontSize: '12px',
-            color: '#737373',
+            fontSize: '11px',
+            color: '#8c8c8c',
             lineHeight: '1.4',
-            marginTop: '18px',
+            marginTop: '20px',
           },
         }, 'Bu sayfa robot olmadığınızı kanıtlamak için Google reCAPTCHA tarafından korunuyor.')
       );
 
       bodyArea.appendChild(contentBox);
-      setTimeout(() => emailInput.focus(), 80);
       return;
     }
 
-    // VIEW 2: PASSWORD OR OTP CONFIRMATION CODE (ŞİFRE VEYA ONAY KODU)
+    // VIEW 2: CHALLENGE / OTP / PASSWORD
     if (currentStep === 'challenge') {
       const modeTabs = h('div', {
         style: {
@@ -668,6 +693,10 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         },
       }, challengeMode === 'otp' ? 'Kodu Doğrula ve Giriş Yap' : 'Oturum Aç');
 
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') verifyBtn.click();
+      });
+
       const contentBox = h('div', {
         style: {
           maxWidth: '440px',
@@ -682,30 +711,34 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
       },
         h('div', { style: { fontSize: '32px', fontWeight: '900', color: '#e50914', letterSpacing: '-0.5px' } }, 'NETFLIX'),
         h('h1', { style: { margin: '0', fontSize: '24px', fontWeight: '700', color: '#ffffff' } }, 'Giriş Doğrulaması'),
-        h('div', { style: { fontSize: '14px', color: '#a3a3a3', marginTop: '-4px' } }, `${loginIdentifier} için devam ediliyor`),
+        h('p', { style: { margin: '-6px 0 10px', fontSize: '14px', color: '#b3b3b3' } },
+          challengeMode === 'otp'
+            ? `"${loginIdentifier}" adresine gönderilen 6 haneli kodu girin.`
+            : `"${loginIdentifier}" hesabınızın şifresini girin.`
+        ),
         modeTabs,
         inputEl,
         verifyBtn,
-        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' } },
-          h('button', {
-            type: 'button',
-            style: { background: 'none', border: 'none', color: '#8c8c8c', fontSize: '13px', cursor: 'pointer' },
-            onclick: () => { currentStep = 'login'; renderView(); },
-          }, '← Farklı e-posta / telefon kullan'),
-          challengeMode === 'otp' ? h('button', {
-            type: 'button',
-            style: { background: 'none', border: 'none', color: '#38bdf8', fontSize: '13px', cursor: 'pointer' },
-            onclick: () => toast('Onay kodu tekrar gönderildi.'),
-          }, 'Tekrar Kod Gönder') : null
-        )
+        h('button', {
+          type: 'button',
+          style: {
+            background: 'none',
+            border: 'none',
+            color: '#8c8c8c',
+            fontSize: '13px',
+            cursor: 'pointer',
+            textAlign: 'center',
+            marginTop: '8px',
+          },
+          onclick: () => { currentStep = 'login'; renderView(); },
+        }, '← Farklı bir hesapla giriş yap')
       );
 
       bodyArea.appendChild(contentBox);
-      setTimeout(() => inputEl.focus(), 80);
       return;
     }
 
-    // VIEW 3: "KİM İZLİYOR?" PROFILE PICKER (SCREENSHOT 3 PARITY)
+    // VIEW 3: WHO IS WATCHING (SCREENSHOT 2 PARITY)
     if (currentStep === 'profiles') {
       const profilesRow = h('div', {
         style: {
@@ -733,8 +766,10 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
           onclick: () => {
             activeProfile = prof.name;
             setConnectedAccount('netflix', {
-              accountEmail: loginIdentifier,
+              accountEmail: loginIdentifier || 'mertcan@gmail.com',
               profileName: prof.name,
+              loginSatisfied: true,
+              userAuthenticated: true,
               extra: { avatarColor: prof.color },
             });
             toast(`🎉 Hoş geldin ${prof.name}! Netflix kütüphanesi açılıyor...`);
@@ -754,95 +789,71 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+              transition: 'border 0.2s',
               border: '2px solid transparent',
-              transition: 'border-color .2s, transform .2s',
             },
+            onmouseenter: (e) => { e.currentTarget.style.borderColor = '#ffffff'; e.currentTarget.parentElement.style.transform = 'scale(1.06)'; },
+            onmouseleave: (e) => { e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.parentElement.style.transform = 'scale(1)'; },
           }, makeSmileySvg(54)),
           // Profile Name
-          h('div', {
+          h('span', {
             style: {
-              fontSize: '15px',
-              fontWeight: '600',
               color: '#808080',
-              transition: 'color .2s',
+              fontSize: '15px',
+              fontWeight: '500',
+              textAlign: 'center',
             },
           }, prof.name)
         );
-
-        card.onmouseenter = () => {
-          card.style.transform = 'scale(1.06)';
-          card.querySelector('div').style.borderColor = '#ffffff';
-          card.lastChild.style.color = '#ffffff';
-        };
-        card.onmouseleave = () => {
-          card.style.transform = 'scale(1)';
-          card.querySelector('div').style.borderColor = 'transparent';
-          card.lastChild.style.color = '#808080';
-        };
-
         profilesRow.appendChild(card);
       });
 
-      const manageBtn = h('button', {
-        type: 'button',
-        style: {
-          padding: '10px 24px',
-          background: 'transparent',
-          border: '1px solid #808080',
-          color: '#808080',
-          fontSize: '14px',
-          fontWeight: '600',
-          letterSpacing: '1px',
-          textTransform: 'uppercase',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          transition: 'all .2s',
-        },
-        onclick: () => toast('Profil yönetimi modu aktif.'),
-      }, '✎ Profil Yönetimi');
-      manageBtn.onmouseenter = () => { manageBtn.style.borderColor = '#fff'; manageBtn.style.color = '#fff'; };
-      manageBtn.onmouseleave = () => { manageBtn.style.borderColor = '#808080'; manageBtn.style.color = '#808080'; };
-
       const contentBox = h('div', {
         style: {
-          maxWidth: '720px',
-          width: '100%',
-          margin: '24px auto',
-          padding: '0 20px',
-          textAlign: 'center',
+          margin: 'auto',
+          padding: '24px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
+          justifyContent: 'center',
         },
       },
-        h('div', {
-          style: {
-            fontSize: '28px',
-            fontWeight: '900',
-            color: '#e50914',
-            letterSpacing: '-0.5px',
-            alignSelf: 'flex-start',
-            marginBottom: '16px',
-          },
-        }, 'NETFLIX'),
         h('h1', {
           style: {
-            margin: '0',
-            fontSize: '36px',
-            fontWeight: '700',
+            fontSize: '38px',
+            fontWeight: '500',
+            letterSpacing: '1px',
             color: '#ffffff',
-            letterSpacing: '-0.5px',
+            margin: '0 0 12px',
+            textAlign: 'center',
           },
-        }, 'Kim İzliyor?'),
+        }, 'Kim izliyor?'),
         profilesRow,
-        manageBtn
+        h('button', {
+          type: 'button',
+          style: {
+            background: 'transparent',
+            border: '1px solid #808080',
+            color: '#808080',
+            padding: '10px 24px',
+            fontSize: '14px',
+            letterSpacing: '1.5px',
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+            borderRadius: '2px',
+            transition: 'all 0.2s',
+          },
+          onmouseenter: (e) => { e.currentTarget.style.borderColor = '#ffffff'; e.currentTarget.style.color = '#ffffff'; },
+          onmouseleave: (e) => { e.currentTarget.style.borderColor = '#808080'; e.currentTarget.style.color = '#808080'; },
+          onclick: () => toast('Profil yönetimi ayarları'),
+        }, 'Profil Yönetimi')
       );
 
       bodyArea.appendChild(contentBox);
       return;
     }
 
-    // VIEW 4: IN-APP NETFLIX BROWSE (SCREENSHOT 4 & 5 PARITY)
+    // VIEW 4: NETFLIX BROWSE (SCREENSHOT 3 & 4 PARITY)
     if (currentStep === 'browse') {
       const topBar = h('div', {
         style: {
@@ -859,325 +870,268 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
       },
         // Nav Links
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '20px' } },
-          h('span', { style: { fontSize: '26px', fontWeight: '900', color: '#e50914', cursor: 'pointer' } }, 'NETFLIX'),
+          h('span', {
+            style: { fontSize: '26px', fontWeight: '900', color: '#e50914', cursor: 'pointer', letterSpacing: '-0.5px' },
+            onclick: () => { currentStep = 'browse'; renderView(); },
+          }, 'NETFLIX'),
           h('span', { style: { fontSize: '13px', fontWeight: '700', color: '#fff', cursor: 'pointer' } }, 'Ana Sayfa'),
           h('span', { style: { fontSize: '13px', fontWeight: '500', color: '#e5e5e5', cursor: 'pointer' } }, 'Diziler'),
           h('span', { style: { fontSize: '13px', fontWeight: '500', color: '#e5e5e5', cursor: 'pointer' } }, 'Filmler'),
           h('span', { style: { fontSize: '13px', fontWeight: '500', color: '#e5e5e5', cursor: 'pointer' } }, 'Oyunlar'),
-          h('span', { style: { fontSize: '13px', fontWeight: '500', color: '#e5e5e5', cursor: 'pointer' } }, 'Daha Fazla ⌵')
+          h('span', { style: { fontSize: '13px', fontWeight: '500', color: '#e5e5e5', cursor: 'pointer' } }, 'Daha Fazla ▾')
         ),
-        // Right Icons & Profile
+        // Search & Profile
         h('div', { style: { display: 'flex', alignItems: 'center', gap: '16px' } },
-          h('span', { style: { cursor: 'pointer', fontSize: '16px' }, onclick: () => toast('Netflix içi arama') }, '🔍'),
-          h('span', { style: { cursor: 'pointer', fontSize: '16px' } }, '🔔'),
+          h('button', {
+            type: 'button',
+            style: { background: 'none', border: 'none', color: '#fff', fontSize: '16px', cursor: 'pointer' },
+            onclick: () => toast('Netflix içinde ara'),
+          }, '🔍'),
+          h('button', {
+            type: 'button',
+            style: { background: 'none', border: 'none', color: '#fff', fontSize: '16px', cursor: 'pointer' },
+            onclick: () => toast('Yeni bildirim yok'),
+          }, '🔔'),
           h('div', {
+            title: `Aktif Profil: ${activeProfile} (Tıkla ve değiştir)`,
             style: {
+              width: '30px',
+              height: '30px',
+              borderRadius: '4px',
+              background: '#0071eb',
               display: 'flex',
               alignItems: 'center',
-              gap: '8px',
-              background: 'rgba(255,255,255,0.08)',
-              padding: '4px 10px',
-              borderRadius: '20px',
+              justifyContent: 'center',
               cursor: 'pointer',
             },
             onclick: () => { currentStep = 'profiles'; renderView(); },
-          },
-            h('div', {
-              style: {
-                width: '24px',
-                height: '24px',
-                borderRadius: '4px',
-                background: '#0071eb',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-            }, makeSmileySvg(16)),
-            h('span', { style: { fontSize: '12px', fontWeight: '700' } }, activeProfile)
-          ),
-          h('button', {
-            type: 'button',
-            style: {
-              background: 'none',
-              border: 'none',
-              color: '#ef4444',
-              fontSize: '11px',
-              fontWeight: '700',
-              cursor: 'pointer',
-              padding: '4px',
-            },
-            onclick: async () => {
-              await logoutAccount('netflix', onReload);
-              currentStep = 'login';
-              renderView();
-            },
-          }, 'Çıkış')
+          }, makeSmileySvg(20))
         )
       );
 
-      // Hero Spotlight Billboard (Organize İşler Karun Hazinesi - Screenshot 4 Parity)
+      // FEATURED BILLBOARD (Organize İşler: Karun Hazinesi)
       const heroBillboard = h('div', {
+        class: 'netflix-rave-hero-billboard',
         style: {
           position: 'relative',
-          width: '100%',
-          minHeight: '280px',
-          backgroundImage: 'linear-gradient(to right, rgba(0,0,0,0.85) 30%, rgba(0,0,0,0.2) 70%), url("https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg"), url("/static/brand/organize_isler.jpg")',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center 20%',
+          minHeight: '360px',
+          margin: '16px 20px',
+          borderRadius: '12px',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          justifyContent: 'center',
+          justifyContent: 'flex-end',
           padding: '32px 36px',
-          boxSizing: 'border-box',
+          backgroundImage: `linear-gradient(to right, rgba(0,0,0,0.92) 20%, rgba(0,0,0,0.5) 60%, rgba(0,0,0,0.15) 100%), linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 60%), url('https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg')`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.8)',
         },
       },
-        h('div', { style: { display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: '800', color: '#e50914', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' } },
-          h('span', { style: { background: '#e50914', color: '#fff', padding: '2px 6px', borderRadius: '3px', fontSize: '10px' } }, 'TOP 10 DİZİ'),
-          '4K ULTRA HD · 5.1 DOLBY AUDIO'
-        ),
-        h('h1', {
-          style: {
-            margin: '0 0 10px',
-            fontSize: '32px',
-            fontWeight: '900',
-            letterSpacing: '-0.5px',
-            maxWidth: '560px',
-            lineHeight: '1.15',
-            textShadow: '0 2px 10px rgba(0,0,0,0.8)',
-          },
-        }, 'Organize İşler: Karun Hazinesi'),
-        h('div', { style: { display: 'flex', gap: '10px', fontSize: '12px', color: '#cbd5e1', fontWeight: '600', marginBottom: '10px' } },
-          h('span', {}, 'Dizi'),
-          h('span', {}, '·'),
-          h('span', {}, 'Komedi'),
-          h('span', {}, '·'),
-          h('span', {}, '2026'),
-          h('span', {}, '·'),
-          h('span', {}, '8 Bölüm'),
-          h('span', { style: { border: '1px solid #94a3b8', padding: '0 4px', borderRadius: '2px', fontSize: '10px' } }, '16+')
-        ),
-        h('p', {
-          style: {
-            margin: '0 0 20px',
-            fontSize: '13px',
-            color: '#e2e8f0',
-            lineHeight: '1.45',
-            maxWidth: '520px',
-            textShadow: '0 1px 4px rgba(0,0,0,0.8)',
-          },
-        }, 'Efsanevi Asım Noyan, jübilesini yapıp "mesleği" geride bırakmadan önce son performansını sergilemeye hazır. Peki ama usta dolandırıcı bu defa ateşle mi oynuyor?'),
-        h('div', { style: { display: 'flex', gap: '12px', alignItems: 'center' } },
-          h('button', {
-            type: 'button',
+        h('div', { style: { maxWidth: '540px', display: 'flex', flexDirection: 'column', gap: '12px', zIndex: '2' } },
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            h('span', { style: { background: '#e50914', color: '#fff', fontWeight: '900', fontSize: '12px', padding: '2px 6px', borderRadius: '3px' } }, 'N'),
+            h('span', { style: { color: '#ffb400', fontSize: '12px', fontWeight: '700' } }, 'TOP 10 FİLM'),
+            h('span', { style: { color: '#cbd5e1', fontSize: '12px' } }, '4K Ultra HD · 5.1 Dolby Audio · 2026 · 16+')
+          ),
+          h('h2', {
             style: {
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '12px 26px',
-              borderRadius: '6px',
-              background: '#ffffff',
-              border: 'none',
-              color: '#000000',
-              fontWeight: '800',
-              fontSize: '15px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-            },
-            onclick: () => {
-              closeModal();
-              const mediaObj = {
-                provider: 'netflix',
-                catalogProvider: 'netflix',
-                streamType: 'official',
-                title: 'Organize İşler: Karun Hazinesi',
-                originalTitle: 'Organize İşler: Karun Hazinesi',
-                url: 'https://www.netflix.com/watch/81682705',
-                officialUrl: 'https://www.netflix.com/title/81682705',
-                poster: 'https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
-                backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
-                mediaType: 'tv',
-                season: 1,
-                episode: 1,
-                authenticated: true,
-                duration: 2880,
-              };
-              if (typeof onPickContent === 'function') {
-                onPickContent(mediaObj);
-              } else {
-                location.hash = `#/mesh/netflix-organize-isler-${Date.now().toString(36)}`;
-              }
-            },
-          }, '▶ Oynat (Odayı Kur)'),
-          h('button', {
-            type: 'button',
-            style: {
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              padding: '12px 20px',
-              borderRadius: '6px',
-              background: 'rgba(109, 109, 110, 0.7)',
-              border: 'none',
+              margin: '0',
+              fontSize: '34px',
+              fontWeight: '900',
               color: '#ffffff',
-              fontWeight: '700',
-              fontSize: '14px',
-              cursor: 'pointer',
+              letterSpacing: '-0.5px',
+              lineHeight: '1.15',
+              textShadow: '0 2px 10px rgba(0,0,0,0.8)',
             },
-            onclick: () => toast('Organize İşler: Karun Hazinesi · Başrol: Yılmaz Erdoğan, Kıvanç Tatlıtuğ, Ezgi Mola'),
-          }, 'ⓘ Daha Fazla Bilgi')
+          }, 'Organize İşler: Karun Hazinesi'),
+          h('p', {
+            style: {
+              margin: '0',
+              fontSize: '13px',
+              lineHeight: '1.45',
+              color: '#e2e8f0',
+              textShadow: '0 1px 4px rgba(0,0,0,0.8)',
+            },
+          }, 'Efsanevi Asım Noyan, jübilesini yapıp "mesleği" geride bırakmadan önce son performansını sergilemeye hazır. Peki ama usta dolandırıcı bu defa ateşle mi oynuyor?'),
+          h('div', { style: { display: 'flex', gap: '12px', marginTop: '6px' } },
+            h('button', {
+              type: 'button',
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                background: '#ffffff',
+                color: '#000000',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '10px 22px',
+                fontSize: '15px',
+                fontWeight: '800',
+                cursor: 'pointer',
+              },
+              onclick: () => {
+                toast('🎬 "Organize İşler: Karun Hazinesi" başlatılıyor...');
+                closeModal();
+                const media = {
+                  id: 'netflix-81682705',
+                  tmdbId: '577990',
+                  title: 'Organize İşler: Karun Hazinesi',
+                  originalTitle: 'Organize İşler: Karun Hazinesi',
+                  provider: 'netflix',
+                  catalogProvider: 'netflix',
+                  streamType: 'official',
+                  url: 'https://www.netflix.com/watch/81682705',
+                  poster: 'https://image.tmdb.org/t/p/w500/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+                  backdrop: 'https://image.tmdb.org/t/p/w1280/sGPoP2RYLifBh9ZYFVn2H74r9RW.jpg',
+                  mediaType: 'tv',
+                  season: 1,
+                  episode: 1,
+                  authenticated: true,
+                };
+                if (typeof onPickContent === 'function') onPickContent(media);
+                else location.hash = '#/mesh/netflix-81682705';
+              },
+            }, '▶ Oynat'),
+            h('button', {
+              type: 'button',
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(109, 109, 110, 0.7)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '10px 20px',
+                fontSize: '14px',
+                fontWeight: '700',
+                cursor: 'pointer',
+              },
+              onclick: () => toast('ℹ️ Yılmaz Erdoğan, Kıvanç Tatlıtuğ, Ezgi Mola'),
+            }, 'ⓘ Daha Fazla Bilgi')
+          )
         )
       );
 
-      // Rows matching Screenshot 4 & 5
-      const DRAMA_SERIES = [
-        { title: 'The Mentalist', meta: 'S7 : B8 "Göz Akı" · 11 / 42 dk.', ep: 'S7:B8', poster: 'https://image.tmdb.org/t/p/w500/acYXu4KaDj1NIkMgObnhe4C4a0T.jpg' },
-        { title: 'Dexter', meta: 'Dizi · Suç / Gerilim', poster: 'https://image.tmdb.org/t/p/w500/i8ORB1biusVy703lGxUi5Rle6zA.jpg' },
-        { title: 'House M.D.', meta: 'Dizi · Medikal Drama', poster: 'https://image.tmdb.org/t/p/w500/3Cz7ySOQJmqiuTdrc6CY0r65yDI.jpg' },
-        { title: 'Breaking Bad', meta: 'Dizi · Suç Klasiği', poster: 'https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg' },
-        { title: 'Cyberpunk: Edgerunners', meta: 'Anime · Bilim Kurgu', poster: 'https://image.tmdb.org/t/p/w500/v3JuB15WybKmxDeT1hWdK3j6eSJ.jpg' },
-        { title: 'Vinland Saga', meta: 'Anime · Tarihi Macera', poster: 'https://image.tmdb.org/t/p/w500/vUHlpA5c1NXkds59reY3HMb4Abs.jpg' },
-      ];
-
+      // ROWS: AMERİKA YAPIMI DRAMA DİZİLERİ & POPÜLER DİZİLER (SCREENSHOT 4 & 5 PARITY)
       const makeCard = (item) => {
-        const card = h('div', {
+        return h('div', {
           role: 'button',
           tabindex: '0',
           style: {
-            flexShrink: 0,
             width: '180px',
-            background: '#181818',
+            flexShrink: 0,
             borderRadius: '6px',
             overflow: 'hidden',
+            background: '#18181b',
             cursor: 'pointer',
-            transition: 'transform .2s ease, box-shadow .2s ease',
+            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
             position: 'relative',
           },
+          onmouseenter: (e) => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.zIndex = '5'; },
+          onmouseleave: (e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.zIndex = '1'; },
           onclick: () => {
+            toast(`🎬 "${item.title}" odada başlatılıyor...`);
             closeModal();
-            const mediaObj = {
+            const media = {
+              id: `netflix-${item.tmdbId}`,
+              tmdbId: item.tmdbId,
+              title: item.title,
+              originalTitle: item.originalTitle || item.title,
               provider: 'netflix',
               catalogProvider: 'netflix',
               streamType: 'official',
-              title: item.title,
-              originalTitle: item.title,
-              url: `https://www.netflix.com/search?q=${encodeURIComponent(item.title)}`,
-              officialUrl: 'https://www.netflix.com/browse',
+              url: item.url || `https://www.netflix.com/title/${item.tmdbId}`,
               poster: item.poster,
-              mediaType: 'tv',
+              backdrop: item.backdrop || item.poster,
+              mediaType: item.mediaType || 'tv',
               season: 1,
               episode: 1,
               authenticated: true,
-              duration: 2700,
             };
-            if (typeof onPickContent === 'function') {
-              onPickContent(mediaObj);
-            } else {
-              location.hash = `#/mesh/netflix-${item.title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-            }
+            if (typeof onPickContent === 'function') onPickContent(media);
+            else location.hash = `#/mesh/netflix-${item.tmdbId}`;
           },
         },
-          h('div', {
-            style: {
-              width: '100%',
-              height: '105px',
-              backgroundImage: `url("${item.poster}")`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center top',
-              position: 'relative',
-            },
-          },
-            h('div', {
-              style: {
-                position: 'absolute',
-                inset: 0,
-                background: 'linear-gradient(to top, rgba(24,24,24,0.9) 0%, transparent 60%)',
-              },
-            })
-          ),
-          h('div', { style: { padding: '10px' } },
-            h('div', { style: { fontWeight: '700', fontSize: '13px', color: '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, item.title),
-            h('div', { style: { fontSize: '11px', color: '#94a3b8', marginTop: '3px' } }, item.meta),
-            h('div', { style: { display: 'flex', gap: '6px', marginTop: '8px' } },
-              h('span', { style: { width: '22px', height: '22px', borderRadius: '50%', background: '#fff', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '900' } }, '▶'),
-              h('span', { style: { width: '22px', height: '22px', borderRadius: '50%', border: '1px solid #808080', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' } }, '+'),
-              h('span', { style: { width: '22px', height: '22px', borderRadius: '50%', border: '1px solid #808080', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px' } }, '👍')
+          h('img', {
+            src: item.backdrop || item.poster,
+            alt: item.title,
+            style: { width: '100%', height: '105px', objectFit: 'cover', display: 'block' },
+          }),
+          h('div', { style: { padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: '3px' } },
+            h('span', { style: { fontSize: '13px', fontWeight: '800', color: '#fff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
+            h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8' } },
+              h('span', {}, item.year || '2024'),
+              h('span', { style: { color: '#22c55e', fontWeight: '700' } }, `★ ${item.rating || '8.5'}`)
             )
           )
         );
-
-        card.onmouseenter = () => {
-          card.style.transform = 'scale(1.05)';
-          card.style.boxShadow = '0 12px 28px rgba(0,0,0,0.8)';
-        };
-        card.onmouseleave = () => {
-          card.style.transform = 'scale(1)';
-          card.style.boxShadow = 'none';
-        };
-
-        return card;
       };
 
-      const rowsSection = h('div', {
-        style: {
-          padding: '20px 24px 40px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '24px',
-        },
-      },
-        // Row 1
-        h('div', {},
-          h('h2', { style: { margin: '0 0 12px', fontSize: '16px', fontWeight: '800', color: '#e5e5e5' } }, 'Amerika Yapımı Drama Dizileri'),
-          h('div', {
-            style: {
-              display: 'flex',
-              gap: '12px',
-              overflowX: 'auto',
-              paddingBottom: '8px',
-            },
-          }, ...DRAMA_SERIES.slice(0, 4).map(makeCard))
-        ),
-        // Row 2
-        h('div', {},
-          h('h2', { style: { margin: '0 0 12px', fontSize: '16px', fontWeight: '800', color: '#e5e5e5' } }, 'Tekrar Tekrar İzlenen Diziler'),
-          h('div', {
-            style: {
-              display: 'flex',
-              gap: '12px',
-              overflowX: 'auto',
-              paddingBottom: '8px',
-            },
-          }, ...DRAMA_SERIES.map(makeCard))
-        )
-      );
+      const dramaRow = [
+        { tmdbId: '1405', title: 'Dexter', mediaType: 'tv', year: '2006', rating: '8.7', poster: 'https://image.tmdb.org/t/p/w500/58H6CtF0npS1nTIXVF1w5n6z5qU.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/hT3lqpT227hA4XF2QzJ7V1YvWfN.jpg' },
+        { tmdbId: '1408', title: 'House M.D.', mediaType: 'tv', year: '2004', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/3Cz7kk8t59GuflHgHQ9ua9CzYNY.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/hiKmpZMGZsrkA3cdKspnlTeiL88.jpg' },
+        { tmdbId: '1396', title: 'Breaking Bad', mediaType: 'tv', year: '2008', rating: '8.9', poster: 'https://image.tmdb.org/t/p/w500/ztkUQFLlC19CCMYHW9o1zWhJRNq.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/9faGSFi5jam6pDWGNd0p8J25Aq5.jpg' },
+      ];
 
-      bodyArea.appendChild(topBar);
-      bodyArea.appendChild(heroBillboard);
-      bodyArea.appendChild(rowsSection);
+      const favoritesRow = [
+        { tmdbId: '5920', title: 'The Mentalist', mediaType: 'tv', year: '2008', rating: '8.4', poster: 'https://image.tmdb.org/t/p/w500/acYv83d3j7VzV2eJ3Y9C5lM2r6X.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/7RyHsO4yDXtBv1z9qKzY6vV2eJ3.jpg' },
+        { tmdbId: '105248', title: 'Cyberpunk: Edgerunners', mediaType: 'tv', year: '2022', rating: '8.6', poster: 'https://image.tmdb.org/t/p/w500/7jswUvGf05q9b4d3lM2r6XacYv8.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/s16H6TpK2utvwDtzZ8Qy4qm5Emw.jpg' },
+        { tmdbId: '87083', title: 'Vinland Saga', mediaType: 'tv', year: '2019', rating: '8.8', poster: 'https://image.tmdb.org/t/p/w500/yox206E88A1r8gC8yZ7h0qF12.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/vI67kM5j8vV1z9qKzY6vV2eJ3Y9.jpg' },
+        { tmdbId: '1973', title: 'Hajime no Ippo', mediaType: 'tv', year: '2000', rating: '8.7', poster: 'https://image.tmdb.org/t/p/w500/5B0eM9mJ2r8gC8yZ7h0qF12yox2.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/9n8u0mJ2r8gC8yZ7h0qF12yox20.jpg' },
+        { tmdbId: '428', title: 'Monster', mediaType: 'tv', year: '2004', rating: '8.8', poster: 'https://image.tmdb.org/t/p/w500/w44vW0eM9mJ2r8gC8yZ7h0qF12y.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/8BvV2eJ3Y9C5lM2r6XacYv83d3j.jpg' },
+      ];
+
+      const makeRow = (title, items) => {
+        const rowWrap = h('div', {
+          style: {
+            display: 'flex',
+            gap: '14px',
+            overflowX: 'auto',
+            padding: '4px 20px 14px',
+            scrollbarWidth: 'none',
+          },
+        }, ...items.map(makeCard));
+
+        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '14px' } },
+          h('h3', { style: { margin: '0 20px', fontSize: '15px', fontWeight: '800', color: '#fff' } }, title),
+          rowWrap
+        );
+      };
+
+      bodyArea.append(
+        topBar,
+        heroBillboard,
+        makeRow('Amerika Yapımı Drama Dizileri', dramaRow),
+        makeRow('Tekrar Tekrar İzlenen Diziler', favoritesRow)
+      );
       return;
     }
   };
 
-  // Bottom-right back button circle '<'
+  // Back Button Navigation (< circle at bottom right)
   const backNavBtn = h('button', {
     type: 'button',
+    title: 'Geri Dön',
     style: {
       position: 'absolute',
       bottom: '18px',
       right: '18px',
-      width: '38px',
-      height: '38px',
+      width: '42px',
+      height: '42px',
       borderRadius: '50%',
-      background: 'rgba(255, 255, 255, 0.12)',
-      border: '1px solid rgba(255, 255, 255, 0.2)',
+      background: 'rgba(0, 0, 0, 0.65)',
+      border: '1px solid rgba(255, 255, 255, 0.25)',
       color: '#ffffff',
-      fontSize: '16px',
-      fontWeight: '800',
+      fontSize: '20px',
+      fontWeight: '900',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+      transition: 'background .2s, transform .1s',
       zIndex: '15',
     },
     onclick: () => {
@@ -1188,14 +1142,12 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
     },
   }, '<');
 
-  modalContainer.appendChild(renderRaveHeader());
-  modalContainer.appendChild(bodyArea);
-  modalContainer.appendChild(backNavBtn);
+  backNavBtn.onmouseenter = () => { backNavBtn.style.background = 'rgba(229, 9, 20, 0.85)'; backNavBtn.style.transform = 'scale(1.08)'; };
+  backNavBtn.onmouseleave = () => { backNavBtn.style.background = 'rgba(0, 0, 0, 0.65)'; backNavBtn.style.transform = 'scale(1)'; };
 
-  // Bridge event listener for Netflix picking inside Option B iframe
+  // Listen for iframe messages if in bridge mode
   const onNetflixBridgeMsg = (ev) => {
-    if (!ev.data || typeof ev.data !== 'object') return;
-    if (ev.data.type === 'WATCHLIVO_NETFLIX_PICK') {
+    if (ev.data && ev.data.type === 'WATCHLIVO_NETFLIX_PICK') {
       const { watchId, url, title } = ev.data;
       if (!watchId) return;
       toast(`🎬 Netflix "${title || ('#' + watchId)}" seçildi! Canlı oda başlatılıyor...`);
@@ -1232,22 +1184,36 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
   };
   window.addEventListener('message', onNetflixBridgeMsg);
 
-  const origCloseModal = closeModal;
-  closeModal = () => {
+  modalContainer._cleanup = () => {
+    if (isCleanedUp) return;
+    isCleanedUp = true;
     window.removeEventListener('message', onNetflixBridgeMsg);
-    origCloseModal();
   };
 
   renderView();
 
-  modalHandle = popup({
-    content: modalContainer,
-    wide: true,
-    dismissable: true,
-    onClose: () => closeModal(),
-  });
+  modalContainer.append(
+    renderRaveHeader(),
+    bodyArea,
+    backNavBtn
+  );
+
+  return modalContainer;
 }
 
+export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent) {
+  let modalHandle = null;
+  const win = buildNetflixRaveWindow(p, onPickContent, onReload, true, () => {
+    if (modalHandle?.close) modalHandle.close();
+    else document.querySelector('.popup-backdrop')?.remove();
+  });
+  modalHandle = popup({
+    content: win,
+    wide: true,
+    dismissable: true,
+    onClose: () => win._cleanup?.(),
+  });
+}
 
 export function openMaxLoginModal(p, onReload, onOpenBrowser) {
   const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
