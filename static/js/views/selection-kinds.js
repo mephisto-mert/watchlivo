@@ -1,37 +1,19 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261109_v164';
-import { api, qs } from '../api.js?v=20261109_v164';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261109_v164';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261109_v164';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261109_v164';
-import { profileSetup } from '../profile.js?v=20261109_v164';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261109_v164';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v165';
+import { api, qs } from '../api.js?v=20261110_v165';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v165';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v165';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v165';
+import { profileSetup } from '../profile.js?v=20261110_v165';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v165';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261109_v164';
+} from '../store.js?v=20261110_v165';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
-  if (provId === 'max' || it?.provider === 'max' || it?.catalogProvider === 'max') {
-    const maxAcct = getAccount('max');
-    if (!maxAcct?.loginSatisfied) {
-      toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
-      const targetProv = (provId === 'max') ? prov : (getProvider('max') || { id: 'max', name: 'Max' });
-      openProviderLoginModal(targetProv);
-      return null;
-    }
-  }
-  if (provId === 'netflix' || it?.provider === 'netflix' || it?.catalogProvider === 'netflix') {
-    const nfAcct = getAccount('netflix');
-    if (!nfAcct?.loginSatisfied) {
-      toast('Netflix içeriklerini izlemek için önce Netflix hesabınızı bağlamalısınız.');
-      const targetProv = (provId === 'netflix') ? prov : (getProvider('netflix') || { id: 'netflix', name: 'Netflix' });
-      openProviderLoginModal(targetProv);
-      return null;
-    }
-  }
   const acct = getAccount(provId);
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
   const s = Math.max(1, Number(season) || 1);
@@ -930,7 +912,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v164');
+                  const { setView } = await import('../state.js?v=20261110_v165');
                   setView('left', 'Room');
                 }
               },
@@ -945,7 +927,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v164');
+                  const { setView } = await import('../state.js?v=20261110_v165');
                   setView('left', 'Room');
                 }
               },
@@ -960,7 +942,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261109_v164');
+                  const { setView } = await import('../state.js?v=20261110_v165');
                   setView('left', 'Room');
                 }
               },
@@ -1035,15 +1017,6 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       class: 'btn primary poster-cta',
       onclick: async (e) => {
         e.stopPropagation();
-        if (p?.id === 'max' || it?.provider === 'max' || it?.catalogProvider === 'max') {
-          const maxAcct = getAccount('max');
-          if (!maxAcct?.loginSatisfied) {
-            toast('Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.');
-            const targetProv = (p?.id === 'max') ? p : (getProvider('max') || { id: 'max', name: 'Max' });
-            openProviderLoginModal(targetProv, () => refreshAuth?.());
-            return;
-          }
-        }
         if (isTv) { openDetail(it); return; }
         if (card.querySelector('.loading')) return;
         const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));

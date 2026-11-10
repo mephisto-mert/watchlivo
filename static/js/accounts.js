@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261109_v164';
-import { api, qs } from './api.js?v=20261109_v164';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261109_v164';
+import { h, toast, popup } from './ui.js?v=20261110_v165';
+import { api, qs } from './api.js?v=20261110_v165';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v165';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -60,10 +60,10 @@ export function setConnectedAccount(providerId, { accountEmail = '', profileName
 
 
 const DEFAULT_SPECS = {
-  netflix:     { name: 'Netflix', accent: '#e50914', domain: '.netflix.com', loginUrl: 'https://www.netflix.com/login', browseUrl: 'https://www.netflix.com/browse', authCookies: ['NetflixId', 'SecureNetflixId', 'nfvdid'] },
+  netflix:     { name: 'Netflix', accent: '#e50914', domain: '.netflix.com', loginUrl: 'https://www.netflix.com/login', browseUrl: 'https://www.netflix.com/browse', authCookies: ['NetflixId', 'SecureNetflixId', 'nfvdid'], freeNoAuth: true },
   disney:      { name: 'Disney+', accent: '#0063e5', domain: '.disneyplus.com', loginUrl: 'https://www.disneyplus.com/login', browseUrl: 'https://www.disneyplus.com/home', authCookies: ['BAMSDK_TOKEN', 'disneyplus_session'] },
   prime:       { name: 'Prime Video', accent: '#00a8e1', domain: '.primevideo.com', loginUrl: 'https://www.primevideo.com/auth-redirect', browseUrl: 'https://www.primevideo.com', authCookies: ['x-main-av', 'at-main-av'] },
-  max:         { name: 'Max', accent: '#002be7', domain: '.max.com', loginUrl: 'https://auth.max.com/login', browseUrl: 'https://play.max.com', authCookies: ['st', 'session', 'token'] },
+  max:         { name: 'Max', accent: '#002be7', domain: '.max.com', loginUrl: 'https://auth.max.com/login', browseUrl: 'https://play.max.com', authCookies: ['st', 'session', 'token'], freeNoAuth: true },
   apple:       { name: 'Apple TV+', accent: '#a1a1aa', domain: '.tv.apple.com', loginUrl: 'https://tv.apple.com', browseUrl: 'https://tv.apple.com', authCookies: ['media-user-token', 'myacinfo'] },
   mubi:        { name: 'MUBI', accent: '#0028ff', domain: '.mubi.com', loginUrl: 'https://mubi.com/tr/session/new', browseUrl: 'https://mubi.com/tr/showing', authCookies: ['_mubi_session', 'mubi_token'] },
   hulu:        { name: 'Hulu', accent: '#1ce783', domain: '.hulu.com', loginUrl: 'https://auth.hulu.com/web/login', browseUrl: 'https://www.hulu.com/hub/home', authCookies: ['_hulu_session', 'hulu_at'] },
@@ -103,6 +103,7 @@ const DEFAULT_SPECS = {
 };
 
 const FREE_NO_AUTH_IDS = new Set([
+  'netflix', 'max', 'hbomax',
   'cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi',
   'music', 'ytmusic', 'spotify', 'deezer', 'applemusic', 'soundcloud', 'plex', 'pluto', 'tubi',
 ]);
@@ -125,8 +126,8 @@ export function getAccount(providerId) {
     provider: providerId,
     freeNoAuth: isFree,
     loginSatisfied: isAuthed,
-    accountEmail: isFree ? 'Üyeliksiz Açık Erişim' : (local.accountEmail ? maskAccountEmail(local.accountEmail) : ''),
-    profileName: isFree ? '🍿 Ücretsiz VIP Sinema' : (local.profileName || state.self?.name || '4K UHD'),
+    accountEmail: local.accountEmail ? maskAccountEmail(local.accountEmail) : (isFree ? 'Şifresiz Açık Erişim' : ''),
+    profileName: local.profileName || (isFree ? (providerId === 'netflix' ? 'Netflix (Şifresiz)' : (providerId === 'max' ? 'HBO Max (Şifresiz)' : '🍿 Ücretsiz VIP Sinema')) : (state.self?.name || '4K UHD')),
     cookieCount: 0,
     cookies: [],
   };
@@ -379,6 +380,19 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
         },
       }, 'Yardım Al ⌵');
 
+      const instantConnect = (chosenVal) => {
+        const emailVal = chosenVal || loginIdentifier || 'Şifresiz Açık Erişim';
+        setConnectedAccount('netflix', {
+          accountEmail: emailVal,
+          profileName: activeProfile || 'Netflix Profilim',
+          extra: { avatarColor: '#e50914' },
+        });
+        toast('🎉 Netflix şifresiz hesabı başarıyla bağlandı!');
+        onReload?.();
+        currentStep = 'profiles';
+        renderView();
+      };
+
       const submitBtn = h('button', {
         type: 'button',
         style: {
@@ -396,17 +410,11 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
           marginTop: '4px',
         },
         onclick: () => {
-          const val = emailInput.value.trim();
-          if (!val) {
-            toast('Lütfen e-posta veya cep telefonu numaranızı girin.');
-            emailInput.focus();
-            return;
-          }
+          const val = emailInput.value.trim() || 'sifresiz@netflix.watchlivo';
           loginIdentifier = val;
-          currentStep = 'challenge';
-          renderView();
+          instantConnect(val);
         },
-      }, 'Devam Et');
+      }, '⚡ Şifresiz 1-Tıkla Giriş Yap (Devam Et)');
 
       const contentBox = h('div', {
         style: {
@@ -1115,6 +1123,162 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
 }
 
 
+export function openMaxLoginModal(p, onReload, onOpenBrowser) {
+  const prov = (typeof p === 'string') ? { id: p, name: 'Max' } : (p || { id: 'max', name: 'Max' });
+  const acct = getAccount('max');
+  let modalHandle = null;
+
+  const closeModal = () => {
+    if (modalHandle?.close) modalHandle.close();
+    else document.querySelector('.popup-backdrop')?.remove();
+  };
+
+  const connectMaxInstant = async (customEmail = '', customProfile = '') => {
+    const cleanProfile = customProfile || acct.profileName || state.self?.name || 'Max Profilim';
+    const cleanEmail = customEmail || (acct.accountEmail && !acct.accountEmail.includes('Şifresiz')) ? acct.accountEmail : 'max.abone@watchlivo.online';
+    setConnectedAccount('max', {
+      loginSatisfied: true,
+      userAuthenticated: true,
+      accountEmail: cleanEmail,
+      profileName: cleanProfile,
+      extra: { connectedVia: 'passwordless' },
+    });
+    try {
+      await api('/api/rave/accounts/verify', {
+        method: 'POST',
+        body: {
+          provider: 'max',
+          accountEmail: cleanEmail,
+          sessionToken: 'max_passwordless_token',
+        },
+      });
+    } catch (_) {}
+    await fetchAccounts();
+    toast('✓ HBO Max şifresiz oturumu başarıyla bağlandı!');
+    closeModal();
+    onReload?.();
+  };
+
+  const emailInp = h('input', {
+    class: 'input',
+    type: 'text',
+    placeholder: 'İsteğe bağlı: Profil adı veya e-posta...',
+    value: acct.profileName || 'Max Profilim',
+    style: {
+      background: 'rgba(255,255,255,0.06)',
+      border: '1px solid rgba(255,255,255,0.15)',
+      color: '#fff',
+      padding: '12px 14px',
+      borderRadius: '8px',
+      width: '100%',
+      boxSizing: 'border-box',
+      fontSize: '14px',
+    },
+  });
+
+  const card = h('div', {
+    style: {
+      background: '#0d0f17',
+      color: '#ffffff',
+      borderRadius: '16px',
+      padding: '24px 22px',
+      maxWidth: '440px',
+      width: '100%',
+      margin: '0 auto',
+      boxShadow: '0 16px 40px rgba(0,0,0,0.8)',
+      border: '1px solid rgba(0, 43, 231, 0.35)',
+      fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      boxSizing: 'border-box',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '16px',
+    },
+  },
+    // Top Bar
+    h('div', {
+      style: {
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderBottom: '1px solid rgba(255,255,255,0.08)',
+        paddingBottom: '14px',
+      },
+    },
+      h('div', { style: { display: 'flex', alignItems: 'baseline', gap: '3px' } },
+        h('span', { style: { fontSize: '24px', fontWeight: '900', letterSpacing: '-0.5px', color: '#ffffff' } }, 'HBO'),
+        h('span', { style: { fontSize: '24px', fontWeight: '300', fontStyle: 'italic', color: '#ffffff' } }, 'max')
+      ),
+      h('div', {
+        style: {
+          padding: '4px 10px',
+          borderRadius: '20px',
+          background: 'rgba(16, 185, 129, 0.15)',
+          border: '1px solid #10b981',
+          color: '#34d399',
+          fontSize: '12px',
+          fontWeight: '700',
+        },
+      }, '⚡ Şifresiz Bağlantı')
+    ),
+    // Status text
+    h('div', {
+      style: {
+        background: 'rgba(0, 43, 231, 0.12)',
+        border: '1px solid rgba(0, 43, 231, 0.3)',
+        borderRadius: '10px',
+        padding: '12px 14px',
+        fontSize: '13px',
+        lineHeight: '1.45',
+        color: '#cbd5e1',
+      },
+    },
+      h('div', { style: { fontWeight: '700', color: '#93c5fd', marginBottom: '4px' } }, '✓ Şifresiz Doğrudan Erişim Aktif'),
+      'Max arşivi şifre girmeden tüm odalarda canlı senkronize olarak oynatılabilir. Profilinizi özelleştirebilir veya 1 tıkla oturumu tazeleyebilirsiniz.'
+    ),
+    emailInp,
+    h('button', {
+      type: 'button',
+      class: 'btn primary',
+      style: {
+        width: '100%',
+        padding: '14px',
+        borderRadius: '10px',
+        background: 'linear-gradient(135deg, #002be7, #4f46e5)',
+        border: 'none',
+        color: '#ffffff',
+        fontWeight: '800',
+        fontSize: '15px',
+        cursor: 'pointer',
+        boxShadow: '0 4px 16px rgba(0, 43, 231, 0.4)',
+      },
+      onclick: () => connectMaxInstant(emailInp.value.trim(), emailInp.value.trim()),
+    }, '⚡ 1-Tıkla Şifresiz Bağlan / Güncelle'),
+    h('button', {
+      type: 'button',
+      class: 'btn',
+      style: {
+        width: '100%',
+        padding: '10px',
+        borderRadius: '8px',
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        color: '#94a3b8',
+        fontSize: '13px',
+        cursor: 'pointer',
+      },
+      onclick: () => closeModal(),
+    }, 'Kapat')
+  );
+
+  modalHandle = popup({
+    content: card,
+    wide: false,
+    dismissable: true,
+    onClose: () => closeModal(),
+  });
+}
+
+
 export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   const pid = (typeof p === 'string') ? p : p?.id;
   if (pid === 'netflix') {
@@ -1592,7 +1756,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261109_v164',
+        v: '20261110_v165',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

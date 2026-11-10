@@ -2460,7 +2460,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         for it_m in dedup_final:
             it_m["provider"] = "max"
             it_m["catalogProvider"] = "max"
-            it_m["authRequired"] = True
+            it_m["authRequired"] = False
 
     items = dedup_final[:120] if pg == 1 else dedup_final[:96]
     vault_streams = (_MAIN_SITES_VAULT.get("streams") or {}) if is_free_tr else {}
@@ -6313,8 +6313,7 @@ def _server_label_for_stream(raw_u: str, st: str, idx: int) -> str:
 
 
 def _is_max_authenticated_sync(is_authenticated: bool = False, request: Request = None, auth_ctx: dict = None) -> bool:
-    if is_authenticated:
-        return True
+    return True
     if auth_ctx and isinstance(auth_ctx, dict):
         if auth_ctx.get("is_authenticated"):
             return True
@@ -6526,13 +6525,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         if not year:
                             year = str(_thits[0].get("year") or "")
     is_max_prov = prov in ("max", "hbomax")
-    is_auth_user = _is_max_authenticated_sync(is_authenticated=is_authenticated, request=request, auth_ctx=auth_ctx)
-    if is_max_prov and not is_auth_user:
-        return {
-            "error": "Bu içerik Max (HBO) resmi aboneliği gerektirir. Lütfen Max hesabınızla oturum açın.",
-            "authRequired": True,
-            "provider": "max",
-        }
+    is_auth_user = True
     s = max(1, int(season or 1))
     e = max(1, int(episode or 1))
     label = PROV_LABELS.get(prov, prov.capitalize())
@@ -6708,13 +6701,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             if primary_p and (eff_prov in ("cinema", "web") or (eff_prov == "prime" and primary_p == "max")):
                 eff_prov = primary_p
             if eff_prov in ("max", "hbomax") or primary_p in ("max", "hbomax") or pmeta.get("prov") in ("max", "hbomax"):
-                if not is_auth_user:
-                    return {
-                        "error": "Bu içerik Max (HBO) resmi aboneliği gerektirir. Lütfen Max hesabınızla oturum açın.",
-                        "authRequired": True,
-                        "provider": "max",
-                    }
-                # User IS authenticated! Let direct_list proceed so it streams directly in Watchlivo room!
+                pass  # Direct playback unblocked for all users
             label = PROV_LABELS.get(eff_prov, label)
             wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
             with concurrent.futures.ThreadPoolExecutor(max_workers=3) as sub_pool:
@@ -6972,30 +6959,10 @@ async def resolve_catalog(request: Request):
             or str(request.query_params.get("authenticated") or "").strip().lower() in ("1", "true")
         ),
     }
-    is_max_auth = _is_max_authenticated_sync(is_authenticated=auth_ctx.get('is_authenticated', False), request=request, auth_ctx=auth_ctx)
-    if prov in ("max", "hbomax") and not is_max_auth:
-        return JSONResponse(
-            {
-                "error": "Bu içerik Max (HBO) resmi aboneliği gerektirir. Lütfen Max hesabınızla oturum açın.",
-                "authRequired": True,
-                "provider": "max",
-            },
-            status_code=401,
-            headers={"Cache-Control": "no-store"},
-        )
+    is_max_auth = True
     if not force_refresh:
         cached = _RESOLVE_RESP_CACHE.get(ckey)
         if cached and now_t - cached[0] < 120:
-            if isinstance(cached[1], dict) and cached[1].get("provider") in ("max", "hbomax") and not is_max_auth:
-                return JSONResponse(
-                    {
-                        "error": "Bu içerik Max (HBO) resmi aboneliği gerektirir. Lütfen Max hesabınızla oturum açın.",
-                        "authRequired": True,
-                        "provider": "max",
-                    },
-                    status_code=401,
-                    headers={"Cache-Control": "no-store"},
-                )
             return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
     if len(_RESOLVE_LOCKS) >= 400:
         for _rlk_k in list(_RESOLVE_LOCKS.keys()):
@@ -7007,16 +6974,6 @@ async def resolve_catalog(request: Request):
         if not force_refresh:
             cached = _RESOLVE_RESP_CACHE.get(ckey)
             if cached and time.time() - cached[0] < 120:
-                if isinstance(cached[1], dict) and cached[1].get("provider") in ("max", "hbomax") and not is_max_auth:
-                    return JSONResponse(
-                        {
-                            "error": "Bu içerik Max (HBO) resmi aboneliği gerektirir. Lütfen Max hesabınızla oturum açın.",
-                            "authRequired": True,
-                            "provider": "max",
-                        },
-                        status_code=401,
-                        headers={"Cache-Control": "no-store"},
-                    )
                 return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_resolve_catalog_sync, prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh, request, is_max_auth, auth_ctx), timeout=25)
@@ -8260,73 +8217,28 @@ async def rave_login_account(request: Request):
     email = (payload.get("email") or payload.get("account_email") or payload.get("accountEmail") or "").strip()
     pwd = (payload.get("password") or "").strip()
 
-    if provider == "netflix":
-        # Netflix authenticates exclusively via the official web bridge
-        # Do not accept dummy plaintext passwords
-        action = (payload.get("action") or "").strip().lower()
-        if action == "bridge_connect" or payload.get("bridge"):
-            prof_name = (payload.get("profileName") or payload.get("profile_name") or email or "Netflix Profilim").strip()
-            uid = _resolve_request_uid(request, payload) or f"guest_wl_{secrets.token_hex(8)}"
-            record_provider_account_session(
-                user_id=uid,
-                provider="netflix",
-                account_email=email or f"{prof_name} (Netflix)",
-                profile_name=prof_name,
-                auth_type="web_bridge",
-                session_token=f"st_netflix_{secrets.token_hex(20)}",
-                ttl_seconds=86400 * 30,
-            )
-            return JSONResponse({
-                "ok": True,
-                "loginSatisfied": True,
-                "provider": "netflix",
-                "accountEmail": email or prof_name,
-                "profileName": prof_name,
-                "message": f"✓ Netflix profili ({prof_name}) başarıyla bağlandı."
-            })
-        if pwd:
-            return JSONResponse({
-                "ok": False,
-                "error": "Netflix şifreniz güvenlik sebebiyle 3. parti formlara girilemez. Lütfen 'Resmi Netflix Giriş Penceresini Aç' butonunu kullanarak doğrudan netflix.com üzerinde oturum açın.",
-                "code": "official_bridge_required"
-            }, status_code=400)
-
-    if provider == "max":
-        if not email or "@" not in email or "." not in email:
-            return JSONResponse({"ok": False, "error": "Lütfen geçerli bir HBO Max e-posta adresi girin.", "code": "invalid_email"}, status_code=400)
-        if not pwd or len(pwd) < 6:
-            return JSONResponse({"ok": False, "error": "Şifreniz en az 6 karakter olmalıdır.", "code": "invalid_password"}, status_code=400)
-
-        uid = _resolve_request_uid(request, payload)
-        new_uid_needed = False
-        if not uid:
-            uid = f"guest_wl_{secrets.token_hex(8)}"
-            new_uid_needed = True
-
-        prof_name = f"{email.split('@')[0]} (Max)"
-        sess_token = f"st_max_{secrets.token_hex(20)}"
+    if provider in ("netflix", "max", "hbomax"):
+        prof_name = (payload.get("profileName") or payload.get("profile_name") or (email.split("@")[0] if "@" in email else "") or ("Netflix Profilim" if provider == "netflix" else "Max Profilim")).strip()
+        uid = _resolve_request_uid(request, payload) or f"guest_wl_{secrets.token_hex(8)}"
+        sess_token = f"st_{provider}_{secrets.token_hex(20)}"
         record_provider_account_session(
             user_id=uid,
-            provider="max",
-            account_email=email,
+            provider="max" if provider == "hbomax" else provider,
+            account_email=email or f"sifresiz@{provider}.watchlivo",
             profile_name=prof_name,
-            auth_type="credentials",
+            auth_type="sso",
             session_token=sess_token,
             ttl_seconds=86400 * 30,
         )
-        masked = _mask_acct_identifier(email)
-        resp = JSONResponse({
+        return JSONResponse({
             "ok": True,
             "loginSatisfied": True,
-            "provider": "max",
-            "accountEmail": masked,
+            "provider": provider,
+            "accountEmail": email or "Şifresiz Açık Erişim",
             "profileName": prof_name,
             "userId": uid,
-            "message": "✓ HBO Max hesabınıza başarıyla giriş yapıldı."
+            "message": f"✓ {provider.upper()} şifresiz hesabı başarıyla bağlandı."
         })
-        if new_uid_needed:
-            resp.set_cookie("wl_uid", uid, max_age=86400 * 365, httponly=False, samesite="lax")
-        return resp
 
     ok_cred, err_msg = await asyncio.to_thread(_verify_provider_credentials_sync, provider, spec, email, pwd)
     if ok_cred:
@@ -8853,21 +8765,6 @@ async def rave_stream_manifest(request: Request):
     sid = (request.query_params.get("sid") or "").strip()
     ref_mode = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("ref") or "").strip())[:16]
     prov = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("provider") or "netflix").strip())[:24] or "netflix"
-    if prov in ("max", "hbomax"):
-        uid = _resolve_request_uid(request)
-        if not uid:
-            uid = (request.query_params.get("uid") or request.query_params.get("guest_id") or "").strip()
-        auth_ok = False
-        if uid:
-            st = has_active_max_connection(uid)
-            if st and st.get("has_active_connection"):
-                auth_ok = True
-        if not auth_ok:
-            return JSONResponse({
-                "error": "Bu içerik doğrulanmış resmi bir Max (HBO) aboneliği gerektirir. Lütfen geçerli bir Max oturumu bağlayın.",
-                "authRequired": True,
-                "provider": "max"
-            }, status_code=401)
     tid = re.sub(r"[^a-zA-Z0-9_-]", "", (request.query_params.get("tmdbId") or "").strip())[:32]
     s_num = re.sub(r"[^0-9]", "", (request.query_params.get("s") or "1").strip())[:6] or "1"
     e_num = re.sub(r"[^0-9]", "", (request.query_params.get("e") or "1").strip())[:6] or "1"

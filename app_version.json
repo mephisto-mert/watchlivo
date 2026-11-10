@@ -10,6 +10,6 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-04T03:39:14.022390+00:00",
-  "changelog": "v164: Exact Rave In-App Netflix Experience — In-window interactive login, password/SMS OTP challenge, 5 canonical smiley profile selector (Kim İzliyor?), Organize İşler Karun Hazinesi billboard, and live synchronized room bridge.",
-  "version": "20261109_v164"
+  "changelog": "v165: Revert HBO Max & Netflix to passwordless free access — Zero password challenges, unblocked catalog & room playback, and instant 1-click connection.",
+  "version": "20261110_v165"
 }

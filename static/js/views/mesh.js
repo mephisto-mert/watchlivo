@@ -1,38 +1,21 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261109_v164';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261109_v164';
-import { resolveMusicItem } from './selection-kinds.js?v=20261109_v164';
-import { MeshConnection } from '../realtime.js?v=20261109_v164';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261109_v164';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261109_v164';
-import { buildLayout } from './mesh-layout.js?v=20261109_v164';
-import { getAccount } from '../accounts.js?v=20261109_v164';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261109_v164';
-import { Voice } from '../voice.js?v=20261109_v164';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261109_v164';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261109_v164';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261109_v164';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v165';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v165';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v165';
+import { MeshConnection } from '../realtime.js?v=20261110_v165';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v165';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v165';
+import { buildLayout } from './mesh-layout.js?v=20261110_v165';
+import { getAccount } from '../accounts.js?v=20261110_v165';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v165';
+import { Voice } from '../voice.js?v=20261110_v165';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v165';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v165';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v165';
 
 let ctx = null;
 
 export function checkRoomMediaAuth(media) {
-  if (!media) return { required: false };
-  const rawProv = String(media.catalogProvider || media.sourceProvider || media.provider || '').trim().toLowerCase();
-  const rawUrl = String(media.url || '').toLowerCase();
-  const isNf = rawProv === 'netflix' || rawUrl.includes('netflix.com');
-  const isMax = rawProv === 'max' || rawUrl.includes('max.com');
-  if (isNf) {
-    const acct = getAccount('netflix');
-    if (!acct?.loginSatisfied) {
-      return { required: true, provider: 'netflix' };
-    }
-  }
-  if (isMax) {
-    const acct = getAccount('max');
-    if (!acct?.loginSatisfied) {
-      return { required: true, provider: 'max' };
-    }
-  }
   return { required: false };
 }
 
