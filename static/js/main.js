@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v190';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v190';
-import { renderHome, destroyHome } from './views/home.js?v=20261110_v190';
-import { api } from './api.js?v=20261110_v190';
-import { h, toast } from './ui.js?v=20261110_v190';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v191';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v191';
+import { renderHome, destroyHome } from './views/home.js?v=20261110_v191';
+import { api } from './api.js?v=20261110_v191';
+import { h, toast } from './ui.js?v=20261110_v191';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v190'; } catch (_) { return '20261110_v190'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v191'; } catch (_) { return '20261110_v191'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261110_v190')
+    _meshModPromise = import('./views/mesh.js?v=20261110_v191')
       .then((mod) => {
         _meshMod = mod;
         return mod;

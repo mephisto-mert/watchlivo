@@ -299,8 +299,14 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
     uid_c = _clean(card.get("uid"), 64)
     if not uid_c or uid_c in _LEGACY_BOT_UIDS or uid_c in ("guest_default", "guest_local") or uid_c.startswith("unauth_"):
         return
-    d = _load_social_dir()
-    prev = d.get(uid_c) if isinstance(d.get(uid_c), dict) else {}
+    now_t = _now()
+    fast_prev = _SOCIAL_DIR.get(uid_c) if isinstance(_SOCIAL_DIR.get(uid_c), dict) else None
+    if not persist and fast_prev and (now_t - float(fast_prev.get("updatedAt") or 0.0) < 60.0):
+        d = _SOCIAL_DIR
+        prev = fast_prev
+    else:
+        d = _load_social_dir()
+        prev = d.get(uid_c) if isinstance(d.get(uid_c), dict) else {}
     raw_nm = _clean(card.get("name"), 32)
     prev_nm = _clean(prev.get("name"), 32)
     if prev_nm and prev_nm.lower() not in ("izleyici", "misafir") and raw_nm.lower() in ("", "izleyici", "misafir"):
@@ -323,8 +329,13 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
         "statusEmoji": _clean(card.get("statusEmoji") or prev.get("statusEmoji") or "🍿", 12),
         "statusText": _clean(card.get("statusText") if "statusText" in card else prev.get("statusText", ""), 80),
         "isGuest": bool(uid_c.startswith("guest_")),
-        "updatedAt": _now(),
+        "updatedAt": now_t,
     }
+    unchanged = bool(prev) and all(
+        merged.get(k) == prev.get(k)
+        for k in ("name", "handle", "color", "avatar", "avatarUrl", "bio", "statusEmoji", "statusText")
+    )
+    prev_upd = float(prev.get("updatedAt") or 0.0) if prev else 0.0
     d[uid_c] = merged
     if len(d) > 800:
         oldest = sorted(
@@ -333,7 +344,7 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
         )[:120]
         for ok, _ in oldest:
             d.pop(ok, None)
-    if persist:
+    if persist and (not unchanged or (now_t - prev_upd >= 600.0)):
         _kv_set("wl:soc:dir", d, ttl_sec=2592000)
 
 

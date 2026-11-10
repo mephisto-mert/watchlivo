@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v190';
+import { isRoomMediaPlaying } from './store.js?v=20261110_v191';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -124,6 +124,10 @@ export class SyncEngine {
     const now = performance.now();
     const activeVideo = ad._activeMediaEl ? ad._activeMediaEl() : ad.video;
     if (activeVideo && activeVideo.readyState < 1 && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+      if (status === 'PLAYING' && ad.isPaused?.() && !ad.autoplayHardBlocked && now - (this.lastPlayAttempt || 0) > 1500) {
+        this.lastPlayAttempt = now;
+        ad.play?.();
+      }
       this.lastStepAt = now;
       this.lastExpected = expected;
       this.mode = 'buffering';
@@ -190,7 +194,7 @@ export class SyncEngine {
       this.reJumps = 0;
       const elapsedSinceSeek = this.lastSeekWallAt ? Math.max(0, (now - this.lastSeekWallAt) / 1000) * base : 0;
       const driftedTarget = Number.isFinite(this.lastSeekTarget) ? this.lastSeekTarget + elapsedSinceSeek : -999;
-      if (!leader && (statusChanged || (expectedJump && Math.abs(expected - driftedTarget) > JUMP_DELTA + 2.0))) {
+      if (!leader && (statusChanged || (expectedJump && Math.abs(expected - driftedTarget) > JUMP_DELTA))) {
         this.seekUntil = 0;
         this.deferStartedAt = 0;
       }
@@ -243,7 +247,7 @@ export class SyncEngine {
         this.lastSeekWallAt = now;
         ad.seek(expected);
         this.seekUntil = now + 4200;
-      } else {
+      } else if (leader || this.didInitialSync) {
         this.seekUntil = Math.max(this.seekUntil, now + 2200);
       }
     }

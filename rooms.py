@@ -5,6 +5,7 @@ JSON-serializable dict so it can live in memory (local/dev) or in a shared store
 """
 import asyncio
 import base64
+import concurrent.futures
 import hashlib
 import hmac
 import ipaddress
@@ -1434,6 +1435,9 @@ class _RedisLock:
                 self.local_lock.release()
 
 
+_REDIS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=24, thread_name_prefix="wl_redis")
+
+
 class RedisStore:
     """Hybrid L1 (in-memory micro-cache) + L2 (pipelined Upstash Redis REST + disk fallback) store for 10k-100k concurrent users."""
 
@@ -1468,13 +1472,15 @@ class RedisStore:
 
     async def cmd(self, *args: str) -> Any:
         try:
-            return await asyncio.to_thread(self._call, [str(a) for a in args])
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(_REDIS_EXECUTOR, self._call, [str(a) for a in args])
         except Exception:
             return None
 
     async def pipeline(self, commands: List[List[str]]) -> Any:
         try:
-            return await asyncio.to_thread(self._pipeline_call, [[str(x) for x in c] for c in commands])
+            loop = asyncio.get_running_loop()
+            return await loop.run_in_executor(_REDIS_EXECUTOR, self._pipeline_call, [[str(x) for x in c] for c in commands])
         except Exception:
             return None
 
@@ -1577,18 +1583,20 @@ class RedisStore:
         room.pop("_explicit_media_clear", None)
         self.l1_rooms[rid] = room
         self.l1_read_ts[rid] = t
-        await self.fallback.put(room, force_disk=force_disk)
+        self.fallback.rooms[rid] = room
         is_serverless = os.environ.get("VERCEL") == "1"
         if not force_disk and not is_serverless and (t - self.l1_write_ts.get(rid, 0.0) < 0.25):
             return
         self.l1_write_ts[rid] = t
         clean_r = {k: v for k, v in room.items() if not k.startswith("_")}
         payload = json.dumps(clean_r, separators=(",", ":"), ensure_ascii=False)
-        await self.pipeline([
+        pipe_res = await self.pipeline([
             ["SET", f"vortex:room:{rid}", payload, "EX", "86400"],
             ["SADD", "vortex:rooms", rid],
             ["DEL", f"vortex:closed:{rid}"],
         ])
+        if pipe_res is None:
+            await self.fallback.put(room, force_disk=force_disk)
 
     async def delete(self, room_id: str, mark_closed: bool = True) -> None:
         if mark_closed:
@@ -1883,7 +1891,7 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
                 "bio": p.get("bio") or "",
                 "statusEmoji": p.get("statusEmoji") or "🍿",
                 "statusText": p.get("statusText") or "",
-            })
+            }, persist=(existing is None))
         except Exception:
             pass
     replaced_precreated = False

@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v190';
-import { expectedPosition } from '../sync.js?v=20261110_v190';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v190';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v190';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v190';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v191';
+import { expectedPosition } from '../sync.js?v=20261110_v191';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v191';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v191';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v191';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -781,8 +781,7 @@ export class Html5Adapter {
           this._ensureIosPipStandby?.(nextUrl);
         }
       }
-      const clearInitSeekListeners = () => {
-        this.initialSeekPending = 0;
+      const detachInitSeekListeners = () => {
         if (v._wlInitSeekFn) {
           ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
             v.removeEventListener(evName, v._wlInitSeekFn);
@@ -790,6 +789,10 @@ export class Html5Adapter {
           v._wlInitSeekFn = null;
         }
         v._wlInitSeekBound = false;
+      };
+      const clearInitSeekListeners = () => {
+        this.initialSeekPending = 0;
+        detachInitSeekListeners();
       };
       const enforceInitialSeek = () => {
         if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 12000) {
@@ -806,7 +809,7 @@ export class Html5Adapter {
         }
         try {
           v.currentTime = targetPos;
-          clearInitSeekListeners();
+          detachInitSeekListeners();
         } catch (e) { /* ignore */ }
       };
       this._enforceInitialSeekFn = enforceInitialSeek;
@@ -981,7 +984,7 @@ export class Html5Adapter {
       });
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         const errCode = Number(data?.response?.code || 0);
-        const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
+        const isHardUpstreamDead = [401, 403, 404, 410, 429, 451, 500, 502, 503, 504, 520, 521, 522, 524].includes(errCode);
         if (!data?.fatal) {
           if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
             this._switchedToProxySegs = true;
@@ -1198,8 +1201,8 @@ export class Html5Adapter {
       this.loadReadyTimer = setTimeout(done, 1800);
       if (validStart >= 0.5 && !(isHls && canHlsJs && !useNativeHls) && !v._wlInitSeekBound) {
         v._wlInitSeekBound = true;
-        const clearPrimaryInitSeek = () => {
-          this.initialSeekPending = 0;
+        const clearPrimaryInitSeek = (clearPending = true) => {
+          if (clearPending) this.initialSeekPending = 0;
           if (v._wlInitSeekFn) {
             ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
               v.removeEventListener(evName, v._wlInitSeekFn);
@@ -1210,7 +1213,7 @@ export class Html5Adapter {
         };
         const enforcePrimaryInitialSeek = () => {
           if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 12000) {
-            clearPrimaryInitSeek();
+            clearPrimaryInitSeek(true);
             return;
           }
           if (v.seeking || v.readyState < 1) return;
@@ -1218,20 +1221,18 @@ export class Html5Adapter {
           const targetPos = this.initialSeekPending;
           const curT = Number(v.currentTime || 0);
           if (Math.abs(curT - targetPos) <= 3.5 || curT >= targetPos - 3.2) {
-            clearPrimaryInitSeek();
+            clearPrimaryInitSeek(true);
             return;
           }
           try {
             v.currentTime = targetPos;
-            clearPrimaryInitSeek();
+            clearPrimaryInitSeek(false);
           } catch (_) {}
         };
         v._wlInitSeekFn = enforcePrimaryInitialSeek;
         ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
           v.addEventListener(evName, enforcePrimaryInitialSeek);
         });
-      } else if (isHls && canHlsJs && !useNativeHls) {
-        this.initialSeekPending = 0;
       }
       syncVideoCors(url);
       if (isHls && canHlsJs && !useNativeHls) {

@@ -6,6 +6,7 @@ Secrets come from environment variables (.env locally, Vercel env in production)
 import asyncio
 import base64
 import collections
+import concurrent.futures
 import hashlib
 import hmac
 import html as html_mod
@@ -412,10 +413,12 @@ class SecurityHeaders:
 
 IDENTITY_HEADER = b"authorization"
 _UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_LOOP_EXECUTOR_CONFIGURED = False
+_DEFAULT_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="wl_io")
 
 
 def _claims_from_token(token: str) -> dict:
-    """Resolve a bearer token to verified claims (short 2s TTL cache, 5000 entries)."""
+    """Resolve a bearer token to verified claims (15s TTL cache, 5000 entries)."""
     if not token:
         return {}
     now_ts = time.time()
@@ -429,7 +432,7 @@ def _claims_from_token(token: str) -> dict:
     except Exception:
         claims = None
     if isinstance(claims, dict) and claims.get("uid"):
-        _UID_CACHE[token] = (claims, now_ts + 2.0)
+        _UID_CACHE[token] = (claims, now_ts + 15.0)
         _UID_CACHE.move_to_end(token)
         while len(_UID_CACHE) > 5000:
             _UID_CACHE.popitem(last=False)
@@ -450,11 +453,26 @@ class IdentityMiddleware:
     is never trusted, so identity cannot be spoofed by editing a JSON body.
     """
 
+    _SKIP_AUTH_PREFIXES = ("/static/", "/api/health", "/favicon.ico", "/sw.js", "/manifest.json", "/robots.txt")
+
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        global _LOOP_EXECUTOR_CONFIGURED
+        if not _LOOP_EXECUTOR_CONFIGURED:
+            try:
+                asyncio.get_running_loop().set_default_executor(_DEFAULT_IO_EXECUTOR)
+                _LOOP_EXECUTOR_CONFIGURED = True
+            except Exception:
+                pass
         if scope["type"] == "http":
+            path_str = str(scope.get("path") or "")
+            if path_str.startswith(self._SKIP_AUTH_PREFIXES):
+                scope["wl_uid"] = ""
+                scope["wl_claims"] = {}
+                await self.app(scope, receive, send)
+                return
             token = ""
             for hk, hv in scope.get("headers") or ():
                 if hk.lower() == IDENTITY_HEADER:
@@ -7447,7 +7465,7 @@ async def provider_catalog(request: Request):
         ]
     if q and page == 1:
         try:
-            _track_analytics_sync("search", query=q)
+            await asyncio.to_thread(_track_analytics_sync, "search", query=q)
         except Exception:
             pass
     return JSONResponse(
@@ -7657,7 +7675,7 @@ async def rave_new_releases(request: Request):
                 w_ckey = f"v33|cinema|{w_mt}|{w_tid or w_t.lower()}|1|1"
                 if w_ckey not in _RESOLVE_RESP_CACHE:
                     r_w = await asyncio.wait_for(
-                        asyncio.to_thread(_resolve_catalog_sync, "cinema", w_t, str(w_it.get("year") or ""), w_tid, w_mt, str(w_it.get("poster") or ""), 1, 1, str(w_it.get("imdbId") or ""), w_t, str(w_it.get("sourceUrl") or "")),
+                        asyncio.get_running_loop().run_in_executor(_RESOLVE_EXECUTOR, _resolve_catalog_sync, "cinema", w_t, str(w_it.get("year") or ""), w_tid, w_mt, str(w_it.get("poster") or ""), 1, 1, str(w_it.get("imdbId") or ""), w_t, str(w_it.get("sourceUrl") or "")),
                         timeout=6.0,
                     )
                     if r_w:
@@ -7892,7 +7910,7 @@ async def supersearch(request: Request):
         ]
     payload = {"query": q, "youtube": yt, "tmdb": tmdb, "justwatch": jw}
     try:
-        _track_analytics_sync("search", query=q)
+        await asyncio.to_thread(_track_analytics_sync, "search", query=q)
     except Exception:
         pass
     if len(_SUPERSEARCH_CACHE) >= 250:
@@ -10957,9 +10975,20 @@ async def manifest_json(request: Request):
     )
 
 
+_SW_MEM_CACHE: dict[str, object] = {"mtime": None, "js": ""}
+_INDEX_MEM_CACHE: dict[str, object] = {"mtime": None, "html": ""}
+
+
 async def service_worker(request: Request):
     sw_path = STATIC_DIR / "sw.js"
-    js = sw_path.read_text(encoding="utf-8") if sw_path.exists() else "self.addEventListener('install',()=>self.skipWaiting());"
+    try:
+        st = sw_path.stat()
+        if _SW_MEM_CACHE.get("mtime") != st.st_mtime_ns or not _SW_MEM_CACHE.get("js"):
+            _SW_MEM_CACHE["js"] = sw_path.read_text(encoding="utf-8")
+            _SW_MEM_CACHE["mtime"] = st.st_mtime_ns
+        js = str(_SW_MEM_CACHE["js"])
+    except Exception:
+        js = "self.addEventListener('install',()=>self.skipWaiting());"
     return Response(js, media_type="application/javascript", headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
@@ -10986,7 +11015,16 @@ async def health(request: Request):
 
 
 async def index(request: Request):
-    return HTMLResponse((STATIC_DIR / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
+    idx_path = STATIC_DIR / "index.html"
+    try:
+        st = idx_path.stat()
+        if _INDEX_MEM_CACHE.get("mtime") != st.st_mtime_ns or not _INDEX_MEM_CACHE.get("html"):
+            _INDEX_MEM_CACHE["html"] = idx_path.read_text(encoding="utf-8")
+            _INDEX_MEM_CACHE["mtime"] = st.st_mtime_ns
+        html_txt = str(_INDEX_MEM_CACHE["html"])
+    except Exception:
+        html_txt = idx_path.read_text(encoding="utf-8")
+    return HTMLResponse(html_txt, headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0", "Pragma": "no-cache", "X-Frame-Options": "SAMEORIGIN"})
 
 
 _APK_HASH_CACHE: dict[str, object] = {"mtime": None, "sha256": "", "sizeBytes": 0}
@@ -12152,7 +12190,10 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
         mt_str = str(body.get("mediaType") or "")[:16]
         if ev not in ('heartbeat', 'route_view'):
             await asyncio.to_thread(_track_analytics_sync, ev, vid_hash, dev, q_str, t_str, mt_str)
-        await asyncio.to_thread(_send_server_ga4_hit_sync, vid_hash, ua_str, ip_str, ev, str(body.get('path') or '/'), t_str)
+            try:
+                _RESOLVE_EXECUTOR.submit(_send_server_ga4_hit_sync, vid_hash, ua_str, ip_str, ev, str(body.get('path') or '/'), t_str)
+            except Exception:
+                pass
         ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
         return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store"})
     summary = await _build_analytics_summary()

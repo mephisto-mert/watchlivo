@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v190';
-import { api } from './api.js?v=20261110_v190';
-import { state } from './store.js?v=20261110_v190';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v190';
+import { clock } from './sync.js?v=20261110_v191';
+import { api } from './api.js?v=20261110_v191';
+import { state } from './store.js?v=20261110_v191';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v191';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -140,10 +140,18 @@ export class MeshConnection {
     if (!this._visHandler) {
       this._visHandler = () => {
         if (this.closed || document.hidden) return;
+        const nowMs = Date.now();
+        if (nowMs - (this._lastVisSendAt || 0) < 2500) return;
+        this._lastVisSendAt = nowMs;
         this.retry = 0;
         this.httpFailCount = 0;
+        this._backoffUntil = 0;
         if (this.mode === 'http') {
-          this.httpSend({ type: 'init' }, true);
+          if (this.lastRoom && this.lastRev > 0) {
+            if (!this.inFlight && !this.flushing) this.httpSend({ type: 'poll' }, false);
+          } else {
+            this.httpSend({ type: 'init' }, true);
+          }
         } else if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
           this.startWs();
         }
@@ -182,6 +190,7 @@ export class MeshConnection {
   nudgeIfDisconnected() {
     if (this.closed) return;
     const now = Date.now();
+    if (now < (this._backoffUntil || 0)) return;
     if (now - (this._lastBgNudgeAt || 0) < 3500) return;
     this._lastBgNudgeAt = now;
     if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
@@ -301,8 +310,10 @@ export class MeshConnection {
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
       const rawBaseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950;
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
-      const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
-      const jitterMs = pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140);
+      const failCnt = this.httpFailCount || 0;
+      const backoffMs = failCnt > 0 ? Math.min(12000, Math.round(700 * Math.pow(1.55, Math.min(failCnt, 7)))) : 0;
+      const cooldownWait = Math.max(0, (this._backoffUntil || 0) - Date.now());
+      const jitterMs = (pCnt >= 25 || failCnt > 0) ? Math.floor(Math.random() * 650) : Math.floor(Math.random() * 140);
       this.pollTimer = setTimeout(async () => {
         if (this.closed) return;
         if (this.outQueue.length && !this.flushing) {
@@ -311,7 +322,7 @@ export class MeshConnection {
           await this.httpSend({ type: 'poll' });
         }
         scheduleNextPoll();
-      }, baseMs + backoffMs + jitterMs);
+      }, Math.max(baseMs + backoffMs, cooldownWait) + jitterMs);
     };
     scheduleNextPoll();
   }
@@ -369,7 +380,9 @@ export class MeshConnection {
             }
             if (dedupedRetry.length) {
               this.outQueue.unshift(...dedupedRetry);
-              await new Promise((r) => setTimeout(r, 800));
+              const retryDelay = Math.max(900, Math.min(8000, (this._backoffUntil || 0) - Date.now(), (this.httpFailCount || 1) * 950));
+              await new Promise((r) => setTimeout(r, retryDelay));
+              break;
             }
           }
         }
@@ -608,8 +621,16 @@ export class MeshConnection {
           this.onMessage?.({ type: 'password_required', roomId: this.roomId });
         }
       } else {
-        this.httpFailCount = (this.httpFailCount || 0) + 1;
-        if (e.status !== 429 && (!this.lastRoom || this.httpFailCount >= 5)) {
+        const st = Number(e.status || 0);
+        if (st === 429 || st === 502 || st === 503 || st === 504) {
+          this.httpFailCount = Math.min(10, (this.httpFailCount || 0) + 2);
+          const retrySec = Number(e.data?.retry_after || 0);
+          const waitMs = retrySec > 0 ? Math.min(12000, retrySec * 1000) : Math.min(10000, 1500 * this.httpFailCount);
+          this._backoffUntil = Date.now() + waitMs + Math.floor(Math.random() * 500);
+        } else {
+          this.httpFailCount = (this.httpFailCount || 0) + 1;
+        }
+        if (st !== 429 && (!this.lastRoom || this.httpFailCount >= 5)) {
           this.emitStatus('connecting');
         }
       }
@@ -687,6 +708,11 @@ export class MeshConnection {
       }
     } else if (this.mode === 'http') {
       this.actionSeq = (this.actionSeq || 0) + 1;
+      if (obj.type === 'heartbeat' || obj.type === 'typing') {
+        this.outQueue = this.outQueue.filter((q) => q && q.type !== obj.type);
+      } else if (['play', 'pause', 'seek', 'change_media', 'resolve_media'].includes(obj.type)) {
+        this.outQueue = this.outQueue.filter((q) => q && q.type !== 'heartbeat');
+      }
       this.outQueue.push(obj);
       this._flushOutQueue();
     }

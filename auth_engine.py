@@ -622,7 +622,7 @@ def _candidate_auth_secrets() -> list[bytes]:
 
 
 _REVOKED_AUTH_SIGS = BoundedTTLCache(maxsize=5000, default_ttl=TOKEN_TTL)
-_REVOKED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=2.0)
+_REVOKED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=12.0)
 
 
 def revoke_auth_token(token: str) -> None:
@@ -634,6 +634,7 @@ def revoke_auth_token(token: str) -> None:
     exp_ts = time.time() + TOKEN_TTL
     _REVOKED_AUTH_SIGS.set(sig, exp_ts, ttl=TOKEN_TTL)
     _REVOKED_NEG_CACHE.delete(sig)
+    _purge_uid_cache(token=token)
     if store_backend() == "redis":
         _kv("SET", f"{_kp()}rev:{sig}", str(int(exp_ts)), "EX", TOKEN_TTL)
 
@@ -643,6 +644,7 @@ def revoke_all_user_tokens(uid: str) -> float:
         return 0.0
     rev_ts = round(time.time(), 3)
     _USER_REVOKED_AFTER.set(uid, rev_ts, ttl=TOKEN_TTL)
+    _purge_uid_cache(uid=uid)
     if store_backend() == "redis":
         _kv("SET", f"{_kp()}rev_uid:{uid}", str(rev_ts), "EX", TOKEN_TTL)
         try:
@@ -687,7 +689,7 @@ def get_user_revoked_after(uid: str) -> float:
                 conn.close()
         except Exception:
             val = 0.0
-    _USER_REVOKED_AFTER.set(uid, val, ttl=5.0 if val <= 0 else TOKEN_TTL)
+    _USER_REVOKED_AFTER.set(uid, val, ttl=12.0 if val <= 0 else TOKEN_TTL)
     return val
 
 
@@ -712,7 +714,7 @@ def verify_any_token(token: str) -> Optional[Dict[str, Any]]:
                         return None
                 except Exception:
                     pass
-            _REVOKED_NEG_CACHE.set(sig, now_ts + 2.0, ttl=2.0)
+            _REVOKED_NEG_CACHE.set(sig, now_ts + 12.0, ttl=12.0)
     try:
         b64_bytes = b64.encode("ascii")
     except Exception:
@@ -1563,7 +1565,10 @@ def _purge_uid_cache(token: str = "", uid: str = "") -> None:
         if token:
             server._UID_CACHE.pop(token, None)
         if uid:
-            stale_keys = [k for k, v in list(server._UID_CACHE.items()) if isinstance(v, tuple) and v[0] == uid]
+            stale_keys = [
+                k for k, v in list(server._UID_CACHE.items())
+                if isinstance(v, tuple) and (v[0] == uid or (isinstance(v[0], dict) and str(v[0].get("uid") or "") == uid))
+            ]
             for k in stale_keys:
                 server._UID_CACHE.pop(k, None)
     except Exception:

@@ -341,89 +341,90 @@ async function fetchPublicWithRedirects(initialUrl, baseHeaders, maxHops = 4, me
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: { ...CORS_HEADERS, "Access-Control-Max-Age": "86400" },
-      });
-    }
-    const reqUrl = new URL(request.url);
-    const path = reqUrl.pathname;
-    if (path !== "/api/rave/edge-fetch" && request.method !== "GET" && request.method !== "HEAD") {
-      return jsonResponse({ error: "Method not allowed" }, 405);
-    }
-
-    if (path === "/health" || path === "/api/health") {
-      return jsonResponse({
-        ok: true,
-        service: "watchlivo-stream-proxy",
-        colo: request.cf?.colo || "edge",
-      });
-    }
-
-    if (path === "/download/apk" || /^\/download\/Watchlivo.*\.apk$/i.test(path) || path === "/Watchlivo-v2.0.apk") {
-      return serveBinaryAsset(request, env, "/Watchlivo-v2.0.apk", "Watchlivo-v2.0.apk", "application/vnd.android.package-archive");
-    }
-
-    if (path === "/download/ipa" || /^\/download\/Watchlivo.*\.ipa$/i.test(path) || path === "/Watchlivo.ipa") {
-      return serveBinaryAsset(request, env, "/Watchlivo.ipa", "Watchlivo.ipa", "application/octet-stream");
-    }
-
-    if (path === "/api/rave/edge-fetch") {
-      if (request.method !== "GET" && request.method !== "POST" && request.method !== "HEAD") {
+    try {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: { ...CORS_HEADERS, "Access-Control-Max-Age": "86400" },
+        });
+      }
+      const reqUrl = new URL(request.url);
+      const path = reqUrl.pathname;
+      if (path !== "/api/rave/edge-fetch" && request.method !== "GET" && request.method !== "HEAD") {
         return jsonResponse({ error: "Method not allowed" }, 405);
       }
-      const efUrl = (reqUrl.searchParams.get("url") || "").trim();
-      const efRef = (reqUrl.searchParams.get("referer") || "").trim();
-      const efSig = (reqUrl.searchParams.get("sig") || "").trim();
-      if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || ""))) {
-        return jsonResponse({ error: "İmzasız kenar isteği reddedildi" }, 403);
-      }
-      if (!isPublicHttpUrl(efUrl)) {
-        return jsonResponse({ error: "Geçersiz hedef URL" }, 403);
-      }
-      const efHeaders = new Headers();
-      efHeaders.set("User-Agent", UA137);
-      efHeaders.set("Accept", reqUrl.searchParams.get("accept") || request.headers.get("X-Edge-Accept") || "application/json, text/plain, */*");
-      efHeaders.set("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7");
-      const effEfRef = inferReferer(efUrl, efRef);
-      if (effEfRef) {
-        efHeaders.set("Referer", effEfRef);
-        try {
-          const rObj = new URL(effEfRef);
-          efHeaders.set("Origin", `${rObj.protocol}//${rObj.host}`);
-        } catch {}
-      }
-      if (reqUrl.searchParams.get("xhr") === "1" || request.headers.get("X-Edge-XHR") === "1" || efUrl.includes("animecix.tv/secure/")) {
-        efHeaders.set("X-Requested-With", "XMLHttpRequest");
-      }
-      const csrfTok = request.headers.get("X-Edge-CSRF") || "";
-      if (csrfTok) efHeaders.set("X-CSRF-Token", csrfTok);
-      const reqCt = request.headers.get("Content-Type") || "";
-      if (reqCt && request.method === "POST") efHeaders.set("Content-Type", reqCt);
-      const bodyBuf = request.method === "POST" ? await request.arrayBuffer() : undefined;
-      try {
-        const { resp: upEf, finalUrl: efFinalUrl } = await fetchPublicWithRedirects(
-          efUrl,
-          efHeaders,
-          4,
-          request.method,
-          bodyBuf,
-          10_000
-        );
-        const outEfHeaders = new Headers();
-        outEfHeaders.set("Content-Type", upEf.headers.get("Content-Type") || "application/octet-stream");
-        outEfHeaders.set("Cache-Control", "no-store");
-        outEfHeaders.set("X-Final-Url", efFinalUrl);
-        for (const [k, v] of Object.entries(CORS_HEADERS)) outEfHeaders.set(k, v);
-        return new Response(request.method === "HEAD" ? null : upEf.body, {
-          status: upEf.status,
-          headers: outEfHeaders,
+
+      if (path === "/health" || path === "/api/health") {
+        return jsonResponse({
+          ok: true,
+          service: "watchlivo-stream-proxy",
+          colo: request.cf?.colo || "edge",
         });
-      } catch {
-        return jsonResponse({ error: "Kenar kaynağına ulaşılamadı" }, 502);
       }
-    }
+
+      if (path === "/download/apk" || /^\/download\/Watchlivo.*\.apk$/i.test(path) || path === "/Watchlivo-v2.0.apk") {
+        return await serveBinaryAsset(request, env, "/Watchlivo-v2.0.apk", "Watchlivo-v2.0.apk", "application/vnd.android.package-archive");
+      }
+
+      if (path === "/download/ipa" || /^\/download\/Watchlivo.*\.ipa$/i.test(path) || path === "/Watchlivo.ipa") {
+        return await serveBinaryAsset(request, env, "/Watchlivo.ipa", "Watchlivo.ipa", "application/octet-stream");
+      }
+
+      if (path === "/api/rave/edge-fetch") {
+        if (request.method !== "GET" && request.method !== "POST" && request.method !== "HEAD") {
+          return jsonResponse({ error: "Method not allowed" }, 405);
+        }
+        const efUrl = (reqUrl.searchParams.get("url") || "").trim();
+        const efRef = (reqUrl.searchParams.get("referer") || "").trim();
+        const efSig = (reqUrl.searchParams.get("sig") || "").trim();
+        if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || ""))) {
+          return jsonResponse({ error: "İmzasız kenar isteği reddedildi" }, 403);
+        }
+        if (!isPublicHttpUrl(efUrl)) {
+          return jsonResponse({ error: "Geçersiz hedef URL" }, 403);
+        }
+        const efHeaders = new Headers();
+        efHeaders.set("User-Agent", UA137);
+        efHeaders.set("Accept", reqUrl.searchParams.get("accept") || request.headers.get("X-Edge-Accept") || "application/json, text/plain, */*");
+        efHeaders.set("Accept-Language", "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7");
+        const effEfRef = inferReferer(efUrl, efRef);
+        if (effEfRef) {
+          efHeaders.set("Referer", effEfRef);
+          try {
+            const rObj = new URL(effEfRef);
+            efHeaders.set("Origin", `${rObj.protocol}//${rObj.host}`);
+          } catch {}
+        }
+        if (reqUrl.searchParams.get("xhr") === "1" || request.headers.get("X-Edge-XHR") === "1" || efUrl.includes("animecix.tv/secure/")) {
+          efHeaders.set("X-Requested-With", "XMLHttpRequest");
+        }
+        const csrfTok = request.headers.get("X-Edge-CSRF") || "";
+        if (csrfTok) efHeaders.set("X-CSRF-Token", csrfTok);
+        const reqCt = request.headers.get("Content-Type") || "";
+        if (reqCt && request.method === "POST") efHeaders.set("Content-Type", reqCt);
+        try {
+          const bodyBuf = request.method === "POST" ? await request.arrayBuffer() : undefined;
+          const { resp: upEf, finalUrl: efFinalUrl } = await fetchPublicWithRedirects(
+            efUrl,
+            efHeaders,
+            4,
+            request.method,
+            bodyBuf,
+            10_000
+          );
+          const outEfHeaders = new Headers();
+          outEfHeaders.set("Content-Type", upEf.headers.get("Content-Type") || "application/octet-stream");
+          outEfHeaders.set("Cache-Control", "no-store");
+          outEfHeaders.set("X-Final-Url", efFinalUrl);
+          for (const [k, v] of Object.entries(CORS_HEADERS)) outEfHeaders.set(k, v);
+          return new Response(request.method === "HEAD" ? null : upEf.body, {
+            status: upEf.status,
+            headers: outEfHeaders,
+          });
+        } catch {
+          return jsonResponse({ error: "Kenar kaynağına ulaşılamadı" }, 502);
+        }
+      }
 
     if (request.method !== "GET" && request.method !== "HEAD") {
       return jsonResponse({ error: "Method not allowed" }, 405);
@@ -458,11 +459,13 @@ export default {
       targetUrl.includes("/hls/") ||
       targetUrl.includes("/r6/s/");
 
-    const cache = caches.default;
-    const cacheKey = isUnrangedGet && isHlsSeg ? new Request(`https://edge-cache.watchlivo.internal/seg?u=${encodeURIComponent(targetUrl)}`, { method: "GET" }) : null;
+    const cache = typeof caches !== "undefined" ? caches.default : null;
+    const cacheKey = cache && isUnrangedGet && isHlsSeg ? new Request(`https://edge-cache.watchlivo.internal/seg?u=${encodeURIComponent(targetUrl)}`, { method: "GET" }) : null;
     if (cacheKey) {
-      const hit = await cache.match(cacheKey);
-      if (hit) return hit;
+      try {
+        const hit = await cache.match(cacheKey);
+        if (hit) return hit;
+      } catch {}
     }
 
     const isHakuna = targetUrl.includes("hakunaymatata.com");
@@ -571,12 +574,13 @@ export default {
     );
 
     const outStatus = [200, 206, 416].includes(upResp.status) ? upResp.status : 200;
+    const clBytes = Number(upCl);
 
-    if (cacheKey && outStatus === 200 && Number(upCl || 0) <= 15 * 1024 * 1024) {
+    if (cacheKey && outStatus === 200 && Number.isFinite(clBytes) && clBytes > 0 && clBytes <= 15 * 1024 * 1024) {
       const [bodyClient, bodyCache] = streamBody ? streamBody.tee() : [null, null];
       if (bodyCache) {
         const cacheResp = new Response(bodyCache, { status: 200, headers: outHeaders });
-        ctx.waitUntil(cache.put(cacheKey, cacheResp).catch(() => {}));
+        ctx?.waitUntil?.(cache.put(cacheKey, cacheResp).catch(() => {}));
       }
       return new Response(request.method === "HEAD" ? null : bodyClient, {
         status: outStatus,
@@ -588,5 +592,8 @@ export default {
       status: outStatus,
       headers: outHeaders,
     });
+    } catch {
+      return jsonResponse({ error: "Akış servisi geçici olarak meşgul." }, 502);
+    }
   },
 };
