@@ -211,6 +211,8 @@ class SecurityHeaders:
                     hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 if b"cross-origin-opener-policy" not in existing_keys:
                     hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
+                if b"x-robots-tag" not in existing_keys:
+                    hdrs.append((b"x-robots-tag", b"noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"))
                 if b"content-security-policy" not in existing_keys:
                     if scope.get("path") == "/api/rave/browser-proxy":
                         hdrs.append((
@@ -11575,7 +11577,20 @@ def _track_analytics_sync(
 
 async def robots_txt_endpoint(request: Request) -> Response:
     txt = (
-        "# Watchlivo Rave.io Watch Party & Safe Harbor Directives\n"
+        "# Watchlivo Private Streaming Infrastructure & Anti-Crawler Directives\n"
+        "User-agent: Googlebot\nDisallow: /\n\n"
+        "User-agent: Googlebot-Image\nDisallow: /\n\n"
+        "User-agent: Googlebot-Video\nDisallow: /\n\n"
+        "User-agent: Mediapartners-Google\nDisallow: /\n\n"
+        "User-agent: Bingbot\nDisallow: /\n\n"
+        "User-agent: Slurp\nDisallow: /\n\n"
+        "User-agent: Yandex\nDisallow: /\n\n"
+        "User-agent: Baiduspider\nDisallow: /\n\n"
+        "User-agent: AhrefsBot\nDisallow: /\n\n"
+        "User-agent: SemrushBot\nDisallow: /\n\n"
+        "User-agent: DotBot\nDisallow: /\n\n"
+        "User-agent: MJ12bot\nDisallow: /\n\n"
+        "User-agent: PetalBot\nDisallow: /\n\n"
         "User-agent: MarkMonitor\nDisallow: /\n\n"
         "User-agent: Corsearch\nDisallow: /\n\n"
         "User-agent: OpSec\nDisallow: /\n\n"
@@ -11583,25 +11598,23 @@ async def robots_txt_endpoint(request: Request) -> Response:
         "User-agent: ByteSpider\nDisallow: /\n\n"
         "User-agent: GPTBot\nDisallow: /\n\n"
         "User-agent: CCBot\nDisallow: /\n\n"
+        "User-agent: anthropic-ai\nDisallow: /\n\n"
+        "User-agent: Claude-Web\nDisallow: /\n\n"
         "User-agent: *\n"
-        "Allow: /\n"
-        "Allow: /r/\n"
-        "Allow: /join/\n"
-        "Allow: /about\n"
-        "Allow: /privacy\n"
-        "Allow: /terms\n"
-        "Allow: /dmca\n"
-        "Allow: /contact\n"
+        "Disallow: /\n"
         "Disallow: /api/\n"
         "Disallow: /mesh/\n"
         "Disallow: /room/\n"
+        "Disallow: /r/\n"
+        "Disallow: /join/\n"
         "Disallow: /download/\n"
         "Disallow: /uploads/\n"
+        "Disallow: /static/\n"
         "Disallow: /stats\n"
         "Disallow: /analytics\n\n"
         "Sitemap: https://watchlivo.online/sitemap.xml\n"
     )
-    return Response(txt, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600"})
+    return Response(txt, media_type="text/plain; charset=utf-8", headers={"Cache-Control": "public, max-age=3600", "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"})
 
 
 async def sitemap_xml_endpoint(request: Request) -> Response:
