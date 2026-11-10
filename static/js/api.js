@@ -64,7 +64,8 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const isTransientGateway = (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) && !data?.error;
+        const isGateway5xx = res.status === 502 || res.status === 503 || res.status === 504;
+        const isTransientGateway = isGateway5xx || (res.status === 429 && (!data?.error || Boolean(data?.retryable)));
         if (isTransientGateway && attempt < maxRetries && !extSignal?.aborted) {
           const retryHdr = Number(res.headers?.get?.('retry-after') || 0);
           const baseWait = retryHdr > 0 ? Math.min(2200, retryHdr * 1000) : (attempt === 0 ? 600 : 1300);
@@ -80,6 +81,18 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
         throw err;
       }
       return data;
+    } catch (fetchErr) {
+      if (ctl.signal.aborted && !extSignal?.aborted) {
+        if (attempt < maxRetries && !isPollSync && timeout <= 12000) {
+          await _sleep(450);
+          continue;
+        }
+        const tErr = new Error('Sunucu yanıt süresi aşıldı, lütfen tekrar deneyin.');
+        tErr.status = 408;
+        tErr.isTimeout = true;
+        throw tErr;
+      }
+      throw fetchErr;
     } finally {
       clearTimeout(timer);
       if (extSignal) {
@@ -94,7 +107,8 @@ export async function api(path, opts = {}) {
   const method = String(opts?.method || 'GET').toUpperCase();
   if (method === 'GET' && !opts?.body && !opts?.signal) {
     const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
-    const dedupKey = `${path}|${tok.slice(-16)}`;
+    const tBucket = Math.round(Number(opts?.timeout || 12000) / 1000);
+    const dedupKey = `${path}|${tok.slice(-16)}|${tBucket}`;
     const existing = _inflightGets.get(dedupKey);
     if (existing) return existing;
     const p = _execApi(path, { ...opts, method }).finally(() => {

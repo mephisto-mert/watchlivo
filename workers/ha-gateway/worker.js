@@ -9,7 +9,26 @@
 
 const DEFAULT_SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com";
 const DEFAULT_STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
-const BYPASS_WORKER_HOSTS = ["hakunaymatata.com"];
+const BYPASS_WORKER_HOSTS = [
+  "hakunaymatata.com",
+  "vidmoly.",
+  "vmbox.",
+  "vmnow.",
+  "vmpx.",
+  "hdfilmcehennemi.mobi",
+  "ag2m5.cfd",
+  "uk-traffic-",
+  "fastplay.",
+  "radyotvonline.com",
+  "nexa.mov",
+  "dplayer",
+  "playmix.",
+  "makesomthingup.",
+  "cdnimages.",
+  "ercdn.net",
+  "daioncdn.net",
+];
+const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
 const FAILOVER_STATUSES = new Set([
   402, 429, 451, 500, 502, 503, 504,
@@ -32,7 +51,7 @@ const VERCEL_PAUSE_TOKENS = [
 let primaryCircuitOpenUntil = 0;
 let secondaryCircuitOpenUntil = 0;
 
-const MAX_BUFFER_BYTES = Math.floor(4.2 * 1024 * 1024);
+const MAX_BUFFER_BYTES = 262_144;
 
 function timingSafeEq(a, b) {
   if (typeof a !== "string" || typeof b !== "string" || !a || a.length !== b.length) return false;
@@ -54,8 +73,7 @@ function isAdminEdge(request, env) {
 function isAppManagedError(resp) {
   if (!resp) return false;
   const ct = (resp.headers.get("content-type") || "").toLowerCase();
-  const nosniff = (resp.headers.get("x-content-type-options") || "").toLowerCase() === "nosniff";
-  return ct.includes("application/json") || nosniff;
+  return ct.includes("application/json");
 }
 
 function shouldFailoverResponse(resp) {
@@ -64,7 +82,7 @@ function shouldFailoverResponse(resp) {
   if (vercelErr && VERCEL_PAUSE_TOKENS.some((tok) => vercelErr.includes(tok))) {
     return true;
   }
-  if (!vercelErr && [429, 500, 502, 503, 504].includes(resp.status) && isAppManagedError(resp)) {
+  if (!vercelErr && resp.status === 429 && isAppManagedError(resp)) {
     return false;
   }
   return FAILOVER_STATUSES.has(resp.status);
@@ -105,9 +123,9 @@ function originTimeoutMs(pathname) {
     pathname.startsWith("/api/rave/stream") ||
     pathname === "/api/upload"
   ) {
-    return 25_000;
+    return 28_000;
   }
-  return 14_000;
+  return 15_000;
 }
 
 function isStaticCacheablePath(pathname) {
@@ -182,7 +200,8 @@ async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu
   const resp = await fetch(secUrl.toString(), init);
   const outHeaders = new Headers(resp.headers);
   outHeaders.set("X-Watchlivo-Origin", originTag);
-  return new Response(resp.body, {
+  const safeBody = NULL_BODY_STATUSES.has(resp.status) || request.method === "HEAD" ? null : resp.body;
+  return new Response(safeBody, {
     status: resp.status,
     statusText: resp.statusText,
     headers: outHeaders,
@@ -205,19 +224,27 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
         continue;
       }
       if (cache && request.method === "GET" && resp.status === 200) {
-        if (staticCacheKey) {
-          const clone = resp.clone();
-          const cHdrs = new Headers(clone.headers);
-          cHdrs.set("Cache-Control", "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400");
-          const cachePut = cache.put(staticCacheKey, new Response(clone.body, { status: 200, headers: cHdrs })).catch(() => {});
-          ctx?.waitUntil?.(cachePut);
-        } else if (rootCacheKey && !resp.headers.get("set-cookie")) {
-          const clone = resp.clone();
-          const cHdrs = new Headers(clone.headers);
-          cHdrs.set("Cache-Control", "public, max-age=300, s-maxage=3600");
-          const cachePut = cache.put(rootCacheKey, new Response(clone.body, { status: 200, headers: cHdrs })).catch(() => {});
-          ctx?.waitUntil?.(cachePut);
-        }
+        try {
+          if (staticCacheKey) {
+            const clone = resp.clone();
+            const cHdrs = new Headers(clone.headers);
+            const hasVersion = url.search.includes("v=");
+            cHdrs.set(
+              "Cache-Control",
+              hasVersion
+                ? "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400"
+                : "public, max-age=300, s-maxage=900, stale-while-revalidate=600"
+            );
+            const cachePut = cache.put(staticCacheKey, new Response(clone.body, { status: 200, headers: cHdrs })).catch(() => {});
+            ctx?.waitUntil?.(cachePut);
+          } else if (rootCacheKey && !resp.headers.get("set-cookie")) {
+            const clone = resp.clone();
+            const cHdrs = new Headers(clone.headers);
+            cHdrs.set("Cache-Control", "public, max-age=120, s-maxage=600");
+            const cachePut = cache.put(rootCacheKey, new Response(clone.body, { status: 200, headers: cHdrs })).catch(() => {});
+            ctx?.waitUntil?.(cachePut);
+          }
+        } catch {}
       }
       return resp;
     } catch (_err) {
@@ -228,7 +255,9 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
     }
   }
 
-  secondaryCircuitOpenUntil = Date.now() + 10_000;
+  if (!url.pathname.startsWith("/api/rave/resolve") && !url.pathname.startsWith("/api/rave/stream")) {
+    secondaryCircuitOpenUntil = Date.now() + 8_000;
+  }
   if (cache && isIdempotent) {
     try {
       const fallbackKey = staticCacheKey || rootCacheKey;
@@ -305,14 +334,8 @@ export default {
         let bypassWorker = cfFallback;
         if (!bypassWorker && isStreamProxyPath) {
           const rawTarget = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
-          try {
-            const parsedHost = new URL(rawTarget).hostname.toLowerCase();
-            bypassWorker = BYPASS_WORKER_HOSTS.some(
-              (h) => parsedHost === h || parsedHost.endsWith(`.${h}`)
-            );
-          } catch {
-            bypassWorker = false;
-          }
+          const rawLower = rawTarget.toLowerCase();
+          bypassWorker = BYPASS_WORKER_HOSTS.some((h) => rawLower.includes(h));
         }
         if (!bypassWorker) {
           if (env.STREAM_PROXY) {
@@ -439,21 +462,26 @@ export default {
       }
 
       // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads, stream/catalog caches) -> Render EU primary with instant Vercel fallback
-      const prefersStatefulOrigin =
-        url.pathname === "/api/rooms" ||
-        url.pathname.startsWith("/api/rooms/") ||
-        url.pathname.startsWith("/api/rave/voice-relay/") ||
+      const isStreamOrResolveRoute =
         url.pathname === "/api/rave/resolve-catalog" ||
         url.pathname === "/api/rave/resolve-stream" ||
         url.pathname === "/api/rave/stream" ||
         url.pathname === "/api/rave/stream-manifest" ||
         url.pathname === "/api/rave/stream_manifest" ||
-        url.pathname === "/api/rave/hls-proxy" ||
+        url.pathname === "/api/rave/stream-proxy" ||
+        url.pathname === "/api/rave/stream_chunk" ||
+        url.pathname === "/api/rave/hls-proxy";
+
+      const prefersStatefulOrigin =
+        url.pathname === "/api/rooms" ||
+        url.pathname.startsWith("/api/rooms/") ||
+        url.pathname.startsWith("/api/rave/voice-relay/") ||
+        isStreamOrResolveRoute ||
         url.pathname === "/api/upload" ||
         url.pathname.startsWith("/uploads/");
 
       let alreadyTriedSecondary = false;
-      if (prefersStatefulOrigin && Date.now() >= secondaryCircuitOpenUntil) {
+      if (prefersStatefulOrigin && (isStreamOrResolveRoute || Date.now() >= secondaryCircuitOpenUntil)) {
         alreadyTriedSecondary = true;
         try {
           const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
@@ -461,9 +489,13 @@ export default {
             return statefulResp;
           }
           statefulResp.body?.cancel?.();
-          secondaryCircuitOpenUntil = Date.now() + 12_000;
+          if (!isStreamOrResolveRoute) {
+            secondaryCircuitOpenUntil = Date.now() + 8_000;
+          }
         } catch {
-          secondaryCircuitOpenUntil = Date.now() + 12_000;
+          if (!isStreamOrResolveRoute) {
+            secondaryCircuitOpenUntil = Date.now() + 8_000;
+          }
         }
         if (url.pathname === "/api/upload" || url.pathname.startsWith("/uploads/")) {
           return new Response(JSON.stringify({ ok: false, error: "Yükleme servisi geçici olarak meşgul." }), {
@@ -529,7 +561,8 @@ export default {
 
       const outHeaders = new Headers(primaryResp.headers);
       outHeaders.set("X-Watchlivo-Origin", "vercel-primary");
-      return new Response(primaryResp.body, {
+      const safePrimaryBody = NULL_BODY_STATUSES.has(primaryResp.status) || request.method === "HEAD" ? null : primaryResp.body;
+      return new Response(safePrimaryBody, {
         status: primaryResp.status,
         statusText: primaryResp.statusText,
         headers: outHeaders,

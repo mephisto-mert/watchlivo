@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v192';
-import { api, qs } from '../api.js?v=20261110_v192';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v192';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v192';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v192';
-import { profileSetup } from '../profile.js?v=20261110_v192';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v192';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261111_v193';
+import { api, qs } from '../api.js?v=20261111_v193';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261111_v193';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261111_v193';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261111_v193';
+import { profileSetup } from '../profile.js?v=20261111_v193';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v193';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v192';
+} from '../store.js?v=20261111_v193';
 
 const _resolveMemCache = new Map();
 
@@ -46,10 +46,11 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
     authSatisfied: acct?.loginSatisfied ? '1' : '0',
     profileName: acct?.profileName || '',
   });
+  let prevTimedOut = false;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const qTry = attempt === 1 ? `${query}&refresh=1` : query;
-      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: attempt === 0 ? 14000 : 9500 });
+      const qTry = (attempt === 1 && !prevTimedOut) ? `${query}&refresh=1` : query;
+      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: attempt === 0 ? 25000 : 20000 });
       if (res?.authRequired || res?.status === 401) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
         toast(res.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
@@ -82,37 +83,11 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         }
         return res;
       }
-      if (attempt === 1 && !it.streamUrl) {
-        if (mediaType === 'tv' && (s > 1 || e > 1)) {
-          try {
-            const fbQuery = qs({
-              provider: provId,
-              tmdbId: rawTid,
-              imdbId: it.imdbId || '',
-              mediaType,
-              title: it.title || '',
-              originalTitle: it.originalTitle || '',
-              season: '1',
-              episode: '1',
-              backdrop: it.backdrop || '',
-              poster: it.poster || '',
-              year: it.year || '',
-            });
-            const fbRes = await api(`/api/rave/resolve-catalog?${fbQuery}`, { timeout: 6500 });
-            if (fbRes && (fbRes.url || fbRes.videoId)) {
-              const disp = it.title || fbRes.title || prov.name;
-              fbRes.title = epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
-              fbRes.seriesTitle = it.seriesTitle || String(disp || '').split(' — ')[0].trim();
-              fbRes.originalTitle = fbRes.originalTitle || it.originalTitle || '';
-              fbRes.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
-              _resolveMemCache.set(cacheKey, { ts: Date.now(), data: { ...fbRes } });
-              return fbRes;
-            }
-          } catch (_) { /* ignore fallback error */ }
-        }
+      if (attempt === 1 && !it.streamUrl && !opts?.silentToast) {
         toast(res?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
       }
     } catch (err) {
+      prevTimedOut = Boolean(err?.isTimeout || err?.status === 408 || err?.name === 'AbortError');
       if (err.status === 401 || err.data?.authRequired) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
         toast(err.data?.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
@@ -120,34 +95,9 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         return null;
       }
       if (attempt === 1) {
-        if (mediaType === 'tv' && (s > 1 || e > 1) && !it.streamUrl) {
-          try {
-            const fbQuery = qs({
-              provider: provId,
-              tmdbId: rawTid,
-              imdbId: it.imdbId || '',
-              mediaType,
-              title: it.title || '',
-              originalTitle: it.originalTitle || '',
-              season: '1',
-              episode: '1',
-              backdrop: it.backdrop || '',
-              poster: it.poster || '',
-              year: it.year || '',
-            });
-            const fbRes = await api(`/api/rave/resolve-catalog?${fbQuery}`, { timeout: 6500 });
-            if (fbRes && (fbRes.url || fbRes.videoId)) {
-              const disp = it.title || fbRes.title || prov.name;
-              fbRes.title = epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
-              fbRes.seriesTitle = it.seriesTitle || String(disp || '').split(' — ')[0].trim();
-              fbRes.originalTitle = fbRes.originalTitle || it.originalTitle || '';
-              fbRes.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
-              _resolveMemCache.set(cacheKey, { ts: Date.now(), data: { ...fbRes } });
-              return fbRes;
-            }
-          } catch (_) { /* ignore fallback error */ }
+        if (!it.streamUrl && !opts?.silentToast) {
+          toast(err.data?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
         }
-        if (!it.streamUrl) toast(err.data?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
         break;
       }
     }

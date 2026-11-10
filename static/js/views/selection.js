@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v192';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v192';
-import { api, qs } from '../api.js?v=20261110_v192';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v192';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v192';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v192';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v192';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261111_v193';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261111_v193';
+import { api, qs } from '../api.js?v=20261111_v193';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261111_v193';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261111_v193';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261111_v193';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v193';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v192';
+} from '../store.js?v=20261111_v193';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -162,7 +162,18 @@ export function providerTile(p, onClick) {
     h('span', { class: 'provider-corner-tag' }, cornerTag),
     h('div', { class: 'provider-logo-wrap' },
       p.logo
-        ? h('img', { src: p.logo, alt: p.name, onerror: (e) => { e.target.remove(); } })
+        ? h('img', {
+            src: p.logo,
+            alt: '',
+            'aria-hidden': 'true',
+            onerror: (e) => {
+              const fb = h('span', {
+                class: 'provider-fallback-monogram',
+                style: { fontWeight: '900', fontSize: '.92rem', color: p.accent || '#27DCC8', letterSpacing: '.04em' },
+              }, shortName);
+              e.target.replaceWith(fb);
+            },
+          })
         : (p.glyph ? h('span', { class: 'p-icon', style: { background: p.accent || '#27DCC8' }, html: icons[p.glyph] }) : h('span', { style: { fontWeight: '800', fontSize: '.95rem' } }, shortName.slice(0, 2)))),
     h('div', { class: 'provider-meta' },
       h('span', { class: 'ptitle' }, shortName),
@@ -1082,8 +1093,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   };
                   try {
                     resolved = await Promise.race([
-                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-                      new Promise((r) => setTimeout(() => r(null), 22000)),
+                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, { silentToast: true }),
+                      new Promise((r) => setTimeout(() => r(null), 34000)),
                     ]);
                   } catch (e) {
                     console.warn('Continue resolve error:', e);
@@ -1199,8 +1210,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           const eNum = Number(epItem.episode || 1);
           const epBadge = epItem.episodeLabel || `S${sNum}:B${eNum}`;
           const baseEpStr = `${sNum}. Sezon ${eNum}. Bölüm`;
-          const rawEpTitle = String(epItem.episodeTitle || '').trim();
-          const subExtra = (rawEpTitle && rawEpTitle.toLowerCase() !== baseEpStr.toLowerCase())
+          const rawEpTitle = String(epItem.episodeTitle || '')
+            .replace(/^\s*\d+\s*\.?\s*sezon\s*\d+\s*\.?\s*b[oö]l[uü]m\s*[·:–—-]?\s*/i, '')
+            .replace(/^\s*S\d+\s*[:.]?\s*[BE]\d+\s*[·:–—-]?\s*/i, '')
+            .trim();
+          const normEpCmp = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9çğıöşü]+/gi, '');
+          const subExtra = (rawEpTitle && normEpCmp(rawEpTitle) !== normEpCmp(baseEpStr) && normEpCmp(rawEpTitle) !== normEpCmp(epBadge))
             ? rawEpTitle
             : (epItem.sourceBadge || 'Yeni Bölüm');
           const subLabel = `${baseEpStr} · ${subExtra}`;
@@ -1907,8 +1922,8 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
           streamUrl: savedStreamUrl,
         };
         resolved = await Promise.race([
-          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-          new Promise((r) => setTimeout(() => r(null), 22000)),
+          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, { silentToast: true }),
+          new Promise((r) => setTimeout(() => r(null), 34000)),
         ]);
       } catch (err) {
         console.warn('History modal resolve error:', err);

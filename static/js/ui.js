@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v192';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261111_v193';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -107,7 +107,13 @@ export function h(tag, attrs = {}, ...children) {
           isSafeSvgImg &&
           !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:|;base64/i.test(cleanV)
         );
-        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
+        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) {
+          if (k === 'src' && String(tag).toLowerCase() === 'img') {
+            el.hidden = true;
+            el.alt = '';
+          }
+          continue;
+        }
       }
       el.setAttribute(rawK, v === true ? '' : v);
     }

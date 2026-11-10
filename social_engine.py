@@ -902,75 +902,81 @@ async def social_user_search(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
     query = _strip_soc_tag(_clean(q.get("q") or q.get("query"), 64))
-    u = _ensure_user_social(uid, claims=request.scope.get("wl_claims"), persist=False)
     if not query:
         return JSONResponse({"ok": True, "users": []})
+    wl_claims = request.scope.get("wl_claims")
     is_authed_caller = bool(request.scope.get("wl_uid"))
-    found: Dict[str, Dict[str, Any]] = {}
-    try:
-        import auth_engine
-        for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
-            if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
-                _register_social_dir(ac, persist=False)
-                found[ac["uid"]] = ac
-    except Exception:
-        pass
-    q_fold = _tr_fold_soc(query.lstrip("@"))
-    q_norm = re.sub(r"[^a-z0-9_.\-]", "", q_fold)
-    for d_uid, card in _load_social_dir().items():
-        if d_uid == uid or d_uid in found or d_uid in _LEGACY_BOT_UIDS or d_uid in ("guest_default", "guest_local") or not isinstance(card, dict):
-            continue
-        h_f = _tr_fold_soc(str(card.get("handle") or "").lstrip("@"))
-        n_f = _tr_fold_soc(str(card.get("name") or ""))
-        if str(d_uid).startswith("guest_") and not is_authed_caller and not (query.startswith("@") and q_fold and h_f == q_fold):
-            continue
-        if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
-            found[d_uid] = dict(card)
-    try:
-        import rooms as rooms_mod
-        rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
-        for r_obj in list(rm_dict.values()):
-            if not isinstance(r_obj, dict):
+
+    def _run_search_sync() -> List[Dict[str, Any]]:
+        u = _ensure_user_social(uid, claims=wl_claims, persist=False)
+        found: Dict[str, Dict[str, Any]] = {}
+        try:
+            import auth_engine
+            for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
+                if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
+                    _register_social_dir(ac, persist=False)
+                    found[ac["uid"]] = ac
+        except Exception:
+            pass
+        q_fold = _tr_fold_soc(query.lstrip("@"))
+        q_norm = re.sub(r"[^a-z0-9_.\-]", "", q_fold)
+        for d_uid, card in _load_social_dir().items():
+            if d_uid == uid or d_uid in found or d_uid in _LEGACY_BOT_UIDS or d_uid in ("guest_default", "guest_local") or not isinstance(card, dict):
                 continue
-            for p_obj in (r_obj.get("participants") or {}).values():
-                if not isinstance(p_obj, dict) or p_obj.get("transport") == "bot":
+            h_f = _tr_fold_soc(str(card.get("handle") or "").lstrip("@"))
+            n_f = _tr_fold_soc(str(card.get("name") or ""))
+            if str(d_uid).startswith("guest_") and not is_authed_caller and not (query.startswith("@") and q_fold and h_f == q_fold):
+                continue
+            if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
+                found[d_uid] = dict(card)
+        try:
+            import rooms as rooms_mod
+            rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
+            for r_obj in list(rm_dict.values()):
+                if not isinstance(r_obj, dict):
                     continue
-                p_uid = _clean(p_obj.get("uid"), 64)
-                if not p_uid or p_uid == uid or p_uid in found or p_uid in _LEGACY_BOT_UIDS:
-                    continue
-                p_h = _tr_fold_soc(str(p_obj.get("handle") or "").lstrip("@"))
-                p_n = _tr_fold_soc(str(p_obj.get("name") or ""))
-                if (q_fold and ((p_h and q_fold in p_h) or q_fold in p_n)) or (q_norm and len(q_norm) >= 2 and ((p_h and q_norm in p_h) or q_norm in re.sub(r"[^a-z0-9_.\-]", "", p_n))):
-                    card_rm = {
-                        "uid": p_uid,
-                        "name": _clean(p_obj.get("name") or "İzleyici", 32),
-                        "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
-                        "color": _clean(p_obj.get("color") or "#27DCC8", 16),
-                        "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
-                    }
-                    _register_social_dir(card_rm, persist=False)
-                    found[p_uid] = card_rm
-    except Exception:
-        pass
-    out_users = []
-    blocked_by_me = {b.get("uid") for b in (u.get("blocked") or []) if isinstance(b, dict)}
-    for t_uid, card in list(found.items())[:20]:
-        fstate = _friendship_state(u, t_uid)
-        pres = _compute_live_presence(t_uid, uid, is_friend=(fstate == "FRIENDS"))
-        out_users.append({
-            "uid": t_uid,
-            "name": _clean(card.get("name") or "İzleyici", 32),
-            "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
-            "color": _clean(card.get("color") or "#27DCC8", 16),
-            "avatarUrl": _clean_avatar(card.get("avatarUrl")),
-            "bio": _clean(card.get("bio") or "", 160),
-            "isGuest": bool(str(t_uid).startswith("guest_")),
-            "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
-            "online": pres["online"],
-            "presenceState": pres["presenceState"],
-            "status": pres["status"],
-            "watchingRoom": pres["watchingRoom"],
-        })
+                for p_obj in (r_obj.get("participants") or {}).values():
+                    if not isinstance(p_obj, dict) or p_obj.get("transport") == "bot":
+                        continue
+                    p_uid = _clean(p_obj.get("uid"), 64)
+                    if not p_uid or p_uid == uid or p_uid in found or p_uid in _LEGACY_BOT_UIDS:
+                        continue
+                    p_h = _tr_fold_soc(str(p_obj.get("handle") or "").lstrip("@"))
+                    p_n = _tr_fold_soc(str(p_obj.get("name") or ""))
+                    if (q_fold and ((p_h and q_fold in p_h) or q_fold in p_n)) or (q_norm and len(q_norm) >= 2 and ((p_h and q_norm in p_h) or q_norm in re.sub(r"[^a-z0-9_.\-]", "", p_n))):
+                        card_rm = {
+                            "uid": p_uid,
+                            "name": _clean(p_obj.get("name") or "İzleyici", 32),
+                            "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
+                            "color": _clean(p_obj.get("color") or "#27DCC8", 16),
+                            "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
+                        }
+                        _register_social_dir(card_rm, persist=False)
+                        found[p_uid] = card_rm
+        except Exception:
+            pass
+        out_users = []
+        blocked_by_me = {b.get("uid") for b in (u.get("blocked") or []) if isinstance(b, dict)}
+        for t_uid, card in list(found.items())[:20]:
+            fstate = _friendship_state(u, t_uid)
+            pres = _compute_live_presence(t_uid, uid, is_friend=(fstate == "FRIENDS"))
+            out_users.append({
+                "uid": t_uid,
+                "name": _clean(card.get("name") or "İzleyici", 32),
+                "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
+                "color": _clean(card.get("color") or "#27DCC8", 16),
+                "avatarUrl": _clean_avatar(card.get("avatarUrl")),
+                "bio": _clean(card.get("bio") or "", 160),
+                "isGuest": bool(str(t_uid).startswith("guest_")),
+                "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
+                "online": pres["online"],
+                "presenceState": pres["presenceState"],
+                "status": pres["status"],
+                "watchingRoom": pres["watchingRoom"],
+            })
+        return out_users
+
+    out_users = await asyncio.to_thread(_run_search_sync)
     return JSONResponse({"ok": True, "users": out_users})
 
 
@@ -1716,6 +1722,51 @@ async def link_preview(request: Request) -> JSONResponse:
 
     # Instant YouTube recognition
     yt_m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", raw_url)
+    def _fetch_link_meta_sync() -> None:
+        if yt_m:
+            vid = yt_m.group(1)
+            try:
+                oembed_u = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+                if is_safe_public_url(oembed_u):
+                    req = urllib.request.Request(oembed_u, headers={"User-Agent": UA_CHROME})
+                    with urllib.request.urlopen(req, timeout=2.5) as r:
+                        od = json.loads(r.read(65536).decode("utf-8", errors="ignore"))
+                        if od.get("title"):
+                            preview["title"] = _clean(od["title"], 140)
+                        if od.get("author_name"):
+                            preview["description"] = f"Kanal: {_clean(od['author_name'], 80)} · YouTube"
+            except Exception:
+                pass
+            return
+        if is_safe_public_url(raw_url):
+            try:
+                opener = urllib.request.build_opener(_SafeRedirectHandler())
+                req = urllib.request.Request(raw_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
+                with opener.open(req, timeout=2.8) as r:
+                    ctype = str(r.headers.get("Content-Type") or "").lower()
+                    if "html" in ctype or not ctype:
+                        html_str = r.read(96000).decode("utf-8", errors="ignore")
+                        og_t = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I) or re.search(r"<title[^>]*>([^<]+)</title>", html_str, re.I)
+                        og_d = re.search(r'<meta[^>]+(?:property=["\']og:description["\']|name=["\']description["\'])[^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                        og_i = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                        og_s = re.search(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                        if og_t:
+                            preview["title"] = _clean(html_mod.unescape(og_t.group(1)), 140)
+                        if og_d:
+                            preview["description"] = _clean(html_mod.unescape(og_d.group(1)), 200)
+                        if og_i:
+                            img_u = html_mod.unescape(og_i.group(1).strip())
+                            if img_u.startswith("//"):
+                                img_u = "https:" + img_u
+                            elif img_u.startswith("/"):
+                                img_u = f"{parsed.scheme}://{host}{img_u}"
+                            if img_u.startswith("https://"):
+                                preview["image"] = _clean(img_u, 600)
+                        if og_s:
+                            preview["site"] = _clean(html_mod.unescape(og_s.group(1)), 60)
+            except Exception:
+                pass
+
     if yt_m:
         vid = yt_m.group(1)
         preview.update({
@@ -1724,49 +1775,11 @@ async def link_preview(request: Request) -> JSONResponse:
             "description": "YouTube üzerinden Watchlivo odasında senkronize izlenebilir.",
             "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
         })
-        try:
-            oembed_u = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
-            if is_safe_public_url(oembed_u):
-                req = urllib.request.Request(oembed_u, headers={"User-Agent": UA_CHROME})
-                with urllib.request.urlopen(req, timeout=2.5) as r:
-                    od = json.loads(r.read(65536).decode("utf-8", errors="ignore"))
-                    if od.get("title"):
-                        preview["title"] = _clean(od["title"], 140)
-                    if od.get("author_name"):
-                        preview["description"] = f"Kanal: {_clean(od['author_name'], 80)} · YouTube"
-        except Exception:
-            pass
+        await asyncio.to_thread(_fetch_link_meta_sync)
         _LINK_PREVIEW_CACHE[raw_url] = preview
         return JSONResponse({"ok": True, "preview": preview})
 
-    if is_safe_public_url(raw_url):
-        try:
-            opener = urllib.request.build_opener(_SafeRedirectHandler())
-            req = urllib.request.Request(raw_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
-            with opener.open(req, timeout=2.8) as r:
-                ctype = str(r.headers.get("Content-Type") or "").lower()
-                if "html" in ctype or not ctype:
-                    html_str = r.read(96000).decode("utf-8", errors="ignore")
-                    og_t = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I) or re.search(r"<title[^>]*>([^<]+)</title>", html_str, re.I)
-                    og_d = re.search(r'<meta[^>]+(?:property=["\']og:description["\']|name=["\']description["\'])[^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                    og_i = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                    og_s = re.search(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                    if og_t:
-                        preview["title"] = _clean(html_mod.unescape(og_t.group(1)), 140)
-                    if og_d:
-                        preview["description"] = _clean(html_mod.unescape(og_d.group(1)), 200)
-                    if og_i:
-                        img_u = html_mod.unescape(og_i.group(1).strip())
-                        if img_u.startswith("//"):
-                            img_u = "https:" + img_u
-                        elif img_u.startswith("/"):
-                            img_u = f"{parsed.scheme}://{host}{img_u}"
-                        if img_u.startswith("https://"):
-                            preview["image"] = _clean(img_u, 600)
-                    if og_s:
-                        preview["site"] = _clean(html_mod.unescape(og_s.group(1)), 60)
-        except Exception:
-            pass
+    await asyncio.to_thread(_fetch_link_meta_sync)
 
     if len(_LINK_PREVIEW_CACHE) > 300:
         _LINK_PREVIEW_CACHE.clear()
@@ -1963,8 +1976,9 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
     short_b = _clean(tr_b["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
     mashup_title = f"🎧 Watchlivo DJ: {short_a} × {short_b} ({target_bpm} BPM)"
     combined_alts = [u for u in [tr_a.get("audioPreviewUrl"), *(tr_a.get("altUrls") or []), tr_b.get("url"), tr_b.get("audioPreviewUrl"), *(tr_b.get("altUrls") or [])] if u and u != tr_a["url"]]
+    mashup_stype = "hls" if ".m3u8" in str(tr_a["url"]).lower() else "mp4"
     mashup_media = {
-        "id": "wldj_" + uuid.uuid4().hex[:8], "provider": "direct", "streamType": "direct",
+        "id": "wldj_" + uuid.uuid4().hex[:8], "provider": "direct", "streamType": mashup_stype,
         "videoId": tr_a.get("videoId") or "", "clipVideoId": tr_a.get("clipVideoId") or tr_b.get("clipVideoId") or "",
         "altVideoIds": [tr_b.get("videoId")] if tr_b.get("videoId") else [],
         "url": tr_a["url"], "altUrls": list(dict.fromkeys(combined_alts)),
@@ -2025,7 +2039,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                     "trackB": parts[1] if len(parts) > 1 else t_raw,
                     "bpm": 124,
                     "provider": "direct",
-                    "streamType": "mp4",
+                    "streamType": "hls" if ".m3u8" in str(v_url).lower() else "mp4",
                     "url": v_url,
                     "audioPreviewUrl": str(urls.get("audio") or v_url),
                     "thumbnail": str(thumbs.get("max") or thumbs.get("720") or thumbs.get("default") or thumbs.get("480") or "/static/watchlivo-poster.svg"),

@@ -1,7 +1,8 @@
 // Provider registry — Rave providerList parity with authentic full-color brand SVGs on dark obsidian surfaces.
 const svgRaw = (body, vb = '0 0 140 44') => {
+  const [, , w = '140', h = '44'] = String(vb).trim().split(/\s+/);
   const xmlSafe = String(body).replace(/&(?!amp;|lt;|gt;|quot;|apos;|#\d+;|#x[0-9a-fA-F]+;)/g, '&amp;');
-  return `data:image/svg+xml;utf8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" fill="none">${xmlSafe}</svg>`)}`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="${vb}" fill="none">${xmlSafe}</svg>`)}`;
 };
 
 export const LOGOS = {
@@ -46,8 +47,8 @@ export const LOGOS = {
   tod: svgRaw(
     '<defs><linearGradient id="td" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#e879f9"/><stop offset="100%" stop-color="#9333ea"/></linearGradient></defs>' +
     '<rect x="16" y="7" width="108" height="30" rx="8" fill="url(#td)" fill-opacity="0.18" stroke="url(#td)" stroke-width="2"/>' +
-    '<text x="70" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="23" letter-spacing="3">TOD</text>' +
-    '<circle cx="70" cy="22" r="4.2" fill="#e879f9"/>'
+    '<text x="68" y="29" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="23" letter-spacing="3">TOD</text>' +
+    '<circle cx="109" cy="14.5" r="3.4" fill="#e879f9"/>'
   ),
   tabii: svgRaw(
     '<text x="66" y="30" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="25" letter-spacing="-0.6">tabii</text>' +
@@ -401,9 +402,31 @@ const INTERNAL_FALLBACK_PROVIDERS = [
 ];
 
 const _WEB_URL_RE = /^https?:\/\/(?:localhost(?::\d+)?|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?|[a-z0-9-]+(?:\.[a-z0-9-]+)+(?::\d+)?)(?:\/|$)/i;
-const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi'];
+const CINEMA_ALIASES = ['cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi', 'sinema', 'dizi', 'anime'];
+const PROVIDER_ID_ALIASES = {
+  hbomax: 'max',
+  hbo: 'max',
+  disneyplus: 'disney',
+  'disney+': 'disney',
+  primevideo: 'prime',
+  amazon: 'prime',
+  appletv: 'apple',
+  appletvplus: 'apple',
+  'apple+': 'apple',
+  bein: 'tod',
+  beinsports: 'tod',
+  trt: 'tabii',
+  turkcell: 'tvplus',
+  youtubemusic: 'ytmusic',
+  direct: 'web',
+  hls: 'web',
+  mp4: 'web',
+  embed: 'cinema',
+};
 export const getProvider = (id) => {
-  const norm = CINEMA_ALIASES.includes(id) ? 'cinema' : (id === 'direct' || id === 'hls' ? 'web' : id);
+  const raw = String(id || '').trim().toLowerCase();
+  if (!raw) return null;
+  const norm = CINEMA_ALIASES.includes(raw) ? 'cinema' : (PROVIDER_ID_ALIASES[raw] || raw);
   return PROVIDERS.find((p) => p.id === norm) || INTERNAL_FALLBACK_PROVIDERS.find((p) => p.id === norm) || null;
 };
 

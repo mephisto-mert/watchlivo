@@ -30,7 +30,7 @@ function _loadScriptUrl(url, perTryTimeoutMs) {
   });
 }
 
-export function ensureHlsJs(timeoutMs = 7000) {
+export function ensureHlsJs(timeoutMs = 8000) {
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     return Promise.resolve(false);
   }
@@ -45,14 +45,14 @@ export function ensureHlsJs(timeoutMs = 7000) {
     if (existing) {
       if (window.Hls) return true;
       const okExisting = await new Promise((resolve) => {
-        const t = setTimeout(() => resolve(Boolean(window.Hls)), 3500);
+        const t = setTimeout(() => resolve(Boolean(window.Hls)), 5000);
         existing.addEventListener('load', () => { clearTimeout(t); resolve(Boolean(window.Hls)); }, { once: true });
         existing.addEventListener('error', () => { clearTimeout(t); resolve(false); }, { once: true });
       });
       if (okExisting) return true;
       try { existing.remove(); } catch (_) {}
     }
-    const perTry = Math.max(2500, Math.round((Number(timeoutMs) || 7000) / HLS_CDN_URLS.length));
+    const perTry = Math.max(3800, Math.round((Number(timeoutMs) || 8000) / HLS_CDN_URLS.length));
     for (const url of HLS_CDN_URLS) {
       if (await _loadScriptUrl(url, perTry)) return true;
     }

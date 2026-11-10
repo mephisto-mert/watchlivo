@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261110_v192
+// Watchlivo Service Worker v20261111_v193
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">
@@ -18,7 +18,7 @@ const OFFLINE_HTML = `<!doctype html>
   <main class="card">
     <h1>📡 İnternet Bağlantısı Yok</h1>
     <p>Watchlivo canlı senkronizasyon odalarına bağlanmak için internet bağlantınızı kontrol edip tekrar deneyin.</p>
-    <a href="/" onclick="location.reload();return false" class="btn" style="display:inline-block;text-decoration:none;border-radius:12px;padding:12px 22px;background:#27dcc8;color:#041014;font-weight:800;font-size:.95rem;">Yeniden Dene</a>
+    <a href="/" class="btn" style="display:inline-block;text-decoration:none;border-radius:12px;padding:12px 22px;background:#27dcc8;color:#041014;font-weight:800;font-size:.95rem;">Yeniden Dene</a>
   </main>
 </body>
 </html>`;

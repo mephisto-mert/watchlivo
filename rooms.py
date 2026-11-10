@@ -680,7 +680,7 @@ def media_key(m: Dict[str, Any]) -> str:
     is_catalog_stream = bool(m.get("seriesTitle") or m.get("originalTitle") or m.get("catalogProvider") or "/api/rave/" in str(m.get("url") or "") or m.get("season") or m.get("episode"))
     raw_title = str(m.get("seriesTitle") or m.get("originalTitle") or m.get("title") or "").strip().lower()
     if is_catalog_stream and raw_title and raw_title not in ("video", "medya", "stream", "canlı yayın", "medya yükleniyor…", "medya seçilmedi"):
-        base_title = re.sub(r"\s+[—–-]\s*\d+\.\s*sezon.*$", "", raw_title, flags=re.I).strip()
+        base_title = re.sub(r"\s*(?:[—–\-·|]\s*)?(?:s\d+\s*:\s*b\d+|\d+\.\s*sezon(?:\s*\d+\.\s*bölüm)?|\d+\.\s*bölüm|episode\s*\d+).*$", "", raw_title, flags=re.I).split(" — ")[0].strip()
         if base_title and base_title not in ("video", "medya", "stream"):
             return f"title|{base_title}|{m.get('mediaType') or 'movie'}|{s}|{e}"
     return f"{m.get('provider')}|{m.get('videoId') or ''}|{m.get('url') or ''}|{s}|{e}"
@@ -1571,7 +1571,7 @@ class RedisStore:
                     r_m = room.get("media") or {}
                     c_upd = float(c_m.get("updatedAt") or 0.0)
                     r_upd = float(r_m.get("updatedAt") or 0.0)
-                    if (not r_has_media and not room.get("_explicit_media_clear")) or (c_rev >= r_rev and c_upd > r_upd + 0.01):
+                    if (not r_has_media and not room.get("_explicit_media_clear") and c_rev >= r_rev) or (c_rev >= r_rev and c_upd > r_upd + 0.01):
                         room["media"] = c_m
                         room["rev"] = max(r_rev, c_rev, 1)
                     if cached.get("events"):

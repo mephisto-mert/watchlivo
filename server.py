@@ -72,6 +72,14 @@ _WORKER_BYPASS_HOSTS = (
     "ag2m5.cfd",
     "uk-traffic-",
     "fastplay.",
+    "radyotvonline.com",
+    "nexa.mov",
+    "dplayer",
+    "playmix.",
+    "makesomthingup.",
+    "cdnimages.",
+    "ercdn.net",
+    "daioncdn.net",
 )
 
 
@@ -98,7 +106,8 @@ def _proxy_sig_ok(url: str, ref: str, sig: str) -> bool:
 def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
     base = (os.environ["STREAM_PROXY_BASE_URL"] if "STREAM_PROXY_BASE_URL" in os.environ else STREAM_PROXY_BASE_URL).strip().rstrip("/")
     u_low = (url or "").lower()
-    if base and any(h in u_low for h in _WORKER_BYPASS_HOSTS):
+    bypass_worker = any(h in u_low for h in _WORKER_BYPASS_HOSTS)
+    if base and bypass_worker:
         base = ""
     q = f"{base}/api/rave/stream-proxy?url={urllib.parse.quote(url, safe='')}"
     if ref:
@@ -106,6 +115,8 @@ def _proxy_u(url: str, ref: str = "", ext: str = "") -> str:
     q += f"&sig={_proxy_sig(url, ref)}"
     if ext:
         q += f"&ext={ext}"
+    if bypass_worker:
+        q += "&cf_fb=1"
     return q
 TMDB_API_KEY = os.environ.get("TMDB_API_KEY") or "4f042878f22ef63cb94f25e60cb4ec6e"
 GIPHY_API_KEY = os.environ.get("GIPHY_API_KEY") or "y66IkWFVC8eBWb4VWUgb8ad2RREu4v8T"
@@ -413,7 +424,7 @@ class SecurityHeaders:
 
 IDENTITY_HEADER = b"authorization"
 _UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
-_LOOP_EXECUTOR_CONFIGURED = False
+_CONFIGURED_LOOP_ID: int = 0
 _DEFAULT_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="wl_io")
 
 
@@ -459,13 +470,16 @@ class IdentityMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        global _LOOP_EXECUTOR_CONFIGURED
-        if not _LOOP_EXECUTOR_CONFIGURED:
-            try:
-                asyncio.get_running_loop().set_default_executor(_DEFAULT_IO_EXECUTOR)
-                _LOOP_EXECUTOR_CONFIGURED = True
-            except Exception:
-                pass
+        global _CONFIGURED_LOOP_ID, _DEFAULT_IO_EXECUTOR
+        try:
+            loop = asyncio.get_running_loop()
+            if _CONFIGURED_LOOP_ID != id(loop) or getattr(_DEFAULT_IO_EXECUTOR, "_shutdown", False):
+                if getattr(_DEFAULT_IO_EXECUTOR, "_shutdown", False):
+                    _DEFAULT_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="wl_io")
+                loop.set_default_executor(_DEFAULT_IO_EXECUTOR)
+                _CONFIGURED_LOOP_ID = id(loop)
+        except Exception:
+            pass
         if scope["type"] == "http":
             path_str = str(scope.get("path") or "")
             if path_str.startswith(self._SKIP_AUTH_PREFIXES):
@@ -480,7 +494,15 @@ class IdentityMiddleware:
                     if val.lower().startswith("bearer "):
                         token = val[7:].strip()
                     break
-            claims = _claims_from_token(token) if token else {}
+            claims = {}
+            if token:
+                now_ts = time.time()
+                hit = _UID_CACHE.get(token)
+                if hit and hit[1] > now_ts:
+                    val = hit[0]
+                    claims = val if isinstance(val, dict) else {"uid": str(val or "")}
+                else:
+                    claims = await asyncio.to_thread(_claims_from_token, token)
             scope["wl_uid"] = str(claims.get("uid") or "")
             scope["wl_claims"] = claims
         await self.app(scope, receive, send)
@@ -511,11 +533,66 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class _CffiRespAdapter:
+    """Minimal urllib-compatible context manager wrapping a curl_cffi response."""
+
+    def __init__(self, body: bytes, final_url: str, status: int = 200, headers: Optional[dict] = None):
+        import io as _io_mod
+        self._buf = _io_mod.BytesIO(body)
+        self.url = final_url
+        self.status = status
+        self.code = status
+        self.headers = headers or {}
+
+    def read(self, amt: int = -1) -> bytes:
+        return self._buf.read(amt)
+
+    def geturl(self) -> str:
+        return self.url
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._buf.close()
+        return False
+
+
 def _public_open(request, timeout=8.0):
     url = request.full_url if isinstance(request, urllib.request.Request) else request
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
-    return urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout)
+    try:
+        return urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout)
+    except Exception as orig_err:
+        code = getattr(orig_err, "code", 0)
+        if code and code not in (403, 429, 503, 520, 521, 522):
+            raise
+        try:
+            from curl_cffi import requests as _cffi_req
+            hdrs = dict(request.headers) if isinstance(request, urllib.request.Request) else {}
+            if isinstance(request, urllib.request.Request) and hasattr(request, "unredirected_hdrs"):
+                hdrs.update(request.unredirected_hdrs)
+            method = request.get_method() if isinstance(request, urllib.request.Request) else "GET"
+            data = request.data if isinstance(request, urllib.request.Request) else None
+            cr = _cffi_req.request(
+                method,
+                url,
+                headers=hdrs,
+                data=data,
+                impersonate="chrome124",
+                timeout=min(float(timeout or 6.0), 8.0),
+                allow_redirects=True,
+                max_redirects=4,
+            )
+            fin_u = str(getattr(cr, "url", "") or url)
+            if not public_http_url(fin_u):
+                raise ValueError("Geçersiz yönlendirme URL")
+            if cr.status_code >= 400:
+                raise orig_err
+            return _CffiRespAdapter(bytes(cr.content[:MAX_PAGE_BYTES * 2]), fin_u, cr.status_code, dict(cr.headers))
+        except Exception:
+            raise orig_err
 
 
 def fetch_user_page(url: str) -> str:
@@ -3776,7 +3853,7 @@ _DDIZIMAG_BASE: str = "https://ddizimag.icu"
 
 def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: str = "", timeout: float = 3.8, max_bytes: int = MAX_PAGE_BYTES) -> tuple[bytes, str]:
     edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL or "").strip().rstrip("/")
-    if not edge_base or not edge_base.startswith("https://") or "watchlivo-edge.workers.dev" in edge_base or "jokallame0.workers.dev" in edge_base:
+    if not edge_base or not edge_base.startswith("https://") or "jokallame0.workers.dev" in edge_base:
         hdrs = {"User-Agent": UA137, "Accept": accept or "*/*"}
         if referer:
             hdrs["Referer"] = referer
@@ -4279,11 +4356,9 @@ def _is_unplayable_stream_url(url: str) -> bool:
     except Exception:
         u_dec = u_low
     for s_chk in (u_low, u_dec):
-        if "nexa-banned" in s_chk or "nexa.mov/" in s_chk:
+        if "nexa-banned" in s_chk:
             return True
         if "/resource/h265/" in s_chk or re.search(r"(?:[/_.-])(?:h265|hevc)(?:[/_.-]|\.mp4|\?|$)", s_chk):
-            return True
-        if any(d in s_chk for d in ("makesomthingup.", "dplayer82.site", "dplayer81.", "dplayer80.")):
             return True
     return False
 
@@ -4397,7 +4472,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
-                        if (
+                        if IS_VERCEL and (
                             "dbx.molystream.org" in raw_su.lower()
                             or "dplayer" in raw_su.lower()
                             or "hdfilmcehennemi.mobi" in raw_su.lower()
@@ -4407,7 +4482,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             or st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                         ):
                             continue
-                        if "dplayer" in raw_su.lower() and "multiplayer.php" not in raw_su.lower() and "iframe.php" not in raw_su.lower():
+                        if "dplayer" in raw_su.lower() and "multiplayer.php" not in raw_su.lower() and "iframe.php" not in raw_su.lower() and ".m3u8" not in raw_su.lower() and "/hls/" not in raw_su.lower():
                             continue
                         if not _stream_matches_title(raw_su, valid_titles, year, imdb_id):
                             continue
@@ -5335,9 +5410,9 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                         st_nx = str(dec_nx.get("url") or dec_nx.get("stream") or "").strip()
                         st_nx_path = st_nx.lower().split("?", 1)[0]
                         if st_nx.startswith("https://") and not st_nx_path.endswith((".mpd", ".mp4")) and not _is_unplayable_stream_url(st_nx):
-                            with _public_open(urllib.request.Request(st_nx, headers={"User-Agent": UA137, "Referer": "https://cinejoy.pk/"}), timeout=2.0) as pr_nx:
+                            with _public_open(urllib.request.Request(st_nx, headers={"User-Agent": UA137, "Referer": "https://cinejoy.pk/"}), timeout=2.5) as pr_nx:
                                 if "#EXTM3U" in pr_nx.read(4096).decode("utf-8", errors="ignore"):
-                                    res.append((st_nx, "hls"))
+                                    res.append((st_nx, "hls_cj"))
         except Exception:
             pass
         return res
@@ -5404,10 +5479,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     t_start = time.time()
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower() or str(tid or "") in _ANIMECIX_KNOWN_TMDB
-    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_ve", "hls_ve_multi", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
+    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_ve", "hls_ve_multi", "hls_cj", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
     has_tr_dub_ready = orig_lang == "tr"
-    while time.time() - t_start < 2.4:
+    max_extract_budget = 4.2 if IS_VERCEL else 6.8
+    while time.time() - t_start < max_extract_budget:
         ac_res_now = (f_ac.result() or []) if (f_ac.done() and not f_ac.exception()) else []
         ac_ok = bool(ac_res_now)
         pv_res_now = (f_pv.result() or []) if (f_pv.done() and not f_pv.exception()) else []
@@ -5428,26 +5504,24 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             or any(isinstance(x, (list, tuple)) and len(x) >= 2 and x[1] in _TR_DUB_TAGS for x in (ac_res_now + pv_res_now + hf_res_now + dl_res_now + dp_res_now))
         )
         tr_extractors_done = f_hf.done() and f_dl.done() and f_pv.done() and (f_ac.done() if is_ja_or_anime else True)
-        has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 2.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
-        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or pv_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
+        has_glob_ready = cj_ok or ar_ok or ve_ok or hx_ok or vl_ok
+        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or pv_ok or dl_ok or dp_ok or (ar_ok if orig_lang == "tr" else False)
         if primary_1080_ok and (has_tr_dub_ready or has_glob_ready or (time.time() - t_start >= 0.35)):
             break
-        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 1.8):
+        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.8):
             time.sleep(0.06)
             continue
-        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 1.5):
+        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 3.0):
             time.sleep(0.06)
             continue
-        if has_glob_ready and tr_extractors_done:
-            break
-        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or pv_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 1.5)) or (time.time() - t_start >= 1.8)):
+        if has_glob_ready and (tr_extractors_done or time.time() - t_start >= 3.2):
             break
         if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
         time.sleep(0.06)
     any_ready_after_loop = any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar))
     if not any_ready_after_loop:
-        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=0.8)
+        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=2.2)
     elif not is_ja_or_anime and not has_tr_dub_ready and not f_hf.done():
         concurrent.futures.wait([f_hf], timeout=0.3)
     ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
@@ -6148,13 +6222,11 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int,
         finally:
             _p_loop.close()
         if resp.status_code != 200:
-            if "multi" not in str(st):
+            if resp.status_code in (404, 410) and "multi" not in str(st):
                 _STREAM_RES_HINT.set(raw_u, -1, ttl=45.0)
             return None
         body = resp.body.decode("utf-8", errors="ignore")
     except Exception:
-        if "multi" not in str(st):
-            _STREAM_RES_HINT.set(raw_u, -1, ttl=30.0)
         return None
     max_w = max((max(int(m.group(1)), int(int(m.group(2)) * 16 / 9)) for m in re.finditer(r"RESOLUTION=(\d+)x(\d+)", body, re.I)), default=0)
     if not max_w:
@@ -6813,7 +6885,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         st_u, st_t = str(st_item[0]), str(st_item[1])
                         if _is_vault_url_expired(st_u):
                             continue
-                        if (
+                        if IS_VERCEL and (
                             st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                             or "dbx.molystream.org" in st_u.lower()
                             or "dplayer" in st_u.lower()
@@ -6825,7 +6897,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             continue
                         if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title], year, imdb_id):
                             fb_candidates.append((st_u, st_t))
-            if not fb_candidates and mtype == "tv":
+            if not fb_candidates and mtype == "tv" and s == 1 and e == 1:
                 tv_fb_keys = [
                     f"tmdb:tv:{tid}:{s}:1",
                     f"tmdb:tv:{tid}:1:1",
@@ -6844,7 +6916,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             st_u, st_t = str(st_item[0]), str(st_item[1])
                             if _is_vault_url_expired(st_u):
                                 continue
-                            if (
+                            if IS_VERCEL and (
                                 st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                                 or "dbx.molystream.org" in st_u.lower()
                                 or "dplayer" in st_u.lower()
@@ -7170,7 +7242,7 @@ async def resolve_catalog(request: Request):
         media_type = "movie"
     raw_poster = (request.query_params.get("poster") or "").strip()[:600]
     poster = raw_poster if raw_poster.startswith(("https://", "http://", "/api/rave/poster", "/static/")) else ""
-    raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:600]
+    raw_source_url = (request.query_params.get("sourceUrl") or "").strip()[:2048]
     source_url = ""
     if re.fullmatch(r"animecix:\d+", raw_source_url):
         source_url = raw_source_url
@@ -7235,10 +7307,9 @@ async def resolve_catalog(request: Request):
                 break
     lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
     async with lock:
-        if not force_refresh:
-            cached = _RESOLVE_RESP_CACHE.get(ckey)
-            if cached and time.time() - cached[0] < 120:
-                return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
+        cached = _RESOLVE_RESP_CACHE.get(ckey)
+        if cached and time.time() - cached[0] < (25 if force_refresh else 120):
+            return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
         try:
             loop_rc = asyncio.get_running_loop()
             res = await asyncio.wait_for(
@@ -7247,7 +7318,7 @@ async def resolve_catalog(request: Request):
                     _resolve_catalog_sync,
                     prov, title, year, tmdb_id, media_type, poster, season, episode, imdb_id, display_title, source_url, force_refresh, request, is_max_auth, auth_ctx,
                 ),
-                timeout=25,
+                timeout=26,
             )
         except Exception:
             res = None
@@ -9352,7 +9423,8 @@ async def rave_stream_manifest(request: Request):
                         return dtxt, (dfin if (dfin.startswith("http") and public_http_url(dfin)) else u_m)
                 except Exception as derr:
                     if not edge_ok or prefer_edge:
-                        raise derr
+                        if not prefer_edge:
+                            raise derr
                 if edge_ok and not prefer_edge:
                     eb, efin = _edge_fetch_bytes(u_m, ref_m, xhr=xhr_m, timeout=t_edge, max_bytes=1024 * 1024)
                     etxt = eb.decode("utf-8", errors="ignore")

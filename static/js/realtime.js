@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v192';
-import { api } from './api.js?v=20261110_v192';
-import { state } from './store.js?v=20261110_v192';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v192';
+import { clock } from './sync.js?v=20261111_v193';
+import { api } from './api.js?v=20261111_v193';
+import { state } from './store.js?v=20261111_v193';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261111_v193';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -114,8 +114,12 @@ export class MeshConnection {
           if (this.seenSignalIds.has(ev.id)) return;
           this._addBounded(this.seenSignalIds, ev.id);
         } else {
-          if (this.seenEventIds.has(ev.id)) return;
-          this._addBounded(this.seenEventIds, ev.id);
+          if (!this.seenP2pEventIds) this.seenP2pEventIds = new Set();
+          if (this.seenEventIds.has(ev.id) || this.seenP2pEventIds.has(ev.id)) return;
+          this._addBounded(this.seenP2pEventIds, ev.id);
+          if (ev.type !== 'media_changed' && ev.action !== 'change_media' && ev.action !== 'resolve_media') {
+            this._addBounded(this.seenEventIds, ev.id);
+          }
         }
       }
       const safeEv = { ...ev, viaP2p: true };
@@ -522,16 +526,16 @@ export class MeshConnection {
           const srvUrl = String(res.media.url || res.media.videoId || '');
           const srvUnresolved = srvUrl.startsWith('/api/rave/resolve-catalog');
           const prevResolved = prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog');
-          if (prevUrl && (!srvUrl || (prevResolved && srvUnresolved))) {
+          const sameIdentity = Boolean(
+            (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
+            (!res.media.tmdbId && !prevMedia.tmdbId && res.media.title && prevMedia.title && String(res.media.title) === String(prevMedia.title) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1))
+          );
+          if (prevUrl && (!srvUrl || (sameIdentity && prevResolved && srvUnresolved))) {
             this.needsMediaPush = true;
             this.lastRev = 0;
             if (stateMutated) this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
             return true;
           }
-          const sameIdentity = Boolean(
-            (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
-            (res.media.title && prevMedia.title && String(res.media.title) === String(prevMedia.title))
-          );
           if (srvUrl && srvUrl !== prevUrl && !sameIdentity) {
             this.lastRev = 0;
             this.syncToken = '';
@@ -572,6 +576,25 @@ export class MeshConnection {
             this.lastRoom.polls = res.polls;
             stateMutated = true;
           }
+        }
+        if (Array.isArray(res.co_hosts) || Array.isArray(res.coHosts)) {
+          const nextCo = res.co_hosts || res.coHosts || [];
+          if (JSON.stringify(this.lastRoom.co_hosts || this.lastRoom.coHosts || []) !== JSON.stringify(nextCo)) {
+            this.lastRoom.co_hosts = nextCo;
+            this.lastRoom.coHosts = nextCo;
+            stateMutated = true;
+          }
+        }
+        if (Array.isArray(res.queue)) {
+          if (JSON.stringify(this.lastRoom.queue || []) !== JSON.stringify(res.queue)) {
+            this.lastRoom.queue = res.queue;
+            stateMutated = true;
+          }
+        }
+        if (typeof res.skip_votes === 'number' && res.skip_votes !== this.lastRoom.skip_votes) {
+          this.lastRoom.skip_votes = res.skip_votes;
+          if (typeof res.skipNeeded === 'number') this.lastRoom.skipNeeded = res.skipNeeded;
+          stateMutated = true;
         }
         if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
           this.lastRoom.participantCount = newCnt;
@@ -663,7 +686,7 @@ export class MeshConnection {
       this._addBounded(this.seenEventIds, actId);
       const m = { ...(this.lastRoom?.media || {}), ...obj, meshStateStatus: 'PLAYING', playing: true, meshStatePosition: Number(obj.currentTime || 0), meshStateTime: clock.now() };
       delete m.type;
-      this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
+      this._emitP2p({ event: { id: `p2p_${actId}`, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
     } else if (['play', 'pause', 'seek', 'rate', 'heartbeat'].includes(obj.type)) {
       const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
       obj.actionId = actId;

@@ -1898,17 +1898,24 @@ def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> l
         else:
             uids = _kv("SMEMBERS", f"{_kp()}uids") or []
             if isinstance(uids, list):
-                for u_id in uids[:200]:
-                    if len(results) >= limit or str(u_id) == exclude_uid:
-                        continue
-                    row = _user_get(str(u_id))
-                    if not row:
-                        continue
-                    card = public_user_card(row)
-                    h_f = _tr_fold(card["handle"].lstrip("@"))
-                    n_f = _tr_fold(card["name"])
-                    if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
-                        results[card["uid"]] = card
+                cand_uids = [str(u_id) for u_id in uids[:160] if u_id and str(u_id) != exclude_uid and str(u_id) not in results]
+                if cand_uids:
+                    raw_rows = _kv("MGET", *[f"{_kp()}user:{u_id}" for u_id in cand_uids])
+                    rows_iter = raw_rows if isinstance(raw_rows, list) else []
+                    for u_id, raw_r in zip(cand_uids, rows_iter):
+                        if len(results) >= limit or not raw_r:
+                            continue
+                        try:
+                            row = json.loads(raw_r) if isinstance(raw_r, str) else (raw_r if isinstance(raw_r, dict) else None)
+                        except Exception:
+                            row = None
+                        if not row:
+                            continue
+                        card = public_user_card(row)
+                        h_f = _tr_fold(card["handle"].lstrip("@"))
+                        n_f = _tr_fold(card["name"])
+                        if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
+                            results[card["uid"]] = card
     except Exception:
         pass
     return list(results.values())[:limit]

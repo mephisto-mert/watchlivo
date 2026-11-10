@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261110_v192';
-import { Html5Adapter } from './html5.js?v=20261110_v192';
-import { VimeoAdapter } from './vimeo.js?v=20261110_v192';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v192';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261110_v192';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v192';
+import { YouTubeAdapter } from './youtube.js?v=20261111_v193';
+import { Html5Adapter } from './html5.js?v=20261111_v193';
+import { VimeoAdapter } from './vimeo.js?v=20261111_v193';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261111_v193';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261111_v193';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261111_v193';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -47,10 +47,10 @@ export const mediaKey = (m) => {
   if (m.imdbId) return `imdb|${m.imdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
   if (m.id && /^(cat|t24|fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)[-_]/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
   if (m.videoId) return `vid|${m.provider || 'ext'}|${m.videoId}|${s}|${e}`;
-  const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/'));
+  const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/') || m.season || m.episode);
   const rawTitle = String(m.seriesTitle || m.originalTitle || m.title || '').trim().toLowerCase();
   if (isCatalogStream && rawTitle && !['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitle)) {
-    const baseTitle = rawTitle.replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').trim();
+    const baseTitle = rawTitle.replace(/\s*(?:[—–\-·|]\s*)?(?:s\d+\s*:\s*b\d+|\d+\.\s*sezon(?:\s*\d+\.\s*bölüm)?|\d+\.\s*bölüm|episode\s*\d+).*$/i, '').split(' — ')[0].trim();
     if (baseTitle && !['video', 'medya', 'stream'].includes(baseTitle)) return `title|${baseTitle}|${m.mediaType || 'movie'}|${s}|${e}`;
   }
   return `${m.provider}|${m.videoId || ''}|${m.url || ''}|${s}|${e}`;

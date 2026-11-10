@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v192';
+import { isRoomMediaPlaying } from './store.js?v=20261111_v193';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -146,7 +146,7 @@ export class SyncEngine {
     const epMatch = String(media.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
     const s = Math.max(1, Number(media.season || epMatch?.[1] || epMatch?.[3]) || 1);
     const e = Math.max(1, Number(media.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
-    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').split(' — ')[0].trim().toLowerCase();
+    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:s\d+\s*:\s*b\d+|\d+\.\s*sezon(?:\s*\d+\.\s*bölüm)?|\d+\.\s*bölüm|episode\s*\d+).*$/i, '').split(' — ')[0].trim().toLowerCase();
     const rawTitleSig = ['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitleCandidate)
       ? ''
       : rawTitleCandidate;

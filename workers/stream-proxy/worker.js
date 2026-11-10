@@ -11,7 +11,7 @@ const HAKUNA_UA =
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-  "Access-Control-Allow-Headers": "Range, Content-Type",
+  "Access-Control-Allow-Headers": "Range, If-Range, Content-Type",
   "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
 };
 
@@ -81,8 +81,24 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
-async function verifyProxySig(url, ref, sig, secret) {
-  if (!secret || !sig || !sig.includes(".")) return false;
+async function deriveFallbackSecret(env) {
+  for (const k of ["VORTEX_SECRET", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN", "REDIS_URL"]) {
+    const cand = String(env?.[k] || "").trim();
+    if (cand.length >= 24) {
+      const key = await getHmacKey(cand);
+      const msg = new TextEncoder().encode("watchlivo-shared-secret-v4:PROXY_SECRET");
+      const macBuf = await crypto.subtle.sign("HMAC", key, msg);
+      return Array.from(new Uint8Array(macBuf))
+        .slice(0, 16)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+    }
+  }
+  return "";
+}
+
+async function verifyProxySig(url, ref, sig, secret, env = null) {
+  if (!sig || !sig.includes(".")) return false;
   const dotIdx = sig.lastIndexOf(".");
   const digest = sig.slice(0, dotIdx);
   const expRaw = sig.slice(dotIdx + 1);
@@ -90,14 +106,23 @@ async function verifyProxySig(url, ref, sig, secret) {
   const exp = Number(expRaw);
   if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
 
-  const key = await getHmacKey(secret);
+  const candidates = [];
+  if (secret && String(secret).trim().length >= 16) candidates.push(String(secret).trim());
+  if (env) {
+    const derived = await deriveFallbackSecret(env);
+    if (derived && !candidates.includes(derived)) candidates.push(derived);
+  }
   const msg = new TextEncoder().encode(`${url}|${ref}|${exp}`);
-  const macBuf = await crypto.subtle.sign("HMAC", key, msg);
-  const hex = Array.from(new Uint8Array(macBuf))
-    .slice(0, 12)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return timingSafeEqualStr(hex, digest.toLowerCase());
+  for (const cand of candidates) {
+    const key = await getHmacKey(cand);
+    const macBuf = await crypto.subtle.sign("HMAC", key, msg);
+    const hex = Array.from(new Uint8Array(macBuf))
+      .slice(0, 12)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+    if (timingSafeEqualStr(hex, digest.toLowerCase())) return true;
+  }
+  return false;
 }
 
 function inferReferer(url, explicitRef) {
@@ -113,7 +138,8 @@ function inferReferer(url, explicitRef) {
   ) {
     return "https://vidy.st/";
   }
-  if (url.includes("lightspeed.st")) return "https://cinejoy.pk/";
+  if (url.includes("lightspeed.st") || url.includes("nexa.mov")) return "https://cinejoy.pk/";
+  if (url.includes("dplayer")) return "https://dizipal1511.com/";
   if (url.includes("archive.org")) return "https://archive.org/";
   if (url.includes("tau-video")) return "https://tau-video.xyz/";
   if (url.includes("fastplay.") || url.includes(".cfd/")) {
@@ -377,7 +403,7 @@ export default {
         const efUrl = (reqUrl.searchParams.get("url") || "").trim();
         const efRef = (reqUrl.searchParams.get("referer") || "").trim();
         const efSig = (reqUrl.searchParams.get("sig") || "").trim();
-        if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || ""))) {
+        if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || "", env))) {
           return jsonResponse({ error: "İmzasız kenar isteği reddedildi" }, 403);
         }
         if (!isPublicHttpUrl(efUrl)) {
@@ -443,7 +469,7 @@ export default {
     const sig = (reqUrl.searchParams.get("sig") || "").trim();
     const extHint = (reqUrl.searchParams.get("ext") || "").trim().toLowerCase();
 
-    if (!targetUrl || !(await verifyProxySig(targetUrl, ref, sig, env.PROXY_SECRET || ""))) {
+    if (!targetUrl || !(await verifyProxySig(targetUrl, ref, sig, env.PROXY_SECRET || "", env))) {
       return jsonResponse({ error: "İmzasız proxy isteği reddedildi" }, 403);
     }
     if (!isPublicHttpUrl(targetUrl)) {

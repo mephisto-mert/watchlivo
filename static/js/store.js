@@ -454,13 +454,8 @@ export async function syncCloudUserMedia(force = false) {
       for (const loc of localList) {
         const k = _boundProgressKey(loc.historyId || loc.key || '');
         if (!k) continue;
-        if (!cloudKeys.has(k) && loc.cloudSynced) {
-          historyChanged = true;
-          continue;
-        }
         if (!cloudKeys.has(k) && !loc.cloudSynced) {
           toPush.push({ ...loc, key: k, historyId: k });
-          loc.cloudSynced = true;
           historyChanged = true;
         }
         byKey.set(k, loc);
@@ -573,13 +568,8 @@ export async function syncCloudUserMedia(force = false) {
       for (const f of localFavs) {
         const fk = _boundProgressKey(f.key || (f.tmdbId ? `${f.mediaType || 'movie'}:${f.tmdbId}` : f.favId || ''));
         if (!fk) continue;
-        if (!cloudFavKeys.has(fk) && f.cloudSynced) {
-          favsChanged = true;
-          continue;
-        }
         if (!cloudFavKeys.has(fk) && !f.cloudSynced) {
           favsToPush.push({ ...f, key: fk });
-          f.cloudSynced = true;
           favsChanged = true;
         }
         byFav.set(fk, { ...f, key: fk });
@@ -898,6 +888,9 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const now = Date.now();
   const prevPush = _lastCloudProgPush.get(id) || 0;
   const shouldPushCloud = Boolean(typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || completed || epFinished || now - prevPush >= 12000));
+  const rawSaveUrl = String(media.url || prev?.url || '');
+  const isEphemeralProxyUrl = /\/api\/rave\/(?:stream\?|stream-proxy\?|stream-manifest|resolve-catalog)/i.test(rawSaveUrl);
+  const persistableUrl = isEphemeralProxyUrl ? '' : rawSaveUrl;
   try {
     const list = existingList.filter((item) => String(item.historyId || item.key || '') !== id);
     const effSavedPoster = media.poster || media.thumbnail || prev?.poster || prev?.thumbnail || (media.title ? `/api/rave/poster?tid=${encodeURIComponent(media.tmdbId || '')}&t=${encodeURIComponent(media.title || '')}&y=${encodeURIComponent(media.year || '')}&mt=${encodeURIComponent(mtype)}` : '');
@@ -923,7 +916,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       season: savedSeason,
       episode: savedEpisode,
       year: media.year || prev?.year || '',
-      url: media.url || prev?.url || '',
+      url: persistableUrl,
       officialUrl: media.officialUrl || prev?.officialUrl || '',
       videoId: media.videoId || prev?.videoId || '',
       currentTime: savedTime,
@@ -932,7 +925,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       percent: savedPct,
       completed,
       epProgress: epMap,
-      cloudSynced: shouldPushCloud,
+      cloudSynced: Boolean(prev?.cloudSynced),
       updatedAt: now,
     });
     localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 50)));

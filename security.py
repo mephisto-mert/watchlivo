@@ -247,6 +247,30 @@ _UPSTASH_DOWN_UNTIL: dict[str, float] = {}
 _CF_WORKER_EGRESS_NETS = (
     ipaddress.ip_network("2a06:98c0::/29"),
 )
+_CF_EDGE_NETS = (
+    ipaddress.ip_network("173.245.48.0/20"),
+    ipaddress.ip_network("103.21.244.0/22"),
+    ipaddress.ip_network("103.22.200.0/22"),
+    ipaddress.ip_network("103.31.4.0/22"),
+    ipaddress.ip_network("141.101.64.0/18"),
+    ipaddress.ip_network("108.162.192.0/18"),
+    ipaddress.ip_network("190.93.240.0/20"),
+    ipaddress.ip_network("188.114.96.0/20"),
+    ipaddress.ip_network("197.234.240.0/22"),
+    ipaddress.ip_network("198.41.128.0/17"),
+    ipaddress.ip_network("162.158.0.0/15"),
+    ipaddress.ip_network("104.16.0.0/13"),
+    ipaddress.ip_network("104.24.0.0/14"),
+    ipaddress.ip_network("172.64.0.0/13"),
+    ipaddress.ip_network("131.0.72.0/22"),
+    ipaddress.ip_network("2400:cb00::/32"),
+    ipaddress.ip_network("2606:4700::/32"),
+    ipaddress.ip_network("2803:f800::/32"),
+    ipaddress.ip_network("2405:b500::/32"),
+    ipaddress.ip_network("2405:8100::/32"),
+    ipaddress.ip_network("2a06:98c0::/29"),
+    ipaddress.ip_network("2c0f:f248::/32"),
+)
 
 
 def is_upstash_down(url: Optional[str]) -> bool:
@@ -445,7 +469,18 @@ def _is_cf_worker_egress_ip(raw_ip: str) -> bool:
         return False
     try:
         ip = ipaddress.ip_address(s)
-        return isinstance(ip, ipaddress.IPv6Address) and any(ip in net for net in _CF_WORKER_EGRESS_NETS)
+        return any(ip in net for net in _CF_WORKER_EGRESS_NETS)
+    except Exception:
+        return False
+
+
+def _is_cf_edge_ip(raw_ip: str) -> bool:
+    s = (raw_ip or "").strip()
+    if not s:
+        return False
+    try:
+        ip = ipaddress.ip_address(s)
+        return any(ip in net for net in _CF_EDGE_NETS)
     except Exception:
         return False
 
@@ -460,7 +495,7 @@ def _is_trusted_proxy_peer(peer: str) -> bool:
         ip = ipaddress.ip_address(p)
         if isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in _DOC_TEST_NETS):
             return False
-        return bool(ip.is_private or ip.is_loopback)
+        return bool(ip.is_private or ip.is_loopback or any(ip in net for net in _CF_EDGE_NETS))
     except Exception:
         return False
 
@@ -522,15 +557,15 @@ def client_ip(scope_or_request) -> str:
     elif trust_proxy:
         cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
         if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
-            if not edge_secret and _is_cf_worker_egress_ip(cf_ip):
-                wl_ip = (headers.get("x-watchlivo-client-ip") or "").split(",")[0].strip()
-                if wl_ip and not _is_cf_worker_egress_ip(wl_ip):
+            if not edge_secret and (_is_cf_worker_egress_ip(cf_ip) or _is_cf_edge_ip(cf_ip)):
+                wl_ip = (headers.get("x-watchlivo-client-ip") or headers.get("x-forwarded-for") or "").split(",")[0].strip()
+                if wl_ip and not _is_cf_worker_egress_ip(wl_ip) and not _is_cf_edge_ip(wl_ip):
                     try:
                         ipaddress.ip_address(wl_ip)
                         return wl_ip[:64]
                     except Exception:
                         pass
-            else:
+            if not _is_cf_worker_egress_ip(cf_ip):
                 try:
                     ipaddress.ip_address(cf_ip)
                     return cf_ip[:64]

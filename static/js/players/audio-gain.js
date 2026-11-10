@@ -107,9 +107,15 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
   if ((ctx.state === 'suspended' || ctx.state === 'interrupted') && !(typeof document !== 'undefined' && document.hidden)) {
-    try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
+    try {
+      ctx.resume().then(() => {
+        if (ctx.state === 'running' && el.isConnected && !_mediaNodes.has(el) && !el.muted && initialGain > 1.01) {
+          applyElementVolume(el, Math.round(initialGain * 100), false, opts);
+        }
+      }).catch(() => {});
+    } catch (e) { /* ignore */ }
   }
-  if (ctx.state === 'closed' || (isIosWebKit() && ctx.state !== 'running')) return null;
+  if (ctx.state !== 'running') return null;
   try {
     const source = ctx.createMediaElementSource(el);
     const eqLow = ctx.createBiquadFilter();

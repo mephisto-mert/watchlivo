@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261110_v192';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261110_v192';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261110_v192';
-import { getProvider } from '../providers.js?v=20261110_v192';
-import { expectedPosition } from '../sync.js?v=20261110_v192';
-import { thumbFor } from './lobby.js?v=20261110_v192';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261110_v192';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261110_v192';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261110_v192';
-import { avatar } from '../profile.js?v=20261110_v192';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v193';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v193';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v193';
+import { getProvider } from '../providers.js?v=20261111_v193';
+import { expectedPosition } from '../sync.js?v=20261111_v193';
+import { thumbFor } from './lobby.js?v=20261111_v193';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v193';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v193';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v193';
+import { avatar } from '../profile.js?v=20261111_v193';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -763,7 +763,7 @@ export function buildControls(frame, ctx) {
       return;
     }
     if (nextEpBusy) return;
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || 'Dizi';
+    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
     nextEpBusy = true;
     nextEpBanner.classList.add('hidden');
     let targetSeason = curE > 1 ? curS : Math.max(1, curS - 1);
@@ -790,11 +790,11 @@ export function buildControls(frame, ctx) {
       showOverlay(`⏮️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4000);
       if (manual) toast(`⏮️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = (rawProvId === 'youtube' || rawProvId === 'web' || rawProvId === 'hls' || rawProvId === 'mp4') ? 'cinema' : rawProvId;
+      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
       const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
       const rawSrcUrl = String(m.sourceUrl || '').trim();
       const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
-      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || cleanTitle;
+      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
       const prevMedia = await resolveCatalogItem(
         { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
         prov,
@@ -839,7 +839,7 @@ export function buildControls(frame, ctx) {
     }
     if (!manual && (state.mesh?.queue || []).length > 0) return;
     if (nextEpBusy) return;
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || 'Dizi';
+    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
     const seriesIdKey = m.tmdbId || m.id || cleanTitle;
     if (!seriesIdKey) return;
     const curKey = `${seriesIdKey}:${curS || 1}:${curE || 1}`;
@@ -888,11 +888,11 @@ export function buildControls(frame, ctx) {
         }
       } catch (e) { /* fallback to +1 */ }
       const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = (rawProvId === 'youtube' || rawProvId === 'web' || rawProvId === 'hls' || rawProvId === 'mp4') ? 'cinema' : rawProvId;
+      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
       const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
       const rawSrcUrl = String(m.sourceUrl || '').trim();
       const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
-      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || cleanTitle;
+      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
       showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
       const nextMedia = await resolveCatalogItem(
         { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
@@ -1690,10 +1690,10 @@ export function buildControls(frame, ctx) {
     const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
     if (isMovie || (m.mediaType !== 'tv' && !parsedEp)) return;
     const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-    const safeProvId = (rawProvId === 'youtube' || rawProvId === 'web' || rawProvId === 'hls' || rawProvId === 'mp4') ? 'cinema' : rawProvId;
+    const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
     const prov = getProvider(safeProvId) || getProvider('cinema') || getProvider('netflix');
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || 'Dizi';
-    const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim() || cleanTitle;
+    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
+    const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
     const rawSrcUrl = String(m.sourceUrl || '').trim();
     const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
     const box = h('div', { style: { minHeight: '280px' } });
@@ -1733,7 +1733,7 @@ export function buildControls(frame, ctx) {
           });
         }
       },
-      resolveCatalogItem,
+      (it, pr, sNum, eNum, epTitle) => resolveCatalogItem(it, pr, sNum, eNum, epTitle, { applySavedResume: false }),
     );
   }
 
@@ -1801,11 +1801,13 @@ export function buildControls(frame, ctx) {
     loading.classList.remove('hidden');
     showOverlay('🔄 Yayın kaynakları canlı yenileniyor…', 3500);
     const curPos = position();
-    const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
-    const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
+    const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
+    const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
+    const rawRefreshProv = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
+    const safeRefreshProv = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawRefreshProv) ? 'cinema' : rawRefreshProv;
     try {
       const qs = new URLSearchParams({
-        provider: String(m.catalogProvider || m.provider || 'cinema'),
+        provider: safeRefreshProv,
         title: cleanOrigTitle || cleanSeriesTitle,
         displayTitle: cleanSeriesTitle,
         year: String(m.year || ''),
@@ -1920,7 +1922,14 @@ export function buildControls(frame, ctx) {
           onclick: async (e) => {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
+            const prevAudUrl = host.adapter?.currentUrl || '';
             await host.adapter?.setAudioTrack?.(t.id);
+            const afterAudUrl = host.adapter?.currentUrl || '';
+            if (afterAudUrl && afterAudUrl !== prevAudUrl && state.mesh?.media) {
+              state.mesh.media.url = afterAudUrl;
+              if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = afterAudUrl;
+              if (isLeader()) ctx.conn?.send('resolve_media', { ...state.mesh.media, url: afterAudUrl, currentTime: position() });
+            }
             ctx.sync?.kick();
             showOverlay(`🎙️ Ses: ${t.label}`, 2000);
             closeMenu();
@@ -2033,7 +2042,14 @@ export function buildControls(frame, ctx) {
         onclick: async (e) => {
           e.stopPropagation();
           if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
+          const prevAudUrl = host.adapter?.currentUrl || '';
           await host.adapter?.setAudioTrack?.(t.id);
+          const afterAudUrl = host.adapter?.currentUrl || '';
+          if (afterAudUrl && afterAudUrl !== prevAudUrl && state.mesh?.media) {
+            state.mesh.media.url = afterAudUrl;
+            if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = afterAudUrl;
+            if (isLeader()) ctx.conn?.send('resolve_media', { ...state.mesh.media, url: afterAudUrl, currentTime: position() });
+          }
           ctx.sync?.kick();
           showOverlay(`🎙️ Ses: ${t.label}`, 2000);
           closeMenu();
@@ -2109,8 +2125,13 @@ export function buildControls(frame, ctx) {
                 : `${nextSrvUrl}&aud=tr`;
             }
             m.url = nextSrvUrl;
+            if (host.loadedUrl) host.loadedUrl = nextSrvUrl;
+            if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = nextSrvUrl;
             host.adapter?.switchStreamSource?.(nextSrvUrl);
             host.adapter?.subs?.onStreamFallbackUrl?.(nextSrvUrl);
+            if (isLeader() || canSelectVideo()) {
+              ctx.conn?.send('resolve_media', { ...m, url: nextSrvUrl, currentTime: position() });
+            }
             showOverlay(srv.label, 2200);
             closeMenu();
             update();
@@ -2894,7 +2915,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261110_v192',
+            v: '20261111_v193',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

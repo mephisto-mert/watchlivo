@@ -4047,6 +4047,23 @@ body > .ctl-menu.acrylic.is-body-portal .ctl-menu-close,
   gap: 6px;
   flex-shrink: 0;
 }
+@media (max-width: 720px), (max-height: 520px) {
+  .rave-notif-stack {
+    top: calc(58px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    bottom: auto !important;
+    left: 12px !important;
+    right: 12px !important;
+    max-width: none !important;
+  }
+  .rave-notif-stack .rave-notif-card:nth-child(n+2) {
+    display: none !important;
+  }
+  .rave-notif-card {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+}
 @keyframes raveNotifIn {
   from { opacity: 0; transform: translateY(14px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -5628,19 +5645,27 @@ html.is-android-pip .rave-subtitle-cue {
   }
 }
 
-/* v137: Ultra-Narrow 320px-390px Control Bar Protection — Guarantees #ctl-fs Never Clips on >1h Feature Films */
-@media (max-width: 390px) {
-  .video-frame:not(.fullscreen) .ctl-bar-row {
+/* v137/v193: Ultra-Narrow 320px-430px Control Bar Protection — Guarantees #ctl-fs & .ctl-time Never Collide on iPhone 15/16 (393px) */
+@media (max-width: 560px) {
+  .video-frame.fullscreen .ctl-fs-reactions,
+  #video-frame:fullscreen .ctl-fs-reactions,
+  #video-frame:-webkit-full-screen .ctl-fs-reactions,
+  body.vortex-fs .video-frame .ctl-fs-reactions {
+    display: none !important;
+  }
+}
+@media (max-width: 430px) {
+  .video-frame .ctl-bar-row {
     gap: 2px !important;
     padding: 0 2px !important;
   }
-  .video-frame:not(.fullscreen) #ctl-speed-btn,
-  .video-frame:not(.fullscreen) #ctl-theater,
-  .video-frame:not(.fullscreen) #ctl-sub-btn .ctl-btn-lbl {
+  .video-frame #ctl-speed-btn,
+  .video-frame #ctl-theater,
+  .video-frame #ctl-sub-btn .ctl-btn-lbl {
     display: none !important;
   }
-  .video-frame:not(.fullscreen) .ctl-action,
-  .video-frame:not(.fullscreen) #ctl-sub-btn {
+  .video-frame .ctl-action,
+  .video-frame #ctl-sub-btn {
     width: 28px !important;
     height: 28px !important;
     min-width: 28px !important;
@@ -5648,9 +5673,9 @@ html.is-android-pip .rave-subtitle-cue {
     flex: 0 0 28px !important;
     padding: 0 !important;
   }
-  .video-frame:not(.fullscreen) .ctl-time {
+  .video-frame .ctl-time {
     font-size: 9.5px !important;
-    padding: 0 1px !important;
+    padding: 0 2px !important;
     letter-spacing: -0.02em !important;
   }
 }
@@ -5702,7 +5727,7 @@ html.is-android-pip .rave-subtitle-cue {
 .reaction-emoji-grid::-webkit-scrollbar {
   display: none !important;
 }
-.react-emoji-btn {
+.reaction-bar .react-emoji-btn:not(.ctl-fs-react-btn) {
   flex: 1 0 28px !important;
   min-width: 28px !important;
   height: 28px !important;
@@ -5943,11 +5968,17 @@ html.is-android-pip .rave-subtitle-cue {
   }
 }
 
-@container (max-width: 385px) {
+@container (max-width: 560px) {
+  .ctl-fs-reactions {
+    display: none !important;
+  }
+}
+@container (max-width: 430px) {
   .ctl-bottom {
     padding: 4px 5px 5px !important;
   }
-  #ctl-theater {
+  #ctl-theater,
+  #ctl-speed-btn {
     display: none !important;
   }
   .ctl-action,

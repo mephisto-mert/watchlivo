@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v192';
-import { expectedPosition } from '../sync.js?v=20261110_v192';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v192';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v192';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v192';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v193';
+import { expectedPosition } from '../sync.js?v=20261111_v193';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v193';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v193';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v193';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -681,12 +681,12 @@ export class Html5Adapter {
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';
     const hasHlsCandidate = isHls || alts.some((au) => isUrlHls(au));
     if (isHls && !window.Hls && !isIosWebKit()) {
-      await ensureHlsJs(2800);
+      await ensureHlsJs(7500);
       if (this._destroyed || this.video !== v) return;
     } else if (hasHlsCandidate && !window.Hls && !isIosWebKit()) {
-      ensureHlsJs(2800).catch(() => {});
+      ensureHlsJs(7500).catch(() => {});
     }
-    const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
+    let canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
     const isApple = isIosWebKit() || (/Apple/i.test(navigator.vendor || '') && (/iPhone|iPad|iPod/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)));
     let useNativeHls = isHls && canNativeHls && (isApple || !canHlsJs);
@@ -705,6 +705,7 @@ export class Html5Adapter {
     };
     this._withProxySegs = withProxySegs;
 
+    let stallChecks = 0;
     let lastLiveRefreshAt = 0;
     const handleExhaustedCandidates = async (srcUrl, doneCb) => {
       const proxied = withProxySegs(srcUrl || this.currentUrl);
@@ -759,6 +760,7 @@ export class Html5Adapter {
 
     const loadCandidateUrl = (nextUrl, doneCb) => {
       if (!nextUrl || this._destroyed || this.video !== v) return;
+      stallChecks = 0;
       if (!String(nextUrl).includes('proxy_segs=1')) this._switchedToProxySegs = false;
       const expT = expectedPosition(state.mesh?.media);
       const curNow = Math.max(Number(this.getTime() || 0), Number(this.highestPlayedPos || 0));
@@ -773,6 +775,7 @@ export class Html5Adapter {
       this.currentUrl = nextUrl;
       this._currentIsDirectProxy = Boolean(/\/api\/rave\//i.test(String(nextUrl || '')));
       this._zeroDimPlayStartAt = 0;
+      this._zeroDimPlayStartPos = -1;
       this.subs?.onStreamFallbackUrl?.(nextUrl);
       syncVideoCors(nextUrl, useNativeHls && isUrlHls(nextUrl));
       if (this.isMusic) {
@@ -830,6 +833,36 @@ export class Html5Adapter {
         doneCb?.();
       };
       if (isUrlHls(nextUrl)) {
+        canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
+        if (!canHlsJs && !isApple) {
+          ensureHlsJs(5500).then((ok) => {
+            if (this._destroyed || this.video !== v || this.currentUrl !== nextUrl) return;
+            canHlsJs = Boolean(ok && window.Hls && window.Hls.isSupported());
+            if (canHlsJs) {
+              useNativeHls = false;
+              this.useNativeHls = false;
+              attachHlsJs(nextUrl, doneCb, resumePos);
+            } else if (canNativeHls) {
+              useNativeHls = true;
+              this.useNativeHls = true;
+              syncVideoCors(nextUrl, true);
+              try { this.hls?.destroy(); } catch (_) {}
+              this.hls = null;
+              v.src = nextUrl;
+              v.load();
+              v.addEventListener('loadedmetadata', () => {
+                this.subs.mergeNativeAudioTracks?.(v.audioTracks);
+                restorePosOnLoad();
+              }, { once: true });
+              if (this.wantPlaying) this.tryPlay();
+            } else if (nativeAltIdx < alts.length) {
+              loadCandidateUrl(alts[nativeAltIdx++], doneCb);
+            } else {
+              handleExhaustedCandidates(nextUrl, doneCb);
+            }
+          });
+          return;
+        }
         const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
         if (allowHlsJsHere) {
           if (isApple) {
@@ -985,8 +1018,16 @@ export class Html5Adapter {
       this.hls.on(window.Hls.Events.ERROR, (_e, data) => {
         const errCode = Number(data?.response?.code || 0);
         const isHardUpstreamDead = [401, 403, 404, 410, 429, 451, 500, 502, 503, 504, 520, 521, 522, 524].includes(errCode);
+        const isProxyableDetail = (
+          data?.details === 'fragLoadError'
+          || data?.details === 'fragLoadTimeOut'
+          || data?.details === 'levelLoadError'
+          || data?.details === 'levelLoadTimeOut'
+          || data?.details === 'keyLoadError'
+          || data?.details === 'keyLoadTimeOut'
+        );
         if (!data?.fatal) {
-          if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+          if (isProxyableDetail && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
             this._switchedToProxySegs = true;
             const proxied = withProxySegs(srcUrl);
             if (proxied && proxied !== srcUrl) {
@@ -1053,7 +1094,7 @@ export class Html5Adapter {
             this.lastSeekAt = Date.now();
           }
           if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-            if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+            if (isProxyableDetail && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
               this._switchedToProxySegs = true;
               const proxied = withProxySegs(srcUrl);
               if (proxied && proxied !== srcUrl) {
@@ -1234,11 +1275,15 @@ export class Html5Adapter {
           v.addEventListener(evName, enforcePrimaryInitialSeek);
         });
       }
-      syncVideoCors(url);
+      syncVideoCors(url, useNativeHls && isUrlHls(url));
       if (isHls && canHlsJs && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
         v.src = url;
+        try { v.load(); } catch (_) {}
+        if (useNativeHls) {
+          v.addEventListener('loadedmetadata', () => this.subs.mergeNativeAudioTracks?.(v.audioTracks), { once: true });
+        }
         if (autoplay) this.tryPlay();
       }
     });
@@ -1253,21 +1298,25 @@ export class Html5Adapter {
       if (v.paused) this.tryPlay();
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
-    let stallChecks = 0;
     const isTouchVp = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
     const isMobViewport = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (isTouchVp && typeof window !== 'undefined' && window.innerWidth <= 900);
     const stallWindowMs = this.isMusic ? 3500 : (isMobViewport ? 5500 : 4500);
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
     this._zeroDimPlayStartAt = 0;
+    this._zeroDimPlayStartPos = -1;
     const checkZeroDimAudioOnly = () => {
       if (this.video !== v || this.isMusic || isAudioOnlyUrl(this.currentUrl)) {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
       if (v.seeking) return;
-      if (!this._zeroDimPlayStartAt && !v.paused) this._zeroDimPlayStartAt = performance.now();
+      if (!this._zeroDimPlayStartAt && !v.paused) {
+        this._zeroDimPlayStartAt = performance.now();
+        this._zeroDimPlayStartPos = Number(v.currentTime || 0);
+      }
       const elapsedAfterStart = this._zeroDimPlayStartAt ? (performance.now() - this._zeroDimPlayStartAt) / 1000 : 0;
+      const posAdvanced = this._zeroDimPlayStartPos >= 0 ? Math.max(0, (v.currentTime || 0) - this._zeroDimPlayStartPos) : 0;
       const q = typeof v.getVideoPlaybackQuality === 'function' ? v.getVideoPlaybackQuality() : null;
       const decFrames = q && typeof q.totalVideoFrames === 'number'
         ? q.totalVideoFrames
@@ -1276,8 +1325,8 @@ export class Html5Adapter {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
-      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > (this.useNativeHls ? 4.2 : 2.2) && (v.currentTime || 0) > 1.5;
-      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.8;
+      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > (this.useNativeHls ? 4.5 : 2.6) && posAdvanced > 2.0;
+      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 3.2 && posAdvanced > 1.8;
       if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
         const nowMs = Date.now();
         if (this.hls && !zeroDimDowngraded) {
@@ -1323,7 +1372,9 @@ export class Html5Adapter {
         return;
       }
       if (!v.paused && v.readyState >= 2 && (v.currentTime > 0.25 || v.readyState >= 3)) {
-        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0 && (v.currentTime || 0) > 2.2) {
+        const zeroDimElapsed = this._zeroDimPlayStartAt ? (performance.now() - this._zeroDimPlayStartAt) / 1000 : 0;
+        const zeroDimAdvanced = this._zeroDimPlayStartPos >= 0 ? Math.max(0, (v.currentTime || 0) - this._zeroDimPlayStartPos) : 0;
+        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0 && zeroDimElapsed > 3.2 && zeroDimAdvanced > 2.2) {
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
             this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
@@ -1340,10 +1391,11 @@ export class Html5Adapter {
         this.tryPlay();
       }
       const isStuck = v.readyState < 2 || (this.wantPlaying && !v.paused && v.currentTime <= 0.15 && v.readyState < 3);
-      if (isStuck && stallChecks < 6) {
+      if (isStuck && stallChecks < 8) {
         stallChecks += 1;
         const activelyLoadingMedia = Boolean(v.networkState === 2 || (v.buffered && v.buffered.length > 0));
-        if (stallChecks === 1 && ((this.hls && this.hls.levels?.length > 0) || (!this.hls && activelyLoadingMedia))) {
+        const hlsStillWarming = Boolean(this.hls && (this.hls.levels?.length > 0 || stallChecks <= 2));
+        if (stallChecks <= 3 && (hlsStillWarming || (!this.hls && activelyLoadingMedia))) {
           try {
             if (this.hls && this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
             if (v.readyState >= 2 && this.wantPlaying && v.paused) this.tryPlay();

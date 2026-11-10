@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261110_v192';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261111_v193';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -437,6 +437,7 @@ export class SubtitleDubController {
     if (this.media) this.media.subtitleTracks = this.subtitleTracks;
     const baseUrl = media.url || '';
     const rawAudio = Array.isArray(media.audioTracks) ? media.audioTracks.filter(Boolean) : [];
+    this._hadInitialAudioTracks = rawAudio.length > 0;
     this.audioTracks = rawAudio.length
       ? [...rawAudio]
       : [
@@ -1131,13 +1132,17 @@ export class SubtitleDubController {
 
     const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
+    const allowInitStreamSwitch = !isInit || !this._skipInitStreamSwitch || !this._hadInitialAudioTracks;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if (!(isInit && this._skipInitStreamSwitch) && track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (allowInitStreamSwitch && track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       await this.adapter.switchStreamSource(track.url);
     } else {
       if (isInit && this._skipInitStreamSwitch && track.mode === 'stream' && track.url) {
         this.adapter?._pushFallbackAlt?.(track.url);
+        if (this.adapter?.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+          this.onStreamFallbackUrl(this.adapter.currentUrl);
+        }
       }
       this._applyHlsAudioSelection();
       this._applyNativeAudioSelection();

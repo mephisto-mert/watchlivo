@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261110_v192';
-import { api, qs } from './api.js?v=20261110_v192';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v192';
+import { h, toast, popup } from './ui.js?v=20261111_v193';
+import { api, qs } from './api.js?v=20261111_v193';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261111_v193';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -212,7 +212,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
 
   // State Machine: 'login' | 'challenge' | 'profiles' | 'browse'
   let currentStep = acct.loginSatisfied ? 'browse' : 'login';
-  let loginIdentifier = acct.accountEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : 'mertcan@gmail.com');
+  let loginIdentifier = acct.accountEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : '');
   let challengeMode = 'otp'; // 'otp' or 'password'
   let activeProfile = acct.profileName || NETFLIX_PROFILES[0].name;
 
@@ -268,7 +268,7 @@ export function openNetflixLoginModal(p, onReload, onOpenBrowser, onPickContent)
             color: '#fff',
             overflow: 'hidden',
           },
-        }, state.self?.avatar ? h('img', { src: state.self.avatar, style: { width: '100%', height: '100%', objectFit: 'cover' } }) : 'MC'),
+        }, state.self?.avatar ? h('img', { src: state.self.avatar, style: { width: '100%', height: '100%', objectFit: 'cover' } }) : String(state.self?.name || 'WL').trim().slice(0, 2).toUpperCase()),
         h('button', {
           type: 'button',
           style: { background: 'none', border: 'none', color: '#94a3b8', fontSize: '18px', cursor: 'pointer', padding: '2px 4px' },
@@ -1461,7 +1461,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261110_v192',
+        v: '20261111_v193',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

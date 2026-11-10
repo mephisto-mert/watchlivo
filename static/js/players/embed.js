@@ -3,8 +3,10 @@ const _TRUSTED_EMBED_DOMAINS = [
   'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
   'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
   'rutube.ru', 'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
+  'embed.su', 'vidfast.pro', 'vidora.su', 'rivestream.live', 'pstream.org', 'playmix.uno', 'nexa.mov', 'moviesapi.club',
+  'nontongo.win', 'vidbinge.dev', 'superembed.stream', 'uqload.net', 'sendvid.com', 'watchlivo.online',
 ];
-const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid)\.[a-z0-9-]+$/i;
+const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid|closeload|filmmakinesi|dizilla|dizipal|sezonlukdizi|turkanime|dplayer\d*)(?:\.[a-z0-9-]+)+$/i;
 
 export function isTrustedEmbedUrl(rawUrl) {
   try {
@@ -107,21 +109,32 @@ export class EmbedAdapter {
     this.paused = !shouldPlay;
     this.duration = Number(media.duration) || (media.mediaType === 'tv' ? 2700 : 7200);
     const src = this.buildSrc(media, this.baseTime, shouldPlay);
-    try { this._expectedOrigin = src.startsWith('http') ? new URL(src).origin : ''; } catch (_) { this._expectedOrigin = ''; }
+    if (!src || src === 'about:blank') {
+      const firstValidAlt = (media.altUrls || []).find((u) => _isTrustedEmbedUrl(u));
+      if (!firstValidAlt) {
+        this.events.onBuffering?.(false);
+        this.events.onError?.('Akış yüklenemedi');
+        return;
+      }
+    }
+    const initialEmbedSrc = (!src || src === 'about:blank')
+      ? ((media.altUrls || []).find((u) => _isTrustedEmbedUrl(u)) || 'about:blank')
+      : src;
+    try { this._expectedOrigin = initialEmbedSrc.startsWith('http') ? new URL(initialEmbedSrc).origin : ''; } catch (_) { this._expectedOrigin = ''; }
     const f = document.createElement('iframe');
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;
     f.referrerPolicy = 'origin';
     // Not: Gömülü oynatıcılar (vidlink, vidsrc…) "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
     f.removeAttribute('sandbox');
-    f.src = src;
+    f.src = initialEmbedSrc;
     this.frame = f;
     window.addEventListener('message', this._onMsg);
     this.container.replaceChildren(f);
-    const alts = (media.altUrls || []).filter((u) => _isTrustedEmbedUrl(u));
+    const alts = (media.altUrls || []).filter((u) => _isTrustedEmbedUrl(u) && u !== initialEmbedSrc);
     if (alts.length) {
       let idx = 0;
-      const allSrcs = [src, ...alts];
+      const allSrcs = [initialEmbedSrc, ...alts];
       const sw = document.createElement('button');
       sw.type = 'button';
       sw.textContent = '🔄 Kaynak Değiştir';

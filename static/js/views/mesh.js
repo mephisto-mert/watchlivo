@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v192';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v192';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v192';
-import { MeshConnection } from '../realtime.js?v=20261110_v192';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v192';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v192';
-import { buildLayout } from './mesh-layout.js?v=20261110_v192';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v192';
-import { Voice } from '../voice.js?v=20261110_v192';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v192';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v192';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v192';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261111_v193';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261111_v193';
+import { resolveMusicItem } from './selection-kinds.js?v=20261111_v193';
+import { MeshConnection } from '../realtime.js?v=20261111_v193';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261111_v193';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261111_v193';
+import { buildLayout } from './mesh-layout.js?v=20261111_v193';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261111_v193';
+import { Voice } from '../voice.js?v=20261111_v193';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261111_v193';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261111_v193';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261111_v193';
 
 let ctx = null;
 
@@ -663,6 +663,10 @@ function onMessage(data) {
           if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
           if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
           if (!mergedMedia.provider && room.media?.provider) mergedMedia.provider = room.media.provider;
+          if (!mergedMedia.catalogProvider && room.media?.catalogProvider) mergedMedia.catalogProvider = room.media.catalogProvider;
+          if (!mergedMedia.seriesTitle && room.media?.seriesTitle) mergedMedia.seriesTitle = room.media.seriesTitle;
+          if (!mergedMedia.originalTitle && room.media?.originalTitle) mergedMedia.originalTitle = room.media.originalTitle;
+          if (!mergedMedia.sourceUrl && room.media?.sourceUrl) mergedMedia.sourceUrl = room.media.sourceUrl;
         }
         const nextKey = mediaKey(mergedMedia);
         const urlResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog') && (!prevUrl || prevUrl.startsWith('/api/rave/resolve-catalog') || !ctx?.host?.adapter));
@@ -922,9 +926,12 @@ const actions = {
       ? {
           url: curM.url,
           provider: curM.provider || 'hls',
+          catalogProvider: curM.catalogProvider || '',
           streamType: curM.streamType || 'hls',
           duration: curM.duration || ad.getDuration?.() || 0,
           title: curM.title || '',
+          seriesTitle: curM.seriesTitle || '',
+          originalTitle: curM.originalTitle || '',
           tmdbId: curM.tmdbId || '',
           imdbId: curM.imdbId || '',
           mediaType: curM.mediaType || '',

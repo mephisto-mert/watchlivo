@@ -1211,10 +1211,20 @@ async def yt_music_stream(request: Request):
             _YT_IOS_STREAM_CACHE.pop(vid, None)
             if is_video_req:
                 raise
-            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+            is_mid_stream_range = bool(rng and not rng.strip().lower().startswith("bytes=0-"))
+            fresh_info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.0)
+            fresh_target = (fresh_info or {}).get("audioUrl") or ""
+            fresh_ua = str((fresh_info or {}).get("ua") or "")
+            if fresh_target:
+                target, cli_ua = fresh_target, fresh_ua
+            elif not is_mid_stream_range:
+                target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+                cli_ua = ""
+            else:
+                raise
             if not target:
                 raise
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, ""), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, cli_ua), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
             "Content-Length": cr if (is_head and status == 200 and cr.isdigit()) else str(len(data)),
