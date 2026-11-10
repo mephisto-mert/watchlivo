@@ -1,16 +1,18 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v182';
-import { api, qs } from '../api.js?v=20261110_v182';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v182';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v182';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v182';
-import { profileSetup } from '../profile.js?v=20261110_v182';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v182';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v183';
+import { api, qs } from '../api.js?v=20261110_v183';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v183';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v183';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v183';
+import { profileSetup } from '../profile.js?v=20261110_v183';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v183';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v182';
+} from '../store.js?v=20261110_v183';
+
+const _resolveMemCache = new Map();
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -19,6 +21,13 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   const s = Math.max(1, Number(season) || 1);
   const e = Math.max(1, Number(episode) || 1);
   const rawTid = /^\d+$/.test(String(it.tmdbId || '').trim()) ? String(it.tmdbId).trim() : (/^\d+$/.test(String(it.id || '').trim()) ? String(it.id).trim() : '');
+  const cacheKey = `${provId}:${mediaType}:${rawTid || it.title || ''}:${s}:${e}`;
+  if (!opts?.forceRefresh && _resolveMemCache.has(cacheKey)) {
+    const cachedHit = _resolveMemCache.get(cacheKey);
+    if (cachedHit && (Date.now() - cachedHit.ts < 90000) && cachedHit.data) {
+      return { ...cachedHit.data };
+    }
+  }
   const query = qs({
     provider: provId,
     title: it.originalTitle || it.title || prov?.name || provId,
@@ -40,7 +49,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const qTry = attempt === 1 ? `${query}&refresh=1` : query;
-      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: 18000 });
+      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: attempt === 0 ? 9500 : 7500 });
       if (res?.authRequired || res?.status === 401) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
         toast(res.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
@@ -56,6 +65,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         res.originalTitle = res.originalTitle || it.originalTitle || '';
         res.catalogProvider = prov?.id || it.catalogProvider || it.provider || 'cinema';
         if (it.streamUrl && !res.streamUrl) res.streamUrl = it.streamUrl;
+        _resolveMemCache.set(cacheKey, { ts: Date.now(), data: { ...res } });
         if (opts?.applySavedResume !== false) {
           const savedProg = findSavedProgress(
             { tmdbId: rawTid || res.tmdbId, title: disp, originalTitle: res.originalTitle, seriesTitle: res.seriesTitle, mediaType },

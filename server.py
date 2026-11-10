@@ -5860,13 +5860,14 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
             )
             return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=1.8)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as os_pool:
+        os_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+        try:
             fut_tr = os_pool.submit(_fetch_os_rest, "tur")
             fut_en = os_pool.submit(_fetch_os_rest, "eng")
-            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 1.8)
+            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 1.6)
             for lang3, fut in (("tur", fut_tr), ("eng", fut_en)):
                 try:
-                    os_items = fut.result(timeout=1.6)
+                    os_items = fut.result(timeout=1.4)
                     if isinstance(os_items, list):
                         valid_os = [
                             it for it in os_items
@@ -5949,7 +5950,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 except Exception:
                     pass
             try:
-                data = fut_strem.result(timeout=3.0) or {}
+                data = fut_strem.result(timeout=1.6) or {}
                 for idx_st, sub in enumerate(data.get("subtitles") or []):
                     raw_lang = str(sub.get("lang") or "").lower().strip()
                     if raw_lang not in SUB_LANG_MAP:
@@ -5959,6 +5960,8 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                     _add_sub(sub.get("url"), raw_lang, st_tier, lcode in ("tr", "en"), "opensubtitles")
             except Exception:
                 pass
+        finally:
+            os_pool.shutdown(wait=False, cancel_futures=True)
 
     raw_cands.sort(key=lambda x: (x[0], x[1], x[2]))
     best_en_url = next((c[5] for c in raw_cands if c[3] == "en"), next((c[5] for c in raw_cands), ""))
@@ -6719,15 +6722,18 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
         poster = poster or (m_cached or {}).get("poster") or (m_cached or {}).get("backdrop") or _resolve_fallback_poster_cdn_sync("", title, orig_title, year, mtype, tid) or ""
 
         import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as cat_pool:
+        cat_pool = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        try:
             fut_direct = cat_pool.submit(_extract_direct_stream_sync, eff_tid, mtype, s, e, orig_title, year, imdb_id, tr_title, source_url, refresh)
             fut_pmeta = cat_pool.submit(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype)
             direct_list = fut_direct.result()
             try:
-                pmeta = fut_pmeta.result(timeout=2.2)
+                pmeta = fut_pmeta.result(timeout=1.2)
             except Exception:
                 def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
                 pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
+        finally:
+            cat_pool.shutdown(wait=False, cancel_futures=True)
         if not direct_list and not eff_tid.isdigit():
             alt_query = _clean_query_title(disp or tr_title or orig_title or title)
             if alt_query and len(alt_query) >= 3:
@@ -6858,22 +6864,25 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 pass  # Direct playback unblocked for all users
             label = PROV_LABELS.get(eff_prov, label)
             wrapped = [(_wrap_first_party_stream(u, st, eff_prov, eff_tid, s, e, mtype), "mp4" if str(st).startswith("mp4") else "hls") for u, st in direct_list]
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as sub_pool:
+            sub_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
+            try:
                 fut_subs = sub_pool.submit(_fetch_subtitles_sync, eff_tid, imdb_id, mtype, s, e, eff_prov, pmeta, direct_list)
                 fut_intro_api = sub_pool.submit(_detect_intro_sync, imdb_id, tid, mtype, s, e, None)
                 fut_audio = sub_pool.submit(_build_audio_tracks, wrapped[0][0], direct_list, eff_prov, eff_tid, s, e, pmeta, mtype)
                 try:
-                    sub_tracks = fut_subs.result(timeout=2.0)
+                    sub_tracks = fut_subs.result(timeout=1.6)
                 except Exception:
                     sub_tracks = []
                 try:
-                    intro_seg = fut_intro_api.result(timeout=0.8)
+                    intro_seg = fut_intro_api.result(timeout=0.5)
                 except Exception:
                     intro_seg = None
                 try:
-                    audio_tracks = fut_audio.result(timeout=2.0)
+                    audio_tracks = fut_audio.result(timeout=1.5)
                 except Exception:
                     audio_tracks = []
+            finally:
+                sub_pool.shutdown(wait=False, cancel_futures=True)
             alive_direct = [(u, st) for u, st in direct_list if _STREAM_RES_HINT.get(u, 0) != -1]
             if not alive_direct:
                 alive_direct = direct_list

@@ -7767,3 +7767,57 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
   overflow-wrap: anywhere !important;
   word-break: break-word !important;
 }
+
+/* ============================================================================
+   v183 — Mobile Portrait & Landscape Navbar & Platform Card Fit
+   ============================================================================ */
+@media (max-width: 480px) {
+  .top-nav-capsule,
+  .top-nav-capsule.navbar,
+  header.navbar.top-nav-capsule {
+    padding: var(--top-safe-offset, 0px) max(8px, env(safe-area-inset-right, 0px)) 0 max(8px, env(safe-area-inset-left, 0px)) !important;
+    gap: 4px !important;
+    justify-content: space-between !important;
+  }
+  .top-nav-capsule .navbar-left,
+  .top-nav-capsule .navbar-right {
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+    gap: 4px !important;
+  }
+  .top-nav-capsule #nav-theme-btn,
+  .top-nav-capsule #nav-download-btn,
+  .top-nav-capsule #nav-btn-apk {
+    display: none !important;
+  }
+  .top-nav-capsule .nav-icon,
+  .top-nav-capsule .user-profile-badge {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    min-height: 32px !important;
+  }
+  .top-nav-capsule #btn-create-room,
+  .top-nav-capsule .btn-create-room {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 9px !important;
+    font-size: 0.72rem !important;
+    gap: 4px !important;
+    white-space: nowrap !important;
+  }
+  .provider-tile.rave-icon-tile,
+  .platform-card,
+  .p-card {
+    min-width: 0 !important;
+    padding: 9px 10px !important;
+    height: 84px !important;
+    min-height: 84px !important;
+  }
+  .provider-tile.rave-icon-tile .provider-corner-tag {
+    max-width: 64px !important;
+    font-size: 0.48rem !important;
+    top: 6px !important;
+    right: 6px !important;
+  }
+}

@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v182';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v183';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -104,7 +104,7 @@ export function h(tag, attrs = {}, ...children) {
         const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
         const isTrustedStaticSvg = (
           isSafeSvgImg &&
-          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed|use)|onload\s*=|onerror\s*=|javascript:|data:/i.test(cleanV)
+          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)
         );
         if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
       }

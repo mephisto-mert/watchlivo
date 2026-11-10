@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v182';
-import { expectedPosition } from '../sync.js?v=20261110_v182';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v182';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v182';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v182';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v183';
+import { expectedPosition } from '../sync.js?v=20261110_v183';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v183';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v183';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v183';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -680,9 +680,11 @@ export class Html5Adapter {
     };
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';
     const hasHlsCandidate = isHls || alts.some((au) => isUrlHls(au));
-    if (hasHlsCandidate && !window.Hls && !isIosWebKit()) {
-      await ensureHlsJs();
+    if (isHls && !window.Hls && !isIosWebKit()) {
+      await ensureHlsJs(2800);
       if (this._destroyed || this.video !== v) return;
+    } else if (hasHlsCandidate && !window.Hls && !isIosWebKit()) {
+      ensureHlsJs(2800).catch(() => {});
     }
     const canHlsJs = Boolean(window.Hls && window.Hls.isSupported());
     const canNativeHls = Boolean(v.canPlayType('application/vnd.apple.mpegurl') || v.canPlayType('application/x-mpegURL'));
@@ -827,7 +829,7 @@ export class Html5Adapter {
         const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
         if (allowHlsJsHere) {
           if (isApple) this._ensureIosPipStandby?.(nextUrl);
-          attachHlsJs(isApple ? withProxySegs(nextUrl) : nextUrl, doneCb, resumePos);
+          attachHlsJs(nextUrl, doneCb, resumePos);
           return;
         }
         if (!canNativeHls) {
@@ -843,7 +845,7 @@ export class Html5Adapter {
         syncVideoCors(nextUrl, true);
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
-        v.src = withProxySegs(nextUrl);
+        v.src = nextUrl;
         v.load();
         v.addEventListener('loadedmetadata', () => {
           this.subs.mergeNativeAudioTracks?.(v.audioTracks);
@@ -888,10 +890,11 @@ export class Html5Adapter {
         subtitleDisplay: false,
         enableWebVTT: false,
         startFragPrefetch: true,
+        startLevel: isMobileScreen ? 0 : -1,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: isMobileScreen ? 680000 : 1600000,
-        abrBandWidthFactor: isMobileScreen ? 0.78 : 0.85,
-        abrBandWidthUpFactor: isMobileScreen ? 0.55 : 0.65,
+        abrEwmaDefaultEstimate: isMobileScreen ? 950000 : 2200000,
+        abrBandWidthFactor: isMobileScreen ? 0.82 : 0.88,
+        abrBandWidthUpFactor: isMobileScreen ? 0.65 : 0.72,
         autoLevelCapping: -1,
         maxBufferLength: isMobileScreen ? 35 : 50,
         maxMaxBufferLength: isMobileScreen ? 70 : 110,
@@ -902,17 +905,17 @@ export class Html5Adapter {
         stretchShortVideoTrack: true,
         forceKeyFrameOnDiscontinuity: true,
         progressive: false,
-        highBufferWatchdogPeriod: 3,
+        highBufferWatchdogPeriod: 2,
         maxFragLookUpTolerance: 0.35,
         nudgeOffset: 0.25,
         nudgeMaxRetry: 10,
         fragLoadingTimeOut: 28000,
-        fragLoadingMaxRetry: 6,
-        fragLoadingRetryDelay: 600,
-        manifestLoadingTimeOut: 16000,
-        manifestLoadingMaxRetry: 4,
-        levelLoadingTimeOut: 16000,
-        levelLoadingMaxRetry: 4,
+        fragLoadingMaxRetry: 3,
+        fragLoadingRetryDelay: 350,
+        manifestLoadingTimeOut: 7500,
+        manifestLoadingMaxRetry: 2,
+        levelLoadingTimeOut: 7500,
+        levelLoadingMaxRetry: 2,
       });
       v._hls = this.hls;
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
@@ -1127,6 +1130,14 @@ export class Html5Adapter {
         if (this.wantPlaying) this.tryPlay();
         return;
       }
+      if (this.useNativeHls && this.currentUrl && String(this.currentUrl).includes('/api/rave/stream') && !String(this.currentUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
+        this._switchedToProxySegs = true;
+        const proxied = withProxySegs(this.currentUrl);
+        if (proxied && proxied !== this.currentUrl) {
+          loadCandidateUrl(proxied);
+          return;
+        }
+      }
       if (nativeAltIdx < alts.length) {
         this._reportStreamHealth?.(this.currentUrl, false, { stalled: false });
         loadCandidateUrl(alts[nativeAltIdx++]);
@@ -1176,7 +1187,7 @@ export class Html5Adapter {
       v.addEventListener('loadeddata', onFrameReady);
       v.addEventListener('canplay', onFrameReady);
       v.addEventListener('playing', onFrameReady);
-      this.loadReadyTimer = setTimeout(done, 3400);
+      this.loadReadyTimer = setTimeout(done, 1800);
       if (validStart >= 0.5 && !v._wlInitSeekBound) {
         v._wlInitSeekBound = true;
         const enforcePrimaryInitialSeek = () => {
@@ -1196,9 +1207,9 @@ export class Html5Adapter {
       }
       syncVideoCors(url);
       if (isHls && canHlsJs && !useNativeHls) {
-        attachHlsJs(isApple ? withProxySegs(url) : url, onFrameReady);
+        attachHlsJs(url, onFrameReady);
       } else {
-        v.src = useNativeHls ? withProxySegs(url) : url;
+        v.src = url;
         if (autoplay) this.tryPlay();
       }
     });
@@ -1209,13 +1220,13 @@ export class Html5Adapter {
       }
     }
     if (autoplay) {
-      this.tryPlay();
+      if (v.paused) this.tryPlay();
       v.addEventListener('canplay', () => { if (this.wantPlaying && v.paused) this.tryPlay(); });
     }
     let stallChecks = 0;
     const isTouchVp = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
     const isMobViewport = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || (isTouchVp && typeof window !== 'undefined' && window.innerWidth <= 900);
-    const stallWindowMs = this.isMusic ? 4500 : (isMobViewport ? 16500 : 13000);
+    const stallWindowMs = this.isMusic ? 3500 : (isMobViewport ? 5500 : 4500);
     let lastZeroDimSwitchAt = 0;
     let zeroDimDowngraded = false;
     this._zeroDimPlayStartAt = 0;
@@ -1235,8 +1246,8 @@ export class Html5Adapter {
         v.removeEventListener('timeupdate', checkZeroDimAudioOnly);
         return;
       }
-      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > 0.45;
-      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.2;
+      const hasZeroVideoDim = v.videoWidth === 0 && elapsedAfterStart > (this.useNativeHls ? 4.2 : 2.2) && (v.currentTime || 0) > 1.5;
+      const hasZeroDecodedFrames = Boolean(this.hls) && decFrames === 0 && elapsedAfterStart > 2.8;
       if (v.readyState >= 2 && !v.paused && (hasZeroVideoDim || hasZeroDecodedFrames)) {
         const nowMs = Date.now();
         if (this.hls && !zeroDimDowngraded) {
@@ -1282,7 +1293,7 @@ export class Html5Adapter {
         return;
       }
       if (!v.paused && v.readyState >= 2 && (v.currentTime > 0.25 || v.readyState >= 3)) {
-        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0) {
+        if (!this.isMusic && !isAudioOnlyUrl(this.currentUrl) && v.videoWidth === 0 && (v.currentTime || 0) > 2.2) {
           if (nativeAltIdx < alts.length) {
             loadCandidateUrl(alts[nativeAltIdx++]);
             this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);

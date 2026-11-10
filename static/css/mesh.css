@@ -6087,3 +6087,124 @@ html.is-android-pip .rave-subtitle-cue {
 .video-frame:fullscreen:has(.controls.ui-active) .fs-chat-stack {
   bottom: max(116px, calc(104px + env(safe-area-inset-bottom, 0px))) !important;
 }
+
+/* ============================================================================
+   v183 — Mobile Portrait (Düz Ekran) & Landscape (Yan Ekran) Zero-Overlap HUD
+   ============================================================================ */
+@media (max-width: 1120px), ((orientation: landscape) and (max-height: 560px)) {
+  #mesh-root > .navbar .room-nav-lbl {
+    display: none !important;
+  }
+  .video-frame .ctl-top #ctl-orig-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-orig-btn,
+  #ctl-orig-btn {
+    display: none !important;
+  }
+}
+
+.video-frame .ctl-top {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.video-frame .ctl-top-left {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+  overflow: hidden !important;
+}
+
+.video-frame .ctl-top-right {
+  flex: 0 1 auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  display: flex !important;
+  align-items: center !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  scrollbar-width: none !important;
+}
+
+.video-frame .ctl-top-right::-webkit-scrollbar {
+  display: none !important;
+}
+
+@container (max-width: 720px) {
+  .video-frame .ctl-top #ctl-orig-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-sync-pill,
+  .video-frame .ctl-top #ctl-quality-badge:not(.hidden),
+  .video-frame .ctl-top #ctl-break-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-prev-ep-top:not(.hidden) {
+    display: none !important;
+  }
+  .video-frame .ctl-top #ctl-sub-pill:not(.hidden) {
+    max-width: 108px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    padding: 0 6px !important;
+    font-size: 0.66rem !important;
+    flex-shrink: 1 !important;
+  }
+  .video-frame .ctl-top #ctl-ep-btn:not(.hidden),
+  .video-frame .ctl-top #ctl-next-ep-top:not(.hidden) {
+    padding: 0 6px !important;
+    font-size: 0.66rem !important;
+    flex-shrink: 0 !important;
+  }
+  #video-frame:fullscreen .ctl-fs-reactions,
+  #video-frame:-webkit-full-screen .ctl-fs-reactions,
+  .video-frame.fullscreen .ctl-fs-reactions,
+  body.vortex-fs .video-frame .ctl-fs-reactions,
+  .video-frame .ctl-fs-reactions {
+    display: none !important;
+  }
+  .video-frame .ctl-bar-row #ctl-back10,
+  .video-frame .ctl-bar-row #ctl-fwd10,
+  .video-frame .ctl-bar-row .vol-wrap,
+  .video-frame .ctl-bar-row #ctl-skip,
+  .video-frame .ctl-bar-row #ctl-snap {
+    display: none !important;
+  }
+  .video-frame .ctl-bar-row .ctl-time {
+    flex: 0 0 auto !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    font-size: 0.66rem !important;
+    padding: 3px 6px !important;
+  }
+}
+
+@media (max-width: 720px), ((orientation: landscape) and (max-height: 560px)) {
+  #video-frame:fullscreen .ctl-fs-reactions,
+  #video-frame:-webkit-full-screen .ctl-fs-reactions,
+  .video-frame.fullscreen .ctl-fs-reactions,
+  body.vortex-fs .video-frame .ctl-fs-reactions,
+  .video-frame .ctl-fs-reactions {
+    display: none !important;
+  }
+}
+
+@media (max-width: 430px) {
+  #mesh-root > .navbar .nav-icon.room-nav-pill {
+    width: 26px !important;
+    height: 26px !important;
+    min-width: 26px !important;
+    min-height: 26px !important;
+  }
+  #mesh-root > .navbar .mesh-title,
+  #mesh-root > .navbar #room-header-title {
+    min-width: 0 !important;
+    flex: 1 1 40px !important;
+    font-size: 0.7rem !important;
+  }
+  #mesh-root > .navbar .privacy-chip {
+    max-width: 38px !important;
+    padding: 2px 4px !important;
+    font-size: 0.56rem !important;
+  }
+}
