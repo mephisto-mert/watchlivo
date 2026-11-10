@@ -4346,6 +4346,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 if isinstance(v_fb, dict) and v_fb.get("sourceUrl") and "/film/" not in str(v_fb.get("sourceUrl")):
                     source_url = str(v_fb.get("sourceUrl"))
                     break
+        fb_ep_keys = []
 
     def _collect_vault_keys(key_list, target_list):
         all_vt_words = set()
@@ -4378,7 +4379,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
-                        if IS_VERCEL and (
+                        if (
                             "dbx.molystream.org" in raw_su.lower()
                             or "dplayer" in raw_su.lower()
                             or "hdfilmcehennemi.mobi" in raw_su.lower()
@@ -5410,7 +5411,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         )
         tr_extractors_done = f_hf.done() and f_dl.done() and f_pv.done() and (f_ac.done() if is_ja_or_anime else True)
         has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 2.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
-        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
+        primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or pv_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
         if primary_1080_ok and (has_tr_dub_ready or has_glob_ready or (time.time() - t_start >= 0.35)):
             break
         if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 1.8):
@@ -5421,7 +5422,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             continue
         if has_glob_ready and tr_extractors_done:
             break
-        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 1.5)) or (time.time() - t_start >= 1.8)):
+        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or pv_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 1.5)) or (time.time() - t_start >= 1.8)):
             break
         if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
@@ -6794,7 +6795,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         st_u, st_t = str(st_item[0]), str(st_item[1])
                         if _is_vault_url_expired(st_u):
                             continue
-                        if IS_VERCEL and (
+                        if (
                             st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
                             or "dbx.molystream.org" in st_u.lower()
                             or "dplayer" in st_u.lower()
@@ -6824,6 +6825,16 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
                             st_u, st_t = str(st_item[0]), str(st_item[1])
                             if _is_vault_url_expired(st_u):
+                                continue
+                            if (
+                                st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
+                                or "dbx.molystream.org" in st_u.lower()
+                                or "dplayer" in st_u.lower()
+                                or "hdfilmcehennemi.mobi" in st_u.lower()
+                                or ("cdnimages" in st_u.lower() and "/hls/" in st_u.lower())
+                                or "playmix.uno" in st_u.lower()
+                                or "master.txt?s=" in st_u.lower()
+                            ):
                                 continue
                             if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title], year, imdb_id):
                                 fb_candidates.append((st_u, st_t))
