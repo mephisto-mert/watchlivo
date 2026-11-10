@@ -9,7 +9,7 @@
   "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-04T03:39:14.022390+00:00",
-  "changelog": "v193: Unlock full stream catalog vault, harden Cloudflare Edge & stream proxy, upgrade HLS player recovery, and synchronize room episode/server switching.",
+  "publishedAt": "2026-11-11T02:16:00.000000+03:00",
+  "changelog": "v193.2: Unlock full stream catalog vault, enable curl_cffi TLS bypass + Hexa/Pilavyer live TV extractors on Render EU, harden Cloudflare Edge & stream proxy, upgrade HLS player recovery, and synchronize room episode/server switching.",
   "version": "20261111_v193"
 }

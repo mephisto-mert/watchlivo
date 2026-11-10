@@ -153,7 +153,7 @@ function inferReferer(url, explicitRef) {
       return "https://play2.pilavyerplay.top/";
     }
   }
-  if (url.includes("dragonballzfans")) return "https://flixer.su/";
+  if (url.includes("dragonballzfans")) return "https://hexa.su/";
   if ((url.includes("cdnimages") && url.includes("/hls/")) || url.includes("playmix.uno") || url.includes("hdfilmcehennemi.mobi")) {
     return "https://hdfilmcehennemi.mobi/";
   }

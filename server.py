@@ -80,6 +80,8 @@ _WORKER_BYPASS_HOSTS = (
     "cdnimages.",
     "ercdn.net",
     "daioncdn.net",
+    "dragonballzfans",
+    "molystream.org",
 )
 
 
@@ -132,6 +134,9 @@ UA137 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 
 def _raw_get_json(url: str, headers: dict = None, data: bytes = None, timeout: float = 6.5):
     req = urllib.request.Request(url, data=data, headers={"User-Agent": UA137, **(headers or {})})
+    if "PYTEST_CURRENT_TEST" not in os.environ and public_http_url(url):
+        with _public_open(req, timeout=timeout) as r:
+            return json.loads(r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
@@ -558,10 +563,62 @@ class _CffiRespAdapter:
         return False
 
 
+_CFFI_FIRST_DOMAINS = (
+    "ddizimag.",
+    "pilavyer",
+    "hdfilmcehennemi.",
+    "dizibox.",
+    "dizi84.",
+    "dizi82.",
+    "dizipal",
+    "dplayer",
+    "hexa.su",
+    "dragonballzfans",
+    "vidlink.pro",
+    "enc-dec.app",
+)
+
+
+def _cffi_open_req(request, url: str, timeout: float):
+    from curl_cffi import requests as _cffi_req
+    raw_hdrs = dict(request.headers) if isinstance(request, urllib.request.Request) else {}
+    if isinstance(request, urllib.request.Request) and hasattr(request, "unredirected_hdrs"):
+        raw_hdrs.update(request.unredirected_hdrs)
+    hdrs = {}
+    for hk, hv in raw_hdrs.items():
+        if hk.lower() == "user-agent" and ("chrome/137" in str(hv).lower() or "chrome/124" in str(hv).lower()):
+            continue
+        hdrs[hk] = hv
+    method = request.get_method() if isinstance(request, urllib.request.Request) else "GET"
+    data = request.data if isinstance(request, urllib.request.Request) else None
+    cr = _cffi_req.request(
+        method,
+        url,
+        headers=hdrs,
+        data=data,
+        impersonate="chrome124",
+        timeout=min(float(timeout or 6.0), 14.0),
+        allow_redirects=True,
+        max_redirects=4,
+    )
+    fin_u = str(getattr(cr, "url", "") or url)
+    if not public_http_url(fin_u):
+        raise ValueError("Geçersiz yönlendirme URL")
+    if cr.status_code >= 400:
+        raise urllib.error.HTTPError(fin_u, cr.status_code, f"HTTP {cr.status_code}", dict(cr.headers), None)
+    return _CffiRespAdapter(bytes(cr.content[:28 * 1024 * 1024]), fin_u, cr.status_code, dict(cr.headers))
+
+
 def _public_open(request, timeout=8.0):
     url = request.full_url if isinstance(request, urllib.request.Request) else request
     if not public_http_url(url):
         raise ValueError("Geçersiz URL")
+    u_low = str(url or "").lower()
+    if "PYTEST_CURRENT_TEST" not in os.environ and any(d in u_low for d in _CFFI_FIRST_DOMAINS):
+        try:
+            return _cffi_open_req(request, url, timeout)
+        except Exception:
+            pass
     try:
         return urllib.request.build_opener(_NoRedirect).open(request, timeout=timeout)
     except Exception as orig_err:
@@ -569,28 +626,7 @@ def _public_open(request, timeout=8.0):
         if code and code not in (403, 429, 503, 520, 521, 522):
             raise
         try:
-            from curl_cffi import requests as _cffi_req
-            hdrs = dict(request.headers) if isinstance(request, urllib.request.Request) else {}
-            if isinstance(request, urllib.request.Request) and hasattr(request, "unredirected_hdrs"):
-                hdrs.update(request.unredirected_hdrs)
-            method = request.get_method() if isinstance(request, urllib.request.Request) else "GET"
-            data = request.data if isinstance(request, urllib.request.Request) else None
-            cr = _cffi_req.request(
-                method,
-                url,
-                headers=hdrs,
-                data=data,
-                impersonate="chrome124",
-                timeout=min(float(timeout or 6.0), 8.0),
-                allow_redirects=True,
-                max_redirects=4,
-            )
-            fin_u = str(getattr(cr, "url", "") or url)
-            if not public_http_url(fin_u):
-                raise ValueError("Geçersiz yönlendirme URL")
-            if cr.status_code >= 400:
-                raise orig_err
-            return _CffiRespAdapter(bytes(cr.content[:MAX_PAGE_BYTES * 2]), fin_u, cr.status_code, dict(cr.headers))
+            return _cffi_open_req(request, url, timeout)
         except Exception:
             raise orig_err
 
@@ -3470,7 +3506,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
         else:
             base = f"https://{dom}"
             try:
-                with urllib.request.urlopen(urllib.request.Request(base + "/", headers={"User-Agent": UA137}), timeout=2.2) as r_dp_h:
+                with _public_open(urllib.request.Request(base + "/", headers={"User-Agent": UA137}), timeout=2.2) as r_dp_h:
                     fin_u = str(r_dp_h.geturl() or "").strip()
                 p_fin = urllib.parse.urlparse(fin_u)
                 if p_fin.scheme in ("http", "https") and p_fin.netloc:
@@ -3490,7 +3526,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                     headers={"User-Agent": UA137, "Content-Type": "application/json", "Referer": base + "/", "Origin": base},
                     method="POST"
                 )
-                with urllib.request.urlopen(req_mj_probe, timeout=3.4) as r_mj0:
+                with _public_open(req_mj_probe, timeout=3.4) as r_mj0:
                     mj0 = json.loads(r_mj0.read(131072).decode("utf-8", errors="ignore"))
                 if isinstance(mj0, dict) and mj0.get("ok"):
                     use_mj_api = True
@@ -3500,7 +3536,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
         if not use_mj_api:
             try:
                 req_init = urllib.request.Request(f"{base}/arama-yap", headers={"User-Agent": UA137})
-                with urllib.request.urlopen(req_init, timeout=3.5) as r_init:
+                with _public_open(req_init, timeout=3.5) as r_init:
                     init_html = r_init.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 m_key = re.search(r'name="cKey"\s+value="([^"]+)"', init_html)
                 m_val = re.search(r'name="cValue"\s+value="([^"]+)"', init_html)
@@ -3526,7 +3562,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                                 headers={"User-Agent": UA137, "Content-Type": "application/json", "Referer": base + "/", "Origin": base},
                                 method="POST"
                             )
-                            with urllib.request.urlopen(req_s, timeout=3.5) as rs:
+                            with _public_open(req_s, timeout=3.5) as rs:
                                 s_data = json.loads(rs.read(131072).decode("utf-8", errors="ignore"))
                             rows = (s_data.get("result") or []) if isinstance(s_data, dict) else []
                     else:
@@ -3542,7 +3578,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                             "X-Requested-With": "XMLHttpRequest",
                             "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
                         })
-                        with urllib.request.urlopen(req_s, timeout=3.5) as rs:
+                        with _public_open(req_s, timeout=3.5) as rs:
                             s_data = json.loads(rs.read(131072).decode("utf-8", errors="ignore"))
                         d_obj = (s_data.get("data") or {}) if isinstance(s_data, dict) else {}
                         rows = d_obj.get("result") or []
@@ -3583,7 +3619,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                             ep_url = ""
                             for sz_try in (f"{base}/sezon/{base_sl}/sezon-{s}", match_link):
                                 try:
-                                    with urllib.request.urlopen(urllib.request.Request(sz_try, headers={"User-Agent": UA137, "Referer": base + "/"}), timeout=3.4) as r_sz:
+                                    with _public_open(urllib.request.Request(sz_try, headers={"User-Agent": UA137, "Referer": base + "/"}), timeout=3.4) as r_sz:
                                         sz_html = r_sz.read(350000).decode("utf-8", errors="ignore")
                                     m_ep = re.search(rf'(/bolum/[a-z0-9-]+-{s}x{e}(?:-[a-z0-9]+)?)(?=["\'\?\\])', sz_html)
                                     if m_ep:
@@ -3599,7 +3635,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                         ep_url = match_link
 
                     req_ep = urllib.request.Request(ep_url, headers={"User-Agent": UA137, "Referer": base + "/"})
-                    with urllib.request.urlopen(req_ep, timeout=3.5) as r_ep:
+                    with _public_open(req_ep, timeout=3.5) as r_ep:
                         ep_html = r_ep.read(420000).decode("utf-8", errors="ignore")
 
                 m_rmk = re.search(r'data-rm-k="true">(\{.*?\})</div>', ep_html) or re.search(r'\\?"enc\\?":\s*(\{\\?"ciphertext\\?":.*?\})', ep_html)
@@ -3614,7 +3650,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                     continue
 
                 req_if = urllib.request.Request(iframe_src, headers={"User-Agent": UA137, "Referer": base + "/"})
-                with urllib.request.urlopen(req_if, timeout=3.8) as r_if:
+                with _public_open(req_if, timeout=3.8) as r_if:
                     if_html = r_if.read(655360).decode("utf-8", errors="ignore")
 
                 m_np = re.search(r"window\.NP_CONFIG\s*=\s*(\{.*?\});", if_html, re.S)
@@ -3647,7 +3683,7 @@ def _extract_dizipal_hls_sync(mtype: str, s: int, e: int, titles: list, ekey: st
                 req_src = urllib.request.Request(src_api, headers={
                     "User-Agent": UA137, "Referer": iframe_src, "X-Requested-With": "XMLHttpRequest"
                 })
-                with urllib.request.urlopen(req_src, timeout=3.5) as r_src:
+                with _public_open(req_src, timeout=3.5) as r_src:
                     src_data = json.loads(r_src.read(131072).decode("utf-8", errors="ignore"))
                 playlist = src_data.get("playlist", [])
                 for p_item in playlist:
@@ -3852,27 +3888,35 @@ _DDIZIMAG_BASE: str = "https://ddizimag.icu"
 
 
 def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: str = "", timeout: float = 3.8, max_bytes: int = MAX_PAGE_BYTES) -> tuple[bytes, str]:
+    hdrs = {"User-Agent": UA137, "Accept": accept or "*/*"}
+    if referer:
+        hdrs["Referer"] = referer
+    if xhr:
+        hdrs["X-Requested-With"] = "XMLHttpRequest"
     edge_base = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL or "").strip().rstrip("/")
     if not edge_base or not edge_base.startswith("https://") or "jokallame0.workers.dev" in edge_base:
-        hdrs = {"User-Agent": UA137, "Accept": accept or "*/*"}
-        if referer:
-            hdrs["Referer"] = referer
-        if xhr:
-            hdrs["X-Requested-With"] = "XMLHttpRequest"
         with _public_open(urllib.request.Request(url, headers=hdrs), timeout=timeout) as r:
             return r.read(max_bytes), str(getattr(r, "url", "") or r.geturl() or url)
-    q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
-    if referer:
-        q += f"&referer={urllib.parse.quote(referer, safe='')}"
-    q += f"&sig={_proxy_sig(url, referer)}"
-    if xhr:
-        q += "&xhr=1"
-    if accept:
-        q += f"&accept={urllib.parse.quote(accept, safe='')}"
-    req = urllib.request.Request(q, headers={"User-Agent": UA137, "Accept": accept or "*/*"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        fin = str(r.headers.get("X-Final-Url") or url).strip()
-        return r.read(max_bytes), fin
+    try:
+        q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
+        if referer:
+            q += f"&referer={urllib.parse.quote(referer, safe='')}"
+        q += f"&sig={_proxy_sig(url, referer)}"
+        if xhr:
+            q += "&xhr=1"
+        if accept:
+            q += f"&accept={urllib.parse.quote(accept, safe='')}"
+        req = urllib.request.Request(q, headers={"User-Agent": UA137, "Accept": accept or "*/*"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            fin = str(r.headers.get("X-Final-Url") or url).strip()
+            body = r.read(max_bytes)
+            head_low = body[:512].decode("utf-8", errors="ignore").lower()
+            if body and "<title>just a moment" not in head_low and "attention required! | cloudflare" not in head_low:
+                return body, fin
+    except Exception:
+        pass
+    with _public_open(urllib.request.Request(url, headers=hdrs), timeout=timeout) as r:
+        return r.read(max_bytes), str(getattr(r, "url", "") or r.geturl() or url)
 
 
 def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: str, ekey: str, year: str = "", extra_titles: list = None, source_url: str = "", orig_lang: str = "", imdb_id: str = "") -> list:
@@ -3930,28 +3974,24 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             if now_dd >= _DDIZIMAG_DIRECT_DEAD_UNTIL:
                 req = urllib.request.Request(ep_u, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"})
                 try:
-                    with _public_open(req, timeout=2.0) as r:
+                    with _public_open(req, timeout=2.6) as r:
                         fin_dd = str(r.geturl() or "").strip()
                         html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 except urllib.error.HTTPError as he_dd:
                     if he_dd.code in (403, 503) and edge_base_dd:
-                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 600.0
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 120.0
                     else:
                         return []
                 except Exception:
                     if edge_base_dd:
-                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 600.0
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = now_dd + 120.0
                     else:
-                        _DDIZIMAG_DEAD_UNTIL = time.time() + 300.0
                         return []
             if not html and edge_base_dd:
                 try:
                     raw_dd, fin_dd = _edge_fetch_bytes(ep_u, _DDIZIMAG_BASE + "/", accept="text/html,*/*", timeout=3.2)
                     html = raw_dd.decode("utf-8", errors="ignore")
-                except urllib.error.HTTPError:
-                    return []
                 except Exception:
-                    _DDIZIMAG_DEAD_UNTIL = time.time() + 180.0
                     return []
             if fin_dd:
                 p_dd = urllib.parse.urlparse(fin_dd)
@@ -3975,7 +4015,7 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             s_u = f"https://{pv_dom}/assets/js/s.php?s={urllib.parse.quote(m_pv.group(1))}"
             if not public_http_url(s_u):
                 return []
-            with urllib.request.urlopen(urllib.request.Request(s_u, headers={"User-Agent": UA137, "Referer": ep_u, "Accept": "*/*"}), timeout=4.2) as sr:
+            with _public_open(urllib.request.Request(s_u, headers={"User-Agent": UA137, "Referer": ep_u, "Accept": "*/*"}), timeout=4.2) as sr:
                 s_js = sr.read(131072).decode("utf-8", errors="ignore")
             m_pl = re.search(r"window\.__PLAYER__\s*=\s*(\{.*?\});\s*</script>", s_js, re.S)
             if not m_pl:
@@ -4045,12 +4085,12 @@ def _extract_ddizimag_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             edge_base_dds = (os.environ.get("STREAM_PROXY_BASE_URL") or STREAM_PROXY_BASE_URL).strip().rstrip("/")
             if time.time() >= _DDIZIMAG_DIRECT_DEAD_UNTIL:
                 try:
-                    with urllib.request.urlopen(urllib.request.Request(su, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"}), timeout=2.0) as r:
+                    with _public_open(urllib.request.Request(su, headers={"User-Agent": UA137, "Referer": _DDIZIMAG_BASE + "/"}), timeout=2.6) as r:
                         fin_s = str(r.geturl() or "").strip()
                         s_html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 except Exception:
                     if edge_base_dds:
-                        _DDIZIMAG_DIRECT_DEAD_UNTIL = time.time() + 600.0
+                        _DDIZIMAG_DIRECT_DEAD_UNTIL = time.time() + 120.0
                     else:
                         raise
             if not s_html and edge_base_dds:
@@ -4114,17 +4154,19 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
                 matched_url = val
                 base_dom = f"{urllib.parse.urlparse(matched_url).scheme}://{urllib.parse.urlparse(matched_url).netloc}"
             else:
-                r = None
+                html = ""
+                base_dom = ""
                 for _dl_host in ("https://dizi84.life", "https://dizi82.life"):
                     try:
-                        r = urllib.request.urlopen(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=3.2)
-                        break
+                        with _public_open(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=3.2) as r:
+                            base_dom = f"{urllib.parse.urlparse(r.geturl()).scheme}://{urllib.parse.urlparse(r.geturl()).netloc}"
+                            html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                        if html:
+                            break
                     except Exception:
                         continue
-                if r is None:
+                if not html:
                     continue
-                base_dom = f"{urllib.parse.urlparse(r.geturl()).scheme}://{urllib.parse.urlparse(r.geturl()).netloc}"
-                html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 seg = "dizi" if mtype == "tv" else "film"
                 cards = re.findall(rf'<a[^>]+href=["\']((?:https?://[^"\'\s/]+)?/{seg}/[a-z0-9-]+)["\'][^>]*>(.*?)</a>', html, re.S)
                 matched_url = ""
@@ -4155,15 +4197,18 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             else:
                 ep_url = item_url
             try:
-                ep_html = urllib.request.urlopen(urllib.request.Request(ep_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                with _public_open(urllib.request.Request(ep_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4) as r_ep_dl:
+                    ep_html = r_ep_dl.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             except Exception:
                 if mtype == "tv" and "/sezon/" not in item_url and mode != "__SLUG__":
-                    s_html = urllib.request.urlopen(urllib.request.Request(item_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                    with _public_open(urllib.request.Request(item_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4) as r_it_dl:
+                        s_html = r_it_dl.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                     alt_ep = re.search(rf'href=["\']((?:https?://[^"\'\s/]+)?/dizi/[a-z0-9-]+/sezon/\d+/bolum/{e})["\']', s_html)
                     if not alt_ep:
                         continue
                     ep_url = alt_ep.group(1) if alt_ep.group(1).startswith("http") else (base_dom + alt_ep.group(1))
-                    ep_html = urllib.request.urlopen(urllib.request.Request(ep_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+                    with _public_open(urllib.request.Request(ep_url, headers={"User-Agent": UA137, "Referer": base_dom + "/"}), timeout=3.4) as r_ep_dl2:
+                        ep_html = r_ep_dl2.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 else:
                     continue
             if _page_year_or_imdb_mismatch(ep_html, mtype, year, s, imdb_id):
@@ -4174,7 +4219,8 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             pu = ("https:" + ifr.group(1)) if ifr.group(1).startswith("//") else ifr.group(1)
             if not public_http_url(pu):
                 continue
-            phtml = urllib.request.urlopen(urllib.request.Request(pu, headers={"User-Agent": UA137, "Referer": ep_url}), timeout=4.2).read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
+            with _public_open(urllib.request.Request(pu, headers={"User-Agent": UA137, "Referer": ep_url}), timeout=4.2) as r_pu_dl:
+                phtml = r_pu_dl.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
             fn_m = re.search(r"var\s+([a-zA-Z0-9_$]+)\s*=\s*function\(s\)\{return atob", phtml)
             if not fn_m:
                 continue
@@ -5137,7 +5183,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1, "has_splits": False}
     s_split, e_split = ep_num["s_split"], ep_num["e_split"]
     s_tmdb, e_tmdb = ep_num["s_tmdb"], ep_num["e_tmdb"]
-    ckey = f"v45:{mtype}:{tid}:{s_split}:{e_split}"
+    ckey = f"v46:{mtype}:{tid}:{s_split}:{e_split}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -5328,23 +5374,23 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
                 }
                 ep = f"https://{host_dom}/api/tmdb/tv/{tid}/season/{s_tmdb}/episode/{e_tmdb}/images" if mtype == "tv" else f"https://{host_dom}/api/tmdb/movie/{tid}/images"
                 req = urllib.request.Request(ep, headers=hdrs)
-                with urllib.request.urlopen(req, timeout=4.2) as r:
+                with _public_open(req, timeout=4.2) as r:
                     enc_txt = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
                 if enc_txt and len(enc_txt) > 20:
                     dec = _raw_get_json("https://enc-dec.app/api/dec-hexa", headers={"Content-Type": "application/json"}, data=json.dumps({"text": enc_txt, "key": key}).encode("utf-8"), timeout=4.2)
                     srcs = ((dec.get("result") or {}).get("sources") or []) if isinstance(dec.get("result"), dict) else []
-                    srcs.sort(key=lambda x: 0 if "fuckme.dragonballzfans" in (x.get("url") or "") else 1)
+                    srcs.sort(key=lambda x: 0 if "fuckme.dragonballzfans" in (x.get("url") or "") else (1 if "shrek.dragonballzfans" in (x.get("url") or "") else 2))
                     cand_urls = []
                     for src in srcs:
                         u = (src.get("url") or "").strip()
-                        if u.startswith("https://") and not any(b in u for b in ("serve.dragonballzfans.xyz", "shrek.dragonballzfans.xyz", "sun.dragonballzfans.xyz")) and u not in cand_urls:
+                        if u.startswith("https://") and not any(b in u for b in ("serve.dragonballzfans.xyz", "sun.dragonballzfans.xyz")) and u not in cand_urls:
                             cand_urls.append(u)
                     def _probe_hx(u_cand: str) -> bool:
                         if "dragonballzfans" not in u_cand:
                             return True
                         try:
-                            p_hdrs = {"User-Agent": UA137, "Referer": "https://flixer.su/", "Origin": "https://flixer.su"}
-                            with urllib.request.urlopen(urllib.request.Request(u_cand, headers=p_hdrs), timeout=2.2) as pr:
+                            p_hdrs = {"User-Agent": UA137, "Referer": "https://hexa.su/", "Origin": "https://hexa.su"}
+                            with _public_open(urllib.request.Request(u_cand, headers=p_hdrs), timeout=2.6) as pr:
                                 return "#EXTM3U" in pr.read(4096).decode("utf-8", errors="ignore")
                         except Exception:
                             return False
@@ -5586,7 +5632,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     for x in reversed([x for x in tr_res if x[1] in ("hls_ve", "hls_ve_multi")]):
         if x not in ve_res:
             ve_res.insert(0, x)
-    for x in reversed([x for x in tr_res if x[1] == "hls" and "shrek." not in str(x[0]).lower()]):
+    for x in reversed([x for x in tr_res if x[1] == "hls"]):
         if x not in hexa_res:
             hexa_res.insert(0, x)
     vault_yt = [x for x in tr_res if x[1] == "yt"]
@@ -8962,7 +9008,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
         elif "pilavyer" in url:
             eff_ref = f"https://{urllib.parse.urlparse(url).netloc or 'play2.pilavyerplay.top'}/"
         elif "dragonballzfans" in url:
-            eff_ref = "https://flixer.su/"
+            eff_ref = "https://hexa.su/"
         elif ("cdnimages" in url and "/hls/" in url) or "playmix.uno" in url or "hdfilmcehennemi.mobi" in url:
             eff_ref = "https://hdfilmcehennemi.mobi/"
         elif "cdnimgs" in url or ("cdnimg" in url and not ("cdnimages" in url and "/hls/" in url)) or "rapidvid" in url or re.search(r"https://s\d+\.[^/]+\.shop/", url):
@@ -9072,7 +9118,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                                     ct = "audio/mp4"
                                 elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url or ext_hint == ".m4s")):
                                     ct = "video/mp4"
-                                elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url:
+                                elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url or "dragonballzfans" in url:
                                     ct = "video/mp2t"
                                 elif "video/" in raw_ct_low or "audio/" in raw_ct_low or "mpegurl" in raw_ct_low:
                                     ct = r.headers.get("Content-Type")
@@ -9298,8 +9344,8 @@ async def rave_stream_manifest(request: Request):
                 hdrs["Referer"] = f"{dp_origin}/"
                 hdrs["Origin"] = dp_origin
             elif ref_mode == "hx" or "dragonballzfans" in target:
-                hdrs["Referer"] = "https://flixer.su/"
-                hdrs["Origin"] = "https://flixer.su"
+                hdrs["Referer"] = "https://hexa.su/"
+                hdrs["Origin"] = "https://hexa.su"
             elif "daioncdn.net/startv" in target:
                 hdrs["Referer"] = "https://www.startv.com.tr/"
                 hdrs["Origin"] = "https://www.startv.com.tr"
@@ -9315,7 +9361,7 @@ async def rave_stream_manifest(request: Request):
             elif ref_mode == "vm" or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
                 hdrs["Referer"] = "https://vidmoly.biz/"
                 hdrs["Origin"] = "https://vidmoly.biz"
-            cur_target = "https://shrek.dragonballzfans.xyz/" + target.split("serve.dragonballzfans.xyz/", 1)[1] if "serve.dragonballzfans.xyz/" in target else target
+            cur_target = target
             now_dp = time.time()
             if any(d in cur_target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")) and ("/embed-" in cur_target or "/w/" in cur_target):
                 dp_c = _DP_M3U8_CACHE.get(cur_target)
@@ -9484,11 +9530,11 @@ async def rave_stream_manifest(request: Request):
                     mt_guess = explicit_mtype
                     mt_tries = (explicit_mtype,)
                 else:
-                    mt_guess = "tv" if (f"v45:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v44:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v43:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v42:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v41:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v45:movie:{tid}:1:1" in _STREAM_CACHE or f"v44:movie:{tid}:1:1" in _STREAM_CACHE or f"v43:movie:{tid}:1:1" in _STREAM_CACHE or f"v42:movie:{tid}:1:1" in _STREAM_CACHE or f"v41:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                    mt_guess = "tv" if (f"v46:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v45:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v44:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v43:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v42:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v41:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v46:movie:{tid}:1:1" in _STREAM_CACHE or f"v45:movie:{tid}:1:1" in _STREAM_CACHE or f"v44:movie:{tid}:1:1" in _STREAM_CACHE or f"v43:movie:{tid}:1:1" in _STREAM_CACHE or f"v42:movie:{tid}:1:1" in _STREAM_CACHE or f"v41:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                     mt_tries = (mt_guess, "movie" if mt_guess == "tv" else "tv")
                 cands = []
                 for mt_try in mt_tries:
-                    for ver_p in ("v45", "v44", "v43", "v42", "v41", "v40", "v39", "v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v46", "v45", "v44", "v43", "v42", "v41", "v40", "v39", "v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
@@ -9530,8 +9576,8 @@ async def rave_stream_manifest(request: Request):
                                 c_hdrs["Referer"] = f"{pv_orig}/"
                                 c_hdrs["Origin"] = pv_orig
                             elif "dragonballzfans" in cand_u:
-                                c_hdrs["Referer"] = "https://flixer.su/"
-                                c_hdrs["Origin"] = "https://flixer.su"
+                                c_hdrs["Referer"] = "https://hexa.su/"
+                                c_hdrs["Origin"] = "https://hexa.su"
                             cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.8, t_edge=3.8)
                             if cand_raw and "#EXTM3U" in cand_raw:
                                 raw = cand_raw
@@ -9555,9 +9601,10 @@ async def rave_stream_manifest(request: Request):
             cur_is_dbx = ("molystream.org" in cur_target) or (cur_target == target and is_dbx)
             cur_is_dl = ("makesomthingup" in cur_target) or ("centralodsseyproud" in cur_target) or ("/r6/" in cur_target) or (cur_target == target and is_dl)
             cur_is_vm = (ref_mode == "vm") or any(d in cur_target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")) or any(d in target for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx."))
+            cur_is_hx = (ref_mode == "hx") or ("dragonballzfans" in cur_target) or ("dragonballzfans" in target)
             is_master = "#EXT-X-STREAM-INF" in raw
             is_fmp4_playlist = (not is_master) and ("#EXT-X-MAP:" in raw)
-            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm or is_live_tv)
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm or cur_is_hx or is_live_tv)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "") + (f"&mtype={explicit_mtype}" if explicit_mtype else "")
             _manifest_host_ok: dict[tuple[str, str], bool] = {}
 
@@ -9609,7 +9656,7 @@ async def rave_stream_manifest(request: Request):
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=dp{ps_q}&ext=.m3u8"
                     if cur_is_vm:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=vm{ps_q}&ext=.m3u8"
-                    if "dragonballzfans" in cur_target or ref_mode == "hx":
+                    if cur_is_hx or "dragonballzfans" in u_str:
                         return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}&ref=hx{ps_q}&ext=.m3u8"
                     return f"/api/rave/stream?provider={prov}&tmdbId={tid}&s={s_num}&e={e_num}&sid={sub_sid}{ps_q}&ext=.m3u8"
                 if tag_kind == "key" or u_path_low.endswith(".key") or "key.php" in u_str:
@@ -9639,8 +9686,8 @@ async def rave_stream_manifest(request: Request):
                     return _proxy_u(u_str, "https://vidmoly.biz/", seg_ext_hint)
                 if cur_is_fp or ".cfd/" in u_str:
                     return _proxy_u(u_str, "https://fastplay.mom/", seg_ext_hint)
-                if tag_kind in ("key", "map") or "dragonballzfans" in u_str or needs_seg_proxy:
-                    ref_p = "https://flixer.su/" if "dragonballzfans" in u_str else (
+                if tag_kind in ("key", "map") or "dragonballzfans" in u_str or cur_is_hx or needs_seg_proxy:
+                    ref_p = "https://hexa.su/" if ("dragonballzfans" in u_str or cur_is_hx) else (
                         "https://rapidvid.org/" if cur_is_fhd else (
                         "https://hdfilmcehennemi.mobi/" if cur_is_hfnl else (
                         "https://dbx.molystream.org/" if cur_is_dbx else (

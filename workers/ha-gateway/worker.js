@@ -27,6 +27,8 @@ const BYPASS_WORKER_HOSTS = [
   "cdnimages.",
   "ercdn.net",
   "daioncdn.net",
+  "dragonballzfans",
+  "molystream.org",
 ];
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
