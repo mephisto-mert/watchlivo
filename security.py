@@ -508,8 +508,16 @@ _NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
 _NAT64_LOCAL_NETWORK = ipaddress.ip_network("64:ff9b:1::/48")
 
 
-def is_ip_public_global(ip_obj: ipaddress._BaseAddress) -> bool:
+def is_ip_public_global(ip_obj: ipaddress._BaseAddress | str) -> bool:
     """Validate that an IPv4/IPv6 address (and any embedded/mapped IPv4) is globally routable."""
+    if isinstance(ip_obj, str):
+        s = ip_obj.strip()
+        if not s:
+            return False
+        try:
+            ip_obj = ipaddress.ip_address(s)
+        except ValueError:
+            return False
     candidates = [ip_obj]
     if isinstance(ip_obj, ipaddress.IPv6Address):
         if ip_obj.ipv4_mapped is not None:
