@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v185';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v185';
-import { api, qs } from '../api.js?v=20261110_v185';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v185';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v185';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v185';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v185';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v186';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v186';
+import { api, qs } from '../api.js?v=20261110_v186';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v186';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v186';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v186';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v186';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v185';
+} from '../store.js?v=20261110_v186';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -1062,8 +1062,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
                 const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
                 const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
+                const cleanOrigTitle = String(item.originalTitle || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim() || cleanHistTitle;
                 const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
                 const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
+                const savedStreamUrl = item.streamUrl || (item.url && !String(item.url).includes('youtube.com') ? item.url : '');
 
                 let resolved = null;
                 if (!item.isMusic) {
@@ -1072,19 +1074,41 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                     imdbId: item.imdbId || '',
                     mediaType: resolvedMediaType,
                     title: cleanHistTitle,
-                    originalTitle: item.originalTitle || cleanHistTitle,
+                    originalTitle: cleanOrigTitle,
                     backdrop: item.backdrop || item.thumbnail || item.poster || '',
                     poster: item.poster || item.thumbnail || '',
                     year: histYear,
+                    streamUrl: savedStreamUrl,
                   };
                   try {
                     resolved = await Promise.race([
                       resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-                      new Promise((r) => setTimeout(() => r(null), 12000)),
+                      new Promise((r) => setTimeout(() => r(null), 22000)),
                     ]);
                   } catch (e) {
                     console.warn('Continue resolve error:', e);
                   }
+                }
+                if (!resolved && savedStreamUrl && /^(?:https?:\/\/|\/api\/rave\/)/i.test(String(savedStreamUrl))) {
+                  const isHls = /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(savedStreamUrl));
+                  resolved = {
+                    provider: isHls ? 'hls' : 'direct',
+                    catalogProvider: targetProv.id || 'cinema',
+                    streamType: isHls ? 'hls' : 'mp4',
+                    url: savedStreamUrl,
+                    streamUrl: savedStreamUrl,
+                    title: item.title || cleanHistTitle,
+                    seriesTitle: cleanHistTitle,
+                    originalTitle: cleanOrigTitle,
+                    tmdbId: item.tmdbId || '',
+                    imdbId: item.imdbId || '',
+                    mediaType: resolvedMediaType,
+                    season: Number(item.season || 1),
+                    episode: Number(item.episode || 1),
+                    poster: item.poster || item.thumbnail || '/static/watchlivo-poster.svg',
+                    thumbnail: item.thumbnail || item.poster || '/static/watchlivo-poster.svg',
+                    duration: Number(item.duration || 0),
+                  };
                 }
                 if (resolved) {
                   resolved.currentTime = resumeSec;
@@ -1863,9 +1887,11 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     }
     const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
     const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
+    const cleanOrigTitle = String(item.originalTitle || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim() || cleanHistTitle;
     const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
     const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
     const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
+    const savedStreamUrl = item.streamUrl || (item.url && !String(item.url).includes('youtube.com') ? item.url : '');
     let resolved = null;
     if (!item.isMusic) {
       try {
@@ -1874,18 +1900,40 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
           imdbId: item.imdbId || '',
           mediaType: resolvedMediaType,
           title: cleanHistTitle,
-          originalTitle: item.originalTitle || cleanHistTitle,
+          originalTitle: cleanOrigTitle,
           backdrop: item.backdrop || item.thumbnail || item.poster || '',
           poster: item.poster || item.thumbnail || '',
           year: histYear,
+          streamUrl: savedStreamUrl,
         };
         resolved = await Promise.race([
           resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-          new Promise((r) => setTimeout(() => r(null), 12000)),
+          new Promise((r) => setTimeout(() => r(null), 22000)),
         ]);
       } catch (err) {
         console.warn('History modal resolve error:', err);
       }
+    }
+    if (!resolved && savedStreamUrl && /^(?:https?:\/\/|\/api\/rave\/)/i.test(String(savedStreamUrl))) {
+      const isHls = /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(savedStreamUrl));
+      resolved = {
+        provider: isHls ? 'hls' : 'direct',
+        catalogProvider: targetProv.id || 'cinema',
+        streamType: isHls ? 'hls' : 'mp4',
+        url: savedStreamUrl,
+        streamUrl: savedStreamUrl,
+        title: item.title || cleanHistTitle,
+        seriesTitle: cleanHistTitle,
+        originalTitle: cleanOrigTitle,
+        tmdbId: item.tmdbId || '',
+        imdbId: item.imdbId || '',
+        mediaType: resolvedMediaType,
+        season: Number(item.season || 1),
+        episode: Number(item.episode || 1),
+        poster: item.poster || item.thumbnail || '/static/watchlivo-poster.svg',
+        thumbnail: item.thumbnail || item.poster || '/static/watchlivo-poster.svg',
+        duration: Number(item.duration || 0),
+      };
     }
     if (resolved) {
       resolved.currentTime = resumeSec;

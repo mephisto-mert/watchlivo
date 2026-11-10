@@ -4346,7 +4346,6 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                 if isinstance(v_fb, dict) and v_fb.get("sourceUrl") and "/film/" not in str(v_fb.get("sourceUrl")):
                     source_url = str(v_fb.get("sourceUrl"))
                     break
-        fb_ep_keys = []
 
     def _collect_vault_keys(key_list, target_list):
         all_vt_words = set()
@@ -4607,7 +4606,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
         return res + [x for x in fallback_res if x not in res]
 
     # 4. Live extraction from https://www.dizibox.live/ (for series)
-    if mtype == "tv":
+    if mtype == "tv" and not fallback_res:
         dbx_slugs = []
         if source_url and "dizibox.live" in source_url:
             m_dbx = re.search(r"dizibox\.live/(?:diziler/)?([a-z0-9-]+?)(?:-\d+-sezon.*)?/?$", source_url)
@@ -5386,10 +5385,10 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     t_start = time.time()
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower() or str(tid or "") in _ANIMECIX_KNOWN_TMDB
-    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
+    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_ve", "hls_ve_multi", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
     has_tr_dub_ready = orig_lang == "tr"
-    while time.time() - t_start < 4.6:
+    while time.time() - t_start < 2.4:
         ac_res_now = (f_ac.result() or []) if (f_ac.done() and not f_ac.exception()) else []
         ac_ok = bool(ac_res_now)
         pv_res_now = (f_pv.result() or []) if (f_pv.done() and not f_pv.exception()) else []
@@ -5429,9 +5428,9 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         time.sleep(0.06)
     any_ready_after_loop = any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar))
     if not any_ready_after_loop:
-        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.0)
+        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=1.0)
     elif not is_ja_or_anime and not has_tr_dub_ready and not f_hf.done():
-        concurrent.futures.wait([f_hf], timeout=0.8)
+        concurrent.futures.wait([f_hf], timeout=0.6)
     ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
     if f_ac.done():
         try:
@@ -6890,16 +6889,17 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 fut_subs = sub_pool.submit(_fetch_subtitles_sync, eff_tid, imdb_id, mtype, s, e, eff_prov, pmeta, direct_list)
                 fut_intro_api = sub_pool.submit(_detect_intro_sync, imdb_id, tid, mtype, s, e, None)
                 fut_audio = sub_pool.submit(_build_audio_tracks, wrapped[0][0], direct_list, eff_prov, eff_tid, s, e, pmeta, mtype)
+                concurrent.futures.wait([fut_subs, fut_intro_api, fut_audio], timeout=1.5)
                 try:
-                    sub_tracks = fut_subs.result(timeout=1.6)
+                    sub_tracks = fut_subs.result(timeout=0.05) if fut_subs.done() else []
                 except Exception:
                     sub_tracks = []
                 try:
-                    intro_seg = fut_intro_api.result(timeout=0.5)
+                    intro_seg = fut_intro_api.result(timeout=0.05) if fut_intro_api.done() else None
                 except Exception:
                     intro_seg = None
                 try:
-                    audio_tracks = fut_audio.result(timeout=1.5)
+                    audio_tracks = fut_audio.result(timeout=0.05) if fut_audio.done() else []
                 except Exception:
                     audio_tracks = []
             finally:

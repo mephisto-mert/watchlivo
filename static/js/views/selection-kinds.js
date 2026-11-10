@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v185';
-import { api, qs } from '../api.js?v=20261110_v185';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v185';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v185';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v185';
-import { profileSetup } from '../profile.js?v=20261110_v185';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v185';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v186';
+import { api, qs } from '../api.js?v=20261110_v186';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v186';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v186';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v186';
+import { profileSetup } from '../profile.js?v=20261110_v186';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v186';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v185';
+} from '../store.js?v=20261110_v186';
 
 const _resolveMemCache = new Map();
 
@@ -49,7 +49,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const qTry = attempt === 1 ? `${query}&refresh=1` : query;
-      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: attempt === 0 ? 9500 : 7500 });
+      const res = await api(`/api/rave/resolve-catalog?${qTry}`, { timeout: attempt === 0 ? 14000 : 9500 });
       if (res?.authRequired || res?.status === 401) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
         toast(res.error || (targetProv?.id === 'max' ? 'Max içeriklerini izlemek için önce Max hesabınızı bağlamalısınız.' : `${targetProv?.name || 'Sağlayıcı'} oturumu gerekli.`));
@@ -152,8 +152,8 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       }
     }
   }
-  if (it.streamUrl && /^https?:\/\//i.test(String(it.streamUrl))) {
-    const isHls = /\.m3u8(\?|$)/i.test(String(it.streamUrl));
+  if (it.streamUrl && /^(?:https?:\/\/|\/api\/rave\/)/i.test(String(it.streamUrl))) {
+    const isHls = /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(it.streamUrl));
     const disp = it.title || prov?.name || 'Sinema';
     return {
       provider: isHls ? 'hls' : 'direct',

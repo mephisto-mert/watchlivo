@@ -5678,7 +5678,12 @@ html.is-native-apk .wl-btn-apk-dl,
   scrollbar-width: thin;
 }
 .wl-continue-card {
-  flex: 0 0 218px;
+  flex: 0 0 236px;
+  width: 236px;
+  max-width: 236px;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 10px;
