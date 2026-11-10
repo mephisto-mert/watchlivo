@@ -4472,17 +4472,19 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             continue
                         if _is_vault_url_expired(raw_su):
                             continue
-                        if IS_VERCEL and (
+                        if (
                             "dbx.molystream.org" in raw_su.lower()
                             or "dplayer" in raw_su.lower()
-                            or "hdfilmcehennemi.mobi" in raw_su.lower()
+                            or st_t in ("hls_dbx", "hls_dp")
+                        ):
+                            continue
+                        if IS_VERCEL and (
+                            "hdfilmcehennemi.mobi" in raw_su.lower()
                             or ("cdnimages" in raw_su.lower() and "/hls/" in raw_su.lower())
                             or "playmix.uno" in raw_su.lower()
                             or "master.txt?s=" in raw_su.lower()
-                            or st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
+                            or st_t in ("hls_hfnl", "hls_hfnl_multi")
                         ):
-                            continue
-                        if "dplayer" in raw_su.lower() and "multiplayer.php" not in raw_su.lower() and "iframe.php" not in raw_su.lower() and ".m3u8" not in raw_su.lower() and "/hls/" not in raw_su.lower():
                             continue
                         if not _stream_matches_title(raw_su, valid_titles, year, imdb_id):
                             continue
@@ -4493,7 +4495,6 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                             st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr")
                             or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
                             or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
-                            or (not IS_VERCEL and st_t == "hls_dp" and ("multiplayer.php" in raw_su or "iframe.php" in raw_su))
                         )
                         dest_l = target_list if is_true_1080_vault else fallback_res
                         if (raw_su, st_t) not in dest_l:
@@ -4506,7 +4507,7 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                                 _AUDIO_LANG_HINT[str(u_st[0])] = list(v_aud)
 
     _collect_vault_keys(exact_ep_keys, res)
-    if res and mtype == "movie":
+    if res:
         verified_vault_res = []
         for vu_cand, vst_cand in res:
             if vst_cand in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr") and ("cdnimg" in vu_cand.lower() or ".shop/" in vu_cand.lower()):
@@ -4528,6 +4529,22 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         if v_langs:
                             _AUDIO_LANG_HINT[vu_cand] = v_langs
                             _AUDIO_PROBE_CACHE[vu_cand] = (time.time(), v_langs)
+                except Exception:
+                    continue
+            elif vst_cand in ("hls_hfnl_multi", "hls_hfnl") or "hdfilmcehennemi.mobi" in vu_cand.lower() or ("cdnimages" in vu_cand.lower() and "/hls/" in vu_cand.lower()) or "playmix.uno" in vu_cand.lower():
+                try:
+                    chk_u = vu_cand
+                    m_hid_v = re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", vu_cand) or re.search(r"hdfilmcehennemi\.mobi/video/embed/([A-Za-z0-9_-]+)", vu_cand)
+                    if m_hid_v and ("/master.txt" in vu_cand or "hdfilmcehennemi.mobi/video/embed/" in vu_cand):
+                        emb_u_v = f"https://hdfilmcehennemi.mobi/video/embed/{m_hid_v.group(1)}"
+                        with _public_open(urllib.request.Request(emb_u_v, headers={"User-Agent": UA137, "Referer": "https://www.hdfilmcehennemi.nl/"}), timeout=2.8) as hrv:
+                            fresh_v = _decode_hdfc_mobi_html(hrv.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
+                        if fresh_v and fresh_v.startswith("https://"):
+                            _DP_M3U8_CACHE[vu_cand] = (fresh_v, time.time() + 900)
+                            chk_u = fresh_v
+                    with _public_open(urllib.request.Request(chk_u, headers={"User-Agent": UA137, "Referer": "https://hdfilmcehennemi.mobi/", "Origin": "https://hdfilmcehennemi.mobi"}), timeout=2.8) as hchk:
+                        if "#EXTM3U" in hchk.read(16384).decode("utf-8", errors="ignore"):
+                            verified_vault_res.append((vu_cand, vst_cand))
                 except Exception:
                     continue
             else:
@@ -5120,7 +5137,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     ep_num = _resolve_episode_numbering(tid, s, e) if mtype == "tv" else {"s_split": 1, "e_split": 1, "s_tmdb": 1, "e_tmdb": 1, "abs_ep": 1, "has_splits": False}
     s_split, e_split = ep_num["s_split"], ep_num["e_split"]
     s_tmdb, e_tmdb = ep_num["s_tmdb"], ep_num["e_tmdb"]
-    ckey = f"v44:{mtype}:{tid}:{s_split}:{e_split}"
+    ckey = f"v45:{mtype}:{tid}:{s_split}:{e_split}"
     ekey = f"{mtype}:{tid}:{s}:{e}"
     now_t = time.time()
     if refresh:
@@ -5479,7 +5496,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     t_start = time.time()
     t_first_hf = 0.0
     is_ja_or_anime = orig_lang == "ja" or "anime" in (source_url or "").lower() or str(tid or "") in _ANIMECIX_KNOWN_TMDB
-    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dbx", "hls_dp", "hls_dl", "hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_ve", "hls_ve_multi", "hls_cj", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
+    _VERCEL_1080_TAGS = ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_dl", "hls_pv_multi", "hls_pv_tr", "hls_pv", "hls_ve", "hls_ve_multi", "hls_cj", "hls", "mp4_ac_sub", "mp4_ac_dub", "mp4")
     _TR_DUB_TAGS = ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr")
     has_tr_dub_ready = orig_lang == "tr"
     max_extract_budget = 4.2 if IS_VERCEL else 6.8
@@ -6885,10 +6902,10 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         st_u, st_t = str(st_item[0]), str(st_item[1])
                         if _is_vault_url_expired(st_u):
                             continue
+                        if st_t in ("hls_dbx", "hls_dp") or "dbx.molystream.org" in st_u.lower() or "dplayer" in st_u.lower():
+                            continue
                         if IS_VERCEL and (
-                            st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
-                            or "dbx.molystream.org" in st_u.lower()
-                            or "dplayer" in st_u.lower()
+                            st_t in ("hls_hfnl", "hls_hfnl_multi")
                             or "hdfilmcehennemi.mobi" in st_u.lower()
                             or ("cdnimages" in st_u.lower() and "/hls/" in st_u.lower())
                             or "playmix.uno" in st_u.lower()
@@ -6916,10 +6933,10 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             st_u, st_t = str(st_item[0]), str(st_item[1])
                             if _is_vault_url_expired(st_u):
                                 continue
+                            if st_t in ("hls_dbx", "hls_dp") or "dbx.molystream.org" in st_u.lower() or "dplayer" in st_u.lower():
+                                continue
                             if IS_VERCEL and (
-                                st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
-                                or "dbx.molystream.org" in st_u.lower()
-                                or "dplayer" in st_u.lower()
+                                st_t in ("hls_hfnl", "hls_hfnl_multi")
                                 or "hdfilmcehennemi.mobi" in st_u.lower()
                                 or ("cdnimages" in st_u.lower() and "/hls/" in st_u.lower())
                                 or "playmix.uno" in st_u.lower()
@@ -9467,54 +9484,64 @@ async def rave_stream_manifest(request: Request):
                     mt_guess = explicit_mtype
                     mt_tries = (explicit_mtype,)
                 else:
-                    mt_guess = "tv" if (f"v44:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v43:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v42:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v41:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v44:movie:{tid}:1:1" in _STREAM_CACHE or f"v43:movie:{tid}:1:1" in _STREAM_CACHE or f"v42:movie:{tid}:1:1" in _STREAM_CACHE or f"v41:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
+                    mt_guess = "tv" if (f"v45:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v44:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v43:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v42:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or f"v41:tv:{tid}:{s_i}:{e_i}" in _STREAM_CACHE or s_i > 1 or e_i > 1) else ("movie" if (f"v45:movie:{tid}:1:1" in _STREAM_CACHE or f"v44:movie:{tid}:1:1" in _STREAM_CACHE or f"v43:movie:{tid}:1:1" in _STREAM_CACHE or f"v42:movie:{tid}:1:1" in _STREAM_CACHE or f"v41:movie:{tid}:1:1" in _STREAM_CACHE) else "tv")
                     mt_tries = (mt_guess, "movie" if mt_guess == "tv" else "tv")
                 cands = []
                 for mt_try in mt_tries:
-                    for ver_p in ("v44", "v43", "v42", "v41", "v40", "v39", "v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
+                    for ver_p in ("v45", "v44", "v43", "v42", "v41", "v40", "v39", "v38", "v37", "v36", "v35", "v34", "v33", "v32", "v31", "v30", "v29", "v28"):
                         c_entry = _STREAM_CACHE.get(f"{ver_p}:{mt_try}:{tid}:{s_i}:{e_i}")
                         if c_entry and c_entry.get("val"):
                             cands.extend(c_entry["val"])
-                if not cands:
-                    try:
-                        cands = _extract_direct_stream_sync(tid, mt_guess, s_i, e_i) or []
-                    except Exception:
-                        cands = []
-                for cand_u, cand_k in cands:
-                    if not cand_u or cand_u == cur_target or not cand_u.startswith("http") or str(cand_k).startswith("mp4") or _is_unplayable_stream_url(cand_u) or "serve.dragonballzfans.xyz" in cand_u or "finalsignal.top" in cand_u:
-                        continue
-                    try:
-                        c_hdrs = {"User-Agent": UA137}
-                        if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "finalsignal.top", "workers.dev")) or bool(re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", cand_u)):
-                            c_hdrs["Referer"] = "https://vidy.st/"
-                            c_hdrs["Origin"] = "https://vidy.st"
-                        elif "cj" in str(cand_k) or "lightspeed.st" in cand_u:
-                            c_hdrs["Referer"] = "https://cinejoy.pk/"
-                            c_hdrs["Origin"] = "https://cinejoy.pk"
-                        elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimg" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/", cand_u):
-                            c_hdrs["Referer"] = "https://rapidvid.org/"
-                            c_hdrs["Origin"] = "https://rapidvid.org"
-                        elif "hfnl" in str(cand_k) or "cdnimages" in cand_u or "hdfilmcehennemi" in cand_u:
-                            c_hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
-                            c_hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
-                        elif "dl" in str(cand_k) or "makesomthingup" in cand_u:
-                            c_hdrs["Referer"] = "https://one.makesomthingup.click/"
-                            c_hdrs["Origin"] = "https://one.makesomthingup.click"
-                        elif "pilavyer" in cand_u or "pv" in str(cand_k):
-                            pv_orig = f"https://{urllib.parse.urlparse(cand_u).netloc or 'play2.pilavyerplay.top'}"
-                            c_hdrs["Referer"] = f"{pv_orig}/"
-                            c_hdrs["Origin"] = pv_orig
-                        elif "dragonballzfans" in cand_u:
-                            c_hdrs["Referer"] = "https://flixer.su/"
-                            c_hdrs["Origin"] = "https://flixer.su"
-                        cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.8, t_edge=3.8)
-                        if cand_raw and "#EXTM3U" in cand_raw:
-                            raw = cand_raw
-                            cur_target = cand_fin if (cand_fin.startswith("http") and public_http_url(cand_fin)) else cand_u
-                            cur_k = str(cand_k)
+                for rescue_pass in range(2):
+                    if rescue_pass == 1:
+                        if raw:
                             break
-                    except Exception:
-                        continue
+                        try:
+                            cands = _extract_direct_stream_sync(tid, mt_guess, s_i, e_i, refresh=True) or []
+                        except Exception:
+                            cands = []
+                    elif not cands:
+                        try:
+                            cands = _extract_direct_stream_sync(tid, mt_guess, s_i, e_i) or []
+                        except Exception:
+                            cands = []
+                    for cand_u, cand_k in cands:
+                        if not cand_u or cand_u == cur_target or not cand_u.startswith("http") or str(cand_k).startswith("mp4") or _is_unplayable_stream_url(cand_u) or "serve.dragonballzfans.xyz" in cand_u or "finalsignal.top" in cand_u:
+                            continue
+                        try:
+                            c_hdrs = {"User-Agent": UA137}
+                            if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "finalsignal.top", "workers.dev")) or bool(re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", cand_u)):
+                                c_hdrs["Referer"] = "https://vidy.st/"
+                                c_hdrs["Origin"] = "https://vidy.st"
+                            elif "cj" in str(cand_k) or "lightspeed.st" in cand_u:
+                                c_hdrs["Referer"] = "https://cinejoy.pk/"
+                                c_hdrs["Origin"] = "https://cinejoy.pk"
+                            elif "fhd" in str(cand_k) or "cdnimgs" in cand_u or "cdnimg" in cand_u or re.search(r"https://s\d+\.[^/]+\.shop/", cand_u):
+                                c_hdrs["Referer"] = "https://rapidvid.org/"
+                                c_hdrs["Origin"] = "https://rapidvid.org"
+                            elif "hfnl" in str(cand_k) or "cdnimages" in cand_u or "hdfilmcehennemi" in cand_u:
+                                c_hdrs["Referer"] = "https://hdfilmcehennemi.mobi/"
+                                c_hdrs["Origin"] = "https://hdfilmcehennemi.mobi"
+                            elif "dl" in str(cand_k) or "makesomthingup" in cand_u:
+                                c_hdrs["Referer"] = "https://one.makesomthingup.click/"
+                                c_hdrs["Origin"] = "https://one.makesomthingup.click"
+                            elif "pilavyer" in cand_u or "pv" in str(cand_k):
+                                pv_orig = f"https://{urllib.parse.urlparse(cand_u).netloc or 'play2.pilavyerplay.top'}"
+                                c_hdrs["Referer"] = f"{pv_orig}/"
+                                c_hdrs["Origin"] = pv_orig
+                            elif "dragonballzfans" in cand_u:
+                                c_hdrs["Referer"] = "https://flixer.su/"
+                                c_hdrs["Origin"] = "https://flixer.su"
+                            cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.8, t_edge=3.8)
+                            if cand_raw and "#EXTM3U" in cand_raw:
+                                raw = cand_raw
+                                cur_target = cand_fin if (cand_fin.startswith("http") and public_http_url(cand_fin)) else cand_u
+                                cur_k = str(cand_k)
+                                break
+                        except Exception:
+                            continue
+                    if raw:
+                        break
             if not raw:
                 raise ValueError("Seçilen içerik için oynatılabilir manifest bulunamadı") from last_err
             base_u = cur_target
