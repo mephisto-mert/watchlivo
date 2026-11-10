@@ -7820,4 +7820,13 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     top: 6px !important;
     right: 6px !important;
   }
+  .provider-tile.rave-icon-tile .provider-logo-wrap {
+    max-width: calc(100% - 68px) !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .top-nav-capsule .brand-title {
+    display: none !important;
+  }
 }

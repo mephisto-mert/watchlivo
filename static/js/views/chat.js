@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v183';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261110_v183';
-import { avatar } from '../profile.js?v=20261110_v183';
-import { api, qs } from '../api.js?v=20261110_v183';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v183';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v183';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v184';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261110_v184';
+import { avatar } from '../profile.js?v=20261110_v184';
+import { api, qs } from '../api.js?v=20261110_v184';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v184';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v184';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -962,8 +962,8 @@ export function buildChat(ctx) {
       return;
     }
     const myName = state.self?.name || '';
-    const myBase = myName.split('#')[0];
     const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myBase = myCidTail && myName.endsWith(`#${myCidTail}`) ? myName.slice(0, -(myCidTail.length + 1)) : myName;
     const myVoteTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const sig = `${myVoteTag || myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
     if (wrap.dataset.pollSig === sig) return;
@@ -974,7 +974,7 @@ export function buildChat(ctx) {
       h('div', { class: 'chat-poll-opts' }, ...(poll.options || []).map((opt, idx) => {
         const count = (opt.votes || []).length;
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-        const voted = (opt.votes || []).some((u) => (myVoteTag ? (u === myVoteTag || (!String(u).includes('#') && u === myName)) : u === myName));
+        const voted = (opt.votes || []).some((u) => u === myVoteTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
         return h('button', {
           type: 'button',
           class: `chat-poll-opt ${voted ? 'voted' : ''}`,
@@ -1076,8 +1076,8 @@ export function buildChat(ctx) {
     const msgObj = (state.mesh?.chat || []).find((x) => x.id === msgId);
     const reacts = msgObj?.reactions || {};
     const myName = state.self?.name || 'Misafir';
-    const myBase = myName.split('#')[0];
     const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myBase = myCidTail && myName.endsWith(`#${myCidTail}`) ? myName.slice(0, -(myCidTail.length + 1)) : myName;
     const myReactTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const entries = Object.entries(reacts).filter(([, u]) => Array.isArray(u) && u.length > 0);
     const sig = `${myReactTag || myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
@@ -1090,7 +1090,7 @@ export function buildChat(ctx) {
     }
     wrap.classList.remove('empty');
     wrap.replaceChildren(...entries.map(([em, users]) => {
-      const mine = users.some((u) => (myReactTag ? (u === myReactTag || (!String(u).includes('#') && u === myName)) : u === myName));
+      const mine = users.some((u) => u === myReactTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
       return h('button', {
         type: 'button',
         class: `msg-react-pill ${mine ? 'mine' : ''}`,

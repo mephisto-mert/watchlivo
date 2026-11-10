@@ -3559,9 +3559,14 @@ async def ws_endpoint(websocket: WebSocket):
                             await STORE.put(room, force_disk=True)
                             await broadcast(room_id, _room_event(room))
                     else:
+                        other_live_ws = any(
+                            k != cid and (room.get("participants") or {}).get(k, {}).get("transport") != "bot"
+                            for k in (SOCKETS.get(room_id) or {})
+                        )
                         if cur_p:
                             cur_p["transport"] = "http"
-                            cur_p["lastSeen"] = min(float(cur_p.get("lastSeen") or 0.0), t_disc - (HTTP_PARTICIPANT_TTL - 8.0))
+                            grace_offset = (HTTP_PARTICIPANT_TTL - 8.0) if other_live_ws else 37.0
+                            cur_p["lastSeen"] = min(float(cur_p.get("lastSeen") or 0.0), t_disc - grace_offset)
                         ensure_host(room)
                         room["lastActiveAt"] = t_disc
                         _LOBBY_CACHE["ts"] = 0.0

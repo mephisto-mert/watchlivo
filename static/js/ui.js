@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v183';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v184';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -83,8 +83,9 @@ export const icons = {
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
+  for (const [rawK, v] of Object.entries(attrs || {})) {
     if (v === undefined || v === null || v === false) continue;
+    const k = String(rawK).toLowerCase();
     if (k === 'class') el.className = v;
     else if (k === 'style' && typeof v === 'object') {
       for (const [sk, sv] of Object.entries(v)) {
@@ -104,11 +105,11 @@ export function h(tag, attrs = {}, ...children) {
         const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
         const isTrustedStaticSvg = (
           isSafeSvgImg &&
-          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)
+          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:|;base64/i.test(cleanV)
         );
         if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
       }
-      el.setAttribute(k, v === true ? '' : v);
+      el.setAttribute(rawK, v === true ? '' : v);
     }
   }
   for (const c of children.flat(Infinity)) {
@@ -412,6 +413,10 @@ export function setBackground(url) {
   img.dataset.src = url;
   img.classList.remove('on');
   img.onload = () => img.classList.add('on');
+  img.onerror = () => {
+    delete img.dataset.src;
+    img.classList.remove('on');
+  };
   img.src = url;
 }
 

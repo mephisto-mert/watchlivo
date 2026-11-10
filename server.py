@@ -5771,7 +5771,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
     plabel = PROV_LABELS.get((pmeta or {}).get("prov") or prov, "Sinema, Dizi & Anime+")
     allow_subs = set()
     for raw_name in ((pmeta or {}).get("subLangs") or []):
-        base_n = raw_name.split("[")[0].strip().replace("İ", "i").replace("I", "ı").lower()
+        base_n = raw_name.split("[")[0].strip().replace("İ", "i").replace("I", "i").lower().replace("\u0307", "")
         if base_n in SUB_LANG_MAP:
             allow_subs.add(SUB_LANG_MAP[base_n][0])
     ckey = f"sub:v15:{prov}:{mtype}:{tid or imdb_id}:{s}:{e}"
@@ -5815,7 +5815,7 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
         sub_url = str(sub_url or "").strip()
         if not sub_url.startswith("http") or sub_url in seen_vtt_urls:
             return
-        raw_l = str(raw_l or "").lower().strip()
+        raw_l = str(raw_l or "").replace("İ", "i").replace("I", "i").lower().replace("\u0307", "").strip()
         base_l = re.split(r"[\s(\[-]", raw_l)[0].strip()
         linfo = SUB_LANG_MAP.get(raw_l) or SUB_LANG_MAP.get(base_l)
         if not linfo:
@@ -6342,7 +6342,7 @@ def _filter_live_subs(tracks: list, min_cues: int = 8) -> list:
     try:
         concurrent.futures.wait(futs, timeout=2.6)
     finally:
-        pool.shutdown(wait=False)
+        pool.shutdown(wait=False, cancel_futures=True)
     out = []
     for t, f in zip(tracks, futs):
         n = f.result() if (f.done() and not f.exception()) else 99
@@ -10092,18 +10092,20 @@ def _srt_to_vtt(raw_bytes) -> str:
         txt = raw_bytes
     else:
         if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")):
-            encs = ("utf-16", "utf-8-sig", "cp1254", "latin-1")
+            encs = ("utf-16", "utf-8-sig", "cp1254", "iso-8859-9", "latin-1")
         elif len(raw_bytes) >= 4 and raw_bytes.count(b"\x00") > len(raw_bytes) // 5:
             bomless_u16 = "utf-16-le" if (len(raw_bytes) >= 2 and raw_bytes[1] == 0) else "utf-16-be"
-            encs = (bomless_u16, "utf-16", "utf-8-sig", "cp1254", "latin-1")
+            encs = (bomless_u16, "utf-16", "utf-8-sig", "cp1254", "iso-8859-9", "latin-1")
         else:
-            encs = ("utf-8-sig", "utf-8", "cp1254", "latin-1")
+            encs = ("utf-8-sig", "utf-8", "cp1254", "iso-8859-9")
         for enc in encs:
             try:
                 txt = raw_bytes.decode(enc)
                 break
             except Exception:
                 continue
+        if not txt:
+            txt = raw_bytes.decode("cp1254", errors="replace")
     txt = txt.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if "<p " in txt and "begin=" in txt:
         cues = []
@@ -10581,7 +10583,6 @@ async def rave_subtitles(request: Request):
             intro_seg = await asyncio.wait_for(asyncio.to_thread(_detect_intro_sync, imdb_id, tid, mtype, s, e, subs), timeout=4)
         except Exception:
             intro_seg = None
-        subs = await asyncio.to_thread(_filter_live_subs, subs)
         payload = {"subtitleTracks": subs, "subtitles": subs, "audioTracks": audio, "intro": intro_seg, "platformAudioLangs": pmeta.get("audioLangs") or [], "platformSubLangs": pmeta.get("subLangs") or []}
         if len(_SUB_RESP_CACHE) >= 300:
             _SUB_RESP_CACHE.pop(next(iter(_SUB_RESP_CACHE)), None)
@@ -10631,6 +10632,11 @@ async def rave_subtitle_vtt(request: Request):
         sample_vtt = vtt[:6000]
         if not re.search(r"[ğşıöüçĞŞİÖÜÇ]", sample_vtt) and len(re.findall(r"\b(?:the|you|what|that|have|with|this|from|they|would|there)\b", sample_vtt, re.I)) >= 4:
             need_tr = True
+    if not translate and (need_tr or need_en):
+        allowed_tr, _ = _SUB_TRANSLATE_LIMIT.hit(client_ip(request))
+        if not allowed_tr:
+            need_tr = False
+            need_en = False
     if vtt.count("-->") >= 2 and need_tr:
         try:
             vtt = await asyncio.wait_for(asyncio.to_thread(_translate_vtt_to_tr_sync, vtt, "tr"), timeout=8.5)

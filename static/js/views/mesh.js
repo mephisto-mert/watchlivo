@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v183';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v183';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v183';
-import { MeshConnection } from '../realtime.js?v=20261110_v183';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v183';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v183';
-import { buildLayout } from './mesh-layout.js?v=20261110_v183';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v183';
-import { Voice } from '../voice.js?v=20261110_v183';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v183';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v183';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v183';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v184';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v184';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v184';
+import { MeshConnection } from '../realtime.js?v=20261110_v184';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v184';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v184';
+import { buildLayout } from './mesh-layout.js?v=20261110_v184';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v184';
+import { Voice } from '../voice.js?v=20261110_v184';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v184';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v184';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v184';
 
 let ctx = null;
 
@@ -452,8 +452,8 @@ async function loadMedia(media) {
   if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
     ctx.layout?.playerEvent?.('loading');
     if (!isTimeKeeper()) {
-      for (let w = 0; w < 6; w += 1) {
-        await new Promise((r) => setTimeout(r, 200));
+      for (let w = 0; w < 2; w += 1) {
+        await new Promise((r) => setTimeout(r, 150));
         if (!ctx || ctx.loadSeq !== mySeq) return;
         const latest = state.mesh?.media;
         if (latest?.url && !String(latest.url).startsWith('/api/rave/resolve-catalog') && mediaKey(latest) === mKey) {
@@ -472,6 +472,7 @@ async function loadMedia(media) {
             if (!ctx || ctx.loadSeq !== mySeq) return;
             if (res && res.url) {
               const refMedia = state.mesh?.media || media;
+              const roomStillUnresolved = String(refMedia?.url || '').startsWith('/api/rave/resolve-catalog');
               const freshExp = expectedPosition(refMedia);
               const resolvedStart = (wasNewCreatorRoom && initialPos < 3.0 && freshExp < 3.0)
                 ? 0
@@ -502,8 +503,10 @@ async function loadMedia(media) {
                 if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
                 rememberRoom(updatedMesh);
               }
-              if (ctx) ctx.lastResolvePushAt = Date.now();
-              ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
+              if (isTimeKeeper() || roomStillUnresolved) {
+                if (ctx) ctx.lastResolvePushAt = Date.now();
+                ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
+              }
               break;
             }
           }
@@ -1116,18 +1119,16 @@ const actions = {
     if (!msgId || !emoji) return;
     const room = state.mesh;
     const myName = state.self?.name || 'Misafir';
-    const myBaseName = String(myName).replace(/\s*#\d{3,6}$/, '').trim();
+    const myCidTail = String(state.clientId || '').slice(-4);
+    const myTag = myCidTail ? `${myName}#${myCidTail}` : myName;
     if (room && Array.isArray(room.chat)) {
       const chatList = room.chat.map((m) => {
         if (m.id !== msgId) return m;
         const reacts = { ...(m.reactions || {}) };
         const users = Array.isArray(reacts[emoji]) ? [...reacts[emoji]] : [];
-        let idx = users.indexOf(myName);
-        if (idx < 0 && myBaseName) {
-          idx = users.findIndex((u) => String(u || '').replace(/\s*#\d{3,6}$/, '').trim() === myBaseName);
-        }
+        let idx = users.findIndex((u) => u === myTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
         if (idx >= 0) users.splice(idx, 1);
-        else users.push(myName);
+        else users.push(myTag);
         if (users.length) reacts[emoji] = users;
         else delete reacts[emoji];
         return { ...m, reactions: reacts };

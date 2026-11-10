@@ -6208,3 +6208,16 @@ html.is-android-pip .rave-subtitle-cue {
     font-size: 0.56rem !important;
   }
 }
+
+@container (max-width: 390px) {
+  .video-frame .ctl-bar-row .ctl-time {
+    font-size: 0.59rem !important;
+    padding: 2px 4px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  #mesh-root > .navbar .privacy-chip {
+    display: none !important;
+  }
+}

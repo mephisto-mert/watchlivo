@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v183';
-import { api } from './api.js?v=20261110_v183';
-import { state } from './store.js?v=20261110_v183';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v183';
+import { clock } from './sync.js?v=20261110_v184';
+import { api } from './api.js?v=20261110_v184';
+import { state } from './store.js?v=20261110_v184';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v184';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -472,7 +472,7 @@ export class MeshConnection {
       }
       if (isPoll && (reqSeq !== this.actionSeq || this.outQueue.length > 0)) {
         this._dispatchHttpEvents(res.unchanged ? res : res.room, false);
-        return;
+        return true;
       }
       if (res.unchanged && this.lastRoom) {
         this.lastRoom = { ...this.lastRoom, media: { ...(this.lastRoom.media || {}) } };
@@ -512,7 +512,8 @@ export class MeshConnection {
           if (prevUrl && (!srvUrl || (prevResolved && srvUnresolved))) {
             this.needsMediaPush = true;
             this.lastRev = 0;
-            return;
+            if (stateMutated) this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
+            return true;
           }
           const sameIdentity = Boolean(
             (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
@@ -521,8 +522,9 @@ export class MeshConnection {
           if (srvUrl && srvUrl !== prevUrl && !sameIdentity) {
             this.lastRev = 0;
             this.syncToken = '';
+            if (stateMutated) this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
             setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
-            return;
+            return true;
           }
           const urlChanged = Boolean(srvUrl && srvUrl !== prevUrl);
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
@@ -568,7 +570,7 @@ export class MeshConnection {
           if (res.host_id) this.lastRoom.host_id = res.host_id;
           this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
         }
-        return;
+        return true;
       }
       if (res.room) {
         if ((isInit || payload.type === 'init') && reqSeq !== this.actionSeq && this.lastRoom?.media && (this.lastRoom.media.url || this.lastRoom.media.videoId)) {
@@ -577,7 +579,7 @@ export class MeshConnection {
         this.lastRoom = res.room;
         this.participantCount = Number(res.room.participantCount || res.room.count || (res.room.participants || []).length || 1);
         this._dispatchHttpEvents(res.room, isInit);
-        if (isPoll && reqSeq !== this.actionSeq) return;
+        if (isPoll && reqSeq !== this.actionSeq) return true;
         this.lastRev = Math.max(this.lastRev, Number(res.room.rev || 0));
         if (res.room.syncToken && res.room.syncToken !== this.syncToken) {
           this.syncToken = res.room.syncToken;

@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v183';
-import { api, qs } from '../api.js?v=20261110_v183';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v183';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v183';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v183';
-import { profileSetup } from '../profile.js?v=20261110_v183';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v183';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v184';
+import { api, qs } from '../api.js?v=20261110_v184';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v184';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v184';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261110_v184';
+import { profileSetup } from '../profile.js?v=20261110_v184';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v184';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v183';
+} from '../store.js?v=20261110_v184';
 
 const _resolveMemCache = new Map();
 
@@ -82,7 +82,9 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         }
         return res;
       }
-      break;
+      if (attempt === 1 && !it.streamUrl) {
+        toast(res?.error || 'Bu bölüm şu an açılamadı, lütfen tekrar dene.');
+      }
     } catch (err) {
       if (err.status === 401 || err.data?.authRequired) {
         const targetProv = (provId === 'max' || it?.provider === 'max') ? (getProvider('max') || prov) : prov;
@@ -873,11 +875,12 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 
   const renderCategoryView = () => {
     const favList = getFavorites();
+    const basePool = allCatalogItems.length ? allCatalogItems : currentItems;
     catBar.replaceChildren(...CATALOG_CATEGORIES.map((c) => {
       let badgeTxt = '';
-      const matchCount = (catId) => currentItems.filter((it) => itemMatchesCat(it, catId)).length;
+      const matchCount = (catId) => basePool.filter((it) => itemMatchesCat(it, catId)).length;
       if (c.id === 'favs') badgeTxt = String(favList.length);
-      else if (c.id === 'all') badgeTxt = fmtCount(Math.max(catalogTotals.totalAvailable || 0, currentItems.length));
+      else if (c.id === 'all') badgeTxt = fmtCount(Math.max(catalogTotals.totalAvailable || 0, basePool.length));
       else if (c.id === 'series') badgeTxt = fmtCount(Math.max(catalogTotals.totalTv || 0, matchCount('series')));
       else if (c.id === 'movies') badgeTxt = fmtCount(Math.max(catalogTotals.totalMovies || 0, matchCount('movies')));
       else {

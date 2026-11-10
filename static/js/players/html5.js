@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v183';
-import { expectedPosition } from '../sync.js?v=20261110_v183';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v183';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v183';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v183';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v184';
+import { expectedPosition } from '../sync.js?v=20261110_v184';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v184';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v184';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v184';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -696,9 +696,12 @@ export class Html5Adapter {
     const withProxySegs = (u) => {
       const s = String(u || '');
       if (!/\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)/i.test(s) || s.includes('proxy_segs=1')) return u;
-      return s.includes('&ext=.m3u8')
-        ? s.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
-        : `${s}${s.includes('?') ? '&' : '?'}proxy_segs=1`;
+      const hashIdx = s.indexOf('#');
+      const base = hashIdx >= 0 ? s.slice(0, hashIdx) : s;
+      const hash = hashIdx >= 0 ? s.slice(hashIdx) : '';
+      if (base.includes('&ext=.m3u8')) return `${base.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')}${hash}`;
+      if (base.includes('?ext=.m3u8')) return `${base.replace('?ext=.m3u8', '?proxy_segs=1&ext=.m3u8')}${hash}`;
+      return `${base}${base.includes('?') ? '&' : '?'}proxy_segs=1${hash}`;
     };
     this._withProxySegs = withProxySegs;
 
@@ -828,7 +831,11 @@ export class Html5Adapter {
       if (isUrlHls(nextUrl)) {
         const allowHlsJsHere = canHlsJs && !useNativeHls && (!isApple || Boolean(this._canAppleMseHls) || Boolean(this._forceIosMseInline));
         if (allowHlsJsHere) {
-          if (isApple) this._ensureIosPipStandby?.(nextUrl);
+          if (isApple) {
+            setTimeout(() => {
+              if (!this._destroyed && this.currentUrl === nextUrl) this._ensureIosPipStandby?.(nextUrl);
+            }, 2500);
+          }
           attachHlsJs(nextUrl, doneCb, resumePos);
           return;
         }
@@ -1145,6 +1152,8 @@ export class Html5Adapter {
       }
       if (isUrlHls(this.currentUrl) && canHlsJs && !triedHlsFallback) {
         triedHlsFallback = true;
+        useNativeHls = false;
+        this.useNativeHls = false;
         v.removeAttribute('src');
         attachHlsJs(this.currentUrl);
         return;
@@ -1168,7 +1177,7 @@ export class Html5Adapter {
           resolve();
           return;
         }
-        if ((v.readyState >= 1 && !v.seeking) || v.paused) {
+        if ((v.readyState >= 2 && !v.seeking) || (v.readyState >= 1 && !this.wantPlaying && v.paused)) {
           clearBuf();
           this.events.onReady?.();
         } else {
@@ -1178,7 +1187,8 @@ export class Html5Adapter {
         resolve();
       };
       const onFrameReady = () => {
-        if (this._destroyed || this.video !== v || v.readyState < 1) return;
+        if (this._destroyed || this.video !== v) return;
+        if (v.readyState < (this.wantPlaying ? 2 : 1)) return;
         clearBuf();
         this.events.onReady?.();
         done();
@@ -1324,6 +1334,8 @@ export class Html5Adapter {
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
         } else if (isHls && canHlsJs && !this.hls && !triedHlsFallback) {
           triedHlsFallback = true;
+          useNativeHls = false;
+          this.useNativeHls = false;
           v.removeAttribute('src');
           attachHlsJs(this.currentUrl || url);
           this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);

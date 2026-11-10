@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v183';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v183';
-import { renderHome, destroyHome } from './views/home.js?v=20261110_v183';
-import { api } from './api.js?v=20261110_v183';
-import { h, toast } from './ui.js?v=20261110_v183';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v184';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v184';
+import { renderHome, destroyHome } from './views/home.js?v=20261110_v184';
+import { api } from './api.js?v=20261110_v184';
+import { h, toast } from './ui.js?v=20261110_v184';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v183'; } catch (_) { return '20261110_v183'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v184'; } catch (_) { return '20261110_v184'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261110_v183')
+    _meshModPromise = import('./views/mesh.js?v=20261110_v184')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -376,8 +376,8 @@ async function boot() {
           initialProfile.guestToken = d.guestToken;
           if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
             state.self.guestToken = d.guestToken;
+            try { localStorage.setItem('vortex_profile_v2', JSON.stringify(state.self)); } catch (_) {}
           }
-          try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
         }
       }).catch(() => {});
     }

@@ -899,9 +899,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261110_v183 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261110_v184 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261110_v183", index_html)
+        self.assertIn("20261110_v184", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2515,7 +2515,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261110_v183", sw_js)
+        self.assertIn("v20261110_v184", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2568,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261110_v183', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261110_v184', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261110_v183', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261110_v184', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261110_v183')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261110_v184')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3182,8 +3182,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261110_v183", index_html)
-        self.assertIn("20261110_v183", sw_js)
+        self.assertIn("20261110_v184", index_html)
+        self.assertIn("20261110_v184", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3299,6 +3299,32 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertEqual(logout_resp.status_code, 200)
         resp_status_after = self.client.get("/api/rave/accounts/status?provider=max", headers={"Authorization": f"Bearer {token}"})
         self.assertFalse(resp_status_after.json().get("hasActiveConnection"))
+
+    def test_v184_ecc_full_scan_remediations(self):
+        """v184: Verify ECC 10-subagent full scan remediations across frontend and backend."""
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
+        rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
+        chat_js = (root / "static" / "js" / "views" / "chat.js").read_text(encoding="utf-8")
+        ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        sel_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
+        sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
+
+        self.assertIn("if ((v.readyState >= 2 && !v.seeking) || (v.readyState >= 1 && !this.wantPlaying && v.paused))", html5_js)
+        self.assertIn("if (isTimeKeeper() || roomStillUnresolved)", mesh_js)
+        self.assertNotIn("if (isPoll && reqSeq !== this.actionSeq) return;", rt_js)
+        self.assertNotIn("myName.split('#')[0]", chat_js)
+        self.assertIn("screen.orientation?.unlock?.()", ctl_js)
+        self.assertIn("delete window.__wlSeasonsHydrated[hydKey];", ctl_js)
+        self.assertNotIn("od5S7r2v306B2eR0E5t6vP8K2wG.jpg", sel_js)
+        self.assertIn("const basePool = allCatalogItems.length ? allCatalogItems : currentItems;", sel_kinds_js)
+
+        # Verify Turkish CP1254 subtitle with a stray 0x81 byte still decodes Turkish characters cleanly
+        cp1254_srt = "1\r\n00:00:01,000 --> 00:00:03,000\r\nŞampiyon ğüşiöç İĞÜŞÖÇ\r\n\r\n".encode("cp1254") + b"\x81"
+        vtt_out = server._srt_to_vtt(cp1254_srt)
+        self.assertIn("Şampiyon ğüşiöç İĞÜŞÖÇ", vtt_out)
 
 
 if __name__ == '__main__':
