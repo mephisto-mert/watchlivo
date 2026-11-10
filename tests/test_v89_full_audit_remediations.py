@@ -422,6 +422,20 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertEqual(ver_resp.status_code, 200)
         self.assertGreaterEqual(int(ver_resp.json().get("versionCode") or 0), 21)
 
+    def test_12_v190_guest_playback_anti_stutter_and_seek_invariants(self):
+        import pathlib
+        static_dir = pathlib.Path(__file__).resolve().parent.parent / "static" / "js"
+        sync_js = (static_dir / "sync.js").read_text(encoding="utf-8")
+        mesh_js = (static_dir / "views" / "mesh.js").read_text(encoding="utf-8")
+        rt_js = (static_dir / "realtime.js").read_text(encoding="utf-8")
+        html5_js = (static_dir / "players" / "html5.js").read_text(encoding="utf-8")
+
+        self.assertNotIn("abs > 0.75 && safeBuffered", sync_js)
+        self.assertIn("!ad.useNativeHls", sync_js)
+        self.assertIn("const isPassiveSync = data.action === 'heartbeat' || data.action === 'poll_sync';", mesh_js)
+        self.assertIn("const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 2.2);", rt_js)
+        self.assertIn("clearPrimaryInitSeek", html5_js)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v189';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v189';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v189';
-import { MeshConnection } from '../realtime.js?v=20261110_v189';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v189';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v189';
-import { buildLayout } from './mesh-layout.js?v=20261110_v189';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v189';
-import { Voice } from '../voice.js?v=20261110_v189';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v189';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v189';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v189';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261110_v190';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261110_v190';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v190';
+import { MeshConnection } from '../realtime.js?v=20261110_v190';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261110_v190';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261110_v190';
+import { buildLayout } from './mesh-layout.js?v=20261110_v190';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261110_v190';
+import { Voice } from '../voice.js?v=20261110_v190';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261110_v190';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261110_v190';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261110_v190';
 
 let ctx = null;
 
@@ -394,7 +394,7 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
         } else {
           ctx.userPaused = false;
           if (ctx.host.adapter.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
-          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 1.5) {
+          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 3.5) {
             ctx.host.adapter.seek?.(target);
           }
         }
@@ -429,7 +429,7 @@ async function loadMedia(media) {
     }
     if ((!isTimeKeeper() || !ctx.sync?.didInitialSync) && !state.mesh?.curated && !media?.live) {
       const liveExp = expectedPosition(state.mesh?.media || media);
-      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 1.5) {
+      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 3.5) {
         ctx.host.adapter.seek?.(liveExp);
       }
     }
@@ -552,15 +552,14 @@ async function loadMedia(media) {
       if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || media?.live) return;
       const liveExp = expectedPosition(state.mesh?.media || media);
       const curPos = ad?.getTime?.() || 0;
-      if (liveExp >= 0.6 && Math.abs(liveExp - curPos) > 1.0 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+      if (liveExp >= 0.8 && Math.abs(liveExp - curPos) > 3.5 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
         ad?.seek?.(liveExp);
       }
     };
-    snapGuestToLive();
-    if (vEl) {
+    if (vEl && vEl.readyState < 1) {
       vEl.addEventListener('loadedmetadata', snapGuestToLive, { once: true });
-      vEl.addEventListener('canplay', snapGuestToLive, { once: true });
-      vEl.addEventListener('playing', snapGuestToLive, { once: true });
+    } else {
+      snapGuestToLive();
     }
   } else {
     const k = mediaKey(media);
@@ -662,12 +661,16 @@ function onMessage(data) {
           loadMedia(mergedMedia);
           break;
         }
+        const prevPlaying = isRoomMediaPlaying(room.media);
+        const nextPlaying = isRoomMediaPlaying(mergedMedia);
+        const statusChanged = prevPlaying !== nextPlaying;
         const isExplicitAction = ['play', 'pause', 'seek', 'rate'].includes(data.action);
-        if (!isRoomMediaPlaying(mergedMedia)) {
+        const isPassiveSync = data.action === 'heartbeat' || data.action === 'poll_sync';
+        if (!nextPlaying) {
           if (ctx) ctx.userPaused = true;
           ctx?.host?.adapter?.pause?.();
           const target = Number(mergedMedia.meshStatePosition || 0);
-          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.25) {
+          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.35) {
             if (ctx?.sync) {
               ctx.sync.lastSeekTarget = target;
               ctx.sync.lastSeekWallAt = performance.now();
@@ -675,7 +678,7 @@ function onMessage(data) {
             }
             ctx?.host?.adapter?.seek?.(target);
           }
-        } else if (data.action === 'play' || (!isTimeKeeper() && (data.action === 'heartbeat' || data.action === 'poll_sync'))) {
+        } else if (data.action === 'play' || (!isTimeKeeper() && isPassiveSync)) {
           if (ctx) ctx.userPaused = false;
           if (ctx?.host?.adapter?.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) {
             ctx?.host?.adapter?.play?.();
@@ -696,9 +699,19 @@ function onMessage(data) {
           if (Number.isFinite(nextRate) && nextRate > 0) ctx?.host?.adapter?.setRate?.(nextRate);
         }
         if (ctx?.sync) {
-          ctx.sync.kick(isExplicitAction && data.action !== 'seek' && data.action !== 'pause');
+          if (isPassiveSync && !statusChanged) {
+            const curT = Number(ctx?.host?.adapter?.getTime?.() || 0);
+            const expT = expectedPosition(mergedMedia);
+            if (Math.abs(curT - expT) > 3.2) {
+              ctx.sync.kick(false);
+            }
+          } else {
+            ctx.sync.kick(isExplicitAction && data.action !== 'seek' && data.action !== 'pause');
+          }
         }
-        ctx.layout.update();
+        if (!isPassiveSync || statusChanged) {
+          ctx.layout.update();
+        }
       }
       break;
     case 'chat':
@@ -1481,12 +1494,12 @@ function onPlayerEvent(ev, arg) {
         const liveExp = expectedPosition(m);
         const curTime = ctx.host?.adapter?.getTime?.() || 0;
         const vEl = ctx.host?.adapter?.video;
-        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 1.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 3.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
           ctx.host.adapter.seek?.(liveExp);
           if (ctx.sync) {
             ctx.sync.lastSeekTarget = liveExp;
             ctx.sync.lastSeekWallAt = performance.now();
-            ctx.sync.seekUntil = performance.now() + 1800;
+            ctx.sync.seekUntil = performance.now() + 3200;
             ctx.sync.deferStartedAt = 0;
           }
         }

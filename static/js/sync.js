@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v189';
+import { isRoomMediaPlaying } from './store.js?v=20261110_v190';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -238,13 +238,13 @@ export class SyncEngine {
     if (this.wasBuffering && !ad.isBuffering()) {
       this.wasBuffering = false;
       this.deferStartedAt = 0;
-      if (abs > 0.35 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
+      if (!leader && abs > JUMP_DELTA && safeBuffered(expected, 3.0) && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
         ad.seek(expected);
-        this.seekUntil = now + 2400;
+        this.seekUntil = now + 4200;
       } else {
-        this.seekUntil = Math.max(this.seekUntil, now + 1100);
+        this.seekUntil = Math.max(this.seekUntil, now + 2200);
       }
     }
     if (ad.isBuffering()) {
@@ -267,11 +267,11 @@ export class SyncEngine {
         return CYCLE_MS;
       }
       if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.()) {
-        let anchorEveryMs = 5500;
+        let anchorEveryMs = 9000;
         if (this.isSolo()) {
-          anchorEveryMs = 8000;
+          anchorEveryMs = 12000;
         }
-        const driftTrigger = abs > 1.2 && (now - this.lastLeaderBroadcast > 3500);
+        const driftTrigger = abs > 2.2 && (now - this.lastLeaderBroadcast > 4500);
         const periodicAnchor = !media.live && (now - this.lastLeaderBroadcast > anchorEveryMs);
         if (driftTrigger || periodicAnchor) {
           this.lastLeaderBroadcast = now;
@@ -286,9 +286,9 @@ export class SyncEngine {
     }
 
     if (!this.didInitialSync) {
-      if (abs <= 1.8 && curr >= Math.max(0, expected - 1.8)) {
+      if (abs <= 3.2 && curr >= Math.max(0, expected - 3.5)) {
         this.didInitialSync = true;
-      } else if (expected >= 0.8 && abs > 1.2 && now >= this.seekUntil) {
+      } else if (expected >= 0.8 && abs > 3.2 && now >= this.seekUntil) {
         const inBufInit = buffered(expected);
         this.deferStartedAt = 0;
         this.isRateNudging = false;
@@ -297,20 +297,20 @@ export class SyncEngine {
         this.lastSeekWallAt = now;
         ad.seek(expected);
         this.pendingSeekAt = inBufInit ? 0 : now;
-        this.seekUntil = now + (inBufInit ? 2200 : 6500);
+        this.seekUntil = now + (inBufInit ? 4200 : 7500);
         this.lastJumpAt = now;
         this.reJumps = 0;
         this.inSyncCount = 0;
         this.mode = 'jumpSync';
         this.onStatus({ mode: 'jumpSync', delta, curr, expected, rate: base });
-        return 700;
+        return 900;
       }
     }
 
     const seekWallElapsed = this.lastSeekWallAt ? Math.max(0, (now - this.lastSeekWallAt) / 1000) * base : 0;
     const expectedSinceLastSeek = Number.isFinite(this.lastSeekTarget) ? this.lastSeekTarget + seekWallElapsed : -999;
     const activelySeekingToTarget = Boolean(
-      (ad.video?.seeking || (ad.video && ad.video.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 2.5))
+      (ad.video?.seeking || (ad.video && ad.video.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 3.5))
       && Math.abs(expected - expectedSinceLastSeek) < 12.0
       && this.lastSeekWallAt
       && (now - this.lastSeekWallAt < 12000)
@@ -326,7 +326,7 @@ export class SyncEngine {
       this.bufferLatency = Math.min(5, Math.max(0.2, (this.bufferLatency || 0.4) * 0.5 + lat * 0.5));
       this.pendingSeekAt = 0;
     }
-    if ((stateChanged && abs > 2.5 && now > this.seekUntil) || abs > JUMP_DELTA) {
+    if ((stateChanged && abs > 2.8 && now > this.seekUntil) || abs > JUMP_DELTA) {
       const inBuf = buffered(expected);
       const behindAct = (this.didInitialSync && delta > 0 && delta < 8.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
@@ -352,37 +352,27 @@ export class SyncEngine {
       this.lastSeekWallAt = now;
       ad.seek(targetPos);
       this.pendingSeekAt = inBuf ? 0 : now;
-      this.seekUntil = now + (inBuf ? 4200 : SEEK_SETTLE_MS);
+      this.seekUntil = now + (inBuf ? 4500 : SEEK_SETTLE_MS);
       this.lastJumpAt = now; this.reJumps = 0;
       this.inSyncCount = 0;
       this.mode = 'jumpSync';
-    } else if (abs > 0.75 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
-      this.deferStartedAt = 0;
-      this.isRateNudging = false;
-      if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
-      this.lastSeekTarget = expected;
-      this.lastSeekWallAt = now;
-      ad.seek(expected);
-      this.seekUntil = now + 2600;
-      this.inSyncCount = 0;
-      this.mode = 'inSync';
     } else {
       this.deferStartedAt = 0;
       const fwdBuf = (Number(ad.getBuffered?.() || 0)) - curr;
-      const shouldNudge = (abs > 0.085 || (this.isRateNudging && abs > 0.04))
+      const shouldNudge = !ad.useNativeHls
+        && (abs > 0.85 || (this.isRateNudging && abs > 0.35))
         && abs <= JUMP_DELTA
         && buffered(expected)
-        && fwdBuf > 1.2
+        && fwdBuf > 3.5
         && ad.caps?.rate !== false;
       if (shouldNudge) {
         this.isRateNudging = true;
-        const maxNudge = abs > 0.35 ? 0.14 : 0.08;
-        const nudge = Math.sign(delta) * Math.min(maxNudge, Math.max(0.025, abs * 0.28));
-        const targetRate = Number((base + nudge).toFixed(3));
-        if (Math.abs(ad.getRate() - targetRate) >= 0.01) {
+        const nudge = Math.sign(delta) * (abs > 1.8 ? 0.05 : 0.03);
+        const targetRate = Number((base + nudge).toFixed(2));
+        if (Math.abs(ad.getRate() - targetRate) >= 0.015) {
           ad.setRate(targetRate);
         }
-        timeout = 380;
+        timeout = CYCLE_MS;
       } else {
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) {

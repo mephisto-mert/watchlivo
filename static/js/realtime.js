@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v189';
-import { api } from './api.js?v=20261110_v189';
-import { state } from './store.js?v=20261110_v189';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v189';
+import { clock } from './sync.js?v=20261110_v190';
+import { api } from './api.js?v=20261110_v190';
+import { state } from './store.js?v=20261110_v190';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v190';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -540,7 +540,7 @@ export class MeshConnection {
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
-          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
+          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 2.2);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
           if (statusChanged || significantJump || speedChanged || urlChanged) {
