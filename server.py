@@ -182,6 +182,88 @@ def _get_acc_db():
     return conn
 
 
+_CLOAKED_HTML = b"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Watchlivo | Distributed Media Sync & Workspace Framework</title>
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0e17; color: #94a3b8; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { max-width: 520px; padding: 32px; background: #111827; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; text-align: center; }
+    h1 { color: #f8fafc; font-size: 22px; margin-bottom: 12px; font-weight: 600; }
+    p { font-size: 14px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Watchlivo Media Cloud</h1>
+    <p>Watchlivo is a private real-time collaborative synchronization framework utilizing WebRTC and WebSocket multiplexing for peer-to-peer workspace audio/video streams.</p>
+    <p style="color:#64748b; font-size:12px; margin-top:20px;">Private Authorized Deployment &bull; All Rights Reserved.</p>
+  </div>
+</body>
+</html>"""
+
+_CRAWLER_BOT_REGEX = re.compile(
+    r"(?i)(googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|"
+    r"dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|"
+    r"muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)"
+)
+
+
+class CrawlerShieldMiddleware:
+    """Intelligent cloaking & scraper shielding middleware.
+    
+    Serves a harmless cloaked workspace page to search engines and DMCA crawlers,
+    and restricts crawler access to video streams and catalog resolution endpoints.
+    """
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        raw_headers = scope.get("headers") or []
+        ua = ""
+        for hk, hv in raw_headers:
+            if hk.lower() == b"user-agent":
+                try:
+                    ua = hv.decode("latin-1", errors="ignore")
+                except Exception:
+                    ua = ""
+                break
+
+        path = str(scope.get("path") or "")
+        is_bot = bool(_CRAWLER_BOT_REGEX.search(ua)) if ua else False
+
+        if is_bot:
+            if path in ("/", "/index.html") or path.startswith(("/r/", "/join/")):
+                response = Response(
+                    _CLOAKED_HTML,
+                    media_type="text/html; charset=utf-8",
+                    headers={
+                        "Cache-Control": "public, max-age=86400",
+                        "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"
+                    }
+                )
+                await response(scope, receive, send)
+                return
+
+            if path.startswith(("/api/rave/", "/api/rooms/")):
+                response = Response(
+                    b'{"error":"Forbidden","detail":"bot_access_restricted"}',
+                    status_code=403,
+                    media_type="application/json",
+                    headers={"X-Robots-Tag": "noindex, nofollow"}
+                )
+                await response(scope, receive, send)
+                return
+
+        await self.app(scope, receive, send)
+
+
 class SecurityHeaders:
     def __init__(self, app):
         self.app = app
@@ -12457,7 +12539,12 @@ app = Starlette(
         Mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), check_dir=False), name="uploads"),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],
-    middleware=[Middleware(SecurityHeaders), Middleware(SelectiveGZipMiddleware, minimum_size=1000), Middleware(IdentityMiddleware)],
+    middleware=[
+        Middleware(CrawlerShieldMiddleware),
+        Middleware(SecurityHeaders),
+        Middleware(SelectiveGZipMiddleware, minimum_size=1000),
+        Middleware(IdentityMiddleware),
+    ],
 )
 
 
