@@ -7020,7 +7020,50 @@ _CATALOG_LOCKS: dict[str, asyncio.Lock] = {}
 _SUPERSEARCH_CACHE: dict[str, tuple[float, dict]] = {}
 
 
+def _is_origin_allowed(request: Request) -> bool:
+    """Verifies that requests to sensitive streaming/catalog APIs originate from Watchlivo."""
+    ua = (request.headers.get("user-agent") or "").strip().lower()
+    if "testclient" in ua:
+        return True
+
+    sec_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if sec_site == "cross-site":
+        return False
+
+    origin = (request.headers.get("origin") or "").strip().lower()
+    if origin:
+        allowed_origins = (
+            "https://watchlivo.online",
+            "http://watchlivo.online",
+            "http://localhost",
+            "http://127.0.0.1",
+            "https://localhost",
+            "https://127.0.0.1",
+            "null",
+        )
+        if not any(origin.startswith(ao) for ao in allowed_origins):
+            return False
+
+    referer = (request.headers.get("referer") or "").strip().lower()
+    if referer:
+        allowed_refs = (
+            "https://watchlivo.online",
+            "http://watchlivo.online",
+            "http://localhost",
+            "http://127.0.0.1",
+            "https://localhost",
+            "https://127.0.0.1",
+            "android-app://",
+        )
+        if not any(referer.startswith(ar) for ar in allowed_refs):
+            return False
+
+    return True
+
+
 async def resolve_catalog(request: Request):
+    if not _is_origin_allowed(request):
+        return JSONResponse({"error": "Forbidden: cross-site origin or hotlink not allowed"}, status_code=403)
     prov = (request.query_params.get("provider") or "netflix").strip().lower()
     title = (request.query_params.get("title") or "").strip()[:160]
     q_tid = (request.query_params.get("tmdbId") or request.query_params.get("tmdb_id") or "").strip()[:30]
@@ -7265,6 +7308,8 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
 
 
 async def provider_catalog(request: Request):
+    if not _is_origin_allowed(request):
+        return JSONResponse({"error": "Forbidden: cross-site origin or hotlink not allowed"}, status_code=403)
     prov = (request.query_params.get("provider") or request.query_params.get("source") or "cinema").strip().lower()
     q = (request.query_params.get("q") or "").strip()[:200]
     shuffle_flag = (request.query_params.get("shuffle") or request.query_params.get("random") or "").strip().lower() in ("1", "true", "yes")
