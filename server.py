@@ -211,6 +211,44 @@ _CRAWLER_BOT_REGEX = re.compile(
 )
 
 
+_HONEYPOT_BANNED_IPS: dict[str, float] = {}
+
+
+def is_honeypot_banned(ip: str) -> bool:
+    if not ip or ip in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return False
+    exp = _HONEYPOT_BANNED_IPS.get(ip)
+    if not exp:
+        return False
+    if time.time() > exp:
+        _HONEYPOT_BANNED_IPS.pop(ip, None)
+        return False
+    return True
+
+
+def ban_honeypot_ip(ip: str, duration_sec: float = 86400.0) -> None:
+    if not ip or ip in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return
+    _HONEYPOT_BANNED_IPS[ip] = time.time() + duration_sec
+    if len(_HONEYPOT_BANNED_IPS) > 10000:
+        now = time.time()
+        expired = [k for k, v in _HONEYPOT_BANNED_IPS.items() if v <= now]
+        for k in expired:
+            _HONEYPOT_BANNED_IPS.pop(k, None)
+
+
+async def crawler_honeypot_endpoint(request: Request) -> Response:
+    """Honeypot trap: Any crawler blindly following invisible links is blacklisted."""
+    ip = client_ip(request)
+    ban_honeypot_ip(ip, duration_sec=86400.0)
+    return Response(
+        b'{"error":"Forbidden","detail":"crawler_trap_triggered"}',
+        status_code=403,
+        media_type="application/json",
+        headers={"X-Robots-Tag": "noindex, nofollow, noarchive"}
+    )
+
+
 class CrawlerShieldMiddleware:
     """Intelligent cloaking & scraper shielding middleware.
     
@@ -223,6 +261,17 @@ class CrawlerShieldMiddleware:
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
             await self.app(scope, receive, send)
+            return
+
+        cip = client_ip(scope)
+        if is_honeypot_banned(cip):
+            response = Response(
+                b'{"error":"Forbidden","detail":"ip_blacklisted_by_honeypot"}',
+                status_code=403,
+                media_type="application/json",
+                headers={"X-Robots-Tag": "noindex, nofollow"}
+            )
+            await response(scope, receive, send)
             return
 
         raw_headers = scope.get("headers") or []
@@ -12436,6 +12485,7 @@ app = Starlette(
         Route("/apple-touch-icon.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
         Route("/apple-touch-icon-precomposed.png", _apple_touch_icon_endpoint, methods=["GET", "HEAD"]),
         Route("/robots.txt", robots_txt_endpoint, methods=["GET", "HEAD"]),
+        Route("/api/system/crawler-trap", crawler_honeypot_endpoint, methods=["GET", "HEAD", "POST"]),
         Route("/sitemap.xml", sitemap_xml_endpoint, methods=["GET", "HEAD"]),
         Route("/stats", analytics_dashboard_page, methods=["GET"]),
         Route("/analytics", analytics_dashboard_page, methods=["GET"]),
