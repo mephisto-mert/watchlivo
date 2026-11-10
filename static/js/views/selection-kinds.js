@@ -1,18 +1,18 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
 
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v178';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v180';
 
-import { api, qs } from '../api.js?v=20261110_v178';
+import { api, qs } from '../api.js?v=20261110_v180';
 
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v178';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v180';
 
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v178';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v180';
 
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal, buildNetflixRaveWindow, buildPlatformRaveWindow } from '../accounts.js?v=20261110_v178';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal, buildNetflixRaveWindow, buildPlatformRaveWindow } from '../accounts.js?v=20261110_v180';
 
-import { profileSetup } from '../profile.js?v=20261110_v178';
+import { profileSetup } from '../profile.js?v=20261110_v180';
 
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v178';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v180';
 
 import {
 
@@ -22,7 +22,7 @@ import {
 
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
 
-} from '../store.js?v=20261110_v178';
+} from '../store.js?v=20261110_v180';
 
 
 

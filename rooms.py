@@ -2934,7 +2934,17 @@ def _handle_social(room, cid, data, out, name, is_host):
         room["_parts_list"] = None
         room["rev"] = int(room.get("rev") or 1) + 1
         out["broadcast"].append((_room_event(room), None))
-    elif mtype in ("webrtc_offer", "webrtc_answer", "webrtc_ice"):
+    elif mtype in ("webrtc_offer", "webrtc_answer", "webrtc_ice", "rtc_signal"):
+        if mtype == "rtc_signal":
+            sub_st = str(data.get("signalType") or data.get("subType") or "")
+            if sub_st in ("offer", "webrtc_offer"):
+                mtype = "webrtc_offer"
+            elif sub_st in ("answer", "webrtc_answer"):
+                mtype = "webrtc_answer"
+            elif sub_st in ("ice", "candidate", "webrtc_ice"):
+                mtype = "webrtc_ice"
+            else:
+                return out
         if str(room.get("voipMode") or "all") == "off":
             return out
         target = data.get("targetId")
@@ -3417,14 +3427,20 @@ async def ws_endpoint(websocket: WebSocket):
         room.pop("emptySince", None)
         p, is_new_ws = add_participant(room, cid, {**join_data, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "ws")
         join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
-        SOCKETS.setdefault(room_id, {})[cid] = websocket
+        old_ws = SOCKETS.setdefault(room_id, {}).get(cid)
+        if old_ws and old_ws is not websocket:
+            try:
+                asyncio.create_task(old_ws.close())
+            except Exception:
+                pass
+        SOCKETS[room_id][cid] = websocket
         registered = True
         _LAST_FANOUT_REV[room_id] = int(room.get("rev") or 1)
         _mark_new_local_events_delivered(room, pre_ev_ids_join)
         _ensure_ws_fanout_task()
         await STORE.put(room, force_disk=True)
     try:
-        await websocket.send_json({"type": "init", "clientId": cid, "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
+        await websocket.send_json({"type": "init", "clientId": cid, "serverTime": now(), "clientToken": sign_client_token(room_id, cid), "room": serialize(room, for_cid=cid)})
     except (WebSocketDisconnect, RuntimeError, OSError):
         pass
     await broadcast(room_id, {"type": "user_joined", "user": {"id": cid, "name": p["name"]}, "room": serialize(room)}, exclude=cid)
@@ -3484,7 +3500,8 @@ async def ws_endpoint(websocket: WebSocket):
     finally:
         if not registered:
             return
-        SOCKETS.get(room_id, {}).pop(cid, None)
+        if SOCKETS.get(room_id, {}).get(cid) is websocket:
+            SOCKETS.get(room_id, {}).pop(cid, None)
         if room_id in SOCKETS and not SOCKETS[room_id]:
             SOCKETS.pop(room_id, None)
             _LAST_FANOUT_REV.pop(room_id, None)

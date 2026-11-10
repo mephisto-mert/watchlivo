@@ -337,7 +337,7 @@ class SecurityHeaders:
                 if b"x-frame-options" not in existing_keys:
                     hdrs.append((b"x-frame-options", b"SAMEORIGIN"))
                 if b"permissions-policy" not in existing_keys:
-                    hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"))
+                    hdrs.append((b"permissions-policy", b"camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*, encrypted-media=*"))
                 if b"strict-transport-security" not in existing_keys:
                     hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 if b"cross-origin-opener-policy" not in existing_keys:
@@ -5683,7 +5683,7 @@ def _fetch_platform_meta_sync(prov: str, title: str, tid: str, mtype: str = "mov
         hits = _justwatch_sync(q_clean, pkgs, country, 6) if q_clean else []
         if not hits and q_clean:
             hits = _justwatch_sync(q_clean, None, "TR", 6) or _justwatch_sync(q_clean, None, "US", 6)
-        match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
+        match = next((h for h in hits if (tid and str(h.get("tmdbId") or "") == str(tid)) or (_norm_title(h.get("title") or "") == _norm_title(title))), None)
         if match and match.get("offers"):
             pkg_set = set(pkgs or [])
             off = next((o for o in match["offers"] if o.get("short") in pkg_set), match["offers"][0])
@@ -6619,7 +6619,7 @@ def _build_max_official_item(eff_tid, tid, imdb_id, mtype, s, e, disp, tr_title,
     official_url = source_url or (pmeta.get("officialUrl") if pmeta else "") or ""
     if not official_url or ("play.max.com" not in official_url and "hbomax.com" not in official_url):
         hits = _justwatch_sync(_clean_query_title(disp or tr_title or orig_title), ["mxx", "hbm"], "US", 6)
-        match = next((h for h in hits if tid and str(h.get("tmdbId")) == str(tid)), hits[0] if hits else None)
+        match = next((h for h in hits if (tid and str(h.get("tmdbId") or "") == str(tid)) or (_norm_title(h.get("title") or "") == _norm_title(title))), None)
         if match and match.get("officialUrl"):
             official_url = match["officialUrl"]
     if not official_url:
@@ -12170,35 +12170,55 @@ _NETFLIX_KNOWN_IDS = {
     "1405": "70136126",    # Dexter
     "1396": "70143836",    # Breaking Bad
     "1408": "70136117",    # House M.D.
-    "5920": "70140417",    # The Mentalist
+    "5920": "70155590",    # The Mentalist (Fixed NSES-404)
     "105248": "81054853",  # Cyberpunk: Edgerunners
     "87083": "81249833",   # Vinland Saga
     "428": "81427514",     # Monster
     "577990": "81256740",  # Organize İşler: Karun Hazinesi
+    "66732": "80057281",   # Stranger Things
+    "94605": "80241318",   # Wednesday
+    "63351": "80077209",   # Narcos
+    "71446": "80186863",   # Money Heist
+    "93405": "81040344",   # Squid Game
+    "110316": "80200575",  # Alice in Borderland (Fixed NSES-404)
 }
 _NETFLIX_RESOLVED_CACHE: dict[str, str] = {}
 
 def _resolve_netflix_watch_id_sync(title: str, tmdb_id: str = "") -> str | None:
-    if tmdb_id and str(tmdb_id) in _NETFLIX_KNOWN_IDS:
-        return _NETFLIX_KNOWN_IDS[str(tmdb_id)]
-    ckey = f"{title.lower()}|{tmdb_id}"
+    tid_clean = str(tmdb_id or "").strip()
+    if tid_clean and tid_clean in _NETFLIX_KNOWN_IDS:
+        return _NETFLIX_KNOWN_IDS[tid_clean]
+    clean_t = re.sub(r"\s*\(\d{4}\)\s*$", "", title).strip() or title
+    ckey = f"{clean_t.lower()}|{tid_clean}"
     if ckey in _NETFLIX_RESOLVED_CACHE:
         return _NETFLIX_RESOLVED_CACHE[ckey]
+    resolved_nid = None
+    target_norm = _norm_title(clean_t)
     for country in ("TR", "US", "GB"):
         try:
-            hits = _justwatch_sync(title, packages=["nfx"], country=country, first=6)
+            hits = _justwatch_sync(clean_t, packages=["nfx"], country=country, first=6)
             for h in (hits or []):
-                t_match = not tmdb_id or str(h.get("tmdbId") or "") == str(tmdb_id)
-                if t_match or _norm_title(h.get("title") or "") == _norm_title(title):
-                    u = h.get("officialUrl") or ""
-                    m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:title|watch)/(\d+)", u)
-                    if m:
-                        nid = m.group(1)
-                        _NETFLIX_RESOLVED_CACHE[ckey] = nid
-                        return nid
+                h_tid = str(h.get("tmdbId") or "").strip()
+                h_norm = _norm_title(h.get("title") or "")
+                if tid_clean and h_tid:
+                    if h_tid != tid_clean:
+                        continue
+                elif target_norm and h_norm:
+                    if h_norm != target_norm:
+                        continue
+                else:
+                    continue
+                u = h.get("officialUrl") or ""
+                m = re.search(r"netflix\.com/(?:[a-z-]+/)?(?:title|watch)/(\d+)", u)
+                if m:
+                    resolved_nid = m.group(1)
+                    break
         except Exception:
             pass
-    return None
+        if resolved_nid:
+            break
+    _NETFLIX_RESOLVED_CACHE[ckey] = resolved_nid
+    return resolved_nid
 
 async def resolve_netflix_id_endpoint(request: Request) -> JSONResponse:
     title = (request.query_params.get("title") or "").strip()
@@ -13000,6 +13020,7 @@ app = Starlette(
         Route("/api/rooms/{room_id}/poll", rooms.http_sync, methods=["GET", "POST"]),
         Route("/api/rooms/{room_id}/action", rooms.http_sync, methods=["POST"]),
         WebSocketRoute("/ws/{room_id}", rooms.ws_endpoint),
+        WebSocketRoute("/ws/room/{room_id}", rooms.ws_endpoint),
         Mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR), check_dir=False), name="uploads"),
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],

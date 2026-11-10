@@ -1,12 +1,12 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v178';
+import { isRoomMediaPlaying } from './store.js?v=20261110_v180';
 
 const CYCLE_MS = 1000;
-const JUMP_DELTA = 3.5;
+const JUMP_DELTA = 4.8;
 const IN_SYNC = 3.5;
 const STARVE_CEILING = 55.0;  // Max behind before forcing jump
-const DEFER_MAX_MS = 35000;   // Max defer window while buffer builds
+const DEFER_MAX_MS = 8500;   // Max defer window while buffer builds
 const SEEK_SETTLE_MS = 12000;
 
 export const clock = {
@@ -252,7 +252,7 @@ export class SyncEngine {
     }
 
     if (leader) {
-      const startTarget = Number(media.meshStatePosition ?? media.currentTime ?? 0);
+      const startTarget = expectedPosition(media);
       if (!this.didInitialSeek && startTarget >= 3 && curr < 2 && now - (this.loadedAt || 0) < 25000) {
         this.didInitialSeek = true;
         this.lastSeekTarget = startTarget;

@@ -87,7 +87,17 @@ export class WebviewAdapter {
     clearInterval(this.timer);
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
-    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : 'https://play.max.com';
+    const _DEFAULT_PROV_URLS = {
+      netflix: 'https://www.netflix.com/browse',
+      max: 'https://play.max.com',
+      hbomax: 'https://play.max.com',
+      disney: 'https://www.disneyplus.com',
+      prime: 'https://www.primevideo.com',
+      apple: 'https://tv.apple.com',
+      crunchyroll: 'https://www.crunchyroll.com',
+    };
+    const defaultUrl = _DEFAULT_PROV_URLS[media?.provider] || 'https://play.max.com';
+    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : defaultUrl;
     this.baseTime = Math.max(0, Number(startAt) || 0);
     this.state.t = this.baseTime;
     this.duration = Number(media?.duration) || (media?.mediaType === 'tv' ? 2700 : 7200);
@@ -218,14 +228,18 @@ export class WebviewAdapter {
       return;
     }
 
-    const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
-    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı'));
-    const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : '#38bdf8');
-    const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : 'rgba(56,189,248,0.2)');
-    const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : '#38bdf8');
-    const provDotBg = isNf ? '#ef4444' : '#38bdf8';
-    const openBtnColor = isNf ? '#e50914' : (isMax ? '#002be7' : '#2563eb');
-    const playBtnGrad = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : 'linear-gradient(135deg, #002be7, #2563eb)';
+        const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
+    const isPrime = /primevideo\.com|amazon\./i.test(this.mediaUrl) || media?.provider === 'prime';
+    const isApple = /tv\.apple\.com/i.test(this.mediaUrl) || media?.provider === 'apple';
+    const isDisney = /disneyplus\.com/i.test(this.mediaUrl) || media?.provider === 'disney';
+    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (isPrime ? 'Prime Video' : (isApple ? 'Apple TV+' : (isDisney ? 'Disney+' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı')))));
+    const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : (isApple ? '#f8fafc' : (isDisney ? '#60a5fa' : '#38bdf8')));
+    const provBadgeBg = isNf ? 'rgba(229,9,20,0.25)' : (isMax ? 'rgba(0,43,231,0.25)' : (isApple ? 'rgba(255,255,255,0.12)' : (isDisney ? 'rgba(0,99,229,0.25)' : 'rgba(56,189,248,0.2)')));
+    const provBadgeBorder = isNf ? '#e50914' : (isMax ? '#002be7' : (isApple ? '#ffffff' : (isDisney ? '#0063e5' : '#38bdf8')));
+    const provDotBg = isNf ? '#ef4444' : (isApple ? '#ffffff' : (isDisney ? '#0063e5' : '#38bdf8'));
+    const openBtnColor = isNf ? '#e50914' : (isMax ? '#002be7' : (isApple ? '#ffffff' : (isPrime ? '#00a8e1' : (isDisney ? '#0063e5' : '#2563eb'))));
+    const openBtnTextColor = isApple ? '#000000' : '#ffffff';
+    const playBtnGrad = isNf ? 'linear-gradient(135deg, #e50914, #b20710)' : (isMax ? 'linear-gradient(135deg, #002be7, #2563eb)' : (isDisney ? 'linear-gradient(135deg, #0063e5, #002be7)' : 'linear-gradient(135deg, #2563eb, #1d4ed8)'));
 
     bridge.innerHTML = `
       <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.92);backdrop-filter:blur(16px);border:1px solid ${isNf ? 'rgba(229,9,20,0.45)' : 'rgba(255,255,255,0.12)'};border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.7), 0 0 30px ${isNf ? 'rgba(229,9,20,0.25)' : 'rgba(0,43,231,0.2)'};">
@@ -237,7 +251,7 @@ export class WebviewAdapter {
           ${media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı'))}
         </h2>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#94a3b8;">
-          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Max ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.'}
+          Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle ${provName} ayrı pencerede veya sekmede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.
         </p>
         <div style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
           <div style="text-align:left;">
@@ -265,7 +279,7 @@ export class WebviewAdapter {
         </div>
 
         <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
-          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
+          <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:${openBtnTextColor};font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
             🎬 ${provName}'te Aç (Yan Yana İzle)
           </button>
           <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
@@ -289,7 +303,7 @@ export class WebviewAdapter {
     const openBtn = bridge.querySelector('#vortex-bridge-open-btn');
     if (openBtn) {
       openBtn.onclick = () => {
-        this.targetWindow = window.open(this.mediaUrl, 'vortex_max_player', 'width=1280,height=760,menubar=no,toolbar=no');
+        this.targetWindow = window.open(this.mediaUrl, `vortex_${media?.provider || 'drm'}_player`, 'width=1280,height=760,menubar=no,toolbar=no');
         this.play();
       };
     }

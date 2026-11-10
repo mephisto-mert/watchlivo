@@ -8,8 +8,8 @@ target_dirs = [
     r"c:\Users\pc\Documents\projelerim\rave_web_platform",
     r"c:\Users\pc\Documents\projelerim\watchlivo"
 ]
-old_v = "20261110_v178"
-new_v = "20261110_v178"
+old_v = "20261110_v180"
+new_v = "20261110_v180"
 
 total_count = 0
 for target_dir in target_dirs:

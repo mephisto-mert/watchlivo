@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261110_v178';
-import { Html5Adapter } from './html5.js?v=20261110_v178';
-import { VimeoAdapter } from './vimeo.js?v=20261110_v178';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v178';
-import { WebviewAdapter } from './webview.js?v=20261110_v178';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v178';
+import { YouTubeAdapter } from './youtube.js?v=20261110_v180';
+import { Html5Adapter } from './html5.js?v=20261110_v180';
+import { VimeoAdapter } from './vimeo.js?v=20261110_v180';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v180';
+import { WebviewAdapter } from './webview.js?v=20261110_v180';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v180';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -531,5 +531,14 @@ export class PlayerHost {
     }
     this.destroyAdapterOnly();
     suspendSharedAudioContext();
+  }
+}
+
+export { WebviewAdapter as OfficialSyncAdapter } from './webview.js?v=20261110_v180';
+
+export function mountPlayer(targetContainer, hostInstance) {
+  if (!targetContainer || !hostInstance?.container) return;
+  if (hostInstance.container.parentElement !== targetContainer) {
+    targetContainer.replaceChildren(hostInstance.container);
   }
 }

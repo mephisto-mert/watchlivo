@@ -1,7 +1,7 @@
 // Rave Account Login, In-App WebSelection Auth & TV Season/Episode Selector.
-import { h, toast, popup } from './ui.js?v=20261110_v178';
-import { api, qs } from './api.js?v=20261110_v178';
-import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v178';
+import { h, toast, popup } from './ui.js?v=20261110_v180';
+import { api, qs } from './api.js?v=20261110_v180';
+import { state, set, setView, findSavedProgress } from './store.js?v=20261110_v180';
 
 const LS_KEY = 'vortex_accounts_v7';
 
@@ -422,6 +422,51 @@ export const DEFAULT_PLATFORM_HUBS = {
             "backdrop": "https://image.tmdb.org/t/p/w780/kwronSXO1ogMqHHFvY2eBxfFLdn.jpg"
           }
         ]
+      },
+      {
+        "title": "Pixar Animasyon Başyapıtları",
+        "items": [
+          {
+            "tmdbId": "1022789",
+            "title": "Ters Yüz 2",
+            "originalTitle": "Inside Out 2",
+            "mediaType": "movie",
+            "year": "2024",
+            "rating": "7.6",
+            "poster": "https://image.tmdb.org/t/p/w500/vpnVM9B6NMmQpWeZvzLvDESb2QY.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/xg27NrXi7EgUrPVUm899am4xRR9.jpg"
+          },
+          {
+            "tmdbId": "976573",
+            "title": "Elemental: Doğanın Güçleri",
+            "originalTitle": "Elemental",
+            "mediaType": "movie",
+            "year": "2023",
+            "rating": "7.6",
+            "poster": "https://image.tmdb.org/t/p/w500/4Y1WNkdPp8WACxgIKvImdaPLfo6.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/jZIYaISP3GBSrVOPfrp98aQ8WUm.jpg"
+          },
+          {
+            "tmdbId": "508442",
+            "title": "Soul",
+            "originalTitle": "Soul",
+            "mediaType": "movie",
+            "year": "2020",
+            "rating": "8.1",
+            "poster": "https://image.tmdb.org/t/p/w500/hm58Jw4Lw8OIYECNGDoogZFLk62.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/kf456ZqeC45XTvo6W9pW5clYKfQ.jpg"
+          },
+          {
+            "tmdbId": "354912",
+            "title": "Coco",
+            "originalTitle": "Coco",
+            "mediaType": "movie",
+            "year": "2017",
+            "rating": "8.2",
+            "poster": "https://image.tmdb.org/t/p/w500/gGEsBPAijhVUFoiNpgZXqRVWJt2.jpg",
+            "backdrop": "https://image.tmdb.org/t/p/w780/askg3SMvhqEl4OL52YuvdtQw40Y.jpg"
+          }
+        ]
       }
     ]
   },
@@ -577,14 +622,14 @@ export const DEFAULT_PLATFORM_HUBS = {
       }
     ],
     "billboard": {
-      "tmdbId": "119569",
+      "tmdbId": "194764",
       "title": "The Penguin",
       "originalTitle": "The Penguin",
       "tag": "HBO ORİJİNAL DİZİSİ",
       "meta": "4K UHD · Dolby Atmos · 2024 · 18+ · Colin Farrell",
       "overview": "The Batman evreninin devamında, Carmine Falcone'un ölümünün ardından Gotham'ın suç dünyasında yükselişe geçen Oswald Cobblepot'un acımasız ve karanlık güç savaşı.",
       "poster": "https://image.tmdb.org/t/p/w500/sz4VLexK1winah1e9mu0BURa9wS.jpg",
-      "backdrop": "https://image.tmdb.org/t/p/w780/uyfR8hSLS5ec180K5MYBgf73W83.jpg",
+      "backdrop": "https://image.tmdb.org/t/p/w1280/uyfR8hSLS5ec180K5MYBgf73W83.jpg",
       "mediaType": "tv",
       "season": 1,
       "episode": 1
@@ -618,7 +663,7 @@ export const DEFAULT_PLATFORM_HUBS = {
             "year": "2023",
             "rating": "8.6",
             "poster": "https://image.tmdb.org/t/p/w500/cdbDsn2hqLL7x804GixzPP8AiBE.jpg",
-            "backdrop": "https://image.tmdb.org/t/p/w780/lY2DhbA7Hy44fAKddr06UrXWWaQ.jpg"
+            "backdrop": "https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg"
           }
         ]
       },
@@ -888,7 +933,11 @@ export const OFFICIAL_PLATFORM_MAP = {
       '92749': 'moon-knight',
       '82856': 'the-mandalorian',
       '83867': 'andor',
-      '114479': 'the-book-of-boba-fett'
+      '114479': 'the-book-of-boba-fett',
+      '1022789': 'inside-out-2',
+      '976573': 'elemental',
+      '508442': 'soul',
+      '354912': 'coco'
     }
   },
   prime: {
@@ -900,8 +949,11 @@ export const OFFICIAL_PLATFORM_MAP = {
     knownIds: {
       '106379': 'fallout',
       '76479': 'the-boys',
+      '84773': 'the-lord-of-the-rings-the-rings-of-power',
       '93740': 'the-lord-of-the-rings-the-rings-of-power',
+      '108978': 'reacher',
       '94664': 'reacher',
+      '95557': 'invincible',
       '71914': 'the-wheel-of-time'
     }
   },
@@ -912,6 +964,7 @@ export const OFFICIAL_PLATFORM_MAP = {
     search: 'https://play.max.com/search?q={q}',
     watchPrefix: 'https://play.max.com/video/watch/',
     knownIds: {
+      '194764': 'the-penguin',
       '119569': 'the-penguin',
       '94997': 'house-of-the-dragon',
       '1399': 'game-of-thrones',
@@ -927,9 +980,11 @@ export const OFFICIAL_PLATFORM_MAP = {
     search: 'https://tv.apple.com/search?q={q}',
     watchPrefix: 'https://tv.apple.com/show/',
     knownIds: {
-      '95557': 'ted-lasso',
-      '97951': 'severance',
-      '84661': 'the-morning-show'
+      '97546': 'ted-lasso',
+      '95396': 'severance',
+      '84661': 'the-morning-show',
+      '125988': 'silo',
+      '93740': 'foundation'
     }
   },
   crunchyroll: {
@@ -978,7 +1033,8 @@ export function buildSafePlatformWatchUrl(provId, item) {
 
   // 2. Safe official search deeplink (guaranteed to never 404)
   if (title) {
-    return cfg.search.replace('{q}', encodeURIComponent(title));
+    const cleanTitle = (item?.originalTitle || title).replace(/\s*\([^)]*\)/g, '').trim();
+    return cfg.search.replace('{q}', encodeURIComponent(cleanTitle || title));
   }
 
   // 3. Fallback to platform home
@@ -1251,7 +1307,7 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
             borderRadius: '8px',
             background: conf.brandColor,
             border: 'none',
-            color: (provId === 'apple') ? '#000' : '#fff',
+            color: (['apple', 'prime', 'crunchyroll'].includes(provId)) ? '#090a0f' : '#ffffff',
             fontWeight: '800',
             fontSize: '15px',
             cursor: 'pointer',
@@ -1402,7 +1458,7 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
             borderRadius: '6px',
             background: conf.brandColor,
             border: 'none',
-            color: (provId === 'apple') ? '#000000' : '#ffffff',
+            color: (['apple', 'prime', 'crunchyroll'].includes(provId)) ? '#090a0f' : '#ffffff',
             fontWeight: '800',
             fontSize: '16px',
             cursor: 'pointer',
@@ -1622,7 +1678,8 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
               width: '30px',
               height: '30px',
               borderRadius: '4px',
-              background: conf.brandColor,
+              background: (provId === 'apple') ? '#1c1c1e' : conf.brandColor,
+              border: (provId === 'apple') ? '1px solid rgba(255,255,255,0.2)' : 'none',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1655,7 +1712,7 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
       },
         h('div', { style: { maxWidth: '540px', display: 'flex', flexDirection: 'column', gap: '12px', zIndex: '2' } },
           h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-            h('span', { style: { background: conf.brandColor, color: (provId === 'apple') ? '#000' : '#fff', fontWeight: '900', fontSize: '12px', padding: '2px 6px', borderRadius: '3px' } }, hb.tag || conf.name),
+            h('span', { style: { background: conf.brandColor, color: (['apple', 'prime', 'crunchyroll'].includes(provId)) ? '#090a0f' : '#ffffff', fontWeight: '900', fontSize: '12px', padding: '2px 6px', borderRadius: '3px' } }, hb.tag || conf.name),
             h('span', { style: { color: '#cbd5e1', fontSize: '12px' } }, hb.meta || '4K HDR · 5.1 Ses')
           ),
           h('h2', {
@@ -1784,16 +1841,26 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
             src: item.backdrop || item.poster || `https://image.tmdb.org/t/p/w500/${item.poster_path || ''}`,
             alt: item.title || '',
             loading: 'lazy',
+            referrerPolicy: 'no-referrer',
+            crossOrigin: 'anonymous',
             style: { width: '100%', height: '105px', objectFit: 'cover', display: 'block', background: '#18181b' },
             onerror: (e) => {
               const el = e.currentTarget || e.target;
-              if (!el.dataset.fallback) {
-                el.dataset.fallback = '1';
+              if (!el.dataset.step) {
+                el.dataset.step = '1';
                 if (item.poster && el.src !== item.poster) {
                   el.src = item.poster;
-                } else {
-                  el.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="175" viewBox="0 0 300 175"><rect width="300" height="175" fill="%2318181b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23ffffff" font-family="sans-serif" font-weight="bold" font-size="14">${encodeURIComponent(item.title || '4K')}</text></svg>`;
+                  return;
                 }
+              }
+              if (el.dataset.step === '1' && item.tmdbId) {
+                el.dataset.step = '2';
+                el.src = `/api/rave/poster?tid=${encodeURIComponent(item.tmdbId)}&t=${encodeURIComponent(item.title || '')}&mt=${encodeURIComponent(item.mediaType || 'tv')}`;
+                return;
+              }
+              if (el.dataset.step !== 'done') {
+                el.dataset.step = 'done';
+                el.src = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="300" height="175" viewBox="0 0 300 175"><rect width="300" height="175" fill="%2318181b"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23ffffff" font-family="sans-serif" font-weight="bold" font-size="14">${encodeURIComponent(item.title || '4K')}</text></svg>`;
               }
             },
           }),
@@ -1894,7 +1961,7 @@ export function buildPlatformRaveWindow(p, onPickContent, onReload, isModal = fa
     },
   }, '<');
 
-  backNavBtn.onmouseenter = () => { backNavBtn.style.background = `${conf.brandColor}dd`; backNavBtn.style.transform = 'scale(1.08)'; };
+  backNavBtn.onmouseenter = () => { backNavBtn.style.background = `${conf.brandColor}dd`; backNavBtn.style.color = (provId === 'apple') ? '#090a0f' : '#ffffff'; backNavBtn.style.transform = 'scale(1.08)'; };
   backNavBtn.onmouseleave = () => { backNavBtn.style.background = 'rgba(0, 0, 0, 0.65)'; backNavBtn.style.transform = 'scale(1)'; };
 
   modalContainer._cleanup = () => {
@@ -1946,7 +2013,7 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
 
   const connectMaxInstant = async (customEmail = '', customProfile = '') => {
     const cleanProfile = customProfile || acct.profileName || state.self?.name || 'Max Profilim';
-    const cleanEmail = customEmail || (acct.accountEmail && !acct.accountEmail.includes('Şifresiz')) ? acct.accountEmail : 'max.abone@watchlivo.online';
+    const cleanEmail = customEmail || ((acct.accountEmail && !acct.accountEmail.includes('Şifresiz')) ? acct.accountEmail : 'max.abone@watchlivo.online');
     setConnectedAccount('max', {
       loginSatisfied: true,
       userAuthenticated: true,
@@ -2092,11 +2159,9 @@ export function openMaxLoginModal(p, onReload, onOpenBrowser) {
 
 export function openProviderLoginModal(p, onReload, onOpenBrowser) {
   const pid = (typeof p === 'string') ? p : p?.id;
-  if (pid === 'netflix') {
-    return openNetflixLoginModal(p, onReload, onOpenBrowser);
-  }
-  if (pid === 'max') {
-    return openMaxLoginModal(p, onReload, onOpenBrowser);
+  // ZERO-MOCK RAVE PARITY: Route all official platforms through authentic in-app browser & 4K catalog
+  if (RAVE_HUBS.has(pid)) {
+    return openPlatformLoginModal(pid, null, onReload, true);
   }
   const acct = getAccount(p.id);
   let officialOpenedAt = 0;
@@ -2567,7 +2632,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
         title: item.title || '',
         mediaType: mtype,
         season: sNum,
-        v: '20261110_v178',
+        v: '20261110_v180',
       })}`, { timeout: 10000 });
     } catch (e) { /* fallback */ }
     if (mySeq !== seasonReqSeq) return;

@@ -8,7 +8,7 @@ print("Waiting for v171 to go live...")
 for i in range(30):
     try:
         r = requests.get(url, timeout=10)
-        if "20261110_v178" in r.text:
+        if "20261110_v180" in r.text:
             print(f"[{i*6}s] ✓ v171 is LIVE on watchlivo.online!")
             sys.exit(0)
         else:
