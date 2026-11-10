@@ -6,7 +6,7 @@ import { api } from './api.js?v=20261110_v182';
 import { h, toast } from './ui.js?v=20261110_v182';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v182'; } catch (_) { return '20261110_v182'; }
 })();
 
 let _meshMod = null;

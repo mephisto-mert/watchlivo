@@ -11,5 +11,5 @@
   "autoInstall": true,
   "publishedAt": "2026-11-04T03:39:14.022390+00:00",
   "changelog": "v166: Fix continue watching card resume, restore TMDB 4K posters & thumbnails, resolve subtitle sync drift, and passwordless Max & Netflix access.",
-  "version": "20261110_v181"
+  "version": "20261110_v182"
 }
