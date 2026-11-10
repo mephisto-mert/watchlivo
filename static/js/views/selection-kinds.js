@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v170';
-import { api, qs } from '../api.js?v=20261110_v170';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v170';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v170';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal } from '../accounts.js?v=20261110_v170';
-import { profileSetup } from '../profile.js?v=20261110_v170';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v170';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261110_v171';
+import { api, qs } from '../api.js?v=20261110_v171';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261110_v171';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261110_v171';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal, openNetflixLoginModal } from '../accounts.js?v=20261110_v171';
+import { profileSetup } from '../profile.js?v=20261110_v171';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v171';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261110_v170';
+} from '../store.js?v=20261110_v171';
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
   const provId = prov?.id || it?.provider || 'cinema';
@@ -912,7 +912,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 1, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v170');
+                  const { setView } = await import('../state.js?v=20261110_v171');
                   setView('left', 'Room');
                 }
               },
@@ -927,7 +927,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v170');
+                  const { setView } = await import('../state.js?v=20261110_v171');
                   setView('left', 'Room');
                 }
               },
@@ -942,7 +942,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
                   { id: 'max', name: 'Max' }, 2, 1
                 );
                 if (resolved) {
-                  const { setView } = await import('../state.js?v=20261110_v170');
+                  const { setView } = await import('../state.js?v=20261110_v171');
                   setView('left', 'Room');
                 }
               },
@@ -2439,143 +2439,6 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
         onclick: () => {
           currentTab = t.id;
           renderNavTabs();
-
-  // OPTION B: DIRECT EMBEDDED RAVE NETFLIX PORTAL (Rave parity)
-  const isEmbedPortal = true;
-  let activePortalUrl = acct.loginSatisfied ? '/api/netflix-bridge/browse' : '/api/netflix-bridge/login';
-
-  const ravePortalFrame = h('iframe', {
-    id: 'rave-live-netflix-iframe',
-    src: activePortalUrl,
-    allow: 'autoplay; encrypted-media; fullscreen; picture-in-picture',
-    sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
-    style: {
-      width: '100%',
-      height: '620px',
-      border: 'none',
-      background: '#141414',
-      flex: 1,
-    },
-  });
-
-  const onPortalMsg = (ev) => {
-    if (!ev.data || typeof ev.data !== 'object') return;
-    if (ev.data.type === 'WATCHLIVO_NETFLIX_PICK') {
-      const { watchId, url, title } = ev.data;
-      if (!watchId) return;
-      toast(`🎬 Netflix "${title || ('#' + watchId)}" seçildi! Canlı oda başlatılıyor...`);
-      window.removeEventListener('message', onPortalMsg);
-
-      const mediaObj = {
-        id: `netflix-${watchId}`,
-        title: title || `Netflix #${watchId}`,
-        originalTitle: title || `Netflix #${watchId}`,
-        provider: 'netflix',
-        catalogProvider: 'netflix',
-        streamType: 'official',
-        sourceUrl: url || `https://www.netflix.com/watch/${watchId}`,
-        url: url || `https://www.netflix.com/watch/${watchId}`,
-        mediaType: 'movie',
-        authenticated: true,
-      };
-      pick(mediaObj);
-    }
-  };
-  window.addEventListener('message', onPortalMsg);
-
-  const ravePortalWindow = h('div', {
-    class: 'rave-portal-direct-window',
-    style: {
-      width: '100%',
-      minHeight: '640px',
-      background: '#141414',
-      borderRadius: '16px',
-      border: '1px solid rgba(255, 255, 255, 0.12)',
-      boxShadow: '0 24px 70px rgba(0,0,0,0.95), 0 0 40px rgba(229, 9, 20, 0.25)',
-      overflow: 'hidden',
-      display: 'flex',
-      flexDirection: 'column',
-      position: 'relative',
-    },
-  },
-    // Rave Title Bar
-    h('div', {
-      class: 'rave-native-header',
-      style: {
-        height: '46px',
-        background: '#050507',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 16px',
-        flexShrink: 0,
-      },
-    },
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
-        h('div', {
-          style: {
-            width: '28px',
-            height: '28px',
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #e50914, #0071eb)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '11px',
-            fontWeight: '900',
-            color: '#fff',
-            overflow: 'hidden',
-          },
-        }, state.self?.avatar ? h('img', { src: state.self.avatar, style: { width: '100%', height: '100%', objectFit: 'cover' } }) : 'MC'),
-        h('span', { style: { color: '#94a3b8', fontSize: '13px', fontWeight: '700' } }, 'Netflix')
-      ),
-      h('div', {
-        style: {
-          fontSize: '22px',
-          fontWeight: '900',
-          letterSpacing: '1px',
-          color: '#ffffff',
-          userSelect: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '2px',
-        },
-      },
-        h('span', { style: { textTransform: 'lowercase' } }, 'r'),
-        h('span', { style: { textTransform: 'uppercase' } }, 'A'),
-        h('span', { style: { textTransform: 'lowercase' } }, 'v'),
-        h('span', { style: { textTransform: 'uppercase' } }, 'E')
-      ),
-      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
-        h('button', {
-          type: 'button',
-          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
-          onclick: () => { ravePortalFrame.src = ravePortalFrame.src; },
-        }, '🔄 Yenile'),
-        h('button', {
-          type: 'button',
-          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
-          onclick: () => { ravePortalFrame.src = '/api/netflix-bridge/browse'; },
-        }, '🏠 Ana Sayfa'),
-        h('button', {
-          type: 'button',
-          style: { background: 'rgba(229,9,20,0.15)', border: '1px solid rgba(229,9,20,0.4)', color: '#f87171', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: '700' },
-          onclick: () => { ravePortalFrame.src = '/api/netflix-bridge/login'; },
-        }, '🔑 Giriş Ekranı'),
-        h('button', {
-          type: 'button',
-          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#38bdf8', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
-          onclick: () => openNetflixLoginModal(p, () => {
-            body.replaceChildren();
-            renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
-          }, null, pick),
-        }, 'Pencerede Aç ↗')
-      )
-    ),
-    ravePortalFrame
-  );
-
           filterContent();
         },
       }, t.label))
@@ -2678,6 +2541,142 @@ export function renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl
   );
 
   renderNavTabs();
+
+  // OPTION B: DIRECT EMBEDDED RAVE NETFLIX PORTAL (Rave parity)
+  let activePortalUrl = acct.loginSatisfied ? '/api/netflix-bridge/browse' : '/api/netflix-bridge/login';
+
+  const ravePortalFrame = h('iframe', {
+    id: 'rave-live-netflix-iframe',
+    src: activePortalUrl,
+    allow: 'autoplay; encrypted-media; fullscreen; picture-in-picture',
+    sandbox: 'allow-scripts allow-same-origin allow-forms allow-popups allow-modals',
+    style: {
+      width: '100%',
+      height: '620px',
+      border: 'none',
+      background: '#141414',
+      flex: 1,
+    },
+  });
+
+  const onPortalMsg = (ev) => {
+    if (!ev.data || typeof ev.data !== 'object') return;
+    if (ev.data.type === 'WATCHLIVO_NETFLIX_PICK') {
+      const { watchId, url, title } = ev.data;
+      if (!watchId) return;
+      toast(`🎬 Netflix "${title || ('#' + watchId)}" seçildi! Canlı oda başlatılıyor...`);
+      window.removeEventListener('message', onPortalMsg);
+
+      const mediaObj = {
+        id: `netflix-${watchId}`,
+        title: title || `Netflix #${watchId}`,
+        originalTitle: title || `Netflix #${watchId}`,
+        provider: 'netflix',
+        catalogProvider: 'netflix',
+        streamType: 'official',
+        sourceUrl: url || `https://www.netflix.com/watch/${watchId}`,
+        url: url || `https://www.netflix.com/watch/${watchId}`,
+        mediaType: 'movie',
+        authenticated: true,
+      };
+      pick(mediaObj);
+    }
+  };
+  window.addEventListener('message', onPortalMsg);
+
+  const ravePortalWindow = h('div', {
+    class: 'rave-portal-direct-window',
+    style: {
+      width: '100%',
+      minHeight: '640px',
+      background: '#141414',
+      borderRadius: '16px',
+      border: '1px solid rgba(255, 255, 255, 0.12)',
+      boxShadow: '0 24px 70px rgba(0,0,0,0.95), 0 0 40px rgba(229, 9, 20, 0.25)',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      position: 'relative',
+      marginBottom: '24px',
+    },
+  },
+    // Rave Title Bar
+    h('div', {
+      class: 'rave-native-header',
+      style: {
+        height: '46px',
+        background: '#050507',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        flexShrink: 0,
+      },
+    },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px' } },
+        h('div', {
+          style: {
+            width: '28px',
+            height: '28px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #e50914, #0071eb)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '11px',
+            fontWeight: '900',
+            color: '#fff',
+            overflow: 'hidden',
+          },
+        }, state.self?.avatar ? h('img', { src: state.self.avatar, style: { width: '100%', height: '100%', objectFit: 'cover' } }) : 'MC'),
+        h('span', { style: { color: '#94a3b8', fontSize: '13px', fontWeight: '700' } }, 'Netflix')
+      ),
+      h('div', {
+        style: {
+          fontSize: '22px',
+          fontWeight: '900',
+          letterSpacing: '1px',
+          color: '#ffffff',
+          userSelect: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '2px',
+        },
+      },
+        h('span', { style: { textTransform: 'lowercase' } }, 'r'),
+        h('span', { style: { textTransform: 'uppercase' } }, 'A'),
+        h('span', { style: { textTransform: 'lowercase' } }, 'v'),
+        h('span', { style: { textTransform: 'uppercase' } }, 'E')
+      ),
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+        h('button', {
+          type: 'button',
+          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
+          onclick: () => { ravePortalFrame.src = ravePortalFrame.src; },
+        }, '🔄 Yenile'),
+        h('button', {
+          type: 'button',
+          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#fff', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
+          onclick: () => { ravePortalFrame.src = '/api/netflix-bridge/browse'; },
+        }, '🏠 Ana Sayfa'),
+        h('button', {
+          type: 'button',
+          style: { background: 'rgba(229,9,20,0.15)', border: '1px solid rgba(229,9,20,0.4)', color: '#f87171', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px', fontWeight: '700' },
+          onclick: () => { ravePortalFrame.src = '/api/netflix-bridge/login'; },
+        }, '🔑 Giriş Ekranı'),
+        h('button', {
+          type: 'button',
+          style: { background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', color: '#38bdf8', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontSize: '11px' },
+          onclick: () => openNetflixLoginModal(p, () => {
+            body.replaceChildren();
+            renderNetflixRavePortal(p, body, presetQuery, pick, _pickFromUrl);
+          }, null, pick),
+        }, 'Pencerede Aç ↗')
+      )
+    ),
+    ravePortalFrame
+  );
 
   // 2. Netflix Hero Showcase Spotlight Billboard (Featured: Organize İşler: Sazan Sarmalı)
   const heroItem = {
