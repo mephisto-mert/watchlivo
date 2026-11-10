@@ -10,7 +10,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 OLD_VERSION = "20261109_v164"
-NEW_VERSION = "20261110_v174"
+NEW_VERSION = "20261110_v175"
 exclude_dirs = {".git", ".pytest_cache", "node_modules", "__pycache__", ".vercel", "uploads", "desktop_old_versions_backup"}
 self_path = Path(__file__).resolve()
 
