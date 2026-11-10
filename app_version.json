@@ -2,7 +2,7 @@
   "ok": true,
   "packageName": "online.watchlivo.app",
   "versionCode": 22,
-  "versionName": "2.0.2",
+  "versionName": "2.0.4-v166",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
@@ -10,6 +10,6 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-04T03:39:14.022390+00:00",
-  "changelog": "v165: Revert HBO Max & Netflix to passwordless free access — Zero password challenges, unblocked catalog & room playback, and instant 1-click connection.",
-  "version": "20261110_v165"
+  "changelog": "v166: Fix continue watching card resume, restore TMDB 4K posters & thumbnails, resolve subtitle sync drift, and passwordless Max & Netflix access.",
+  "version": "20261110_v166"
 }

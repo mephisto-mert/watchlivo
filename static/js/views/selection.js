@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v165';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v165';
-import { api, qs } from '../api.js?v=20261110_v165';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261110_v165';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v165';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v165';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v165';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v166';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v166';
+import { api, qs } from '../api.js?v=20261110_v166';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal } from './selection-kinds.js?v=20261110_v166';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v166';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v166';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v166';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v165';
+} from '../store.js?v=20261110_v166';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -1179,14 +1179,35 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: async (ev) => {
               const cardEl = ev.currentTarget;
               if (cardEl.classList.contains('busy')) return;
-              if (!checkProviderAuthGate(epItem, prov)) return;
+              if (!checkProviderAuthGate(item, prov)) return;
               cardEl.classList.add('busy');
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
               try {
                 const isCatalogMedia = Boolean(item.tmdbId || item.imdbId || item.mediaType === 'tv' || item.mediaType === 'movie');
+                const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
+                const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
+                const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
+                const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
                 if (isCatalogMedia && item.provider !== 'youtube' && !item.isMusic) {
-                  const cleanHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
-                  const resolved = await resolveCatalogItem({ tmdbId: item.tmdbId || '', imdbId: item.imdbId || '', mediaType: item.mediaType || 'movie', title: cleanHistTitle, originalTitle: item.originalTitle || cleanHistTitle, backdrop: item.backdrop || item.thumbnail, poster: item.poster || item.thumbnail, year: item.year || '' }, (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' }, item.season || 1, item.episode || 1);
+                  const resolvePayload = {
+                    tmdbId: item.tmdbId || '',
+                    imdbId: item.imdbId || '',
+                    mediaType: item.mediaType || 'movie',
+                    title: cleanHistTitle,
+                    originalTitle: item.originalTitle || cleanHistTitle,
+                    backdrop: item.backdrop || item.thumbnail || item.poster || '',
+                    poster: item.poster || item.thumbnail || '',
+                    year: histYear,
+                  };
+                  let resolved = null;
+                  try {
+                    resolved = await resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1);
+                    if (!resolved && item.mediaType === 'tv' && (Number(item.season || 1) > 1 || Number(item.episode || 1) > 1)) {
+                      resolved = await resolveCatalogItem(resolvePayload, targetProv, 1, 1);
+                    }
+                  } catch (e) {
+                    console.warn('Continue resolve fallback:', e);
+                  }
                   if (resolved) {
                     resolved.currentTime = resumeSec;
                     resolved.meshStatePosition = resumeSec;
@@ -1194,14 +1215,39 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                     return;
                   }
                 }
-                await pickSafe({ ...item, currentTime: resumeSec, meshStatePosition: resumeSec });
+                const fallbackMedia = {
+                  ...item,
+                  title: item.title || cleanHistTitle,
+                  mediaType: item.mediaType || 'movie',
+                  provider: targetProv.id || 'cinema',
+                  catalogProvider: targetProv.id || 'cinema',
+                  currentTime: resumeSec,
+                  meshStatePosition: resumeSec,
+                  poster: item.poster || item.thumbnail || `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, y: histYear, mt: item.mediaType || 'movie' })}`,
+                  thumbnail: item.thumbnail || item.poster || `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, y: histYear, mt: item.mediaType || 'movie' })}`,
+                };
+                if (!fallbackMedia.url) {
+                  fallbackMedia.url = `/api/rave/stream?provider=${encodeURIComponent(targetProv.id || 'cinema')}&tmdbId=${encodeURIComponent(item.tmdbId || '')}&s=${item.season || 1}&e=${item.episode || 1}&mtype=${item.mediaType || 'movie'}&title=${encodeURIComponent(cleanHistTitle)}`;
+                }
+                await pickSafe(fallbackMedia);
               } finally {
                 cardEl.classList.remove('busy');
               }
             },
           },
             h('div', { class: 'wl-continue-thumb' },
-              h('img', { src: item.poster || item.thumbnail || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title || '', loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+              h('img', {
+                src: item.poster || item.thumbnail || item.backdrop || (item.title ? `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: String(item.title).replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').split(' — ')[0].trim(), ot: item.originalTitle || '', y: item.year || '', mt: item.mediaType || 'movie' })}` : '/static/watchlivo-poster.svg'),
+                alt: item.title || '',
+                loading: 'lazy',
+                onerror: (e) => {
+                  if (!e.target.src.includes('/api/rave/poster') && item.title) {
+                    e.target.src = `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: String(item.title).replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').split(' — ')[0].trim(), ot: item.originalTitle || '', y: item.year || '', mt: item.mediaType || 'movie' })}`;
+                  } else {
+                    e.target.src = '/static/watchlivo-poster.svg';
+                  }
+                },
+              }),
               prov?.logo ? h('span', { class: 'wl-continue-prov' }, h('img', { src: prov.logo, alt: '' })) : null,
               h('span', { class: 'wl-continue-play-ico' }, '▶'),
               h('button', {
@@ -1310,8 +1356,8 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       voiceSearchBtn,
       !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
       h('button', { class: 'btn primary', onclick: run }, 'Ara'));
-    if (!compact && !root._cmdkOutsideBound) {
-      root._cmdkOutsideBound = true;
+    if (!compact && !document._cmdkOutsideBound) {
+      document._cmdkOutsideBound = true;
       document.addEventListener('pointerdown', (ev) => {
         const dd = document.getElementById('wl-cmdk-dropdown');
         if (!dd || dd.style.display === 'none') return;
@@ -1860,29 +1906,51 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     modalRef?.close?.();
     if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
     else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
-    if (item.tmdbId) {
-      const resolved = await resolveCatalogItem(
-        {
-          tmdbId: item.tmdbId,
-          imdbId: item.imdbId,
+    const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
+    const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
+    const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
+    const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
+    if (item.tmdbId || item.imdbId || cleanHistTitle) {
+      try {
+        const resolvePayload = {
+          tmdbId: item.tmdbId || '',
+          imdbId: item.imdbId || '',
           mediaType: item.mediaType || 'movie',
-          title: String(item.title || '').split(' — ')[0],
-          backdrop: item.backdrop || item.thumbnail,
-          poster: item.poster || item.thumbnail,
-          year: item.year || '',
-        },
-        prov || { id: 'cinema', name: 'Sinema+' },
-        item.season || 1,
-        item.episode || 1
-      );
-      if (resolved) {
-        resolved.currentTime = resumeSec;
-        resolved.meshStatePosition = resumeSec;
-        await pickFn(resolved);
-        return;
+          title: cleanHistTitle,
+          originalTitle: item.originalTitle || cleanHistTitle,
+          backdrop: item.backdrop || item.thumbnail || item.poster || '',
+          poster: item.poster || item.thumbnail || '',
+          year: histYear,
+        };
+        let resolved = await resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1);
+        if (!resolved && item.mediaType === 'tv' && (Number(item.season || 1) > 1 || Number(item.episode || 1) > 1)) {
+          resolved = await resolveCatalogItem(resolvePayload, targetProv, 1, 1);
+        }
+        if (resolved) {
+          resolved.currentTime = resumeSec;
+          resolved.meshStatePosition = resumeSec;
+          await pickFn(resolved);
+          return;
+        }
+      } catch (err) {
+        console.warn('History modal resolve error, falling back:', err);
       }
     }
-    await pickFn({ ...item, currentTime: resumeSec, meshStatePosition: resumeSec });
+    const fallbackMedia = {
+      ...item,
+      title: item.title || cleanHistTitle,
+      mediaType: item.mediaType || 'movie',
+      provider: targetProv.id || 'cinema',
+      catalogProvider: targetProv.id || 'cinema',
+      currentTime: resumeSec,
+      meshStatePosition: resumeSec,
+      poster: item.poster || item.thumbnail || `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, y: histYear, mt: item.mediaType || 'movie' })}`,
+      thumbnail: item.thumbnail || item.poster || `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: cleanHistTitle, y: histYear, mt: item.mediaType || 'movie' })}`,
+    };
+    if (!fallbackMedia.url) {
+      fallbackMedia.url = `/api/rave/stream?provider=${encodeURIComponent(targetProv.id || 'cinema')}&tmdbId=${encodeURIComponent(item.tmdbId || '')}&s=${item.season || 1}&e=${item.episode || 1}&mtype=${item.mediaType || 'movie'}&title=${encodeURIComponent(cleanHistTitle)}`;
+    }
+    await pickFn(fallbackMedia);
   };
 
   const renderHub = () => {
@@ -1926,12 +1994,21 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
             const pct = isDone ? 100 : (durSec > 30 ? Math.max(4, Math.min(99, Math.round((resumeSec / durSec) * 100))) : Math.max(6, Math.min(94, Math.round(Number(item.percent || 10)))));
             const epTag = item.mediaType === 'tv' ? `S${item.season || 1}:B${item.episode || 1} · ` : '';
             const itemKey = item.historyId || item.key || item.tmdbId || item.title;
+            const rowCleanTitle = String(item.title || '').replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').split(' — ')[0].trim();
+            const rowHistYear = item.year || (String(item.title || '').match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
+            const rowPoster = item.poster || item.thumbnail || item.backdrop || (item.title ? `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: rowCleanTitle, ot: item.originalTitle || '', y: rowHistYear, mt: item.mediaType || 'movie' })}` : '/static/watchlivo-poster.svg');
             return h('div', { class: 'wl-history-row' },
               h('img', {
                 class: 'wl-history-poster',
-                src: item.poster || item.thumbnail || item.backdrop || '/static/watchlivo-poster.svg',
+                src: rowPoster,
                 alt: item.title || '',
-                onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
+                onerror: (e) => {
+                  if (!e.target.src.includes('/api/rave/poster') && item.title) {
+                    e.target.src = `/api/rave/poster?${qs({ tid: item.tmdbId || item.id || '', t: rowCleanTitle, ot: item.originalTitle || '', y: rowHistYear, mt: item.mediaType || 'movie' })}`;
+                  } else {
+                    e.target.src = '/static/watchlivo-poster.svg';
+                  }
+                },
               }),
               h('div', { class: 'wl-history-meta' },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },

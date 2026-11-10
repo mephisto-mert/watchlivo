@@ -582,13 +582,6 @@ export function clearWatchHistory() {
       headers: { 'Content-Type': 'application/json', ..._authHdrs() },
       body: JSON.stringify({ action: 'clear' }),
       keepalive: true,
-    }).then((r) => {
-      if (r && r.ok) {
-        try {
-          const cur = getWatchHistory().map((x) => (String(x.historyId || x.key || '') === id ? { ...x, cloudSynced: true } : x));
-          localStorage.setItem(_historyKey(), JSON.stringify(cur));
-        } catch (_) {}
-      }
     }).catch(() => {});
   }
 }
@@ -695,18 +688,20 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const sType = media.streamType || prev?.streamType || '';
   try {
     const list = existingList.filter((item) => String(item.historyId || item.key || '') !== id);
-    list.unshift({
-      historyId: id,
-      key: id,
-      title: media.title || prev?.title || 'Video',
-      originalTitle: origTitle,
-      seriesTitle: serTitle,
-      channel: media.channel || media.artist || prev?.channel || '',
-      channelId: media.channelId || prev?.channelId || '',
-      channelAvatar: media.channelAvatar || prev?.channelAvatar || '',
-      thumbnail: media.poster || media.thumbnail || prev?.thumbnail || '',
-      poster: media.poster || media.thumbnail || prev?.poster || '',
-      backdrop: media.backdrop || prev?.backdrop || '',
+      const effSavedPoster = media.poster || media.thumbnail || prev?.poster || prev?.thumbnail || (media.title ? `/api/rave/poster?tid=${encodeURIComponent(media.tmdbId || '')}&t=${encodeURIComponent(media.title || '')}&y=${encodeURIComponent(media.year || '')}&mt=${encodeURIComponent(mtype)}` : '');
+      const effSavedBackdrop = media.backdrop || prev?.backdrop || effSavedPoster || '';
+      list.unshift({
+        historyId: id,
+        key: id,
+        title: media.title || prev?.title || 'Video',
+        originalTitle: origTitle,
+        seriesTitle: serTitle,
+        channel: media.channel || media.artist || prev?.channel || '',
+        channelId: media.channelId || prev?.channelId || '',
+        channelAvatar: media.channelAvatar || prev?.channelAvatar || '',
+        thumbnail: effSavedPoster,
+        poster: effSavedPoster,
+        backdrop: effSavedBackdrop,
       provider: catProv,
       catalogProvider: catProv,
       streamType: sType,

@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261110_v165';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261110_v166';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261110_v165';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261110_v165';
-import { api } from '../api.js?v=20261110_v165';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261110_v165';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v165';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261110_v165';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261110_v165';
+} from '../store.js?v=20261110_v166';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261110_v166';
+import { api } from '../api.js?v=20261110_v166';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261110_v166';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v166';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261110_v166';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261110_v166';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261110_v165', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261110_v166', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -76,7 +76,7 @@ export async function createRoomWithMedia(media) {
   const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
   const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
   const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
-  if (cleanMedia && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
+  if (cleanMedia && document.body.classList.contains('mesh-minimized') && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
     document.body.classList.remove('mesh-minimized');
     window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
     window.vortexActions.pickMedia(cleanMedia);
@@ -168,7 +168,7 @@ export function renderHome(app) {
         if (anchor) anchor.scrollIntoView({ behavior: 'smooth', block: 'start' });
         toast('🎬 Aktif izleme odaları listesi');
       }),
-      navIcon('clock', 'İzleme Geçmişim & Listem', () => openWatchHistoryModal('all'), {
+      navIcon('clock', 'İzleme Geçmişim & Listem', () => openWatchHistoryModal('all', createRoomWithMedia), {
         id: 'nav-history-btn',
         badge: getWatchHistory().length,
       }),
@@ -378,7 +378,7 @@ export function renderHome(app) {
       h('button', {
         type: 'button',
         class: 'dock-quick-btn',
-        onclick: () => openWatchHistoryModal('all'),
+        onclick: () => openWatchHistoryModal('all', createRoomWithMedia),
       }, '🕒 İzleme Geçmişim'),
       h('button', {
         type: 'button',

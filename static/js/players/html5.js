@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v165';
-import { expectedPosition } from '../sync.js?v=20261110_v165';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v165';
-import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v165';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v165';
+import { SubtitleDubController } from './subtitles.js?v=20261110_v166';
+import { expectedPosition } from '../sync.js?v=20261110_v166';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v166';
+import { applyElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v166';
+import { ensureHlsJs } from './hls-loader.js?v=20261110_v166';
 
 function setReferrerMeta(policy) {
   let m = document.querySelector('meta[name="referrer"]');
@@ -679,7 +679,9 @@ export class Html5Adapter {
     let triedHlsFallback = false;
     const isUrlHls = (u) => {
       const s = String(u || '');
-      if (/[?&]ext=\.(?:mp4|webm|mkv)\b/i.test(s)) return false;
+      if (/[?&]ext=\.(?:mp4|webm|mkv)\b/i.test(s) || /[?&]stype=mp4/i.test(s)) return false;
+      const cleanPath = s.split('?')[0].split('#')[0].toLowerCase();
+      if (cleanPath.endsWith('.mp4') || cleanPath.endsWith('.mkv') || cleanPath.endsWith('.webm')) return false;
       return /\.m3u8(\?|$)/i.test(s) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(s);
     };
     const isHls = isUrlHls(url) || media.provider === 'hls' || media.streamType === 'hls';

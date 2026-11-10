@@ -115,6 +115,13 @@ OPENAI_CLOUD_FALLBACK_KEY = os.environ.get("OPENAI_CLOUD_FALLBACK_KEY", "")
 SUNO_API_KEY = os.environ.get("SUNO_API_KEY", "")
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 MAX_PAGE_BYTES = 3 * 1024 * 1024
+UA137 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
+
+
+def _raw_get_json(url: str, headers: dict = None, data: bytes = None, timeout: float = 6.5):
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": UA137, **(headers or {})})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
 MAX_UPLOAD_BYTES = 1024 * 1024 * 1024
 ALLOWED_UPLOAD_EXTS = {".mp4", ".webm", ".mov", ".m4v", ".mp3", ".m4a", ".ogg", ".wav"}
 
@@ -3067,13 +3074,6 @@ _HEXA_CAP = {"token": "", "exp": 0.0}
 _VE_SEED_CACHE = BoundedTTLCache(maxsize=500, ttl=3600.0)
 _TMDB_META_CACHE = BoundedTTLCache(maxsize=2000, ttl=21600.0)
 _STREAM_CACHE = BoundedTTLCache(maxsize=1500, ttl=3600.0)
-UA137 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
-
-
-def _raw_get_json(url: str, headers: dict = None, data: bytes = None, timeout: float = 6.5):
-    req = urllib.request.Request(url, data=data, headers={"User-Agent": UA137, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
 
 
 OFFICIAL_SEARCH_URLS = {
@@ -4086,6 +4086,8 @@ def _is_unplayable_stream_url(url: str) -> bool:
             return True
         if "/resource/h265/" in s_chk or re.search(r"(?:[/_.-])(?:h265|hevc)(?:[/_.-]|\.mp4|\?|$)", s_chk):
             return True
+        if any(d in s_chk for d in ("makesomthingup.", "dplayer82.site", "dplayer81.", "dplayer80.")):
+            return True
     return False
 
 
@@ -4803,6 +4805,10 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
             primary_prov = "apple"
         elif "1024" in net_ids or any("amazon" in x or "prime video" in x for x in (net_names | prod_names)):
             primary_prov = "prime"
+        p_path = info.get("poster_path")
+        b_path = info.get("backdrop_path")
+        tmdb_poster_u = f"https://image.tmdb.org/t/p/w500{p_path}" if p_path else ""
+        tmdb_backdrop_u = f"https://image.tmdb.org/t/p/w1280{b_path}" if b_path else ""
         res = {
             "tmdbId": tid,
             "title": orig_t or tr_t,
@@ -4815,6 +4821,8 @@ def _get_tmdb_meta_sync(tid: str, mtype: str, fallback_title: str = "", fallback
             "transLangs": trans_langs or ["tr", "en"],
             "runtime": int((info.get("episode_run_time") or [info.get("runtime") or (48 if mtype == "tv" else 120)])[0] or (48 if mtype == "tv" else 120)),
             "primaryProv": primary_prov,
+            "poster": tmdb_poster_u,
+            "backdrop": tmdb_backdrop_u,
         }
         _TMDB_META_CACHE[ck] = res
         return res
@@ -5216,25 +5224,23 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             or any(isinstance(x, (list, tuple)) and len(x) >= 2 and x[1] in _TR_DUB_TAGS for x in (ac_res_now + pv_res_now + hf_res_now + dl_res_now + dp_res_now))
         )
         tr_extractors_done = f_hf.done() and f_dl.done() and f_pv.done() and (f_ac.done() if is_ja_or_anime else True)
-        has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 3.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
-        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 4.0):
-            time.sleep(0.08)
-            continue
-        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 3.6):
-            time.sleep(0.08)
-            continue
+        has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 2.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
         primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
-        if primary_1080_ok and t_first_hf == 0.0:
-            t_first_hf = time.time()
-        if primary_1080_ok and (has_glob_ready or vl_ok or (time.time() - t_first_hf >= 0.55)):
+        if primary_1080_ok and (has_tr_dub_ready or has_glob_ready or (time.time() - t_start >= 0.75)):
             break
+        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.5):
+            time.sleep(0.06)
+            continue
+        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 2.0):
+            time.sleep(0.06)
+            continue
         if has_glob_ready and tr_extractors_done:
             break
-        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 3.4)) or (time.time() - t_start >= 4.2)):
+        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 2.0)) or (time.time() - t_start >= 2.5)):
             break
         if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
-        time.sleep(0.10)
+        time.sleep(0.06)
     any_ready_after_loop = any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar))
     if not any_ready_after_loop:
         concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=3.0)
@@ -5410,6 +5416,17 @@ def _wrap_first_party_stream(u: str, stype: str, prov: str, tid: str, s: int, e:
     import base64
     tid = urllib.parse.quote(str(tid or ""), safe="")
     mt_q = f"&mtype={mtype}" if mtype in ("tv", "movie") else ""
+    u_clean = u.lower().split("?", 1)[0].split("#", 1)[0]
+    is_mp4_target = u_clean.endswith((".mp4", ".mkv", ".webm")) or str(stype).startswith("mp4")
+    if is_mp4_target:
+        if stype in ("mp4_ac_sub", "mp4_ac_dub"):
+            return _proxy_u(u, "https://tau-video.xyz/", ".mp4")
+        if stype in ("mp4_ar_tr", "mp4_ar"):
+            return _proxy_u(u, "https://archive.org/", ".mp4")
+        if str(stype).startswith("mp4_vl"):
+            use_fb_ref = str(stype).startswith("mp4_vl_fb") or "hakunaymatata.com" not in u
+            return _proxy_u(u, "https://filmboom.top/" if use_fb_ref else "", ".mp4")
+        return _proxy_u(u, "", ".mp4")
     if stype.startswith("hls_fp:"):
         parts = stype.split(":", 4)
         _, _fmode, vid, sp, spt = (parts + ["", "", "", ""])[:5]
@@ -5655,15 +5672,15 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                 if mtype == "tv"
                 else f"https://rest.opensubtitles.org/search/imdbid-{imdb_num}/sublanguageid-{lang3}"
             )
-            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=2.4)
+            return _raw_get_json(os_u, headers={"User-Agent": "TemporaryUserAgent"}, timeout=1.8)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as os_pool:
             fut_tr = os_pool.submit(_fetch_os_rest, "tur")
             fut_en = os_pool.submit(_fetch_os_rest, "eng")
-            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 2.8)
+            fut_strem = os_pool.submit(_raw_get_json, ep_url, {"User-Agent": UA137}, None, 1.8)
             for lang3, fut in (("tur", fut_tr), ("eng", fut_en)):
                 try:
-                    os_items = fut.result(timeout=2.6)
+                    os_items = fut.result(timeout=1.6)
                     if isinstance(os_items, list):
                         valid_os = [
                             it for it in os_items
@@ -5969,12 +5986,12 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         orig_item = next((a for a in ((pmeta or {}).get("audioLangs") or []) if "[Orijinal]" in a), "")
         orig_lang = _norm_audio_lang(orig_item.split("[")[0])
     srcs = list(direct_list or [])[:10]
-    probe_targets = [(u, st) for u, st in srcs if not str(st).startswith("mp4")][:8]
+    probe_targets = [(u, st) for u, st in srcs if not str(st).startswith("mp4") and u not in _AUDIO_LANG_HINT][:2]
     lang_map = {}
     if probe_targets:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(probe_targets)) as ppool:
             futs = {ppool.submit(_probe_audio_langs, u, st, prov, tid, s, e, mtype): u for u, st in probe_targets}
-            done, _ = concurrent.futures.wait(futs, timeout=4.8)
+            done, _ = concurrent.futures.wait(futs, timeout=1.4)
             for f in done:
                 try:
                     lang_map[futs[f]] = f.result()
@@ -6591,6 +6608,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
         imdb_id = m_cached.get("imdbId") or imdb_id or ""
         orig_lang = m_cached.get("origLang") or ""
         disp = _clean_query_title(disp) or tr_title
+        poster = poster or (m_cached or {}).get("poster") or (m_cached or {}).get("backdrop") or _resolve_fallback_poster_cdn_sync("", title, orig_title, year, mtype, tid) or ""
 
         import concurrent.futures
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as cat_pool:
@@ -6602,6 +6620,34 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             except Exception:
                 def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
                 pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
+        if not direct_list and not eff_tid.isdigit():
+            alt_query = _clean_query_title(disp or tr_title or orig_title or title)
+            if alt_query and len(alt_query) >= 3:
+                try:
+                    alt_hits = _tmdb_sync(alt_query)
+                    for ah in (alt_hits or [])[:2]:
+                        alt_tid = str(ah.get("tmdbId") or ah.get("id") or "")
+                        ah_t = ah.get("title") or ah.get("originalTitle") or ""
+                        if alt_tid and alt_tid.isdigit() and _norm_title(ah_t) == _norm_title(alt_query):
+                            alt_direct = _extract_direct_stream_sync(
+                                alt_tid, mtype, s, e,
+                                ah.get("originalTitle") or alt_query,
+                                str(ah.get("year") or year or ""),
+                                ah.get("imdbId") or imdb_id or "",
+                                ah.get("title") or alt_query,
+                                source_url, refresh
+                            )
+                            if alt_direct:
+                                direct_list = alt_direct
+                                eff_tid = alt_tid
+                                tid = alt_tid
+                                orig_title = ah.get("originalTitle") or orig_title
+                                tr_title = ah.get("title") or tr_title
+                                year = str(ah.get("year") or year)
+                                imdb_id = ah.get("imdbId") or imdb_id
+                                break
+                except Exception:
+                    pass
         if not direct_list:
             v_streams = _MAIN_SITES_VAULT.get("streams") or {}
             fb_candidates = []
@@ -6709,15 +6755,15 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 fut_intro_api = sub_pool.submit(_detect_intro_sync, imdb_id, tid, mtype, s, e, None)
                 fut_audio = sub_pool.submit(_build_audio_tracks, wrapped[0][0], direct_list, eff_prov, eff_tid, s, e, pmeta, mtype)
                 try:
-                    sub_tracks = fut_subs.result(timeout=5.5)
+                    sub_tracks = fut_subs.result(timeout=2.0)
                 except Exception:
                     sub_tracks = []
                 try:
-                    intro_seg = fut_intro_api.result(timeout=1.5)
+                    intro_seg = fut_intro_api.result(timeout=0.8)
                 except Exception:
                     intro_seg = None
                 try:
-                    audio_tracks = fut_audio.result(timeout=5.5)
+                    audio_tracks = fut_audio.result(timeout=2.0)
                 except Exception:
                     audio_tracks = []
             alive_direct = [(u, st) for u, st in direct_list if _STREAM_RES_HINT.get(u, 0) != -1]
@@ -6741,7 +6787,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         existing_sub_ids.add(cand_sid)
                         prepended_late.append({"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
                 if prepended_late:
-                    sub_tracks = _filter_live_subs(prepended_late[:6]) + sub_tracks
+                    sub_tracks = sub_tracks + _filter_live_subs(prepended_late[:4])
             if not intro_seg and sub_tracks:
                 intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
             if sub_tracks and not any(t.get("lang") == "tr" for t in sub_tracks):
@@ -6809,6 +6855,8 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             official_url = source_url or pmeta.get("officialUrl") or off_tpl.format(q=urllib.parse.quote(disp or orig_title))
             is_720_likely = any("720" in st or "pilavyer" in u or st == "hls_pv" for u, st in (direct_list or [])) and not any(st in ("hls_1080", "mp4_vl_1080", "hls_fhd", "hls_fhd_multi", "hls_fhd_tr") for _, st in (direct_list or []))
             res_str = "720p HD" if is_720_likely else "1080p HD"
+            eff_poster = poster or (m_cached or {}).get("poster") or ""
+            eff_backdrop = (m_cached or {}).get("backdrop") or eff_poster
             return {
                 "id": eff_tid or tid,
                 "provider": eff_prov,
@@ -6822,7 +6870,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 "platformAudioLangs": pmeta.get("audioLangs") or [],
                 "platformSubLangs": pmeta.get("subLangs") or [],
                 "officialUrl": official_url, "providerUrl": official_url,
-                "title": full_title, "thumbnail": poster,
+                "title": full_title, "poster": eff_poster, "thumbnail": eff_poster, "backdrop": eff_backdrop,
                 "channel": f"{label} · {'Tam Bölüm' if mtype == 'tv' else 'Tam Film'} ({res_str})",
                 "duration": dur,
             }
@@ -6831,12 +6879,15 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             or prov in ("exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv", "youtube")
             or (not tid.isdigit() and any(ch in f"{orig_title} {title}" for ch in "çğıöşüÇĞİÖŞÜ"))
         )
-        if not direct_list and is_tr_yt_eligible:
+        if not direct_list:
             yt_res = _extract_official_yt_sync(tr_title or orig_title or disp or title, s, e, mtype, [orig_title, tr_title, disp, title])
             if yt_res:
                 vid = yt_res["videoId"]
                 dur = yt_res["duration"]
                 full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
+                yt_aud_label = f"🇹🇷 Türkçe ({label} Orijinal Ses)" if (orig_lang == "tr" or is_tr_yt_eligible) else f"🌐 Orijinal Ses ({label})"
+                yt_aud_lang = "tr" if (orig_lang == "tr" or is_tr_yt_eligible) else (orig_lang or "en")
+                yt_poster = poster or (m_cached or {}).get("poster") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
                 return {
                     "id": eff_tid or tid,
                     "provider": "youtube",
@@ -6851,14 +6902,16 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                     "embedUrl": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1",
                     "altUrls": [],
                     "subtitleTracks": [],
-                    "audioTracks": [{"id": "tr-dub", "label": f"🇹🇷 Türkçe ({label} Orijinal Ses)", "language": "tr", "lang": "tr", "kind": "main"}],
+                    "audioTracks": [{"id": "yt-audio", "label": yt_aud_label, "language": yt_aud_lang, "lang": yt_aud_lang, "kind": "main"}],
                     "intro": None,
-                    "platformAudioLangs": ["tr"],
+                    "platformAudioLangs": [yt_aud_lang],
                     "platformSubLangs": [],
                     "officialUrl": f"https://www.youtube.com/watch?v={vid}",
                     "providerUrl": f"https://www.youtube.com/watch?v={vid}",
                     "title": full_title,
-                    "thumbnail": poster or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
+                    "poster": yt_poster,
+                    "thumbnail": yt_poster,
+                    "backdrop": (m_cached or {}).get("backdrop") or yt_poster,
                     "channel": f"{label} · {yt_res['channel']} (1080p HD)",
                     "duration": dur,
                 }
@@ -8804,6 +8857,24 @@ async def rave_stream_manifest(request: Request):
     is_fhd = (not is_hfnl) and (ref_mode == "fhd" or "cdnimgs" in target or ("cdnimg" in target and not ("cdnimages" in target and "/hls/" in target)) or "rapidvid" in target or bool(re.search(r"https://s\d+\.[^/]+\.shop/", target)))
     is_dbx = ref_mode == "dbx" or "molystream.org" in target
     is_dl = ref_mode == "dl" or "makesomthingup" in target or "centralodsseyproud" in target or "/r6/" in target
+    tgt_clean = target.lower().split("?", 1)[0].split("#", 1)[0]
+    if tgt_clean.endswith((".mp4", ".mkv", ".webm")):
+        seg_proxy_u = _proxy_u(target, ext=".mp4")
+        syn_m3u8 = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:3\n"
+            "#EXT-X-TARGETDURATION:10800\n"
+            "#EXT-X-MEDIA-SEQUENCE:0\n"
+            "#EXT-X-PLAYLIST-TYPE:VOD\n"
+            "#EXTINF:10800.0,Video\n"
+            f"{seg_proxy_u}\n"
+            "#EXT-X-ENDLIST\n"
+        ).encode("utf-8")
+        return Response(b"" if request.method == "HEAD" else syn_m3u8, media_type="application/vnd.apple.mpegurl", headers={
+            "Access-Control-Allow-Origin": "*",
+            "Content-Length": str(len(syn_m3u8)),
+            "Cache-Control": "public, max-age=300",
+        })
     m3u8_ckey = f"v7|{target}|{aud_pref}|{prov}|{tid}|{explicit_mtype}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}|{max_h}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
@@ -9738,7 +9809,10 @@ async def stream_proxy(request: Request):
         if can_coalesce:
             inflight = _ASYNC_SEG_INFLIGHT.get(url)
             if inflight is not None and not inflight.done():
-                data, status, cr, ct = await asyncio.wait_for(asyncio.shield(inflight), timeout=22)
+                try:
+                    data, status, cr, ct = await asyncio.wait_for(asyncio.shield(inflight), timeout=22)
+                except (asyncio.CancelledError, Exception):
+                    data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_chunk_sync, url, ref, rng, ext_hint), timeout=22)
             else:
                 loop = asyncio.get_running_loop()
                 fut = loop.create_future()

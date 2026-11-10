@@ -273,7 +273,7 @@ export const PROVIDERS = [
   { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
     homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
     idParser: (u) => (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1] || null },
-  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · Netflix Hesabı Gerekir', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: false,
+  { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · 1080p TR Dublaj & Altyazı', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
   { id: 'disney', name: 'Disney+', cat: 'global', badge: 'Orijinal & Sinema Vitrini', logo: LOGOS.disney, bg: '#10121a', accent: '#0063e5', web: true, kind: 'catalog', freeNoAuth: true,
@@ -282,7 +282,7 @@ export const PROVIDERS = [
   { id: 'prime', name: 'Prime Video', cat: 'global', badge: 'Amazon Originals Vitrini', logo: LOGOS.prime, bg: '#10121a', accent: '#00a8e1', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.primevideo.com', placeholder: "Prime Video vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/(?:primevideo|amazon)\.[a-z.]+\/.*?(?:gti=|asin=|detail\/)([\w.-]+)/i) || [])[1] || null },
-  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO · Max Hesabı Gerekir', logo: LOGOS.max, bg: '#10121a', accent: '#002be7', web: true, kind: 'catalog', freeNoAuth: false,
+  { id: 'max', name: 'Max', cat: 'global', badge: 'HBO Max · 1080p TR Dublaj & Altyazı', logo: LOGOS.max, bg: '#10121a', accent: '#002be7', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://play.max.com', placeholder: "Max vitrininde dizi veya film ara...",
     idParser: (u) => {
       if (!u || typeof u !== 'string') return null;
