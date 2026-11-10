@@ -4444,9 +4444,9 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
         or (not _AUDIO_LANG_HINT.get(vu) and vst in ("hls_fhd_multi", "hls_fhd_tr", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "mp4_ac_dub", "mp4_ar_tr"))
         for vu, vst in res
     )
-    if res and (IS_VERCEL or (not refresh and (mtype == "movie" or has_vault_dub))):
-        return res + [x for x in fallback_res if x not in res]
     _collect_vault_keys(fb_ep_keys, fallback_res)
+    if (res or fallback_res) and (IS_VERCEL or not refresh):
+        return res + [x for x in fallback_res if x not in res]
 
     # 2. Live extraction from https://www.fullhdfilmizlesene.now/ (for movies)
     if mtype == "movie":
@@ -5411,26 +5411,26 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
         tr_extractors_done = f_hf.done() and f_dl.done() and f_pv.done() and (f_ac.done() if is_ja_or_anime else True)
         has_glob_ready = cj_ok or ar_ok or (ve_ok and (vl_ok or f_vid.done() or (time.time() - t_start >= 2.4))) or (hx_ok and f_ve.done() and (vl_ok or f_vid.done())) or (vl_ok and f_ve.done() and f_hexa.done())
         primary_1080_ok = (ac_ok if is_ja_or_anime else False) or hf_ok or (dl_ok and (has_tr_dub_ready or f_hf.done())) or ((dp_ok or ar_ok) if orig_lang == "tr" else False)
-        if primary_1080_ok and (has_tr_dub_ready or has_glob_ready or (time.time() - t_start >= 0.75)):
+        if primary_1080_ok and (has_tr_dub_ready or has_glob_ready or (time.time() - t_start >= 0.35)):
             break
-        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 2.5):
+        if is_ja_or_anime and not f_ac.done() and (time.time() - t_start < 1.8):
             time.sleep(0.06)
             continue
-        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 2.0):
+        if not has_tr_dub_ready and not tr_extractors_done and (time.time() - t_start < 1.5):
             time.sleep(0.06)
             continue
         if has_glob_ready and tr_extractors_done:
             break
-        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 2.0)) or (time.time() - t_start >= 2.5)):
+        if f_pv.done() and f_hf.done() and f_dl.done() and f_dp.done() and f_ac.done() and (hf_ok or dl_ok or ac_ok or (has_glob_ready and (f_vid.done() or time.time() - t_start >= 1.5)) or (time.time() - t_start >= 1.8)):
             break
         if all(f.done() for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar)):
             break
         time.sleep(0.06)
     any_ready_after_loop = any(f.done() and not f.exception() and bool(f.result()) for f in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar))
     if not any_ready_after_loop:
-        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=1.0)
+        concurrent.futures.wait([f_pv, f_hf, f_dl, f_dp, f_ac, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=0.8)
     elif not is_ja_or_anime and not has_tr_dub_ready and not f_hf.done():
-        concurrent.futures.wait([f_hf], timeout=0.6)
+        concurrent.futures.wait([f_hf], timeout=0.3)
     ac_res, tr_res, ve_res, cj_res, hexa_res, vid_res, ar_res = [], [], [], [], [], [], []
     if f_ac.done():
         try:
@@ -5548,7 +5548,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(vault_yt)
 
     else:
-        concurrent.futures.wait([f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=4.0)
+        concurrent.futures.wait([f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar], timeout=0.4)
         for fut in (f_ac, f_pv, f_dl, f_dp, f_hf, f_ve, f_cj, f_hexa, f_vid, f_ar):
             if fut.done():
                 try:
@@ -6727,7 +6727,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             fut_pmeta = cat_pool.submit(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype)
             direct_list = fut_direct.result()
             try:
-                pmeta = fut_pmeta.result(timeout=1.2)
+                pmeta = fut_pmeta.result(timeout=0.35)
             except Exception:
                 def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
                 pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
@@ -6889,7 +6889,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 fut_subs = sub_pool.submit(_fetch_subtitles_sync, eff_tid, imdb_id, mtype, s, e, eff_prov, pmeta, direct_list)
                 fut_intro_api = sub_pool.submit(_detect_intro_sync, imdb_id, tid, mtype, s, e, None)
                 fut_audio = sub_pool.submit(_build_audio_tracks, wrapped[0][0], direct_list, eff_prov, eff_tid, s, e, pmeta, mtype)
-                concurrent.futures.wait([fut_subs, fut_intro_api, fut_audio], timeout=1.5)
+                concurrent.futures.wait([fut_subs, fut_intro_api, fut_audio], timeout=0.95)
                 try:
                     sub_tracks = fut_subs.result(timeout=0.05) if fut_subs.done() else []
                 except Exception:
@@ -6926,8 +6926,6 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         prepended_late.append({"id": cand_sid, "lang": lcode, "label": f"{llabel} (Akış Orijinal Senkron)", "url": vtt_u, "kind": "subtitles", "source": "stream"})
                 if prepended_late:
                     sub_tracks = sub_tracks + _filter_live_subs(prepended_late[:4])
-            if not intro_seg and sub_tracks:
-                intro_seg = _detect_intro_sync(imdb_id, tid, mtype, s, e, sub_tracks)
             if sub_tracks and not any(t.get("lang") == "tr" for t in sub_tracks):
                 fb_t = next((t for t in sub_tracks if t.get("lang") == "en"), sub_tracks[0])
                 q_t = urllib.parse.parse_qs(urllib.parse.urlparse(str(fb_t.get("url") or "")).query)
