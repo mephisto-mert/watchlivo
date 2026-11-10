@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v184';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v184';
-import { api, qs } from '../api.js?v=20261110_v184';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v184';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v184';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v184';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v184';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v185';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v185';
+import { api, qs } from '../api.js?v=20261110_v185';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v185';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v185';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v185';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v185';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v184';
+} from '../store.js?v=20261110_v185';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -886,7 +886,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           type: 'button',
           class: `provider-cat-pill ${catFilter === c.id ? 'active' : ''}`,
           'data-cat': c.id,
-          onclick: () => { catFilter = c.id; renderGrid(); },
+          onclick: () => { catFilter = c.id; superQuery = ''; renderGrid(); },
         }, h('span', {}, c.label), h('span', { class: 'cat-count' }, String(count)));
       }),
       !compact ? h('button', {
@@ -1174,7 +1174,12 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           const sNum = Number(epItem.season || 1);
           const eNum = Number(epItem.episode || 1);
           const epBadge = epItem.episodeLabel || `S${sNum}:B${eNum}`;
-          const subLabel = `${sNum}. Sezon ${eNum}. Bölüm · ${epItem.episodeTitle || epItem.sourceBadge || 'Yeni Bölüm'}`;
+          const baseEpStr = `${sNum}. Sezon ${eNum}. Bölüm`;
+          const rawEpTitle = String(epItem.episodeTitle || '').trim();
+          const subExtra = (rawEpTitle && rawEpTitle.toLowerCase() !== baseEpStr.toLowerCase())
+            ? rawEpTitle
+            : (epItem.sourceBadge || 'Yeni Bölüm');
+          const subLabel = `${baseEpStr} · ${subExtra}`;
           const prov = getProvider(epItem.provider || 'cinema') || { id: 'cinema', name: 'Sinema+' };
           return h('div', {
             class: 'wl-continue-card wl-latest-ep-card',
@@ -1508,9 +1513,36 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const pasted = parseVideoUrl(q);
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};
-    try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
+    try {
+      data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 12000 });
+    } catch (e) {
+      try {
+        const catRes = await api(`/api/rave/catalog?${qs({ provider: 'cinema', q })}`, { timeout: 9000 });
+        if (Array.isArray(catRes?.items) && catRes.items.length) {
+          data = { tmdb: catRes.items, justwatch: [], youtube: [] };
+        }
+      } catch (_) { /* ignore fallback error */ }
+    }
     if (mySearch !== superSearchSeq) return;
     const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '').trim();
+    const qNorm = normTitle(q);
+    if (!Array.isArray(data?.tmdb) || !data.tmdb.length) {
+      const localPool = [...(trendingItems || []), ...(HERO_DEFAULT_POOL || [])];
+      const seenLocal = new Set();
+      const localHits = localPool.filter((it) => {
+        const k = normTitle(it?.title) + ' ' + normTitle(it?.originalTitle);
+        const idKey = String(it?.tmdbId || it?.id || it?.title || '');
+        if (!idKey || seenLocal.has(idKey)) return false;
+        if (qNorm && k.includes(qNorm)) {
+          seenLocal.add(idKey);
+          return true;
+        }
+        return false;
+      });
+      if (localHits.length) {
+        data = { ...data, tmdb: localHits };
+      }
+    }
     const jwList = (data.justwatch || []).filter((t) => t && t.title);
     const jwByTitle = new Map();
     for (const jw of jwList) {

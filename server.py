@@ -6803,6 +6803,27 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             continue
                         if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title], year, imdb_id):
                             fb_candidates.append((st_u, st_t))
+            if not fb_candidates and mtype == "tv":
+                tv_fb_keys = [
+                    f"tmdb:tv:{tid}:{s}:1",
+                    f"tmdb:tv:{tid}:1:1",
+                    f"tv:{tid}",
+                    f"id:{tid}",
+                ]
+                for tc in (tr_title, orig_title, disp, title):
+                    nt = _norm_title(tc or "")
+                    if nt:
+                        tv_fb_keys.append(f"tv:{nt}:{s}:1")
+                        tv_fb_keys.append(f"tv:{nt}:1:1")
+                for vk_try in dict.fromkeys(tv_fb_keys):
+                    v_ent = v_streams.get(vk_try) or {}
+                    for st_item in (v_ent.get("streams") or []):
+                        if isinstance(st_item, (list, tuple)) and len(st_item) >= 2 and str(st_item[0]).startswith("http"):
+                            st_u, st_t = str(st_item[0]), str(st_item[1])
+                            if _is_vault_url_expired(st_u):
+                                continue
+                            if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title], year, imdb_id):
+                                fb_candidates.append((st_u, st_t))
             if not fb_candidates and IS_VERCEL:
                 for vk_try in cand_keys:
                     v_ent = v_streams.get(vk_try) or {}
@@ -7648,31 +7669,41 @@ _CURATED_ACTIVE_SERIES_SEEDS = [
     {"tmdbId": "280030", "title": "Gassal", "originalTitle": "Gassal", "season": 1, "episode": 10, "episodeTitle": "1. Sezon 10. Bölüm", "sourceBadge": "🇹🇷 tabii Yeni Bölüm", "provider": "tabii", "poster": "https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg", "year": "2025", "rating": 8.7},
     {"tmdbId": "100088", "title": "The Last of Us", "originalTitle": "The Last of Us", "season": 2, "episode": 1, "episodeTitle": "Future Days", "sourceBadge": "🔥 Yeni Sezon Bölümü", "provider": "max", "poster": "https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg", "year": "2025", "rating": 8.8},
     {"tmdbId": "95396", "title": "Severance", "originalTitle": "Severance", "season": 2, "episode": 10, "episodeTitle": "Cold Harbor", "sourceBadge": "🔥 Yeni Bölüm · 4K", "provider": "apple", "poster": "https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg", "year": "2025", "rating": 8.7},
+    {"tmdbId": "93405", "title": "Squid Game", "originalTitle": "Squid Game", "season": 2, "episode": 7, "episodeTitle": "Dost mu Düşman mı", "sourceBadge": "🔥 Netflix 4K Dublaj", "provider": "netflix", "poster": "https://image.tmdb.org/t/p/w500/dDlEmu3EZ0Pgg93K2SVNLCjCSvE.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/2meX1nMdScFOoV4370rqHWKmXhY.jpg", "year": "2025", "rating": 8.4},
+    {"tmdbId": "66732", "title": "Stranger Things", "originalTitle": "Stranger Things", "season": 4, "episode": 9, "episodeTitle": "The Piggyback", "sourceBadge": "🔥 Netflix 4K Dublaj", "provider": "netflix", "poster": "https://image.tmdb.org/t/p/w500/49WJfeN0moxb9IPfGn8AIqMGskD.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg", "year": "2024", "rating": 8.6},
+    {"tmdbId": "42009", "title": "Black Mirror", "originalTitle": "Black Mirror", "season": 7, "episode": 1, "episodeTitle": "Common People", "sourceBadge": "🔥 Yeni Sezon · 4K", "provider": "netflix", "poster": "https://image.tmdb.org/t/p/w500/5UaYsGZOFhjFDwQh6GuLjjA1WlF.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/38aCLy0BdFbOAIEfuDladoITHN0.jpg", "year": "2025", "rating": 8.3},
+    {"tmdbId": "94997", "title": "House of the Dragon", "originalTitle": "House of the Dragon", "season": 2, "episode": 8, "episodeTitle": "The Queen Who Ever Was", "sourceBadge": "🔥 Max 4K HDR", "provider": "max", "poster": "https://image.tmdb.org/t/p/w500/7QMsOTMUswlwxJP0rTTZfmz2tX2.jpg", "backdrop": "https://image.tmdb.org/t/p/w780/etj8E2o0Bud0HkONVQPjyCkIvpv.jpg", "year": "2024", "rating": 8.4},
 ]
+
+_EXCLUDED_TALK_NEWS_GENRE_IDS = {10767, 10763, 10764, 10766}
 
 
 def _fetch_latest_episodes_sync() -> list[dict]:
     import concurrent.futures
     candidates = []
-    seen_tids = set()
+    seen_tids = {str(s.get("tmdbId") or "") for s in _CURATED_ACTIVE_SERIES_SEEDS}
     eps_urls = [
-        f"https://api.themoviedb.org/3/tv/airing_today?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
-        f"https://api.themoviedb.org/3/tv/on_the_air?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
         f"https://api.themoviedb.org/3/trending/tv/week?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
+        f"https://api.themoviedb.org/3/tv/on_the_air?api_key={TMDB_API_KEY}&language=tr-TR&page=1",
     ]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
-        futs = [pool.submit(_http_json, u, timeout=3.2) for u in eps_urls]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        futs = [pool.submit(_http_json, u, timeout=3.0) for u in eps_urls]
         for f in futs:
             try:
-                data = f.result(timeout=3.5) or {}
-                for r in (data.get("results") or [])[:12]:
+                data = f.result(timeout=3.2) or {}
+                for r in (data.get("results") or [])[:16]:
                     tid = str(r.get("id") or "").strip()
                     if not tid or tid in seen_tids or not r.get("poster_path"):
                         continue
-                    if str(r.get("id") or "") in _HIDDEN_TMDB_IDS:
+                    if tid in _HIDDEN_TMDB_IDS or f"tv:{tid}" in _HIDDEN_TMDB_IDS:
+                        continue
+                    g_ids = set(r.get("genre_ids") or [])
+                    if g_ids & _EXCLUDED_TALK_NEWS_GENRE_IDS:
+                        continue
+                    it = _tmdb_item(r, "tv")
+                    if _has_vault_stream(it) <= 0:
                         continue
                     seen_tids.add(tid)
-                    it = _tmdb_item(r, "tv")
                     candidates.append(it)
             except Exception:
                 pass
@@ -7682,13 +7713,15 @@ def _fetch_latest_episodes_sync() -> list[dict]:
         if not tid.isdigit():
             return None
         try:
-            info = _http_json(f"https://api.themoviedb.org/3/tv/{tid}?api_key={TMDB_API_KEY}&language=tr-TR", timeout=2.8) or {}
+            info = _http_json(f"https://api.themoviedb.org/3/tv/{tid}?api_key={TMDB_API_KEY}&language=tr-TR", timeout=2.5) or {}
             last_ep = info.get("last_episode_to_air") or info.get("next_episode_to_air") or {}
             s_num = max(1, int(last_ep.get("season_number") or info.get("number_of_seasons") or 1))
             e_num = max(1, int(last_ep.get("episode_number") or 1))
+            if s_num > 15 or e_num > 1200:
+                return None
             ep_name = str(last_ep.get("name") or "").strip()
             if not ep_name or _is_generic_ep_name(ep_name):
-                ep_name = f"{s_num}. Sezon {e_num}. Bölüm"
+                ep_name = ""
             still_p = last_ep.get("still_path") or info.get("backdrop_path") or info.get("poster_path")
             still_u = f"https://image.tmdb.org/t/p/w780{still_p}" if still_p else (it_base.get("backdrop") or it_base.get("poster") or "")
             air_d = str(last_ep.get("air_date") or info.get("last_air_date") or "")[:10]
@@ -7700,25 +7733,26 @@ def _fetch_latest_episodes_sync() -> list[dict]:
                 "season": s_num,
                 "episode": e_num,
                 "episodeLabel": f"S{s_num}:B{e_num}",
-                "episodeTitle": ep_name,
+                "episodeTitle": ep_name or badge,
                 "airDate": air_d,
                 "still": still_u,
                 "backdrop": still_u or it_base.get("backdrop") or it_base.get("poster"),
                 "sourceBadge": badge,
-                "streamReady": bool(info.get("last_episode_to_air")),
+                "streamReady": True,
             }
         except Exception:
             return None
 
     enriched = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ep_pool:
-        for res_ep in ep_pool.map(_enrich_ep, candidates[:12]):
-            if res_ep:
-                enriched.append(res_ep)
+    if candidates:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as ep_pool:
+            for res_ep in ep_pool.map(_enrich_ep, candidates[:8]):
+                if res_ep:
+                    enriched.append(res_ep)
 
     seen_final = set()
     final_list = []
-    for seed in enriched + _CURATED_ACTIVE_SERIES_SEEDS:
+    for seed in _CURATED_ACTIVE_SERIES_SEEDS + enriched:
         tid = str(seed.get("tmdbId") or seed.get("id") or "")
         if not tid or tid in seen_final:
             continue
@@ -7734,7 +7768,7 @@ def _fetch_latest_episodes_sync() -> list[dict]:
             "season": s_n,
             "episode": e_n,
             "episodeLabel": seed.get("episodeLabel") or f"S{s_n}:B{e_n}",
-            "episodeTitle": seed.get("episodeTitle") or f"{s_n}. Sezon {e_n}. Bölüm",
+            "episodeTitle": seed.get("episodeTitle") or seed.get("sourceBadge") or "Yeni Bölüm",
             "sourceBadge": seed.get("sourceBadge") or "🆕 Yeni Bölüm · 1080p",
             "provider": seed.get("provider") or "cinema",
             "poster": seed.get("poster") or "",
@@ -7742,7 +7776,7 @@ def _fetch_latest_episodes_sync() -> list[dict]:
             "still": seed.get("still") or seed.get("backdrop") or seed.get("poster") or "",
             "year": str(seed.get("year") or "2025"),
             "rating": float(seed.get("rating") or 8.4),
-            "streamReady": bool(seed.get("streamReady", True)),
+            "streamReady": True,
         })
     return final_list[:20]
 
@@ -7781,8 +7815,43 @@ async def supersearch(request: Request):
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900"}
     if cached and time.time() - cached[0] < 300:
         return JSONResponse(cached[1], headers=cc_hdrs)
-    res = await asyncio.gather(asyncio.to_thread(_yt_search_sync, q), asyncio.to_thread(_tmdb_sync, q), asyncio.to_thread(_justwatch_sync, q), return_exceptions=True)
+    res = await asyncio.gather(
+        asyncio.wait_for(asyncio.to_thread(_yt_search_sync, q), timeout=4.5),
+        asyncio.wait_for(asyncio.to_thread(_tmdb_sync, q), timeout=4.5),
+        asyncio.wait_for(asyncio.to_thread(_justwatch_sync, q), timeout=4.2),
+        return_exceptions=True,
+    )
     yt, tmdb, jw = [r if isinstance(r, list) else [] for r in res]
+    q_norm = _norm_title(q)
+    if q_norm and len(q_norm) >= 2:
+        seen_tids = {str(x.get("id") or x.get("tmdbId") or "") for x in tmdb if x.get("id") or x.get("tmdbId")}
+        vault_hits = []
+        for vk, vm in (_MAIN_SITES_VAULT.get("meta") or {}).items():
+            if not isinstance(vm, dict):
+                continue
+            vt = str(vm.get("title") or "")
+            vot = str(vm.get("originalTitle") or "")
+            if q_norm in _norm_title(vt) or q_norm in _norm_title(vot):
+                vtid = str(vm.get("tmdbId") or vm.get("id") or vk)
+                if vtid in seen_tids:
+                    continue
+                seen_tids.add(vtid)
+                vault_hits.append({
+                    "id": vtid,
+                    "tmdbId": vtid,
+                    "title": vt or vot,
+                    "originalTitle": vot or vt,
+                    "mediaType": vm.get("mediaType") or ("tv" if "tv:" in str(vk) else "movie"),
+                    "year": str(vm.get("year") or "2024"),
+                    "rating": float(vm.get("rating") or 8.2),
+                    "poster": vm.get("poster") or "",
+                    "backdrop": vm.get("backdrop") or vm.get("poster") or "",
+                    "provider": vm.get("provider") or "cinema",
+                })
+                if len(vault_hits) >= 16:
+                    break
+        if vault_hits:
+            tmdb = vault_hits + tmdb
     if _HIDDEN_TMDB_IDS:
         tmdb = [
             x for x in tmdb

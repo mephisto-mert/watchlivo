@@ -5858,7 +5858,6 @@ html.is-native-apk .wl-btn-apk-dl,
 
 .trending-strip-row,
 .hero-showcase-row,
-.wl-continue-strip,
 .wl-home-friends-row {
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 3.5%, #000 96.5%, transparent 100%) !important;
   mask-image: linear-gradient(90deg, transparent 0%, #000 3.5%, #000 96.5%, transparent 100%) !important;
@@ -7623,7 +7622,7 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     min-height: 0 !important;
     height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
     max-height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
-    padding-bottom: calc(64px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 8px))) !important;
+    padding-bottom: 0 !important;
     box-sizing: border-box !important;
     overflow: hidden !important;
   }
