@@ -1,17 +1,17 @@
 {
   "ok": true,
   "packageName": "online.watchlivo.app",
-  "versionCode": 26,
-  "versionName": "2.0.5-v204",
+  "versionCode": 27,
+  "versionName": "2.0.5-v205",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
   "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-11T23:00:00.000000+03:00",
-  "changelog": "v204: Master Playlist Descending Sort & Native iOS Quality Selection: inverted variant sort order to ensure 4K / 1080p is placed first in HLS master playlists so Apple AVPlayer defaults to 1080p/4K; fixed native HLS variant parser and added synthesized quality tiers with &max_h support.",
-  "version": "20261111_v204",
+  "publishedAt": "2026-11-11T23:15:00.000000+03:00",
+  "changelog": "v205: YouTube-Style Persistent Quality Locking Engine: implemented persistent quality tiers (4K, 1080p, 720p, 480p, 360p, Auto) with server-side master playlist filtering via &res=, ensuring chosen resolution is physically locked with complete audio & subtitle sync and never drops to 720p or disappears from settings.",
+  "version": "20261111_v205",
   "build": 1,
-  "description": "Master Playlist Descending Sort (4K/1080p First) & Native iOS Quality Selection with &max_h support"
+  "description": "YouTube-Style Persistent Quality Locking Engine with server-side &res= master playlist filtering"
 }

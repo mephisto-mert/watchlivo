@@ -2979,7 +2979,12 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
+    const lockedQ = host.adapter?._lockedQuality || localStorage.getItem('watchlivo_quality_lock');
+    if (lockedQ && lockedQ !== 'auto') {
+      qualityBadge.textContent = lockedQ === '2160' ? '4K' : (lockedQ === '1440' ? '2K' : `${lockedQ}p`);
+    } else {
+      qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : '1080p');
+    }
     if (qualityBadge.textContent === '4K') {
       artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|1080p HD|720p HD)/, '4K Ultra HD');
     } else if (qualityBadge.textContent === '1080p') {

@@ -9768,6 +9768,7 @@ async def rave_stream_manifest(request: Request):
         max_h = int(request.query_params.get("max_h") or 0)
     except ValueError:
         max_h = 0
+    res_req = (request.query_params.get("res") or "").strip().lower()
     target = ""
     if sid:
         try:
@@ -9807,7 +9808,7 @@ async def rave_stream_manifest(request: Request):
             "Content-Length": str(len(syn_m3u8)),
             "Cache-Control": "public, max-age=300",
         })
-    m3u8_ckey = f"v8|{target}|{aud_pref}|{tr_aud_sid}|{prov}|{tid}|{explicit_mtype}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}|{max_h}"
+    m3u8_ckey = f"v9|{target}|{aud_pref}|{tr_aud_sid}|{prov}|{tid}|{explicit_mtype}|{s_num}|{e_num}|{int(proxy_segs)}|{int(is_probe)}|{max_h}|{res_req}"
     now_m = time.time()
     cached_m = _M3U8_CACHE.get(m3u8_ckey)
     ttl_m = 2.0 if is_live_tv else 240.0
@@ -10450,7 +10451,24 @@ async def rave_stream_manifest(request: Request):
                             continue
                 out_lines.append(s_ln)
             if variant_pairs:
-                if max_h >= 240:
+                if res_req and res_req not in ("auto", "0"):
+                    matched_v = []
+                    if res_req in ("2160", "4k"):
+                        matched_v = [v for v in variant_pairs if v[0] >= 3000]
+                    elif res_req in ("1440", "2k"):
+                        matched_v = [v for v in variant_pairs if 2200 <= v[0] < 3000]
+                    elif res_req == "1080":
+                        matched_v = [v for v in variant_pairs if 1600 <= v[0] < 2400]
+                    elif res_req == "720":
+                        matched_v = [v for v in variant_pairs if 1000 <= v[0] < 1600]
+                    elif res_req == "480":
+                        matched_v = [v for v in variant_pairs if 600 <= v[0] < 1000]
+                    elif res_req == "360":
+                        matched_v = [v for v in variant_pairs if v[0] < 600]
+                    if matched_v:
+                        # Lock to the single selected resolution stream while preserving all audio & subtitle tracks!
+                        variant_pairs = matched_v[:1]
+                elif max_h >= 240:
                     max_eff_w = int(max_h * 16 / 9) + 96
                     capped_v = [v for v in variant_pairs if 0 < v[0] <= max_eff_w]
                     if capped_v:

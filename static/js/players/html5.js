@@ -2232,7 +2232,8 @@ export class Html5Adapter {
   async _fetchNativeHlsVariants(masterUrl) {
     if (!masterUrl || !isHlsUrl(masterUrl) || this.isMusic) return;
     try {
-      const targetUrl = new URL(masterUrl, window.location.href).href;
+      const cleanMaster = String(masterUrl || '').replace(/[?&]res=[^&]+/g, '').replace(/[?&]max_h=\d+/g, '');
+      const targetUrl = new URL(cleanMaster, window.location.href).href;
       const resp = await fetch(targetUrl, {
         credentials: 'same-origin',
         headers: { 'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, */*' }
@@ -2265,100 +2266,101 @@ export class Html5Adapter {
         // Sort descending: 4K (2160p) -> 1080p -> 720p -> 480p -> 360p
         variants.sort((a, b) => ((b.height || b.width) - (a.height || a.width)) || ((b.bitrate || 0) - (a.bitrate || 0)));
         this._nativeHlsVariants = variants;
+        const resSet = new Set();
+        for (const v of variants) {
+          const eff = Math.max(v.width || 0, Math.round((v.height || 0) * 16 / 9));
+          if (eff >= 3200 || v.height >= 2000) resSet.add('2160');
+          else if (eff >= 2400 || v.height >= 1400) resSet.add('1440');
+          else if (eff >= 1700 || v.height >= 950) resSet.add('1080');
+          else if (eff >= 1100 || v.height >= 650) resSet.add('720');
+          else if (eff >= 750 || v.height >= 450) resSet.add('480');
+          else resSet.add('360');
+        }
+        this._knownAvailableResolutions = resSet;
         this.events.onTracksChanged?.();
       }
     } catch (_) { /* ignore network error for variant parsing */ }
   }
 
   getQualityLevels() {
-    const levels = this.hls?.levels || [];
-    if (!levels.length && Array.isArray(this._nativeHlsVariants) && this._nativeHlsVariants.length > 1) {
-      const curIdx = typeof this._selectedNativeVariantIdx === 'number' ? this._selectedNativeVariantIdx : -1;
-      const isAuto = curIdx < 0;
-      const items = this._nativeHlsVariants.map((l, idx) => {
-        const w = l.width || 0, h = l.height || 0, bw = l.bitrate || 0;
-        const effW = Math.max(w, Math.round(h * 16 / 9));
-        const tag = effW >= 3200 ? '4K Ultra HD (2160p)' : effW >= 2400 ? '2K QHD (1440p)' : effW >= 1800 ? (bw >= 5800000 ? '1080p BluRay HQ' : '1080p Full HD') : effW >= 1200 ? '720p HD' : `${h || 720}p`;
-        const mbps = bw >= 500000 ? ` · ${(bw / 1000000).toFixed(1)} Mbps` : '';
-        return { id: idx, label: `${effW >= 3200 ? '💎' : '🎬'} ${tag}${w && h ? ` (${w}×${h})` : ''}${mbps}`, active: !isAuto && curIdx === idx };
-      });
-      items.push({ id: -1, label: '⚡ Otomatik (4K / En Yüksek HD)', active: isAuto });
-      return items;
-    }
-    if (!levels.length) {
+    const sUrl = String(this.currentUrl || this._nativeMasterUrl || '');
+    const isProxyOrHls = /\/api\/rave\/stream/i.test(sUrl) || isHlsUrl(sUrl);
+    if (!isProxyOrHls && !this.hls) {
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
       const effW = Math.max(vw, Math.round(vh * 16 / 9));
-      const lbl = (effW >= 3200) ? '4K Ultra HD (2160p)' : (effW >= 2400) ? '2K QHD (1440p)' : (effW >= 1800) ? '1080p Full HD' : (effW >= 1200) ? '720p HD' : (vh > 0 ? `${vh}p` : '1080p Full HD');
-      
-      const sUrl = String(this.currentUrl || this._nativeMasterUrl || '');
-      const isProxyStream = /\/api\/rave\/stream/i.test(sUrl) || isHlsUrl(sUrl);
-      if (isProxyStream) {
-        const curMaxH = sUrl.match(/[?&]max_h=(\d+)/i)?.[1];
-        const selSynth = this._selectedSynthQuality;
-        return [
-          { id: 'synth_2160', label: '💎 4K Ultra HD (2160p)', active: selSynth === 'synth_2160' || curMaxH === '2160' },
-          { id: 'synth_1080', label: '🎬 1080p Full HD', active: selSynth === 'synth_1080' || curMaxH === '1080' || (!curMaxH && !selSynth && effW >= 1800) },
-          { id: 'synth_720', label: '🎬 720p HD', active: selSynth === 'synth_720' || curMaxH === '720' || (!curMaxH && !selSynth && effW >= 1100 && effW < 1800) },
-          { id: 'synth_auto', label: `⚡ Otomatik (${lbl})`, active: (!selSynth || selSynth === 'synth_auto') && !curMaxH }
-        ];
-      }
-      return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
+      const lbl = (effW >= 3200) ? '4K Ultra HD' : (effW >= 1800) ? '1080p Full HD' : (effW >= 1200) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Doğrudan Akış');
+      return [{ id: 'auto', label: `✨ ${lbl}`, active: true }];
     }
-    const isAuto = Boolean(this.hls.autoLevelEnabled);
-    const cur = this.hls.currentLevel;
-    const items = levels.map((l, idx) => {
-      const w = l.width || 0, h = l.height || 0, bw = l.bitrate || 0;
-      const effW = Math.max(w, Math.round(h * 16 / 9));
-      const tag = effW >= 3200 ? '4K Ultra HD (2160p)' : effW >= 2400 ? '2K QHD (1440p)' : effW >= 1800 ? (bw >= 5800000 ? '1080p BluRay HQ' : '1080p Full HD') : effW >= 1200 ? '720p HD' : `${h || 720}p`;
-      const mbps = bw >= 500000 ? ` · ${(bw / 1000000).toFixed(1)} Mbps` : '';
-      return { id: idx, label: `${effW >= 3200 ? '💎' : '🎬'} ${tag}${w && h ? ` (${w}×${h})` : ''}${mbps}`, active: !isAuto && cur === idx };
-    });
-    items.push({ id: -1, label: '⚡ Otomatik (4K / En Yüksek HD)', active: isAuto });
+
+    const curLocked = this._lockedQuality || localStorage.getItem('watchlivo_quality_lock') || 'auto';
+    const resSet = this._knownAvailableResolutions || new Set();
+    const has4k = resSet.has('2160') || (this.media && (this.media.resolution === '4K' || String(this.media.title || '').includes('4K')));
+    const has1440 = resSet.has('1440');
+
+    const vw = this.video?.videoWidth || 0;
+    const vh = this.video?.videoHeight || 0;
+    const effW = Math.max(vw, Math.round(vh * 16 / 9));
+    const activeResLabel = effW >= 3200 ? '4K' : effW >= 2400 ? '1440p' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : '1080p');
+
+    const items = [
+      { id: 'auto', label: `⚡ Otomatik (Önerilen · ${activeResLabel})`, active: curLocked === 'auto' }
+    ];
+
+    if (has4k) {
+      items.push({ id: '2160', label: '💎 4K Ultra HD (2160p)', active: curLocked === '2160' });
+    }
+    if (has1440) {
+      items.push({ id: '1440', label: '🎬 2K QHD (1440p)', active: curLocked === '1440' });
+    }
+    items.push(
+      { id: '1080', label: '🎬 1080p Full HD', active: curLocked === '1080' },
+      { id: '720', label: '🎬 720p HD', active: curLocked === '720' },
+      { id: '480', label: '📱 480p SD', active: curLocked === '480' },
+      { id: '360', label: '📱 360p', active: curLocked === '360' }
+    );
     return items;
   }
+
   setQualityLevel(idx) {
-    if (typeof idx === 'string' && idx.startsWith('synth_')) {
-      const maxHMap = { synth_2160: 2160, synth_1080: 1080, synth_720: 720, synth_auto: null };
-      const targetMaxH = maxHMap[idx];
-      this._selectedSynthQuality = idx;
-      let newUrl = this._nativeMasterUrl || this.currentUrl || '';
-      newUrl = newUrl.replace(/[?&]max_h=\d+/g, '');
-      if (targetMaxH) {
-        newUrl += (newUrl.includes('?') ? '&' : '?') + `max_h=${targetMaxH}`;
-      }
-      this.switchStreamSource(newUrl);
-      this.events.onTracksChanged?.();
-      return;
+    const targetQ = String(idx || 'auto').trim().toLowerCase();
+    this._lockedQuality = targetQ;
+    try { localStorage.setItem('watchlivo_quality_lock', targetQ); } catch (_) {}
+
+    // 1. Get base stream URL without prior res / max_h tags
+    let baseStream = this._nativeMasterUrl || this.currentUrl || '';
+    baseStream = baseStream.replace(/[?&]res=[^&]+/g, '').replace(/[?&]max_h=\d+/g, '');
+
+    let targetUrl = baseStream;
+    if (targetQ !== 'auto') {
+      targetUrl += (targetUrl.includes('?') ? '&' : '?') + `res=${targetQ}`;
     }
-    const n = Number(idx);
-    if (!this.hls) {
-      if (Array.isArray(this._nativeHlsVariants) && this._nativeHlsVariants.length > 0 && this.video) {
-        const v = this.video;
-        const curT = this.getTime();
-        const wasPlaying = this.wantPlaying || !v.paused;
-        this._selectedNativeVariantIdx = n;
-        this._selectedSynthQuality = null;
-        let targetUrl = '';
-        if (n >= 0 && this._nativeHlsVariants[n]) {
-          targetUrl = this._nativeHlsVariants[n].url;
-        } else {
-          targetUrl = this._nativeMasterUrl || this.currentUrl;
+
+    // 2. hls.js level capping (desktop / android MSE)
+    if (this.hls && Array.isArray(this.hls.levels) && this.hls.levels.length > 0) {
+      if (targetQ === 'auto') {
+        this.hls.autoLevelCapping = -1;
+        this.hls.currentLevel = -1;
+      } else {
+        const wantH = parseInt(targetQ, 10);
+        let bestIdx = -1;
+        let minDiff = 999999;
+        this.hls.levels.forEach((l, i) => {
+          const lH = l.height || Math.round((l.width || 0) * 9 / 16);
+          const diff = Math.abs(lH - wantH);
+          if (diff < minDiff) { minDiff = diff; bestIdx = i; }
+        });
+        if (bestIdx >= 0) {
+          this.hls.autoLevelCapping = bestIdx;
+          this.hls.currentLevel = bestIdx;
         }
-        if (targetUrl && targetUrl !== v.src) {
-          v.src = targetUrl;
-          v.load();
-          v.addEventListener('loadedmetadata', () => {
-            try { v.currentTime = curT; } catch (_) {}
-            if (wasPlaying) this.tryPlay();
-          }, { once: true });
-        }
-        this.events.onTracksChanged?.();
       }
-      return;
     }
-    if (n >= 0) this.hls.autoLevelCapping = -1;
-    this.hls.currentLevel = n;
+
+    // 3. For native HLS (Safari/iOS) or explicit backend lock, reload master playlist with &res=
+    if (targetUrl && targetUrl !== this.currentUrl) {
+      this.switchStreamSource(targetUrl);
+    }
     this.events.onTracksChanged?.();
   }
   _reportStreamHealth(rawUrl, ok, extra = {}) {
