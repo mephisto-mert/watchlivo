@@ -9442,19 +9442,62 @@ async def rave_site_data(request: Request):
 
 
 import threading
+import urllib3
+import concurrent.futures
+
 _SEGMENT_CACHE: dict[str, tuple[float, bytes, str]] = {}
-_SEG_CACHE_MAX_BYTES = 96 * 1024 * 1024
+_SEG_CACHE_MAX_BYTES = 512 * 1024 * 1024
 _SEG_TABLE_LOCK = threading.Lock()
 _SEG_URL_LOCKS: dict[str, threading.Lock] = {}
 _M3U8_CACHE: dict[str, tuple[float, str]] = {}
 
+_SEG_POOL = urllib3.PoolManager(
+    maxsize=128,
+    num_pools=32,
+    timeout=urllib3.Timeout(connect=5.0, read=15.0),
+    retries=urllib3.Retry(total=2, backoff_factor=0.08)
+)
+_PREFETCH_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=8, thread_name_prefix="seg_prefetch")
+_PREFETCHED_URLS: set[str] = set()
+
+def _schedule_segment_prefetch(current_url: str, ref: str):
+    clean_u = current_url.split("?")[0].split("#")[0]
+    m = re.search(r'([a-zA-Z_-]*)(\d+)(\.(?:jpg|ts|m4s|mp4|aac|webp|png|key))$', clean_u, re.I)
+    if not m:
+        return
+    prefix, num_str, ext = m.group(1), m.group(2), m.group(3)
+    curr_num = int(num_str)
+    prefix_start = m.start(1)
+    suffix_start = m.start(3)
+    query_part = current_url[len(clean_u):]
+    for step in (1, 2, 3):
+        next_num = curr_num + step
+        next_num_str = str(next_num).zfill(len(num_str))
+        next_url = clean_u[:prefix_start] + f"{prefix}{next_num_str}{ext}" + query_part
+        with _SEG_TABLE_LOCK:
+            if next_url in _SEGMENT_CACHE or next_url in _PREFETCHED_URLS:
+                continue
+            if len(_PREFETCHED_URLS) > 3000:
+                _PREFETCHED_URLS.clear()
+            _PREFETCHED_URLS.add(next_url)
+        _PREFETCH_EXECUTOR.submit(_prefetch_single_seg, next_url, ref, ext)
+
+def _prefetch_single_seg(u: str, ref: str, ext_hint: str):
+    try:
+        with _SEG_TABLE_LOCK:
+            if u in _SEGMENT_CACHE:
+                return
+        _proxy_chunk_sync(u, ref, "", ext_hint)
+    except Exception:
+        pass
+
 
 def _seg_cache_put_locked(key: str, ts: float, payload: bytes, meta: str) -> None:
-    expired = [k for k, v_item in _SEGMENT_CACHE.items() if ts - v_item[0] > 90]
+    expired = [k for k, v_item in _SEGMENT_CACHE.items() if ts - v_item[0] > 180]
     for k in expired:
         _SEGMENT_CACHE.pop(k, None)
     total_b = sum(len(v_item[1]) for v_item in _SEGMENT_CACHE.values())
-    while _SEGMENT_CACHE and (len(_SEGMENT_CACHE) >= 96 or total_b + len(payload) > _SEG_CACHE_MAX_BYTES):
+    while _SEGMENT_CACHE and (len(_SEGMENT_CACHE) >= 384 or total_b + len(payload) > _SEG_CACHE_MAX_BYTES):
         oldest = min(_SEGMENT_CACHE, key=lambda k: _SEGMENT_CACHE[k][0])
         ev = _SEGMENT_CACHE.pop(oldest, None)
         if ev is not None:
@@ -9597,43 +9640,62 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                     req_hdrs = {**hdrs, "Range": rng} if use_seg_rng else hdrs
                     for _attempt in range(2):
                         try:
-                            req = urllib.request.Request(url, headers=req_hdrs)
-                            with _public_open(req, timeout=16) as r:
-                                data = r.read(28 * 1024 * 1024)
-                                raw_ct_low = (r.headers.get("Content-Type") or "").lower()
-                                head_trim = data[:64].lstrip().lower() if data else b""
-                                if is_key_req:
-                                    if not data or len(data) > 256 or "text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html", b"{\"error")):
-                                        raise ValueError("Invalid HLS key response")
-                                elif data and not _is_binary_media_payload(data) and ("text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html"))):
-                                    raise ValueError("Upstream returned HTML instead of media segment")
-                                if use_seg_rng and r.status == 206:
-                                    cr_up = r.headers.get("Content-Range") or ""
-                                    is_mp4_206 = (len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")) or is_fmp4_seg or clean_u_path.endswith(".mp4")
-                                    return data, 206, cr_up, ("video/mp4" if is_mp4_206 else "video/mp2t")
-                                raw_cl = (r.headers.get("Content-Length") or "").strip()
-                                up_total = int(raw_cl) if raw_cl.isdigit() else 0
-                                if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total and up_total <= 28 * 1024 * 1024:
-                                    raise IOError(f"Incomplete upstream segment ({len(data)}/{up_total} bytes)")
-                                is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
-                                is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
-                                is_adts = len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xF6) == 0xF0
-                                if is_key_req or len(data) == 16:
-                                    ct = "application/octet-stream"
-                                elif ext_hint == ".aac" or clean_u_path.endswith(".aac") or is_adts:
-                                    ct = "audio/aac"
-                                elif ext_hint == ".mp3" or clean_u_path.endswith(".mp3") or data.startswith(b"ID3"):
-                                    ct = "audio/mpeg"
-                                elif ext_hint == ".m4a" or clean_u_path.endswith(".m4a"):
-                                    ct = "audio/mp4"
-                                elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url or ext_hint == ".m4s")):
-                                    ct = "video/mp4"
-                                elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url or "dragonballzfans" in url:
-                                    ct = "video/mp2t"
-                                elif "video/" in raw_ct_low or "audio/" in raw_ct_low or "mpegurl" in raw_ct_low:
-                                    ct = r.headers.get("Content-Type")
-                                else:
-                                    ct = "video/mp2t"
+                            use_pool = (not is_key_req) and (not use_seg_rng)
+                            r_data = None
+                            r_status = 200
+                            r_headers = {}
+                            if use_pool:
+                                try:
+                                    pool_resp = _SEG_POOL.request("GET", url, headers=req_hdrs, preload_content=True, timeout=14.0)
+                                    if pool_resp.status in (200, 206):
+                                        r_data = pool_resp.data
+                                        r_status = pool_resp.status
+                                        r_headers = dict(pool_resp.headers)
+                                except Exception:
+                                    r_data = None
+                            if r_data is None:
+                                req = urllib.request.Request(url, headers=req_hdrs)
+                                with _public_open(req, timeout=16) as r:
+                                    data = r.read(28 * 1024 * 1024)
+                                    raw_ct_low = (r.headers.get("Content-Type") or "").lower()
+                                    r_headers = dict(r.headers)
+                                    r_status = r.status
+                            else:
+                                data = r_data
+                                raw_ct_low = (r_headers.get("Content-Type") or r_headers.get("content-type") or "").lower()
+                            head_trim = data[:64].lstrip().lower() if data else b""
+                            if is_key_req:
+                                if not data or len(data) > 256 or "text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html", b"{\"error")):
+                                    raise ValueError("Invalid HLS key response")
+                            elif data and not _is_binary_media_payload(data) and ("text/html" in raw_ct_low or head_trim.startswith((b"<!doctype", b"<html"))):
+                                raise ValueError("Upstream returned HTML instead of media segment")
+                            if use_seg_rng and r_status == 206:
+                                cr_up = r_headers.get("Content-Range") or r_headers.get("content-range") or ""
+                                is_mp4_206 = (len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")) or is_fmp4_seg or clean_u_path.endswith(".mp4")
+                                return data, 206, cr_up, ("video/mp4" if is_mp4_206 else "video/mp2t")
+                            raw_cl = (r_headers.get("Content-Length") or r_headers.get("content-length") or "").strip()
+                            up_total = int(raw_cl) if raw_cl.isdigit() else 0
+                            if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total and up_total <= 28 * 1024 * 1024:
+                                raise IOError(f"Incomplete upstream segment ({len(data)}/{up_total} bytes)")
+                            is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
+                            is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")
+                            is_adts = len(data) >= 2 and data[0] == 0xFF and (data[1] & 0xF6) == 0xF0
+                            if is_key_req or len(data) == 16:
+                                ct = "application/octet-stream"
+                            elif ext_hint == ".aac" or clean_u_path.endswith(".aac") or is_adts:
+                                ct = "audio/aac"
+                            elif ext_hint == ".mp3" or clean_u_path.endswith(".mp3") or data.startswith(b"ID3"):
+                                ct = "audio/mpeg"
+                            elif ext_hint == ".m4a" or clean_u_path.endswith(".m4a"):
+                                ct = "audio/mp4"
+                            elif is_ftyp_moof or (not is_mpegts and ("init-" in url or ".m4s" in url or ".mp4" in url or ext_hint == ".m4s")):
+                                ct = "video/mp4"
+                            elif is_mpegts or ".ts" in url or ".png" in url or ".jpg" in url or ".webp" in url or ".cfd/" in url or "/r6/s/" in url or "pilavyer" in url or "dragonballzfans" in url:
+                                ct = "video/mp2t"
+                            elif "video/" in raw_ct_low or "audio/" in raw_ct_low or "mpegurl" in raw_ct_low:
+                                ct = r_headers.get("Content-Type") or r_headers.get("content-type")
+                            else:
+                                ct = "video/mp2t"
                             if data:
                                 break
                         except Exception:
@@ -9647,6 +9709,8 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                     elif data and (not up_total or len(data) >= up_total) and len(data) <= int(18 * 1024 * 1024):
                         with _SEG_TABLE_LOCK:
                             _seg_cache_put_locked(url, time.time(), data, ct)
+                        if is_seg_url or ".jpg" in url or ".ts" in url or ".m4s" in url:
+                            _schedule_segment_prefetch(url, eff_ref)
         total = max(len(data), up_total)
         if rng and rng.startswith("bytes=") and len(data) > 0:
             m_suf_s = re.match(r"bytes=-(\d+)$", rng)
@@ -10455,10 +10519,19 @@ async def rave_stream_manifest(request: Request):
                     matched_v = []
                     if res_req in ("2160", "4k"):
                         matched_v = [v for v in variant_pairs if v[0] >= 3000]
+                        if not matched_v:
+                            sorted_desc = sorted(variant_pairs, key=lambda v: (v[0], v[1]), reverse=True)
+                            matched_v = sorted_desc[:1]
                     elif res_req in ("1440", "2k"):
                         matched_v = [v for v in variant_pairs if 2200 <= v[0] < 3000]
+                        if not matched_v:
+                            sorted_desc = sorted([v for v in variant_pairs if v[0] < 3000], key=lambda v: (v[0], v[1]), reverse=True)
+                            matched_v = sorted_desc[:1] if sorted_desc else variant_pairs[:1]
                     elif res_req == "1080":
                         matched_v = [v for v in variant_pairs if 1600 <= v[0] < 2400]
+                        if not matched_v:
+                            sorted_desc = sorted(variant_pairs, key=lambda v: (v[0], v[1]), reverse=True)
+                            matched_v = sorted_desc[:1]
                     elif res_req == "720":
                         matched_v = [v for v in variant_pairs if 1000 <= v[0] < 1600]
                     elif res_req == "480":
@@ -11690,7 +11763,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
-        "version": "20261111_v197",
+        "version": "20261111_v206",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),
