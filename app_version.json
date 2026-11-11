@@ -11,5 +11,5 @@
   "autoInstall": true,
   "publishedAt": "2026-11-11T14:20:00.000000+03:00",
   "changelog": "v195: Fix Cloudflare Worker 1101, eliminate 429 room polling storms, accelerate HLS/tau-video stream resolution, maintain seamless background playback without Guest rewind, and harden SSRF & room role authorization.",
-  "version": "20261111_v195"
+  "version": "20261111_v196"
 }

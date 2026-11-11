@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v195';
-import { expectedPosition } from '../sync.js?v=20261111_v195';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v195';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v195';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v195';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v196';
+import { expectedPosition } from '../sync.js?v=20261111_v196';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v196';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v196';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v196';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -1019,22 +1019,24 @@ export class Html5Adapter {
       const isTouchDev = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
       const isIpadDesktop = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
       const isMobileScreen = isAndroid || isIpadDesktop || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (isTouchDev && typeof window !== 'undefined' && window.innerWidth <= 900);
+      const netConn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      const isSlowNet = Boolean(netConn && (netConn.saveData || /^(slow-2g|2g|3g)$/i.test(String(netConn.effectiveType || '')) || (Number(netConn.downlink) > 0 && Number(netConn.downlink) < 2.5)));
       this.hls = new window.Hls({
         enableWorker: !isAndroid,
         lowLatencyMode: false,
         subtitleDisplay: false,
         enableWebVTT: false,
         startFragPrefetch: true,
-        startLevel: isMobileScreen ? 0 : -1,
+        startLevel: isSlowNet ? 0 : -1,
         startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: isMobileScreen ? 950000 : 2200000,
-        abrBandWidthFactor: isMobileScreen ? 0.82 : 0.88,
-        abrBandWidthUpFactor: isMobileScreen ? 0.65 : 0.72,
+        abrEwmaDefaultEstimate: isSlowNet ? 1400000 : (isMobileScreen ? 6200000 : 12500000),
+        abrBandWidthFactor: isMobileScreen ? 0.86 : 0.92,
+        abrBandWidthUpFactor: isMobileScreen ? 0.72 : 0.78,
         autoLevelCapping: -1,
         maxBufferLength: isMobileScreen ? 35 : 50,
         maxMaxBufferLength: isMobileScreen ? 70 : 110,
         backBufferLength: isMobileScreen ? 25 : 45,
-        maxBufferSize: (isMobileScreen ? 35 : 60) * 1000 * 1000,
+        maxBufferSize: (isMobileScreen ? 45 : 95) * 1000 * 1000,
         maxBufferHole: 1.2,
         maxAudioFramesDrift: 2,
         stretchShortVideoTrack: true,
@@ -1057,20 +1059,26 @@ export class Html5Adapter {
         if (data?.levels?.length > 1) {
           let maxAllowedIdx = -1;
           let maxMobileHdIdx = -1;
+          let maxSlowNetIdx = -1;
           data.levels.forEach((l, idx) => {
             const w = l.width || 0;
             const h = l.height || 0;
             const bw = l.bitrate || 0;
-            const isOver1080p = w > 2650 || h > 1200 || bw > 10500000;
-            if (!isOver1080p) {
+            const vCodec = String(l.videoCodec || l.attrs?.CODECS || '');
+            const needsHevc = /\b(hvc1|hev1)\b/i.test(vCodec);
+            const codecOk = !needsHevc || (typeof MediaSource !== 'undefined' && typeof MediaSource.isTypeSupported === 'function' && MediaSource.isTypeSupported(`video/mp4; codecs="${(vCodec.split(',')[0] || 'hvc1.1.6.L150.B0').trim()}"`));
+            if (codecOk) {
               maxAllowedIdx = idx;
             }
-            const isMobileSafeHd = (w <= 1440 && h <= 820 && bw <= 4200000) || (w === 0 && h === 0 && bw <= 3400000);
-            if (isMobileSafeHd) {
+            const isMobileFullHd = codecOk && ((w <= 2048 && h <= 1152 && bw <= 9800000) || (w === 0 && h === 0 && bw <= 6500000));
+            if (isMobileFullHd) {
               maxMobileHdIdx = idx;
             }
+            if (codecOk && ((w <= 1366 && h <= 768 && bw <= 3200000) || idx === 0)) {
+              maxSlowNetIdx = idx;
+            }
           });
-          const chosenCap = (isMobileScreen && maxMobileHdIdx >= 0) ? maxMobileHdIdx : maxAllowedIdx;
+          const chosenCap = isSlowNet ? maxSlowNetIdx : ((isMobileScreen && maxMobileHdIdx >= 0) ? maxMobileHdIdx : maxAllowedIdx);
           if (chosenCap >= 0 && chosenCap < data.levels.length - 1) {
             this.hls.autoLevelCapping = chosenCap;
           }
@@ -2202,18 +2210,19 @@ export class Html5Adapter {
     if (!levels.length) {
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
-      const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Otomatik Akış');
+      const lbl = (vw >= 3200 || vh >= 2000) ? '4K Ultra HD (2160p)' : (vw >= 2400 || vh >= 1350) ? '2K QHD (1440p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Otomatik Akış');
       return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
     }
     const isAuto = Boolean(this.hls.autoLevelEnabled);
     const cur = this.hls.currentLevel;
     const items = levels.map((l, idx) => {
-      const w = l.width || 0, h = l.height || 0;
+      const w = l.width || 0, h = l.height || 0, bw = l.bitrate || 0;
       const effW = Math.max(w, Math.round(h * 16 / 9));
-      const tag = effW >= 3200 ? '4K UHD (2160p)' : effW >= 1800 ? '1080p Full HD' : effW >= 1200 ? '720p HD' : `${h || 720}p`;
-      return { id: idx, label: `🎬 ${tag}${w && h ? ` (${w}×${h})` : ''}`, active: !isAuto && cur === idx };
+      const tag = effW >= 3200 ? '4K Ultra HD (2160p)' : effW >= 2400 ? '2K QHD (1440p)' : effW >= 1800 ? (bw >= 5800000 ? '1080p BluRay HQ' : '1080p Full HD') : effW >= 1200 ? '720p HD' : `${h || 720}p`;
+      const mbps = bw >= 500000 ? ` · ${(bw / 1000000).toFixed(1)} Mbps` : '';
+      return { id: idx, label: `${effW >= 3200 ? '💎' : '🎬'} ${tag}${w && h ? ` (${w}×${h})` : ''}${mbps}`, active: !isAuto && cur === idx };
     });
-    items.push({ id: -1, label: '⚡ Otomatik (En Yüksek HD)', active: isAuto });
+    items.push({ id: -1, label: '⚡ Otomatik (4K / En Yüksek HD)', active: isAuto });
     return items;
   }
   setQualityLevel(idx) {

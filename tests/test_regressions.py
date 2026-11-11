@@ -244,9 +244,10 @@ class RegressionTests(unittest.TestCase):
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
         self.assertIn("fragLoadingTimeOut: 28000", html5_js)
         self.assertIn("this.hls.autoLevelCapping = chosenCap", html5_js)
+        self.assertIn("abrEwmaDefaultEstimate: isSlowNet ?", html5_js)
         self.assertNotIn("this.hls.loadLevel = bestIdx", html5_js)
         srv_py = (root / "server.py").read_text(encoding="utf-8")
-        self.assertIn("non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]", srv_py)
+        self.assertNotIn("non_4k = [v for v in variant_pairs", srv_py)
 
     def test_multi_device_creator_role_and_exact_frame_sync(self):
         room = rooms.new_room(
@@ -900,9 +901,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261111_v195 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261111_v196 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261111_v195", index_html)
+        self.assertIn("20261111_v196", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2529,7 +2530,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261111_v195", sw_js)
+        self.assertIn("v20261111_v196", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2582,12 +2583,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261111_v195', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261111_v196', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261111_v195', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261111_v196', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261111_v195')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261111_v196')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3196,8 +3197,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261111_v195", index_html)
-        self.assertIn("20261111_v195", sw_js)
+        self.assertIn("20261111_v196", index_html)
+        self.assertIn("20261111_v196", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3439,7 +3440,7 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         root = _pl.Path(__file__).resolve().parent.parent
         app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
-        self.assertEqual(app_ver.get("version"), "20261111_v195")
+        self.assertEqual(app_ver.get("version"), "20261111_v196")
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
@@ -3467,6 +3468,109 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("_fsPauseBroadcastTimer", mesh_js)
         self.assertIn("if (hiddenNow || ad?.isPiP?.() || ad?._bgAudioActive)", mesh_js)
         self.assertIn("ev?.persisted", rt_js)
+
+    def test_v196_4k_uhd_streams_hybrid_audio_and_real_catalog_totals(self):
+        import base64 as _b64
+        import pathlib as _pl
+        from unittest.mock import patch
+        import social_engine
+
+        root = _pl.Path(__file__).resolve().parent.parent
+
+        # 1. rave_stream_manifest preserves 4K UHD (3840x2160 @ 23.33 Mbps) & 1080p BluRay (8.13 Mbps) and injects hybrid TR audio
+        master_4k = (
+            "#EXTM3U\n"
+            "#EXT-X-VERSION:6\n"
+            '#EXT-X-STREAM-INF:BANDWIDTH=23331206,RESOLUTION=3840x2160,CODECS="hvc1.2.4.L153.B0,mp4a.40.2"\n'
+            "https://lightspeed.st/s1/2160p/index.m3u8\n"
+            '#EXT-X-STREAM-INF:BANDWIDTH=8129489,RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2"\n'
+            "https://lightspeed.st/s1/1080p/index.m3u8\n"
+        )
+        sid_4k = _b64.urlsafe_b64encode(b"https://lightspeed.st/s1/master.m3u8").decode("ascii").rstrip("=")
+        tr_aud_sid = _b64.urlsafe_b64encode(b"https://play2.pilavyerplay.top/hls/tr_audio.m3u8").decode("ascii").rstrip("=")
+
+        class _FakeResp:
+            def __init__(self, payload: bytes, final_url: str):
+                self._buf = payload
+                self.url = final_url
+
+            def read(self, n: int = -1) -> bytes:
+                return self._buf if n < 0 else self._buf[:n]
+
+            def geturl(self) -> str:
+                return self.url
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        with patch.object(server, "public_http_url", return_value=True), patch.object(
+            server, "_public_open", return_value=_FakeResp(master_4k.encode("utf-8"), "https://lightspeed.st/s1/master.m3u8")
+        ):
+            r_m = self.client.get(
+                f"/api/rave/stream?provider=cinema&tmdbId=693134&s=1&e=1&sid={sid_4k}&ref=cj&tr_aud_sid={tr_aud_sid}&ext=.m3u8"
+            )
+        self.assertEqual(r_m.status_code, 200)
+        m_txt = r_m.text
+        self.assertIn("RESOLUTION=3840x2160", m_txt)
+        self.assertIn("BANDWIDTH=23331206", m_txt)
+        self.assertIn("BANDWIDTH=8129489", m_txt)
+        self.assertIn('TYPE=AUDIO', m_txt)
+        self.assertIn('LANGUAGE="tr"', m_txt)
+
+        # 2. _proxy_chunk_sync omits upstream Range header for lightspeed.st while slicing 206 locally
+        srv_py = (root / "server.py").read_text(encoding="utf-8")
+        self.assertIn('no_up_rng = ("lightspeed.st" in url or "bright67." in url)', srv_py)
+
+        # 3. _build_audio_tracks + social_engine.rank_servers_by_health promote 4K UHD ahead of confirmed 720p-only TR dub
+        u_4k = "https://lightspeed.st/got/s04e10/master.m3u8"
+        u_tr720 = "https://play2.pilavyerplay.top/got/s04e10_720p/master.m3u8"
+        u_tr1080 = "https://rapidvid.org/got/s04e10_1080p/master.m3u8"
+        old_4k = server._STREAM_RES_HINT.get(u_4k)
+        old_720 = server._STREAM_RES_HINT.get(u_tr720)
+        old_1080 = server._STREAM_RES_HINT.get(u_tr1080)
+        try:
+            server._STREAM_RES_HINT[u_4k] = 3840
+            server._STREAM_RES_HINT[u_tr720] = 1280
+            server._STREAM_RES_HINT[u_tr1080] = 1920
+            with patch.object(server, "_get_tmdb_meta_sync", return_value={"origLang": "en"}):
+                tracks_720 = server._build_audio_tracks(u_4k, [(u_tr720, "hls_pv_tr"), (u_4k, "hls_cj_4k")], "max", "1399", 4, 10, {"prov": "max"}, "tv")
+            self.assertGreaterEqual(len(tracks_720), 2)
+            self.assertEqual(tracks_720[0]["id"], "orig")
+            self.assertEqual(tracks_720[0]["lang"], "orig")
+            self.assertEqual(tracks_720[1]["lang"], "tr")
+            ranked_720 = social_engine.rank_servers_by_health({
+                "ok": True,
+                "tmdbId": "1399",
+                "url": tracks_720[0]["url"],
+                "servers": [
+                    {"id": "cj-1", "label": "💎 CineJoy 4K Ultra HD", "url": tracks_720[0]["url"], "type": "hls"},
+                    {"id": "pv-2", "label": "🇹🇷 Pilavyer TR (720p HD)", "url": tracks_720[1]["url"], "type": "hls"},
+                ],
+                "audioTracks": tracks_720,
+            })
+            self.assertEqual(ranked_720["url"], tracks_720[0]["url"])
+
+            # When 1080p TR Dub exists, TR Dub stays #1
+            with patch.object(server, "_get_tmdb_meta_sync", return_value={"origLang": "en"}):
+                tracks_1080 = server._build_audio_tracks(u_tr1080, [(u_tr1080, "hls_fhd_tr"), (u_4k, "hls_cj_4k")], "max", "1399", 4, 10, {"prov": "max"}, "tv")
+            self.assertEqual(tracks_1080[0]["lang"], "tr")
+        finally:
+            for k_u, v_old in ((u_4k, old_4k), (u_tr720, old_720), (u_tr1080, old_1080)):
+                if v_old is None:
+                    server._STREAM_RES_HINT.pop(k_u, None)
+                else:
+                    server._STREAM_RES_HINT[k_u] = v_old
+
+        # 4. Era-sharded TMDB catalog totals bypass single-query 20,001 Elasticsearch ceiling
+        server._REAL_TMDB_TOTALS_CACHE.pop("test_shard||", None)
+        with patch.object(server, "_http_json", return_value={"total_results": 15000}):
+            tot_tv_s, tot_mv_s = server._get_real_tmdb_totals_sync("test_shard", "", "")
+        self.assertEqual(tot_mv_s, 8 * 15000)
+        self.assertEqual(tot_tv_s, 5 * 15000)
+        self.assertGreater(tot_tv_s + tot_mv_s, 150000)
 
 
 if __name__ == '__main__':

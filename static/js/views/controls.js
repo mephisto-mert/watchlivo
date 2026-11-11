@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v195';
-import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v195';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v195';
-import { getProvider } from '../providers.js?v=20261111_v195';
-import { expectedPosition } from '../sync.js?v=20261111_v195';
-import { thumbFor } from './lobby.js?v=20261111_v195';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v195';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v195';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v195';
-import { avatar } from '../profile.js?v=20261111_v195';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v196';
+import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v196';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v196';
+import { getProvider } from '../providers.js?v=20261111_v196';
+import { expectedPosition } from '../sync.js?v=20261111_v196';
+import { thumbFor } from './lobby.js?v=20261111_v196';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v196';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v196';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v196';
+import { avatar } from '../profile.js?v=20261111_v196';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2924,7 +2924,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261111_v195',
+            v: '20261111_v196',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
@@ -2979,11 +2979,13 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
-    if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '720p') {
+    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
+    if (qualityBadge.textContent === '4K') {
+      artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|1080p HD|720p HD)/, '4K Ultra HD');
+    } else if (qualityBadge.textContent === '1080p') {
+      artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|720p HD)/, '1080p HD');
+    } else if (qualityBadge.textContent === '720p' && artist.textContent.includes('1080p HD')) {
       artist.textContent = artist.textContent.replace('1080p HD', '720p HD');
-    } else if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '4K') {
-      artist.textContent = artist.textContent.replace('1080p HD', '4K UHD');
     }
     const curRate = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
     speedBtn.querySelector('span').textContent = `${curRate}x`;

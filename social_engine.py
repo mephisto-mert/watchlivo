@@ -2829,9 +2829,11 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         total = ok_n + fail_n
         rel_score = ((ok_n + 2.0) / (total + 3.0)) - (min(lat_ms, 4000.0) / 20000.0)
         has_tr_lbl = any(k in lbl_low for k in ("tr dublaj", "türkçe dublaj", "dual"))
-        tr_srv_bonus = 0.35 if (has_tr_lbl and not (fail_n >= 3 and ok_n == 0)) else 0.0
+        is_720_lbl = "720p" in lbl_low and "1080p" not in lbl_low and "4k" not in lbl_low
+        uhd_srv_bonus = 0.32 if any(k in lbl_low for k in ("4k", "2160p")) else (0.14 if "bluray" in lbl_low else (0.06 if "1080p" in lbl_low else (-0.14 if is_720_lbl else 0.0)))
+        tr_srv_bonus = (0.35 if not is_720_lbl else 0.16) if (has_tr_lbl and not (fail_n >= 3 and ok_n == 0)) else 0.0
         tie_bonus = max(0.0, (10 - idx) * 0.025)
-        final_score = round(rel_score + tr_srv_bonus + tie_bonus, 4)
+        final_score = round(rel_score + tr_srv_bonus + uhd_srv_bonus + tie_bonus, 4)
         score_by_bucket[bkt] = max(score_by_bucket.get(bkt, -999.0), final_score)
         srv_copy = dict(srv)
         srv_copy["healthBucket"] = bkt
@@ -2852,10 +2854,13 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
         if (t.get("id") == "tr-dub" or str(t.get("id") or "").startswith("tr-dub-") or t.get("audioLang") == "tr" or t.get("lang") == "tr")
         and _extract_srv_bucket(t.get("url", ""), t.get("label", "")) not in dead_buckets
     ]
-    if primary_tr_tracks:
+    aud0 = aud_tracks[0] if aud_tracks else None
+    aud0_lbl = str((aud0 or {}).get("label") or "").lower()
+    tr_all_720 = bool(primary_tr_tracks) and all("720p" in str(t.get("label") or "").lower() for t in primary_tr_tracks)
+    aud0_is_hd_orig = bool(aud0) and aud0 not in primary_tr_tracks and any(k in aud0_lbl for k in ("4k", "2160p", "bluray", "1080p"))
+    if primary_tr_tracks and not (tr_all_720 and aud0_is_hd_orig):
         best_url = primary_tr_tracks[0]["url"]
     elif aud_tracks:
-        aud0 = aud_tracks[0]
         aud0_bkt = _extract_srv_bucket(aud0["url"], aud0.get("label", ""))
         if aud0_bkt not in dead_buckets and score_by_bucket.get(aud0_bkt, 0.0) >= (top_score - 0.08):
             best_url = aud0["url"]

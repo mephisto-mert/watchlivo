@@ -1,16 +1,16 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261111_v195';
-import { api, qs } from '../api.js?v=20261111_v195';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261111_v195';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261111_v195';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261111_v195';
-import { profileSetup } from '../profile.js?v=20261111_v195';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v195';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261111_v196';
+import { api, qs } from '../api.js?v=20261111_v196';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261111_v196';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261111_v196';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261111_v196';
+import { profileSetup } from '../profile.js?v=20261111_v196';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v196';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261111_v195';
+} from '../store.js?v=20261111_v196';
 
 const _resolveMemCache = new Map();
 
