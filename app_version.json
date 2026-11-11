@@ -10,6 +10,6 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-11T14:20:00.000000+03:00",
-  "changelog": "v198: Fix Dune (2021) and title resolution against Asylum mockbusters (Planet Dune -> authentic Denis Villeneuve Dune with TR Dub & Sub), update DiziLife active cluster domain to dizi85, and guard vault against mismatched mockbusters.",
-  "version": "20261111_v198"
+  "changelog": "v199: Disallow legacy 1984 Dune from matching 2021 Dune by hardening _page_year_or_imdb_mismatch regex to inspect header spans, metadata, and JSON-LD schema, prioritizing specific localized slugs and guaranteeing authentic Denis Villeneuve stream with dual audio & sync subs.",
+  "version": "20261111_v199"
 }

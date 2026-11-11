@@ -3966,11 +3966,19 @@ def _page_year_or_imdb_mismatch(html_txt: str, mtype: str, target_year: str = ""
     if ty_s.isdigit():
         ty = int(ty_s)
         ym = re.search(
-            r'<span class="year">((?:19|20)\d{2})</span>|(?:Yapım Yılı|Yapım|Yıl|Release|releaseDate)\s*[:<"\'][^0-9]{0,24}((?:19|20)\d{2})|<title>[^<]*\(((?:19|20)\d{2})\)',
+            r'<span class="year">((?:19|20)\d{2})</span>|(?:Yapım Yılı|Yapım|Yıl|Release|releaseDate|datePublished)\s*[:<"\'][^0-9]{0,24}((?:19|20)\d{2})|<title>[^<]*\(((?:19|20)\d{2})\)',
             html_txt,
             re.I,
         )
         py_s = next((g for g in (ym.groups() if ym else []) if g), "") if ym else ""
+        if not py_s:
+            header_spans = re.findall(r'<span>\s*((?:19|20)\d{2})\s*</span>', html_txt[:5000])
+            if header_spans:
+                py_s = header_spans[0]
+        if not py_s:
+            km = re.search(r'<meta\s+name=["\']keywords["\']\s+content=["\'][^"\']*?\b((?:19|20)\d{2})\b', html_txt[:5000], re.I)
+            if km:
+                py_s = km.group(1)
         if py_s.isdigit():
             py = int(py_s)
             if mtype == "movie":
@@ -4294,13 +4302,15 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
     direct_dl = re.sub(r"https?://dizi\d*\.(?:life|plus)", "https://dizi85.life", source_url) if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
     slug_steps = []
     seg_dl = "dizi" if mtype == "tv" else "film"
-    for x_sl in ([title, disp_title] + list(extra_titles or [])):
+    # Prioritize localized display title and titles with more specific descriptors
+    raw_slug_cands = sorted(list(dict.fromkeys([disp_title, title] + list(extra_titles or []))), key=lambda s: len(s or ""), reverse=True)
+    for x_sl in raw_slug_cands:
         sl_dl = _to_ascii_slug(_clean_query_title(x_sl))
         if sl_dl and len(sl_dl) >= 3:
             cand_dl_u = f"https://dizi85.life/{seg_dl}/{sl_dl}"
             if ("__SLUG__", cand_dl_u) not in slug_steps:
                 slug_steps.append(("__SLUG__", cand_dl_u))
-        if len(slug_steps) >= 2:
+        if len(slug_steps) >= 3:
             break
     steps = ([("__DIRECT__", direct_dl)] if direct_dl else []) + slug_steps + [("__SEARCH__", q) for q in list(dict.fromkeys(q_cands))[:3]]
     for mode, val in steps:
