@@ -3909,6 +3909,19 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
         "jurassic school": ("jurassic park", "jurassic world"),
         "jurassic predator": ("jurassic park", "jurassic world"),
         "ape vs monster": ("godzilla vs kong", "king kong"),
+        "fast and fierce": ("fast and furious", "hizli ve ofkeli"),
+        "the da vinci treasure": ("da vinci",),
+        "snakes on a train": ("snakes on a plane",),
+        "triassic world": ("jurassic world", "jurassic park"),
+        "triassic hunt": ("jurassic world", "jurassic park"),
+        "triassic attack": ("jurassic world", "jurassic park"),
+        "tomb invader": ("tomb raider",),
+        "san andreas mega quake": ("san andreas",),
+        "megalodon the frenzy": ("the meg", "meg"),
+        "avengers grimm": ("avengers", "yenilmezler"),
+        "battle star": ("star wars", "yildiz savaslari"),
+        "aladdin and the death lamp": ("aladdin",),
+        "thor god of thunder": ("thor",),
     }
     for mb_pattern, protected_targets in _MOCKBUSTER_DISALLOWED.items():
         if mb_pattern in cn:
@@ -3917,6 +3930,12 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
     if "dune" in cn and ("planet" in cn or ("gezegeni" in cn and "col" not in cn)):
         if not any("planet" in vn or ("gezegeni" in vn and "col" not in vn) for vn in vn_set):
             return False
+
+    # Extract 4-digit year from cand_title if cand_year is absent
+    if not cand_year:
+        _ym_in_title = re.search(r"\b((?:19|20)\d{2})\b", cand_title)
+        if _ym_in_title:
+            cand_year = _ym_in_title.group(1)
 
     ty = str(target_year or "").strip()[:4]
     cy = str(cand_year or "").strip()[:4]
