@@ -30,6 +30,8 @@ const BYPASS_WORKER_HOSTS = [
   "dragonballzfans",
   "molystream.org",
   "irtau1.",
+  "lightspeed.st",
+  "bright67.",
 ];
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
