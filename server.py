@@ -1778,7 +1778,7 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "", prov
                     "id": cid, "tmdbId": "", "mediaType": "movie",
                     "title": tr_t, "originalTitle": orig_t, "year": year,
                     "rating": 7.9, "voteCount": 1450, "categories": ["movies", "trend"],
-                    "genreLabel": "🇹🇷 Dublaj & Altyazı · 1080p", "sourceBadge": "🎬 FullHDFilm 4K",
+                    "genreLabel": "🇹🇷 Dublaj & Altyazı · 1080p", "sourceBadge": "🎬 FullHD 1080p",
                     "poster": poster, "backdrop": poster, "officialUrl": href,
                 })
         except Exception:
@@ -1857,7 +1857,7 @@ def _scrape_hdfc_catalog_sync(cat: str = "all", page: int = 1, q: str = "", prov
                     "id": cid, "tmdbId": "", "mediaType": "movie",
                     "title": tr_t, "originalTitle": orig_t, "year": year,
                     "rating": 7.9, "voteCount": 1450, "categories": cats,
-                    "genreLabel": f"🇹🇷 {lang_tag} · 1080p", "sourceBadge": "🎬 FullHDFilm 4K",
+                    "genreLabel": f"🇹🇷 {lang_tag} · 1080p", "sourceBadge": "🎬 FullHD 1080p",
                     "poster": poster, "backdrop": poster, "officialUrl": href,
                 })
         except Exception:
@@ -7961,7 +7961,7 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     for ex_it in _EXTRA_CURATED_CATALOG:
         _add_cand(ex_it, ex_it.get("sourceBadge") or "🎬 4K Seri Arşivi")
 
-    for src_key, badge in (("fhd", "🎬 FullHDFilm 4K"), ("hfnl", "🎬 HDFilmCehennemi+"), ("dbx", "📺 Dizibox HD"), ("ac", "⛩️ Animetrix Fansub")):
+    for src_key, badge in (("fhd", "🎬 FullHD 1080p"), ("hfnl", "🎬 HDFilmCehennemi+"), ("dbx", "📺 Dizibox HD"), ("ac", "⛩️ Animetrix Fansub")):
         src_list = list(v_cat.get(src_key) or [])
         if len(src_list) > 250:
             src_list = random.sample(src_list, 250)
@@ -7971,7 +7971,7 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
     for _, c_entry in list(_CATALOG_MEM_CACHE.items())[:8]:
         if isinstance(c_entry, tuple) and len(c_entry) == 2 and isinstance(c_entry[1], dict):
             for c_it in (c_entry[1].get("items") or [])[:40]:
-                _add_cand(c_it, "🔥 4K Sinema Arşivi")
+                _add_cand(c_it, "🔥 FullHD Sinema Arşivi")
 
     try:
         rnd_pg = random.randint(1, 15)
@@ -7984,7 +7984,7 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
             mv_u = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR&primary_release_date.lte=2026-04-30&vote_count.gte=80&sort_by=popularity.desc&page={rnd_pg}"
             for r in (_http_json(mv_u, timeout=2.0).get("results") or [])[:16]:
                 if r.get("poster_path"):
-                    _add_cand(_tmdb_item(r, "movie"), "🎬 Sinema+ 4K")
+                    _add_cand(_tmdb_item(r, "movie"), "🎬 Sinema+ FullHD")
     except Exception:
         pass
 
@@ -8236,18 +8236,20 @@ async def rave_new_releases(request: Request):
         vc_i = int(it.get("voteCount") or 0)
         yr_s = str(it.get("year") or "")
         has_v = _has_vault_stream(it) > 0 or cid_s.startswith(("fhd-", "hfnl-", "dbx-", "hdfc-", "dl-", "ac-", "dp-"))
+        s_url_l = str(it.get("streamUrl") or "").lower()
+        has_verified_4k = ("2160" in s_url_l or "3840x" in s_url_l)
         if it.get("customRelease") or it.get("streamUrl"):
             it["streamReady"] = True
-            it["sourceBadge"] = "✨ Yeni Eklendi · 4K Hazır"
+            it["sourceBadge"] = "✨ Yeni Eklendi · 4K Hazır" if has_verified_4k else "✨ Yeni Eklendi · 1080p HD"
         elif has_v:
             it["streamReady"] = True
-            it["sourceBadge"] = "✅ 4K/1080p Akış Hazır"
+            it["sourceBadge"] = "✅ 1080p FullHD Hazır"
         elif it.get("mediaType") == "tv":
             it["streamReady"] = True
             it["sourceBadge"] = "📺 Yeni Bölüm & Sezon Aktif"
         elif it.get("origLang") == "tr" or yr_s < "2026" or vc_i >= 120:
             it["streamReady"] = True
-            it["sourceBadge"] = "✅ 1080p/4K Akış Hazır"
+            it["sourceBadge"] = "✅ 1080p FullHD Hazır"
         else:
             it["streamReady"] = False
             it["sourceBadge"] = "🎟️ Sinemalarda (Yakında Akışta)"
@@ -10508,6 +10510,10 @@ async def rave_stream_manifest(request: Request):
                             bm = re.search(r"BANDWIDTH=(\d+)", inf_l, re.I)
                             if bm:
                                 bw = int(bm.group(1))
+                                if 0 < eff_w < 2600 and bw > 18000000:
+                                    # Sanitize spoofed 80-95 Mbps BANDWIDTH tags on 1080p/720p CDNs so AVPlayer/hls.js never drop to 720p
+                                    bw = 5400000 if eff_w >= 1700 else (2600000 if eff_w >= 1150 else 1400000)
+                                    inf_l = re.sub(r"BANDWIDTH=\d+", f"BANDWIDTH={bw}", inf_l, flags=re.I)
                             else:
                                 bw = 16000000 if eff_w >= 3000 else (5200000 if eff_w >= 1880 else (2600000 if eff_w >= 1150 else 1400000))
                                 inf_l = f"{inf_l},BANDWIDTH={bw}"
@@ -11763,7 +11769,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
-        "version": "20261111_v206",
+        "version": "20261112_v207",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),

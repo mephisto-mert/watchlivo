@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v206';
-import { expectedPosition } from '../sync.js?v=20261111_v206';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v206';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v206';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v206';
+import { SubtitleDubController } from './subtitles.js?v=20261112_v207';
+import { expectedPosition } from '../sync.js?v=20261112_v207';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261112_v207';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261112_v207';
+import { ensureHlsJs } from './hls-loader.js?v=20261112_v207';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -800,6 +800,7 @@ export class Html5Adapter {
     this._canAppleMseHls = false;
     this.useNativeHls = useNativeHls;
     this._nativeHlsVariants = [];
+    this._knownAvailableResolutions = null;
     this._selectedNativeVariantIdx = -1;
     this._nativeMasterUrl = '';
     const withProxySegs = (u) => {
@@ -1015,15 +1016,21 @@ export class Html5Adapter {
       if (isApple && this.baseVolume > 0 && this.baseVolume < 99.5) {
         this._ensureIosPipStandby?.(nextUrl);
       }
+      this._knownAvailableResolutions = new Set(['direct']);
       v.src = nextUrl;
       v.load();
-      v.addEventListener('loadedmetadata', restorePosOnLoad, { once: true });
+      v.addEventListener('loadedmetadata', () => {
+        restorePosOnLoad();
+        this.events.onTracksChanged?.();
+      }, { once: true });
       if (this.wantPlaying) this.tryPlay();
     };
     this._loadCandidateUrl = loadCandidateUrl;
 
     const attachHlsJs = (srcUrl, doneCb, customStart = null) => {
       try { this.hls?.destroy(); } catch (e) { /* ignore */ }
+      this._nativeMasterUrl = srcUrl;
+      this._fetchNativeHlsVariants(srcUrl);
       if (isApple) {
         v.removeAttribute('x-webkit-airplay');
         try { v.disableRemotePlayback = true; } catch (_) {}
@@ -1091,7 +1098,7 @@ export class Html5Adapter {
             if (codecOk) {
               maxAllowedIdx = idx;
             }
-            const isMobileFullHd = codecOk && ((w <= 2048 && h <= 1152 && bw <= 9800000) || (w === 0 && h === 0 && bw <= 6500000));
+            const isMobileFullHd = codecOk && ((w <= 2048 && h <= 1152 && (bw <= 15000000 || bw > 25000000)) || (w === 0 && h === 0 && bw <= 8500000));
             if (isMobileFullHd) {
               maxMobileHdIdx = idx;
             }
@@ -2287,20 +2294,49 @@ export class Html5Adapter {
   }
 
   getQualityLevels() {
-    const curLocked = this._lockedQuality || localStorage.getItem('watchlivo_quality_lock') || '1080';
+    const rawLocked = (this._lockedQuality || localStorage.getItem('watchlivo_quality_lock') || '1080').toLowerCase();
+    const curLocked = rawLocked === '4k' ? '2160' : (rawLocked === '2k' ? '1440' : rawLocked);
     const vw = this.video?.videoWidth || 0;
     const vh = this.video?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    const activeResLabel = effW >= 3200 ? '4K' : effW >= 2400 ? '1440p' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : '1080p');
+    const activeResLabel = effW >= 3200 ? '4K' : effW >= 2400 ? '1440p' : effW >= 1700 ? '1080p' : effW >= 1100 ? '720p' : effW >= 750 ? '480p' : (vh > 0 ? `${vh}p` : '1080p');
+
+    const avail = this._knownAvailableResolutions;
+    if (avail && avail.has('direct')) {
+      return [
+        { id: 'auto', label: `🎬 ${activeResLabel} (Doğrudan MP4 Kaynak)`, active: true }
+      ];
+    }
+
+    const allTiers = [
+      { id: '2160', num: 2160, label: '💎 4K Ultra HD (2160p)' },
+      { id: '1440', num: 1440, label: '🎬 2K QHD (1440p)' },
+      { id: '1080', num: 1080, label: '🎬 1080p Full HD' },
+      { id: '720', num: 720, label: '🎬 720p HD' },
+      { id: '480', num: 480, label: '📱 480p SD' },
+      { id: '360', num: 360, label: '📱 360p' }
+    ];
+
+    // YouTube-honest filter: only expose resolution tiers genuinely present in upstream manifest
+    const realTiers = (avail && avail.size > 0)
+      ? allTiers.filter((t) => avail.has(t.id))
+      : allTiers.filter((t) => t.num <= 1080);
+    const finalTiers = realTiers.length > 0 ? realTiers : [allTiers[2]];
+
+    let activeTierId = curLocked;
+    if (curLocked !== 'auto' && !finalTiers.some((t) => t.id === curLocked)) {
+      const wantN = parseInt(curLocked, 10) || 1080;
+      const best = finalTiers.find((t) => t.num <= wantN) || finalTiers[0];
+      activeTierId = best.id;
+    }
 
     return [
-      { id: 'auto', label: `⚡ Otomatik (Önerilen · ${activeResLabel})`, active: curLocked === 'auto' },
-      { id: '2160', label: '💎 4K Ultra HD (2160p)', active: curLocked === '2160' || curLocked === '4k' },
-      { id: '1440', label: '🎬 2K QHD (1440p)', active: curLocked === '1440' || curLocked === '2k' },
-      { id: '1080', label: '🎬 1080p Full HD', active: curLocked === '1080' },
-      { id: '720', label: '🎬 720p HD', active: curLocked === '720' },
-      { id: '480', label: '📱 480p SD', active: curLocked === '480' },
-      { id: '360', label: '📱 360p', active: curLocked === '360' }
+      { id: 'auto', label: `⚡ Otomatik (Aktif: ${activeResLabel})`, active: activeTierId === 'auto' },
+      ...finalTiers.map((t) => ({
+        id: t.id,
+        label: finalTiers.length === 1 ? `${t.label} (Tek Kalite)` : t.label,
+        active: activeTierId === t.id
+      }))
     ];
   }
 

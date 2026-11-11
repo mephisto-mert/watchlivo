@@ -11,7 +11,7 @@
   "autoInstall": true,
   "publishedAt": "2026-11-11T23:45:00.000000+03:00",
   "changelog": "v206: High-Throughput Keep-Alive Chunk Proxying & Intelligent Segment Prefetching with YouTube-Style Quality Locking Engine.",
-  "version": "20261111_v206",
+  "version": "20261112_v207",
   "build": 1,
   "description": "YouTube-Style Persistent Quality Locking Engine with server-side &res= master playlist filtering"
 }

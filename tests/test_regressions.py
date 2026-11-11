@@ -349,7 +349,7 @@ class RegressionTests(unittest.TestCase):
         # fMP4 init-*.mp4 detection and MP4 box header detection before .cfd/ check
         self.assertIn('is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)', srv_py)
         self.assertIn('is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")', srv_py)
-        self.assertIn("variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 9999, v[1] if v[1] > 0 else 99999999))", srv_py)
+        self.assertIn("variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 0, v[1] if v[1] > 0 else 0), reverse=True)", srv_py)
         # Fresh catalog resolution preserves 0.0 start position
         room = rooms.new_room("test-v35-room", "Test V35", "public", "leader", "Tris", "u_tris", "")
         rooms.add_participant(room, "h_tris", {"username": "Tris", "userId": "u_tris", "_internalCreator": True}, "http")
@@ -901,9 +901,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261111_v206 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261112_v207 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261111_v206", index_html)
+        self.assertIn("20261112_v207", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2530,7 +2530,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261111_v206", sw_js)
+        self.assertIn("v20261112_v207", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2583,12 +2583,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261111_v206', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261112_v207', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261111_v206', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261112_v207', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261111_v206')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261112_v207')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3197,8 +3197,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261111_v206", index_html)
-        self.assertIn("20261111_v206", sw_js)
+        self.assertIn("20261112_v207", index_html)
+        self.assertIn("20261112_v207", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3440,7 +3440,7 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         root = _pl.Path(__file__).resolve().parent.parent
         app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
-        self.assertEqual(app_ver.get("version"), "20261111_v206")
+        self.assertEqual(app_ver.get("version"), "20261112_v207")
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
@@ -3571,6 +3571,22 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertEqual(tot_mv_s, 8 * 15000)
         self.assertEqual(tot_tv_s, 5 * 15000)
         self.assertGreater(tot_tv_s + tot_mv_s, 150000)
+
+    def test_v207_honest_youtube_quality_and_bandwidth_sanitization(self):
+        import pathlib
+        root = pathlib.Path(__file__).resolve().parent.parent
+        srv_py = (root / "server.py").read_text(encoding="utf-8")
+        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
+        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
+        # 1. No fake hardcoded 'FullHDFilm 4K' badges on 1080p-max sources
+        self.assertNotIn("🎬 FullHDFilm 4K", srv_py)
+        # 2. Spoofed >18 Mbps BANDWIDTH tags on <=1080p variants are sanitized
+        self.assertIn("if 0 < eff_w < 2600 and bw > 18000000:", srv_py)
+        # 3. html5.js filters quality menu strictly to available manifest resolutions
+        self.assertIn("allTiers.filter((t) => avail.has(t.id))", html5_js)
+        self.assertIn("Doğrudan MP4 Kaynak", html5_js)
+        # 4. controls.js qualityBadge displays actual decoded video frame pixels when playing
+        self.assertIn("if (vw > 0 && vh > 0)", controls_js)
 
 
 if __name__ == '__main__':

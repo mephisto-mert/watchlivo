@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v206';
-import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v206';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v206';
-import { getProvider } from '../providers.js?v=20261111_v206';
-import { expectedPosition } from '../sync.js?v=20261111_v206';
-import { thumbFor } from './lobby.js?v=20261111_v206';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v206';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v206';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v206';
-import { avatar } from '../profile.js?v=20261111_v206';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261112_v207';
+import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261112_v207';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261112_v207';
+import { getProvider } from '../providers.js?v=20261112_v207';
+import { expectedPosition } from '../sync.js?v=20261112_v207';
+import { thumbFor } from './lobby.js?v=20261112_v207';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261112_v207';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261112_v207';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261112_v207';
+import { avatar } from '../profile.js?v=20261112_v207';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2924,7 +2924,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261111_v206',
+            v: '20261112_v207',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))
@@ -2979,11 +2979,21 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    const lockedQ = host.adapter?._lockedQuality || localStorage.getItem('watchlivo_quality_lock');
-    if (lockedQ && lockedQ !== 'auto') {
-      qualityBadge.textContent = lockedQ === '2160' ? '4K' : (lockedQ === '1440' ? '2K' : `${lockedQ}p`);
+    const lockedQ = String(host.adapter?._lockedQuality || localStorage.getItem('watchlivo_quality_lock') || '').toLowerCase();
+    const availRes = host.adapter?._knownAvailableResolutions;
+    if (vw > 0 && vh > 0) {
+      // Honest ground-truth badge: always reflect actual decoded video frame pixels
+      qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1700 ? '1080p' : effW >= 1100 ? '720p' : effW >= 750 ? '480p' : `${vh}p`;
+    } else if (lockedQ && lockedQ !== 'auto') {
+      if ((lockedQ === '2160' || lockedQ === '4k') && (!availRes || !availRes.has('2160'))) {
+        qualityBadge.textContent = '1080p';
+      } else if ((lockedQ === '1440' || lockedQ === '2k') && (!availRes || !availRes.has('1440'))) {
+        qualityBadge.textContent = '1080p';
+      } else {
+        qualityBadge.textContent = (lockedQ === '2160' || lockedQ === '4k') ? '4K' : ((lockedQ === '1440' || lockedQ === '2k') ? '2K' : `${lockedQ}p`);
+      }
     } else {
-      qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : '1080p');
+      qualityBadge.textContent = '1080p';
     }
     if (qualityBadge.textContent === '4K') {
       artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|1080p HD|720p HD)/, '4K Ultra HD');

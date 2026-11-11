@@ -21,7 +21,7 @@ for p in set(all_files):
         new_content = content
         for old_ver in ("20261111_v205", "20261111_v197", "20261111_v196"):
             if old_ver in new_content:
-                new_content = new_content.replace(old_ver, "20261111_v206")
+                new_content = new_content.replace(old_ver, "20261112_v207")
         if new_content != content:
             with open(p, "w", encoding="utf-8") as f:
                 f.write(new_content)
