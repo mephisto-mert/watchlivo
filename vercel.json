@@ -24,6 +24,7 @@
           "security.py",
           "music_engine.py",
           "social_engine.py",
+          "catalog_api.py",
           "static/index.html",
           "static/desktop-auth.html",
           "static/sw.js",

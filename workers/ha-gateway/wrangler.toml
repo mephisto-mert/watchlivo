@@ -18,4 +18,4 @@ crons = ["*/10 * * * *"]
 [vars]
 SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
 STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
-FORCE_SECONDARY = "1"
+FORCE_SECONDARY = "0"

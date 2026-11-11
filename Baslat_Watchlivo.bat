@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul
-title Watchlivo Sunucu ve Masaüstü Başlatıcı
+title Watchlivo v196 Production Edge Daemon
 cd /d "%~dp0"
 
 if exist "static\Watchlivo.exe" (
@@ -10,10 +10,13 @@ if exist "static\Watchlivo.exe" (
     )
 )
 
-set "PY_EXE=python"
-if exist "C:\Users\pc\AppData\Local\Programs\Python\Python312\python.exe" (
-    set "PY_EXE=C:\Users\pc\AppData\Local\Programs\Python\Python312\python.exe"
+set "PY_EXE=python.exe"
+if exist "%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe" (
+    set "PY_EXE=%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe"
+) else if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" (
+    set "PY_EXE=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
 )
 
-echo [*] Watchlivo yerel sunucusu baslatiliyor (http://127.0.0.1:8000)...
-"%PY_EXE%" server.py
+echo [Watchlivo] Starting Production ASGI + Cloudflare HA Gateway Daemon...
+"%PY_EXE%" "%~dp0scripts\watchlivo_edge_daemon.py"
+pause

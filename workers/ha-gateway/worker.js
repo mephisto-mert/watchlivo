@@ -306,7 +306,49 @@ async function readBoundedBody(request, maxBytes) {
   return { buf: merged.buffer, overflowStream: null };
 }
 
-async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "render-eu-failover", ctx = null) {
+async function fetchPrimary(request, url, bodyBuf, env) {
+  const safePath = normalizeSafePath(url.pathname);
+  const clientIp = request.headers.get("CF-Connecting-IP") || "";
+  const primaryHeaders = buildForwardHeaders(
+    request.headers,
+    clientIp,
+    "watchlivo.online",
+    url.host,
+    env,
+    true
+  );
+  const primaryInit = {
+    method: request.method,
+    headers: primaryHeaders,
+    redirect: "manual",
+    signal: AbortSignal.timeout(originTimeoutMs(safePath)),
+  };
+  if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
+    primaryInit.body = bodyBuf;
+  }
+  const primaryResp = await fetch(request.url, primaryInit);
+  if (primaryResp.status === 101) {
+    return primaryResp;
+  }
+  const outHeaders = new Headers(primaryResp.headers);
+  outHeaders.set("X-Watchlivo-Origin", "vercel-primary");
+  const safePrimaryBody = NULL_BODY_STATUSES.has(primaryResp.status) || request.method === "HEAD" ? null : primaryResp.body;
+  return new Response(safePrimaryBody, {
+    status: primaryResp.status,
+    statusText: primaryResp.statusText,
+    headers: outHeaders,
+  });
+}
+
+async function safeFetchSecondary(
+  request,
+  url,
+  bodyBuf,
+  env,
+  originTag = "render-eu-failover",
+  ctx = null,
+  allowPrimaryFallback = true
+) {
   const isIdempotent = request.method === "GET" || request.method === "HEAD";
   const maxAttempts = isIdempotent ? 2 : 1;
   const cache = getEdgeCache();
@@ -316,13 +358,25 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
   const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
   const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
 
+  let sawExplicitSuspension = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const resp = await fetchSecondary(request, url, bodyBuf, env, originTag);
+      const renderRouting = (resp.headers.get("x-render-routing") || "").toLowerCase();
+      if (renderRouting.includes("suspend") || resp.status === 530) {
+        sawExplicitSuspension = true;
+        resp.body?.cancel?.();
+        break;
+      }
       if (resp.status >= 502 && resp.status <= 504 && attempt + 1 < maxAttempts) {
         resp.body?.cancel?.();
         await new Promise((r) => setTimeout(r, 250));
         continue;
+      }
+      if (shouldFailoverResponse(resp)) {
+        if (resp.status === 503) sawExplicitSuspension = true;
+        resp.body?.cancel?.();
+        break;
       }
       if (cache && request.method === "GET" && resp.status === 200 && canCloneForEdgeCache(resp)) {
         try {
@@ -356,9 +410,25 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
     }
   }
 
-  if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
-    secondaryCircuitOpenUntil = Date.now() + 8_000;
+  if (sawExplicitSuspension) {
+    secondaryCircuitOpenUntil = Date.now() + 60_000;
+  } else if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
+    secondaryCircuitOpenUntil = Date.now() + 15_000;
   }
+
+  if (allowPrimaryFallback && !url.hostname.endsWith(".workers.dev") && Date.now() >= primaryCircuitOpenUntil) {
+    try {
+      const primaryFallbackResp = await fetchPrimary(request, url, bodyBuf, env);
+      if (!shouldFailoverResponse(primaryFallbackResp)) {
+        return primaryFallbackResp;
+      }
+      primaryFallbackResp.body?.cancel?.();
+      primaryCircuitOpenUntil = Date.now() + 60_000;
+    } catch {
+      primaryCircuitOpenUntil = Date.now() + 60_000;
+    }
+  }
+
   if (cache && isIdempotent) {
     try {
       const fallbackKey = staticCacheKey || rootCacheKey;
@@ -395,7 +465,7 @@ export default {
         const adminOk = isAdminEdge(request, env);
         const statusPayload = {
           ok: true,
-          gateway: "watchlivo-ha-gateway-v195",
+          gateway: "watchlivo-ha-gateway-v196",
           primaryCircuitOpen: Date.now() < primaryCircuitOpenUntil,
           secondaryCircuitOpen: Date.now() < secondaryCircuitOpenUntil,
           hasStreamBinding: Boolean(env.STREAM_PROXY),
@@ -603,27 +673,24 @@ export default {
         safePath.startsWith("/uploads/");
 
       let alreadyTriedSecondary = false;
-      if (prefersStatefulOrigin && (isStreamOrResolveRoute || Date.now() >= secondaryCircuitOpenUntil)) {
+      if (prefersStatefulOrigin && Date.now() >= secondaryCircuitOpenUntil) {
         alreadyTriedSecondary = true;
         try {
           const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
           if (!shouldFailoverResponse(statefulResp)) {
             return statefulResp;
           }
+          const renderRouting = (statefulResp.headers.get("x-render-routing") || "").toLowerCase();
+          const isExplicitlyDown =
+            renderRouting.includes("suspend") || statefulResp.status === 503 || statefulResp.status === 530;
           statefulResp.body?.cancel?.();
-          if (!isStreamOrResolveRoute) {
-            secondaryCircuitOpenUntil = Date.now() + 8_000;
+          if (isExplicitlyDown) {
+            secondaryCircuitOpenUntil = Date.now() + 60_000;
+          } else if (!isStreamOrResolveRoute) {
+            secondaryCircuitOpenUntil = Date.now() + 15_000;
           }
         } catch {
-          if (!isStreamOrResolveRoute) {
-            secondaryCircuitOpenUntil = Date.now() + 8_000;
-          }
-        }
-        if (safePath === "/api/upload" || safePath.startsWith("/uploads/")) {
-          return new Response(JSON.stringify({ ok: false, error: "Yükleme servisi geçici olarak meşgul." }), {
-            status: 503,
-            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
-          });
+          secondaryCircuitOpenUntil = Date.now() + 15_000;
         }
       }
 
@@ -639,37 +706,19 @@ export default {
         env.FORCE_SECONDARY === "1" ||
         (Date.now() < primaryCircuitOpenUntil && Date.now() >= secondaryCircuitOpenUntil)
       ) {
-        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx, true);
       }
 
-      // 7. Try Primary (Vercel via Cloudflare Zone DNS -> 216.198.79.1), failover to Render on pause/5xx
+      // 7. Try Primary (Vercel via Cloudflare Zone DNS -> 216.198.79.1), failover to Secondary on pause/5xx
       let primaryResp = null;
       try {
-        const clientIp = request.headers.get("CF-Connecting-IP") || "";
-        const primaryHeaders = buildForwardHeaders(
-          request.headers,
-          clientIp,
-          "watchlivo.online",
-          url.host,
-          env,
-          true
-        );
-        const primaryInit = {
-          method: request.method,
-          headers: primaryHeaders,
-          redirect: "manual",
-          signal: AbortSignal.timeout(originTimeoutMs(safePath)),
-        };
-        if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
-          primaryInit.body = bodyBuf;
-        }
-        primaryResp = await fetch(request.url, primaryInit);
+        primaryResp = await fetchPrimary(request, url, bodyBuf, env);
       } catch (_err) {
         primaryCircuitOpenUntil = Date.now() + 60_000;
         if (alreadyTriedSecondary) {
           return buildGracefulOverloadResponse(request, url);
         }
-        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx, false);
       }
 
       if (shouldFailoverResponse(primaryResp)) {
@@ -678,20 +727,10 @@ export default {
         if (alreadyTriedSecondary) {
           return buildGracefulOverloadResponse(request, url);
         }
-        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx, false);
       }
 
-      if (primaryResp.status === 101) {
-        return primaryResp;
-      }
-      const outHeaders = new Headers(primaryResp.headers);
-      outHeaders.set("X-Watchlivo-Origin", "vercel-primary");
-      const safePrimaryBody = NULL_BODY_STATUSES.has(primaryResp.status) || request.method === "HEAD" ? null : primaryResp.body;
-      return new Response(safePrimaryBody, {
-        status: primaryResp.status,
-        statusText: primaryResp.statusText,
-        headers: outHeaders,
-      });
+      return primaryResp;
     } catch (_topErr) {
       return buildGracefulOverloadResponse(request, url);
     }
