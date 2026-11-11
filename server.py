@@ -88,6 +88,10 @@ _WORKER_BYPASS_HOSTS = (
     "molystream.org",
     "lightspeed.st",
     "bright67.",
+    "centralodsseyproud",
+    "5d06cffcf9563c",
+    "gamma.",
+    ".click",
 )
 
 
@@ -10124,7 +10128,7 @@ async def rave_stream_manifest(request: Request):
             cur_is_hx = (ref_mode == "hx") or ("dragonballzfans" in cur_target) or ("dragonballzfans" in target)
             is_master = "#EXT-X-STREAM-INF" in raw
             is_fmp4_playlist = (not is_master) and ("#EXT-X-MAP:" in raw)
-            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_dl or cur_is_vm or cur_is_hx or is_live_tv)
+            needs_seg_proxy = bool(proxy_segs or cur_is_dp or cur_is_dbx or cur_is_ve or cur_is_cj or cur_is_fp or cur_is_fhd or cur_is_hfnl or cur_is_pv or cur_is_vm or cur_is_hx or is_live_tv)
             ps_q = ("&proxy_segs=1" if needs_seg_proxy else "") + ("&aud=" + urllib.parse.quote(aud_pref) if aud_pref else "") + (f"&mtype={explicit_mtype}" if explicit_mtype else "")
             _manifest_host_ok: dict[tuple[str, str], bool] = {}
 

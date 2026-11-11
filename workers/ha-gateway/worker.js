@@ -32,6 +32,10 @@ const BYPASS_WORKER_HOSTS = [
   "irtau1.",
   "lightspeed.st",
   "bright67.",
+  "centralodsseyproud",
+  "5d06cffcf9563c",
+  "gamma.",
+  ".click",
 ];
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
@@ -530,9 +534,7 @@ export default {
               return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx);
             }
           }
-          const edgeBase = (env.STREAM_PROXY_ORIGIN || DEFAULT_STREAM_PROXY_ORIGIN).replace(/\/+$/, "");
-          const edgeUrl = buildSafeOriginUrl(edgeBase, safePath, url.search);
-          return Response.redirect(edgeUrl.toString(), 302);
+          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx);
         }
       }
 

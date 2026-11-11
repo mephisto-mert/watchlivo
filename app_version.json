@@ -1,15 +1,15 @@
 {
   "ok": true,
   "packageName": "online.watchlivo.app",
-  "versionCode": 23,
-  "versionName": "2.0.5-v201",
+  "versionCode": 24,
+  "versionName": "2.0.5-v202",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
   "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-11T21:30:00.000000+03:00",
-  "changelog": "v201: Dune (2021) dual-stream 1080p Full HD master + 720p TR dub integration; enhanced server-side vault resolution to support multi-variant HLS tracks with exact audio-language routing.",
-  "version": "20261111_v201"
+  "publishedAt": "2026-11-11T22:00:00.000000+03:00",
+  "changelog": "v202: Zero-lag high-throughput streaming optimization: enabled direct CDN offloading for open HLS streams (eliminating double-hop upload choke), fixed Cloudflare edge stream-proxy routing to secondary origin, and expanded worker bypass host pool.",
+  "version": "20261111_v202"
 }
