@@ -10471,7 +10471,9 @@ async def rave_stream_manifest(request: Request):
                                         break
                             except Exception:
                                 pass
-                variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 9999, v[1] if v[1] > 0 else 99999999))
+                # Apple AVPlayer / HLS standard: AVPlayer picks the FIRST variant in the master playlist by default.
+                # Sort descending by resolution & bandwidth so 4K / 1080p is served first, guaranteeing maximum visual fidelity.
+                variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 0, v[1] if v[1] > 0 else 0), reverse=True)
                 for _, _, inf_l, uri_l in variant_pairs:
                     out_lines.append(inf_l)
                     out_lines.append(uri_l)

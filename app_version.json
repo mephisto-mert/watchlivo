@@ -1,17 +1,17 @@
 {
   "ok": true,
   "packageName": "online.watchlivo.app",
-  "versionCode": 25,
-  "versionName": "2.0.5-v203",
+  "versionCode": 26,
+  "versionName": "2.0.5-v204",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
   "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-11T22:00:00.000000+03:00",
-  "changelog": "v203: True 1080p Full HD & 4K Ultra HD auto-priority: prevented down-ranking of 4K/1080p master streams when Turkish dub is 720p, upgraded Dune (2021) to CineJoy 4K multi-variant HLS, and aligned initial track resolution picker.",
-  "version": "20261111_v203",
+  "publishedAt": "2026-11-11T23:00:00.000000+03:00",
+  "changelog": "v204: Master Playlist Descending Sort & Native iOS Quality Selection: inverted variant sort order to ensure 4K / 1080p is placed first in HLS master playlists so Apple AVPlayer defaults to 1080p/4K; fixed native HLS variant parser and added synthesized quality tiers with &max_h support.",
+  "version": "20261111_v204",
   "build": 1,
-  "description": "Prioritize true 1080p/4K master streams over 720p, fix Dune 2021 CineJoy 4K primary track, auto-select highest resolution"
+  "description": "Master Playlist Descending Sort (4K/1080p First) & Native iOS Quality Selection with &max_h support"
 }

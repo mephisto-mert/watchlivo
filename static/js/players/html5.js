@@ -27,6 +27,14 @@ function applyOptimalPipAttributes(v, autoPipOn = true) {
   } catch (_) {}
 }
 
+export function isHlsUrl(u) {
+  const s = String(u || '');
+  if (/[?&]ext=\.(?:mp4|webm|mkv)\b/i.test(s) || /[?&]stype=mp4/i.test(s)) return false;
+  const cleanPath = s.split('?')[0].split('#')[0].toLowerCase();
+  if (cleanPath.endsWith('.mp4') || cleanPath.endsWith('.mkv') || cleanPath.endsWith('.webm')) return false;
+  return /\.m3u8(\?|$)/i.test(s) || /\/proxy\?data=|\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)|playback\.media-streaming\.soundcloud\.cloud|cf-hls-media\.sndcdn\.com/i.test(s);
+}
+
 export class Html5Adapter {
   constructor(container, events) {
     this.container = container;
@@ -945,7 +953,8 @@ export class Html5Adapter {
               syncVideoCors(nextUrl, true);
               try { this.hls?.destroy(); } catch (_) {}
               this.hls = null;
-              if (!this._nativeMasterUrl) this._nativeMasterUrl = nextUrl;
+              this._nativeMasterUrl = nextUrl;
+              this._selectedNativeVariantIdx = -1;
               this._fetchNativeHlsVariants(nextUrl);
               v.src = nextUrl;
               v.load();
@@ -985,7 +994,8 @@ export class Html5Adapter {
         syncVideoCors(nextUrl, true);
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
-        if (!this._nativeMasterUrl) this._nativeMasterUrl = nextUrl;
+        this._nativeMasterUrl = nextUrl;
+        this._selectedNativeVariantIdx = -1;
         this._fetchNativeHlsVariants(nextUrl);
         v.src = nextUrl;
         v.load();
@@ -2202,6 +2212,13 @@ export class Html5Adapter {
     if (this.currentUrl && this.currentUrl !== newUrl) {
       this._pushFallbackAlt?.(this.currentUrl);
     }
+    this._nativeMasterUrl = newUrl;
+    this._selectedNativeVariantIdx = -1;
+    this._selectedSynthQuality = null;
+    this._nativeHlsVariants = [];
+    if (this.useNativeHls || isHlsUrl(newUrl)) {
+      this._fetchNativeHlsVariants(newUrl);
+    }
     if (typeof this._loadCandidateUrl === 'function') {
       this._loadCandidateUrl(newUrl, () => {
         if (this.subs?.selectedSubId && this.subs.selectedSubId !== 'off') {
@@ -2213,15 +2230,19 @@ export class Html5Adapter {
     }
   }
   async _fetchNativeHlsVariants(masterUrl) {
-    if (!masterUrl || !isUrlHls(masterUrl) || this.isMusic) return;
+    if (!masterUrl || !isHlsUrl(masterUrl) || this.isMusic) return;
     try {
-      const resp = await fetch(masterUrl, { headers: { 'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, */*' } });
+      const targetUrl = new URL(masterUrl, window.location.href).href;
+      const resp = await fetch(targetUrl, {
+        credentials: 'same-origin',
+        headers: { 'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, */*' }
+      });
       if (!resp.ok) return;
       const text = await resp.text();
       if (!text || !text.includes('#EXT-X-STREAM-INF')) return;
       const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
       const variants = [];
-      const base = masterUrl;
+      const base = targetUrl;
       for (let i = 0; i < lines.length; i += 1) {
         const line = lines[i];
         if (line.startsWith('#EXT-X-STREAM-INF:')) {
@@ -2241,8 +2262,8 @@ export class Html5Adapter {
         }
       }
       if (variants.length > 0) {
-        // Sort ascending by width / height
-        variants.sort((a, b) => (a.height || a.width) - (b.height || b.width));
+        // Sort descending: 4K (2160p) -> 1080p -> 720p -> 480p -> 360p
+        variants.sort((a, b) => ((b.height || b.width) - (a.height || a.width)) || ((b.bitrate || 0) - (a.bitrate || 0)));
         this._nativeHlsVariants = variants;
         this.events.onTracksChanged?.();
       }
@@ -2267,7 +2288,21 @@ export class Html5Adapter {
     if (!levels.length) {
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
-      const lbl = (vw >= 3200 || vh >= 2000) ? '4K Ultra HD (2160p)' : (vw >= 2400 || vh >= 1350) ? '2K QHD (1440p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Otomatik Akış');
+      const effW = Math.max(vw, Math.round(vh * 16 / 9));
+      const lbl = (effW >= 3200) ? '4K Ultra HD (2160p)' : (effW >= 2400) ? '2K QHD (1440p)' : (effW >= 1800) ? '1080p Full HD' : (effW >= 1200) ? '720p HD' : (vh > 0 ? `${vh}p` : '1080p Full HD');
+      
+      const sUrl = String(this.currentUrl || this._nativeMasterUrl || '');
+      const isProxyStream = /\/api\/rave\/stream/i.test(sUrl) || isHlsUrl(sUrl);
+      if (isProxyStream) {
+        const curMaxH = sUrl.match(/[?&]max_h=(\d+)/i)?.[1];
+        const selSynth = this._selectedSynthQuality;
+        return [
+          { id: 'synth_2160', label: '💎 4K Ultra HD (2160p)', active: selSynth === 'synth_2160' || curMaxH === '2160' },
+          { id: 'synth_1080', label: '🎬 1080p Full HD', active: selSynth === 'synth_1080' || curMaxH === '1080' || (!curMaxH && !selSynth && effW >= 1800) },
+          { id: 'synth_720', label: '🎬 720p HD', active: selSynth === 'synth_720' || curMaxH === '720' || (!curMaxH && !selSynth && effW >= 1100 && effW < 1800) },
+          { id: 'synth_auto', label: `⚡ Otomatik (${lbl})`, active: (!selSynth || selSynth === 'synth_auto') && !curMaxH }
+        ];
+      }
       return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
     }
     const isAuto = Boolean(this.hls.autoLevelEnabled);
@@ -2283,6 +2318,19 @@ export class Html5Adapter {
     return items;
   }
   setQualityLevel(idx) {
+    if (typeof idx === 'string' && idx.startsWith('synth_')) {
+      const maxHMap = { synth_2160: 2160, synth_1080: 1080, synth_720: 720, synth_auto: null };
+      const targetMaxH = maxHMap[idx];
+      this._selectedSynthQuality = idx;
+      let newUrl = this._nativeMasterUrl || this.currentUrl || '';
+      newUrl = newUrl.replace(/[?&]max_h=\d+/g, '');
+      if (targetMaxH) {
+        newUrl += (newUrl.includes('?') ? '&' : '?') + `max_h=${targetMaxH}`;
+      }
+      this.switchStreamSource(newUrl);
+      this.events.onTracksChanged?.();
+      return;
+    }
     const n = Number(idx);
     if (!this.hls) {
       if (Array.isArray(this._nativeHlsVariants) && this._nativeHlsVariants.length > 0 && this.video) {
@@ -2290,6 +2338,7 @@ export class Html5Adapter {
         const curT = this.getTime();
         const wasPlaying = this.wantPlaying || !v.paused;
         this._selectedNativeVariantIdx = n;
+        this._selectedSynthQuality = null;
         let targetUrl = '';
         if (n >= 0 && this._nativeHlsVariants[n]) {
           targetUrl = this._nativeHlsVariants[n].url;
