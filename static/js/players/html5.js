@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v196';
-import { expectedPosition } from '../sync.js?v=20261111_v196';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v196';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v196';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v196';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v197';
+import { expectedPosition } from '../sync.js?v=20261111_v197';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v197';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261111_v197';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v197';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -787,6 +787,9 @@ export class Html5Adapter {
     this._isApple = isApple;
     this._canAppleMseHls = false;
     this.useNativeHls = useNativeHls;
+    this._nativeHlsVariants = [];
+    this._selectedNativeVariantIdx = -1;
+    this._nativeMasterUrl = '';
     const withProxySegs = (u) => {
       const s = String(u || '');
       if (!/\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)/i.test(s) || s.includes('proxy_segs=1')) return u;
@@ -942,6 +945,8 @@ export class Html5Adapter {
               syncVideoCors(nextUrl, true);
               try { this.hls?.destroy(); } catch (_) {}
               this.hls = null;
+              if (!this._nativeMasterUrl) this._nativeMasterUrl = nextUrl;
+              this._fetchNativeHlsVariants(nextUrl);
               v.src = nextUrl;
               v.load();
               v.addEventListener('loadedmetadata', () => {
@@ -980,6 +985,8 @@ export class Html5Adapter {
         syncVideoCors(nextUrl, true);
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
+        if (!this._nativeMasterUrl) this._nativeMasterUrl = nextUrl;
+        this._fetchNativeHlsVariants(nextUrl);
         v.src = nextUrl;
         v.load();
         v.addEventListener('loadedmetadata', () => {
@@ -2205,8 +2212,58 @@ export class Html5Adapter {
       });
     }
   }
+  async _fetchNativeHlsVariants(masterUrl) {
+    if (!masterUrl || !isUrlHls(masterUrl) || this.isMusic) return;
+    try {
+      const resp = await fetch(masterUrl, { headers: { 'Accept': 'application/x-mpegURL, application/vnd.apple.mpegurl, */*' } });
+      if (!resp.ok) return;
+      const text = await resp.text();
+      if (!text || !text.includes('#EXT-X-STREAM-INF')) return;
+      const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+      const variants = [];
+      const base = masterUrl;
+      for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        if (line.startsWith('#EXT-X-STREAM-INF:')) {
+          const attrs = line.slice('#EXT-X-STREAM-INF:'.length);
+          let w = 0, h = 0, bw = 0;
+          const mRes = attrs.match(/RESOLUTION=(\d+)x(\d+)/i);
+          if (mRes) { w = parseInt(mRes[1], 10); h = parseInt(mRes[2], 10); }
+          const mBw = attrs.match(/BANDWIDTH=(\d+)/i);
+          if (mBw) { bw = parseInt(mBw[1], 10); }
+          if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+            let u = lines[i + 1];
+            try {
+              u = new URL(u, base).href;
+            } catch (_) {}
+            variants.push({ width: w, height: h, bitrate: bw, url: u });
+          }
+        }
+      }
+      if (variants.length > 0) {
+        // Sort ascending by width / height
+        variants.sort((a, b) => (a.height || a.width) - (b.height || b.width));
+        this._nativeHlsVariants = variants;
+        this.events.onTracksChanged?.();
+      }
+    } catch (_) { /* ignore network error for variant parsing */ }
+  }
+
   getQualityLevels() {
     const levels = this.hls?.levels || [];
+    if (!levels.length && Array.isArray(this._nativeHlsVariants) && this._nativeHlsVariants.length > 1) {
+      const curIdx = typeof this._selectedNativeVariantIdx === 'number' ? this._selectedNativeVariantIdx : -1;
+      const isAuto = curIdx < 0;
+      const items = this._nativeHlsVariants.map((l, idx) => {
+        const w = l.width || 0, h = l.height || 0, bw = l.bitrate || 0;
+        const effW = Math.max(w, Math.round(h * 16 / 9));
+        const tag = effW >= 3200 ? '4K Ultra HD (2160p)' : effW >= 2400 ? '2K QHD (1440p)' : effW >= 1800 ? (bw >= 5800000 ? '1080p BluRay HQ' : '1080p Full HD') : effW >= 1200 ? '720p HD' : `${h || 720}p`;
+        const mbps = bw >= 500000 ? ` · ${(bw / 1000000).toFixed(1)} Mbps` : '';
+        return { id: idx, label: `${effW >= 3200 ? '💎' : '🎬'} ${tag}${w && h ? ` (${w}×${h})` : ''}${mbps}`, active: !isAuto && curIdx === idx };
+      });
+      items.push({ id: -1, label: '⚡ Otomatik (4K / En Yüksek HD)', active: isAuto });
+      return items;
+    }
     if (!levels.length) {
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
@@ -2226,8 +2283,31 @@ export class Html5Adapter {
     return items;
   }
   setQualityLevel(idx) {
-    if (!this.hls) return;
     const n = Number(idx);
+    if (!this.hls) {
+      if (Array.isArray(this._nativeHlsVariants) && this._nativeHlsVariants.length > 0 && this.video) {
+        const v = this.video;
+        const curT = this.getTime();
+        const wasPlaying = this.wantPlaying || !v.paused;
+        this._selectedNativeVariantIdx = n;
+        let targetUrl = '';
+        if (n >= 0 && this._nativeHlsVariants[n]) {
+          targetUrl = this._nativeHlsVariants[n].url;
+        } else {
+          targetUrl = this._nativeMasterUrl || this.currentUrl;
+        }
+        if (targetUrl && targetUrl !== v.src) {
+          v.src = targetUrl;
+          v.load();
+          v.addEventListener('loadedmetadata', () => {
+            try { v.currentTime = curT; } catch (_) {}
+            if (wasPlaying) this.tryPlay();
+          }, { once: true });
+        }
+        this.events.onTracksChanged?.();
+      }
+      return;
+    }
     if (n >= 0) this.hls.autoLevelCapping = -1;
     this.hls.currentLevel = n;
     this.events.onTracksChanged?.();

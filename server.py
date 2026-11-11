@@ -1546,6 +1546,8 @@ def _rank_search_item(it: dict, raw_q: str) -> tuple:
 
     if exact_match_any and is_substantial:
         exact_tier = 5
+    elif pref_match_any and vc >= 2500:
+        exact_tier = 5
     elif pref_match_any and vc >= 600 and not has_spinoff_sub:
         exact_tier = 5
     elif (pref_match_any or starts_match_any) and is_substantial:
@@ -11612,7 +11614,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
-        "version": "20261111_v196",
+        "version": "20261111_v197",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),
