@@ -25686,6 +25686,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -25704,11 +25708,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "id:438631": {
@@ -25717,6 +25726,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -25735,11 +25748,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "tmdb:movie:693134:1:1": {
@@ -129539,6 +129557,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -129557,11 +129579,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "movie:dune col gezegeni:1:1": {
@@ -129570,6 +129597,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -129588,11 +129619,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "movie:dune 1:1:1": {
@@ -129601,6 +129637,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -129619,11 +129659,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "movie:dune part one:1:1": {
@@ -129632,6 +129677,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -129650,11 +129699,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     },
     "movie:col gezegeni:1:1": {
@@ -129663,6 +129717,10 @@
       "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
+          "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/master.m3u8",
+          "hls_cj_4k"
+        ],
+        [
           "https://nebula.bright67.online/hls/bc29b1e2-e40e-473b-8c53-adf019900fe3/master.m3u8",
           "hls_cj"
         ],
@@ -129681,11 +129739,16 @@
           "lang": "en",
           "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
           "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://lightspeed.st/hls/b22e9fff-a3e6-4e57-9e24-410f0c4d8fbc/1/subtitles/sub-en.vtt",
+          "source": "cinejoy_embed"
         }
       ],
       "audioLangs": [
-        "tr",
-        "orig"
+        "orig",
+        "tr"
       ]
     }
   }

@@ -6715,9 +6715,9 @@ def _probe_audio_langs(raw_u: str, st: str, prov: str, tid: str, s: int, e: int,
     cached = _AUDIO_PROBE_CACHE.get(raw_u)
     if cached and time.time() - cached[0] < 1800 and raw_u in _STREAM_RES_HINT:
         return list(cached[1])
-    if str(st) == "hls_pv_tr":
+    if str(st) in ("hls_pv_tr", "hls_dl", "hls_pv"):
         _STREAM_RES_HINT.setdefault(raw_u, 1280)
-        return ["tr"]
+        return ["tr"] if str(st) != "hls_pv" else []
     if str(st).startswith("hls_fp:tr:"):
         _STREAM_RES_HINT.setdefault(raw_u, 1920)
         return ["tr"]
@@ -6807,41 +6807,32 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         u, st = pair
         probed_l = lang_map.get(u) or _AUDIO_LANG_HINT.get(u) or []
         has_tr = ("tr" in probed_l) or st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_pv_tr", "hls_fhd_tr", "mp4_ac_dub", "mp4_ar_tr") or str(st).startswith("hls_fp:multi:") or str(st).startswith("hls_fp:tr:")
-        live_bonus = 1.0 if (u in lang_map and lang_map.get(u)) else 0.0
-        tr_boost = (3.0 if has_tr else 0.0) + live_bonus
-        if st in ("mp4_ac_sub", "mp4_ac_dub", "mp4_ar_tr", "mp4_ar"):
-            return (3.5 if ("_720p" not in str(u).lower() and _STREAM_RES_HINT.get(u, 1920) >= 1800) else 1.0) + tr_boost
-        if str(st).startswith("mp4"):
-            if st == "mp4_vl_sd":
-                return 0.2
-            if st == "mp4_vl_720":
-                return 0.7
-            return 0.6 if "%2fh265%2f" in str(u).lower() or "/h265/" in str(u).lower() else 1.2
-        if st == "hls_vm" or any(d in str(u).lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
-            return 0.45 + (1.5 if has_tr else 0.0)
+        live_bonus = 0.5 if (u in lang_map and lang_map.get(u)) else 0.0
+        tr_bonus = (1.5 if has_tr else 0.0) + live_bonus
         w = _STREAM_RES_HINT.get(u, 0)
-        if w >= 3200 or st == "hls_cj_4k":
-            return 4.6 + tr_boost
-        if w > 0:
-            if w >= 1880 and st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl"):
-                return 4.2 + tr_boost
-            if w >= 2500:
-                return 3.8 + tr_boost
-            return (2.6 if w >= 1880 else 1.1) + tr_boost
-        if st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi"):
-            return 4.0 + tr_boost
-        if st == "hls_dp":
-            return 1.2 + tr_boost
-        if st == "hls_dl":
-            return 2.2 + tr_boost
-        return (2.2 if st in ("hls_ve", "hls_ve_multi", "hls_cj", "hls", "hls_hfnl", "hls_hfnl_multi", "hls_dbx", "hls_pv", "hls_pv_multi", "hls_pv_tr") else 1.5) + tr_boost
+        is_4k = (w >= 3200 or st == "hls_cj_4k")
+        is_fhd = (w >= 1800 or st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "hls_cj", "hls_ve", "hls_ve_multi"))
+        is_720 = (st in ("hls_dl", "hls_pv", "hls_pv_tr") or "_720p" in str(u).lower() or (0 < w < 1800))
+        if is_4k:
+            return 9.0 + tr_bonus
+        if is_fhd:
+            return 7.0 + tr_bonus
+        if is_720:
+            return 3.0 + tr_bonus
+        if st in ("mp4_ac_sub", "mp4_ac_dub", "mp4_ar_tr", "mp4_ar"):
+            return (5.0 if ("_720p" not in str(u).lower() and _STREAM_RES_HINT.get(u, 1920) >= 1800) else 2.5) + tr_bonus
+        if str(st).startswith("mp4"):
+            return 1.5
+        if st == "hls_vm" or any(d in str(u).lower() for d in ("vidmoly.", "vmbox.", "vmnow.", "vmpx.")):
+            return 1.0 + (1.0 if has_tr else 0.0)
+        return 4.0 + tr_bonus
     srcs.sort(key=_src_res_tier, reverse=True)
     by_lang: dict[str, list] = {}
     unknown: list = []
     for raw_u, st in srcs:
         wu = _wrap_first_party_stream(raw_u, st, prov, tid, s, e, mtype)
         raw_w_hint = _STREAM_RES_HINT.get(raw_u, 0)
-        eff_sort_w = raw_w_hint if raw_w_hint > 0 else (3840 if st == "hls_cj_4k" else (1280 if "_720p" in str(raw_u).lower() else (1920 if st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "mp4_ac_sub", "mp4_ac_dub", "hls_cj", "hls_ve", "hls_ve_multi") else 1840)))
+        eff_sort_w = raw_w_hint if raw_w_hint > 0 else (3840 if st == "hls_cj_4k" else (1280 if ("_720p" in str(raw_u).lower() or st in ("hls_dl", "hls_pv", "hls_pv_tr")) else (1920 if st in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_hfnl_multi", "hls_hfnl", "mp4_ac_sub", "mp4_ac_dub", "hls_cj", "hls_ve", "hls_ve_multi") else 1840)))
         if st == "mp4_ac_sub":
             by_lang.setdefault(orig_lang or "ja", []).append((wu, "fansub", raw_w_hint, eff_sort_w))
             continue
@@ -6891,9 +6882,9 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
     is_tr_native = orig_lang == "tr" or prov in ("exxen", "blutv", "gain", "tod", "tabii", "puhutv")
     order = list(base_order)
     if "tr" in by_lang and not is_tr_native and eff_orig_lang and eff_orig_lang != "tr" and eff_orig_lang in by_lang:
-        tr_probed_ws = [it[2] for it in by_lang["tr"] if it[2] > 0]
-        orig_probed_ws = [it[2] for it in by_lang[eff_orig_lang] if it[2] > 0]
-        if tr_probed_ws and len(tr_probed_ws) == len(by_lang["tr"]) and max(tr_probed_ws) < 1800 and orig_probed_ws and max(orig_probed_ws) >= 1880:
+        tr_ws = [it[3] for it in by_lang["tr"]]
+        orig_ws = [it[3] for it in by_lang[eff_orig_lang]]
+        if tr_ws and max(tr_ws) < 1800 and orig_ws and max(orig_ws) >= 1800:
             order = [eff_orig_lang, "tr"] + [L for L in base_order if L not in (eff_orig_lang, "tr")]
     tracks = []
     for L in order:
@@ -6902,7 +6893,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         is_orig = (L == eff_orig_lang) or (is_tr_native and L == "tr")
         base_id = "orig" if is_orig else ("tr-dub" if L == "tr" else ("en-dub" if L == "en" else f"dub-{L}"))
         for k, (u_l, kind, raw_w_h, eff_w_h) in enumerate(by_lang[L][:2]):
-            res_tag_t = "4K Ultra HD" if eff_w_h >= 3200 else ("720p HD" if 0 < raw_w_h < 1800 else "1080p")
+            res_tag_t = "4K Ultra HD" if eff_w_h >= 3200 else ("720p HD" if eff_w_h < 1800 else "1080p")
             if kind == "fansub":
                 label = f"⛩️ {name} Orijinal + Türkçe Fansub (Animetrix {res_tag_t})"
             elif is_orig:

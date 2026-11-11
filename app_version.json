@@ -1,8 +1,8 @@
 {
   "ok": true,
   "packageName": "online.watchlivo.app",
-  "versionCode": 24,
-  "versionName": "2.0.5-v202",
+  "versionCode": 25,
+  "versionName": "2.0.5-v203",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
@@ -10,6 +10,8 @@
   "mandatory": true,
   "autoInstall": true,
   "publishedAt": "2026-11-11T22:00:00.000000+03:00",
-  "changelog": "v202: Zero-lag high-throughput streaming optimization: enabled direct CDN offloading for open HLS streams (eliminating double-hop upload choke), fixed Cloudflare edge stream-proxy routing to secondary origin, and expanded worker bypass host pool.",
-  "version": "20261111_v202"
+  "changelog": "v203: True 1080p Full HD & 4K Ultra HD auto-priority: prevented down-ranking of 4K/1080p master streams when Turkish dub is 720p, upgraded Dune (2021) to CineJoy 4K multi-variant HLS, and aligned initial track resolution picker.",
+  "version": "20261111_v203",
+  "build": 1,
+  "description": "Prioritize true 1080p/4K master streams over 720p, fix Dune 2021 CineJoy 4K primary track, auto-select highest resolution"
 }

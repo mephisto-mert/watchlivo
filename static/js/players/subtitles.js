@@ -308,15 +308,26 @@ export class SubtitleDubController {
       || t.audioLang === 'tr' || t.lang === 'tr' || t.targetLang === 'tr'
     );
     const studioTr = rawAudio.find((t) => isTrStudio(t) && (t.url || typeof t.hlsIndex === 'number' || typeof t.nativeIndex === 'number'));
-    if (!pref || pref === 'tr-dub' || pref === 'tr' || String(pref).startsWith('tr-dub-')) {
+    if (pref === 'tr-dub' || pref === 'tr' || String(pref).startsWith('tr-dub-')) {
       if (studioTr) {
         this.selectedAudioId = studioTr.id;
         return studioTr;
       }
-      const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
-      this.selectedAudioId = origFallback?.id || 'orig';
-      return origFallback || null;
     }
+    const firstTrack = rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
+    const isStudioTr720 = studioTr && /720p/i.test(studioTr.label || '');
+    const isFirstTrackHd = firstTrack && /(?:1080p|4k|2160p|bluray)/i.test(firstTrack.label || '');
+    if (!pref && studioTr && isStudioTr720 && isFirstTrackHd && firstTrack.id !== studioTr.id) {
+      this.selectedAudioId = firstTrack.id || 'orig';
+      return firstTrack;
+    }
+    if (!pref && studioTr) {
+      this.selectedAudioId = studioTr.id;
+      return studioTr;
+    }
+    const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
+    this.selectedAudioId = origFallback?.id || 'orig';
+    return origFallback || null;
     if (pref === 'tr-ai-dub') {
       const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
       if (!isAnime || studioTr) {
