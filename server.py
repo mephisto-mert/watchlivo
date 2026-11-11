@@ -4727,15 +4727,17 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
                         if is_vm_vault and st_t == "hls":
                             st_t = "hls_vm"
                         is_true_1080_vault = (
-                            st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr")
+                            st_t in ("hls_fhd_multi", "hls_fhd", "hls_fhd_tr", "hls_dl", "hls_pv_tr", "hls_cj", "hls_cj_4k", "hls_ve", "hls_ve_multi")
                             or (st_t in ("mp4_ac_sub", "mp4_ac_dub") and "_720p" not in raw_su.lower())
                             or (not IS_VERCEL and st_t in ("hls_hfnl_multi", "hls_hfnl") and (bool(re.search(r"-([A-Za-z0-9]{10,12})\.(?:mp4|mkv)/", raw_su)) or "hdfilmcehennemi.mobi" in raw_su or "cdnimages" in raw_su.lower()))
                         )
                         dest_l = target_list if is_true_1080_vault else fallback_res
                         if (raw_su, st_t) not in dest_l:
                             dest_l.append((raw_su, st_t))
-                        if st_t == "hls_pv_tr":
+                        if st_t in ("hls_pv_tr", "hls_fhd_tr", "hls_dl"):
                             _AUDIO_LANG_HINT[raw_su] = ["tr"]
+                        elif st_t in ("hls_cj", "hls_cj_4k", "hls_ve"):
+                            _AUDIO_LANG_HINT[raw_su] = ["orig"]
                         elif v_aud and ("tr" in v_aud or ("multi" not in st_t and st_t not in ("hls_dl", "hls_dp") and len(v_aud) == 1)):
                             prev_aud = _AUDIO_LANG_HINT.get(str(u_st[0])) or []
                             if not prev_aud or ("orig" in prev_aud and "orig" not in v_aud):
@@ -6085,9 +6087,11 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
     dl_720 = [x for x in dl_all if x not in dl_hd]
     dp_only = [] if IS_VERCEL else [x for x in tr_res if x[1] == "hls_dp"]
     vm_only = [x for x in tr_res if x[1] == "hls_vm"]
-    cj_4k = [x for x in cj_res if x[1] == "hls_cj_4k"]
-    cj_1080 = [x for x in cj_res if x[1] != "hls_cj_4k"]
-    if ac_res or main_multi or main_single or pv_multi_all or fp_multi or pv_single or fp_other or dl_all or dp_only or ve_res or cj_res or hexa_res or vid_res or ar_res or vm_only or vault_yt:
+    all_cj = list(cj_res) + [x for x in tr_res if x[1] in ("hls_cj", "hls_cj_4k")]
+    cj_4k = [x for x in all_cj if x[1] == "hls_cj_4k"]
+    cj_1080 = [x for x in all_cj if x[1] != "hls_cj_4k"]
+    all_ve = list(ve_res) + [x for x in tr_res if x[1] in ("hls_ve", "hls_ve_multi")]
+    if ac_res or main_multi or main_single or pv_multi_all or fp_multi or pv_single or fp_other or dl_all or dp_only or all_ve or all_cj or hexa_res or vid_res or ar_res or vm_only or vault_yt:
         if is_ja_or_anime:
             out_urls.extend(ac_1080)
             out_urls.extend(main_multi)
@@ -6097,7 +6101,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(cj_4k)
             out_urls.extend(dl_hd)
             out_urls.extend(cj_1080)
-            out_urls.extend(ve_res)
+            out_urls.extend(all_ve)
             out_urls.extend(hexa_res)
             out_urls.extend(dp_only)
             out_urls.extend(pv_multi_720)
@@ -6119,7 +6123,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(dp_only)
             out_urls.extend(ac_1080)
             out_urls.extend(cj_4k)
-            out_urls.extend(ve_res)
+            out_urls.extend(all_ve)
             out_urls.extend(cj_1080)
             out_urls.extend(hexa_res)
             out_urls.extend(pv_multi_720)
@@ -6138,7 +6142,7 @@ def _extract_direct_stream_sync(tid: str, mtype: str, s: int, e: int, title: str
             out_urls.extend(pv_multi_hd)
             out_urls.extend(cj_4k)
             out_urls.extend(dl_hd)
-            out_urls.extend(ve_res)
+            out_urls.extend(all_ve)
             out_urls.extend(cj_1080)
             out_urls.extend(hexa_res)
             out_urls.extend(dp_only)
@@ -6843,7 +6847,7 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
         langs = lang_map.get(raw_u)
         if langs is not None:
             if not langs:
-                if st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr") or str(st).startswith("hls_fp:tr:"):
+                if st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr", "hls_dl") or str(st).startswith("hls_fp:tr:"):
                     langs = ["tr"]
                 elif orig_lang == "tr":
                     langs = ["tr"]
@@ -6856,13 +6860,13 @@ def _build_audio_tracks(stream_url: str, direct_list: list, prov: str = "netflix
                 langs = ["tr"]
             elif str(st).startswith("hls_fp:orig:") and orig_lang:
                 langs = [orig_lang]
-            elif st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr"):
+            elif st in ("hls_fhd_tr", "hls_pv_tr", "mp4_ar_tr", "hls_dl"):
                 langs = ["tr"]
             elif (st in ("hls_fhd_multi", "hls_hfnl_multi", "hls_pv_multi", "hls_ve_multi") or str(st).startswith("hls_fp:multi:")):
                 langs = ["tr", orig_lang or "en"] if (orig_lang or "en") != "tr" else ["tr"]
             elif orig_lang == "tr":
                 langs = ["tr"]
-            elif (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dl", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj_4k", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
+            elif (st in ("hls_fhd", "hls_hfnl", "hls_dbx", "hls_pv", "hls_dp", "hls", "hls_vm", "hls_ve", "hls_cj_4k", "hls_cj", "mp4", "mp4_ar", "mp4_vl") or str(st).startswith("mp4_vl")):
                 langs = [orig_lang or "en"]
         if langs:
             norm_langs = []
