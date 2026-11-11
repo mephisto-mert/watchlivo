@@ -3895,6 +3895,29 @@ def _titles_match(cand_title: str, valid_titles: list, cand_year: str = "", targ
         return False
     cn_no1 = re.sub(r"\s+1$", "", cn).strip()
     vn_set = {_norm_title(vt) for vt in (valid_titles or []) if _norm_title(vt)}
+
+    # Mockbuster / parody rejection guard:
+    _MOCKBUSTER_DISALLOWED = {
+        "planet dune": ("dune", "col gezegeni"),
+        "dune gezegeni": ("dune", "col gezegeni"),
+        "alien conquest": ("dunyalar savasi", "war of the worlds"),
+        "transmorphers": ("transformers",),
+        "top gunner": ("top gun",),
+        "titanic ii": ("titanic",),
+        "titanic 2": ("titanic",),
+        "atlantic rim": ("pacific rim",),
+        "jurassic school": ("jurassic park", "jurassic world"),
+        "jurassic predator": ("jurassic park", "jurassic world"),
+        "ape vs monster": ("godzilla vs kong", "king kong"),
+    }
+    for mb_pattern, protected_targets in _MOCKBUSTER_DISALLOWED.items():
+        if mb_pattern in cn:
+            if not any(mb_pattern in vn for vn in vn_set):
+                return False
+    if "dune" in cn and ("planet" in cn or ("gezegeni" in cn and "col" not in cn)):
+        if not any("planet" in vn or ("gezegeni" in vn and "col" not in vn) for vn in vn_set):
+            return False
+
     ty = str(target_year or "").strip()[:4]
     cy = str(cand_year or "").strip()[:4]
     year_ok = False
@@ -4268,13 +4291,13 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
         q_cands.append(x)
     valid_titles = list(dict.fromkeys(q_cands + [disp_title, title]))
     want_kore = any("kore" in str(vt or "").lower() or "korea" in str(vt or "").lower() for vt in valid_titles)
-    direct_dl = re.sub(r"https?://dizi\d*\.(?:life|plus)", "https://dizi84.life", source_url) if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
+    direct_dl = re.sub(r"https?://dizi\d*\.(?:life|plus)", "https://dizi85.life", source_url) if (source_url and re.search(r"dizi\d*\.(?:life|plus)/(?:dizi|film)/", source_url)) else ""
     slug_steps = []
     seg_dl = "dizi" if mtype == "tv" else "film"
     for x_sl in ([title, disp_title] + list(extra_titles or [])):
         sl_dl = _to_ascii_slug(_clean_query_title(x_sl))
         if sl_dl and len(sl_dl) >= 3:
-            cand_dl_u = f"https://dizi84.life/{seg_dl}/{sl_dl}"
+            cand_dl_u = f"https://dizi85.life/{seg_dl}/{sl_dl}"
             if ("__SLUG__", cand_dl_u) not in slug_steps:
                 slug_steps.append(("__SLUG__", cand_dl_u))
         if len(slug_steps) >= 2:
@@ -4288,7 +4311,7 @@ def _extract_dizilife_sync(mtype: str, s: int, e: int, title: str, disp_title: s
             else:
                 html = ""
                 base_dom = ""
-                for _dl_host in ("https://dizi84.life", "https://dizi82.life"):
+                for _dl_host in ("https://dizi85.life", "https://dizi86.life", "https://dizi84.life", "https://dizi82.life"):
                     try:
                         with _public_open(urllib.request.Request(f"{_dl_host}/ara?q={urllib.parse.quote(val)}", headers={"User-Agent": UA137}), timeout=3.2) as r:
                             base_dom = f"{urllib.parse.urlparse(r.geturl()).scheme}://{urllib.parse.urlparse(r.geturl()).netloc}"
@@ -4628,7 +4651,12 @@ def _extract_hdfc_sync(mtype: str, s: int, e: int, title: str, disp_title: str, 
             v_ent = v_streams.get(vk)
             if not isinstance(v_ent, dict):
                 continue
+            if v_ent.get("title") and not _titles_match(str(v_ent["title"]), valid_titles, str(v_ent.get("year") or ""), year, mtype):
+                continue
             v_su = str(v_ent.get("sourceUrl") or "")
+            if v_su and any(b in v_su.lower() for b in ("dune-gezegeni", "planet-dune", "transmorphers", "alien-conquest")):
+                if not any(b in " ".join(valid_titles).lower() for b in ("dune-gezegeni", "planet-dune", "transmorphers", "alien-conquest")):
+                    continue
             if mtype == "tv" and "/film/" in v_su:
                 continue
             if mtype == "tv" and (s > 1 or e > 1) and vk.startswith(("id:", "url:")):

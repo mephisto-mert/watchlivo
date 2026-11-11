@@ -25681,31 +25681,57 @@
       ]
     },
     "tmdb:movie:438631:1:1": {
-      "sourceUrl": "",
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
-          "https://s23.cdnimage7200.shop/m2/HTkuozI0YxE1ozHhZwNlZF5PoUIlLKxhZGN4ZUNhESIOGNd0zxL2EhnJ1uM2H3ZwNjYaAbo3Ns0xi23vr1",
-          "hls_fhd_multi"
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
         ]
       ],
-      "subs": [],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
       "audioLangs": [
         "tr",
-        "en"
+        "orig"
       ]
     },
     "id:438631": {
-      "sourceUrl": "",
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
       "streams": [
         [
-          "https://s23.cdnimage7200.shop/m2/HTkuozI0YxE1ozHhZwNlZF5PoUIlLKxhZGN4ZUNhESIOGNd0zxL2EhnJ1uM2H3ZwNjYaAbo3Ns0xi23vr1",
-          "hls_fhd_multi"
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
         ]
       ],
-      "subs": [],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
       "audioLangs": [
         "tr",
-        "en"
+        "orig"
       ]
     },
     "tmdb:movie:693134:1:1": {
@@ -129497,6 +129523,141 @@
       "audioLangs": [
         "tr",
         "en"
+      ]
+    },
+    "movie:dune:1:1": {
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
+      "streams": [
+        [
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
+        ]
+      ],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
+      "audioLangs": [
+        "tr",
+        "orig"
+      ]
+    },
+    "movie:dune col gezegeni:1:1": {
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
+      "streams": [
+        [
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
+        ]
+      ],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
+      "audioLangs": [
+        "tr",
+        "orig"
+      ]
+    },
+    "movie:dune 1:1:1": {
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
+      "streams": [
+        [
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
+        ]
+      ],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
+      "audioLangs": [
+        "tr",
+        "orig"
+      ]
+    },
+    "movie:dune part one:1:1": {
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
+      "streams": [
+        [
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
+        ]
+      ],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
+      "audioLangs": [
+        "tr",
+        "orig"
+      ]
+    },
+    "movie:col gezegeni:1:1": {
+      "title": "Dune: Çöl Gezegeni",
+      "year": "2021",
+      "sourceUrl": "https://dizi85.life/film/dune-col-gezegeni",
+      "streams": [
+        [
+          "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/master.m3u8",
+          "hls_dl"
+        ]
+      ],
+      "subs": [
+        {
+          "lang": "tr",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_turkish/turkish.vtt",
+          "source": "dl_embed"
+        },
+        {
+          "lang": "en",
+          "url": "https://one.makesomthingup.click/JdIWx7F28apbP57yKGERZ1On/sub_english/english.vtt",
+          "source": "dl_embed"
+        }
+      ],
+      "audioLangs": [
+        "tr",
+        "orig"
       ]
     }
   }
