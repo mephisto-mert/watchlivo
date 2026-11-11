@@ -1,7 +1,9 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261111_v194';
-import { applyElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261111_v194';
-import { ensureHlsJs } from './hls-loader.js?v=20261111_v194';
+import { SubtitleDubController } from './subtitles.js?v=20261111_v195';
+import { applyElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261111_v195';
+import { ensureHlsJs } from './hls-loader.js?v=20261111_v195';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261111_v195';
+import { expectedPosition } from '../sync.js?v=20261111_v195';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -286,6 +288,14 @@ export class YouTubeAdapter {
       this._lastVisChangeAt = Date.now();
       if (document.visibilityState === 'visible') {
         if (this._bgAudioActive) this._stopYtBgBridge(true);
+        const roomM = state.mesh?.media;
+        if (roomM && !roomM.live && isRoomMediaPlaying(roomM)) {
+          this._suppressLeaderAnchorUntil = performance.now() + 2600;
+          const exp = expectedPosition(roomM);
+          if (Number.isFinite(exp) && exp > 0.5 && Math.abs((v.currentTime || 0) - exp) > 1.4 && Math.abs((v.currentTime || 0) - exp) < 300) {
+            try { v.currentTime = exp; } catch (_) {}
+          }
+        }
         if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended && !this.isPiP()) {
           v.play().catch(() => {});
         }
@@ -558,14 +568,16 @@ export class YouTubeAdapter {
 
   _mountVinylOverlay(media) {
     const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const cover = esc(media.poster || media.thumbnail || '/static/watchlivo-poster.svg');
+    const rawCover = media.poster || media.thumbnail || '/static/watchlivo-poster.svg';
+    const cover = esc(rawCover);
+    const safeCssCover = String(rawCover || '').replace(/['"()\\\r\n<>]/g, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
     const title = esc((media.songTitle || media.title || 'Müzik & Klip').replace(/^🎵\s*/, ''));
     const artist = esc(media.artist || media.channel || 'Sanatçı');
     const wrap = document.createElement('div');
     wrap.className = 'music-vinyl-stage';
     wrap.style.display = 'none';
     wrap.innerHTML = `
-      <div class="music-vinyl-bg" style="background-image:url('${cover}')"></div>
+      <div class="music-vinyl-bg" style="background-image:url('${safeCssCover}')"></div>
       <div class="music-vinyl-card">
         <div class="music-vinyl-disc">
           <img src="${cover}" alt="" />
@@ -990,9 +1002,18 @@ export class YouTubeAdapter {
       try { bg.removeAttribute('src'); bg.load(); } catch (_) {}
     }
     if (syncBack && !this._destroyed) {
-      if (!this.media?.live && exitT >= 0.5) {
-        if (this.video) { try { this.video.currentTime = exitT; } catch (_) {} }
-        else if (this.player) { try { this.player.seekTo?.(exitT, true); } catch (_) {} }
+      this._suppressLeaderAnchorUntil = performance.now() + 2600;
+      let targetT = exitT;
+      const roomM = state.mesh?.media;
+      if (roomM && !roomM.live && isRoomMediaPlaying(roomM)) {
+        const exp = expectedPosition(roomM);
+        if (Number.isFinite(exp) && exp > 0.5 && Math.abs(exp - targetT) > 1.4 && Math.abs(exp - targetT) < 300) {
+          targetT = exp;
+        }
+      }
+      if (!this.media?.live && targetT >= 0.5) {
+        if (this.video) { try { this.video.currentTime = targetT; } catch (_) {} }
+        else if (this.player) { try { this.player.seekTo?.(targetT, true); } catch (_) {} }
       }
       if (this.wantPlaying && !this._userPausedViaMediaSession) {
         if (this.video) this._attemptDirectPlay(this.video);
@@ -1002,6 +1023,7 @@ export class YouTubeAdapter {
   }
 
   play() {
+    this._userPausedViaMediaSession = false;
     this.wantPlaying = true;
     if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) primeBgRelayAudio();
     resumeSharedAudioContext();

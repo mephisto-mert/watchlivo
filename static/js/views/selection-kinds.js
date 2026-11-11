@@ -1,20 +1,27 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261111_v194';
-import { api, qs } from '../api.js?v=20261111_v194';
-import { parseVideoUrl, getProvider } from '../providers.js?v=20261111_v194';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261111_v194';
-import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261111_v194';
-import { profileSetup } from '../profile.js?v=20261111_v194';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v194';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261111_v195';
+import { api, qs } from '../api.js?v=20261111_v195';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261111_v195';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261111_v195';
+import { renderAccountBar, renderSeriesPicker, getAccount, openProviderLoginModal } from '../accounts.js?v=20261111_v195';
+import { profileSetup } from '../profile.js?v=20261111_v195';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v195';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261111_v194';
+} from '../store.js?v=20261111_v195';
 
 const _resolveMemCache = new Map();
 
 export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epName = '', opts = {}) {
+  if (epName && typeof epName === 'object') {
+    opts = epName;
+    epName = String(opts.epName || opts.name || '');
+  }
+  const cleanEpName = (typeof epName === 'string' ? epName : '')
+    .replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '')
+    .trim();
   const provId = prov?.id || it?.provider || 'cinema';
   const acct = getAccount(provId);
   const mediaType = it.mediaType || (it.type === 'SHOW' ? 'tv' : 'movie');
@@ -58,9 +65,9 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
         return null;
       }
       if (res && (res.url || res.videoId)) {
-        const disp = it.title || res.title || prov.name;
+        const disp = String(it.title || res.title || prov.name || 'Sinema').replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '').trim() || 'Sinema';
         if (mediaType === 'tv') {
-          res.title = epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
+          res.title = cleanEpName ? `${disp} — S${s}:B${e} · ${cleanEpName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`;
           res.seriesTitle = it.seriesTitle || String(disp || '').split(' — ')[0].trim();
         }
         res.originalTitle = res.originalTitle || it.originalTitle || '';
@@ -104,7 +111,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
   }
   if (it.streamUrl && /^(?:https?:\/\/|\/api\/rave\/)/i.test(String(it.streamUrl))) {
     const isHls = /\.m3u8(\?|$)|\/api\/rave\/stream\?/i.test(String(it.streamUrl));
-    const disp = it.title || prov?.name || 'Sinema';
+    const disp = String(it.title || prov?.name || 'Sinema').replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '').trim() || 'Sinema';
     return {
       provider: isHls ? 'hls' : 'direct',
       catalogProvider: provId,
@@ -112,7 +119,7 @@ export async function resolveCatalogItem(it, prov, season = 1, episode = 1, epNa
       url: it.streamUrl,
       streamUrl: it.streamUrl,
       title: mediaType === 'tv'
-        ? (epName ? `${disp} — S${s}:B${e} · ${epName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`)
+        ? (cleanEpName ? `${disp} — S${s}:B${e} · ${cleanEpName}` : `${disp} — ${s}. Sezon ${e}. Bölüm`)
         : disp,
       originalTitle: it.originalTitle || '',
       poster: it.poster || it.backdrop || '/static/watchlivo-poster.svg',

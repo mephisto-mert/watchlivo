@@ -4763,15 +4763,15 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
     max-height: var(--vvh, 100%) !important;
   }
   body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root > .navbar {
-    height: 36px !important;
-    min-height: 36px !important;
-    padding-top: 0 !important;
+    height: calc(36px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    min-height: calc(36px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    padding-top: var(--top-safe-offset, env(safe-area-inset-top, 0px)) !important;
     padding-bottom: 0 !important;
   }
   body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh {
-    height: calc(100% - 36px) !important;
+    height: calc(100% - 36px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
     min-height: 0 !important;
-    max-height: calc(100% - 36px) !important;
+    max-height: calc(100% - 36px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
   }
   body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh-layout {
     padding-top: 2px !important;
@@ -6251,4 +6251,15 @@ html.is-android-pip .rave-subtitle-cue {
   #mesh-root > .navbar .privacy-chip {
     display: none !important;
   }
+}
+
+/* v195: Subtitle/Settings Menu Z-Order & Top-Pill Non-Interception Guard */
+.video-frame .ctl-menu:not(.hidden),
+body > .ctl-menu.is-body-portal:not(.hidden) {
+  z-index: 220050 !important;
+}
+.video-frame.menu-open .ctl-top,
+body.ctl-menu-open .video-frame .ctl-top {
+  pointer-events: none !important;
+  opacity: 0.25 !important;
 }

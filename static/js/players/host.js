@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261111_v194';
-import { Html5Adapter } from './html5.js?v=20261111_v194';
-import { VimeoAdapter } from './vimeo.js?v=20261111_v194';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261111_v194';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261111_v194';
-import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261111_v194';
+import { YouTubeAdapter } from './youtube.js?v=20261111_v195';
+import { Html5Adapter } from './html5.js?v=20261111_v195';
+import { VimeoAdapter } from './vimeo.js?v=20261111_v195';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261111_v195';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261111_v195';
+import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261111_v195';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -540,6 +540,9 @@ export class PlayerHost {
       }
     }
     this.destroyAdapterOnly();
+    if (this.container && (!window.__kinoxHost || window.__kinoxHost === this)) {
+      try { this.container.replaceChildren(); } catch (e) { /* ignore */ }
+    }
     suspendSharedAudioContext();
   }
 }

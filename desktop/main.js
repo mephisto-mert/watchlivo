@@ -15,6 +15,25 @@ function buildDesktopUserAgent() {
 }
 
 const CHROME_UA = buildDesktopUserAgent();
+
+function isSafeExternalHttpUrl(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return false;
+  try {
+    const u = new URL(raw);
+    return u.protocol === 'https:' || u.protocol === 'http:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 let mainWindow = null;
 
 const gotLock = app.requestSingleInstanceLock();
@@ -56,7 +75,7 @@ function createWindow() {
 
   win.webContents.setUserAgent(CHROME_UA);
   win.webContents.setWindowOpenHandler(({ url }) => {
-    if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
+    if (isSafeExternalHttpUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   win.webContents.on('will-attach-webview', (event, webPreferences, params) => {
@@ -83,8 +102,10 @@ function createWindow() {
   });
   win.webContents.on('did-fail-load', (_ev, errorCode, _errorDesc, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return;
+    const safeFailedUrl = escHtml(validatedURL || SERVER_URL);
+    const safeServerHref = isSafeExternalHttpUrl(SERVER_URL) ? escHtml(SERVER_URL) : 'https://watchlivo.online';
     const retryHtml = `data:text/html;charset=utf-8,${encodeURIComponent(
-      `<!doctype html><html lang="tr"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b0a12;color:#f8fafc;font-family:system-ui,sans-serif;text-align:center"><div><h2 style="margin:0 0 10px">Watchlivo Sunucusuna Bağlanılamadı</h2><p style="color:#94a3b8;margin:0 0 18px">${String(validatedURL || SERVER_URL)}</p><button onclick="location.href='${SERVER_URL}'" style="padding:12px 22px;border:none;border-radius:10px;background:#27dcc8;color:#041014;font-weight:800;cursor:pointer">Yeniden Dene</button></div></body></html>`
+      `<!doctype html><html lang="tr"><body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b0a12;color:#f8fafc;font-family:system-ui,sans-serif;text-align:center"><div><h2 style="margin:0 0 10px">Watchlivo Sunucusuna Bağlanılamadı</h2><p style="color:#94a3b8;margin:0 0 18px">${safeFailedUrl}</p><a href="${safeServerHref}" style="display:inline-block;text-decoration:none;padding:12px 22px;border-radius:10px;background:#27dcc8;color:#041014;font-weight:800;cursor:pointer">Yeniden Dene</a></div></body></html>`
     )}`;
     win.loadURL(retryHtml).catch(() => {});
   });
@@ -92,7 +113,7 @@ function createWindow() {
 }
 
 ipcMain.handle('vortex:open-external', (_ev, url) => {
-  if (typeof url === 'string' && /^https?:\/\//i.test(url)) return shell.openExternal(url);
+  if (isSafeExternalHttpUrl(url)) return shell.openExternal(url);
   return false;
 });
 

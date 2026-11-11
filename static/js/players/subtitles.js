@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261111_v194';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261111_v195';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -659,7 +659,7 @@ export class SubtitleDubController {
   }
 
   _applyHlsAudioSelection(targetHls = null) {
-    const hls = targetHls || this.adapter.hls;
+    const hls = targetHls || this.adapter?.hls;
     const hlsTracks = hls?.audioTracks;
     if (!hls || !Array.isArray(hlsTracks) || hlsTracks.length <= 1) return;
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
@@ -695,9 +695,11 @@ export class SubtitleDubController {
     }
     if (targetIdx >= 0 && hls.audioTrack !== targetIdx) {
       hls.audioTrack = targetIdx;
-      if (hls.bufferController) {
+      const curSec = Number(this.adapter?.getTime?.() || 0);
+      if (targetHls === null && hls.bufferController && curSec > 0.5 && this._lastFlushedHlsTrack !== targetIdx) {
+        this._lastFlushedHlsTrack = targetIdx;
         try {
-          hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: this.adapter.getTime(), endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
+          hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: curSec, endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
         } catch (_) {}
       }
     }

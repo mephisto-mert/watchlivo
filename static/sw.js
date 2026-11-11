@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261111_v194
+// Watchlivo Service Worker v20261111_v195
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">
@@ -45,10 +45,12 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (!req || req.method !== 'GET' || req.mode !== 'navigate') return;
   event.respondWith(
-    fetch(req).catch(() => new Response(OFFLINE_HTML, {
-      status: 503,
-      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-    }))
+    fetch(new Request(req, { cache: 'no-store' }))
+      .catch(() => fetch(req))
+      .catch(() => new Response(OFFLINE_HTML, {
+        status: 503,
+        headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+      }))
   );
 });
 

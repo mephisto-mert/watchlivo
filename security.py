@@ -17,7 +17,7 @@ import threading
 import time
 import urllib.request
 from collections import OrderedDict
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Secrets
@@ -404,15 +404,20 @@ class RateLimiter:
             if bucket is None:
                 bucket = []
                 self._hits[key] = bucket
+            else:
+                self._hits.move_to_end(key)
             cutoff = t - self.window
             while bucket and bucket[0] < cutoff:
                 bucket.pop(0)
             if len(self._hits) > 20000:
-                for stale in [k for k, v in list(self._hits.items())[:5000] if not v or v[-1] < cutoff]:
-                    self._hits.pop(stale, None)
-                if len(self._hits) > 20000:
-                    for old_k in list(self._hits.keys())[:4000]:
-                        self._hits.pop(old_k, None)
+                stale = [k for k, v in self._hits.items() if k != key and (not v or v[-1] < cutoff)]
+                for sk in stale:
+                    self._hits.pop(sk, None)
+                while len(self._hits) > 20000:
+                    old_k, _ = next(iter(self._hits.items()))
+                    if old_k == key:
+                        break
+                    self._hits.pop(old_k, None)
             if len(bucket) >= self.limit:
                 retry = max(1.0, self.window - (t - bucket[0]))
                 return False, retry
@@ -485,7 +490,7 @@ def _is_cf_edge_ip(raw_ip: str) -> bool:
         return False
 
 
-def _is_trusted_proxy_peer(peer: str) -> bool:
+def _is_trusted_proxy_peer(peer: str, *, allow_cf_edge: bool = True) -> bool:
     p = (peer or "").strip()
     if not p:
         return False
@@ -495,7 +500,13 @@ def _is_trusted_proxy_peer(peer: str) -> bool:
         ip = ipaddress.ip_address(p)
         if isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in _DOC_TEST_NETS):
             return False
-        return bool(ip.is_private or ip.is_loopback or any(ip in net for net in _CF_EDGE_NETS))
+        if _is_cf_worker_egress_ip(p):
+            return False
+        if ip.is_private or ip.is_loopback:
+            return True
+        if allow_cf_edge and any(ip in net for net in _CF_EDGE_NETS):
+            return True
+        return False
     except Exception:
         return False
 
@@ -525,6 +536,11 @@ def client_ip(scope_or_request) -> str:
                     return edge_ip[:64]
                 except Exception:
                     continue
+    cf_worker_zone = (headers.get("cf-worker") or "").strip().lower()
+    untrusted_foreign_worker = bool(
+        cf_worker_zone and cf_worker_zone not in ("watchlivo.online", "www.watchlivo.online")
+    )
+    allow_cf_edge = not untrusted_foreign_worker and not edge_secret
     peer = ""
     try:
         client = getattr(scope_or_request, "client", None)
@@ -544,7 +560,7 @@ def client_ip(scope_or_request) -> str:
     trust_proxy = (
         os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
         or bool(os.environ.get("RENDER"))
-        or _is_trusted_proxy_peer(peer)
+        or _is_trusted_proxy_peer(peer, allow_cf_edge=allow_cf_edge)
     )
     if trust_vercel and not trust_proxy:
         v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
@@ -556,8 +572,8 @@ def client_ip(scope_or_request) -> str:
                 pass
     elif trust_proxy:
         cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
-        if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
-            if not edge_secret and (_is_cf_worker_egress_ip(cf_ip) or _is_cf_edge_ip(cf_ip)):
+        if not untrusted_foreign_worker and cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer, allow_cf_edge=allow_cf_edge)):
+            if not edge_secret and cf_worker_zone in ("watchlivo.online", "www.watchlivo.online") and (_is_cf_worker_egress_ip(cf_ip) or _is_cf_edge_ip(cf_ip)):
                 wl_ip = (headers.get("x-watchlivo-client-ip") or headers.get("x-forwarded-for") or "").split(",")[0].strip()
                 if wl_ip and not _is_cf_worker_egress_ip(wl_ip) and not _is_cf_edge_ip(wl_ip):
                     try:
@@ -582,14 +598,14 @@ def client_ip(scope_or_request) -> str:
                     ipaddress.ip_address(cand)
                     if not fallback_cand:
                         fallback_cand = cand[:64]
-                    if not _is_trusted_proxy_peer(cand) and not (not edge_secret and _is_cf_worker_egress_ip(cand)):
+                    if not _is_trusted_proxy_peer(cand, allow_cf_edge=allow_cf_edge) and not (not edge_secret and not untrusted_foreign_worker and _is_cf_worker_egress_ip(cand)):
                         return cand[:64]
                 except Exception:
                     continue
             if fallback_cand:
                 return fallback_cand
         real_ip = (headers.get("x-real-ip") or "").split(",")[0].strip()
-        if real_ip:
+        if real_ip and not untrusted_foreign_worker:
             try:
                 ipaddress.ip_address(real_ip)
                 return real_ip[:64]
@@ -601,10 +617,16 @@ def client_ip(scope_or_request) -> str:
 def too_many_response(retry_after: float):
     from starlette.responses import JSONResponse
 
+    retry_sec = int(max(1, round(float(retry_after or 1.0))))
     return JSONResponse(
-        {"ok": False, "error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."},
+        {
+            "ok": False,
+            "error": "Çok fazla istek gönderildi, lütfen birkaç saniye bekleyip tekrar deneyin.",
+            "retryable": True,
+            "retryAfter": retry_sec,
+        },
         status_code=429,
-        headers={"Retry-After": str(int(max(1, retry_after)))},
+        headers={"Retry-After": str(retry_sec), "Cache-Control": "no-store"},
     )
 
 
@@ -648,6 +670,9 @@ def is_ip_public_global(ip_obj: ipaddress._BaseAddress | str) -> bool:
     return True
 
 
+_DNS_PUBLIC_CACHE = BoundedTTLCache(maxsize=2048, default_ttl=60.0)
+
+
 def is_safe_public_url(url: str) -> bool:
     """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT/NAT64 ranges."""
     import socket
@@ -657,8 +682,14 @@ def is_safe_public_url(url: str) -> bool:
         p = urllib.parse.urlparse(str(url or "").strip())
         if p.scheme not in ("http", "https") or not p.hostname:
             return False
+        if p.username or p.password:
+            return False
         host = p.hostname.lower().rstrip(".")
-        if not host or host in ("localhost", "metadata.google.internal", "metadata") or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
+        if (
+            not host
+            or host in ("localhost", "metadata.google.internal", "metadata", "watchlivo.online", "www.watchlivo.online", "watchlivo-origin-eu.onrender.com")
+            or host.endswith((".localhost", ".local", ".internal", ".home.arpa", ".watchlivo.online"))
+        ):
             return False
         try:
             lit_ip = ipaddress.ip_address(host)
@@ -666,13 +697,20 @@ def is_safe_public_url(url: str) -> bool:
         except ValueError:
             pass
         port = int(p.port or (443 if p.scheme == "https" else 80))
+        cache_key = f"{host}:{port}"
+        cached = _DNS_PUBLIC_CACHE.get(cache_key)
+        if cached is not None:
+            return bool(cached)
         infos = socket.getaddrinfo(host, port)
         if not infos:
+            _DNS_PUBLIC_CACHE.set(cache_key, False, ttl=15.0)
             return False
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
             if not is_ip_public_global(ip):
+                _DNS_PUBLIC_CACHE.set(cache_key, False, ttl=30.0)
                 return False
+        _DNS_PUBLIC_CACHE.set(cache_key, True, ttl=60.0)
         return True
     except Exception:
         return False

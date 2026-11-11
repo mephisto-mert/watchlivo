@@ -29,8 +29,30 @@ const BYPASS_WORKER_HOSTS = [
   "daioncdn.net",
   "dragonballzfans",
   "molystream.org",
+  "irtau1.",
 ];
-const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
+const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+const EDGE_SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "strict-origin-when-cross-origin",
+  "X-Frame-Options": "SAMEORIGIN",
+  "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+  "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+};
+
+function normalizeSafePath(pathname) {
+  const raw = typeof pathname === "string" ? pathname : "/";
+  const collapsed = raw.replace(/^\/+/, "/");
+  return collapsed.startsWith("/") ? collapsed : `/${collapsed}`;
+}
+
+function buildSafeOriginUrl(baseOrigin, pathname, searchStr = "") {
+  const target = new URL(baseOrigin);
+  target.pathname = normalizeSafePath(pathname);
+  target.search = searchStr ? (searchStr.startsWith("?") ? searchStr : `?${searchStr}`) : "";
+  return target;
+}
 
 const FAILOVER_STATUSES = new Set([
   402, 429, 451, 500, 502, 503, 504,
@@ -131,13 +153,17 @@ function originTimeoutMs(pathname) {
 }
 
 function isStaticCacheablePath(pathname) {
+  const p = normalizeSafePath(pathname);
+  if (p === "/static/desktop-auth.html" || p === "/desktop-auth.html") {
+    return false;
+  }
   return (
-    pathname.startsWith("/static/") ||
-    pathname === "/favicon.ico" ||
-    pathname === "/apple-touch-icon.png" ||
-    pathname === "/apple-touch-icon-precomposed.png" ||
-    pathname === "/manifest.json" ||
-    pathname === "/manifest.webmanifest"
+    p.startsWith("/static/") ||
+    p === "/favicon.ico" ||
+    p === "/apple-touch-icon.png" ||
+    p === "/apple-touch-icon-precomposed.png" ||
+    p === "/manifest.json" ||
+    p === "/manifest.webmanifest"
   );
 }
 
@@ -150,8 +176,9 @@ function getEdgeCache() {
 }
 
 function buildGracefulOverloadResponse(request, url) {
-  const accept = (request.headers.get("accept") || "").toLowerCase();
-  if (url.pathname.startsWith("/api/") || accept.includes("application/json")) {
+  const accept = (request?.headers?.get?.("accept") || "").toLowerCase();
+  const safePath = url ? normalizeSafePath(url.pathname) : "";
+  if (safePath.startsWith("/api/") || accept.includes("application/json")) {
     return new Response(
       JSON.stringify({
         ok: false,
@@ -165,11 +192,12 @@ function buildGracefulOverloadResponse(request, url) {
           "Cache-Control": "no-store",
           "Retry-After": "2",
           "X-Watchlivo-Origin": "edge-fallback",
+          ...EDGE_SECURITY_HEADERS,
         },
       }
     );
   }
-  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="2"><title>Watchlivo — Bağlanıyor...</title><style>body{margin:0;background:#06090e;color:#e6edf3;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.box{padding:28px;max-width:360px}.sp{width:36px;height:36px;border:3px solid rgba(39,220,200,.2);border-top-color:#27DCC8;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#8b949e;margin:0}</style></head><body><div class="box"><div class="sp"></div><h1>Watchlivo'ya bağlanılıyor...</h1><p>Yayın sunucusu hazırlanıyor, sayfa otomatik yenilenecek.</p></div><script>setTimeout(()=>location.reload(),1800);</script></body></html>`;
+  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="2"><title>Watchlivo — Bağlanıyor...</title><style>body{margin:0;background:#06090e;color:#e6edf3;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.box{padding:28px;max-width:360px}.sp{width:36px;height:36px;border:3px solid rgba(39,220,200,.2);border-top-color:#27DCC8;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#8b949e;margin:0}</style></head><body><div class="box"><div class="sp"></div><h1>Watchlivo'ya bağlanılıyor...</h1><p>Yayın sunucusu hazırlanıyor, sayfa otomatik yenilenecek.</p></div></body></html>`;
   return new Response(html, {
     status: 503,
     headers: {
@@ -177,6 +205,8 @@ function buildGracefulOverloadResponse(request, url) {
       "Cache-Control": "no-store",
       "Retry-After": "2",
       "X-Watchlivo-Origin": "edge-fallback",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'",
+      ...EDGE_SECURITY_HEADERS,
     },
   });
 }
@@ -186,7 +216,8 @@ async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu
   const cleanSearch = new URLSearchParams(url.search);
   cleanSearch.delete("__simulate_vercel_pause");
   const qs = cleanSearch.toString();
-  const secUrl = new URL(url.pathname + (qs ? `?${qs}` : ""), secondaryBase);
+  const safePath = normalizeSafePath(url.pathname);
+  const secUrl = buildSafeOriginUrl(secondaryBase, safePath, qs);
   const clientIp = request.headers.get("CF-Connecting-IP") || "";
   const headers = buildForwardHeaders(request.headers, clientIp, "watchlivo.online", secUrl.host, env, false);
 
@@ -194,12 +225,15 @@ async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu
     method: request.method,
     headers,
     redirect: "manual",
-    signal: AbortSignal.timeout(originTimeoutMs(url.pathname)),
+    signal: AbortSignal.timeout(originTimeoutMs(safePath)),
   };
   if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
     init.body = bodyBuf;
   }
   const resp = await fetch(secUrl.toString(), init);
+  if (resp.status === 101) {
+    return resp;
+  }
   const outHeaders = new Headers(resp.headers);
   outHeaders.set("X-Watchlivo-Origin", originTag);
   const safeBody = NULL_BODY_STATUSES.has(resp.status) || request.method === "HEAD" ? null : resp.body;
@@ -210,12 +244,75 @@ async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu
   });
 }
 
+const BOT_UA_RE = /bot|crawl|spider|slurp|mediapartners|inspection|lighthouse|headless|facebookexternalhit|discordbot|telegrambot|whatsapp|twitterbot/i;
+
+function canCloneForEdgeCache(resp) {
+  const cc = (resp.headers.get("cache-control") || "").toLowerCase();
+  if (cc.includes("private") || cc.includes("no-store")) return false;
+  const clRaw = resp.headers.get("content-length");
+  if (clRaw !== null) {
+    const cl = Number(clRaw);
+    if (!Number.isFinite(cl) || cl < 0 || cl > 8_388_608) return false;
+    return true;
+  }
+  const ct = (resp.headers.get("content-type") || "").toLowerCase();
+  return (
+    ct.includes("text/") ||
+    ct.includes("javascript") ||
+    ct.includes("json") ||
+    ct.includes("svg") ||
+    ct.includes("manifest")
+  );
+}
+
+async function readBoundedBody(request, maxBytes) {
+  if (!request.body) return { buf: new ArrayBuffer(0), overflowStream: null };
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    chunks.push(value);
+    if (total > maxBytes) {
+      let idx = 0;
+      const overflowStream = new ReadableStream({
+        pull(controller) {
+          if (idx < chunks.length) {
+            controller.enqueue(chunks[idx++]);
+            return;
+          }
+          return reader.read().then(({ done: rDone, value: rVal }) => {
+            if (rDone) controller.close();
+            else controller.enqueue(rVal);
+          });
+        },
+        cancel(reason) {
+          return reader.cancel(reason);
+        },
+      });
+      return { buf: null, overflowStream };
+    }
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    merged.set(c, offset);
+    offset += c.byteLength;
+  }
+  return { buf: merged.buffer, overflowStream: null };
+}
+
 async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "render-eu-failover", ctx = null) {
   const isIdempotent = request.method === "GET" || request.method === "HEAD";
   const maxAttempts = isIdempotent ? 2 : 1;
   const cache = getEdgeCache();
-  const rootCacheKey = isIdempotent && url.pathname === "/" ? new Request("https://edge-cache.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
-  const staticCacheKey = isIdempotent && isStaticCacheablePath(url.pathname) ? new Request(`https://edge-cache.watchlivo.internal${url.pathname}${url.search}`, { method: "GET" }) : null;
+  const safePath = normalizeSafePath(url.pathname);
+  const ua = request.headers.get("user-agent") || "";
+  const isBotUa = BOT_UA_RE.test(ua);
+  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
+  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -225,7 +322,7 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
         await new Promise((r) => setTimeout(r, 250));
         continue;
       }
-      if (cache && request.method === "GET" && resp.status === 200) {
+      if (cache && request.method === "GET" && resp.status === 200 && canCloneForEdgeCache(resp)) {
         try {
           if (staticCacheKey) {
             const clone = resp.clone();
@@ -257,7 +354,7 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
     }
   }
 
-  if (!url.pathname.startsWith("/api/rave/resolve") && !url.pathname.startsWith("/api/rave/stream")) {
+  if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
     secondaryCircuitOpenUntil = Date.now() + 8_000;
   }
   if (cache && isIdempotent) {
@@ -278,20 +375,25 @@ async function safeFetchSecondary(request, url, bodyBuf, env, originTag = "rende
 
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+    let url = null;
     try {
+      url = new URL(request.url);
+      const safePath = normalizeSafePath(url.pathname);
+
       // 1. Canonical www -> apex redirect
       if (url.hostname === "www.watchlivo.online") {
-        url.hostname = "watchlivo.online";
-        return Response.redirect(url.toString(), 308);
+        const redirectUrl = new URL("https://watchlivo.online");
+        redirectUrl.pathname = safePath;
+        redirectUrl.search = url.search;
+        return Response.redirect(redirectUrl.toString(), 308);
       }
 
       // 2. Gateway diagnostic endpoint
-      if (url.pathname === "/api/ha-status") {
+      if (safePath === "/api/ha-status") {
         const adminOk = isAdminEdge(request, env);
         const statusPayload = {
           ok: true,
-          gateway: "watchlivo-ha-gateway-v190",
+          gateway: "watchlivo-ha-gateway-v195",
           primaryCircuitOpen: Date.now() < primaryCircuitOpenUntil,
           secondaryCircuitOpen: Date.now() < secondaryCircuitOpenUntil,
           hasStreamBinding: Boolean(env.STREAM_PROXY),
@@ -305,15 +407,16 @@ export default {
           headers: {
             "Content-Type": "application/json; charset=utf-8",
             "Cache-Control": "no-store",
+            ...EDGE_SECURITY_HEADERS,
           },
         });
       }
 
       // 2b. Fast Edge Cache hit for static assets (/static/*, icons, manifest)
       const edgeCache = getEdgeCache();
-      if (edgeCache && (request.method === "GET" || request.method === "HEAD") && isStaticCacheablePath(url.pathname)) {
+      if (edgeCache && (request.method === "GET" || request.method === "HEAD") && isStaticCacheablePath(safePath)) {
         try {
-          const staticKey = new Request(`https://edge-cache.watchlivo.internal${url.pathname}${url.search}`, { method: "GET" });
+          const staticKey = new Request(`https://edge-cache.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
           const cachedStatic = await edgeCache.match(staticKey);
           if (cachedStatic) {
             const h = new Headers(cachedStatic.headers);
@@ -323,18 +426,20 @@ export default {
         } catch {}
       }
 
-      // 3. Direct zero-egress offload via Service Binding (0ms RPC) for APK/IPA and stream-proxy
+      // 3. Direct zero-egress offload via Service Binding (0ms RPC) for APK/IPA, stream-proxy, and edge-fetch
       const isBinaryDownload =
-        url.pathname === "/download/apk" ||
-        url.pathname === "/download/ipa" ||
-        /^\/download\/Watchlivo.*\.(apk|ipa)$/i.test(url.pathname);
+        safePath === "/download/apk" ||
+        safePath === "/download/ipa" ||
+        /^\/download\/Watchlivo.*\.(apk|ipa)$/i.test(safePath);
+      const isEdgeFetchPath = safePath === "/api/rave/edge-fetch";
       const isStreamProxyPath =
-        url.pathname === "/api/rave/stream-proxy" ||
-        url.pathname === "/api/rave/stream_chunk";
+        safePath === "/api/rave/stream-proxy" ||
+        safePath === "/api/rave/stream_chunk" ||
+        isEdgeFetchPath;
       if (isBinaryDownload || isStreamProxyPath) {
         const cfFallback = url.searchParams.get("cf_fb") === "1";
         let bypassWorker = cfFallback;
-        if (!bypassWorker && isStreamProxyPath) {
+        if (!bypassWorker && isStreamProxyPath && !isEdgeFetchPath) {
           const rawTarget = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
           const rawLower = rawTarget.toLowerCase();
           bypassWorker = BYPASS_WORKER_HOSTS.some((h) => rawLower.includes(h));
@@ -344,11 +449,17 @@ export default {
             try {
               return await env.STREAM_PROXY.fetch(request);
             } catch {
-              return safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx);
+              if (isEdgeFetchPath) {
+                return new Response(JSON.stringify({ ok: false, error: "Kenar servisi geçici olarak meşgul." }), {
+                  status: 502,
+                  headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
+                });
+              }
+              return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx);
             }
           }
           const edgeBase = (env.STREAM_PROXY_ORIGIN || DEFAULT_STREAM_PROXY_ORIGIN).replace(/\/+$/, "");
-          const edgeUrl = new URL(url.pathname + url.search, edgeBase);
+          const edgeUrl = buildSafeOriginUrl(edgeBase, safePath, url.search);
           return Response.redirect(edgeUrl.toString(), 302);
         }
       }
@@ -356,14 +467,20 @@ export default {
       // 4. Native WebSockets (/ws/*) -> route directly to stateful ASGI Secondary Origin (Render)
       const upgrade = (request.headers.get("Upgrade") || "").toLowerCase();
       if (upgrade === "websocket") {
+        if (request.method !== "GET") {
+          return new Response("Method Not Allowed", {
+            status: 405,
+            headers: { Allow: "GET", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
+          });
+        }
         if (Date.now() < secondaryCircuitOpenUntil) {
           return new Response("WebSocket origin temporarily unavailable", {
             status: 503,
-            headers: { "Cache-Control": "no-store", "Retry-After": "5" },
+            headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
           });
         }
         const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-        const wsTarget = new URL(url.pathname + url.search, secondaryBase);
+        const wsTarget = buildSafeOriginUrl(secondaryBase, safePath, url.search);
         const clientIp = request.headers.get("CF-Connecting-IP") || "";
         const wsHeaders = buildForwardHeaders(
           request.headers,
@@ -376,29 +493,31 @@ export default {
         wsHeaders.set("Upgrade", "websocket");
         try {
           const wsResp = await fetch(wsTarget.toString(), {
-            method: request.method,
+            method: "GET",
             headers: wsHeaders,
           });
-          if (wsResp.status >= 502) {
+          if (wsResp.status >= 502 && safePath.startsWith("/ws/")) {
             secondaryCircuitOpenUntil = Date.now() + 15_000;
           }
           return wsResp;
         } catch {
-          secondaryCircuitOpenUntil = Date.now() + 15_000;
+          if (safePath.startsWith("/ws/")) {
+            secondaryCircuitOpenUntil = Date.now() + 15_000;
+          }
           return new Response("WebSocket origin unreachable", {
             status: 503,
-            headers: { "Cache-Control": "no-store", "Retry-After": "5" },
+            headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
           });
         }
       }
 
-      // 5. Buffer non-streaming request bodies (<= 4.2 MB) so POST/PUT/DELETE can failover cleanly
+      // 5. Buffer small non-streaming request bodies (<= 256 KB) safely; stream larger/chunked payloads directly
       let bodyBuf = null;
       if (request.method !== "GET" && request.method !== "HEAD") {
         const contentLen = parseInt(request.headers.get("content-length") || "0", 10);
-        if (!Number.isNaN(contentLen) && contentLen > MAX_BUFFER_BYTES) {
+        const streamLargeToSecondary = async (streamBody) => {
           const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-          const secUrl = new URL(url.pathname + url.search, secondaryBase);
+          const secUrl = buildSafeOriginUrl(secondaryBase, safePath, url.search);
           const headers = buildForwardHeaders(
             request.headers,
             request.headers.get("CF-Connecting-IP") || "",
@@ -408,47 +527,40 @@ export default {
             false
           );
           try {
-            return await fetch(secUrl.toString(), {
+            const resp = await fetch(secUrl.toString(), {
               method: request.method,
               headers,
-              body: request.body,
+              body: streamBody,
               redirect: "manual",
-              signal: AbortSignal.timeout(25_000),
+              signal: AbortSignal.timeout(28_000),
+            });
+            if (resp.status === 101) return resp;
+            const outH = new Headers(resp.headers);
+            outH.set("X-Watchlivo-Origin", "render-eu-stream-upload");
+            return new Response(NULL_BODY_STATUSES.has(resp.status) ? null : resp.body, {
+              status: resp.status,
+              statusText: resp.statusText,
+              headers: outH,
             });
           } catch {
             return buildGracefulOverloadResponse(request, url);
           }
+        };
+
+        if (!Number.isNaN(contentLen) && contentLen > MAX_BUFFER_BYTES) {
+          return await streamLargeToSecondary(request.body);
         }
         try {
-          bodyBuf = await request.arrayBuffer();
+          const { buf, overflowStream } = await readBoundedBody(request, MAX_BUFFER_BYTES);
+          if (overflowStream) {
+            return await streamLargeToSecondary(overflowStream);
+          }
+          bodyBuf = buf;
         } catch {
           return new Response(JSON.stringify({ ok: false, error: "İstek gövdesi okunamadı." }), {
             status: 400,
-            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
           });
-        }
-        if (bodyBuf.byteLength > MAX_BUFFER_BYTES) {
-          const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-          const secUrl = new URL(url.pathname + url.search, secondaryBase);
-          const headers = buildForwardHeaders(
-            request.headers,
-            request.headers.get("CF-Connecting-IP") || "",
-            "watchlivo.online",
-            secUrl.host,
-            env,
-            false
-          );
-          try {
-            return await fetch(secUrl.toString(), {
-              method: request.method,
-              headers,
-              body: bodyBuf,
-              redirect: "manual",
-              signal: AbortSignal.timeout(25_000),
-            });
-          } catch {
-            return buildGracefulOverloadResponse(request, url);
-          }
         }
       }
 
@@ -459,28 +571,34 @@ export default {
           headers: { "x-vercel-error": "DEPLOYMENT_PAUSED" },
         });
         if (shouldFailoverResponse(simulatedPaused)) {
-          return safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+          return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
         }
       }
 
       // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads, stream/catalog caches) -> Render EU primary with instant Vercel fallback
       const isStreamOrResolveRoute =
-        url.pathname === "/api/rave/resolve-catalog" ||
-        url.pathname === "/api/rave/resolve-stream" ||
-        url.pathname === "/api/rave/stream" ||
-        url.pathname === "/api/rave/stream-manifest" ||
-        url.pathname === "/api/rave/stream_manifest" ||
-        url.pathname === "/api/rave/stream-proxy" ||
-        url.pathname === "/api/rave/stream_chunk" ||
-        url.pathname === "/api/rave/hls-proxy";
+        safePath === "/api/rave/resolve-catalog" ||
+        safePath === "/api/rave/resolve-stream" ||
+        safePath === "/api/rave/stream" ||
+        safePath === "/api/rave/stream-manifest" ||
+        safePath === "/api/rave/stream_manifest" ||
+        safePath === "/api/rave/stream-proxy" ||
+        safePath === "/api/rave/stream_chunk" ||
+        safePath === "/api/rave/hls-proxy";
 
       const prefersStatefulOrigin =
-        url.pathname === "/api/rooms" ||
-        url.pathname.startsWith("/api/rooms/") ||
-        url.pathname.startsWith("/api/rave/voice-relay/") ||
+        safePath === "/api/rooms" ||
+        safePath.startsWith("/api/rooms/") ||
+        safePath === "/api/rave/meshes" ||
+        safePath.startsWith("/api/rave/meshes/") ||
+        safePath === "/api/rave/voice-relay" ||
+        safePath.startsWith("/api/rave/voice-relay/") ||
+        safePath.startsWith("/api/rave/social/voice-relay") ||
+        safePath.startsWith("/r/") ||
+        safePath.startsWith("/join/") ||
         isStreamOrResolveRoute ||
-        url.pathname === "/api/upload" ||
-        url.pathname.startsWith("/uploads/");
+        safePath === "/api/upload" ||
+        safePath.startsWith("/uploads/");
 
       let alreadyTriedSecondary = false;
       if (prefersStatefulOrigin && (isStreamOrResolveRoute || Date.now() >= secondaryCircuitOpenUntil)) {
@@ -499,16 +617,16 @@ export default {
             secondaryCircuitOpenUntil = Date.now() + 8_000;
           }
         }
-        if (url.pathname === "/api/upload" || url.pathname.startsWith("/uploads/")) {
+        if (safePath === "/api/upload" || safePath.startsWith("/uploads/")) {
           return new Response(JSON.stringify({ ok: false, error: "Yükleme servisi geçici olarak meşgul." }), {
             status: 503,
-            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+            headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
           });
         }
       }
 
       // Mirror auth logout to stateful secondary origin so in-memory token caches evict immediately across origins
-      if (request.method === "POST" && url.pathname === "/api/auth/logout" && Date.now() >= secondaryCircuitOpenUntil) {
+      if (request.method === "POST" && safePath === "/api/auth/logout" && Date.now() >= secondaryCircuitOpenUntil) {
         ctx?.waitUntil?.(
           fetchSecondary(request, url, bodyBuf, env, "render-eu-logout-mirror").catch(() => null)
         );
@@ -519,7 +637,7 @@ export default {
         env.FORCE_SECONDARY === "1" ||
         (Date.now() < primaryCircuitOpenUntil && Date.now() >= secondaryCircuitOpenUntil)
       ) {
-        return safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
       }
 
       // 7. Try Primary (Vercel via Cloudflare Zone DNS -> 216.198.79.1), failover to Render on pause/5xx
@@ -538,7 +656,7 @@ export default {
           method: request.method,
           headers: primaryHeaders,
           redirect: "manual",
-          signal: AbortSignal.timeout(originTimeoutMs(url.pathname)),
+          signal: AbortSignal.timeout(originTimeoutMs(safePath)),
         };
         if (bodyBuf !== null && request.method !== "GET" && request.method !== "HEAD") {
           primaryInit.body = bodyBuf;
@@ -549,7 +667,7 @@ export default {
         if (alreadyTriedSecondary) {
           return buildGracefulOverloadResponse(request, url);
         }
-        return safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
       }
 
       if (shouldFailoverResponse(primaryResp)) {
@@ -558,9 +676,12 @@ export default {
         if (alreadyTriedSecondary) {
           return buildGracefulOverloadResponse(request, url);
         }
-        return safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
+        return await safeFetchSecondary(request, url, bodyBuf, env, "render-eu-failover", ctx);
       }
 
+      if (primaryResp.status === 101) {
+        return primaryResp;
+      }
       const outHeaders = new Headers(primaryResp.headers);
       outHeaders.set("X-Watchlivo-Origin", "vercel-primary");
       const safePrimaryBody = NULL_BODY_STATUSES.has(primaryResp.status) || request.method === "HEAD" ? null : primaryResp.body;

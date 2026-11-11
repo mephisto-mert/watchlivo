@@ -1,7 +1,7 @@
 // Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261111_v194';
-import { api } from '../api.js?v=20261111_v194';
-import { state } from '../store.js?v=20261111_v194';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261111_v195';
+import { api } from '../api.js?v=20261111_v195';
+import { state } from '../store.js?v=20261111_v195';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -206,7 +206,7 @@ export function openContactModal(initialType = 'request') {
   const msgInput = h('textarea', {
     class: 'input wl-contact-textarea',
     id: 'wl-contact-msg',
-    rows: '4',
+    rows: '3',
     placeholder: 'Detayları buraya yazabilirsiniz... Ekibimiz en kısa sürede inceleyip dönüş yapacaktır.',
   });
   const statusEl = h('div', { class: 'wl-contact-status', id: 'wl-contact-status' });
@@ -407,7 +407,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261111_v194', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261111_v195', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),

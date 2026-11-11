@@ -29,7 +29,12 @@ from starlette.responses import JSONResponse
 
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
-AUTH_DB_PATH = pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
+_ENV_DB_PATH = (os.environ.get("WATCHLIVO_DB_PATH") or "").strip()
+AUTH_DB_PATH = (
+    pathlib.Path(_ENV_DB_PATH)
+    if _ENV_DB_PATH
+    else (pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db")
+)
 
 from security import (
     BoundedTTLCache,
@@ -972,9 +977,17 @@ async def auth_login(request: Request) -> JSONResponse:
                     "updated_at": time.time(),
                 }
                 try:
-                    _user_create(row)
+                    if not _user_create(row):
+                        ex_uid = _uid_for("email", row["email"])
+                        ex_row = _user_get(ex_uid) if ex_uid else None
+                        if ex_row and hmac.compare_digest(_hash_pw(password, str(ex_row.get("salt") or "")), str(ex_row.get("password_hash") or "")):
+                            row = ex_row
+                        else:
+                            row = None
+                            fb_verified = False
                 except Exception:
-                    pass
+                    row = None
+                    fb_verified = False
     reset_allowed = bool(target_email and (float(_PASSWORD_RESET_PENDING.get(target_email) or 0.0) > time.time()))
     if not reset_allowed and target_email and store_backend() == "redis":
         try:
@@ -1023,7 +1036,9 @@ async def auth_login(request: Request) -> JSONResponse:
                             "created_at": time.time(), "updated_at": time.time(),
                         }
                         try:
-                            _user_create(row)
+                            if not _user_create(row):
+                                ex_uid = _uid_for("email", target_email)
+                                row = _user_get(ex_uid) if ex_uid else row
                         except Exception:
                             pass
                 break
@@ -1048,9 +1063,14 @@ async def auth_login(request: Request) -> JSONResponse:
                 "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
             }
             try:
-                _user_create(row)
+                if not _user_create(row):
+                    ex_uid = _uid_for("email", identifier)
+                    row = _user_get(ex_uid) if ex_uid else None
+                    if not row:
+                        fb_verified = False
             except Exception:
-                pass
+                row = None
+                fb_verified = False
     if not row:
         return JSONResponse({"ok": False, "error": "Hesap bulunamadı veya bilgiler hatalı."}, status_code=401)
     expected = _hash_pw(password, row["salt"])
@@ -1136,17 +1156,39 @@ async def auth_oauth(request: Request) -> JSONResponse:
     if not raw_name:
         raw_name = (raw_email.split("@")[0] if raw_email else f"Watchlivo {provider.capitalize()}")[:24]
     handle = _norm_handle(str(body.get("handle") or ""), raw_name)
+    caller_verified_uid = str(request.scope.get("wl_uid") or "").strip().lower()
     if raw_email and EMAIL_RE.match(raw_email):
         uid = "u_wl_" + hashlib.sha256(raw_email.encode("utf-8")).hexdigest()[:12]
+        ex_email_uid = _uid_for("email", raw_email)
+        if ex_email_uid:
+            uid = ex_email_uid
         ex = _user_get(uid)
         if ex:
-            if password and len(password) >= 6 and not ex.get("password_set"):
+            issued_ts: Optional[float] = None
+            pwh_claim = ""
+            if str(ex.get("auth_provider") or "email") == "email" and caller_verified_uid != uid.lower():
+                new_salt = _new_salt()
+                has_new_pw = bool(password and len(password) >= 6)
+                new_hash = _hash_pw(password if has_new_pw else _new_salt(), new_salt)
+                rev_ts = revoke_all_user_tokens(uid)
+                issued_ts = max(time.time(), rev_ts + 0.002)
+                ex = _user_update(uid, {
+                    "password_hash": new_hash,
+                    "salt": new_salt,
+                    "password_set": 1 if has_new_pw else 0,
+                    "auth_provider": provider,
+                    "verified": 1,
+                }) or ex
+                if has_new_pw:
+                    pwh_claim = _pw_verifier(uid, password)
+            elif password and len(password) >= 6 and not ex.get("password_set"):
                 new_salt = _new_salt()
                 new_hash = _hash_pw(password, new_salt)
                 ex = _user_update(uid, {"password_hash": new_hash, "salt": new_salt, "password_set": 1}) or ex
+                pwh_claim = _pw_verifier(uid, password)
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_claim, issued_override=issued_ts)})
     else:
         uid = "u_wl_" + hashlib.sha256(f"{provider}:{handle}".encode("utf-8")).hexdigest()[:12]
         raw_email = f"{handle}@{provider}.watchlivo.online"
@@ -1154,23 +1196,28 @@ async def auth_oauth(request: Request) -> JSONResponse:
         if ex:
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier="")})
     salt = _new_salt()
-    pw_hash = _hash_pw(password or _new_salt(), salt)
+    has_init_pw = bool(password and len(password) >= 6)
+    pw_hash = _hash_pw(password if has_init_pw else _new_salt(), salt)
     now_ts = time.time()
     row = {
         "uid": uid, "email": raw_email, "handle": handle, "name": raw_name, "password_hash": pw_hash, "salt": salt,
-        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1 if password else 0,
+        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1 if has_init_pw else 0,
         "created_at": now_ts, "updated_at": now_ts,
     }
     try:
-        _user_create(row)
-        clear_uid_deleted(uid)
+        if not _user_create(row):
+            ex_uid = _uid_for("email", raw_email)
+            ex_row = _user_get(ex_uid) if ex_uid else None
+            if ex_row:
+                row = ex_row
+        clear_uid_deleted(str(row["uid"]))
     except Exception:
         pass
     user = _row_to_user(row)
     _sync_user_to_social(user)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(row.get("password_hash") or ""), str(row.get("salt") or "")))})
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(user["uid"]), password) if has_init_pw else "")})
 
 
 _PHONE_CODES = BoundedTTLCache(maxsize=1000, default_ttl=300.0)

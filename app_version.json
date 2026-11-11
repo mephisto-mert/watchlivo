@@ -2,14 +2,14 @@
   "ok": true,
   "packageName": "online.watchlivo.app",
   "versionCode": 22,
-  "versionName": "2.0.4-v166",
+  "versionName": "2.0.5-v195",
   "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
   "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
   "sha256": "4d3f7044e4662505dafc10bd50aa59ea1bf1865e2b28605a22cde4e4f342c86b",
   "sizeBytes": 63027,
   "mandatory": true,
   "autoInstall": true,
-  "publishedAt": "2026-11-11T02:16:00.000000+03:00",
-  "changelog": "v193.2: Unlock full stream catalog vault, enable curl_cffi TLS bypass + Hexa/Pilavyer live TV extractors on Render EU, harden Cloudflare Edge & stream proxy, upgrade HLS player recovery, and synchronize room episode/server switching.",
-  "version": "20261111_v194"
+  "publishedAt": "2026-11-11T14:20:00.000000+03:00",
+  "changelog": "v195: Fix Cloudflare Worker 1101, eliminate 429 room polling storms, accelerate HLS/tau-video stream resolution, maintain seamless background playback without Guest rewind, and harden SSRF & room role authorization.",
+  "version": "20261111_v195"
 }

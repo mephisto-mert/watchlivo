@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261111_v194';
+import { isRoomMediaPlaying } from './store.js?v=20261111_v195';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -21,11 +21,11 @@ export const clock = {
     const rtt = Math.max(0, t1 - t0);
     const est = serverTime + rtt / 2 - t1;
     if (this.samples > 6 && Number.isFinite(this.bestRtt)) {
-      this.bestRtt = this.bestRtt * 1.04;
+      this.bestRtt = Math.min(10.0, this.bestRtt * 1.04);
     }
     if (this.samples === 0 || rtt <= this.bestRtt * 1.65) {
       this.offset = this.samples === 0 ? est : this.offset * 0.65 + est * 0.35;
-      this.bestRtt = Math.min(this.bestRtt, Math.max(0.015, rtt));
+      this.bestRtt = Math.min(10.0, Math.min(this.bestRtt, Math.max(0.015, rtt)));
     }
     this.samples += 1;
   },
@@ -278,7 +278,7 @@ export class SyncEngine {
         this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return CYCLE_MS;
       }
-      if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !activeEl?.seeking && !ad.isBuffering?.()) {
+      if (!(ad.initialSeekPending > 3) && !(ad._suppressLeaderAnchorUntil && now < ad._suppressLeaderAnchorUntil) && now > this.seekUntil && curr > 0.2 && !activeEl?.seeking && !ad.isBuffering?.()) {
         let anchorEveryMs = 9000;
         if (this.isSolo()) {
           anchorEveryMs = 12000;
@@ -302,19 +302,21 @@ export class SyncEngine {
         this.didInitialSync = true;
       } else if (expected >= 0.8 && abs > 3.2 && now >= this.seekUntil) {
         const inBufInit = buffered(expected);
+        const initLead = inBufInit ? 0 : Math.min(2.5, Number(this.bufferLatency || 0));
+        const initTarget = dur > 0 ? Math.min(Math.max(0, dur - 0.5), expected + initLead) : (expected + initLead);
         this.deferStartedAt = 0;
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
-        this.lastSeekTarget = expected;
+        this.lastSeekTarget = initTarget;
         this.lastSeekWallAt = now;
-        ad.seek(expected);
+        ad.seek(initTarget);
         this.pendingSeekAt = inBufInit ? 0 : now;
         this.seekUntil = now + (inBufInit ? 4200 : 7500);
         this.lastJumpAt = now;
         this.reJumps = 0;
         this.inSyncCount = 0;
         this.mode = 'jumpSync';
-        this.onStatus({ mode: 'jumpSync', delta, curr, expected, rate: base });
+        this.onStatus({ mode: 'jumpSync', delta, curr, expected: initTarget, rate: base });
         return 900;
       }
     }
@@ -359,7 +361,8 @@ export class SyncEngine {
       this.deferStartedAt = 0;
       this.isRateNudging = false;
       if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
-      const targetPos = expected;
+      const leadComp = inBuf ? 0 : Math.min(2.5, Number(this.bufferLatency || 0));
+      const targetPos = dur > 0 ? Math.min(Math.max(0, dur - 0.5), expected + leadComp) : (expected + leadComp);
       this.lastSeekTarget = targetPos;
       this.lastSeekWallAt = now;
       ad.seek(targetPos);

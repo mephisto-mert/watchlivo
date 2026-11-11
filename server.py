@@ -56,7 +56,11 @@ import rooms  # noqa: E402  (reads storage env vars at import)
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 UPLOADS_DIR = pathlib.Path("/tmp/uploads") if IS_VERCEL else BASE_DIR / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-ACC_DB_PATH = pathlib.Path("/tmp/vortex_accounts.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
+ACC_DB_PATH = (
+    pathlib.Path(os.environ["WATCHLIVO_DB_PATH"])
+    if os.environ.get("WATCHLIVO_DB_PATH")
+    else (pathlib.Path("/tmp/vortex_accounts.db") if IS_VERCEL else BASE_DIR / "rave_platform.db")
+)
 # Proxy URLs are signed and verified by this same process, so an instance-local
 # secret is safe and never leaks a global one.
 _PROXY_SECRET = server_secret("PROXY_SECRET")
@@ -134,7 +138,9 @@ UA137 = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, li
 
 def _raw_get_json(url: str, headers: dict = None, data: bytes = None, timeout: float = 6.5):
     req = urllib.request.Request(url, data=data, headers={"User-Agent": UA137, **(headers or {})})
-    if "PYTEST_CURRENT_TEST" not in os.environ and public_http_url(url):
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        if not public_http_url(url):
+            return {}
         with _public_open(req, timeout=timeout) as r:
             return json.loads(r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore"))
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -328,6 +334,7 @@ class CrawlerShieldMiddleware:
                     media_type="text/html; charset=utf-8",
                     headers={
                         "Cache-Control": "public, max-age=86400",
+                        "Vary": "User-Agent",
                         "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"
                     }
                 )
@@ -339,7 +346,7 @@ class CrawlerShieldMiddleware:
                     b'{"error":"Forbidden","detail":"bot_access_restricted"}',
                     status_code=403,
                     media_type="application/json",
-                    headers={"X-Robots-Tag": "noindex, nofollow"}
+                    headers={"X-Robots-Tag": "noindex, nofollow", "Vary": "User-Agent"}
                 )
                 await response(scope, receive, send)
                 return
@@ -376,6 +383,8 @@ class SecurityHeaders:
                     hdrs.append((b"strict-transport-security", b"max-age=31536000; includeSubDomains"))
                 if b"cross-origin-opener-policy" not in existing_keys:
                     hdrs.append((b"cross-origin-opener-policy", b"same-origin-allow-popups"))
+                if b"cross-origin-resource-policy" not in existing_keys:
+                    hdrs.append((b"cross-origin-resource-policy", b"cross-origin"))
                 if b"x-robots-tag" not in existing_keys:
                     hdrs.append((b"x-robots-tag", b"noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"))
                 req_path = str(scope.get("path") or "")
@@ -429,8 +438,31 @@ class SecurityHeaders:
 
 IDENTITY_HEADER = b"authorization"
 _UID_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_UID_CACHE_LOCK = threading.RLock()
+_LOOP_LOCKS_GUARD = threading.RLock()
 _CONFIGURED_LOOP_ID: int = 0
 _DEFAULT_IO_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=64, thread_name_prefix="wl_io")
+
+
+def _get_loop_lock(lock_dict: dict, key: str, max_size: int = 400) -> asyncio.Lock:
+    """Return an asyncio.Lock bound to the current running event loop (prevents cross-loop RuntimeError 500s)."""
+    cur_loop = asyncio.get_running_loop()
+    cur_id = id(cur_loop)
+    with _LOOP_LOCKS_GUARD:
+        existing = lock_dict.get(key)
+        if existing is not None and getattr(existing, "_wl_loop_id", None) == cur_id:
+            return existing
+        if len(lock_dict) >= max_size:
+            for old_k in list(lock_dict.keys()):
+                old_lk = lock_dict.get(old_k)
+                if old_lk is None or getattr(old_lk, "_wl_loop_id", None) != cur_id or not old_lk.locked():
+                    lock_dict.pop(old_k, None)
+                    if len(lock_dict) < max(1, max_size - 40):
+                        break
+        lk = asyncio.Lock()
+        setattr(lk, "_wl_loop_id", cur_id)
+        lock_dict[key] = lk
+        return lk
 
 
 def _claims_from_token(token: str) -> dict:
@@ -438,7 +470,8 @@ def _claims_from_token(token: str) -> dict:
     if not token:
         return {}
     now_ts = time.time()
-    hit = _UID_CACHE.get(token)
+    with _UID_CACHE_LOCK:
+        hit = _UID_CACHE.get(token)
     if hit and hit[1] > now_ts:
         val = hit[0]
         return val if isinstance(val, dict) else {"uid": str(val or "")}
@@ -447,13 +480,14 @@ def _claims_from_token(token: str) -> dict:
         claims = auth_engine.verify_any_token(token)
     except Exception:
         claims = None
-    if isinstance(claims, dict) and claims.get("uid"):
-        _UID_CACHE[token] = (claims, now_ts + 15.0)
-        _UID_CACHE.move_to_end(token)
-        while len(_UID_CACHE) > 5000:
-            _UID_CACHE.popitem(last=False)
-        return claims
-    _UID_CACHE.pop(token, None)
+    with _UID_CACHE_LOCK:
+        if isinstance(claims, dict) and claims.get("uid"):
+            _UID_CACHE[token] = (claims, now_ts + 15.0)
+            _UID_CACHE.move_to_end(token)
+            while len(_UID_CACHE) > 5000:
+                _UID_CACHE.popitem(last=False)
+            return claims
+        _UID_CACHE.pop(token, None)
     return {}
 
 
@@ -502,7 +536,8 @@ class IdentityMiddleware:
             claims = {}
             if token:
                 now_ts = time.time()
-                hit = _UID_CACHE.get(token)
+                with _UID_CACHE_LOCK:
+                    hit = _UID_CACHE.get(token)
                 if hit and hit[1] > now_ts:
                     val = hit[0]
                     claims = val if isinstance(val, dict) else {"uid": str(val or "")}
@@ -591,22 +626,52 @@ def _cffi_open_req(request, url: str, timeout: float):
         hdrs[hk] = hv
     method = request.get_method() if isinstance(request, urllib.request.Request) else "GET"
     data = request.data if isinstance(request, urllib.request.Request) else None
-    cr = _cffi_req.request(
-        method,
-        url,
-        headers=hdrs,
-        data=data,
-        impersonate="chrome124",
-        timeout=min(float(timeout or 6.0), 14.0),
-        allow_redirects=True,
-        max_redirects=4,
-    )
-    fin_u = str(getattr(cr, "url", "") or url)
-    if not public_http_url(fin_u):
+    cur_u = url
+    cr = None
+    req_to = min(float(timeout or 6.0), 14.0)
+    for _hop in range(5):
+        if not public_http_url(cur_u):
+            raise ValueError("Geçersiz yönlendirme URL")
+        cr = _cffi_req.request(
+            method,
+            cur_u,
+            headers=hdrs,
+            data=data,
+            impersonate="chrome124",
+            timeout=req_to,
+            allow_redirects=False,
+            max_redirects=0,
+        )
+        if cr.status_code in (301, 302, 303, 307, 308):
+            loc = str(cr.headers.get("Location") or cr.headers.get("location") or "").strip()
+            if hasattr(cr, "close"):
+                try:
+                    cr.close()
+                except Exception:
+                    pass
+            if not loc or _hop >= 4:
+                raise ValueError("Geçersiz yönlendirme URL")
+            cur_u = urllib.parse.urljoin(cur_u, loc)
+            if cr.status_code == 303:
+                method = "GET"
+                data = None
+            continue
+        break
+    if cr is None:
         raise ValueError("Geçersiz yönlendirme URL")
-    if cr.status_code >= 400:
-        raise urllib.error.HTTPError(fin_u, cr.status_code, f"HTTP {cr.status_code}", dict(cr.headers), None)
-    return _CffiRespAdapter(bytes(cr.content[:28 * 1024 * 1024]), fin_u, cr.status_code, dict(cr.headers))
+    try:
+        fin_u = str(getattr(cr, "url", "") or cur_u)
+        if not public_http_url(fin_u):
+            raise ValueError("Geçersiz yönlendirme URL")
+        if cr.status_code >= 400:
+            raise urllib.error.HTTPError(fin_u, cr.status_code, f"HTTP {cr.status_code}", dict(cr.headers), None)
+        return _CffiRespAdapter(bytes(cr.content[:28 * 1024 * 1024]), fin_u, cr.status_code, dict(cr.headers))
+    finally:
+        if hasattr(cr, "close"):
+            try:
+                cr.close()
+            except Exception:
+                pass
 
 
 def _public_open(request, timeout=8.0):
@@ -3233,12 +3298,7 @@ async def title_seasons(request: Request):
     hdrs = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
     if cached and now_t - cached[0] < 3600:
         return JSONResponse(cached[1], headers=hdrs)
-    if len(_SEASONS_LOCKS) >= 300:
-        for _slk_k in list(_SEASONS_LOCKS.keys()):
-            if not _SEASONS_LOCKS[_slk_k].locked():
-                _SEASONS_LOCKS.pop(_slk_k, None)
-                break
-    lock = _SEASONS_LOCKS.setdefault(ckey, asyncio.Lock())
+    lock = _get_loop_lock(_SEASONS_LOCKS, ckey, 300)
     async with lock:
         cached = _SEASONS_CACHE.get(ckey)
         if cached and time.time() - cached[0] < 3600:
@@ -3901,7 +3961,7 @@ def _edge_fetch_bytes(url: str, referer: str = "", xhr: bool = False, accept: st
         q = f"{edge_base}/api/rave/edge-fetch?url={urllib.parse.quote(url, safe='')}"
         if referer:
             q += f"&referer={urllib.parse.quote(referer, safe='')}"
-        q += f"&sig={_proxy_sig(url, referer)}"
+        q += f"&sig={_proxy_sig(url, referer)}&efsig={_proxy_sig('ef:' + url, referer)}"
         if xhr:
             q += "&xhr=1"
         if accept:
@@ -5052,7 +5112,12 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                 continue
             seen_tau.add(tau_id)
             try:
-                best_u = (fb_u if fb_u.startswith("https://") else "") or _TAU_URL_CACHE.get(tau_id, "")
+                best_u = _TAU_URL_CACHE.get(tau_id, "")
+                if best_u and _is_vault_url_expired(best_u):
+                    _TAU_URL_CACHE.pop(tau_id, None)
+                    best_u = ""
+                if not best_u and tau_id.startswith("https://") and not _is_vault_url_expired(tau_id):
+                    best_u = tau_id
                 if not best_u and not tau_id.startswith("https://"):
                     tau_tries = 1 if (IS_VERCEL or len(res) >= 1) else 2
                     tau_to = 1.6 if IS_VERCEL else (1.8 if len(res) >= 1 else 3.0)
@@ -5072,6 +5137,8 @@ def _extract_animecix_sync(mtype: str, s: int, e: int, orig_title: str, tr_title
                             break
                         except Exception:
                             break
+                if not best_u and fb_u.startswith("https://") and not _is_vault_url_expired(fb_u):
+                    best_u = fb_u
                 if best_u and not _is_unplayable_stream_url(best_u):
                     res.append((best_u, "mp4_ac_dub" if is_dub else "mp4_ac_sub"))
                     if is_dub:
@@ -6572,7 +6639,7 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
                     dur_secs = sum(v * (60 ** idx) for idx, v in enumerate(reversed(parts)))
                     if dur_secs < min_dur or dur_secs > 18000:
                         continue
-                    if re.search(r"\b(?:fragman|tan[ıi]t[ıi]m|teaser|trailer|kesit|analiz|inceleme)\b", v_title, re.I) and dur_secs < 2400:
+                    if re.search(r"\b(?:fragman|tan[ıi]t[ıi]m|teaser|trailer|kesit|analiz|inceleme|[öo]zet|tepki|reaction|podcast|ele[şs]tiri|yorum)\b", v_title, re.I) and dur_secs < 2400:
                         continue
                     if mtype == "tv":
                         if not re.search(ep_pattern, v_title, re.I):
@@ -6948,7 +7015,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                         st_u, st_t = str(st_item[0]), str(st_item[1])
                         if _is_vault_url_expired(st_u):
                             continue
-                        if st_t in ("hls_dbx", "hls_dp") or "dbx.molystream.org" in st_u.lower() or "dplayer" in st_u.lower():
+                        if st_t in ("hls_dbx", "hls_dp") or any(dk in st_u.lower() for dk in ("dbx.molystream.org", "dplayer", "pilavyerplay.top", "makesomthingup.click")):
                             continue
                         if IS_VERCEL and (
                             st_t in ("hls_hfnl", "hls_hfnl_multi")
@@ -7260,7 +7327,7 @@ def _is_origin_allowed(request: Request) -> bool:
 
     origin = (request.headers.get("origin") or "").strip().lower()
     if origin:
-        if origin.startswith("android-app://"):
+        if origin.startswith(("android-app://", "capacitor://", "ionic://")):
             return True
         orig_host = (urllib.parse.urlsplit(origin).hostname or "").lower()
         if not _host_allowed(orig_host):
@@ -7268,7 +7335,7 @@ def _is_origin_allowed(request: Request) -> bool:
 
     referer = (request.headers.get("referer") or "").strip().lower()
     if referer:
-        if referer.startswith("android-app://"):
+        if referer.startswith(("android-app://", "capacitor://", "ionic://")):
             return True
         ref_host = (urllib.parse.urlsplit(referer).hostname or "").lower()
         if not _host_allowed(ref_host):
@@ -7363,12 +7430,7 @@ async def resolve_catalog(request: Request):
         cached = _RESOLVE_RESP_CACHE.get(ckey)
         if cached and now_t - cached[0] < 120:
             return JSONResponse(social_engine.rank_servers_by_health(cached[1]), headers=cc_hdrs)
-    if len(_RESOLVE_LOCKS) >= 400:
-        for _rlk_k in list(_RESOLVE_LOCKS.keys()):
-            if not _RESOLVE_LOCKS[_rlk_k].locked():
-                _RESOLVE_LOCKS.pop(_rlk_k, None)
-                break
-    lock = _RESOLVE_LOCKS.setdefault(ckey, asyncio.Lock())
+    lock = _get_loop_lock(_RESOLVE_LOCKS, ckey, 400)
     async with lock:
         cached = _RESOLVE_RESP_CACHE.get(ckey)
         if cached and time.time() - cached[0] < (25 if force_refresh else 120):
@@ -7574,10 +7636,7 @@ async def provider_catalog(request: Request):
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
     ckey = f"v3:{prov}:{category}:{page}:{mt_filter}:{q.replace('İ', 'i').replace('I', 'ı').lower()}"
-    if len(_CATALOG_LOCKS) >= 400:
-        for _clk_k in [k for k, lk in list(_CATALOG_LOCKS.items()) if not lk.locked()][:150]:
-            _CATALOG_LOCKS.pop(_clk_k, None)
-    lock = _CATALOG_LOCKS.setdefault(ckey, asyncio.Lock())
+    lock = _get_loop_lock(_CATALOG_LOCKS, ckey, 400)
     async with lock:
         try:
             res = await asyncio.wait_for(asyncio.to_thread(_provider_catalog_page_sync, prov, q, page, category, mt_filter), timeout=9)
@@ -7705,12 +7764,6 @@ _VIZYON_POST_LIMIT = RateLimiter(15, 600.0, name="vizyon_post")
 
 async def rave_new_releases(request: Request):
     if request.method == "POST":
-        if os.environ.get("ADMIN_SECRET", "").strip() and not _is_admin_request(request):
-            return JSONResponse(
-                {"ok": False, "error": "Vizyon katalog yönetimi için yönetici yetkisi gerekli."},
-                status_code=403,
-                headers={"Cache-Control": "no-store"},
-            )
         allowed_v, retry_v = _VIZYON_POST_LIMIT.hit(client_ip(request))
         if not allowed_v:
             return too_many_response(retry_v)
@@ -7719,7 +7772,20 @@ async def rave_new_releases(request: Request):
         except Exception:
             payload = {}
         if not isinstance(payload, dict):
-            return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400)
+            return JSONResponse({"ok": False, "error": "Geçersiz veri"}, status_code=400, headers={"Cache-Control": "no-store"})
+        raw_stream_chk = str(payload.get("streamUrl") or "").strip()[:800]
+        if raw_stream_chk and not (raw_stream_chk.startswith(("https://", "http://")) and public_http_url(raw_stream_chk)):
+            return JSONResponse(
+                {"ok": False, "error": "Geçersiz veya güvenli olmayan akış bağlantısı"},
+                status_code=400,
+                headers={"Cache-Control": "no-store"},
+            )
+        if not _is_admin_request(request):
+            return JSONResponse(
+                {"ok": False, "error": "Vizyon katalog yönetimi için yönetici yetkisi gerekli."},
+                status_code=403,
+                headers={"Cache-Control": "no-store"},
+            )
         try:
             item = await asyncio.to_thread(_ingest_custom_release_sync, payload)
         except ValueError as ve:
@@ -8317,8 +8383,22 @@ def _upstream_authenticate_sync(provider: str, spec: dict, id_clean: str, pw: st
     )
 
 
+def _sign_guest_uid(gid: str) -> str:
+    return hmac.new(_PROXY_SECRET, f"wl_guest_uid|{gid}".encode("utf-8"), hashlib.sha256).hexdigest()[:24]
+
+
+def _verify_guest_uid_token(raw_tok: str) -> str:
+    if not raw_tok or "." not in raw_tok:
+        return ""
+    gid, _, sig = raw_tok.rpartition(".")
+    if not gid.startswith("guest_") or not re.match(r"^guest_[a-zA-Z0-9_\-:.]{3,58}$", gid):
+        return ""
+    expected = _sign_guest_uid(gid)
+    return gid if hmac.compare_digest(expected, sig) else ""
+
+
 def _resolve_request_uid(request: Request, body_payload: Optional[dict] = None) -> str:
-    """Extract authenticated user UID or guest session UID from scope, headers, query, or body."""
+    """Extract authenticated user UID or cryptographically verified guest UID."""
     uid = str(request.scope.get("wl_uid") or "").strip()
     if uid:
         return uid
@@ -8332,7 +8412,10 @@ def _resolve_request_uid(request: Request, body_payload: Optional[dict] = None) 
                 return str(claims["uid"]).strip()
         except Exception:
             pass
-    q_tok = (request.query_params.get("token") or request.query_params.get("guest_id") or "").strip()
+        v_gid = _verify_guest_uid_token(tok)
+        if v_gid:
+            return v_gid
+    q_tok = (request.query_params.get("token") or "").strip()
     if q_tok:
         try:
             import auth_engine
@@ -8341,10 +8424,11 @@ def _resolve_request_uid(request: Request, body_payload: Optional[dict] = None) 
                 return str(claims["uid"]).strip()
         except Exception:
             pass
-        if not q_tok.startswith("u_wl_") and q_tok.startswith("guest_") and re.match(r"^guest_[a-zA-Z0-9_\-:.]{3,58}$", q_tok):
-            return q_tok
+        v_gid = _verify_guest_uid_token(q_tok)
+        if v_gid:
+            return v_gid
     if isinstance(body_payload, dict):
-        b_tok = str(body_payload.get("token") or body_payload.get("guest_id") or body_payload.get("guest_uid") or "").strip()
+        b_tok = str(body_payload.get("token") or "").strip()
         if b_tok:
             try:
                 import auth_engine
@@ -8353,8 +8437,15 @@ def _resolve_request_uid(request: Request, body_payload: Optional[dict] = None) 
                     return str(claims["uid"]).strip()
             except Exception:
                 pass
-            if not b_tok.startswith("u_wl_") and b_tok.startswith("guest_") and re.match(r"^guest_[a-zA-Z0-9_\-:.]{3,58}$", b_tok):
-                return b_tok
+            v_gid = _verify_guest_uid_token(b_tok)
+            if v_gid:
+                return v_gid
+    c_tok = str((getattr(request, "cookies", None) or {}).get("wl_guest_tok") or "").strip()
+    if c_tok:
+        req_gid = str(request.query_params.get("guest_id") or ((body_payload or {}).get("guest_id") if isinstance(body_payload, dict) else "") or "").strip()
+        v_gid = _verify_guest_uid_token(c_tok)
+        if v_gid and (not req_gid or req_gid == v_gid):
+            return v_gid
     return ""
 
 
@@ -8649,30 +8740,33 @@ async def rave_get_accounts(request: Request):
         }
     uid = _resolve_request_uid(request)
     if uid:
-        conn = None
-        try:
-            now_ts = time.time()
-            conn = _get_acc_db()
-            rows = conn.execute(
-                "SELECT provider, login_satisfied, account_email, profile_name, expires_at, updated_at FROM user_provider_accounts WHERE user_id = ?",
-                (uid,)
-            ).fetchall()
-            for r in rows:
-                p = r["provider"]
-                exp = float(r["expires_at"] or 0.0)
-                if p in accounts and int(r["login_satisfied"] or 0) == 1 and (exp <= 0 or exp > now_ts):
-                    accounts[p]["loginSatisfied"] = True
-                    accounts[p]["accountEmail"] = str(r["account_email"] or "")
-                    accounts[p]["profileName"] = str(r["profile_name"] or "")
-                    accounts[p]["updatedAt"] = float(r["updated_at"] or 0.0)
-        except Exception:
-            pass
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+        def _load_accs_sync():
+            conn = None
+            try:
+                now_ts = time.time()
+                conn = _get_acc_db()
+                return conn.execute(
+                    "SELECT provider, login_satisfied, account_email, profile_name, expires_at, updated_at FROM user_provider_accounts WHERE user_id = ?",
+                    (uid,)
+                ).fetchall(), now_ts
+            except Exception:
+                return [], time.time()
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+
+        rows, now_ts = await asyncio.to_thread(_load_accs_sync)
+        for r in rows:
+            p = r["provider"]
+            exp = float(r["expires_at"] or 0.0)
+            if p in accounts and int(r["login_satisfied"] or 0) == 1 and (exp <= 0 or exp > now_ts):
+                accounts[p]["loginSatisfied"] = True
+                accounts[p]["accountEmail"] = str(r["account_email"] or "")
+                accounts[p]["profileName"] = str(r["profile_name"] or "")
+                accounts[p]["updatedAt"] = float(r["updated_at"] or 0.0)
     return JSONResponse({"accounts": accounts, "zeroKnowledge": True})
 
 
@@ -8691,29 +8785,39 @@ async def rave_login_account(request: Request):
         return JSONResponse({"ok": False, "error": "Bilinmeyen platform"}, status_code=400)
     email = (payload.get("email") or payload.get("account_email") or payload.get("accountEmail") or "").strip()
     pwd = (payload.get("password") or "").strip()
+    raw_spoof_gid = (request.query_params.get("guest_id") or payload.get("guest_id") or "").strip()
+    resolved_uid = _resolve_request_uid(request, payload)
+    if raw_spoof_gid and not resolved_uid:
+        return JSONResponse({"ok": False, "error": "Doğrulanmamış misafir oturumu"}, status_code=401)
 
-    if provider in ("netflix", "max", "hbomax") and not pwd and not email:
+    if provider in ("netflix", "max", "hbomax") and not pwd:
         prof_name = (payload.get("profileName") or payload.get("profile_name") or ("Netflix Profilim" if provider == "netflix" else "Max Profilim")).strip()
-        uid = _resolve_request_uid(request, payload) or f"guest_wl_{secrets.token_hex(8)}"
+        minted_guest = not bool(resolved_uid)
+        uid = resolved_uid or f"guest_wl_{secrets.token_hex(8)}"
         sess_token = f"st_{provider}_{secrets.token_hex(20)}"
-        record_provider_account_session(
-            user_id=uid,
-            provider="max" if provider == "hbomax" else provider,
-            account_email=f"sifresiz@{provider}.watchlivo",
-            profile_name=prof_name,
-            auth_type="sso",
-            session_token=sess_token,
-            ttl_seconds=86400 * 30,
+        await asyncio.to_thread(
+            record_provider_account_session,
+            uid,
+            "max" if provider == "hbomax" else provider,
+            email or f"sifresiz@{provider}.watchlivo",
+            prof_name,
+            "sso",
+            sess_token,
+            86400 * 30,
         )
-        return JSONResponse({
+        resp = JSONResponse({
             "ok": True,
             "loginSatisfied": True,
             "provider": provider,
-            "accountEmail": "Şifresiz Açık Erişim",
+            "accountEmail": _mask_acct_identifier(email) if email else "Şifresiz Açık Erişim",
             "profileName": prof_name,
             "userId": uid,
+            "guestToken": f"{uid}.{_sign_guest_uid(uid)}" if uid.startswith("guest_") else "",
             "message": f"✓ {provider.upper()} şifresiz hesabı başarıyla bağlandı."
         })
+        if minted_guest and uid.startswith("guest_"):
+            resp.set_cookie("wl_guest_tok", f"{uid}.{_sign_guest_uid(uid)}", max_age=86400 * 30, httponly=True, samesite="lax")
+        return resp
 
     ok_cred, err_msg = await asyncio.to_thread(_verify_provider_credentials_sync, provider, spec, email, pwd)
     if ok_cred:
@@ -8907,24 +9011,29 @@ async def rave_logout_account(request: Request):
     if provider in ("hbomax",):
         provider = "max"
     domain = str(payload.get("domain") or "").strip()
+    raw_spoof_gid = (request.query_params.get("guest_id") or payload.get("guest_id") or "").strip()
     uid = _resolve_request_uid(request, payload)
+    if raw_spoof_gid and not uid:
+        return JSONResponse({"ok": False, "error": "Doğrulanmamış misafir oturumu"}, status_code=401)
     if uid and provider:
-        conn = None
-        try:
-            conn = _get_acc_db()
-            with conn:
-                conn.execute(
-                    "UPDATE user_provider_accounts SET login_satisfied = 0, updated_at = ? WHERE user_id = ? AND provider = ?",
-                    (time.time(), uid, provider)
-                )
-        except Exception:
-            pass
-        finally:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
+        def _logout_acc_sync():
+            conn = None
+            try:
+                conn = _get_acc_db()
+                with conn:
+                    conn.execute(
+                        "UPDATE user_provider_accounts SET login_satisfied = 0, updated_at = ? WHERE user_id = ? AND provider = ?",
+                        (time.time(), uid, provider)
+                    )
+            except Exception:
+                pass
+            finally:
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+        await asyncio.to_thread(_logout_acc_sync)
     return JSONResponse({"ok": True, "provider": provider, "domain": domain, "loginSatisfied": False})
 
 
@@ -8999,7 +9108,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
             eff_ref = "https://cinejoy.pk/"
         elif "archive.org" in url:
             eff_ref = "https://archive.org/"
-        elif "tau-video" in url:
+        elif "tau-video" in url or "irtau" in url:
             eff_ref = "https://tau-video.xyz/"
         elif "fastplay." in url or ".cfd/" in url:
             eff_ref = "https://x.ag2m5.cfd/" if "ag2m5.cfd" in url else "https://fastplay.mom/"
@@ -9499,7 +9608,7 @@ async def rave_stream_manifest(request: Request):
                 try:
                     if is_fp and cur_sp:
                         hdrs["X-Sp"] = _gen_fp_xsp(cur_sp, cur_spt)
-                    raw, eff_r_url = _fetch_manifest_with_edge(cur_target, hdrs, t_direct=2.8 if is_probe else 3.4, t_edge=3.6 if is_probe else 4.8)
+                    raw, eff_r_url = _fetch_manifest_with_edge(cur_target, hdrs, t_direct=2.2 if is_probe else 2.6, t_edge=2.8 if is_probe else 3.2)
                     if raw and "#EXTM3U" in raw:
                         if eff_r_url.startswith("http") and public_http_url(eff_r_url):
                             cur_target = eff_r_url
@@ -9551,9 +9660,13 @@ async def rave_stream_manifest(request: Request):
                             cands = _extract_direct_stream_sync(tid, mt_guess, s_i, e_i) or []
                         except Exception:
                             cands = []
+                    tried_cands = 0
                     for cand_u, cand_k in cands:
+                        if tried_cands >= 3:
+                            break
                         if not cand_u or cand_u == cur_target or not cand_u.startswith("http") or str(cand_k).startswith("mp4") or _is_unplayable_stream_url(cand_u) or "serve.dragonballzfans.xyz" in cand_u or "finalsignal.top" in cand_u:
                             continue
+                        tried_cands += 1
                         try:
                             c_hdrs = {"User-Agent": UA137}
                             if "ve" in str(cand_k) or any(d in cand_u for d in ("zenoak.top", "paleoak.top", "olivewave.top", "goldenkite.top", "cleartree.top", "vividstone.top", "crispwave.top", "greennova.top", "finalsignal.top", "workers.dev")) or bool(re.search(r"https?://[^/]+\.top/vd[a-z0-9]*/", cand_u)):
@@ -9578,7 +9691,7 @@ async def rave_stream_manifest(request: Request):
                             elif "dragonballzfans" in cand_u:
                                 c_hdrs["Referer"] = "https://hexa.su/"
                                 c_hdrs["Origin"] = "https://hexa.su"
-                            cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.8, t_edge=3.8)
+                            cand_raw, cand_fin = _fetch_manifest_with_edge(cand_u, c_hdrs, t_direct=2.2, t_edge=2.8)
                             if cand_raw and "#EXTM3U" in cand_raw:
                                 raw = cand_raw
                                 cur_target = cand_fin if (cand_fin.startswith("http") and public_http_url(cand_fin)) else cand_u
@@ -9951,10 +10064,7 @@ async def rave_stream_manifest(request: Request):
                     out_lines.append(inf_l)
                     out_lines.append(uri_l)
             return "\n".join(out_lines)
-        if len(_STREAM_LOCKS) > 300:
-            for k in [k for k, lk in list(_STREAM_LOCKS.items()) if not lk.locked()][:150]:
-                _STREAM_LOCKS.pop(k, None)
-        _manifest_lock = _STREAM_LOCKS.setdefault(m3u8_ckey, asyncio.Lock())
+        _manifest_lock = _get_loop_lock(_STREAM_LOCKS, m3u8_ckey, 300)
         async with _manifest_lock:
             cached_m2 = _M3U8_CACHE.get(m3u8_ckey)
             if cached_m2 and time.time() - cached_m2[0] < ttl_m:
@@ -9964,7 +10074,7 @@ async def rave_stream_manifest(request: Request):
                     "Content-Length": str(len(body_bytes2)),
                     "Cache-Control": "no-cache, no-store" if is_live_tv else "public, max-age=60, s-maxage=90, stale-while-revalidate=180",
                 })
-            body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=15.0)
+            body = await asyncio.wait_for(asyncio.to_thread(_fetch_m3u8), timeout=8.5)
             body_bytes = body.encode("utf-8")
             if body_bytes:
                 if len(_M3U8_CACHE) >= 240:
@@ -10138,9 +10248,12 @@ async def poster_proxy(request: Request):
             "spotifycdn.com", "media-amazon.com", "media-imdb.com",
         )
     )
-    if url and not is_whitelisted_poster and not _proxy_sig_ok(url, ref, sig) and not title and not orig_title and not tmdb_id:
-        return RedirectResponse("/static/watchlivo-poster.svg")
-    if url:
+    has_valid_poster_auth = is_whitelisted_poster or _proxy_sig_ok(url, ref, sig)
+    if url and not has_valid_poster_auth:
+        if not title and not orig_title and not tmdb_id:
+            return RedirectResponse("/static/watchlivo-poster.svg")
+        url = ""
+    if url and has_valid_poster_auth:
         with _POSTER_CACHE_LOCK:
             cached_poster = _POSTER_MEM_CACHE.get(url)
             if cached_poster is not None:
@@ -10157,7 +10270,7 @@ async def poster_proxy(request: Request):
     allowed, retry_after = await asyncio.to_thread(_POSTER_LIMIT.hit, client_ip(request))
     if not allowed:
         return too_many_response(retry_after)
-    if url and url.startswith(("https://", "http://")) and is_whitelisted_poster and public_http_url(url):
+    if url and url.startswith(("https://", "http://")) and has_valid_poster_auth and public_http_url(url):
         try:
             data, ct = await asyncio.wait_for(asyncio.to_thread(_fetch_poster_sync, url), timeout=2.6)
             if data and ct.startswith("image/") and "svg" not in ct.lower():
@@ -10350,7 +10463,9 @@ def _srt_to_vtt(raw_bytes) -> str:
         if raw_bytes.startswith((b"\xff\xfe", b"\xfe\xff")):
             encs = ("utf-16", "utf-8-sig", "cp1254", "iso-8859-9", "latin-1")
         elif len(raw_bytes) >= 4 and raw_bytes.count(b"\x00") > len(raw_bytes) // 5:
-            bomless_u16 = "utf-16-le" if (len(raw_bytes) >= 2 and raw_bytes[1] == 0) else "utf-16-be"
+            odd_zeros = sum(1 for b in raw_bytes[1:256:2] if b == 0)
+            even_zeros = sum(1 for b in raw_bytes[0:256:2] if b == 0)
+            bomless_u16 = "utf-16-le" if odd_zeros >= even_zeros else "utf-16-be"
             encs = (bomless_u16, "utf-16", "utf-8-sig", "cp1254", "iso-8859-9", "latin-1")
         else:
             encs = ("utf-8-sig", "utf-8", "cp1254", "iso-8859-9")
@@ -10410,6 +10525,8 @@ def _srt_to_vtt(raw_bytes) -> str:
     txt = re.sub(r"<br\s*/?>", "\n", txt, flags=re.I)
     txt = html_mod.unescape(txt)
     txt = re.sub(r"</?[a-zA-Z!][^>\n]*>", "", txt)
+    m_xts = re.search(r"(?m)^(X-TIMESTAMP-MAP=[^\r\n]+)", txt)
+    x_ts_map = m_xts.group(1).strip() if m_xts else ""
     txt = re.sub(r"^X-TIMESTAMP-MAP[^\n]*\n?", "", txt, flags=re.M)
     txt = re.sub(
         r"(?im)^.*?(?:ai\.opensubtitles\.com|opensubtitles\.org|osdb\.link|advertise your product or brand here|support us and become vip|do you want subtitles for any video|çevrimiçi filmleri ve dizileri ücretsiz izleyin|yutukluklar\.xyz|www\.altyazi\.org|turkcealtyazi\.org|subscene\.com|dizipal|dizibox|hdfilmcehennemi|fullhdfilmizlesene|dizilla|dizigom|sezonlukdizi|yabancidizi|jetfilmizle|filmmodu|deneme\s*bonusu|freespin|t\.me/|(?:bahis|casino|telegram)[^\n]*(?:https?://|www\.|@[a-z0-9_]{3,}|\.(?:com|net|org|xyz|bet|io)|bonus|güncel\s*giriş)|çeviri\s*:|senkron\s*:|iyi seyirler dileriz).*$\n?",
@@ -10453,7 +10570,8 @@ def _srt_to_vtt(raw_bytes) -> str:
             continue
         prev_ts_norm = cur_sig
         cleaned_blocks.append(f"{ts_line}\n{joined_payload}")
-    return "WEBVTT\n\n" + "\n\n".join(cleaned_blocks) + "\n"
+    vtt_hdr = f"WEBVTT\n{x_ts_map}\n\n" if x_ts_map else "WEBVTT\n\n"
+    return vtt_hdr + "\n\n".join(cleaned_blocks) + "\n"
 
 
 _VTT_CACHE_LOCK = threading.Lock()
@@ -10560,7 +10678,7 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
 
 def _translate_vtt_to_tr_sync(vtt: str, target_lang: str = "tr") -> str:
     tl_code = re.sub(r"[^a-z-]", "", (target_lang or "tr").strip().lower())[:5] or "tr"
-    ck = f"{tl_code}_vtt:{hashlib.md5(vtt[:4096].encode('utf-8', errors='ignore')).hexdigest()}:{len(vtt)}"
+    ck = f"{tl_code}_vtt:{hashlib.md5(vtt.encode('utf-8', errors='ignore')).hexdigest()}:{len(vtt)}"
     with _VTT_CACHE_LOCK:
         if ck in _SUB_VTT_CACHE:
             _SUB_VTT_CACHE.move_to_end(ck)
@@ -10594,7 +10712,7 @@ def _translate_vtt_to_tr_sync(vtt: str, target_lang: str = "tr") -> str:
         cur_len += len(c_t) + 4
     if cur_b:
         batches.append((cur_i, cur_b))
-    batches = batches[:40]
+    batches = batches[:120]
 
     def _tr_batch(b_tuple):
         b_idxs, b_txts = b_tuple
@@ -10785,14 +10903,7 @@ async def rave_subtitles(request: Request):
     cached_s = _SUB_RESP_CACHE.get(s_ckey)
     if cached_s and time.time() - cached_s[0] < 600:
         return JSONResponse(cached_s[1], headers=cc_hdrs)
-    if len(_SUB_RESP_LOCKS) >= 400:
-        for old_sk in list(_SUB_RESP_LOCKS.keys()):
-            lk_obj = _SUB_RESP_LOCKS.get(old_sk)
-            if lk_obj is not None and not lk_obj.locked():
-                _SUB_RESP_LOCKS.pop(old_sk, None)
-                if len(_SUB_RESP_LOCKS) < 350:
-                    break
-    lock = _SUB_RESP_LOCKS.setdefault(s_ckey, asyncio.Lock())
+    lock = _get_loop_lock(_SUB_RESP_LOCKS, s_ckey, 400)
     async with lock:
         cached_s = _SUB_RESP_CACHE.get(s_ckey)
         if cached_s and time.time() - cached_s[0] < 600:
@@ -11147,6 +11258,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
+        "version": "20261111_v195",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),
@@ -11742,10 +11854,14 @@ async def rave_browser_proxy(request: Request):
   </script>
 </body>
 </html>"""
-    return HTMLResponse(portal_html, headers={
-        "Cache-Control": "no-store",
-        "Access-Control-Allow-Origin": "*",
-    })
+    bp_hdrs = {"Cache-Control": "no-store"}
+    req_orig = (request.headers.get("origin") or "").strip()
+    if req_orig:
+        orig_h = (urllib.parse.urlsplit(req_orig).hostname or "").lower()
+        if orig_h in ("watchlivo.online", "www.watchlivo.online", "localhost", "127.0.0.1") or orig_h.endswith(".onrender.com"):
+            bp_hdrs["Access-Control-Allow-Origin"] = req_orig
+            bp_hdrs["Vary"] = "Origin"
+    return HTMLResponse(portal_html, headers=bp_hdrs)
 
 import auth_engine
 import music_engine
@@ -12928,8 +13044,8 @@ app = Starlette(
         Mount("/static", StaticFiles(directory=str(STATIC_DIR), check_dir=False), name="static"),
     ],
     middleware=[
-        Middleware(CrawlerShieldMiddleware),
         Middleware(SecurityHeaders),
+        Middleware(CrawlerShieldMiddleware),
         Middleware(SelectiveGZipMiddleware, minimum_size=1000),
         Middleware(IdentityMiddleware),
     ],

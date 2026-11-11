@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261111_v194';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261111_v194';
-import { resolveMusicItem } from './selection-kinds.js?v=20261111_v194';
-import { MeshConnection } from '../realtime.js?v=20261111_v194';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261111_v194';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261111_v194';
-import { buildLayout } from './mesh-layout.js?v=20261111_v194';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261111_v194';
-import { Voice } from '../voice.js?v=20261111_v194';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261111_v194';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261111_v194';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261111_v194';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261111_v195';
+import { state, set, isLeader, canControlPlayback, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261111_v195';
+import { resolveMusicItem } from './selection-kinds.js?v=20261111_v195';
+import { MeshConnection } from '../realtime.js?v=20261111_v195';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261111_v195';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261111_v195';
+import { buildLayout } from './mesh-layout.js?v=20261111_v195';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261111_v195';
+import { Voice } from '../voice.js?v=20261111_v195';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261111_v195';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261111_v195';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261111_v195';
 
 let ctx = null;
 
@@ -579,6 +579,7 @@ async function loadMedia(media) {
     const vEl = ad?.video;
     const fireLeaderAnchor = () => {
       if (!ctx || ctx.loadSeq !== mySeq || !isTimeKeeper() || ctx.anchoredKey === k) return;
+      if (ad?._suppressLeaderAnchorUntil && performance.now() < ad._suppressLeaderAnchorUntil) return;
       if (ad && !ad.isPaused?.() && (!vEl || (vEl.readyState >= 2 && !vEl.seeking))) {
         ctx.anchoredKey = k;
         actions.heartbeat(ad.getTime?.() ?? 0, true);
@@ -951,7 +952,7 @@ const actions = {
   },
   play() {
     if (!ctx) return;
-    if (!isLeader()) {
+    if (!canControlPlayback()) {
       ctx.host.adapter?.play?.();
       ctx.sync?.kick();
       return;
@@ -966,7 +967,7 @@ const actions = {
   },
   pause() {
     if (!ctx) return;
-    if (!isLeader()) {
+    if (!canControlPlayback()) {
       toast('Videoyu yalnızca oda lideri duraklatabilir');
       return;
     }
@@ -979,7 +980,7 @@ const actions = {
     ctx.conn.send('pause', { currentTime: t, atTime: clock.now() });
   },
   toggle() {
-    if (!isLeader()) {
+    if (!canControlPlayback()) {
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
       return;
     }
@@ -991,7 +992,7 @@ const actions = {
   seek(t) {
     if (!ctx) return;
     if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
-    if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+    if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
     const d = Number(ctx.host.adapter?.getDuration?.() || state.mesh?.media?.duration || 0);
     const target = d > 0 ? Math.max(0, Math.min(d - 0.5, Number(t) || 0)) : Math.max(0, Number(t) || 0);
     if (isActiveTimeKeeper()) ctx.lastLeaderActionAt = Date.now();
@@ -1009,7 +1010,7 @@ const actions = {
   },
   setRate(r) {
     if (!ctx) return;
-    if (!isLeader()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; }
+    if (!canControlPlayback()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; }
     const t = ctx.host.adapter?.getTime() ?? 0;
     if (isActiveTimeKeeper()) ctx.lastLeaderActionAt = Date.now();
     ctx.host.adapter?.setRate?.(r);
@@ -1532,6 +1533,7 @@ function onPlayerEvent(ev, arg) {
       const k = mediaKey(m);
       const ad = ctx.host.adapter;
       const vEl = ad?.video;
+      if (ad?._suppressLeaderAnchorUntil && performance.now() < ad._suppressLeaderAnchorUntil) return;
       if (m && k && ad && !ad.isPaused() && (!vEl || (vEl.readyState >= 2 && !vEl.seeking)) && ctx.anchoredKey !== k) {
         ctx.anchoredKey = k;
         const t = ad.getTime?.() ?? 0;

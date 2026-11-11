@@ -1,7 +1,7 @@
 name = "watchlivo-ha-gateway"
 main = "worker.js"
 compatibility_date = "2026-01-01"
-workers_dev = true
+workers_dev = false
 
 routes = [
   { pattern = "watchlivo.online/*", zone_name = "watchlivo.online" },
@@ -18,4 +18,4 @@ crons = ["*/10 * * * *"]
 [vars]
 SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
 STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
-FORCE_SECONDARY = "0"
+FORCE_SECONDARY = "1"

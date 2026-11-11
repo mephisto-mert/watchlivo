@@ -1,13 +1,13 @@
-import sys
-import io
-import os
 import asyncio
+import io
 import json
+import os
+import sys
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import server
+
 
 class MockRequest:
     def __init__(self, json_data=None, query_params=None, cookies=None, headers=None):
@@ -17,16 +17,18 @@ class MockRequest:
         self.headers = headers or {}
         self.scope = {"type": "http", "wl_uid": self.cookies.get("wl_uid")}
         self.method = "POST" if json_data else "GET"
+
     async def json(self):
         return self._json
 
+
 async def run_tests():
     test_uid = "rave_test_user_tris_777"
-    
+
     # 1. Passwordless login for Max
     req_login = MockRequest(
         json_data={"provider": "max", "email": "tris.author@gmail.com"},
-        cookies={"wl_uid": test_uid}
+        cookies={"wl_uid": test_uid},
     )
     res_login = await server.rave_login_account(req_login)
     login_data = json.loads(res_login.body.decode("utf-8"))
@@ -38,7 +40,7 @@ async def run_tests():
     # 2. Passwordless login for Netflix
     req_nf = MockRequest(
         json_data={"provider": "netflix", "profileName": "Mertcan"},
-        cookies={"wl_uid": test_uid}
+        cookies={"wl_uid": test_uid},
     )
     res_nf = await server.rave_login_account(req_nf)
     nf_data = json.loads(res_nf.body.decode("utf-8"))
@@ -47,7 +49,9 @@ async def run_tests():
     assert nf_data["loginSatisfied"] is True
 
     # 3. Unauthenticated guest stream manifest check (must NOT return 401 gate)
-    unauth_stream_req = MockRequest(query_params={"provider": "max", "tmdbId": "223397", "uid": "unauthenticated_guest_111"})
+    unauth_stream_req = MockRequest(
+        query_params={"provider": "max", "tmdbId": "223397", "uid": "unauthenticated_guest_111"}
+    )
     res_stream_gate = await server.rave_stream_manifest(unauth_stream_req)
     print("[3] Free Playback Status Code (no 401 blocker):", res_stream_gate.status_code)
     assert res_stream_gate.status_code != 401, "Should never be 401 blocked!"
@@ -62,5 +66,12 @@ async def run_tests():
     print("ALL HBO & NETFLIX PASSWORDLESS ACCESS TESTS PASSED!")
     print("=======================================================")
 
+
+def test_hbo_netflix_passwordless_parity():
+    asyncio.run(run_tests())
+
+
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     asyncio.run(run_tests())

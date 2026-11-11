@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261111_v194';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261111_v195';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261111_v194';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261111_v194';
-import { api } from '../api.js?v=20261111_v194';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261111_v194';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v194';
-import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261111_v194';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261111_v194';
+} from '../store.js?v=20261111_v195';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261111_v195';
+import { api } from '../api.js?v=20261111_v195';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261111_v195';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v195';
+import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261111_v195';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261111_v195';
 
 let refreshTimer = null;
 let retryLoadTimer = null;
@@ -64,7 +64,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261111_v194', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261111_v195', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -74,77 +74,85 @@ export function openRoom(room) {
   window.vortexNavigate(`/mesh/${encodeURIComponent(room.id)}`);
 }
 
+let _creatingRoomPromise = null;
+
 export async function createRoomWithMedia(media) {
-  const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
-  const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
-  const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
-  if (cleanMedia && document.body.classList.contains('mesh-minimized') && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
-    document.body.classList.remove('mesh-minimized');
-    window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
-    window.vortexActions.pickMedia(cleanMedia);
-    return;
-  }
-  let cid = '';
-  try {
-    cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
-    sessionStorage.setItem('vortex_cid', cid);
-  } catch (e) { /* ignore */ }
-  const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
-    ? String(cleanMedia.title).trim().slice(0, 80)
-    : `${self.name || 'İzleyici'} odası`;
-  const res = await api('/api/rooms/create', {
-    method: 'POST',
-    body: {
-      name: initialRoomName,
-      privacy: 'public',
-      playMode: 'leader',
-      creator: self.name || 'İzleyici',
-      creatorId: self.id || '',
-      clientId: cid,
-      color: self.color || '#27DCC8',
-      handle: self.handle || '',
-      avatarUrl: self.avatarUrl || self.avatar || '',
-      bio: self.bio || '',
-      statusText: self.statusText || '',
-      statusEmoji: self.statusEmoji || '🍿',
-      medal: self.medal || '',
-      watchMinutes: self.watchMinutes || 0,
-      hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
-      hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
-      hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
-      friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
-      device: (() => {
-        const ua = navigator.userAgent || '';
-        if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
-        if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'Tablet';
-        if (/iPad|Tablet/i.test(ua)) return 'Tablet';
-        return /Mobi|Android|iPhone/i.test(ua) ? 'Mobil' : 'Web';
-      })(),
-      media: cleanMedia,
-    },
-  });
-  if (!res.room?.id) throw new Error('Oda oluşturulamadı');
-  try {
-    const prevRecents = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]');
-    for (const oldId of prevRecents) {
-      if (oldId && oldId !== res.room.id && !String(oldId).startsWith('tv-') && !String(oldId).startsWith('radyo-')) {
-        forgetRoom(oldId);
+  if (_creatingRoomPromise) return _creatingRoomPromise;
+  _creatingRoomPromise = (async () => {
+    const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
+    const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
+    const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
+    if (cleanMedia && document.body.classList.contains('mesh-minimized') && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
+      document.body.classList.remove('mesh-minimized');
+      window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
+      window.vortexActions.pickMedia(cleanMedia);
+      return;
+    }
+    let cid = '';
+    try {
+      cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+      sessionStorage.setItem('vortex_cid', cid);
+    } catch (e) { /* ignore */ }
+    const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
+      ? String(cleanMedia.title).trim().slice(0, 80)
+      : `${self.name || 'İzleyici'} odası`;
+    const res = await api('/api/rooms/create', {
+      method: 'POST',
+      body: {
+        name: initialRoomName,
+        privacy: 'public',
+        playMode: 'leader',
+        creator: self.name || 'İzleyici',
+        creatorId: self.id || '',
+        clientId: cid,
+        color: self.color || '#27DCC8',
+        handle: self.handle || '',
+        avatarUrl: self.avatarUrl || self.avatar || '',
+        bio: self.bio || '',
+        statusText: self.statusText || '',
+        statusEmoji: self.statusEmoji || '🍿',
+        medal: self.medal || '',
+        watchMinutes: self.watchMinutes || 0,
+        hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
+        hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
+        hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
+        friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
+        device: (() => {
+          const ua = navigator.userAgent || '';
+          if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
+          if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'Tablet';
+          if (/iPad|Tablet/i.test(ua)) return 'Tablet';
+          return /Mobi|Android|iPhone/i.test(ua) ? 'Mobil' : 'Web';
+        })(),
+        media: cleanMedia,
+      },
+    });
+    if (!res.room?.id) throw new Error('Oda oluşturulamadı');
+    try {
+      const prevRecents = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]');
+      for (const oldId of prevRecents) {
+        if (oldId && oldId !== res.room.id && !String(oldId).startsWith('tv-') && !String(oldId).startsWith('radyo-')) {
+          forgetRoom(oldId);
+        }
       }
-    }
-    if (res.clientId) {
-      sessionStorage.setItem('vortex_cid', res.clientId);
-      sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
-      localStorage.removeItem(`vortex_creator_flag_${res.room.id}`);
-      localStorage.removeItem(`vortex_creator_${res.room.id}`);
-    }
-    if (res.clientToken) {
-      sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
-      localStorage.removeItem(`vortex_ct_${res.room.id}`);
-    }
-    if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
-  } catch (e) { /* ignore */ }
-  rememberRoom(res.room);
-  window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
+      if (res.clientId) {
+        sessionStorage.setItem('vortex_cid', res.clientId);
+        sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
+        localStorage.removeItem(`vortex_creator_flag_${res.room.id}`);
+        localStorage.removeItem(`vortex_creator_${res.room.id}`);
+      }
+      if (res.clientToken) {
+        sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
+        localStorage.removeItem(`vortex_ct_${res.room.id}`);
+      }
+      if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
+    } catch (e) { /* ignore */ }
+    rememberRoom(res.room);
+    window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
+  })().finally(() => {
+    _creatingRoomPromise = null;
+  });
+  return _creatingRoomPromise;
 }
 
 export function renderHome(app) {
@@ -313,6 +321,11 @@ export function renderHome(app) {
       'data-view': id,
       title,
       onclick: () => {
+        if (!document.body.classList.contains('mesh-minimized')) {
+          const mr = document.getElementById('mesh-root');
+          if (mr && !mr.classList.contains('hidden')) mr.classList.add('hidden');
+          document.body.classList.remove('in-room');
+        }
         if (id !== 'profile') {
           dockEl.querySelectorAll('.dock-btn').forEach((x) => x.classList.toggle('active', x === b));
           dockEl._syncTubelight?.();
@@ -518,13 +531,17 @@ export function renderHome(app) {
   updateMiniPip();
   initCookieConsentBanner();
   let emptyStreak = 0;
+  let failStreak = 0;
   let loadInFlight = false;
   const load = async (isAuto = false) => {
     if (loadInFlight) return;
-    if (isAuto && typeof document !== 'undefined' && document.hidden && rooms.length > 0) return;
+    if (isAuto && typeof document !== 'undefined' && document.hidden) return;
     loadInFlight = true;
     try {
       const next = await fetchRooms();
+      failStreak = 0;
+      clearTimeout(retryLoadTimer);
+      retryLoadTimer = null;
       if (next.length === 0 && rooms.length > 0 && emptyStreak < 2) {
         emptyStreak += 1;
         return;
@@ -534,14 +551,17 @@ export function renderHome(app) {
       draw();
       updateMiniPip();
     } catch (e) {
+      failStreak = Math.min(8, failStreak + 1);
       if (!rooms.length) {
         rooms = buildFallbackCuratedRooms();
         draw(true);
       }
       clearTimeout(retryLoadTimer);
+      const baseMs = (e && Number(e.retryAfter) > 0) ? (Number(e.retryAfter) * 1000) : 3500;
+      const delayMs = Math.min(30000, Math.round(baseMs * Math.pow(1.7, Math.max(0, failStreak - 1))));
       retryLoadTimer = setTimeout(() => {
-        if (home.isConnected) load(false);
-      }, 2500);
+        if (home.isConnected && !(typeof document !== 'undefined' && document.hidden)) load(false);
+      }, delayMs);
     } finally {
       loadInFlight = false;
     }

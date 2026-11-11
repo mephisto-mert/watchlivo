@@ -234,6 +234,9 @@ def _strip_soc_tag(s: Any) -> str:
     return re.sub(r"#[a-zA-Z0-9]{1,8}$", "", str(s or "").strip()).strip()
 
 
+_GUEST_BINDINGS = BoundedTTLCache(maxsize=4096, default_ttl=86400 * 14)
+
+
 def _guest_binding_sig(request: Request) -> str:
     ip_s = str(client_ip(request) or "anon")
     ua_s = str(request.headers.get("user-agent") or "")[:160]
@@ -251,23 +254,31 @@ def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_defa
             return str(any_claims["uid"]).strip().lower()[:64]
     cand = _clean(raw_uid, 64).lower()
     req_sig = _guest_binding_sig(request)
-    valid_cand = False
-    if cand.startswith("guest_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"guest_[a-z0-9_-]{3,48}", cand):
-        valid_cand = True
-    elif cand and not cand.startswith("u_wl_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"[a-z0-9_-]{3,48}", cand):
-        if auth_engine.resolve_public_user(cand) is None:
-            valid_cand = True
-    if valid_cand:
+    is_ephemeral_cand = (
+        (cand.startswith("guest_") or (cand.startswith("u_") and not cand.startswith("u_wl_")))
+        and cand not in ("guest_default", "guest_local")
+        and bool(re.fullmatch(r"(?:guest_|u_(?!wl_))[a-z0-9_-]{3,48}", cand))
+    )
+    if is_ephemeral_cand:
         ex_u = _SOCIAL_USERS.get(cand) or _kv_get(f"wl:soc:u:{cand}", None, max_age=3.0)
+        saved_sig = ""
         if isinstance(ex_u, dict) and ex_u.get("uid"):
             saved_sig = str(ex_u.get("guestBindingSig") or "")
-            if not saved_sig or hmac.compare_digest(saved_sig, req_sig):
+        if not saved_sig:
+            saved_sig = str(_GUEST_BINDINGS.get(cand) or "")
+        if isinstance(ex_u, dict) and ex_u.get("uid"):
+            if saved_sig and hmac.compare_digest(saved_sig, req_sig):
+                _GUEST_BINDINGS.set(cand, req_sig)
                 return cand
         else:
-            return cand
+            if not saved_sig or hmac.compare_digest(saved_sig, req_sig):
+                _GUEST_BINDINGS.set(cand, req_sig)
+                return cand
     ip_seed = str(client_ip(request) or "anon")
     ua_seed = str(request.headers.get("user-agent") or "")[:80]
-    return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{fallback}".encode("utf-8")).hexdigest()[:12]
+    det_uid = "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{fallback}".encode("utf-8")).hexdigest()[:12]
+    _GUEST_BINDINGS.set(det_uid, req_sig)
+    return det_uid
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -418,6 +429,10 @@ def _ensure_user_social(
             "lastSeen": _now(),
         }
     u = _SOCIAL_USERS[uid_clean]
+    if uid_clean.startswith("guest_") and not u.get("guestBindingSig"):
+        mem_sig = _GUEST_BINDINGS.get(uid_clean)
+        if mem_sig:
+            u["guestBindingSig"] = str(mem_sig)
     # Purge legacy demo bot entries so only real mutual accounts appear
     u["friends"] = [f for f in (u.get("friends") or []) if isinstance(f, dict) and f.get("uid") not in _LEGACY_BOT_UIDS]
     u["requests"] = [r for r in (u.get("requests") or []) if isinstance(r, dict) and r.get("fromUid") not in _LEGACY_BOT_UIDS and r.get("id") != "req_emre_01"]
@@ -2778,7 +2793,10 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     hmap = _load_health_map()
     dead_buckets = {
         bkt for bkt, rec in hmap.items()
-        if isinstance(rec, dict) and int(rec.get("fail") or 0) >= 3 and int(rec.get("ok") or 0) == 0
+        if isinstance(rec, dict)
+        and int(rec.get("fail") or 0) >= 6
+        and int(rec.get("ok") or 0) == 0
+        and len(rec.get("failReporters") or []) >= 3
     }
     srvs = res.get("servers")
     if not isinstance(srvs, list) or len(srvs) < 2:
@@ -2855,6 +2873,9 @@ def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     return out
 
 
+_SRV_HEALTH_RL = BoundedTTLCache(maxsize=4096, default_ttl=60.0)
+
+
 async def server_health_report(request: Request) -> JSONResponse:
     try:
         body = await request.json()
@@ -2869,15 +2890,27 @@ async def server_health_report(request: Request) -> JSONResponse:
     ok = bool(body.get("ok", True)) and not bool(body.get("stalled", False))
     lat_ms = _finite_float(body.get("latencyMs"), 550.0 if ok else 4500.0, lo=20.0, hi=15000.0)
     bkt = _extract_srv_bucket(url_raw, label)
+    ip_hash = hashlib.sha256(str(client_ip(request) or "anon").encode("utf-8")).hexdigest()[:12]
+    rl_key = f"{ip_hash}:{bkt}:{'ok' if ok else 'fail'}"
+    if _SRV_HEALTH_RL.get(rl_key):
+        hmap_cur = _load_health_map()
+        return JSONResponse({"ok": True, "bucket": bkt, "stats": hmap_cur.get(bkt) or {}})
+    _SRV_HEALTH_RL.set(rl_key, 1, ttl=60.0)
     hmap = _load_health_map()
-    rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0})
+    rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0, "failReporters": []})
+    reporters = [str(x) for x in (rec.get("failReporters") or []) if x][:16]
     if ok:
         rec["ok"] = min(500, int(rec.get("ok") or 0) + 1)
-        # Decay old failures gradually on fresh recovery
         if rec.get("fail", 0) > 0 and rec["ok"] % 2 == 0:
             rec["fail"] = max(0, int(rec["fail"]) - 1)
+        if ip_hash in reporters:
+            reporters.remove(ip_hash)
     else:
-        rec["fail"] = min(200, int(rec.get("fail") or 0) + 2)
+        rec["fail"] = min(200, int(rec.get("fail") or 0) + 1)
+        if ip_hash not in reporters:
+            reporters.append(ip_hash)
+            reporters = reporters[-12:]
+    rec["failReporters"] = reporters
     prev_ms = float(rec.get("avgMs") or lat_ms)
     rec["avgMs"] = round(prev_ms * 0.65 + lat_ms * 0.35, 1)
     rec["label"] = label or rec.get("label") or bkt
@@ -3227,10 +3260,36 @@ _VN_UPLOAD_LIMIT = RateLimiter(30, 60.0, name="vn_upload")
 _VR_POST_LIMIT = RateLimiter(25, 5.0, name="vr_post")
 _VR_GET_LIMIT = RateLimiter(90, 10.0, name="vr_get")
 _VR_AUTH_FAIL_LIMIT = RateLimiter(20, 60.0, name="vr_fail")
-_RELAY_HEADERS = {
-    **_PRIVATE_HEADERS,
-    "Access-Control-Allow-Origin": "*",
-}
+_RELAY_HEADERS = dict(_PRIVATE_HEADERS)
+
+
+def _safe_cors_origin(request: Request) -> str:
+    orig = (request.headers.get("origin") or "").strip()
+    if orig in (
+        "https://watchlivo.online",
+        "https://www.watchlivo.online",
+        "https://localhost",
+        "capacitor://localhost",
+        "ionic://localhost",
+    ) or re.match(r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$", orig):
+        return orig
+    return ""
+
+
+def _get_voice_relay_lock(room_id: str) -> asyncio.Lock:
+    loop_id = id(asyncio.get_running_loop())
+    lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
+    if len(lock_map) > 160:
+        for lk_k in list(lock_map.keys()):
+            entry = lock_map.get(lk_k)
+            if not isinstance(entry, tuple) or not entry[1].locked():
+                lock_map.pop(lk_k, None)
+    cur_entry = lock_map.get(room_id)
+    if isinstance(cur_entry, tuple) and cur_entry[0] == loop_id:
+        return cur_entry[1]
+    new_lock = asyncio.Lock()
+    lock_map[room_id] = (loop_id, new_lock)
+    return new_lock
 
 
 def _bound_voice_note_mem() -> None:
@@ -3360,16 +3419,17 @@ async def voice_note_upload(request: Request):
 
 
 async def voice_note_stream(request: Request):
+    cors_orig = _safe_cors_origin(request)
     if request.method == "OPTIONS":
-        return _StarletteResponse(
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-                "Access-Control-Allow-Headers": "Range, Content-Type",
-                "Accept-Ranges": "bytes",
-            },
-        )
+        opt_hdrs = {
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
+            "Accept-Ranges": "bytes",
+        }
+        if cors_orig:
+            opt_hdrs["Access-Control-Allow-Origin"] = cors_orig
+            opt_hdrs["Vary"] = "Origin"
+        return _StarletteResponse(status_code=204, headers=opt_hdrs)
     note_id = request.path_params.get("note_id") or ""
     entry = _load_voice_note_entry(note_id)
     if not entry or not entry.get("b64"):
@@ -3383,12 +3443,14 @@ async def voice_note_stream(request: Request):
     base_headers = {
         "Content-Type": mime,
         "Accept-Ranges": "bytes",
-        "Cache-Control": "public, max-age=86400",
-        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "private, no-store, max-age=0",
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Content-Disposition": 'inline; filename="voice-note"',
     }
+    if cors_orig:
+        base_headers["Access-Control-Allow-Origin"] = cors_orig
+        base_headers["Vary"] = "Origin"
     if request.method == "HEAD":
         base_headers["Content-Length"] = str(total)
         return _StarletteResponse(status_code=200, headers=base_headers)
@@ -3425,18 +3487,20 @@ async def voice_note_stream(request: Request):
 
 
 async def voice_relay_endpoint(request: Request):
+    cors_orig = _safe_cors_origin(request)
+    relay_hdrs = {**_RELAY_HEADERS, **({"Access-Control-Allow-Origin": cors_orig, "Vary": "Origin"} if cors_orig else {})}
     if request.method == "OPTIONS":
-        return _StarletteResponse(
-            status_code=204,
-            headers={
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization",
-            },
-        )
+        opt_hdrs = {
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        }
+        if cors_orig:
+            opt_hdrs["Access-Control-Allow-Origin"] = cors_orig
+            opt_hdrs["Vary"] = "Origin"
+        return _StarletteResponse(status_code=204, headers=opt_hdrs)
     room_id = re.sub(r"[^a-z0-9_\-]", "", str(request.path_params.get("room_id") or request.query_params.get("roomId") or "").lower())[:48]
     if not room_id:
-        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=relay_hdrs)
     kv_key = f"wl:vrelay:{room_id}"
     now_t = _now()
     if len(_VOICE_RELAY_MEM) > 80:
@@ -3490,15 +3554,7 @@ async def voice_relay_endpoint(request: Request):
         mime = _clean(body.get("mime") or "audio/wav", 32)
         if not mime.startswith("audio/"):
             mime = "audio/wav"
-        lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
-        if len(lock_map) > 120:
-            for lk_k in list(lock_map.keys()):
-                if not lock_map[lk_k].locked():
-                    lock_map.pop(lk_k, None)
-        rlock = lock_map.get(room_id)
-        if rlock is None:
-            rlock = asyncio.Lock()
-            lock_map[room_id] = rlock
+        rlock = _get_voice_relay_lock(room_id)
         async with rlock:
             now_t = time.time()
             cur = _kv_get(kv_key, None, max_age=0.12)
@@ -3509,44 +3565,40 @@ async def voice_relay_endpoint(request: Request):
             buf = buf[-64:]
             _VOICE_RELAY_MEM[room_id] = buf
             _kv_set(kv_key, buf, ttl_sec=20)
-        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=relay_hdrs)
     cid_q = re.sub(r"[^a-zA-Z0-9_]", "", str(request.query_params.get("clientId") or ""))[:24]
     ctok_q = str(request.query_params.get("clientToken") or "").strip()
     if not cid_q:
-        return JSONResponse({"ok": False, "error": "İstemci kimliği gerekli"}, status_code=400, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "İstemci kimliği gerekli"}, status_code=400, headers=relay_hdrs)
     try:
         import rooms as _rm
         rm_obj_g = await _rm.STORE.get(room_id)
         tok_ok_g = bool(ctok_q and _rm.verify_client_token(room_id, ctok_q) == cid_q)
     except Exception:
-        return JSONResponse({"ok": False, "error": "Oda doğrulaması yapılamadı"}, status_code=503, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Oda doğrulaması yapılamadı"}, status_code=503, headers=relay_hdrs)
     if rm_obj_g is None:
-        return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=relay_hdrs)
     if cid_q in (rm_obj_g.get("kicked") or rm_obj_g.get("kicked_cids") or []):
-        return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=relay_hdrs)
     if not tok_ok_g:
         ok_fail, retry_fail = _VR_AUTH_FAIL_LIMIT.hit(client_ip(request))
         if not ok_fail:
             return too_many_response(retry_fail)
-        return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=relay_hdrs)
     if cid_q not in (rm_obj_g.get("participants") or {}):
-        return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=relay_hdrs)
     ok_get, _ = _VR_GET_LIMIT.hit(f"{room_id}:{cid_q}")
     if not ok_get:
-        return JSONResponse({"ok": False, "error": "Hız sınırı"}, status_code=429, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": False, "error": "Hız sınırı"}, status_code=429, headers=relay_hdrs)
     if str(rm_obj_g.get("voipMode") or "all") == "off":
-        return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=_RELAY_HEADERS)
+        return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=relay_hdrs)
     try:
         since_ts = float(request.query_params.get("sinceTs") or 0.0)
         if not math.isfinite(since_ts):
             since_ts = 0.0
     except (TypeError, ValueError):
         since_ts = 0.0
-    lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
-    rlock = lock_map.get(room_id)
-    if rlock is None:
-        rlock = asyncio.Lock()
-        lock_map[room_id] = rlock
+    rlock = _get_voice_relay_lock(room_id)
     async with rlock:
         now_t = time.time()
         cur = _kv_get(kv_key, None, max_age=0.12)
@@ -3558,6 +3610,6 @@ async def voice_relay_endpoint(request: Request):
             and float(p.get("ts") or 0.0) > since_ts
             and (now_t - float(p.get("ts") or 0.0) < 10.0)
         ]
-    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_RELAY_HEADERS)
+    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=relay_hdrs)
 
 

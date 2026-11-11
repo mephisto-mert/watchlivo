@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261111_v194';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261111_v194';
-import { api, qs } from '../api.js?v=20261111_v194';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261111_v194';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261111_v194';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261111_v194';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v194';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261111_v195';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261111_v195';
+import { api, qs } from '../api.js?v=20261111_v195';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261111_v195';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261111_v195';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261111_v195';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261111_v195';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261111_v194';
+} from '../store.js?v=20261111_v195';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -1093,7 +1093,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   };
                   try {
                     resolved = await Promise.race([
-                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, { silentToast: true }),
+                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentToast: true }),
                       new Promise((r) => setTimeout(() => r(null), 34000)),
                     ]);
                   } catch (e) {
@@ -1168,7 +1168,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 },
               }, '✕')),
             h('div', { class: 'wl-continue-body' },
-              h('div', { class: 'wl-continue-title' }, item.title || 'Sinema'),
+              h('div', { class: 'wl-continue-title' }, String(item.title || 'Sinema').replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '').trim() || 'Sinema'),
               h('div', { class: 'wl-continue-sub' }, subTxt),
               h('div', { class: 'wl-continue-prog' },
                 h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))));
@@ -1922,7 +1922,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
           streamUrl: savedStreamUrl,
         };
         resolved = await Promise.race([
-          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, { silentToast: true }),
+          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1, '', { silentToast: true }),
           new Promise((r) => setTimeout(() => r(null), 34000)),
         ]);
       } catch (err) {
@@ -1937,7 +1937,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
         streamType: isHls ? 'hls' : 'mp4',
         url: savedStreamUrl,
         streamUrl: savedStreamUrl,
-        title: item.title || cleanHistTitle,
+        title: String(item.title || cleanHistTitle || '').replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '').trim() || cleanHistTitle,
         seriesTitle: cleanHistTitle,
         originalTitle: cleanOrigTitle,
         tmdbId: item.tmdbId || '',
@@ -2025,7 +2025,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
               }),
               h('div', { class: 'wl-history-meta' },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' } },
-                  h('strong', { class: 'wl-history-title' }, item.title || 'Yapım'),
+                  h('strong', { class: 'wl-history-title' }, String(item.title || 'Yapım').replace(/\s*(?:[·—–-]\s*)?\[object Object\]/gi, '').trim() || 'Yapım'),
                   isDone
                     ? h('span', { class: 'wl-history-badge is-done' }, '✅ Tamamlandı')
                     : h('span', { class: 'wl-history-badge' }, `%${pct}`)),

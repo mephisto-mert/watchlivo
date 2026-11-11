@@ -35,8 +35,20 @@ function isPublicHttpUrl(rawUrl) {
     return false;
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.username || u.password) return false;
   const host = (u.hostname || "").toLowerCase().replace(/\.$/, "");
-  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+  if (
+    !host ||
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host === "watchlivo.online" ||
+    host.endsWith(".watchlivo.online") ||
+    host === "watchlivo-origin-eu.onrender.com" ||
+    host.includes("watchlivo-stream-proxy") ||
+    host.includes("watchlivo-ha-gateway")
+  ) {
     return false;
   }
   if (host.startsWith("[") || host.includes(":")) {
@@ -44,11 +56,16 @@ function isPublicHttpUrl(rawUrl) {
   }
   const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4) {
-    const [a, b] = [Number(ipv4[1]), Number(ipv4[2])];
+    const [a, b, c, d] = [Number(ipv4[1]), Number(ipv4[2]), Number(ipv4[3]), Number(ipv4[4])];
+    if ([a, b, c, d].some((n) => n > 255)) return false;
     if (a === 0 || a === 10 || a === 127) return false;
     if (a === 169 && b === 254) return false;
     if (a === 172 && b >= 16 && b <= 31) return false;
     if (a === 192 && b === 168) return false;
+    if (a === 192 && b === 0 && (c === 0 || c === 2)) return false;
+    if (a === 198 && (b === 18 || b === 19)) return false;
+    if (a === 198 && b === 51 && c === 100) return false;
+    if (a === 203 && b === 0 && c === 113) return false;
     if (a === 100 && b >= 64 && b <= 127) return false;
     if (a >= 224) return false;
   }
@@ -141,7 +158,7 @@ function inferReferer(url, explicitRef) {
   if (url.includes("lightspeed.st") || url.includes("nexa.mov")) return "https://cinejoy.pk/";
   if (url.includes("dplayer")) return "https://dizipal1511.com/";
   if (url.includes("archive.org")) return "https://archive.org/";
-  if (url.includes("tau-video")) return "https://tau-video.xyz/";
+  if (url.includes("tau-video") || url.includes("irtau1.")) return "https://tau-video.xyz/";
   if (url.includes("fastplay.") || url.includes(".cfd/")) {
     return url.includes("ag2m5.cfd") ? "https://x.ag2m5.cfd/" : "https://fastplay.mom/";
   }
@@ -260,11 +277,21 @@ async function serveBinaryAsset(request, env, assetPath, filename, contentType) 
   if (rangeHdr && resp.status === 200) {
     const m = rangeHdr.match(/^bytes=(\d*)-(\d*)$/i);
     const knownTotal = Number(upCl || 0);
-    if (m && knownTotal > 0 && resp.body) {
+    if (!m || (!m[1] && !m[2])) {
+      resp.body?.cancel?.();
+      if (knownTotal > 0) hdrs.set("Content-Range", `bytes */${knownTotal}`);
+      return new Response(null, { status: 416, headers: hdrs });
+    }
+    if (knownTotal > 0 && resp.body) {
       let start = m[1] ? parseInt(m[1], 10) : 0;
       let end = m[2] ? parseInt(m[2], 10) : knownTotal - 1;
       if (!m[1] && m[2]) {
         const suffix = parseInt(m[2], 10);
+        if (!Number.isFinite(suffix) || suffix <= 0) {
+          resp.body?.cancel?.();
+          hdrs.set("Content-Range", `bytes */${knownTotal}`);
+          return new Response(null, { status: 416, headers: hdrs });
+        }
         start = Math.max(0, knownTotal - suffix);
         end = knownTotal - 1;
       }
@@ -304,25 +331,6 @@ async function serveBinaryAsset(request, env, assetPath, filename, contentType) 
       hdrs.set("Content-Range", `bytes ${start}-${end}/${knownTotal}`);
       hdrs.set("Content-Length", String(wantLen));
       return new Response(readable, { status: 206, headers: hdrs });
-    } else if (m) {
-      const fullBuf = await resp.arrayBuffer();
-      const total = fullBuf.byteLength;
-      let start = m[1] ? parseInt(m[1], 10) : 0;
-      let end = m[2] ? parseInt(m[2], 10) : total - 1;
-      if (!m[1] && m[2]) {
-        const suffix = parseInt(m[2], 10);
-        start = Math.max(0, total - suffix);
-        end = total - 1;
-      }
-      if (start >= total || start < 0 || end < start) {
-        hdrs.set("Content-Range", `bytes */${total}`);
-        return new Response(null, { status: 416, headers: hdrs });
-      }
-      end = Math.min(end, total - 1);
-      const slice = fullBuf.slice(start, end + 1);
-      hdrs.set("Content-Range", `bytes ${start}-${end}/${total}`);
-      hdrs.set("Content-Length", String(slice.byteLength));
-      return new Response(slice, { status: 206, headers: hdrs });
     }
   }
 
@@ -402,8 +410,8 @@ export default {
         }
         const efUrl = (reqUrl.searchParams.get("url") || "").trim();
         const efRef = (reqUrl.searchParams.get("referer") || "").trim();
-        const efSig = (reqUrl.searchParams.get("sig") || "").trim();
-        if (!efUrl || !(await verifyProxySig(efUrl, efRef, efSig, env.PROXY_SECRET || "", env))) {
+        const efScopedSig = (reqUrl.searchParams.get("efsig") || "").trim();
+        if (!efUrl || !(await verifyProxySig(`ef:${efUrl}`, efRef, efScopedSig, env.PROXY_SECRET || "", env))) {
           return jsonResponse({ error: "İmzasız kenar isteği reddedildi" }, 403);
         }
         if (!isPublicHttpUrl(efUrl)) {
@@ -429,7 +437,18 @@ export default {
         const reqCt = request.headers.get("Content-Type") || "";
         if (reqCt && request.method === "POST") efHeaders.set("Content-Type", reqCt);
         try {
-          const bodyBuf = request.method === "POST" ? await request.arrayBuffer() : undefined;
+          let bodyBuf;
+          if (request.method === "POST") {
+            const cl = parseInt(request.headers.get("content-length") || "0", 10);
+            if (!Number.isNaN(cl) && cl > 524_288) {
+              return jsonResponse({ error: "Kenar isteği gövdesi çok büyük" }, 413);
+            }
+            const rawBuf = await request.arrayBuffer();
+            if (rawBuf.byteLength > 524_288) {
+              return jsonResponse({ error: "Kenar isteği gövdesi çok büyük" }, 413);
+            }
+            bodyBuf = rawBuf;
+          }
           const { resp: upEf, finalUrl: efFinalUrl } = await fetchPublicWithRedirects(
             efUrl,
             efHeaders,
@@ -441,6 +460,7 @@ export default {
           const outEfHeaders = new Headers();
           outEfHeaders.set("Content-Type", upEf.headers.get("Content-Type") || "application/octet-stream");
           outEfHeaders.set("Cache-Control", "no-store");
+          outEfHeaders.set("X-Content-Type-Options", "nosniff");
           outEfHeaders.set("X-Final-Url", efFinalUrl);
           for (const [k, v] of Object.entries(CORS_HEADERS)) outEfHeaders.set(k, v);
           return new Response(request.method === "HEAD" ? null : upEf.body, {
@@ -464,10 +484,12 @@ export default {
       return jsonResponse({ error: "Not found" }, 404);
     }
 
+    const ALLOWED_EXT_HINTS = new Set([".ts", ".m4s", ".mp4", ".webm", ".key", ".vtt", ".aac", ".m3u8"]);
     const targetUrl = (reqUrl.searchParams.get("url") || reqUrl.searchParams.get("u") || "").trim();
     const ref = (reqUrl.searchParams.get("referer") || "").trim();
     const sig = (reqUrl.searchParams.get("sig") || "").trim();
-    const extHint = (reqUrl.searchParams.get("ext") || "").trim().toLowerCase();
+    const rawExtHint = (reqUrl.searchParams.get("ext") || "").trim().toLowerCase();
+    const extHint = ALLOWED_EXT_HINTS.has(rawExtHint) ? rawExtHint : "";
 
     if (!targetUrl || !(await verifyProxySig(targetUrl, ref, sig, env.PROXY_SECRET || "", env))) {
       return jsonResponse({ error: "İmzasız proxy isteği reddedildi" }, 403);
@@ -555,9 +577,14 @@ export default {
           controller.enqueue(chunk);
         },
         async pull(controller) {
-          const { done, value } = await reader.read();
-          if (done) controller.close();
-          else controller.enqueue(value);
+          try {
+            const { done, value } = await reader.read();
+            if (done) controller.close();
+            else controller.enqueue(value);
+          } catch (err) {
+            try { await reader.cancel(); } catch {}
+            controller.error(err);
+          }
         },
         cancel(reason) {
           return reader.cancel(reason);

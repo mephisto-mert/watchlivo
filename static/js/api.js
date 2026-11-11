@@ -36,8 +36,10 @@ function _isSameOriginPath(path) {
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function _execApi(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
+  const normMethod = String(method || 'GET').toUpperCase();
   const isPollSync = String(path || '').includes('/sync');
-  const maxRetries = isPollSync ? 0 : 2;
+  const canRetry = !isPollSync && (normMethod === 'GET' || normMethod === 'HEAD');
+  const maxRetries = canRetry ? 2 : 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const ctl = new AbortController();
@@ -55,7 +57,7 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
         hdrs.Authorization = `Bearer ${tok}`;
       }
       const res = await fetch(path, {
-        method,
+        method: normMethod,
         cache: 'no-store',
         credentials: 'same-origin',
         headers: Object.keys(hdrs).length ? hdrs : undefined,
@@ -64,26 +66,34 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        const retryHdr = Number(res.headers?.get?.('retry-after') || data?.retryAfter || 0);
         const isGateway5xx = res.status === 502 || res.status === 503 || res.status === 504;
-        const isTransientGateway = isGateway5xx || (res.status === 429 && (!data?.error || Boolean(data?.retryable)));
-        if (isTransientGateway && attempt < maxRetries && !extSignal?.aborted) {
-          const retryHdr = Number(res.headers?.get?.('retry-after') || 0);
-          const baseWait = retryHdr > 0 ? Math.min(2200, retryHdr * 1000) : (attempt === 0 ? 600 : 1300);
-          await _sleep(baseWait + Math.floor(Math.random() * 250));
+        const isTransientGateway = isGateway5xx || (res.status === 429 && (!data?.error || Boolean(data?.retryable) || /^HTTP\s*429\b/i.test(String(data.error))));
+        if (canRetry && isTransientGateway && attempt < maxRetries && !extSignal?.aborted) {
+          const baseWait = retryHdr > 0 ? Math.min(6500, retryHdr * 1000) : (attempt === 0 ? 850 : 1900);
+          await _sleep(baseWait + Math.floor(Math.random() * 300));
           continue;
         }
-        const msg = data.error || (res.status === 429
-          ? 'Sunucu şu an yoğun, lütfen birkaç saniye sonra tekrar deneyin.'
-          : `HTTP ${res.status}`);
+        const rawErr = String(data?.error || '').trim();
+        const isRaw429 = res.status === 429 && (!rawErr || /^HTTP\s*429\b/i.test(rawErr) || /^too many requests$/i.test(rawErr));
+        const msg = isRaw429
+          ? 'Sunucu şu an yoğun, birkaç saniye içinde otomatik yenilenecek.'
+          : (rawErr || (res.status === 429
+            ? 'Sunucu şu an yoğun, birkaç saniye içinde otomatik yenilenecek.'
+            : `HTTP ${res.status}`));
         const err = new Error(msg);
         err.status = res.status;
         err.data = data;
+        if (res.status === 429) {
+          err.isRateLimit = true;
+          err.retryAfter = retryHdr > 0 ? retryHdr : 3;
+        }
         throw err;
       }
       return data;
     } catch (fetchErr) {
       if (ctl.signal.aborted && !extSignal?.aborted) {
-        if (attempt < maxRetries && !isPollSync && timeout <= 12000) {
+        if (canRetry && attempt < maxRetries && timeout <= 12000) {
           await _sleep(450);
           continue;
         }

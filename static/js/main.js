@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261111_v194';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261111_v194';
-import { renderHome, destroyHome } from './views/home.js?v=20261111_v194';
-import { api } from './api.js?v=20261111_v194';
-import { h, toast } from './ui.js?v=20261111_v194';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261111_v195';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261111_v195';
+import { renderHome, destroyHome } from './views/home.js?v=20261111_v195';
+import { api } from './api.js?v=20261111_v195';
+import { h, toast } from './ui.js?v=20261111_v195';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261111_v194'; } catch (_) { return '20261111_v194'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261111_v195'; } catch (_) { return '20261111_v195'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261111_v194')
+    _meshModPromise = import('./views/mesh.js?v=20261111_v195')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -74,6 +74,16 @@ function ensureViewRoots(app) {
   return { homeRoot, meshRoot };
 }
 
+function cleanFloatingRoomOverlays() {
+  document.querySelectorAll('.settings-menu.is-body-portal, .ctl-menu.is-body-portal, .ctl-menu-backdrop.is-body-portal').forEach((m) => m.remove());
+  document.querySelectorAll('#mesh-root .ctl-menu:not(.hidden), #mesh-root .ctl-menu-backdrop:not(.hidden)').forEach((m) => m.classList.add('hidden'));
+  document.querySelectorAll('.video-frame.fullscreen, .video-frame.menu-open').forEach((f) => {
+    f.classList.remove('fullscreen', 'menu-open');
+    f.dataset.fsMode = '';
+  });
+  document.body.classList.remove('ctl-menu-open');
+}
+
 window.vortexMinimizeRoom = () => {
   if (!activeMeshRoomId) {
     navigate('/');
@@ -86,7 +96,7 @@ window.vortexMinimizeRoom = () => {
       window.__kinoxHost?.adapter?.pause?.();
     }
   } catch (_) {}
-  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
+  cleanFloatingRoomOverlays();
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.add('mesh-minimized');
   document.body.classList.remove('vortex-fs', 'theater-mode');
@@ -102,7 +112,7 @@ window.vortexRestoreRoom = () => {
 
 window.vortexCloseMinimizedRoom = () => {
   document.body.classList.remove('mesh-minimized', 'vortex-fs', 'theater-mode');
-  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
+  cleanFloatingRoomOverlays();
   activeMeshRoomId = null;
   leaveMeshSafe(true);
   const meshRoot = document.getElementById('mesh-root');
@@ -161,6 +171,7 @@ async function route() {
     }
   } else {
     closeNavPopups();
+    cleanFloatingRoomOverlays();
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
       window.__activeSubsController?.stopDubAudio?.();

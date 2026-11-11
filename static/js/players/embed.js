@@ -6,7 +6,7 @@ const _TRUSTED_EMBED_DOMAINS = [
   'embed.su', 'vidfast.pro', 'vidora.su', 'rivestream.live', 'pstream.org', 'playmix.uno', 'nexa.mov', 'moviesapi.club',
   'nontongo.win', 'vidbinge.dev', 'superembed.stream', 'uqload.net', 'sendvid.com', 'watchlivo.online',
 ];
-const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid|closeload|filmmakinesi|dizilla|dizipal|sezonlukdizi|turkanime|dplayer\d*)(?:\.[a-z0-9-]+)+$/i;
+const _TRUSTED_EMBED_PREFIX_RE = /^(?:(?:www|player|embed)\.)?(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid|closeload|filmmakinesi|dizilla|dizipal|sezonlukdizi|turkanime|dplayer\d*)\.(?:[a-z]{2,12}|(?:co|com|net|org|gov|edu)\.[a-z]{2})$/i;
 
 export function isTrustedEmbedUrl(rawUrl) {
   try {

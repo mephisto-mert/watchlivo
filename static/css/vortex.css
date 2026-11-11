@@ -4782,6 +4782,7 @@ header.navbar.top-nav-capsule {
 /* v71: Watchlivo Studio Dynamic Accent Synchronization & Theme Studio 8-Grid */
 .floating-dock .dock-btn.active,
 .provider-cat-pill.active,
+.cat-tab-pill.active,
 .lobby-tab.on,
 .top-nav-capsule #btn-create-room,
 .btn.primary {
@@ -7873,5 +7874,82 @@ img[src=""] {
 @media (max-width: 360px) {
   .top-nav-capsule .brand-title {
     display: none !important;
+  }
+}
+
+/* ============================================================================
+   v195 — Top Dynamic-Island Toast Clearance, Room Dock Guard, WCAG Contrast,
+          390px Navbar/Card Fit & Vaul Contact Sheet Scroll Guard
+   ============================================================================ */
+#toast-root,
+.toast-root {
+  top: calc(var(--top-safe-offset, env(safe-area-inset-top, 0px)) + 58px) !important;
+  bottom: auto !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  pointer-events: none !important;
+  z-index: 225000 !important;
+}
+#toast-root .toast,
+.toast-root .toast {
+  pointer-events: auto !important;
+}
+
+body.in-room:not(.mesh-minimized) .floating-dock,
+body.in-room:not(.mesh-minimized) nav.floating-dock,
+#home-root.hidden .floating-dock {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.cat-tab-pill.active .cat-count,
+.provider-cat-pill.active .cat-count {
+  background: rgba(4, 16, 20, 0.2) !important;
+  color: var(--accent-ink, #04080e) !important;
+}
+
+.tv-glass-card {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 900px) {
+  .home-scroll.glass-home-shell {
+    padding-bottom: calc(98px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 12px))) !important;
+  }
+  .wl-contact-row2 {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .wl-contact-form-wrap {
+    max-height: min(62dvh, calc(var(--app-height, 100dvh) - 190px)) !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    padding-right: 2px !important;
+  }
+  .wl-contact-textarea {
+    min-height: 74px !important;
+    max-height: 120px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .top-nav-capsule .logo-wordmark,
+  .top-nav-capsule .brand-title {
+    display: none !important;
+  }
+  .top-nav-capsule #btn-create-room,
+  .top-nav-capsule .btn-create-room {
+    padding: 0 8px !important;
+    font-size: 0.7rem !important;
+    flex-shrink: 0 !important;
+    max-width: 126px !important;
+  }
+  .tv-channels-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
   }
 }

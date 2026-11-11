@@ -246,11 +246,15 @@ export const isLeader = () => {
   if (state.mesh.curated) return false;
   if (isHostOnly()) return true;
   if (state.mesh.playMode === 'cohost') return true;
-  if (Array.isArray(state.mesh.co_hosts) && state.clientId && state.mesh.co_hosts.includes(state.clientId)) return true;
+  const coList = Array.isArray(state.mesh.co_hosts)
+    ? state.mesh.co_hosts
+    : (Array.isArray(state.mesh.coHosts) ? state.mesh.coHosts : null);
+  if (coList && state.clientId && coList.includes(state.clientId)) return true;
   const meCoP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === state.clientId) : null;
   if (meCoP?.isCoHost) return true;
   return false;
 };
+export const canControlPlayback = isLeader;
 export function isRoomMediaPlaying(media) {
   if (!media) return false;
   if (media.meshStateStatus === 'PAUSED') return false;

@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261111_v194';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261111_v194';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261111_v194';
+import { toast } from './ui.js?v=20261111_v195';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261111_v195';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261111_v195';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -694,8 +694,9 @@ export class Voice {
           const pkt = JSON.parse(ev.data);
           if (!pkt || typeof pkt !== 'object') return;
           pkt.fromCid = id;
+          pkt._fromDc = true;
           const evType = pkt.event?.type;
-          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync', 'room_state', 'room_closed'].includes(evType)) return;
+          if (!evType || !['sync', 'typing', 'reaction', 'soundfx', 'speaking', 'cam_state'].includes(evType)) return;
           this.onP2pData?.(pkt);
         } catch (e) { /* ignore */ }
       };
@@ -770,11 +771,11 @@ export class Voice {
     if (!from || from === this.getSelfId()) return;
     if (!this.peers.has(from) && this.peers.size >= 12) return;
     if (data.type === 'webrtc_offer' && this.peers.has(from)) {
-      // Karşı taraf sayfayı yenilediyse yeni ICE kimliği (ice-ufrag) gelir: eski bağlantıyı at, sıfırdan kur.
+      // Karşı taraf sayfayı yenilediyse yeni SDP oturum kimliği (o=- <sessId>) gelir; ICE restart aynı sessId'yi korur.
       const old = this.peers.get(from);
-      const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
-      const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (old.pc.connectionState === 'closed' || (newU && oldU && newU !== oldU)) {
+      const newSess = /^o=\S+\s+(\S+)/m.exec(data.sdp?.sdp || '')?.[1];
+      const oldSess = /^o=\S+\s+(\S+)/m.exec(old.pc.remoteDescription?.sdp || '')?.[1];
+      if (old.pc.connectionState === 'closed' || (newSess && oldSess && newSess !== oldSess)) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { releaseStreamBoost(old.audio); old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);

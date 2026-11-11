@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261111_v194';
-import { api } from './api.js?v=20261111_v194';
-import { state } from './store.js?v=20261111_v194';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261111_v194';
+import { clock } from './sync.js?v=20261111_v195';
+import { api } from './api.js?v=20261111_v195';
+import { state } from './store.js?v=20261111_v195';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261111_v195';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -108,6 +108,18 @@ export class MeshConnection {
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
     if (pkt.event) {
       const ev = pkt.event;
+      if (pkt._fromDc) {
+        const dcAllowed = ['sync', 'typing', 'reaction', 'soundfx', 'speaking', 'cam_state'];
+        if (!ev.type || !dcAllowed.includes(ev.type)) return;
+        if (ev.type === 'sync') {
+          const rmRef = this.lastRoom || state.mesh || {};
+          const coList = Array.isArray(rmRef.co_hosts) ? rmRef.co_hosts : (Array.isArray(rmRef.coHosts) ? rmRef.coHosts : []);
+          const senderCanControl = (rmRef.playMode === 'cohost')
+            || (rmRef.host_id && pkt.fromCid === rmRef.host_id)
+            || coList.includes(pkt.fromCid);
+          if (!senderCanControl) return;
+        }
+      }
       if (ev.targetId && ev.targetId !== this.clientId) return;
       if (ev.id) {
         if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(ev.type)) {
@@ -166,8 +178,11 @@ export class MeshConnection {
     }
     if (!this._pageHideHandler && typeof window !== 'undefined') {
       this._pageHideHandler = (ev) => {
-        if (this.closed || !this.clientId || this.mode !== 'http' || ev?.persisted) return;
+        if (this.closed || !this.clientId || ev?.persisted) return;
         try {
+          if (this.mode === 'ws' && this.ws?.readyState === 1) {
+            try { this.ws.send(JSON.stringify({ type: 'leave' })); } catch (_) {}
+          }
           const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
           const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
           if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
@@ -647,7 +662,7 @@ export class MeshConnection {
         const st = Number(e.status || 0);
         if (st === 429 || st === 502 || st === 503 || st === 504) {
           this.httpFailCount = Math.min(10, (this.httpFailCount || 0) + 2);
-          const retrySec = Number(e.data?.retry_after || 0);
+          const retrySec = Number(e.data?.retryAfter || e.data?.retry_after || 0);
           const waitMs = retrySec > 0 ? Math.min(12000, retrySec * 1000) : Math.min(10000, 1500 * this.httpFailCount);
           this._backoffUntil = Date.now() + waitMs + Math.floor(Math.random() * 500);
         } else {

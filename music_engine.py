@@ -6,6 +6,7 @@ import concurrent.futures
 import json
 import re
 import struct
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -53,13 +54,31 @@ class _BoundedCache(OrderedDict):
     def __init__(self, maxsize: int = 512):
         super().__init__()
         self._maxsize = maxsize
+        self._lock = threading.RLock()
+
+    def __contains__(self, key):
+        with self._lock:
+            return super().__contains__(key)
+
+    def get(self, key, default=None):
+        with self._lock:
+            return super().get(key, default)
+
+    def __getitem__(self, key):
+        with self._lock:
+            return super().__getitem__(key)
+
+    def pop(self, key, *args):
+        with self._lock:
+            return super().pop(key, *args)
 
     def __setitem__(self, key, value):
-        if key in self:
-            self.move_to_end(key)
-        super().__setitem__(key, value)
-        while len(self) > self._maxsize:
-            self.popitem(last=False)
+        with self._lock:
+            if super().__contains__(key):
+                self.move_to_end(key)
+            super().__setitem__(key, value)
+            while len(self) > self._maxsize:
+                self.popitem(last=False)
 
 
 _TR_ASCII = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")

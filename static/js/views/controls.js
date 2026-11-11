@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v194';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v194';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v194';
-import { getProvider } from '../providers.js?v=20261111_v194';
-import { expectedPosition } from '../sync.js?v=20261111_v194';
-import { thumbFor } from './lobby.js?v=20261111_v194';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v194';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v194';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v194';
-import { avatar } from '../profile.js?v=20261111_v194';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261111_v195';
+import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261111_v195';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261111_v195';
+import { getProvider } from '../providers.js?v=20261111_v195';
+import { expectedPosition } from '../sync.js?v=20261111_v195';
+import { thumbFor } from './lobby.js?v=20261111_v195';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261111_v195';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261111_v195';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261111_v195';
+import { avatar } from '../profile.js?v=20261111_v195';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -224,7 +224,7 @@ export function buildControls(frame, ctx) {
         toast('7/24 canlı TV yayını duraklatılamaz');
         return;
       }
-      if (isLeader()) {
+      if (canControlPlayback()) {
         actions.pause?.();
         toast('☕ Mola verildi — video duraklatıldı');
         showOverlay('☕ Mola Zamanı — Video duraklatıldı', 3000);
@@ -266,7 +266,7 @@ export function buildControls(frame, ctx) {
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
   const syncDot = h('span', { class: 'sync-dot', title: 'Senkron' });
   const syncText = h('span', { class: 'ctl-time', style: { opacity: .7 } });
-  const canSeekNow = () => Boolean(isLeader() && !state.mesh?.curated && !timeline.classList.contains('locked') && (!host.adapter || host.adapter.caps?.seek));
+  const canSeekNow = () => Boolean(canControlPlayback() && !state.mesh?.curated && !timeline.classList.contains('locked') && (!host.adapter || host.adapter.caps?.seek));
   const seekStep = (delta) => {
     if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
     if (!canSeekNow()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
@@ -288,7 +288,7 @@ export function buildControls(frame, ctx) {
     lastPlayToggleAt = now;
     const roomPlaying = isRoomMediaPlaying(state.mesh?.media);
     const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
-    if (!isLeader()) {
+    if (!canControlPlayback()) {
       if (roomPlaying && adapterPaused) {
         if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
         host.adapter?.play?.();
@@ -322,7 +322,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye geri',
     id: 'ctl-back10',
     ...tapProps(() => {
-      if (!isLeader()) {
+      if (!canControlPlayback()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
@@ -335,7 +335,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye ileri',
     id: 'ctl-fwd10',
     ...tapProps(() => {
-      if (!isLeader()) {
+      if (!canControlPlayback()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
@@ -686,7 +686,7 @@ export function buildControls(frame, ctx) {
   window.vortexGetVideoPosition = () => Math.max(0, Math.round(position()));
   window.vortexSeekToTimestamp = (sec) => {
     const target = Math.max(0, Number(sec) || 0);
-    if (!isLeader()) {
+    if (!canControlPlayback()) {
       toast(`⏱️ ${fmtTime(target)} sahnesi (Videoyu yalnızca oda başkanı sarabilir)`);
       return;
     }
@@ -1004,7 +1004,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye geri',
     title: '10 saniye geri',
     ...tapProps(() => {
-      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
       seekStep(-10);
     }),
   }, ico('rewind10'));
@@ -1026,7 +1026,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye ileri',
     title: '10 saniye ileri',
     ...tapProps(() => {
-      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
       seekStep(10);
     }),
   }, ico('forward10'));
@@ -1102,13 +1102,13 @@ export function buildControls(frame, ctx) {
       clearTimeout(tapTimer);
       lastTapTime = 0;
       if (ratio < 0.38) {
-        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
         accumulatedSeek = (accumulatedSeek <= 0 ? accumulatedSeek : 0) - 10;
         seekStep(-10);
         triggerSeekRipple('left', accumulatedSeek);
         revealControls(4500);
       } else if (ratio > 0.62) {
-        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
         accumulatedSeek = (accumulatedSeek >= 0 ? accumulatedSeek : 0) + 10;
         seekStep(10);
         triggerSeekRipple('right', accumulatedSeek);
@@ -1295,7 +1295,7 @@ export function buildControls(frame, ctx) {
     if (e.key === ' ' && (tag === 'button' || tag === 'select' || tag === 'a')) return;
     if (e.key === ' ' || e.key === 'k') {
       e.preventDefault();
-      if (!isLeader()) {
+      if (!canControlPlayback()) {
         const roomPlaying = isRoomMediaPlaying(state.mesh?.media);
         if (roomPlaying && host.adapter?.isPaused?.()) {
           host.adapter.play();
@@ -1310,12 +1310,12 @@ export function buildControls(frame, ctx) {
     }
     else if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      if (isLeader()) seekStep(-10);
+      if (canControlPlayback()) seekStep(-10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
     else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      if (isLeader()) seekStep(10);
+      if (canControlPlayback()) seekStep(10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
     else if (e.key === 'ArrowUp') {
@@ -1426,10 +1426,19 @@ export function buildControls(frame, ctx) {
     scrubbing = false;
     lastScrubEndedAt = Date.now();
     try { timeline.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    seekPreview.classList.add('hidden');
     seekFromEvent(e, true);
   };
+  const cancelScrub = (e) => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    lastScrubEndedAt = Date.now();
+    try { timeline.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    seekPreview.classList.add('hidden');
+    update();
+  };
   timeline.addEventListener('pointerup', endScrub);
-  timeline.addEventListener('pointercancel', endScrub);
+  timeline.addEventListener('pointercancel', cancelScrub);
   timeline.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!canSeekNow()) {
@@ -2097,8 +2106,8 @@ export function buildControls(frame, ctx) {
     if (view === 'speed') {
       menu.replaceChildren(
         backHeader('Oynatma Hızı', 'list'),
-        h('div', { class: 'dim', style: { fontSize: '.75em', padding: '.3em .7em' } }, isLeader() ? 'Oynatma hızı' : 'Oynatma hızını yalnızca lider değiştirebilir'),
-        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { if (!isLeader()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; } closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
+        h('div', { class: 'dim', style: { fontSize: '.75em', padding: '.3em .7em' } }, canControlPlayback() ? 'Oynatma hızı' : 'Oynatma hızını yalnızca lider değiştirebilir'),
+        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { if (!canControlPlayback()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; } closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
       );
       return;
     }
@@ -2129,7 +2138,7 @@ export function buildControls(frame, ctx) {
             if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = nextSrvUrl;
             host.adapter?.switchStreamSource?.(nextSrvUrl);
             host.adapter?.subs?.onStreamFallbackUrl?.(nextSrvUrl);
-            if (isLeader() || canSelectVideo()) {
+            if (canControlPlayback() || canSelectVideo()) {
               ctx.conn?.send('resolve_media', { ...m, url: nextSrvUrl, currentTime: position() });
             }
             showOverlay(srv.label, 2200);
@@ -2915,7 +2924,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261111_v194',
+            v: '20261111_v195',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

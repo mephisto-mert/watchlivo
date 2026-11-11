@@ -507,12 +507,13 @@ class RegressionTests(unittest.TestCase):
         self.assertFalse(rooms._is_creator_of_room(test_room, "h_guest_2", {"id": "h_guest_2", "name": "Misafir İzleyici"}))
         # Chat clear timestamp prevents old recentChat from re-populating cleared room
         old_ts = rooms.now() - 30.0
-        self.client.post("/api/rooms/v45-clear-room/sync", json={
+        r_init_c1 = self.client.post("/api/rooms/v45-clear-room/sync", json={
             "type": "init", "clientId": "h_c1", "username": "Lider",
             "recentChat": [{"id": "m_old_1", "user": "Lider", "text": "Silinecek mesaj", "ts": old_ts}],
         })
+        c1_tok = r_init_c1.json().get("clientToken", "")
         self.client.post("/api/rooms/v45-clear-room/sync", json={
-            "type": "clear_chat", "clientId": "h_c1", "username": "Lider",
+            "type": "clear_chat", "clientId": "h_c1", "clientToken": c1_tok, "username": "Lider",
         })
         r_after = self.client.post("/api/rooms/v45-clear-room/sync", json={
             "type": "init", "clientId": "h_c2", "username": "Izleyici",
@@ -899,9 +900,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261111_v194 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261111_v195 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261111_v194", index_html)
+        self.assertIn("20261111_v195", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -1548,17 +1549,30 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
 
     def test_v107_vizyon_new_releases_large_room_and_tv_nav(self):
+        import os
         from pathlib import Path
         import rooms
 
         # 1. Test POST /api/rave/new-releases & GET /api/rave/new-releases & catalog category=vizyon
-        post_res = self.client.post("/api/rave/new-releases", json={
-            "title": "Dune: Messiah Vizyon Test",
-            "mediaType": "movie",
-            "year": "2026",
-            "poster": "https://image.tmdb.org/t/p/w500/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg",
-            "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-        })
+        prev_adm = os.environ.get("ADMIN_SECRET")
+        os.environ["ADMIN_SECRET"] = "test_admin_v195_secret"
+        try:
+            post_res = self.client.post(
+                "/api/rave/new-releases",
+                headers={"X-Admin-Secret": "test_admin_v195_secret"},
+                json={
+                    "title": "Dune: Messiah Vizyon Test",
+                    "mediaType": "movie",
+                    "year": "2026",
+                    "poster": "https://image.tmdb.org/t/p/w500/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg",
+                    "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                },
+            )
+        finally:
+            if prev_adm is None:
+                os.environ.pop("ADMIN_SECRET", None)
+            else:
+                os.environ["ADMIN_SECRET"] = prev_adm
         self.assertEqual(post_res.status_code, 200)
         post_data = post_res.json()
         self.assertTrue(post_data.get("ok"))
@@ -2515,7 +2529,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261111_v194", sw_js)
+        self.assertIn("v20261111_v195", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2582,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261111_v194', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261111_v195', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261111_v194', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261111_v195', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261111_v194')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261111_v195')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3182,8 +3196,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261111_v194", index_html)
-        self.assertIn("20261111_v194", sw_js)
+        self.assertIn("20261111_v195", index_html)
+        self.assertIn("20261111_v195", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3425,7 +3439,7 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         root = _pl.Path(__file__).resolve().parent.parent
         app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
-        self.assertEqual(app_ver.get("version"), "20261111_v194")
+        self.assertEqual(app_ver.get("version"), "20261111_v195")
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
