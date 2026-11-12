@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -10,18 +11,48 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-if getattr(sys.stdout, "buffer", None) is not None:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-if getattr(sys.stderr, "buffer", None) is not None:
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
-
 REPO_DIR = Path(__file__).resolve().parent.parent
 WORKER_DIR = REPO_DIR / "workers" / "ha-gateway"
 STATE_DIR = Path.home() / ".watchlivo"
 CONFIG_PATH = STATE_DIR / "runtime_config.json"
 STATUS_PATH = STATE_DIR / "daemon_status.json"
+LOG_PATH = STATE_DIR / "daemon.log"
 CLOUDFLARED_EXE = r"C:\Program Files (x86)\cloudflared\cloudflared.exe"
 SSH_EXE = r"C:\Windows\System32\OpenSSH\ssh.exe"
+CURL_EXE = r"C:\Windows\System32\curl.exe"
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def log(msg: str) -> None:
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    line = f"[{ts}] {msg}\n"
+    try:
+        if LOG_PATH.exists() and LOG_PATH.stat().st_size > 5 * 1024 * 1024:
+            LOG_PATH.write_text(line, encoding="utf-8")
+        else:
+            with open(LOG_PATH, "a", encoding="utf-8", errors="replace") as f:
+                f.write(line)
+    except Exception:
+        pass
+    try:
+        if sys.stdout is not None and hasattr(sys.stdout, "write"):
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    except Exception:
+        pass
+
+
+def acquire_single_instance_lock(lock_port: int = 48081) -> socket.socket | None:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", lock_port))
+        s.listen(1)
+        return s
+    except OSError:
+        s.close()
+        return None
 
 
 def load_runtime_config() -> dict:
@@ -30,11 +61,11 @@ def load_runtime_config() -> dict:
     return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def wait_local_server(port: int = 8080, timeout_sec: float = 25.0) -> bool:
+def wait_local_server(port: int = 8080, timeout_sec: float = 30.0) -> bool:
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/app/version", timeout=3) as r:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as r:
                 if r.status == 200:
                     return True
         except Exception:
@@ -45,8 +76,13 @@ def wait_local_server(port: int = 8080, timeout_sec: float = 25.0) -> bool:
 def start_uvicorn(app_env: dict, port: int = 8080) -> subprocess.Popen:
     env = os.environ.copy()
     env.update({str(k): str(v) for k, v in app_env.items() if v is not None})
+    py_exe = sys.executable
+    if py_exe.lower().endswith("pythonw.exe"):
+        cand = Path(py_exe).with_name("python.exe")
+        if cand.exists():
+            py_exe = str(cand)
     cmd = [
-        sys.executable,
+        py_exe,
         "-m",
         "uvicorn",
         "server:app",
@@ -57,7 +93,15 @@ def start_uvicorn(app_env: dict, port: int = 8080) -> subprocess.Popen:
         "--proxy-headers",
         "--forwarded-allow-ips=*",
     ]
-    return subprocess.Popen(cmd, cwd=str(REPO_DIR), env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return subprocess.Popen(
+        cmd,
+        cwd=str(REPO_DIR),
+        env=env,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=NO_WINDOW,
+    )
 
 
 def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str]:
@@ -88,6 +132,7 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
         text=True,
         encoding="utf-8",
         errors="replace",
+        creationflags=NO_WINDOW,
     )
 
     def _reader():
@@ -98,7 +143,7 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
                 found["url"] = m.group(1)
 
     threading.Thread(target=_reader, daemon=True).start()
-    deadline = time.time() + 25.0
+    deadline = time.time() + 28.0
     while time.time() < deadline and not found["url"]:
         if proc.poll() is not None:
             break
@@ -119,9 +164,18 @@ def deploy_gateway_and_purge(cfg: dict, tunnel_url: str) -> bool:
         "--var",
         "FORCE_SECONDARY:1",
     ]
-    res = subprocess.run(cmd, cwd=str(WORKER_DIR), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    res = subprocess.run(
+        cmd,
+        cwd=str(WORKER_DIR),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=NO_WINDOW,
+    )
     if res.returncode != 0:
-        print("[Daemon] Wrangler deploy error:", (res.stderr or res.stdout)[-300:], flush=True)
+        log(f"[Daemon] Wrangler deploy error: {(res.stderr or res.stdout)[-300:]}")
         return False
     try:
         req = urllib.request.Request(
@@ -137,12 +191,23 @@ def deploy_gateway_and_purge(cfg: dict, tunnel_url: str) -> bool:
 
 
 def probe_public_domain() -> bool:
-    for _ in range(4):
+    for _ in range(5):
         try:
-            req = urllib.request.Request("https://watchlivo.online/api/app/version", headers={"User-Agent": "Watchlivo-Daemon/1.0"})
+            if Path(CURL_EXE).exists():
+                res = subprocess.run(
+                    [CURL_EXE, "-s", "-f", "--max-time", "12", "https://watchlivo.online/api/health"],
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=NO_WINDOW,
+                )
+                if res.returncode == 0 and '"ok":true' in res.stdout.replace(" ", ""):
+                    return True
+            req = urllib.request.Request("https://watchlivo.online/api/health", headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0"})
             with urllib.request.urlopen(req, timeout=12) as r:
                 body = r.read().decode("utf-8", errors="replace")
-                if r.status == 200 and "version" in body:
+                if r.status == 200 and '"ok"' in body:
                     return True
         except Exception:
             pass
@@ -151,65 +216,97 @@ def probe_public_domain() -> bool:
 
 
 def main() -> None:
+    lock_sock = acquire_single_instance_lock(48081)
+    if lock_sock is None:
+        log("[Daemon] Another instance of Watchlivo Edge Daemon is already running (port 48081 locked). Exiting.")
+        return
+
     cfg = load_runtime_config()
     port = 8080
     uvicorn_proc = None
     tunnel_proc = None
     preferred_provider = "cloudflared"
     active_url = ""
+    consecutive_probe_failures = 0
+
+    log("[Daemon] Watchlivo Persistent Edge Daemon started (PID=%d)." % os.getpid())
 
     while True:
-        if uvicorn_proc is None or uvicorn_proc.poll() is not None:
-            print("[Daemon] Starting local Watchlivo ASGI server on 127.0.0.1:8080...", flush=True)
-            uvicorn_proc = start_uvicorn(cfg["app_env"], port=port)
-            if not wait_local_server(port=port, timeout_sec=30.0):
-                print("[Daemon] Local server failed healthcheck; retrying...", flush=True)
-                try:
-                    uvicorn_proc.terminate()
-                except Exception:
-                    pass
-                uvicorn_proc = None
-                time.sleep(3.0)
-                continue
-            print("[Daemon] Local ASGI server healthy (200 OK).", flush=True)
+        try:
+            if uvicorn_proc is None or uvicorn_proc.poll() is not None:
+                if not wait_local_server(port=port, timeout_sec=1.5):
+                    log("[Daemon] Starting local Watchlivo ASGI server on 127.0.0.1:8080...")
+                    uvicorn_proc = start_uvicorn(cfg["app_env"], port=port)
+                    if not wait_local_server(port=port, timeout_sec=30.0):
+                        log("[Daemon] Local server failed healthcheck; retrying...")
+                        try:
+                            uvicorn_proc.terminate()
+                        except Exception:
+                            pass
+                        uvicorn_proc = None
+                        time.sleep(3.0)
+                        continue
+                log("[Daemon] Local ASGI server healthy (200 OK).")
 
-        if tunnel_proc is None or tunnel_proc.poll() is not None or not active_url:
-            for provider in ([preferred_provider, "localhost_run"] if preferred_provider == "cloudflared" else ["localhost_run", "cloudflared"]):
-                print(f"[Daemon] Provisioning edge tunnel via {provider}...", flush=True)
-                t_proc, t_url = start_tunnel(provider, port=port)
-                if not t_url:
+            if tunnel_proc is None or tunnel_proc.poll() is not None or not active_url:
+                providers = [preferred_provider, "localhost_run"] if preferred_provider == "cloudflared" else ["localhost_run", "cloudflared"]
+                for provider in providers:
+                    log(f"[Daemon] Provisioning edge tunnel via {provider}...")
+                    t_proc, t_url = start_tunnel(provider, port=port)
+                    if not t_url:
+                        try:
+                            t_proc.terminate()
+                        except Exception:
+                            pass
+                        continue
+                    log(f"[Daemon] Tunnel established ({provider}): {t_url}")
+                    time.sleep(2.5)
+                    if deploy_gateway_and_purge(cfg, t_url) and probe_public_domain():
+                        tunnel_proc = t_proc
+                        active_url = t_url
+                        preferred_provider = provider
+                        consecutive_probe_failures = 0
+                        STATUS_PATH.write_text(
+                            json.dumps(
+                                {
+                                    "ok": True,
+                                    "pid": os.getpid(),
+                                    "provider": provider,
+                                    "tunnel_url": t_url,
+                                    "ts": time.time(),
+                                },
+                                indent=2,
+                            ),
+                            encoding="utf-8",
+                        )
+                        log(f"[Daemon] LIVE ON PRODUCTION: https://watchlivo.online -> {t_url}")
+                        break
+                    log(f"[Daemon] Public domain probe via {provider} failed; switching provider...")
                     try:
                         t_proc.terminate()
                     except Exception:
                         pass
-                    continue
-                print(f"[Daemon] Tunnel established ({provider}): {t_url}", flush=True)
-                if deploy_gateway_and_purge(cfg, t_url) and probe_public_domain():
-                    tunnel_proc = t_proc
-                    active_url = t_url
-                    preferred_provider = provider
-                    STATUS_PATH.write_text(
-                        json.dumps({"ok": True, "provider": provider, "tunnel_url": t_url, "ts": time.time()}, indent=2),
-                        encoding="utf-8",
-                    )
-                    print(f"[Daemon] LIVE ON PRODUCTION: https://watchlivo.online -> {t_url}", flush=True)
-                    break
-                print(f"[Daemon] Public domain probe via {provider} failed (orange-to-orange or 5xx); switching provider...", flush=True)
-                try:
-                    t_proc.terminate()
-                except Exception:
-                    pass
 
-        time.sleep(20.0)
-        if active_url and not probe_public_domain():
-            print("[Daemon] Public probe detected degradation; cycling tunnel...", flush=True)
-            if tunnel_proc is not None:
-                try:
-                    tunnel_proc.terminate()
-                except Exception:
-                    pass
-            tunnel_proc = None
-            active_url = ""
+            time.sleep(20.0)
+            if active_url:
+                if probe_public_domain():
+                    consecutive_probe_failures = 0
+                else:
+                    consecutive_probe_failures += 1
+                    log(f"[Daemon] Public probe warning ({consecutive_probe_failures}/2)...")
+                    if consecutive_probe_failures >= 2:
+                        log("[Daemon] Public probe confirmed degradation; cycling tunnel...")
+                        if tunnel_proc is not None:
+                            try:
+                                tunnel_proc.terminate()
+                            except Exception:
+                                pass
+                        tunnel_proc = None
+                        active_url = ""
+                        consecutive_probe_failures = 0
+        except Exception as exc:
+            log(f"[Daemon] Loop error recovered: {exc}")
+            time.sleep(5.0)
 
 
 if __name__ == "__main__":
