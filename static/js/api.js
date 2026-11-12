@@ -1,5 +1,12 @@
-// HTTP API helpers with explicit timeouts, GET deduplication, 429/5xx auto-retry, and Bearer injection.
+// HTTP API helpers with explicit timeouts, GET deduplication, 429/5xx/network auto-retry, and Bearer injection.
 const _inflightGets = new Map();
+
+const _IDEMPOTENT_POST_PATHS = [
+  '/api/rave/social/guest',
+  '/api/rave/social/presence',
+  '/api/rave/server-health',
+  '/api/rave/analytics',
+];
 
 function _getAuthToken() {
   try {
@@ -35,10 +42,12 @@ function _isSameOriginPath(path) {
 
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function _execApi(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
+async function _execApi(path, { method = 'GET', body, headers: extraHeaders, timeout = 14000, signal: extSignal } = {}) {
   const normMethod = String(method || 'GET').toUpperCase();
-  const isPollSync = String(path || '').includes('/sync');
-  const canRetry = !isPollSync && (normMethod === 'GET' || normMethod === 'HEAD');
+  const pathStr = String(path || '');
+  const isPollSync = pathStr.includes('/sync');
+  const isSafeIdempotentPost = normMethod === 'POST' && _IDEMPOTENT_POST_PATHS.some((p) => pathStr.startsWith(p));
+  const canRetry = !isPollSync && (normMethod === 'GET' || normMethod === 'HEAD' || isSafeIdempotentPost);
   const maxRetries = canRetry ? 2 : 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -67,11 +76,11 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const retryHdr = Number(res.headers?.get?.('retry-after') || data?.retryAfter || 0);
-        const isGateway5xx = res.status === 502 || res.status === 503 || res.status === 504;
+        const isGateway5xx = res.status === 502 || res.status === 503 || res.status === 504 || res.status === 530;
         const isTransientGateway = isGateway5xx || (res.status === 429 && (!data?.error || Boolean(data?.retryable) || /^HTTP\s*429\b/i.test(String(data.error))));
         if (canRetry && isTransientGateway && attempt < maxRetries && !extSignal?.aborted) {
-          const baseWait = retryHdr > 0 ? Math.min(6500, retryHdr * 1000) : (attempt === 0 ? 850 : 1900);
-          await _sleep(baseWait + Math.floor(Math.random() * 300));
+          const baseWait = retryHdr > 0 ? Math.min(5000, retryHdr * 1000) : (attempt === 0 ? 550 : 1350);
+          await _sleep(baseWait + Math.floor(Math.random() * 250));
           continue;
         }
         const rawErr = String(data?.error || '').trim();
@@ -93,7 +102,7 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       return data;
     } catch (fetchErr) {
       if (ctl.signal.aborted && !extSignal?.aborted) {
-        if (canRetry && attempt < maxRetries && timeout <= 12000) {
+        if (canRetry && attempt < maxRetries && timeout <= 15000) {
           await _sleep(450);
           continue;
         }
@@ -101,6 +110,16 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
         tErr.status = 408;
         tErr.isTimeout = true;
         throw tErr;
+      }
+      const isRawNetErr = !fetchErr?.status && !extSignal?.aborted;
+      if (isRawNetErr && canRetry && attempt < maxRetries) {
+        await _sleep(attempt === 0 ? 400 : 950);
+        continue;
+      }
+      if (isRawNetErr && /load failed|failed to fetch|networkerror|ağ bağlantısı/i.test(String(fetchErr?.message || ''))) {
+        const nErr = new Error('Bağlantı yenileniyor, lütfen birkaç saniye içinde tekrar deneyin.');
+        nErr.isNetworkError = true;
+        throw nErr;
       }
       throw fetchErr;
     } finally {
@@ -117,7 +136,7 @@ export async function api(path, opts = {}) {
   const method = String(opts?.method || 'GET').toUpperCase();
   if (method === 'GET' && !opts?.body && !opts?.signal) {
     const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
-    const tBucket = Math.round(Number(opts?.timeout || 12000) / 1000);
+    const tBucket = Math.round(Number(opts?.timeout || 14000) / 1000);
     const dedupKey = `${path}|${tok.slice(-16)}|${tBucket}`;
     const existing = _inflightGets.get(dedupKey);
     if (existing) return existing;

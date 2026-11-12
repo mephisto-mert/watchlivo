@@ -217,13 +217,13 @@ function buildGracefulOverloadResponse(request, url) {
   });
 }
 
-async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu-failover") {
-  const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
+async function fetchOriginBase(baseOrigin, request, url, bodyBuf, env, originTag = "render-eu-failover") {
+  const cleanBase = (baseOrigin || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
   const cleanSearch = new URLSearchParams(url.search);
   cleanSearch.delete("__simulate_vercel_pause");
   const qs = cleanSearch.toString();
   const safePath = normalizeSafePath(url.pathname);
-  const secUrl = buildSafeOriginUrl(secondaryBase, safePath, qs);
+  const secUrl = buildSafeOriginUrl(cleanBase, safePath, qs);
   const clientIp = request.headers.get("CF-Connecting-IP") || "";
   const headers = buildForwardHeaders(request.headers, clientIp, "watchlivo.online", secUrl.host, env, false);
 
@@ -248,6 +248,24 @@ async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu
     statusText: resp.statusText,
     headers: outHeaders,
   });
+}
+
+async function fetchSecondary(request, url, bodyBuf, env, originTag = "render-eu-failover") {
+  const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
+  const tertiaryBase = (env.TERTIARY_ORIGIN || "").trim().replace(/\/+$/, "");
+  try {
+    const resp = await fetchOriginBase(secondaryBase, request, url, bodyBuf, env, originTag);
+    if (tertiaryBase && tertiaryBase !== secondaryBase && shouldFailoverResponse(resp)) {
+      resp.body?.cancel?.();
+      return await fetchOriginBase(tertiaryBase, request, url, bodyBuf, env, "tertiary-lhr-failover");
+    }
+    return resp;
+  } catch (err) {
+    if (tertiaryBase && tertiaryBase !== secondaryBase) {
+      return await fetchOriginBase(tertiaryBase, request, url, bodyBuf, env, "tertiary-lhr-failover");
+    }
+    throw err;
+  }
 }
 
 const BOT_UA_RE = /bot|crawl|spider|slurp|mediapartners|inspection|lighthouse|headless|facebookexternalhit|discordbot|telegrambot|whatsapp|twitterbot/i;
@@ -414,10 +432,12 @@ async function safeFetchSecondary(
     }
   }
 
-  if (sawExplicitSuspension) {
-    secondaryCircuitOpenUntil = Date.now() + 60_000;
-  } else if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
-    secondaryCircuitOpenUntil = Date.now() + 15_000;
+  if (env.FORCE_SECONDARY !== "1") {
+    if (sawExplicitSuspension) {
+      secondaryCircuitOpenUntil = Date.now() + 60_000;
+    } else if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
+      secondaryCircuitOpenUntil = Date.now() + 15_000;
+    }
   }
 
   if (allowPrimaryFallback && !url.hostname.endsWith(".workers.dev") && Date.now() >= primaryCircuitOpenUntil) {
@@ -547,42 +567,52 @@ export default {
             headers: { Allow: "GET", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
           });
         }
-        if (Date.now() < secondaryCircuitOpenUntil) {
+        if (env.FORCE_SECONDARY !== "1" && Date.now() < secondaryCircuitOpenUntil) {
           return new Response("WebSocket origin temporarily unavailable", {
             status: 503,
             headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
           });
         }
         const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
-        const wsTarget = buildSafeOriginUrl(secondaryBase, safePath, url.search);
+        const tertiaryBase = (env.TERTIARY_ORIGIN || "").trim().replace(/\/+$/, "");
+        const wsCandidates = [secondaryBase];
+        if (tertiaryBase && tertiaryBase !== secondaryBase) wsCandidates.push(tertiaryBase);
         const clientIp = request.headers.get("CF-Connecting-IP") || "";
-        const wsHeaders = buildForwardHeaders(
-          request.headers,
-          clientIp,
-          "watchlivo.online",
-          wsTarget.host,
-          env,
-          false
-        );
-        wsHeaders.set("Upgrade", "websocket");
-        try {
-          const wsResp = await fetch(wsTarget.toString(), {
-            method: "GET",
-            headers: wsHeaders,
-          });
-          if (wsResp.status >= 502 && safePath.startsWith("/ws/")) {
-            secondaryCircuitOpenUntil = Date.now() + 15_000;
+        for (let wi = 0; wi < wsCandidates.length; wi++) {
+          const wsTarget = buildSafeOriginUrl(wsCandidates[wi], safePath, url.search);
+          const wsHeaders = buildForwardHeaders(
+            request.headers,
+            clientIp,
+            "watchlivo.online",
+            wsTarget.host,
+            env,
+            false
+          );
+          wsHeaders.set("Upgrade", "websocket");
+          try {
+            const wsResp = await fetch(wsTarget.toString(), {
+              method: "GET",
+              headers: wsHeaders,
+            });
+            if (wsResp.status >= 502 && wi + 1 < wsCandidates.length) {
+              wsResp.body?.cancel?.();
+              continue;
+            }
+            if (wsResp.status >= 502 && safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
+              secondaryCircuitOpenUntil = Date.now() + 15_000;
+            }
+            return wsResp;
+          } catch {
+            if (wi + 1 < wsCandidates.length) continue;
           }
-          return wsResp;
-        } catch {
-          if (safePath.startsWith("/ws/")) {
-            secondaryCircuitOpenUntil = Date.now() + 15_000;
-          }
-          return new Response("WebSocket origin unreachable", {
-            status: 503,
-            headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
-          });
         }
+        if (safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
+          secondaryCircuitOpenUntil = Date.now() + 15_000;
+        }
+        return new Response("WebSocket origin unreachable", {
+          status: 503,
+          headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
+        });
       }
 
       // 5. Buffer small non-streaming request bodies (<= 256 KB) safely; stream larger/chunked payloads directly
@@ -675,7 +705,7 @@ export default {
         safePath.startsWith("/uploads/");
 
       let alreadyTriedSecondary = false;
-      if (prefersStatefulOrigin && Date.now() >= secondaryCircuitOpenUntil) {
+      if (prefersStatefulOrigin && (env.FORCE_SECONDARY === "1" || Date.now() >= secondaryCircuitOpenUntil)) {
         alreadyTriedSecondary = true;
         try {
           const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
@@ -686,13 +716,17 @@ export default {
           const isExplicitlyDown =
             renderRouting.includes("suspend") || statefulResp.status === 503 || statefulResp.status === 530;
           statefulResp.body?.cancel?.();
-          if (isExplicitlyDown) {
-            secondaryCircuitOpenUntil = Date.now() + 60_000;
-          } else if (!isStreamOrResolveRoute) {
-            secondaryCircuitOpenUntil = Date.now() + 15_000;
+          if (env.FORCE_SECONDARY !== "1") {
+            if (isExplicitlyDown) {
+              secondaryCircuitOpenUntil = Date.now() + 60_000;
+            } else if (!isStreamOrResolveRoute) {
+              secondaryCircuitOpenUntil = Date.now() + 15_000;
+            }
           }
         } catch {
-          secondaryCircuitOpenUntil = Date.now() + 15_000;
+          if (env.FORCE_SECONDARY !== "1") {
+            secondaryCircuitOpenUntil = Date.now() + 15_000;
+          }
         }
       }
 

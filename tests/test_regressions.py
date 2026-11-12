@@ -901,9 +901,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261112_v207 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261112_v208 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261112_v207", index_html)
+        self.assertIn("20261112_v208", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -2530,7 +2530,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261112_v207", sw_js)
+        self.assertIn("v20261112_v208", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2583,12 +2583,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261112_v207', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261112_v208', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261112_v207', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261112_v208', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261112_v207')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261112_v208')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3197,8 +3197,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261112_v207", index_html)
-        self.assertIn("20261112_v207", sw_js)
+        self.assertIn("20261112_v208", index_html)
+        self.assertIn("20261112_v208", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3440,7 +3440,7 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         root = _pl.Path(__file__).resolve().parent.parent
         app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
-        self.assertEqual(app_ver.get("version"), "20261112_v207")
+        self.assertEqual(app_ver.get("version"), "20261112_v208")
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
@@ -3587,6 +3587,63 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("Doğrudan MP4 Kaynak", html5_js)
         # 4. controls.js qualityBadge displays actual decoded video frame pixels when playing
         self.assertIn("if (vw > 0 && vh > 0)", controls_js)
+
+    def test_v208_dual_tunnel_ha_and_network_retry(self):
+        import pathlib
+        import subprocess as _sp
+        root = pathlib.Path(__file__).resolve().parent.parent
+        srv_py = (root / "server.py").read_text(encoding="utf-8")
+        api_js = (root / "static" / "js" / "api.js").read_text(encoding="utf-8")
+        daemon_py = (root / "scripts" / "watchlivo_edge_daemon.py").read_text(encoding="utf-8")
+        # 1. Dead cloudflareinsights beacon domain removed from script-src CSP
+        self.assertNotIn("static.cloudflareinsights.com", srv_py)
+        # 2. api.js retries transient fetch TypeError and normalizes Load failed / Failed to fetch
+        self.assertIn("_IDEMPOTENT_POST_PATHS", api_js)
+        self.assertIn("Bağlantı yenileniyor", api_js)
+        # 3. Daemon uses HTTP/2 HA cloudflared + dual-tunnel TERTIARY_ORIGIN
+        self.assertIn('"--protocol"', daemon_py)
+        self.assertIn("TERTIARY_ORIGIN", daemon_py)
+
+        # 4. Gateway fails over from 530 Orange-to-Orange SECONDARY_ORIGIN to TERTIARY_ORIGIN on HTTP & WS
+        worker_url = (root / "workers" / "ha-gateway" / "worker.js").as_uri()
+        harness = f"""
+import gw from {worker_url!r};
+import assert from 'node:assert/strict';
+
+globalThis.fetch = async (input) => {{
+  const u = typeof input === 'string' ? input : input.url;
+  if (u.startsWith('https://bad-cf.trycloudflare.com/')) {{
+    return new Response('CF 1033', {{ status: 530 }});
+  }}
+  if (u.startsWith('https://good-backup.lhr.life/api/rooms')) {{
+    return new Response(JSON.stringify({{ rooms: [{{ id: 'ok-lhr' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
+  }}
+  if (u.startsWith('https://good-backup.lhr.life/ws/r1')) {{
+    return new Response('ws-lhr-ok', {{ status: 200 }});
+  }}
+  return new Response('ok', {{ status: 200 }});
+}};
+
+const env = {{
+  SECONDARY_ORIGIN: 'https://bad-cf.trycloudflare.com',
+  TERTIARY_ORIGIN: 'https://good-backup.lhr.life',
+  FORCE_SECONDARY: '1',
+}};
+
+const rHttp = await gw.fetch(new Request('https://watchlivo.online/api/rooms'), env, {{}});
+assert.equal(rHttp.status, 200);
+assert.equal(rHttp.headers.get('X-Watchlivo-Origin'), 'tertiary-lhr-failover');
+const j = await rHttp.json();
+assert.equal(j.rooms[0].id, 'ok-lhr');
+
+const rWs = await gw.fetch(new Request('https://watchlivo.online/ws/r1', {{ headers: {{ Upgrade: 'websocket' }} }}), env, {{}});
+assert.equal(rWs.status, 200);
+assert.equal(await rWs.text(), 'ws-lhr-ok');
+console.log('V208_DUAL_TUNNEL_OK');
+"""
+        proc = _sp.run(["node", "--input-type=module", "-e", harness], capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("V208_DUAL_TUNNEL_OK", proc.stdout)
 
 
 if __name__ == '__main__':

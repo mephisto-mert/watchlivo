@@ -107,7 +107,17 @@ def start_uvicorn(app_env: dict, port: int = 8080) -> subprocess.Popen:
 def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str]:
     found = {"url": ""}
     if provider == "cloudflared" and Path(CLOUDFLARED_EXE).exists():
-        cmd = [CLOUDFLARED_EXE, "tunnel", "--url", f"http://127.0.0.1:{port}", "--no-autoupdate"]
+        cmd = [
+            CLOUDFLARED_EXE,
+            "tunnel",
+            "--url",
+            f"http://127.0.0.1:{port}",
+            "--protocol",
+            "http2",
+            "--ha-connections",
+            "4",
+            "--no-autoupdate",
+        ]
         rx = re.compile(r"(https://[a-z0-9-]+\.trycloudflare\.com)")
     else:
         cmd = [
@@ -151,7 +161,7 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
     return proc, found["url"]
 
 
-def deploy_gateway_and_purge(cfg: dict, tunnel_url: str) -> bool:
+def deploy_gateway_and_purge(cfg: dict, secondary_url: str, tertiary_url: str = "") -> bool:
     env = os.environ.copy()
     env["CLOUDFLARE_API_TOKEN"] = cfg["cf_token"]
     env["CLOUDFLARE_ACCOUNT_ID"] = cfg["cf_account"]
@@ -160,10 +170,12 @@ def deploy_gateway_and_purge(cfg: dict, tunnel_url: str) -> bool:
         "wrangler",
         "deploy",
         "--var",
-        f"SECONDARY_ORIGIN:{tunnel_url}",
+        f"SECONDARY_ORIGIN:{secondary_url}",
         "--var",
         "FORCE_SECONDARY:1",
     ]
+    if tertiary_url and tertiary_url != secondary_url:
+        cmd += ["--var", f"TERTIARY_ORIGIN:{tertiary_url}"]
     res = subprocess.run(
         cmd,
         cwd=str(WORKER_DIR),
@@ -224,18 +236,21 @@ def main() -> None:
     cfg = load_runtime_config()
     port = 8080
     uvicorn_proc = None
-    tunnel_proc = None
-    preferred_provider = "cloudflared"
-    active_url = ""
+    cf_proc = None
+    cf_url = ""
+    lhr_proc = None
+    lhr_url = ""
+    deployed_pair = ("", "")
     consecutive_probe_failures = 0
 
-    log("[Daemon] Watchlivo Persistent Edge Daemon started (PID=%d)." % os.getpid())
+    log("[Daemon] Watchlivo Persistent Dual-Tunnel Edge Daemon started (PID=%d)." % os.getpid())
 
     while True:
         try:
             if uvicorn_proc is None or uvicorn_proc.poll() is not None:
                 if not wait_local_server(port=port, timeout_sec=1.5):
                     log("[Daemon] Starting local Watchlivo ASGI server on 127.0.0.1:8080...")
+                    cfg = load_runtime_config()
                     uvicorn_proc = start_uvicorn(cfg["app_env"], port=port)
                     if not wait_local_server(port=port, timeout_sec=30.0):
                         log("[Daemon] Local server failed healthcheck; retrying...")
@@ -248,61 +263,79 @@ def main() -> None:
                         continue
                 log("[Daemon] Local ASGI server healthy (200 OK).")
 
-            if tunnel_proc is None or tunnel_proc.poll() is not None or not active_url:
-                providers = [preferred_provider, "localhost_run"] if preferred_provider == "cloudflared" else ["localhost_run", "cloudflared"]
-                for provider in providers:
-                    log(f"[Daemon] Provisioning edge tunnel via {provider}...")
-                    t_proc, t_url = start_tunnel(provider, port=port)
-                    if not t_url:
-                        try:
-                            t_proc.terminate()
-                        except Exception:
-                            pass
-                        continue
-                    log(f"[Daemon] Tunnel established ({provider}): {t_url}")
-                    time.sleep(2.5)
-                    if deploy_gateway_and_purge(cfg, t_url) and probe_public_domain():
-                        tunnel_proc = t_proc
-                        active_url = t_url
-                        preferred_provider = provider
-                        consecutive_probe_failures = 0
-                        STATUS_PATH.write_text(
-                            json.dumps(
-                                {
-                                    "ok": True,
-                                    "pid": os.getpid(),
-                                    "provider": provider,
-                                    "tunnel_url": t_url,
-                                    "ts": time.time(),
-                                },
-                                indent=2,
-                            ),
-                            encoding="utf-8",
-                        )
-                        log(f"[Daemon] LIVE ON PRODUCTION: https://watchlivo.online -> {t_url}")
-                        break
-                    log(f"[Daemon] Public domain probe via {provider} failed; switching provider...")
+            if cf_proc is None or cf_proc.poll() is not None or not cf_url:
+                log("[Daemon] Provisioning HTTP/2 HA edge tunnel via cloudflared...")
+                p, u = start_tunnel("cloudflared", port=port)
+                if u:
+                    cf_proc, cf_url = p, u
+                    log(f"[Daemon] Cloudflared HTTP/2 tunnel ready: {cf_url}")
+                else:
                     try:
-                        t_proc.terminate()
+                        p.terminate()
                     except Exception:
                         pass
+                    cf_proc, cf_url = None, ""
+
+            if lhr_proc is None or lhr_proc.poll() is not None or not lhr_url:
+                log("[Daemon] Provisioning non-CF backup tunnel via localhost.run...")
+                p2, u2 = start_tunnel("localhost_run", port=port)
+                if u2:
+                    lhr_proc, lhr_url = p2, u2
+                    log(f"[Daemon] localhost.run backup tunnel ready: {lhr_url}")
+                else:
+                    try:
+                        p2.terminate()
+                    except Exception:
+                        pass
+                    lhr_proc, lhr_url = None, ""
+
+            sec_origin = cf_url or lhr_url
+            tert_origin = lhr_url if (cf_url and lhr_url) else ""
+
+            if sec_origin and (sec_origin, tert_origin) != deployed_pair:
+                time.sleep(2.0)
+                if deploy_gateway_and_purge(cfg, sec_origin, tert_origin) and probe_public_domain():
+                    deployed_pair = (sec_origin, tert_origin)
+                    consecutive_probe_failures = 0
+                    STATUS_PATH.write_text(
+                        json.dumps(
+                            {
+                                "ok": True,
+                                "pid": os.getpid(),
+                                "secondary_origin": sec_origin,
+                                "tertiary_origin": tert_origin,
+                                "ts": time.time(),
+                            },
+                            indent=2,
+                        ),
+                        encoding="utf-8",
+                    )
+                    log(f"[Daemon] LIVE ON PRODUCTION: https://watchlivo.online -> {sec_origin} (failover: {tert_origin or 'none'})")
+                else:
+                    log("[Daemon] Public probe failed after deploy; swapping primary/backup order...")
+                    if lhr_url and sec_origin == cf_url and deploy_gateway_and_purge(cfg, lhr_url, cf_url) and probe_public_domain():
+                        deployed_pair = (sec_origin, tert_origin)
+                        consecutive_probe_failures = 0
+                        log(f"[Daemon] LIVE ON PRODUCTION (LHR Primary): https://watchlivo.online -> {lhr_url}")
 
             time.sleep(20.0)
-            if active_url:
+            if deployed_pair[0]:
                 if probe_public_domain():
                     consecutive_probe_failures = 0
                 else:
                     consecutive_probe_failures += 1
                     log(f"[Daemon] Public probe warning ({consecutive_probe_failures}/2)...")
                     if consecutive_probe_failures >= 2:
-                        log("[Daemon] Public probe confirmed degradation; cycling tunnel...")
-                        if tunnel_proc is not None:
-                            try:
-                                tunnel_proc.terminate()
-                            except Exception:
-                                pass
-                        tunnel_proc = None
-                        active_url = ""
+                        log("[Daemon] Public probe confirmed degradation; cycling tunnels...")
+                        for tp in (cf_proc, lhr_proc):
+                            if tp is not None:
+                                try:
+                                    tp.terminate()
+                                except Exception:
+                                    pass
+                        cf_proc, cf_url = None, ""
+                        lhr_proc, lhr_url = None, ""
+                        deployed_pair = ("", "")
                         consecutive_probe_failures = 0
         except Exception as exc:
             log(f"[Daemon] Loop error recovered: {exc}")

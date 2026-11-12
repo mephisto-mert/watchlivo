@@ -403,7 +403,7 @@ class SecurityHeaders:
                     else:
                         csp_val = (
                             "default-src 'self'; "
-                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
+                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
                             "worker-src 'self' blob:; "
                             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                             "font-src 'self' data: https://fonts.gstatic.com; "
@@ -11769,7 +11769,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
-        "version": "20261112_v207",
+        "version": "20261112_v208",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),
