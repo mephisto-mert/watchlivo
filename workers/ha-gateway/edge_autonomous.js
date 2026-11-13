@@ -14,7 +14,61 @@ import {
 let _bootCache = null;
 let _curatedMap = null;
 const _edgeSearchCache = new Map();
+let _blockedCache = { ts: 0, set: new Set() };
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
+
+async function getBlockedTmdbSet(env) {
+  const now = Date.now();
+  if (now - _blockedCache.ts < 60_000) return _blockedCache.set;
+  let arr = [];
+  if (env?.WATCHLIVO_KV) {
+    try {
+      const v = await env.WATCHLIVO_KV.get("blocked:tmdb_ids", "json");
+      if (Array.isArray(v)) arr = v;
+    } catch {}
+  }
+  const s = new Set(arr.map((x) => String(x || "").trim()).filter(Boolean));
+  _blockedCache = { ts: now, set: s };
+  return s;
+}
+
+function isItemBlocked(it, blockedSet) {
+  if (!blockedSet || !blockedSet.size || !it) return false;
+  const tid = String(it.tmdbId || it.id || "").trim();
+  const mt = it.mediaType === "tv" ? "tv" : "movie";
+  return Boolean(tid && (blockedSet.has(tid) || blockedSet.has(`${mt}:${tid}`)));
+}
+
+function isEdgeOriginAllowed(request) {
+  const ua = (request.headers.get("User-Agent") || "").toLowerCase();
+  if (["watchlivo", "okhttp", "exoplayer", "dalvik", "cfnetwork", "darwin"].some((k) => ua.includes(k))) {
+    return true;
+  }
+  const secSite = (request.headers.get("Sec-Fetch-Site") || "").toLowerCase();
+  if (secSite === "cross-site") return false;
+  const hostAllowed = (h) =>
+    h === "watchlivo.online" || h === "www.watchlivo.online" || h === "localhost" || h === "127.0.0.1";
+  const orig = (request.headers.get("Origin") || "").trim();
+  if (orig) {
+    if (/^(?:android-app|capacitor|ionic):\/\//i.test(orig)) return true;
+    try {
+      if (!hostAllowed(new URL(orig).hostname.toLowerCase())) return false;
+    } catch { return false; }
+  }
+  const ref = (request.headers.get("Referer") || "").trim();
+  if (ref) {
+    if (/^(?:android-app|capacitor|ionic):\/\//i.test(ref)) return true;
+    try {
+      if (!hostAllowed(new URL(ref).hostname.toLowerCase())) return false;
+    } catch { return false; }
+  }
+  if (!orig && !ref) {
+    if (/(?:bot|crawler|spider|scrapy|curl\/|wget\/|python-urllib|python-requests|httpx|aiohttp|go-http-client|dmca|abuse)/i.test(ua)) {
+      return false;
+    }
+  }
+  return true;
+}
 
 async function getBootstrap(env) {
   if (_bootCache) return _bootCache;
@@ -323,7 +377,13 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return await handleEdgeRoomWs(roomId, request, url, env);
   }
 
-  // 2. SPA HTML routes & /r/<id> invite redirect
+  // 2. Robots.txt & SPA HTML routes & /r/<id> invite redirect
+  if (safePath === "/robots.txt") {
+    return new Response("User-agent: *\nDisallow: /\n", {
+      status: 200,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" },
+    });
+  }
   if (safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
     const seg = safePath.replace(/^\/(?:r|join)\//, "").split("/")[0] || "";
     if (seg) {
@@ -371,19 +431,61 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return edgeJson({ ok: true, version: boot.version, mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
   }
 
-  // 5. Catalog, Search & Streams
+  // 5. Catalog, Search & Streams (Origin/Bot Shield + KV Takedown Filter)
+  if (
+    safePath === "/api/rave/catalog" ||
+    safePath === "/api/rave/supersearch" ||
+    safePath === "/api/rave/resolve-catalog" ||
+    safePath === "/api/rave/resolve-stream" ||
+    safePath === "/api/rave/seasons"
+  ) {
+    if (!isEdgeOriginAllowed(request)) {
+      return edgeJson({ ok: false, error: "Forbidden: cross-site origin or automated crawler not allowed" }, 403);
+    }
+  }
+  if (safePath === "/api/rave/admin/takedown") {
+    const authHdr = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    const adminHdr = (request.headers.get("X-Admin-Secret") || "").trim();
+    const expected = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "").trim();
+    if (!expected || (authHdr !== expected && adminHdr !== expected)) {
+      return edgeJson({ ok: false, error: "Unauthorized" }, 401);
+    }
+    const blocked = await getBlockedTmdbSet(env);
+    if (request.method === "GET") {
+      return edgeJson({ ok: true, blocked: Array.from(blocked) });
+    }
+    const body = await request.json().catch(() => ({}));
+    const addIds = Array.isArray(body.add) ? body.add : (body.tmdbId ? [body.tmdbId] : []);
+    const remIds = Array.isArray(body.remove) ? body.remove : [];
+    for (const id of addIds) { const s = String(id || "").trim(); if (s) blocked.add(s); }
+    for (const id of remIds) { blocked.delete(String(id || "").trim()); }
+    const nextArr = Array.from(blocked);
+    _blockedCache = { ts: Date.now(), set: blocked };
+    if (env?.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put("blocked:tmdb_ids", JSON.stringify(nextArr));
+    }
+    return edgeJson({ ok: true, count: nextArr.length, blocked: nextArr });
+  }
+  const blockedSet = await getBlockedTmdbSet(env);
   if (safePath === "/api/rave/catalog") {
-    return edgeJson(await handleEdgeCatalogSearch(boot, url, env));
+    const res = await handleEdgeCatalogSearch(boot, url, env);
+    if (blockedSet.size && Array.isArray(res.items)) {
+      res.items = res.items.filter((it) => !isItemBlocked(it, blockedSet));
+    }
+    return edgeJson(res);
   }
   if (safePath === "/api/rave/supersearch") {
     const res = await handleEdgeCatalogSearch(boot, url, env);
-    return edgeJson({ query: res.query || "", tmdb: res.items || [], justwatch: [], youtube: [], items: res.items || [] });
+    const filtered = blockedSet.size ? (res.items || []).filter((it) => !isItemBlocked(it, blockedSet)) : (res.items || []);
+    return edgeJson({ query: res.query || "", tmdb: filtered, justwatch: [], youtube: [], items: filtered });
   }
   if (safePath === "/api/rave/new-releases") {
-    return edgeJson({ ok: true, items: boot.newReleases });
+    const items = blockedSet.size ? boot.newReleases.filter((it) => !isItemBlocked(it, blockedSet)) : boot.newReleases;
+    return edgeJson({ ok: true, items });
   }
   if (safePath === "/api/rave/latest-episodes") {
-    return edgeJson({ ok: true, items: boot.latestEpisodes });
+    const items = blockedSet.size ? boot.latestEpisodes.filter((it) => !isItemBlocked(it, blockedSet)) : boot.latestEpisodes;
+    return edgeJson({ ok: true, items });
   }
   if (safePath === "/api/rave/seasons") {
     const tid = (url.searchParams.get("tmdbId") || url.searchParams.get("id") || "").trim();
@@ -419,6 +521,11 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     }
   }
   if (safePath === "/api/rave/resolve-catalog" || safePath === "/api/rave/resolve-stream") {
+    const reqTid = (url.searchParams.get("tmdbId") || url.searchParams.get("id") || "").trim();
+    const reqMt = (url.searchParams.get("type") || url.searchParams.get("mediaType") || "movie").trim().toLowerCase() === "tv" ? "tv" : "movie";
+    if (reqTid && (blockedSet.has(reqTid) || blockedSet.has(`${reqMt}:${reqTid}`))) {
+      return edgeJson({ ok: false, error: "Bu içerik kaldırma talebi nedeniyle erişime kapatıldı." }, 404);
+    }
     return await handleEdgeResolveCatalog(url, env, edgeJson);
   }
   if (safePath === "/api/rave/stream" || safePath === "/api/rave/stream_manifest" || safePath === "/api/rave/stream-manifest" || safePath === "/api/rave/hls-proxy") {

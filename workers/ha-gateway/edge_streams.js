@@ -58,12 +58,25 @@ export async function signProxySig(targetUrl, ref, env) {
   return `${hex}.${exp}`;
 }
 
+const OFFLOAD_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
+const OFFLOAD_BYPASS_HOSTS = [
+  "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.",
+  "hdfilmcehennemi.mobi", "ag2m5.cfd", "uk-traffic-", "fastplay.",
+  "radyotvonline.com", "nexa.mov", "dplayer", "playmix.",
+  "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
+  "dragonballzfans", "molystream.org", "irtau1.", "lightspeed.st",
+  "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.", ".click",
+];
+
 async function buildSignedProxyPath(targetUrl, ref, ext, env) {
   const cleanRef = ref !== undefined ? ref : inferStreamReferer(targetUrl);
   const sig = await signProxySig(targetUrl, cleanRef, env);
   const q = new URLSearchParams({ url: targetUrl, sig, ext: ext || ".ts" });
   if (cleanRef) q.set("referer", cleanRef);
-  return `/api/rave/stream-proxy?${q.toString()}`;
+  const lower = String(targetUrl || "").toLowerCase();
+  const useLocal = OFFLOAD_BYPASS_HOSTS.some((h) => lower.includes(h));
+  const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
+  return `${base}/api/rave/stream-proxy?${q.toString()}`;
 }
 
 async function lookupVaultStream(keys, env) {
