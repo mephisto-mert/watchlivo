@@ -12,6 +12,8 @@ import {
 
 let _bootCache = null;
 let _curatedMap = null;
+const _edgeSearchCache = new Map();
+const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
 async function getBootstrap(env) {
   if (_bootCache) return _bootCache;
@@ -105,8 +107,143 @@ async function serveSpaIndex(env, method = "GET") {
   });
 }
 
+function normalizeSearchText(s) {
+  return String(s || "")
+    .replace(/İ/g, "i")
+    .replace(/I/g, "ı")
+    .toLowerCase()
+    .replace(/ı/g, "i")
+    .replace(/ğ/g, "g")
+    .replace(/ü/g, "u")
+    .replace(/ş/g, "s")
+    .replace(/ö/g, "o")
+    .replace(/ç/g, "c")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function expandTurkishPhoneticQuery(q) {
+  const norm = normalizeSearchText(q);
+  const rules = [
+    [/\baktivite(ler|si)?\b/g, "activity"],
+    [/\bdoktor\b/g, "doctor"],
+    [/\bkaptan\b/g, "captain"],
+    [/\bsuper\b/g, "super"],
+    [/\bfantastik\b/g, "fantastic"],
+    [/\bekspres\b/g, "express"],
+    [/\bmisyon\b/g, "mission"],
+    [/\bprofesor\b/g, "professor"],
+  ];
+  let alt = norm;
+  for (const [rx, rep] of rules) alt = alt.replace(rx, rep);
+  return alt !== norm ? alt : "";
+}
+
+function mapTmdbItem(r) {
+  const mt = r.media_type === "tv" ? "tv" : "movie";
+  const tid = String(r.id || "");
+  const title = (r.title || r.name || "").trim();
+  const orig = (r.original_title || r.original_name || title).trim();
+  const rel = (r.release_date || r.first_air_date || "").slice(0, 4);
+  const gids = Array.isArray(r.genre_ids) ? r.genre_ids : [];
+  const cats = [mt === "tv" ? "series" : "movies"];
+  if (gids.includes(16) && (r.original_language === "ja" || gids.includes(10759) || gids.includes(10765))) {
+    cats.push("anime");
+  }
+  return {
+    id: `tmdb-${mt}-${tid}`,
+    tmdbId: tid,
+    title,
+    originalTitle: orig,
+    year: rel,
+    rating: r.vote_average ? Math.round(r.vote_average * 10) / 10 : 0,
+    voteCount: Number(r.vote_count || 0),
+    mediaType: mt,
+    origLang: r.original_language || "",
+    poster: r.poster_path ? `https://image.tmdb.org/t/p/w500${r.poster_path}` : "",
+    backdrop: r.backdrop_path ? `https://image.tmdb.org/t/p/w780${r.backdrop_path}` : "",
+    categories: cats,
+    genreLabel: mt === "tv" ? "📺 Dizi · TMDB" : "🎬 Film · TMDB",
+    sourceBadge: "🌐 Bulut Arşiv",
+    provider: "cinema",
+    _fromTmdb: true,
+  };
+}
+
+async function fetchTmdbMulti(query, lang, apiKey) {
+  const u = `https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(apiKey)}&language=${encodeURIComponent(lang)}&query=${encodeURIComponent(query)}&page=1`;
+  try {
+    const r = await fetch(u, { signal: AbortSignal.timeout(2200) });
+    if (!r.ok) return [];
+    const data = await r.json();
+    return (data.results || []).filter((x) => (x.media_type === "movie" || x.media_type === "tv") && x.poster_path).map(mapTmdbItem);
+  } catch {
+    return [];
+  }
+}
+
+async function searchTmdbEdge(rawQ, env) {
+  const normQ = normalizeSearchText(rawQ);
+  if (normQ.length < 2) return [];
+  const now = Date.now();
+  const memHit = _edgeSearchCache.get(normQ);
+  if (memHit && now - memHit.ts < 300_000) return memHit.items;
+
+  if (env?.WATCHLIVO_KV) {
+    try {
+      const kvHit = await env.WATCHLIVO_KV.get(`tmdb_q:v1:${normQ}`, "json");
+      if (Array.isArray(kvHit) && kvHit.length) {
+        if (_edgeSearchCache.size >= 150) _edgeSearchCache.delete(_edgeSearchCache.keys().next().value);
+        _edgeSearchCache.set(normQ, { ts: now, items: kvHit });
+        return kvHit;
+      }
+    } catch {}
+  }
+
+  const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+  const altQ = expandTurkishPhoneticQuery(rawQ);
+  const reqs = [
+    fetchTmdbMulti(rawQ, "tr-TR", apiKey),
+    fetchTmdbMulti(rawQ, "en-US", apiKey),
+  ];
+  if (altQ) reqs.push(fetchTmdbMulti(altQ, "en-US", apiKey));
+  const batches = await Promise.all(reqs);
+
+  const seen = new Set();
+  const items = [];
+  for (const batch of batches) {
+    for (const it of batch) {
+      const k = `${it.mediaType}:${it.tmdbId}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      items.push(it);
+    }
+  }
+  items.sort((a, b) => {
+    const qa = normalizeSearchText(a.title);
+    const qb = normalizeSearchText(b.title);
+    const qoa = normalizeSearchText(a.originalTitle);
+    const qob = normalizeSearchText(b.originalTitle);
+    const scoreA = (qa === normQ || qoa === normQ ? 10000 : (qa.includes(normQ) || qoa.includes(normQ) ? 2000 : 0)) + Math.min(a.voteCount || 0, 5000);
+    const scoreB = (qb === normQ || qob === normQ ? 10000 : (qb.includes(normQ) || qob.includes(normQ) ? 2000 : 0)) + Math.min(b.voteCount || 0, 5000);
+    return scoreB - scoreA;
+  });
+  const top = items.slice(0, 48);
+  if (top.length) {
+    if (_edgeSearchCache.size >= 150) _edgeSearchCache.delete(_edgeSearchCache.keys().next().value);
+    _edgeSearchCache.set(normQ, { ts: now, items: top });
+    if (env?.WATCHLIVO_KV) {
+      env.WATCHLIVO_KV.put(`tmdb_q:v1:${normQ}`, JSON.stringify(top), { expirationTtl: 3600 }).catch(() => {});
+    }
+  }
+  return top;
+}
+
 function filterCatalog(items, url) {
   const q = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim().toLowerCase();
+  const normQ = normalizeSearchText(q);
+  const altQ = normQ ? expandTurkishPhoneticQuery(q) : "";
   const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
   const provider = (url.searchParams.get("provider") || "cinema").trim().toLowerCase();
   let list = items;
@@ -119,17 +256,61 @@ function filterCatalog(items, url) {
   } else if (cat && cat !== "all" && cat !== "recommended" && cat !== "for_you" && cat !== "vizyon") {
     list = list.filter((x) => (x.categories || []).map((c) => String(c).toLowerCase()).includes(cat));
   }
-  if (q) {
-    list = list.filter((x) =>
-      String(x.title || "").toLowerCase().includes(q) ||
-      String(x.originalTitle || "").toLowerCase().includes(q) ||
-      String(x.genreLabel || "").toLowerCase().includes(q)
-    );
+  if (normQ) {
+    list = list.filter((x) => {
+      const t = normalizeSearchText(x.title);
+      const ot = normalizeSearchText(x.originalTitle);
+      const gl = normalizeSearchText(x.genreLabel);
+      return t.includes(normQ) || ot.includes(normQ) || gl.includes(normQ) || (altQ && (t.includes(altQ) || ot.includes(altQ)));
+    });
   }
   const page = Math.max(1, Number(url.searchParams.get("page") || 1) || 1);
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 48) || 48));
   const start = (page - 1) * limit;
-  return { provider, query: q, page, total: list.length, items: list.slice(start, start + limit) };
+  return { provider, query: q, page, total: list.length, totalAvailable: list.length, items: list.slice(start, start + limit), hasMore: list.length > start + limit };
+}
+
+async function handleEdgeCatalogSearch(boot, url, env) {
+  const rawQ = (url.searchParams.get("q") || url.searchParams.get("query") || "").trim();
+  const localRes = filterCatalog(boot.catalog, url);
+  if (rawQ.length < 2) return localRes;
+
+  const tmdbHits = await searchTmdbEdge(rawQ, env);
+  if (!tmdbHits.length) return localRes;
+
+  const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
+  const provider = (url.searchParams.get("provider") || "cinema").trim().toLowerCase();
+  let filteredTmdb = tmdbHits;
+  if (provider === "anime") {
+    filteredTmdb = filteredTmdb.filter((x) => (x.categories || []).includes("anime") || x.origLang === "ja");
+  } else if (provider === "series" || cat === "series" || cat === "diziler") {
+    filteredTmdb = filteredTmdb.filter((x) => x.mediaType === "tv");
+  } else if (cat === "movies" || cat === "filmler") {
+    filteredTmdb = filteredTmdb.filter((x) => x.mediaType === "movie");
+  }
+
+  const seenIds = new Set();
+  const merged = [];
+  for (const it of [...localRes.items, ...filteredTmdb]) {
+    const k = it.tmdbId ? `${it.mediaType}:${it.tmdbId}` : `t:${normalizeSearchText(it.title)}`;
+    if (seenIds.has(k)) continue;
+    seenIds.add(k);
+    merged.push(it);
+  }
+  const page = Math.max(1, Number(url.searchParams.get("page") || 1) || 1);
+  const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") || 48) || 48));
+  const start = (page - 1) * limit;
+  return {
+    provider,
+    query: rawQ,
+    page,
+    total: merged.length,
+    totalAvailable: merged.length,
+    totalTv: merged.filter((x) => x.mediaType === "tv").length,
+    totalMovies: merged.filter((x) => x.mediaType !== "tv").length,
+    items: merged.slice(start, start + limit),
+    hasMore: merged.length > start + limit,
+  };
 }
 
 export async function handleAutonomousEdge(request, url, safePath, env) {
@@ -182,7 +363,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
 
   // 5. Catalog, Search & Streams
   if (safePath === "/api/rave/catalog" || safePath === "/api/rave/supersearch") {
-    return edgeJson(filterCatalog(boot.catalog, url));
+    return edgeJson(await handleEdgeCatalogSearch(boot, url, env));
   }
   if (safePath === "/api/rave/new-releases") {
     return edgeJson({ ok: true, items: boot.newReleases });

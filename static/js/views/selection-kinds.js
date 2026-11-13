@@ -656,6 +656,8 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   let loadingMore = false;
   let catalogTotals = { totalAvailable: 0, totalTv: 0, totalMovies: 0 };
   let ioObserver = null;
+  const searchMemCache = new Map();
+  let activeSearchAbort = null;
 
   const mergeUniqueItems = (existing, incoming, tagCat = '') => {
     const map = new Map();
@@ -1006,6 +1008,10 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
 
   const run = async (q) => {
     const mine = ++seq;
+    if (activeSearchAbort) {
+      try { activeSearchAbort.abort(); } catch {}
+      activeSearchAbort = null;
+    }
     detailWrap.classList.add('hidden');
     mainWrap.classList.remove('hidden');
     const raw = (q || '').trim();
@@ -1021,9 +1027,40 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         return;
       }
     }
-    contentArea.replaceChildren(spinner());
-    const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, page: 1, category: activeCat === 'favs' ? 'all' : activeCat })}`, { timeout: 14000 }).catch(() => ({ items: [] }));
-    if (mine !== seq || input.value.trim() !== raw) return;
+    const catParam = activeCat === 'favs' ? 'all' : activeCat;
+    const cacheKey = `${p.id}|${catParam}|${raw.toLowerCase()}`;
+    const cached = searchMemCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts < 300000)) {
+      currentItems = cached.items;
+      if (activeCat === 'all' && !raw) allCatalogItems = [...currentItems];
+      hasMorePages = cached.hasMore;
+      renderCategoryView();
+      return;
+    }
+    if (raw && allCatalogItems.length) {
+      const ql = raw.replace(/İ/g, 'i').replace(/I/g, 'ı').toLowerCase();
+      const localHits = allCatalogItems.filter((it) =>
+        String(it.title || '').toLowerCase().includes(ql) ||
+        String(it.originalTitle || '').toLowerCase().includes(ql)
+      );
+      if (localHits.length) {
+        currentItems = localHits;
+        hasMorePages = false;
+        renderCategoryView();
+        contentArea.prepend(h('div', {
+          class: 'hint',
+          style: { marginBottom: '10px', fontSize: '12px', opacity: '0.85' },
+        }, '🔍 Tüm bulut arşivinde ek sonuçlar aranıyor...'));
+      } else {
+        contentArea.replaceChildren(spinner());
+      }
+    } else {
+      contentArea.replaceChildren(spinner());
+    }
+    const ac = new AbortController();
+    activeSearchAbort = ac;
+    const catData = await api(`/api/rave/catalog?${qs({ provider: p.id, q: raw, page: 1, category: catParam })}`, { timeout: 10000, signal: ac.signal }).catch(() => ({ items: [] }));
+    if (mine !== seq || input.value.trim() !== raw || ac.signal.aborted) return;
     currentItems = catData.items || [];
     if (activeCat === 'all' && !raw) {
       allCatalogItems = [...currentItems];
@@ -1036,6 +1073,10 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
       };
     }
     hasMorePages = catData.hasMore !== false;
+    if (currentItems.length || !raw) {
+      if (searchMemCache.size >= 80) searchMemCache.delete(searchMemCache.keys().next().value);
+      searchMemCache.set(cacheKey, { ts: Date.now(), items: currentItems, hasMore: hasMorePages });
+    }
     renderCategoryView();
   };
 
@@ -1055,9 +1096,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
     clearTimeout(debTimer);
     const val = input.value.trim();
     if (!val || (!/^https?:\/\//i.test(val) && val.length >= 2)) {
-      debTimer = setTimeout(() => run(input.value), 200);
+      debTimer = setTimeout(() => run(input.value), 260);
     } else if (val.length === 1 && currentQuery.length >= 2) {
-      debTimer = setTimeout(() => run(''), 200);
+      debTimer = setTimeout(() => run(''), 260);
     }
   });
   input.addEventListener('keydown', (e) => {

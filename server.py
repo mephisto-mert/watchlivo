@@ -1604,9 +1604,26 @@ def _match_star_wars_curated(q: str) -> list:
     return out
 
 
+def _expand_tr_phonetic_query(q: str) -> str:
+    nq = _norm_title(q)
+    for rx, rep in (
+        (r"\baktivite(?:ler|si)?\b", "activity"),
+        (r"\bdoktor\b", "doctor"),
+        (r"\bkaptan\b", "captain"),
+        (r"\bsuper\b", "super"),
+        (r"\bfantastik\b", "fantastic"),
+        (r"\bekspres\b", "express"),
+        (r"\bmisyon\b", "mission"),
+        (r"\bprofesor\b", "professor"),
+    ):
+        nq = re.sub(rx, rep, nq)
+    return nq if nq != _norm_title(q) else ""
+
+
 def _tmdb_sync(q: str):
     clean_q, q_year, q_mt_hint, _ = _parse_search_query(q)
     eff_q = clean_q or q
+    alt_q = _expand_tr_phonetic_query(eff_q)
     curated_sw = _match_star_wars_curated(q)
     if not TMDB_API_KEY:
         curated_sw.sort(key=lambda x: _rank_search_item(x, q), reverse=True)
@@ -1616,32 +1633,40 @@ def _tmdb_sync(q: str):
         try:
             if task_idx == 1:
                 u = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 1})
-                d = _http_json(u, timeout=4.5)
+                d = _http_json(u, timeout=2.8)
                 return [r for r in d.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
             if task_idx == 3:
-                u_en = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US", "query": eff_q, "page": 1})
-                d_en = _http_json(u_en, timeout=4.5)
+                u_en = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US", "query": alt_q or eff_q, "page": 1})
+                d_en = _http_json(u_en, timeout=2.8)
                 return [r for r in d_en.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
             if q_year:
                 u_m = "https://api.themoviedb.org/3/search/movie?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "year": q_year, "page": 1})
-                d_m = _http_json(u_m, timeout=4.5)
+                d_m = _http_json(u_m, timeout=2.8)
                 return [dict(r, media_type="movie") for r in d_m.get("results", []) if r.get("poster_path")]
             if q_mt_hint in ("tv", "movie"):
                 u_t = f"https://api.themoviedb.org/3/search/{q_mt_hint}?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 1})
-                d_t = _http_json(u_t, timeout=4.5)
+                d_t = _http_json(u_t, timeout=2.8)
                 return [dict(r, media_type=q_mt_hint) for r in d_t.get("results", []) if r.get("poster_path")]
-            u2 = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "tr-TR", "query": eff_q, "page": 2})
-            d2 = _http_json(u2, timeout=4.5)
-            return [r for r in d2.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
+            if alt_q:
+                u_en2 = "https://api.themoviedb.org/3/search/multi?" + urllib.parse.urlencode({"api_key": TMDB_API_KEY, "language": "en-US", "query": eff_q, "page": 1})
+                d_en2 = _http_json(u_en2, timeout=2.8)
+                return [r for r in d_en2.get("results", []) if r.get("media_type") in ("movie", "tv") and r.get("poster_path")]
+            return []
         except Exception:
             return []
     raw_tr = []
     raw_en = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-        b1, b2, b3 = list(pool.map(_fetch_p, [1, 2, 3]))
-        raw_tr.extend(b1)
-        raw_tr.extend(b2)
-        raw_en.extend(b3)
+    task_ids = [1, 3]
+    if q_year or q_mt_hint in ("tv", "movie") or alt_q:
+        task_ids.append(2)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(task_ids)) as pool:
+        res_map = dict(zip(task_ids, pool.map(_fetch_p, task_ids)))
+        raw_tr.extend(res_map.get(1) or [])
+        if 2 in res_map and not alt_q:
+            raw_tr.extend(res_map[2] or [])
+        elif 2 in res_map and alt_q:
+            raw_en.extend(res_map[2] or [])
+        raw_en.extend(res_map.get(3) or [])
     en_title_map = {}
     tr_keys = {f"{'tv' if r.get('media_type') == 'tv' else 'movie'}:{r.get('id')}" for r in raw_tr if r.get("id")}
     for r_en in raw_en:
@@ -2361,6 +2386,9 @@ def _has_dub_vault_stream(it_obj: dict) -> bool:
     return False
 
 
+_SEARCH_QUERY_CACHE: dict[str, tuple[float, dict]] = {}
+
+
 def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category: str = "all", media_type_filter: str = "") -> dict:
     pg = max(1, min(200, int(page or 1)))
     cat = (category or "all").strip().lower()
@@ -2375,8 +2403,15 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
     is_free_tr = prov in FREE_TR_PROVIDERS
     if q.strip():
         sq = q.strip()
+        sq_cache_key = f"sq:{prov}:{cat}:{mt_flt}:{pg}:{_norm_title(sq)}"
+        now_sq = time.time()
+        sq_hit = _SEARCH_QUERY_CACHE.get(sq_cache_key)
+        if sq_hit and (now_sq - sq_hit[0] < 300) and sq_hit[1]:
+            return dict(sq_hit[1])
         import concurrent.futures
         scraped_q = []
+        tmdb_items = []
+        t_start = time.monotonic()
         qpool = concurrent.futures.ThreadPoolExecutor(max_workers=5)
         try:
             fut_tmdb = qpool.submit(_tmdb_sync, sq)
@@ -2384,10 +2419,14 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             fut_dl = qpool.submit(_scrape_dizilife_catalog_sync, cat, 1, sq, prov) if (is_free_tr and prov not in ("max", "hbomax")) else None
             fut_ac = qpool.submit(_scrape_animecix_catalog_sync, cat, 1, sq, prov) if ((is_free_tr or prov == "crunchyroll") and prov not in ("max", "hbomax")) else None
             fut_dp = qpool.submit(_scrape_dizipal_catalog_sync, cat, 1, sq, prov) if (is_free_tr and prov not in ("max", "hbomax")) else None
-            tmdb_items = fut_tmdb.result()
+            try:
+                tmdb_items = fut_tmdb.result(timeout=3.0)
+            except Exception:
+                tmdb_items = []
             rem_futs = [f_s for f_s in (fut_hdfc, fut_dl, fut_ac, fut_dp) if f_s]
             if rem_futs:
-                concurrent.futures.wait(rem_futs, timeout=1.2)
+                rem_budget = max(0.05, 1.4 - (time.monotonic() - t_start))
+                concurrent.futures.wait(rem_futs, timeout=rem_budget)
                 for f_s in rem_futs:
                     if f_s.done() and not f_s.exception():
                         try:
@@ -2397,7 +2436,7 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         finally:
             qpool.shutdown(wait=False)
         jw_items = []
-        if prov in JW_PROV and len(tmdb_items) < 4:
+        if prov in JW_PROV and len(tmdb_items) < 2 and len(scraped_q) < 2:
             pkgs, country = JW_PROV[prov]
             try:
                 jw_items = _justwatch_sync(sq, pkgs, country, 24)
@@ -2489,7 +2528,11 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
             merged = [x for x in merged if x.get("mediaType") != "tv"]
         start_q = max(0, (pg - 1) * 48)
         sliced_q = merged[start_q:start_q + 48]
-        return {"items": sliced_q, "totalAvailable": len(merged), "totalTv": sum(1 for x in merged if x.get("mediaType") == "tv"), "totalMovies": sum(1 for x in merged if x.get("mediaType") != "tv"), "page": pg, "hasMore": len(merged) > start_q + 48}
+        q_res = {"items": sliced_q, "totalAvailable": len(merged), "totalTv": sum(1 for x in merged if x.get("mediaType") == "tv"), "totalMovies": sum(1 for x in merged if x.get("mediaType") != "tv"), "page": pg, "hasMore": len(merged) > start_q + 48}
+        if len(_SEARCH_QUERY_CACHE) >= 400:
+            _SEARCH_QUERY_CACHE.clear()
+        _SEARCH_QUERY_CACHE[sq_cache_key] = (time.time(), q_res)
+        return q_res
 
     now_ts = time.time()
     cache_key = f"v6:{prov}:{cat}:{pg}:{mt_flt}"
