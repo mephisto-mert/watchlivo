@@ -3600,45 +3600,57 @@ console.log('HA_UNIT_TESTS_PASSED');
         # 2. api.js retries transient fetch TypeError and normalizes Load failed / Failed to fetch
         self.assertIn("_IDEMPOTENT_POST_PATHS", api_js)
         self.assertIn("Bağlantı yenileniyor", api_js)
-        # 3. Daemon uses HTTP/2 HA cloudflared + dual-tunnel TERTIARY_ORIGIN
+        # 3. Daemon uses HTTP/2 HA cloudflared + Port-443 Pinggy/LHR TERTIARY_ORIGIN with non-blocking cooldown
         self.assertIn('"--protocol"', daemon_py)
         self.assertIn("TERTIARY_ORIGIN", daemon_py)
+        self.assertIn("free.pinggy.io", daemon_py)
+        self.assertIn("backup_retry_after", daemon_py)
 
-        # 4. Gateway fails over from 530 Orange-to-Orange SECONDARY_ORIGIN to TERTIARY_ORIGIN on HTTP & WS
+        # 4. Gateway fails over from 530 Orange-to-Orange SECONDARY_ORIGIN to Pinggy TERTIARY_ORIGIN (with X-Pinggy-No-Screen: 1) & smart auto-reconnect 503
         worker_url = (root / "workers" / "ha-gateway" / "worker.js").as_uri()
         harness = f"""
 import gw from {worker_url!r};
 import assert from 'node:assert/strict';
 
-globalThis.fetch = async (input) => {{
+let sawPinggyHeader = false;
+globalThis.fetch = async (input, init) => {{
   const u = typeof input === 'string' ? input : input.url;
+  const hdrs = new Headers(init?.headers || (typeof input !== 'string' ? input.headers : undefined) || {{}});
   if (u.startsWith('https://bad-cf.trycloudflare.com/')) {{
     return new Response('CF 1033', {{ status: 530 }});
   }}
-  if (u.startsWith('https://good-backup.lhr.life/api/rooms')) {{
-    return new Response(JSON.stringify({{ rooms: [{{ id: 'ok-lhr' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
+  if (u.startsWith('https://good-backup.free.pinggy.net/api/rooms')) {{
+    sawPinggyHeader = hdrs.get('X-Pinggy-No-Screen') === '1';
+    return new Response(JSON.stringify({{ rooms: [{{ id: 'ok-pinggy' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
   }}
-  if (u.startsWith('https://good-backup.lhr.life/ws/r1')) {{
-    return new Response('ws-lhr-ok', {{ status: 200 }});
+  if (u.startsWith('https://good-backup.free.pinggy.net/ws/r1')) {{
+    return new Response('ws-pinggy-ok', {{ status: 200 }});
   }}
-  return new Response('ok', {{ status: 200 }});
+  return new Response('down', {{ status: 530 }});
 }};
 
 const env = {{
   SECONDARY_ORIGIN: 'https://bad-cf.trycloudflare.com',
-  TERTIARY_ORIGIN: 'https://good-backup.lhr.life',
+  TERTIARY_ORIGIN: 'https://good-backup.free.pinggy.net',
   FORCE_SECONDARY: '1',
 }};
 
 const rHttp = await gw.fetch(new Request('https://watchlivo.online/api/rooms'), env, {{}});
 assert.equal(rHttp.status, 200);
 assert.equal(rHttp.headers.get('X-Watchlivo-Origin'), 'tertiary-lhr-failover');
+assert.equal(sawPinggyHeader, true);
 const j = await rHttp.json();
-assert.equal(j.rooms[0].id, 'ok-lhr');
+assert.equal(j.rooms[0].id, 'ok-pinggy');
 
 const rWs = await gw.fetch(new Request('https://watchlivo.online/ws/r1', {{ headers: {{ Upgrade: 'websocket' }} }}), env, {{}});
 assert.equal(rWs.status, 200);
-assert.equal(await rWs.text(), 'ws-lhr-ok');
+assert.equal(await rWs.text(), 'ws-pinggy-ok');
+
+const rOverload = await gw.fetch(new Request('https://watchlivo.online/', {{ headers: {{ Accept: 'text/html' }} }}), {{ SECONDARY_ORIGIN: 'https://dead-only.trycloudflare.com', FORCE_SECONDARY: '1' }}, {{}});
+assert.equal(rOverload.status, 503);
+const html = await rOverload.text();
+assert.ok(html.includes('/api/health?_t='));
+assert.ok(html.includes('Şimdi Bağlan'));
 console.log('V208_DUAL_TUNNEL_OK');
 """
         proc = _sp.run(["node", "--input-type=module", "-e", harness], capture_output=True, text=True, timeout=15)

@@ -73,14 +73,54 @@ def wait_local_server(port: int = 8080, timeout_sec: float = 30.0) -> bool:
     return False
 
 
+def resolve_uvicorn_python() -> str:
+    candidates = [
+        sys.executable,
+        r"C:\Users\pc\AppData\Local\Python\pythoncore-3.14-64\python.exe",
+        r"C:\Users\pc\AppData\Local\Programs\Python\Python312\python.exe",
+    ]
+    for raw in candidates:
+        if not raw:
+            continue
+        p = Path(raw)
+        if p.name.lower() == "pythonw.exe":
+            alt = p.with_name("python.exe")
+            if alt.exists():
+                p = alt
+        if not p.exists():
+            continue
+        try:
+            chk = subprocess.run(
+                [str(p), "-c", "import uvicorn"],
+                capture_output=True,
+                timeout=5,
+                creationflags=NO_WINDOW,
+            )
+            if chk.returncode == 0:
+                return str(p)
+        except Exception:
+            pass
+    return sys.executable
+
+
+def ensure_ssh_key() -> Path:
+    key_path = STATE_DIR / "id_ed25519"
+    if not key_path.exists():
+        keygen = Path(SSH_EXE).with_name("ssh-keygen.exe")
+        if keygen.exists():
+            subprocess.run(
+                [str(keygen), "-t", "ed25519", "-N", "", "-f", str(key_path)],
+                capture_output=True,
+                timeout=10,
+                creationflags=NO_WINDOW,
+            )
+    return key_path
+
+
 def start_uvicorn(app_env: dict, port: int = 8080) -> subprocess.Popen:
     env = os.environ.copy()
     env.update({str(k): str(v) for k, v in app_env.items() if v is not None})
-    py_exe = sys.executable
-    if py_exe.lower().endswith("pythonw.exe"):
-        cand = Path(py_exe).with_name("python.exe")
-        if cand.exists():
-            py_exe = str(cand)
+    py_exe = resolve_uvicorn_python()
     cmd = [
         py_exe,
         "-m",
@@ -106,6 +146,7 @@ def start_uvicorn(app_env: dict, port: int = 8080) -> subprocess.Popen:
 
 def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str]:
     found = {"url": ""}
+    wait_sec = 22.0
     if provider == "cloudflared" and Path(CLOUDFLARED_EXE).exists():
         cmd = [
             CLOUDFLARED_EXE,
@@ -119,11 +160,42 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
             "--no-autoupdate",
         ]
         rx = re.compile(r"(https://[a-z0-9-]+\.trycloudflare\.com)")
+    elif provider == "pinggy":
+        key_path = ensure_ssh_key()
+        cmd = [
+            SSH_EXE,
+            "-T",
+            "-p",
+            "443",
+            "-i",
+            str(key_path),
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=8",
+            "-o",
+            "ServerAliveInterval=30",
+            "-o",
+            "ExitOnForwardFailure=yes",
+            f"-R0:127.0.0.1:{port}",
+            "free.pinggy.io",
+        ]
+        rx = re.compile(r"(https://[a-z0-9.-]+\.free\.pinggy\.net|https://[a-z0-9.-]+\.pinggy-free\.link)")
+        wait_sec = 12.0
     else:
         cmd = [
             SSH_EXE,
+            "-T",
             "-o",
             "StrictHostKeyChecking=no",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=6",
             "-o",
             "ServerAliveInterval=30",
             "-o",
@@ -133,6 +205,7 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
             "nokey@localhost.run",
         ]
         rx = re.compile(r"(https://[a-z0-9-]+\.lhr\.life)")
+        wait_sec = 8.0
 
     proc = subprocess.Popen(
         cmd,
@@ -153,11 +226,11 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
                 found["url"] = m.group(1)
 
     threading.Thread(target=_reader, daemon=True).start()
-    deadline = time.time() + 28.0
+    deadline = time.time() + wait_sec
     while time.time() < deadline and not found["url"]:
         if proc.poll() is not None:
             break
-        time.sleep(0.3)
+        time.sleep(0.25)
     return proc, found["url"]
 
 
@@ -240,6 +313,8 @@ def main() -> None:
     cf_url = ""
     lhr_proc = None
     lhr_url = ""
+    lhr_started_at = 0.0
+    backup_retry_after = 0.0
     deployed_pair = ("", "")
     consecutive_probe_failures = 0
 
@@ -269,6 +344,11 @@ def main() -> None:
                 if u:
                     cf_proc, cf_url = p, u
                     log(f"[Daemon] Cloudflared HTTP/2 tunnel ready: {cf_url}")
+                    # Immediately cut over production before waiting on secondary SSH backup tunnel
+                    if not deployed_pair[0] and deploy_gateway_and_purge(cfg, cf_url, lhr_url) and probe_public_domain():
+                        deployed_pair = (cf_url, lhr_url if lhr_url else "")
+                        consecutive_probe_failures = 0
+                        log(f"[Daemon] FAST CUTOVER LIVE: https://watchlivo.online -> {cf_url}")
                 else:
                     try:
                         p.terminate()
@@ -276,18 +356,37 @@ def main() -> None:
                         pass
                     cf_proc, cf_url = None, ""
 
-            if lhr_proc is None or lhr_proc.poll() is not None or not lhr_url:
-                log("[Daemon] Provisioning non-CF backup tunnel via localhost.run...")
-                p2, u2 = start_tunnel("localhost_run", port=port)
+            now_ts = time.time()
+            backup_expired = bool(lhr_url and lhr_started_at and (now_ts - lhr_started_at > 3000.0))
+            if (lhr_proc is None or lhr_proc.poll() is not None or not lhr_url or backup_expired) and now_ts >= backup_retry_after:
+                old_backup = lhr_proc
+                log("[Daemon] Provisioning Port-443 HTTPS backup tunnel (Pinggy/LHR)...")
+                p2, u2 = start_tunnel("pinggy", port=port)
+                if not u2:
+                    try:
+                        p2.terminate()
+                    except Exception:
+                        pass
+                    p2, u2 = start_tunnel("localhost_run", port=port)
                 if u2:
+                    if old_backup is not None and old_backup is not p2:
+                        try:
+                            old_backup.terminate()
+                        except Exception:
+                            pass
                     lhr_proc, lhr_url = p2, u2
-                    log(f"[Daemon] localhost.run backup tunnel ready: {lhr_url}")
+                    lhr_started_at = time.time()
+                    backup_retry_after = 0.0
+                    log(f"[Daemon] Port-443 backup tunnel ready: {lhr_url}")
                 else:
                     try:
                         p2.terminate()
                     except Exception:
                         pass
-                    lhr_proc, lhr_url = None, ""
+                    if not backup_expired:
+                        lhr_proc, lhr_url = None, ""
+                    backup_retry_after = time.time() + 180.0
+                    log("[Daemon] Backup SSH tunnel unavailable; retrying in 180s without stalling primary.")
 
             sec_origin = cf_url or lhr_url
             tert_origin = lhr_url if (cf_url and lhr_url) else ""

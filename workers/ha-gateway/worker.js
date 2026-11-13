@@ -122,6 +122,9 @@ function buildForwardHeaders(originalHeaders, clientIp, originalHost, targetHost
   const h = new Headers(originalHeaders);
   if (!keepHost && targetHost) {
     h.set("Host", targetHost);
+    if (targetHost.toLowerCase().includes("pinggy")) {
+      h.set("X-Pinggy-No-Screen", "1");
+    }
   }
   h.set("X-Forwarded-Host", originalHost);
   h.set("X-Forwarded-Proto", "https");
@@ -203,15 +206,19 @@ function buildGracefulOverloadResponse(request, url) {
       }
     );
   }
-  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="2"><title>Watchlivo — Bağlanıyor...</title><style>body{margin:0;background:#06090e;color:#e6edf3;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.box{padding:28px;max-width:360px}.sp{width:36px;height:36px;border:3px solid rgba(39,220,200,.2);border-top-color:#27DCC8;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#8b949e;margin:0}</style></head><body><div class="box"><div class="sp"></div><h1>Watchlivo'ya bağlanılıyor...</h1><p>Yayın sunucusu hazırlanıyor, sayfa otomatik yenilenecek.</p></div></body></html>`;
+  const nonceBytes = new Uint8Array(12);
+  crypto.getRandomValues(nonceBytes);
+  const nonce = btoa(String.fromCharCode(...nonceBytes));
+  const retryHref = url ? `${normalizeSafePath(url.pathname)}${url.search ? `${url.search}&_r=${Date.now()}` : `?_r=${Date.now()}`}` : `/?_r=${Date.now()}`;
+  const html = `<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="3"><title>Watchlivo — Bağlanıyor...</title><style>body{margin:0;background:#06090e;color:#e6edf3;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center}.box{padding:28px;max-width:360px}.sp{width:36px;height:36px;border:3px solid rgba(39,220,200,.2);border-top-color:#27DCC8;border-radius:50%;animation:s .8s linear infinite;margin:0 auto 16px}@keyframes s{to{transform:rotate(360deg)}}h1{font-size:18px;margin:0 0 8px}p{font-size:13px;color:#8b949e;margin:0 0 18px}.btn{display:inline-block;padding:10px 20px;border-radius:10px;background:#27DCC8;color:#041014;font-weight:700;font-size:14px;text-decoration:none}</style></head><body><div class="box"><div class="sp"></div><h1>Watchlivo'ya bağlanılıyor...</h1><p>Yayın sunucusu hazırlanıyor, sayfa otomatik açılacak.</p><a class="btn" href="${retryHref}">Şimdi Bağlan</a></div><script nonce="${nonce}">(function(){var busy=false;function p(){if(busy)return;busy=true;fetch('/api/health?_t='+Date.now(),{cache:'no-store'}).then(function(r){if(r&&r.ok){var u=new URL(location.href);u.searchParams.set('_r',String(Date.now()));location.replace(u.toString());return;}busy=false;}).catch(function(){busy=false;});}setInterval(p,1500);setTimeout(p,600);})();</script></body></html>`;
   return new Response(html, {
     status: 503,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
+      "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
       "Retry-After": "2",
       "X-Watchlivo-Origin": "edge-fallback",
-      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'",
+      "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'`,
       ...EDGE_SECURITY_HEADERS,
     },
   });
@@ -417,7 +424,7 @@ async function safeFetchSecondary(
           } else if (rootCacheKey && !resp.headers.get("set-cookie")) {
             const clone = resp.clone();
             const cHdrs = new Headers(clone.headers);
-            cHdrs.set("Cache-Control", "public, max-age=120, s-maxage=600");
+            cHdrs.set("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=86400");
             const cachePut = cache.put(rootCacheKey, new Response(clone.body, { status: 200, headers: cHdrs })).catch(() => {});
             ctx?.waitUntil?.(cachePut);
           }
