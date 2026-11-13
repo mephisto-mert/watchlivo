@@ -1,14 +1,14 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261114_v212';
-import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261114_v212';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261114_v212';
-import { getProvider } from '../providers.js?v=20261114_v212';
-import { expectedPosition } from '../sync.js?v=20261114_v212';
-import { thumbFor } from './lobby.js?v=20261114_v212';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261114_v212';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261114_v212';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261114_v212';
-import { avatar } from '../profile.js?v=20261114_v212';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261114_v213';
+import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261114_v213';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261114_v213';
+import { getProvider } from '../providers.js?v=20261114_v213';
+import { expectedPosition } from '../sync.js?v=20261114_v213';
+import { thumbFor } from './lobby.js?v=20261114_v213';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261114_v213';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261114_v213';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261114_v213';
+import { avatar } from '../profile.js?v=20261114_v213';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -2407,12 +2407,6 @@ export function buildControls(frame, ctx) {
         optIconLbl('audioWave', 'Ses & Dublaj (Audio)'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${curAudioObj ? curAudioObj.label.replace(/^[^\s]+\s/, '') : 'Orijinal'} ›`)));
     }
-    if (!m.isMusic && !m.isLive && (rawServers.length > 0 || m.tmdbId)) {
-      const srvIdx = curSrvObj ? (rawServers.indexOf(curSrvObj) + 1) : 1;
-      items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); } },
-        optIconLbl('globe', 'Yayın Sunucusu (Kaynak)'),
-        h('span', { class: 'dim', style: { fontSize: '.85em' } }, `Sunucu ${srvIdx} (${rawServers.length}) ›`)));
-    }
     if (host.adapter?.caps.rate) {
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('speed'); } },
         optIconLbl('speed', 'Oynatma Hızı'),
@@ -2924,7 +2918,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261114_v212',
+            v: '20261114_v213',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

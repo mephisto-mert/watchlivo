@@ -83,6 +83,15 @@ def main() -> None:
             iid = str(item.get("id") or "").strip()
             if not iid or iid in seen_ids:
                 continue
+            if iid == "ac-7792":
+                item = {
+                    **item,
+                    "tmdbId": "66053",
+                    "poster": "https://image.tmdb.org/t/p/w500/4IOMuCcuQG4N8TGdgCzCTqN7WE8.jpg",
+                }
+            elif iid == "ac-11166":
+                cats = [c for c in (item.get("categories") or []) if c not in ("anime", "animation")]
+                item = {**item, "categories": cats}
             seen_ids.add(iid)
             all_items.append(item)
             id_to_item[iid] = item
@@ -130,6 +139,39 @@ def main() -> None:
                 put_key(f"tmdb:{tid}", enriched)
             if ourl:
                 put_key(f"url:{ourl}", enriched)
+
+    # 3b. Merge animecix_tau_map.json direct 1080p tau-video MP4s into shards
+    tau_map_path = REPO / "animecix_tau_map.json"
+    if tau_map_path.exists():
+        try:
+            tau_map = json.loads(tau_map_path.read_text(encoding="utf-8"))
+            for tkey, entries in tau_map.items():
+                parts = str(tkey).split(":")
+                if len(parts) != 3 or not isinstance(entries, list):
+                    continue
+                ac_id, s_num, e_num = parts
+                mp4s = []
+                for ent in entries:
+                    if isinstance(ent, (list, tuple)) and len(ent) >= 3 and str(ent[2]).startswith("https://"):
+                        mp4s.append([str(ent[2]), "mp4"])
+                if not mp4s:
+                    continue
+                ac_item = id_to_item.get(f"ac-{ac_id}") or {}
+                ac_entry = {
+                    "streams": mp4s[:1],
+                    "subs": [],
+                    "title": ac_item.get("title", ""),
+                    "originalTitle": ac_item.get("originalTitle", ""),
+                    "year": ac_item.get("year", ""),
+                    "mediaType": ac_item.get("mediaType", "tv"),
+                    "tmdbId": str(ac_item.get("tmdbId") or ""),
+                    "id": f"ac-{ac_id}",
+                }
+                put_key(f"id:ac-{ac_id}:s{s_num}e{e_num}", ac_entry)
+                if s_num == "1" and e_num == "1":
+                    put_key(f"id:ac-{ac_id}", ac_entry)
+        except Exception as exc:
+            print(f"[EdgeBundle] animecix_tau_map merge skipped: {exc}")
 
     for idx, data in enumerate(buckets):
         shard_path = SHARDS_DIR / f"b{idx:02x}.json"

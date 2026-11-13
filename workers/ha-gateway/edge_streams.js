@@ -124,7 +124,10 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const reqYear = (url.searchParams.get("year") || "").trim();
 
   const lookupKeys = [];
-  if (id) lookupKeys.push(`id:${id}`);
+  if (id) {
+    if (mtype === "tv") lookupKeys.push(`id:${id}:s${s}e${e}`);
+    lookupKeys.push(`id:${id}`);
+  }
   if (tmdbId) {
     lookupKeys.push(`id:${tmdbId}`);
     if (mtype === "tv") {
@@ -151,8 +154,87 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   }
   if (offUrl) lookupKeys.push(`url:${offUrl}`);
 
+async function resolveAnimecixLive(id, mtype, s, e, env) {
+  const m = String(id || "").match(/^ac-(\d+)$/);
+  if (!m) return null;
+  const acId = m[1];
+  const hdrs = {
+    "User-Agent": UA_CHROME,
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://animecix.tv/",
+  };
+  try {
+    let vids = null;
+    if (mtype === "tv") {
+      const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(2500) });
+      if (r.ok) {
+        const d = await r.json().catch(() => null);
+        if (Array.isArray(d) && d.length) vids = d;
+      }
+    } else {
+      const r = await fetch(`https://animecix.tv/secure/videos?titleId=${acId}`, { headers: hdrs, signal: AbortSignal.timeout(2500) });
+      if (r.ok) {
+        const d = await r.json().catch(() => null);
+        const list = d?.pagination?.data;
+        if (Array.isArray(list) && list.length) {
+          vids = list.filter((v) => !["teaser", "trailer", "clip", "opening", "ending"].includes(String(v?.category || "").toLowerCase()));
+        }
+      }
+    }
+    if (!Array.isArray(vids) || !vids.length) return null;
+    for (const v of vids) {
+      const tm = String(v?.url || "").match(/tau-video\.xyz\/embed\/([a-zA-Z0-9_-]+)/);
+      if (!tm) continue;
+      const tauId = tm[1];
+      const tr = await fetch(`https://tau-video.xyz/api/video/${tauId}`, {
+        headers: { "User-Agent": UA_CHROME, "Referer": `https://tau-video.xyz/embed/${tauId}` },
+        signal: AbortSignal.timeout(2500),
+      });
+      if (!tr.ok) continue;
+      const tj = await tr.json().catch(() => null);
+      const urls = (tj?.urls || []).filter((x) => String(x?.url || "").startsWith("https://"));
+      urls.sort((a, b) => {
+        const ra = /1080|fhd/i.test(a.label || "") ? 0 : (/720/i.test(a.label || "") ? 1 : 2);
+        const rb = /1080|fhd/i.test(b.label || "") ? 0 : (/720/i.test(b.label || "") ? 1 : 2);
+        return ra - rb;
+      });
+      if (urls.length) {
+        const mp4 = urls[0].url;
+        const proxied = await buildSignedProxyPath(mp4, "https://tau-video.xyz/", ".mp4", env);
+        return { url: proxied, streamType: "mp4" };
+      }
+    }
+  } catch {}
+  return null;
+}
+
   const hit = await lookupVaultStream(lookupKeys, env);
   if (!hit) {
+    const liveAc = id.startsWith("ac-") ? await resolveAnimecixLive(id, mtype, s, e, env) : null;
+    if (liveAc) {
+      return jsonResp({
+        id: tmdbId || id,
+        provider: "netflix",
+        catalogProvider: "anime",
+        tmdbId,
+        mediaType: mtype,
+        season: mtype === "tv" ? s : 0,
+        episode: mtype === "tv" ? e : 0,
+        title: reqTitle,
+        seriesTitle: reqTitle,
+        originalTitle: reqOrigTitle || reqTitle,
+        year: reqYear,
+        poster: reqPoster,
+        thumbnail: reqPoster,
+        backdrop: reqPoster,
+        streamType: liveAc.streamType,
+        url: liveAc.url,
+        embedUrl: "",
+        altUrls: [],
+        servers: [{ id: "srv-1", label: "📡 Sunucu 1 · Cloudflare 7/24 (MP4 HD)", url: liveAc.url, streamType: liveAc.streamType }],
+        subtitleTracks: [],
+      });
+    }
     const embedServers = buildEmbedServers(tmdbId, mtype, s, e);
     const primaryEmbed = embedServers[0]?.url || "";
     return jsonResp({
@@ -236,8 +318,8 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
     streamType: primary.streamType,
     url: primary.url,
     embedUrl: primary.streamType === "embed" ? primary.url : "",
-    altUrls: urls.slice(1).map((x) => x.url),
-    servers,
+    altUrls: [],
+    servers: servers.slice(0, 1),
     subtitleTracks: subs,
   });
 }
