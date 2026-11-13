@@ -518,7 +518,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       return;
     }
     const dd = root.querySelector('#wl-cmdk-dropdown');
-    if (dd && dd.style.display !== 'none' && !ev.target.closest?.('.wl-cmdk-host')) {
+    if (dd && dd.style.display !== 'none' && !ev.target.closest?.('.wl-cmdk-host, #wl-cmdk-dropdown, .wl-cmdk-dropdown')) {
       dd.style.display = 'none';
     }
   };
