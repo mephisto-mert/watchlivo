@@ -8496,15 +8496,15 @@ async def supersearch(request: Request):
     q = _BIDI_CTRL_RE.sub("", request.query_params.get("q") or "").strip()[:200]
     if not q:
         return JSONResponse({"youtube": [], "tmdb": [], "justwatch": []})
-    qkey = q.replace("İ", "i").replace("I", "ı").lower()
+    qkey = _norm_title(q) or q.replace("İ", "i").replace("I", "ı").lower()
     cached = _SUPERSEARCH_CACHE.get(qkey)
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900"}
     if cached and time.time() - cached[0] < 300:
         return JSONResponse(cached[1], headers=cc_hdrs)
     res = await asyncio.gather(
-        asyncio.wait_for(asyncio.to_thread(_yt_search_sync, q), timeout=4.5),
-        asyncio.wait_for(asyncio.to_thread(_tmdb_sync, q), timeout=4.5),
-        asyncio.wait_for(asyncio.to_thread(_justwatch_sync, q), timeout=4.2),
+        asyncio.wait_for(asyncio.to_thread(_yt_search_sync, q), timeout=2.0),
+        asyncio.wait_for(asyncio.to_thread(_tmdb_sync, q), timeout=2.8),
+        asyncio.wait_for(asyncio.to_thread(_justwatch_sync, q), timeout=1.8),
         return_exceptions=True,
     )
     yt, tmdb, jw = [r if isinstance(r, list) else [] for r in res]

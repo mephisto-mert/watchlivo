@@ -362,8 +362,12 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   }
 
   // 5. Catalog, Search & Streams
-  if (safePath === "/api/rave/catalog" || safePath === "/api/rave/supersearch") {
+  if (safePath === "/api/rave/catalog") {
     return edgeJson(await handleEdgeCatalogSearch(boot, url, env));
+  }
+  if (safePath === "/api/rave/supersearch") {
+    const res = await handleEdgeCatalogSearch(boot, url, env);
+    return edgeJson({ query: res.query || "", tmdb: res.items || [], justwatch: [], youtube: [], items: res.items || [] });
   }
   if (safePath === "/api/rave/new-releases") {
     return edgeJson({ ok: true, items: boot.newReleases });

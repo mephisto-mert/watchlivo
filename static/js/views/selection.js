@@ -754,6 +754,21 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     modalRef = popup({ title: '', content: body, options: [] });
   }
 
+  const superSearchMemCache = new Map();
+  let activeCmdkAbort = null;
+  let activeSuperAbort = null;
+  const fetchSuperCached = async (q, signal, timeout = 10000) => {
+    const k = String(q || '').replace(/İ/g, 'i').replace(/I/g, 'ı').toLowerCase().trim();
+    const hit = superSearchMemCache.get(k);
+    if (hit && Date.now() - hit.ts < 300000) return hit.data;
+    const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout, signal });
+    if (data && (Array.isArray(data.tmdb) || Array.isArray(data.items))) {
+      if (superSearchMemCache.size >= 80) superSearchMemCache.delete(superSearchMemCache.keys().next().value);
+      superSearchMemCache.set(k, { ts: Date.now(), data });
+    }
+    return data;
+  };
+
   function renderGrid() {
     const prevCatScroll = root.querySelector('.provider-cat-bar')?.scrollLeft || 0;
     const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
@@ -821,10 +836,13 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             h('div', { class: 'wl-cmdk-skel-lines' }, h('span', {}), h('span', {})))))
       );
       cmdkTimer = setTimeout(async () => {
+        if (activeCmdkAbort) { try { activeCmdkAbort.abort(); } catch {} }
+        const ac = new AbortController();
+        activeCmdkAbort = ac;
         try {
-          const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000 });
-          if (myCmdk !== cmdkSeq || input.value.trim() !== q) return;
-          const items = [...(data.tmdb || []), ...(data.justwatch || [])].filter((x) => x && x.title).slice(0, 7);
+          const data = await fetchSuperCached(q, ac.signal, 9000);
+          if (myCmdk !== cmdkSeq || input.value.trim() !== q || ac.signal.aborted) return;
+          const items = [...(data.tmdb || []), ...(data.justwatch || []), ...(data.items || [])].filter((x) => x && x.title).slice(0, 7);
           if (!items.length) {
             cmdkDropdown.replaceChildren(
               h('div', { class: 'wl-cmdk-head' }, h('span', {}, `Sonuç bulunamadı: "${q}"`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×'))
@@ -1548,21 +1566,34 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   async function runSuperSearch(q, box) {
     const mySearch = ++superSearchSeq;
+    if (activeSuperAbort) { try { activeSuperAbort.abort(); } catch {} }
+    const ac = new AbortController();
+    activeSuperAbort = ac;
     box.replaceChildren(buildShimmerGrid(6));
     const pasted = parseVideoUrl(q);
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};
     try {
-      data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 12000 });
+      const k = String(q || '').replace(/İ/g, 'i').replace(/I/g, 'ı').toLowerCase().trim();
+      const memHit = superSearchMemCache?.get?.(k);
+      if (memHit && Date.now() - memHit.ts < 300000) {
+        data = memHit.data;
+      } else {
+        data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000, signal: ac.signal });
+        if (data && (Array.isArray(data.tmdb) || Array.isArray(data.items))) {
+          superSearchMemCache?.set?.(k, { ts: Date.now(), data });
+        }
+      }
     } catch (e) {
+      if (ac.signal.aborted) return;
       try {
-        const catRes = await api(`/api/rave/catalog?${qs({ provider: 'cinema', q })}`, { timeout: 9000 });
+        const catRes = await api(`/api/rave/catalog?${qs({ provider: 'cinema', q })}`, { timeout: 9000, signal: ac.signal });
         if (Array.isArray(catRes?.items) && catRes.items.length) {
           data = { tmdb: catRes.items, justwatch: [], youtube: [] };
         }
       } catch (_) { /* ignore fallback error */ }
     }
-    if (mySearch !== superSearchSeq) return;
+    if (mySearch !== superSearchSeq || ac.signal.aborted) return;
     const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '').trim();
     const qNorm = normTitle(q);
     if (!Array.isArray(data?.tmdb) || !data.tmdb.length) {
