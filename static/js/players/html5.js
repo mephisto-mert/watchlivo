@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261114_v210';
-import { expectedPosition } from '../sync.js?v=20261114_v210';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v210';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v210';
-import { ensureHlsJs } from './hls-loader.js?v=20261114_v210';
+import { SubtitleDubController } from './subtitles.js?v=20261114_v211';
+import { expectedPosition } from '../sync.js?v=20261114_v211';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v211';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v211';
+import { ensureHlsJs } from './hls-loader.js?v=20261114_v211';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;

@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261114_v210';
-import { Html5Adapter } from './html5.js?v=20261114_v210';
-import { VimeoAdapter } from './vimeo.js?v=20261114_v210';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v210';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261114_v210';
-import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261114_v210';
+import { YouTubeAdapter } from './youtube.js?v=20261114_v211';
+import { Html5Adapter } from './html5.js?v=20261114_v211';
+import { VimeoAdapter } from './vimeo.js?v=20261114_v211';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v211';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261114_v211';
+import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261114_v211';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -39,7 +39,7 @@ export function adapterFor(media) {
 }
 
 export const mediaKey = (m) => {
-  if (!m || (!m.url && !m.videoId && !m.tmdbId && !m.imdbId && !m.id)) return '';
+  if (!m || (!m.url && !m.videoId && !m.embedUrl && !m.tmdbId && !m.imdbId && !m.id)) return '';
   const epMatch = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
   const s = Math.max(1, Number(m.season || epMatch?.[1] || epMatch?.[3]) || 1);
   const e = Math.max(1, Number(m.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
@@ -262,7 +262,7 @@ export class PlayerHost {
     this.error = null;
     this.autoplayBlocked = false;
     if (!this.userMuted) this.muted = false;
-    if (!media || (!media.url && !media.videoId)) { this.onEvent('empty'); return true; }
+    if (!media || (!media.url && !media.videoId && !media.embedUrl)) { this.onEvent('empty'); return true; }
     const Cls = adapterFor(media);
     let ad = null;
     let settledReady = false;

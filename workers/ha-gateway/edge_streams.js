@@ -1,4 +1,5 @@
 const UA_CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
+const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
 function fnv1aBucket(key, buckets = 64) {
   let h = 0x811c9dc5;
@@ -28,10 +29,14 @@ function b64UrlDecode(sid) {
 
 export function inferStreamReferer(u) {
   if (!u || u.includes("hakunaymatata.com")) return "";
+  if (u.includes("pilavyer")) return "https://play2.pilavyerplay.top/";
+  if (u.includes("dragonballzfans") || u.includes("hexa.su")) return "https://hexa.su/";
   if (u.includes("filmboom")) return "https://filmboom.top/";
   if (u.includes("tau-video") || u.includes("irtau1.")) return "https://tau-video.xyz/";
   if (u.includes("molystream") || u.includes("/sheila_")) return "https://dbx.molystream.org/";
-  if ((u.includes("cdnimages") && u.includes("/hls/")) || u.includes("playmix.uno") || u.includes("hdfilmcehennemi.mobi")) return "https://hdfilmcehennemi.mobi/";
+  if ((u.includes("cdnimages") && u.includes("/hls/")) || u.includes("playmix.uno") || u.includes("hdfilmcehennemi")) return "https://www.hdfilmcehennemi.nl/";
+  if (u.includes("fullhdfilmizlesene")) return "https://www.fullhdfilmizlesene.tv/";
+  if (u.includes("dizibox")) return "https://www.dizibox.so/";
   if (u.includes("cdnimg") || u.includes("rapidvid") || /https:\/\/s\d+\.[^/]+\.shop\//.test(u)) return "https://rapidvid.org/";
   if (u.includes("makesomthingup") || u.includes("centralodsseyproud") || u.includes("/r6/")) return "https://one.makesomthingup.click/";
   if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => u.includes(d))) return "https://vidmoly.biz/";
@@ -63,8 +68,10 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env) {
 
 async function lookupVaultStream(keys, env) {
   if (!env?.ASSETS) return null;
+  const seen = new Set();
   for (const k of keys) {
-    if (!k) continue;
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
     const hex = fnv1aBucket(k).toString(16).padStart(2, "0");
     try {
       const r = await env.ASSETS.fetch(new Request(`https://assets.local/_edge/streams/b${hex}.json`));
@@ -77,26 +84,105 @@ async function lookupVaultStream(keys, env) {
   return null;
 }
 
+function buildEmbedServers(tmdbId, mtype, s, e) {
+  if (!tmdbId) return [];
+  const tid = encodeURIComponent(tmdbId);
+  const isTv = mtype === "tv";
+  const list = [
+    {
+      id: "srv-vidlink",
+      label: "⚡ Sunucu 1 · Ultra HD (TR Altyazı)",
+      url: isTv ? `https://vidlink.pro/tv/${tid}/${s}/${e}?autoplay=true` : `https://vidlink.pro/movie/${tid}?autoplay=true`,
+      streamType: "embed",
+    },
+    {
+      id: "srv-vidsrcto",
+      label: "🌐 Sunucu 2 · 1080p Bulut",
+      url: isTv ? `https://vidsrc.to/embed/tv/${tid}/${s}/${e}` : `https://vidsrc.to/embed/movie/${tid}`,
+      streamType: "embed",
+    },
+    {
+      id: "srv-vidsrcme",
+      label: "🎬 Sunucu 3 · Yedek HD",
+      url: isTv ? `https://vidsrc.me/embed/tv?tmdb=${tid}&season=${s}&episode=${e}` : `https://vidsrc.me/embed/movie?tmdb=${tid}`,
+      streamType: "embed",
+    },
+    {
+      id: "srv-autoembed",
+      label: "📡 Sunucu 4 · AutoEmbed",
+      url: isTv ? `https://player.autoembed.co/embed/tv/${tid}/${s}/${e}` : `https://player.autoembed.co/embed/movie/${tid}`,
+      streamType: "embed",
+    },
+  ];
+  return list;
+}
+
 export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const id = (url.searchParams.get("id") || "").trim();
   const tmdbId = (url.searchParams.get("tmdbId") || "").trim();
-  const mtype = (url.searchParams.get("type") || url.searchParams.get("mediaType") || "movie").trim();
+  const mtype = (url.searchParams.get("type") || url.searchParams.get("mediaType") || "movie").trim().toLowerCase() === "tv" ? "tv" : "movie";
   const s = Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1;
   const e = Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1;
   const offUrl = (url.searchParams.get("officialUrl") || url.searchParams.get("url") || "").trim();
+  const reqTitle = (url.searchParams.get("title") || url.searchParams.get("displayTitle") || "").trim();
+  const reqOrigTitle = (url.searchParams.get("originalTitle") || "").trim();
+  const reqPoster = (url.searchParams.get("poster") || "").trim();
+  const reqYear = (url.searchParams.get("year") || "").trim();
 
   const lookupKeys = [];
   if (id) lookupKeys.push(`id:${id}`);
-  if (tmdbId && mtype === "tv") lookupKeys.push(`tmdb:${tmdbId}:s${s}e${e}`, `tmdb:${tmdbId}:${s}:${e}`);
-  if (tmdbId) lookupKeys.push(`tmdb:${tmdbId}`);
+  if (tmdbId) {
+    lookupKeys.push(`id:${tmdbId}`);
+    if (mtype === "tv") {
+      lookupKeys.push(
+        `tmdb:tv:${tmdbId}:s${s}e${e}`,
+        `tmdb:tv:${tmdbId}:${s}:${e}`,
+        `tv:${tmdbId}:s${s}e${e}`,
+        `tv:${tmdbId}:${s}:${e}`,
+        `tmdb:${tmdbId}:s${s}e${e}`,
+        `tmdb:${tmdbId}:${s}:${e}`,
+        `tmdb:tv:${tmdbId}`,
+        `tv:${tmdbId}`
+      );
+    } else {
+      lookupKeys.push(
+        `tmdb:movie:${tmdbId}:1:1`,
+        `tmdb:movie:${tmdbId}`,
+        `movie:${tmdbId}:1:1`,
+        `movie:${tmdbId}`,
+        `tmdb:${tmdbId}:1:1`
+      );
+    }
+    lookupKeys.push(`tmdb:${tmdbId}`);
+  }
   if (offUrl) lookupKeys.push(`url:${offUrl}`);
 
   const hit = await lookupVaultStream(lookupKeys, env);
   if (!hit) {
-    const embed = tmdbId
-      ? (mtype === "tv" ? `https://vidsrc.cc/v2/embed/tv/${encodeURIComponent(tmdbId)}/${s}/${e}` : `https://vidsrc.cc/v2/embed/movie/${encodeURIComponent(tmdbId)}`)
-      : "";
-    return jsonResp({ id: tmdbId || id, provider: "embed", tmdbId, mediaType: mtype, season: s, episode: e, streamType: "embed", url: embed, embedUrl: embed, altUrls: [], servers: embed ? [{ id: "srv-embed", label: "🌐 Bulut Embed Kaynağı", url: embed, streamType: "embed" }] : [], subtitleTracks: [] });
+    const embedServers = buildEmbedServers(tmdbId, mtype, s, e);
+    const primaryEmbed = embedServers[0]?.url || "";
+    return jsonResp({
+      id: tmdbId || id,
+      provider: "embed",
+      catalogProvider: "cinema",
+      tmdbId,
+      mediaType: mtype,
+      season: mtype === "tv" ? s : 0,
+      episode: mtype === "tv" ? e : 0,
+      title: reqTitle,
+      seriesTitle: reqTitle,
+      originalTitle: reqOrigTitle || reqTitle,
+      year: reqYear,
+      poster: reqPoster,
+      thumbnail: reqPoster,
+      backdrop: reqPoster,
+      streamType: "embed",
+      url: primaryEmbed,
+      embedUrl: primaryEmbed,
+      altUrls: embedServers.slice(1).map((x) => x.url),
+      servers: embedServers,
+      subtitleTracks: [],
+    });
   }
 
   const urls = [];
@@ -106,12 +192,33 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
     const rawU = Array.isArray(pair) ? pair[0] : pair?.url;
     const kind = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
     if (!rawU) continue;
+    const isYt = kind === "yt" || /youtube\.com\/|youtu\.be\//i.test(rawU);
+    const isEmbed = kind.includes("embed") || rawU.includes("/embed/");
+    if (isYt) {
+      const mYt = rawU.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
+      const vid = mYt ? mYt[1] : "";
+      const embU = vid ? `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1` : rawU;
+      urls.push({ url: embU, streamType: "embed", label: `▶ Sunucu ${i + 1} · YouTube HD` });
+      servers.push({ id: `srv-${i + 1}`, label: `▶ Sunucu ${i + 1} · YouTube HD`, url: embU, streamType: "embed" });
+      continue;
+    }
+    if (isEmbed) {
+      urls.push({ url: rawU, streamType: "embed", label: `🌐 Sunucu ${i + 1} · Embed HD` });
+      servers.push({ id: `srv-${i + 1}`, label: `🌐 Sunucu ${i + 1} · Embed HD`, url: rawU, streamType: "embed" });
+      continue;
+    }
     const isMp4 = kind.includes("mp4") || /\.mp4(\?|$)/i.test(rawU) || rawU.includes("hakunaymatata.com") || rawU.includes("/file/tau-video/");
     const proxied = isMp4
       ? await buildSignedProxyPath(rawU, inferStreamReferer(rawU), ".mp4", env)
       : `/api/rave/stream?tmdbId=${encodeURIComponent(tmdbId || id)}&mtype=${encodeURIComponent(mtype)}&sid=${b64UrlEncode(rawU)}&ext=.m3u8`;
     urls.push({ url: proxied, streamType: isMp4 ? "mp4" : "hls", label: `📡 Sunucu ${i + 1} · Edge Direct (${isMp4 ? "MP4 HD" : "1080p HLS"})` });
     servers.push({ id: `srv-${i + 1}`, label: `📡 Sunucu ${i + 1} · Cloudflare 7/24 (${isMp4 ? "MP4 HD" : "1080p HLS"})`, url: proxied, streamType: isMp4 ? "mp4" : "hls" });
+  }
+
+  // Append working cloud embed fallbacks after direct streams so user always has backup servers
+  const fallbackEmbeds = buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e);
+  for (const fb of fallbackEmbeds.slice(0, 2)) {
+    servers.push(fb);
   }
 
   const subs = (hit.subs || []).filter((t) => t?.url).map((t, idx) => ({
@@ -121,21 +228,26 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
     url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
   }));
 
-  const primary = urls[0] || { url: "", streamType: "hls" };
+  const primary = urls[0] || fallbackEmbeds[0] || { url: "", streamType: "embed" };
+  const resolvedTitle = reqTitle || hit.title || "";
   return jsonResp({
     id: tmdbId || id,
-    provider: "netflix",
+    provider: primary.streamType === "embed" ? "embed" : "netflix",
     catalogProvider: "netflix",
     tmdbId: tmdbId || hit.tmdbId || "",
     mediaType: hit.mediaType || mtype,
     season: mtype === "tv" ? s : 0,
     episode: mtype === "tv" ? e : 0,
-    seriesTitle: hit.title || "",
-    originalTitle: hit.originalTitle || "",
-    year: hit.year || "",
+    title: resolvedTitle,
+    seriesTitle: hit.title || resolvedTitle,
+    originalTitle: hit.originalTitle || reqOrigTitle || resolvedTitle,
+    year: hit.year || reqYear || "",
+    poster: reqPoster,
+    thumbnail: reqPoster,
+    backdrop: reqPoster,
     streamType: primary.streamType,
     url: primary.url,
-    embedUrl: "",
+    embedUrl: primary.streamType === "embed" ? primary.url : "",
     altUrls: urls.slice(1).map((x) => x.url),
     servers,
     subtitleTracks: subs,
@@ -156,8 +268,9 @@ export async function handleEdgeHlsManifest(url, env) {
   if (!up.ok) return new Response(`Upstream HLS ${up.status}`, { status: 502 });
   const finalBase = up.url || target;
   const text = await up.text();
-  if (!text.lstrip?.()?.startsWith("#EXTM3U") && !text.trimStart().startsWith("#EXTM3U")) {
-    return Response.redirect(await buildSignedProxyPath(finalBase, ref, ".mp4", env), 302);
+  if (!text.trimStart().startsWith("#EXTM3U")) {
+    const loc = await buildSignedProxyPath(finalBase, ref, ".mp4", env);
+    return new Response(null, { status: 302, headers: { Location: loc, "Cache-Control": "no-store" } });
   }
   const isMaster = text.includes("#EXT-X-STREAM-INF");
   const lines = text.split(/\r?\n/);
@@ -198,6 +311,35 @@ async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {
   return line.replace(m[0], `URI="${rew}"`);
 }
 
+export async function handleEdgeStreamProxy(request, url) {
+  const target = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
+  if (!target.startsWith("http")) return new Response("Missing stream URL", { status: 400 });
+  const ref = (url.searchParams.get("referer") || url.searchParams.get("ref") || inferStreamReferer(target)).trim();
+  const hdrs = new Headers({ "User-Agent": UA_CHROME, Accept: "*/*" });
+  if (ref) {
+    hdrs.set("Referer", ref);
+    try { hdrs.set("Origin", new URL(ref).origin); } catch {}
+  }
+  const rangeHdr = request.headers.get("Range");
+  if (rangeHdr) hdrs.set("Range", rangeHdr);
+  try {
+    const up = await fetch(target, { headers: hdrs, redirect: "follow", signal: AbortSignal.timeout(20000) });
+    const outHdrs = new Headers();
+    for (const k of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {
+      const v = up.headers.get(k);
+      if (v) outHdrs.set(k, v);
+    }
+    if (!outHdrs.has("Content-Type")) {
+      outHdrs.set("Content-Type", target.includes(".mp4") ? "video/mp4" : "video/mp2t");
+    }
+    outHdrs.set("Access-Control-Allow-Origin", "*");
+    outHdrs.set("Cache-Control", "public, max-age=300");
+    return new Response(up.body, { status: up.status, headers: outHdrs });
+  } catch {
+    return new Response("Stream proxy upstream timeout", { status: 502 });
+  }
+}
+
 export async function handleEdgeSubtitle(url) {
   const target = (url.searchParams.get("url") || "").trim();
   if (!target.startsWith("http")) return new Response("WEBVTT\n\n", { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
@@ -216,20 +358,68 @@ export async function handleEdgeSubtitle(url) {
   }
 }
 
-export async function handleEdgePoster(url) {
-  const target = (url.searchParams.get("url") || "").trim();
-  if (!target.startsWith("https://")) return new Response("Bad poster URL", { status: 400 });
-  try {
-    const r = await fetch(target, { headers: { "User-Agent": UA_CHROME }, cf: { cacheTtl: 86400, cacheEverything: true } });
-    return new Response(r.body, {
-      status: r.status,
-      headers: {
-        "Content-Type": r.headers.get("Content-Type") || "image/jpeg",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=86400",
-      },
-    });
-  } catch {
-    return new Response("Poster unavailable", { status: 502 });
+export async function handleEdgePoster(url, env) {
+  const target = (url.searchParams.get("u") || url.searchParams.get("url") || "").trim();
+  if (target.startsWith("http://") || target.startsWith("https://")) {
+    try {
+      const ref = inferStreamReferer(target);
+      const hdrs = { "User-Agent": UA_CHROME, Accept: "image/avif,image/webp,image/*,*/*;q=0.8" };
+      if (ref) hdrs.Referer = ref;
+      const r = await fetch(target, { headers: hdrs, cf: { cacheTtl: 86400, cacheEverything: true }, signal: AbortSignal.timeout(6000) });
+      if (r.ok) {
+        return new Response(r.body, {
+          status: r.status,
+          headers: {
+            "Content-Type": r.headers.get("Content-Type") || "image/jpeg",
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400",
+          },
+        });
+      }
+    } catch {}
   }
+
+  // Fallback: resolve poster via TMDB ID or Title
+  const tid = (url.searchParams.get("tid") || url.searchParams.get("tmdbId") || "").trim();
+  const title = (url.searchParams.get("t") || url.searchParams.get("ot") || "").trim();
+  const mt = (url.searchParams.get("mt") || "movie").trim().toLowerCase() === "tv" ? "tv" : "movie";
+  const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+  try {
+    let posterPath = "";
+    if (/^\d+$/.test(tid)) {
+      const dr = await fetch(`https://api.themoviedb.org/3/${mt}/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3500) });
+      if (dr.ok) {
+        const dj = await dr.json();
+        posterPath = dj.poster_path || "";
+      }
+    }
+    if (!posterPath && title) {
+      const sr = await fetch(`https://api.themoviedb.org/3/search/multi?api_key=${encodeURIComponent(apiKey)}&language=tr-TR&query=${encodeURIComponent(title)}&page=1`, { signal: AbortSignal.timeout(3500) });
+      if (sr.ok) {
+        const sj = await sr.json();
+        const hit = (sj.results || []).find((x) => x.poster_path);
+        if (hit) posterPath = hit.poster_path;
+      }
+    }
+    if (posterPath) {
+      const imgResp = await fetch(`https://image.tmdb.org/t/p/w500${posterPath}`, { cf: { cacheTtl: 86400, cacheEverything: true }, signal: AbortSignal.timeout(5000) });
+      if (imgResp.ok) {
+        return new Response(imgResp.body, {
+          status: 200,
+          headers: { "Content-Type": imgResp.headers.get("Content-Type") || "image/jpeg", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400" },
+        });
+      }
+    }
+  } catch {}
+
+  if (env?.ASSETS) {
+    const fallback = await env.ASSETS.fetch(new Request("https://assets.local/static/watchlivo-poster.svg"));
+    if (fallback.ok) {
+      return new Response(fallback.body, {
+        status: 200,
+        headers: { "Content-Type": "image/svg+xml", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+      });
+    }
+  }
+  return new Response("Poster unavailable", { status: 404 });
 }

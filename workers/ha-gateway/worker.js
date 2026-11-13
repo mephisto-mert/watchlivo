@@ -600,14 +600,17 @@ export default {
             headers: { Allow: "GET", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
           });
         }
+        if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+          return await handleAutonomousEdge(request, url, safePath, env);
+        }
         if (env.FORCE_SECONDARY !== "1" && Date.now() < secondaryCircuitOpenUntil) {
+          if (hasAutonomousEdge(env)) {
+            return await handleAutonomousEdge(request, url, safePath, env);
+          }
           return new Response("WebSocket origin temporarily unavailable", {
             status: 503,
             headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
           });
-        }
-        if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
-          return await handleAutonomousEdge(request, url, safePath, env);
         }
         const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
         const tertiaryBase = (env.TERTIARY_ORIGIN || "").trim().replace(/\/+$/, "");

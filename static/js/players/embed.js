@@ -125,6 +125,8 @@ export class EmbedAdapter {
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;
     f.referrerPolicy = 'origin';
+    f.style.background = '#050a14';
+    f.style.colorScheme = 'dark';
     // Not: Gömülü oynatıcılar (vidlink, vidsrc…) "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
     f.removeAttribute('sandbox');
     f.src = initialEmbedSrc;

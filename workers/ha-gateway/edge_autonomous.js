@@ -1,6 +1,7 @@
 import {
   handleEdgeResolveCatalog,
   handleEdgeHlsManifest,
+  handleEdgeStreamProxy,
   handleEdgeSubtitle,
   handleEdgePoster,
 } from "./edge_streams.js";
@@ -322,7 +323,16 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return await handleEdgeRoomWs(roomId, request, url, env);
   }
 
-  // 2. SPA HTML routes
+  // 2. SPA HTML routes & /r/<id> invite redirect
+  if (safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
+    const seg = safePath.replace(/^\/(?:r|join)\//, "").split("/")[0] || "";
+    if (seg) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `/#/mesh/${encodeURIComponent(seg)}`, "Cache-Control": "no-store" },
+      });
+    }
+  }
   if (safePath === "/" || safePath === "/index.html" || safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
     return await serveSpaIndex(env, request.method);
   }
@@ -375,17 +385,53 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   if (safePath === "/api/rave/latest-episodes") {
     return edgeJson({ ok: true, items: boot.latestEpisodes });
   }
+  if (safePath === "/api/rave/seasons") {
+    const tid = (url.searchParams.get("tmdbId") || url.searchParams.get("id") || "").trim();
+    const sNum = Math.max(1, Number(url.searchParams.get("season") || 1) || 1);
+    if (!/^\d+$/.test(tid)) return edgeJson({ ok: true, seasons: [{ season: 1, name: "1. Sezon", episodeCount: 1 }], episodes: [{ episode: 1, name: "1. Bölüm" }] });
+    const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+    try {
+      const [tvResp, seaResp] = await Promise.all([
+        fetch(`https://api.themoviedb.org/3/tv/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3000) }),
+        fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3000) }),
+      ]);
+      const tvJson = tvResp.ok ? await tvResp.json() : {};
+      const seaJson = seaResp.ok ? await seaResp.json() : {};
+      const seasons = (tvJson.seasons || []).filter((x) => Number(x.season_number) > 0).map((x) => ({
+        season: x.season_number,
+        name: x.name || `${x.season_number}. Sezon`,
+        episodeCount: x.episode_count || 1,
+      }));
+      const episodes = (seaJson.episodes || []).map((ep) => ({
+        episode: ep.episode_number,
+        name: ep.name || `${ep.episode_number}. Bölüm`,
+        overview: ep.overview || "",
+        still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : "",
+      }));
+      return edgeJson({
+        ok: true,
+        tmdbId: tid,
+        seasons: seasons.length ? seasons : [{ season: 1, name: "1. Sezon", episodeCount: episodes.length || 1 }],
+        episodes: episodes.length ? episodes : [{ episode: 1, name: "1. Bölüm" }],
+      });
+    } catch {
+      return edgeJson({ ok: true, seasons: [{ season: 1, name: "1. Sezon", episodeCount: 1 }], episodes: [{ episode: 1, name: "1. Bölüm" }] });
+    }
+  }
   if (safePath === "/api/rave/resolve-catalog" || safePath === "/api/rave/resolve-stream") {
     return await handleEdgeResolveCatalog(url, env, edgeJson);
   }
   if (safePath === "/api/rave/stream" || safePath === "/api/rave/stream_manifest" || safePath === "/api/rave/stream-manifest" || safePath === "/api/rave/hls-proxy") {
     return await handleEdgeHlsManifest(url, env);
   }
+  if (safePath === "/api/rave/stream-proxy" || safePath === "/api/rave/stream_chunk") {
+    return await handleEdgeStreamProxy(request, url);
+  }
   if (safePath === "/api/rave/subtitle.vtt" || safePath === "/api/rave/subtitles") {
     return await handleEdgeSubtitle(url);
   }
   if (safePath === "/api/rave/poster") {
-    return await handleEdgePoster(url);
+    return await handleEdgePoster(url, env);
   }
 
   // 6. Rooms (24/7 Durable Object + KV + 21 Live TV Curated Rooms)

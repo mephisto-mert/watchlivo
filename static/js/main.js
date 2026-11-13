@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261114_v210';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261114_v210';
-import { renderHome, destroyHome } from './views/home.js?v=20261114_v210';
-import { api } from './api.js?v=20261114_v210';
-import { h, toast } from './ui.js?v=20261114_v210';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261114_v211';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261114_v211';
+import { renderHome, destroyHome } from './views/home.js?v=20261114_v211';
+import { api } from './api.js?v=20261114_v211';
+import { h, toast } from './ui.js?v=20261114_v211';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261114_v210'; } catch (_) { return '20261114_v210'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261114_v211'; } catch (_) { return '20261114_v211'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261114_v210')
+    _meshModPromise = import('./views/mesh.js?v=20261114_v211')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -156,7 +156,11 @@ async function route() {
         await enterMesh(meshRoot, r.params);
       } catch (err) {
         console.error('[Route] enterMesh error:', err);
-        toast('Odaya bağlanırken hata oluştu, tekrar deneniyor...');
+        activeMeshRoomId = null;
+        meshRoot.classList.add('hidden');
+        homeRoot.classList.remove('hidden');
+        toast('Odaya bağlanırken hata oluştu, ana sayfaya dönüldü.');
+        try { navigate('/'); } catch (_) {}
       } finally {
         if (enteringMeshRoomId === r.params.id) enteringMeshRoomId = null;
       }
