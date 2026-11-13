@@ -5110,6 +5110,39 @@ try:
 except Exception:
     _HIDDEN_TMDB_IDS = set()
 
+
+def _sync_hidden_tmdb_with_edge() -> dict:
+    """Bidirectional sync between local hidden_titles.json / _HIDDEN_TMDB_IDS and Edge KV blocked:tmdb_ids."""
+    global _HIDDEN_TMDB_IDS
+    sec = (os.environ.get("PROXY_SECRET") or os.environ.get("VORTEX_SECRET") or "").strip()
+    if not sec:
+        return {"ok": False, "reason": "no_secret"}
+    edge_url = (os.environ.get("WATCHLIVO_EDGE_URL") or "https://watchlivo.online").rstrip("/") + "/api/rave/admin/takedown"
+    try:
+        import urllib.request
+        payload = json.dumps({"add": sorted(_HIDDEN_TMDB_IDS)}).encode("utf-8")
+        req = urllib.request.Request(
+            edge_url,
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json", "X-Admin-Secret": sec, "User-Agent": "WatchlivoOriginSync/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=6) as resp:
+            data = json.loads(resp.read().decode("utf-8", "replace"))
+            remote_ids = {str(x).strip() for x in (data.get("blocked") or []) if str(x).strip()}
+            if remote_ids:
+                _HIDDEN_TMDB_IDS |= remote_ids
+                try:
+                    (BASE_DIR / "hidden_titles.json").write_text(
+                        json.dumps({"tmdbIds": sorted(_HIDDEN_TMDB_IDS)}, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
+            return {"ok": True, "count": len(_HIDDEN_TMDB_IDS)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
 _ANIMECIX_TAU_MAP: dict = {}
 _TAU_URL_CACHE = BoundedTTLCache(maxsize=1500, ttl=1200.0)
 try:
@@ -8090,7 +8123,7 @@ async def provider_catalog(request: Request):
                 res["items"] = items
         except Exception:
             res = {"items": [], "totalAvailable": 0, "totalTv": 0, "totalMovies": 0, "page": page, "category": category, "hasMore": False}
-    if _HIDDEN_TMDB_IDS and res.get("items") and not q:
+    if _HIDDEN_TMDB_IDS and res.get("items"):
         res["items"] = [
             x for x in res["items"]
             if _has_vault_stream(x) or (
@@ -13072,7 +13105,7 @@ async def rave_contact_endpoint(request: Request) -> JSONResponse:
         }
         await asyncio.to_thread(_save_contact_message_sync, entry)
         safe_entry = {**entry, "email": _mask_email(email)}
-        return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "entry": safe_entry}, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"ok": True, "officialEmail": "dmca@watchlivo.online", "entry": safe_entry}, headers={"Cache-Control": "no-store"})
     msgs = await asyncio.to_thread(_get_contact_messages_sync)
     if _is_admin_request(request):
         pub_msgs = [m for m in msgs[:30] if isinstance(m, dict)]
@@ -13089,7 +13122,7 @@ async def rave_contact_endpoint(request: Request) -> JSONResponse:
             for m in msgs[:30]
             if isinstance(m, dict)
         ]
-    return JSONResponse({"ok": True, "officialEmail": "jokallame0@gmail.com", "messages": pub_msgs}, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"ok": True, "officialEmail": "dmca@watchlivo.online", "messages": pub_msgs}, headers={"Cache-Control": "no-store"})
 
 
 async def legal_page_endpoint(request: Request) -> HTMLResponse:
@@ -13133,10 +13166,10 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
         ),
         "contact": (
             "İletişim, Film/Dizi İstek & Destek — Watchlivo",
-            "Watchlivo resmi iletişim e-posta adresi (jokallame0@gmail.com), film/dizi istek, hata bildirimi ve DMCA başvuru sayfası.",
+            "Watchlivo resmi iletişim e-posta adresi (dmca@watchlivo.online), film/dizi istek, hata bildirimi ve DMCA başvuru sayfası.",
             "✉️ İletişim, Film/Dizi İstek & Destek Merkezi",
             "<p>Görüş, öneri, işbirliği, film/dizi ekleme talebi, çalışmayan bölüm bildirimi veya telif hakkı (DMCA) başvurularınız için bize doğrudan ulaşabilirsiniz:</p>"
-            "<!--email_off--><p style='font-size:16px;'><b>📬 Resmi E-Posta Adresimiz:</b> <a href='mailto:jokallame0@gmail.com' style='color:#27dcc8;font-weight:800;'>jokallame0@gmail.com</a></p><!--/email_off-->"
+            "<!--email_off--><p style='font-size:16px;'><b>📬 Resmi E-Posta Adresimiz:</b> <a href='mailto:dmca@watchlivo.online' style='color:#27dcc8;font-weight:800;'>dmca@watchlivo.online</a></p><!--/email_off-->"
         ),
     }
     title, desc, h1_txt, body_html = pages.get(path, pages["about"])
@@ -13255,7 +13288,7 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
       {form_html}
     </main>
     <div class="foot">
-      <!--email_off--><span>📩 Resmi İletişim & Hukuk: <a href="mailto:jokallame0@gmail.com" style="color:#27dcc8;font-weight:700;">jokallame0@gmail.com</a></span><!--/email_off-->
+      <!--email_off--><span>📩 Resmi İletişim & Hukuk: <a href="mailto:dmca@watchlivo.online" style="color:#27dcc8;font-weight:700;">dmca@watchlivo.online</a></span><!--/email_off-->
       <span>© 2026 Watchlivo (watchlivo.online)</span>
     </div>
   </div>
@@ -13345,7 +13378,7 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
       </div>
     </div>
     <div class="card" style="margin-top:16px;">
-      <div class="lbl">📩 Gelen Film/Dizi İstekleri, Hata Bildirimleri & İletişim Mesajları (Resmi E-Posta: jokallame0@gmail.com)</div>
+      <div class="lbl">📩 Gelen Film/Dizi İstekleri, Hata Bildirimleri & İletişim Mesajları (Resmi E-Posta: dmca@watchlivo.online)</div>
       <table><thead><tr><th>Tarih</th><th>Kategori</th><th>Gönderen</th><th>Başlık & Mesaj</th></tr></thead><tbody>{c_rows}</tbody></table>
     </div>
   </div>

@@ -3707,12 +3707,21 @@ const homeHtml = await rHome.text();
 assert.ok(homeHtml.includes('Watchlivo'));
 assert.ok(!homeHtml.includes("Watchlivo'ya bağlanılıyor"));
 
+const tokMatch = homeHtml.match(/name="wl-edge-token"\s+content="([^"]+)"/);
+assert.ok(tokMatch && tokMatch[1]);
+const edgeTok = tokMatch[1];
+
 const rCat = await gw.fetch(new Request('https://watchlivo.online/api/rave/catalog?limit=5'), env, {{}});
 assert.equal(rCat.status, 200);
 const catJson = await rCat.json();
 assert.ok(catJson.total >= 400);
 
-const rRes = await gw.fetch(new Request('https://watchlivo.online/api/rave/resolve-catalog?id=fhd-otis-kasirgasinin-tam-ortasinda-contra-el-huracan&tmdbId=1780005&type=movie'), env, {{}});
+const rResNoTok = await gw.fetch(new Request('https://watchlivo.online/api/rave/resolve-catalog?id=fhd-otis-kasirgasinin-tam-ortasinda-contra-el-huracan&tmdbId=1780005&type=movie'), env, {{}});
+assert.equal(rResNoTok.status, 403);
+
+const rRes = await gw.fetch(new Request('https://watchlivo.online/api/rave/resolve-catalog?id=fhd-otis-kasirgasinin-tam-ortasinda-contra-el-huracan&tmdbId=1780005&type=movie', {{
+  headers: {{ 'X-Watchlivo-Token': edgeTok }},
+}}), env, {{}});
 assert.equal(rRes.status, 200);
 const resJson = await rRes.json();
 assert.ok(resJson.url.startsWith('/api/rave/stream?'));
@@ -3724,7 +3733,7 @@ const rCreate = await gw.fetch(new Request('https://watchlivo.online/api/rooms/c
 }}), env, {{}});
 assert.equal(rCreate.status, 200);
 const crJson = await rCreate.json();
-assert.ok(crJson.room.id.startsWith('pc-kapali-oda-'));
+assert.ok(/^wl-[a-f0-9]{{8,12}}$/.test(crJson.room.id));
 
 const rSync = await gw.fetch(new Request(`https://watchlivo.online/api/rooms/${{crJson.room.id}}/sync`, {{
   method: 'POST',

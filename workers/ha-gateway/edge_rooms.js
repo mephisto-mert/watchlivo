@@ -2,16 +2,11 @@ function nowSec() {
   return Date.now() / 1000;
 }
 
-function slugifyRoomName(name) {
-  const base = String(name || "sinema-odasi")
-    .toLowerCase()
-    .replace(/ğ/g, "g").replace(/ü/g, "u").replace(/ş/g, "s")
-    .replace(/ı/g, "i").replace(/ö/g, "o").replace(/ç/g, "c")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 28) || "oda";
-  const rand = Math.random().toString(16).slice(2, 7);
-  return `${base}-${rand}`;
+function generateOpaqueRoomId() {
+  const bytes = new Uint8Array(5);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `wl-${hex}`;
 }
 
 function makeRoomSkeleton(roomId, opts = {}) {
@@ -338,7 +333,7 @@ export class WatchlivoRoomDO {
 
 export async function handleEdgeRoomCreate(request, env, jsonResp) {
   const body = await request.json().catch(() => ({}));
-  const roomId = slugifyRoomName(body.name || body.media?.title || "watchlivo");
+  const roomId = generateOpaqueRoomId();
   const cid = String(body.clientId || `h_${Math.random().toString(16).slice(2, 10)}`);
   const createPayload = { ...body, clientId: cid };
   let out;

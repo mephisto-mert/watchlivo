@@ -17,6 +17,70 @@ const _edgeSearchCache = new Map();
 let _blockedCache = { ts: 0, set: new Set() };
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
+const CRAWLER_BOT_RX = /(?:googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)/i;
+const SOCIAL_PREVIEW_BOT_RX = /(?:telegrambot|twitterbot|discordbot|whatsapp|facebookexternalhit|slackbot)/i;
+
+const CLOAKED_HTML = `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>Watchlivo — Senkron Video &amp; Sesli Sohbet Odası</title>
+  <meta name="robots" content="noindex, nofollow, noarchive, nosnippet, noimageindex, nocache" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0a0e17; color: #94a3b8; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+    .card { max-width: 520px; padding: 32px; background: #111827; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; text-align: center; }
+    h1 { color: #f8fafc; font-size: 22px; margin-bottom: 12px; font-weight: 600; }
+    p { font-size: 14px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Watchlivo Sync Workspace</h1>
+    <p>Watchlivo, arkadaşlarınızla özel davet bağlantıları üzerinden WebRTC sesli sohbet ve gerçek zamanlı senkronize medya oturumları düzenlemenizi sağlayan bir iletişim alanıdır.</p>
+    <p style="color:#64748b; font-size:12px; margin-top:20px;">Private Synchronized Room Engine &bull; dmca@watchlivo.online</p>
+  </div>
+</body>
+</html>`;
+
+function isCrawlerBot(request) {
+  const ua = request.headers.get("User-Agent") || "";
+  if (!ua) return false;
+  if (SOCIAL_PREVIEW_BOT_RX.test(ua)) return false;
+  return CRAWLER_BOT_RX.test(ua);
+}
+
+async function hmacTokenHex(payload, env) {
+  const secret = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "watchlivo-edge-session-v1").trim();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 24);
+}
+
+async function signEdgeClientToken(env) {
+  const exp = Math.floor(Date.now() / 1000) + 7200;
+  const jti = Math.random().toString(36).slice(2, 10);
+  const payload = `${exp}.${jti}`;
+  const sig = await hmacTokenHex(payload, env);
+  return `${payload}.${sig}`;
+}
+
+async function verifyEdgeClientToken(token, env) {
+  const parts = String(token || "").trim().split(".");
+  if (parts.length !== 3) return false;
+  const [expStr, jti, sig] = parts;
+  const exp = Number(expStr);
+  if (!Number.isFinite(exp) || !jti || !sig) return false;
+  if (exp < Math.floor(Date.now() / 1000)) return false;
+  const expected = await hmacTokenHex(`${expStr}.${jti}`, env);
+  return sig === expected;
+}
+
 async function getBlockedTmdbSet(env) {
   const now = Date.now();
   if (now - _blockedCache.ts < 60_000) return _blockedCache.set;
@@ -39,7 +103,7 @@ function isItemBlocked(it, blockedSet) {
   return Boolean(tid && (blockedSet.has(tid) || blockedSet.has(`${mt}:${tid}`)));
 }
 
-function isEdgeOriginAllowed(request) {
+async function isEdgeOriginAllowed(request, env, requireToken = false) {
   const ua = (request.headers.get("User-Agent") || "").toLowerCase();
   if (["watchlivo", "okhttp", "exoplayer", "dalvik", "cfnetwork", "darwin"].some((k) => ua.includes(k))) {
     return true;
@@ -62,6 +126,11 @@ function isEdgeOriginAllowed(request) {
       if (!hostAllowed(new URL(ref).hostname.toLowerCase())) return false;
     } catch { return false; }
   }
+  const tok = (request.headers.get("X-Watchlivo-Token") || "").trim();
+  if (tok) {
+    return await verifyEdgeClientToken(tok, env);
+  }
+  if (requireToken) return false;
   if (!orig && !ref) {
     if (/(?:bot|crawler|spider|scrapy|curl\/|wget\/|python-urllib|python-requests|httpx|aiohttp|go-http-client|dmca|abuse)/i.test(ua)) {
       return false;
@@ -143,8 +212,11 @@ async function serveSpaIndex(env, method = "GET") {
   const r = await env.ASSETS.fetch(new Request("https://assets.local/index.html"));
   if (!r.ok) return new Response("Index missing", { status: 404 });
   const nonce = makeNonce();
+  const edgeTok = await signEdgeClientToken(env);
   const rawHtml = await r.text();
-  const html = rawHtml.replace(/<script(?![^>]*\bsrc=)/gi, `<script nonce="${nonce}"`);
+  const html = rawHtml
+    .replace(/<script(?![^>]*\bsrc=)/gi, `<script nonce="${nonce}"`)
+    .replace(/<\/head>/i, `  <meta name="wl-edge-token" content="${edgeTok}" />\n</head>`);
   return new Response(method === "HEAD" ? null : html, {
     status: 200,
     headers: {
@@ -377,12 +449,37 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return await handleEdgeRoomWs(roomId, request, url, env);
   }
 
-  // 2. Robots.txt & SPA HTML routes & /r/<id> invite redirect
+  // 2. Robots.txt, Edge Bot Cloaker & SPA HTML routes & /r/<id> invite redirect
   if (safePath === "/robots.txt") {
     return new Response("User-agent: *\nDisallow: /\n", {
       status: 200,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" },
     });
+  }
+  const botReq = isCrawlerBot(request);
+  if (botReq) {
+    if (safePath === "/" || safePath === "/index.html" || safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
+      return new Response(request.method === "HEAD" ? null : CLOAKED_HTML, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=86400",
+          "Vary": "User-Agent",
+          "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache",
+          "X-Watchlivo-Origin": "cf-autonomous-edge-cloak",
+        },
+      });
+    }
+    if (safePath.startsWith("/api/rave/") || safePath.startsWith("/api/rooms/")) {
+      return new Response('{"error":"Forbidden","detail":"bot_access_restricted"}', {
+        status: 403,
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "Vary": "User-Agent",
+          "X-Robots-Tag": "noindex, nofollow",
+        },
+      });
+    }
   }
   if (safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
     const seg = safePath.replace(/^\/(?:r|join)\//, "").split("/")[0] || "";
@@ -431,16 +528,23 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return edgeJson({ ok: true, version: boot.version, mode: "cf-autonomous-edge", sharedStore: true, vercel: false, activeRooms: boot.curatedRooms.length });
   }
 
-  // 5. Catalog, Search & Streams (Origin/Bot Shield + KV Takedown Filter)
+  // 5. Catalog, Search & Streams (Origin/Bot Shield + Signed Token + KV Takedown Filter)
+  if (safePath === "/api/rave/session-token") {
+    if (!(await isEdgeOriginAllowed(request, env, false))) {
+      return edgeJson({ ok: false, error: "Forbidden" }, 403);
+    }
+    const token = await signEdgeClientToken(env);
+    return edgeJson({ ok: true, token, ttl: 7200 });
+  }
+  const isResolvePath = safePath === "/api/rave/resolve-catalog" || safePath === "/api/rave/resolve-stream";
   if (
     safePath === "/api/rave/catalog" ||
     safePath === "/api/rave/supersearch" ||
-    safePath === "/api/rave/resolve-catalog" ||
-    safePath === "/api/rave/resolve-stream" ||
+    isResolvePath ||
     safePath === "/api/rave/seasons"
   ) {
-    if (!isEdgeOriginAllowed(request)) {
-      return edgeJson({ ok: false, error: "Forbidden: cross-site origin or automated crawler not allowed" }, 403);
+    if (!(await isEdgeOriginAllowed(request, env, isResolvePath))) {
+      return edgeJson({ ok: false, error: "Forbidden: cross-site origin, missing client token, or automated crawler not allowed" }, 403);
     }
   }
   if (safePath === "/api/rave/admin/takedown") {

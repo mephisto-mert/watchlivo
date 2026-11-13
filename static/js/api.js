@@ -65,6 +65,11 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       if (tok && !hdrs.Authorization && !hdrs.authorization) {
         hdrs.Authorization = `Bearer ${tok}`;
       }
+      if (_isSameOriginPath(path) && !hdrs['X-Watchlivo-Token']) {
+        const edgeMeta = typeof document !== 'undefined' ? document.querySelector('meta[name="wl-edge-token"]') : null;
+        const edgeTok = (edgeMeta && edgeMeta.getAttribute('content')) || (typeof window !== 'undefined' && window.__WL_EDGE_TOKEN__) || '';
+        if (edgeTok) hdrs['X-Watchlivo-Token'] = edgeTok;
+      }
       const res = await fetch(path, {
         method: normMethod,
         cache: 'no-store',

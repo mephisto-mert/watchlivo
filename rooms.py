@@ -4056,8 +4056,7 @@ async def create_room(request: Request):
     else:
         payload = {}
     name = clean_str(payload.get("name"), 45) or "Watchlivo Odası"
-    slug = re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-").replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c"))[:24].strip("-") or "oda"
-    room_id = f"{slug}-{uuid.uuid4().hex[:5]}"
+    room_id = f"wl-{uuid.uuid4().hex[:8]}"
     _CLOSED_ROOMS.pop(room_id, None)
     req_cid = re.sub(r"[^a-zA-Z0-9_]", "", str(payload.get("clientId") or ""))[:24]
     creator_cid = req_cid or ("h_" + uuid.uuid4().hex[:8])
