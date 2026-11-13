@@ -166,13 +166,13 @@ async function resolveAnimecixLive(id, mtype, s, e, env) {
   try {
     let vids = null;
     if (mtype === "tv") {
-      const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
       if (r.ok) {
         const d = await r.json().catch(() => null);
         if (Array.isArray(d) && d.length) vids = d;
       }
     } else {
-      const r = await fetch(`https://animecix.tv/secure/videos?titleId=${acId}`, { headers: hdrs, signal: AbortSignal.timeout(2500) });
+      const r = await fetch(`https://animecix.tv/secure/videos?titleId=${acId}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
       if (r.ok) {
         const d = await r.json().catch(() => null);
         const list = d?.pagination?.data;
@@ -188,7 +188,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env) {
       const tauId = tm[1];
       const tr = await fetch(`https://tau-video.xyz/api/video/${tauId}`, {
         headers: { "User-Agent": UA_CHROME, "Referer": `https://tau-video.xyz/embed/${tauId}` },
-        signal: AbortSignal.timeout(2500),
+        signal: AbortSignal.timeout(4500),
       });
       if (!tr.ok) continue;
       const tj = await tr.json().catch(() => null);

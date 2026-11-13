@@ -81,7 +81,7 @@ def main() -> None:
             if not isinstance(item, dict):
                 continue
             iid = str(item.get("id") or "").strip()
-            if not iid or iid in seen_ids:
+            if not iid or iid in seen_ids or iid == "dbx-one-piece":
                 continue
             if iid == "ac-7792":
                 item = {
@@ -170,6 +170,12 @@ def main() -> None:
                 put_key(f"id:ac-{ac_id}:s{s_num}e{e_num}", ac_entry)
                 if s_num == "1" and e_num == "1":
                     put_key(f"id:ac-{ac_id}", ac_entry)
+                if ac_id == "66":
+                    for k_ov in (f"tmdb:tv:37854:s{s_num}e{e_num}", f"tv:37854:s{s_num}e{e_num}"):
+                        buckets[fnv1a_bucket(k_ov)][k_ov] = ac_entry
+                    if s_num == "1" and e_num == "1":
+                        for k_ov in ("tmdb:tv:37854", "tmdb:37854", "tv:37854"):
+                            buckets[fnv1a_bucket(k_ov)][k_ov] = ac_entry
         except Exception as exc:
             print(f"[EdgeBundle] animecix_tau_map merge skipped: {exc}")
 

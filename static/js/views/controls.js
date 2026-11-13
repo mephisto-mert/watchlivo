@@ -1,14 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261114_v213';
-import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261114_v213';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261114_v213';
-import { getProvider } from '../providers.js?v=20261114_v213';
-import { expectedPosition } from '../sync.js?v=20261114_v213';
-import { thumbFor } from './lobby.js?v=20261114_v213';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261114_v213';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261114_v213';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261114_v213';
-import { avatar } from '../profile.js?v=20261114_v213';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261114_v214';
+import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261114_v214';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261114_v214';
+import { getProvider } from '../providers.js?v=20261114_v214';
+import { expectedPosition } from '../sync.js?v=20261114_v214';
+import { thumbFor } from './lobby.js?v=20261114_v214';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261114_v214';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261114_v214';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261114_v214';
+import { avatar } from '../profile.js?v=20261114_v214';
+import { api } from '../api.js?v=20261114_v214';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -1827,10 +1828,9 @@ export function buildControls(frame, ctx) {
         episode: String(m.episode || 1),
         refresh: '1',
       });
-      const r = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
-      if (r.ok) {
-        const fresh = await r.json();
-        if (fresh && fresh.url) {
+      const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`).catch(() => null);
+      if (fresh && fresh.url) {
+        if (true) {
           m.url = fresh.url;
           if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
           if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
@@ -2918,7 +2918,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261114_v213',
+            v: '20261114_v214',
           });
           fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
             .then((r) => (r.ok ? r.json() : null))

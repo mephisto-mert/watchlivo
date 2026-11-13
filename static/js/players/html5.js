@@ -1,9 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261114_v213';
-import { expectedPosition } from '../sync.js?v=20261114_v213';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v213';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v213';
-import { ensureHlsJs } from './hls-loader.js?v=20261114_v213';
+import { SubtitleDubController } from './subtitles.js?v=20261114_v214';
+import { expectedPosition } from '../sync.js?v=20261114_v214';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v214';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v214';
+import { ensureHlsJs } from './hls-loader.js?v=20261114_v214';
+import { api } from '../api.js?v=20261114_v214';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -840,10 +841,9 @@ export class Html5Adapter {
             episode: String(media.episode || 1),
             refresh: '1',
           });
-          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
-          if (resp.ok && this.video === v) {
-            const fresh = await resp.json();
-            if (fresh && fresh.url) {
+          const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`).catch(() => null);
+          if (fresh && fresh.url && this.video === v) {
+            if (true) {
               if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
               if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
               const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
