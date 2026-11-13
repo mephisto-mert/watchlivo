@@ -8,6 +8,23 @@ routes = [
   { pattern = "www.watchlivo.online/*", zone_name = "watchlivo.online" }
 ]
 
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[kv_namespaces]]
+binding = "WATCHLIVO_KV"
+id = "c8d3386531db4195910a66cc5c630a3e"
+
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "WatchlivoRoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WatchlivoRoomDO"]
+
 [[services]]
 binding = "STREAM_PROXY"
 service = "watchlivo-stream-proxy"
@@ -17,5 +34,5 @@ crons = ["*/10 * * * *"]
 
 [vars]
 SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
-STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
-FORCE_SECONDARY = "0"
+STREAM_PROXY_ORIGIN = "https://watchlivo.online"
+FORCE_SECONDARY = "1"

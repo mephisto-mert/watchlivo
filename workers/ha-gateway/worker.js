@@ -7,6 +7,9 @@
  * Stream Proxy:     Cloudflare Service Binding STREAM_PROXY (watchlivo-stream-proxy)
  */
 
+import { handleAutonomousEdge } from "./edge_autonomous.js";
+export { WatchlivoRoomDO } from "./edge_rooms.js";
+
 const DEFAULT_SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com";
 const DEFAULT_STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
 const BYPASS_WORKER_HOSTS = [
@@ -80,6 +83,20 @@ const VERCEL_PAUSE_TOKENS = [
 
 let primaryCircuitOpenUntil = 0;
 let secondaryCircuitOpenUntil = 0;
+let tunnelOfflineUntil = 0;
+
+function hasAutonomousEdge(env) {
+  return Boolean(env && (env.ASSETS || env.WATCHLIVO_KV || env.ROOM_DO));
+}
+
+async function runAutonomousFallback(request, url, safePath, bodyBuf, env) {
+  const init = { method: request.method, headers: request.headers };
+  if (bodyBuf !== null && bodyBuf !== undefined && request.method !== "GET" && request.method !== "HEAD") {
+    init.body = bodyBuf;
+  }
+  const edgeReq = new Request(request.url, init);
+  return await handleAutonomousEdge(edgeReq, url, safePath, env);
+}
 
 const MAX_BUFFER_BYTES = 262_144;
 
@@ -156,9 +173,9 @@ function originTimeoutMs(pathname) {
     pathname.startsWith("/api/rave/stream") ||
     pathname === "/api/upload"
   ) {
-    return 28_000;
+    return 18_000;
   }
-  return 15_000;
+  return 5_500;
 }
 
 function isStaticCacheablePath(pathname) {
@@ -382,6 +399,9 @@ async function safeFetchSecondary(
   const maxAttempts = isIdempotent ? 2 : 1;
   const cache = getEdgeCache();
   const safePath = normalizeSafePath(url.pathname);
+  if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+    return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+  }
   const ua = request.headers.get("user-agent") || "";
   const isBotUa = BOT_UA_RE.test(ua);
   const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
@@ -430,6 +450,7 @@ async function safeFetchSecondary(
           }
         } catch {}
       }
+      tunnelOfflineUntil = 0;
       return resp;
     } catch (_err) {
       if (attempt + 1 < maxAttempts) {
@@ -458,6 +479,11 @@ async function safeFetchSecondary(
     } catch {
       primaryCircuitOpenUntil = Date.now() + 60_000;
     }
+  }
+
+  if (hasAutonomousEdge(env)) {
+    tunnelOfflineUntil = Date.now() + 25_000;
+    return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
   }
 
   if (cache && isIdempotent) {
@@ -580,6 +606,9 @@ export default {
             headers: { "Cache-Control": "no-store", "Retry-After": "5", ...EDGE_SECURITY_HEADERS },
           });
         }
+        if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+          return await handleAutonomousEdge(request, url, safePath, env);
+        }
         const secondaryBase = (env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN).replace(/\/+$/, "");
         const tertiaryBase = (env.TERTIARY_ORIGIN || "").trim().replace(/\/+$/, "");
         const wsCandidates = [secondaryBase];
@@ -601,17 +630,27 @@ export default {
               method: "GET",
               headers: wsHeaders,
             });
-            if (wsResp.status >= 502 && wi + 1 < wsCandidates.length) {
+            if (wsResp.status >= 502) {
               wsResp.body?.cancel?.();
-              continue;
+              if (wi + 1 < wsCandidates.length) continue;
+              if (hasAutonomousEdge(env)) {
+                tunnelOfflineUntil = Date.now() + 25_000;
+                return await handleAutonomousEdge(request, url, safePath, env);
+              }
+              if (safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
+                secondaryCircuitOpenUntil = Date.now() + 15_000;
+              }
+              return new Response("WebSocket origin unreachable", { status: 503, headers: { "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS } });
             }
-            if (wsResp.status >= 502 && safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
-              secondaryCircuitOpenUntil = Date.now() + 15_000;
-            }
+            tunnelOfflineUntil = 0;
             return wsResp;
           } catch {
             if (wi + 1 < wsCandidates.length) continue;
           }
+        }
+        if (hasAutonomousEdge(env)) {
+          tunnelOfflineUntil = Date.now() + 25_000;
+          return await handleAutonomousEdge(request, url, safePath, env);
         }
         if (safePath.startsWith("/ws/") && env.FORCE_SECONDARY !== "1") {
           secondaryCircuitOpenUntil = Date.now() + 15_000;
@@ -711,18 +750,27 @@ export default {
         safePath === "/api/upload" ||
         safePath.startsWith("/uploads/");
 
+      if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+        return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+      }
+
       let alreadyTriedSecondary = false;
       if (prefersStatefulOrigin && (env.FORCE_SECONDARY === "1" || Date.now() >= secondaryCircuitOpenUntil)) {
         alreadyTriedSecondary = true;
         try {
           const statefulResp = await fetchSecondary(request, url, bodyBuf, env, "render-eu-stateful");
           if (!shouldFailoverResponse(statefulResp)) {
+            tunnelOfflineUntil = 0;
             return statefulResp;
           }
           const renderRouting = (statefulResp.headers.get("x-render-routing") || "").toLowerCase();
           const isExplicitlyDown =
             renderRouting.includes("suspend") || statefulResp.status === 503 || statefulResp.status === 530;
           statefulResp.body?.cancel?.();
+          if (hasAutonomousEdge(env)) {
+            tunnelOfflineUntil = Date.now() + 25_000;
+            return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+          }
           if (env.FORCE_SECONDARY !== "1") {
             if (isExplicitlyDown) {
               secondaryCircuitOpenUntil = Date.now() + 60_000;
@@ -731,6 +779,10 @@ export default {
             }
           }
         } catch {
+          if (hasAutonomousEdge(env)) {
+            tunnelOfflineUntil = Date.now() + 25_000;
+            return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
+          }
           if (env.FORCE_SECONDARY !== "1") {
             secondaryCircuitOpenUntil = Date.now() + 15_000;
           }

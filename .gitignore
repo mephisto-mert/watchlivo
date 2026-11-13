@@ -32,4 +32,7 @@ node_modules/
 workers/stream-proxy/public/
 workers/stream-proxy/.wrangler/
 workers/stream-proxy/node_modules/
+workers/ha-gateway/public/
+workers/ha-gateway/.wrangler/
+workers/ha-gateway/node_modules/
 *.ipa

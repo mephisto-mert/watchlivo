@@ -3657,6 +3657,89 @@ console.log('V208_DUAL_TUNNEL_OK');
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertIn("V208_DUAL_TUNNEL_OK", proc.stdout)
 
+    def test_v209_autonomous_24_7_cloudflare_edge_origin(self):
+        import pathlib
+        import subprocess as _sp
+        root = pathlib.Path(__file__).resolve().parent.parent
+        worker_url = (root / "workers" / "ha-gateway" / "worker.js").as_uri()
+        pub_dir = (root / "workers" / "ha-gateway" / "public").as_posix()
+        harness = f"""
+import gw from {worker_url!r};
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// Simulate 100% PC-OFF / ALL tunnels returning 530!
+globalThis.fetch = async () => new Response('Tunnel Dead 530', {{ status: 530 }});
+
+const kvMap = new Map();
+const mockKv = {{
+  async get(k, type) {{
+    const v = kvMap.get(k);
+    if (v === undefined) return null;
+    return type === 'json' ? JSON.parse(v) : v;
+  }},
+  async put(k, v) {{ kvMap.set(k, typeof v === 'string' ? v : JSON.stringify(v)); }},
+}};
+
+const mockAssets = {{
+  async fetch(req) {{
+    const u = new URL(typeof req === 'string' ? req : req.url);
+    const fp = path.join({pub_dir!r}, u.pathname);
+    if (!fs.existsSync(fp)) return new Response('Not found', {{ status: 404 }});
+    return new Response(fs.readFileSync(fp), {{ status: 200 }});
+  }},
+}};
+
+const env = {{
+  SECONDARY_ORIGIN: 'https://dead-pc.trycloudflare.com',
+  TERTIARY_ORIGIN: 'https://dead-backup.free.pinggy.net',
+  FORCE_SECONDARY: '1',
+  ASSETS: mockAssets,
+  WATCHLIVO_KV: mockKv,
+  PROXY_SECRET: 'test_edge_secret_v209_1234567890',
+}};
+
+const rHome = await gw.fetch(new Request('https://watchlivo.online/'), env, {{}});
+assert.equal(rHome.status, 200);
+assert.equal(rHome.headers.get('X-Watchlivo-Origin'), 'cf-autonomous-edge');
+const homeHtml = await rHome.text();
+assert.ok(homeHtml.includes('Watchlivo'));
+assert.ok(!homeHtml.includes("Watchlivo'ya bağlanılıyor"));
+
+const rCat = await gw.fetch(new Request('https://watchlivo.online/api/rave/catalog?limit=5'), env, {{}});
+assert.equal(rCat.status, 200);
+const catJson = await rCat.json();
+assert.ok(catJson.total >= 400);
+
+const rRes = await gw.fetch(new Request('https://watchlivo.online/api/rave/resolve-catalog?id=fhd-otis-kasirgasinin-tam-ortasinda-contra-el-huracan&tmdbId=1780005&type=movie'), env, {{}});
+assert.equal(rRes.status, 200);
+const resJson = await rRes.json();
+assert.ok(resJson.url.startsWith('/api/rave/stream?'));
+
+const rCreate = await gw.fetch(new Request('https://watchlivo.online/api/rooms/create', {{
+  method: 'POST',
+  headers: {{ 'Content-Type': 'application/json' }},
+  body: JSON.stringify({{ name: 'PC Kapali Oda', privacy: 'public', creator: 'Tris' }}),
+}}), env, {{}});
+assert.equal(rCreate.status, 200);
+const crJson = await rCreate.json();
+assert.ok(crJson.room.id.startsWith('pc-kapali-oda-'));
+
+const rSync = await gw.fetch(new Request(`https://watchlivo.online/api/rooms/${{crJson.room.id}}/sync`, {{
+  method: 'POST',
+  headers: {{ 'Content-Type': 'application/json' }},
+  body: JSON.stringify({{ type: 'chat', clientId: crJson.clientId, username: 'Tris', text: 'Buluttan selam!' }}),
+}}), env, {{}});
+assert.equal(rSync.status, 200);
+const syncJson = await rSync.json();
+assert.equal(syncJson.room.chat[0].text, 'Buluttan selam!');
+console.log('V209_AUTONOMOUS_EDGE_OK');
+"""
+        proc = _sp.run(["node", "--input-type=module", "-e", harness], capture_output=True, text=True, timeout=15)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        self.assertIn("V209_AUTONOMOUS_EDGE_OK", proc.stdout)
+
 
 if __name__ == '__main__':
     unittest.main()

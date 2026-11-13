@@ -235,6 +235,13 @@ def start_tunnel(provider: str, port: int = 8080) -> tuple[subprocess.Popen, str
 
 
 def deploy_gateway_and_purge(cfg: dict, secondary_url: str, tertiary_url: str = "") -> bool:
+    if not (WORKER_DIR / "public" / "_edge" / "bootstrap.json").exists():
+        subprocess.run(
+            [resolve_uvicorn_python(), str(REPO_DIR / "scripts" / "build_edge_bundle.py")],
+            cwd=str(REPO_DIR),
+            capture_output=True,
+            creationflags=NO_WINDOW,
+        )
     env = os.environ.copy()
     env["CLOUDFLARE_API_TOKEN"] = cfg["cf_token"]
     env["CLOUDFLARE_ACCOUNT_ID"] = cfg["cf_account"]
