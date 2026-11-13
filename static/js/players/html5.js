@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261114_v214';
-import { expectedPosition } from '../sync.js?v=20261114_v214';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v214';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v214';
-import { ensureHlsJs } from './hls-loader.js?v=20261114_v214';
-import { api } from '../api.js?v=20261114_v214';
+import { SubtitleDubController } from './subtitles.js?v=20261114_v215';
+import { expectedPosition } from '../sync.js?v=20261114_v215';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v215';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, hasWebAudioGraph, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261114_v215';
+import { ensureHlsJs } from './hls-loader.js?v=20261114_v215';
+import { api } from '../api.js?v=20261114_v215';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -864,6 +864,7 @@ export class Html5Adapter {
         } catch (err) { /* ignore and fall through */ }
       }
       clearBuf();
+      if (v.readyState >= 2 && !v.paused && !v.error) { doneCb?.(); return; }
       this.events.onError?.('Akış yüklenemedi');
       doneCb?.();
     };

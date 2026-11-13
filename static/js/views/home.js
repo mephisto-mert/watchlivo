@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261114_v214';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261114_v215';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261114_v214';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261114_v214';
-import { api } from '../api.js?v=20261114_v214';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261114_v214';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261114_v214';
-import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261114_v214';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261114_v214';
+} from '../store.js?v=20261114_v215';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261114_v215';
+import { api } from '../api.js?v=20261114_v215';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261114_v215';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261114_v215';
+import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261114_v215';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261114_v215';
 
 let refreshTimer = null;
 let retryLoadTimer = null;
@@ -64,7 +64,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261114_v214', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261114_v215', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 

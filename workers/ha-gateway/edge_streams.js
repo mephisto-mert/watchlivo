@@ -154,16 +154,28 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   }
   if (offUrl) lookupKeys.push(`url:${offUrl}`);
 
-async function resolveAnimecixLive(id, mtype, s, e, env) {
+async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigTitle = "", tmdbId = "") {
   const m = String(id || "").match(/^ac-(\d+)$/);
-  if (!m) return null;
-  const acId = m[1];
+  let acId = m ? m[1] : "";
   const hdrs = {
     "User-Agent": UA_CHROME,
     "Accept": "application/json, text/plain, */*",
     "Referer": "https://animecix.tv/",
   };
   try {
+    if (!acId && (reqTitle || reqOrigTitle)) {
+      const sq = encodeURIComponent(reqOrigTitle || reqTitle);
+      const sr = await fetch(`https://animecix.tv/secure/search/${sq}?limit=8`, { headers: hdrs, signal: AbortSignal.timeout(3500) });
+      if (sr.ok) {
+        const sd = await sr.json().catch(() => null);
+        const results = Array.isArray(sd?.results) ? sd.results : [];
+        const tidNum = Number(tmdbId || 0);
+        const exactTmdb = tidNum ? results.find((x) => Number(x?.tmdb_id) === tidNum && (x?.title_type === "anime" || x?.is_series)) : null;
+        const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
+        if (picked?.id) acId = String(picked.id);
+      }
+    }
+    if (!acId) return null;
     let vids = null;
     if (mtype === "tv") {
       const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
@@ -210,7 +222,9 @@ async function resolveAnimecixLive(id, mtype, s, e, env) {
 
   const hit = await lookupVaultStream(lookupKeys, env);
   if (!hit) {
-    const liveAc = id.startsWith("ac-") ? await resolveAnimecixLive(id, mtype, s, e, env) : null;
+    const liveAc = (id.startsWith("ac-") || reqTitle || reqOrigTitle)
+      ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId)
+      : null;
     if (liveAc) {
       return jsonResp({
         id: tmdbId || id,
