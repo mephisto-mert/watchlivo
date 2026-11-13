@@ -163,16 +163,31 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     "Referer": "https://animecix.tv/",
   };
   try {
-    if (!acId && (reqTitle || reqOrigTitle)) {
-      const sq = encodeURIComponent(reqOrigTitle || reqTitle);
-      const sr = await fetch(`https://animecix.tv/secure/search/${sq}?limit=8`, { headers: hdrs, signal: AbortSignal.timeout(3500) });
-      if (sr.ok) {
+    if (!acId) {
+      const tidNum = Number(tmdbId || 0);
+      const isLatin = (str) => Boolean(str && !/[\u3040-\u30ff\u4e00-\u9faf\u0400-\u04ff]/.test(str));
+      const queries = [];
+      if (isLatin(reqTitle)) queries.push(reqTitle);
+      if (isLatin(reqOrigTitle) && reqOrigTitle !== reqTitle) queries.push(reqOrigTitle);
+      if (!queries.length && tidNum) {
+        const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+        const tr = await fetch(`https://api.themoviedb.org/3/${mtype === "tv" ? "tv" : "movie"}/${tidNum}?api_key=${encodeURIComponent(apiKey)}&language=en-US`, { signal: AbortSignal.timeout(2500) });
+        if (tr.ok) {
+          const tj = await tr.json().catch(() => null);
+          if (tj?.name || tj?.title) queries.push(tj.name || tj.title);
+        }
+      }
+      for (const qRaw of queries) {
+        const sr = await fetch(`https://animecix.tv/secure/search/${encodeURIComponent(qRaw)}?limit=8`, { headers: hdrs, signal: AbortSignal.timeout(3500) });
+        if (!sr.ok) continue;
         const sd = await sr.json().catch(() => null);
         const results = Array.isArray(sd?.results) ? sd.results : [];
-        const tidNum = Number(tmdbId || 0);
         const exactTmdb = tidNum ? results.find((x) => Number(x?.tmdb_id) === tidNum && (x?.title_type === "anime" || x?.is_series)) : null;
         const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
-        if (picked?.id) acId = String(picked.id);
+        if (picked?.id) {
+          acId = String(picked.id);
+          break;
+        }
       }
     }
     if (!acId) return null;
@@ -220,7 +235,14 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   return null;
 }
 
-  const hit = await lookupVaultStream(lookupKeys, env);
+  const hitRaw = await lookupVaultStream(lookupKeys, env);
+  const hitStreams = Array.isArray(hitRaw?.streams) ? hitRaw.streams : [];
+  const hasOnlyDeadOrYt = hitRaw && hitStreams.every((pair) => {
+    const u = String(Array.isArray(pair) ? pair[0] : pair?.url || "").toLowerCase();
+    const k = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
+    return k === "yt" || u.includes("youtube.com/") || u.includes("youtu.be/") || u.includes("pilavyer") || u.includes("dragonballzfans");
+  });
+  const hit = hasOnlyDeadOrYt ? null : hitRaw;
   if (!hit) {
     const liveAc = (id.startsWith("ac-") || reqTitle || reqOrigTitle)
       ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId)
