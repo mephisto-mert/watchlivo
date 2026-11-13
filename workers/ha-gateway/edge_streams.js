@@ -101,33 +101,14 @@ function buildEmbedServers(tmdbId, mtype, s, e) {
   if (!tmdbId) return [];
   const tid = encodeURIComponent(tmdbId);
   const isTv = mtype === "tv";
-  const list = [
+  return [
     {
       id: "srv-vidlink",
       label: "⚡ Sunucu 1 · Ultra HD (TR Altyazı)",
       url: isTv ? `https://vidlink.pro/tv/${tid}/${s}/${e}?autoplay=true` : `https://vidlink.pro/movie/${tid}?autoplay=true`,
       streamType: "embed",
     },
-    {
-      id: "srv-vidsrcto",
-      label: "🌐 Sunucu 2 · 1080p Bulut",
-      url: isTv ? `https://vidsrc.to/embed/tv/${tid}/${s}/${e}` : `https://vidsrc.to/embed/movie/${tid}`,
-      streamType: "embed",
-    },
-    {
-      id: "srv-vidsrcme",
-      label: "🎬 Sunucu 3 · Yedek HD",
-      url: isTv ? `https://vidsrc.me/embed/tv?tmdb=${tid}&season=${s}&episode=${e}` : `https://vidsrc.me/embed/movie?tmdb=${tid}`,
-      streamType: "embed",
-    },
-    {
-      id: "srv-autoembed",
-      label: "📡 Sunucu 4 · AutoEmbed",
-      url: isTv ? `https://player.autoembed.co/embed/tv/${tid}/${s}/${e}` : `https://player.autoembed.co/embed/movie/${tid}`,
-      streamType: "embed",
-    },
   ];
-  return list;
 }
 
 export async function handleEdgeResolveCatalog(url, env, jsonResp) {
@@ -228,12 +209,6 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
     servers.push({ id: `srv-${i + 1}`, label: `📡 Sunucu ${i + 1} · Cloudflare 7/24 (${isMp4 ? "MP4 HD" : "1080p HLS"})`, url: proxied, streamType: isMp4 ? "mp4" : "hls" });
   }
 
-  // Append working cloud embed fallbacks after direct streams so user always has backup servers
-  const fallbackEmbeds = buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e);
-  for (const fb of fallbackEmbeds.slice(0, 2)) {
-    servers.push(fb);
-  }
-
   const subs = (hit.subs || []).filter((t) => t?.url).map((t, idx) => ({
     id: `sub-${idx}`,
     lang: t.lang || "tr",
@@ -241,7 +216,7 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
     url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
   }));
 
-  const primary = urls[0] || fallbackEmbeds[0] || { url: "", streamType: "embed" };
+  const primary = urls[0] || buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e)[0] || { url: "", streamType: "embed" };
   const resolvedTitle = reqTitle || hit.title || "";
   return jsonResp({
     id: tmdbId || id,
