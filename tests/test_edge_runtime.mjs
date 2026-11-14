@@ -922,6 +922,51 @@ test("regression: Animecix null-tmdb_id cannot hijack Son Masa (316702), Sheila 
     assert.ok(JSON.stringify(sonMasaEp2Data).includes("aHR0cHM6Ly9obHMwOC5jZG52aWRlbzExLnNob3AvaGxzMDgvMTM3OTAvRXAy"));
     assert.equal(inferStreamReferer("https://hls08.cdnvideo11.shop/hls08/13790/Ep1.v715_index.m3u8"), "https://kisskh.co/");
     assert.equal(inferStreamReferer("https://hls08.streamingcdn5.site/13790/Ep1.v715_index0.ts"), "https://kisskh.co/");
+
+    // Turkish displayTitle with 3+ words must still search Webteizle using originalTitle
+    const wtOrigCalls = [];
+    globalThis.fetch = async (input, init) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u === "https://webteizle.info/ajax/arama.asp") {
+        const bodyStr = String(init?.body || "");
+        wtOrigCalls.push(decodeURIComponent(bodyStr.replace(/^q=/, "")));
+        if (bodyStr.includes("Paranormal+Activity") || bodyStr.includes("Paranormal%20Activity")) {
+          return new Response(JSON.stringify({
+            status: "success",
+            results: { filmler: { results: [{ title: "Paranormal Activity (2007)", description: "", url: "/hakkinda/paranormal-activity" }] } },
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ status: "success", results: { filmler: { results: [] } } }), { status: 200 });
+      }
+      if (u === "https://webteizle.info/hakkinda/paranormal-activity") {
+        return new Response('<a href="/izle/dublaj/paranormal-activity">İzle</a>', { status: 200 });
+      }
+      if (u === "https://webteizle.info/izle/dublaj/paranormal-activity") {
+        return new Response('<div id="dilsec" data-id="1001"><a data-dil="0"></a></div>', { status: 200 });
+      }
+      if (u === "https://webteizle.info/ajax/dataAlternatif3.asp") {
+        return new Response(JSON.stringify({ status: "success", data: [{ id: 99, baslik: "VidMoly", kalitesi: 1 }] }), { status: 200 });
+      }
+      if (u === "https://webteizle.info/ajax/dataEmbed.asp") {
+        return new Response("<script>vidmoly('pa1mock','rv1');</script>", { status: 200 });
+      }
+      if (u.startsWith("https://vidmoly.biz/embed-pa1mock.html")) {
+        return new Response("sources:[{file:'https://box-1093-w.vmbox.space/hls/pa1/master.m3u8'}]", { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+    const wtOrigRes = await resolveTurkishCatalogStream({
+      title: "Paranormal Aktivite: Hayalet Boyutu",
+      displayTitle: "Paranormal Aktivite: Hayalet Boyutu",
+      originalTitle: "Paranormal Activity",
+      year: "2007",
+      mtype: "movie",
+      s: 1,
+      e: 1,
+      fetchPublicFn: async (target) => ({ resp: await globalThis.fetch(target) }),
+    });
+    assert.ok(wtOrigCalls.includes("Paranormal Activity"));
+    assert.equal(wtOrigRes?.url, "https://box-1093-w.vmbox.space/hls/pa1/master.m3u8");
   } finally {
     globalThis.fetch = origFetch;
   }

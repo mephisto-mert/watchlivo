@@ -313,7 +313,7 @@ function parseRapidvidHtml(rhtml) {
       if (cmU.startsWith("http")) return { url: cmU, subs };
     } catch {}
   }
-  const mFile = String(rhtml || "").match(/"file"\s*:\s*av\('([^']+)'\)/);
+  const mFile = String(rhtml || "").match(/(?:["']?file["']?\s*:\s*)?av\(\s*['"]([^'"]+)['"]\s*\)/);
   if (mFile) {
     try {
       const decU = decodeRapidvidToken(mFile[1]);
@@ -605,11 +605,13 @@ async function postWebteizleForm(path, bodyStr, referer, timeoutMs = 4500) {
 async function extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn) {
   const fullTitles = [];
   const searchQueries = [];
-  for (const qRaw of [displayTitle, title, originalTitle]) {
+  for (const qRaw of [originalTitle, title, displayTitle]) {
     const clean = String(qRaw || "").replace(/\(\d{4}\)/g, "").trim();
     if (!clean) continue;
     if (!fullTitles.includes(clean)) fullTitles.push(clean);
     if (!searchQueries.includes(clean)) searchQueries.push(clean);
+  }
+  for (const clean of [...fullTitles]) {
     const pre = clean.split(/[:\-–—]/)[0].trim();
     if (pre.length >= 4 && !searchQueries.includes(pre)) searchQueries.push(pre);
     const firstWord = clean.split(/\s+/)[0].trim();
