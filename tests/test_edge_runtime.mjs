@@ -2,13 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  inferStreamReferer,
   isPublicHttpUrl,
   signProxySig,
   verifyProxySig,
+  handleEdgeResolveCatalog,
+  handleEdgeHlsManifest,
   handleEdgeStreamProxy,
   handleEdgeSubtitle,
   handleEdgePoster,
 } from "../workers/ha-gateway/edge_streams.js";
+import {
+  isBlockedAdHost,
+  filterM3u8AdDiscontinuities,
+  unpackDeanEdwards,
+  resolveTurkishCatalogStream,
+} from "../workers/ha-gateway/edge_extractors.js";
+import { isTrustedEmbedUrl } from "../static/js/players/embed.js";
+import fs from "node:fs";
 import {
   WatchlivoRoomDO,
   handleEdgeRoomCreate,
@@ -636,6 +647,411 @@ test("edge_music: handles music-catalog, music-resolve, and synced LRC -> WebVTT
     const lrcRes = await handleAutonomousEdge(lrcReq, new URL(lrcReq.url), "/api/rave/music-lyrics.vtt", env);
     assert.equal(lrcRes.status, 200);
     assert.ok((await lrcRes.text()).includes("00:00:05.000 --> 00:00:10.000"));
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("anti_popup_betting_hardening: blocks 1xbet/vidlink embeds, strips allow-popups, unwraps vidmoly/fhd, filters m3u8 ads", async () => {
+  // 1. embed.js sandbox & allowlist hardening
+  const embedSrc = fs.readFileSync(new URL("../static/js/players/embed.js", import.meta.url), "utf8");
+  assert.equal(embedSrc.includes("allow-popups"), false);
+  for (const badEmbed of [
+    "https://vidlink.pro/tv/316702/1/1",
+    "https://vidsrc.to/embed/movie/550",
+    "https://1xbet.com/promo",
+    "https://tr.casibom.com/play",
+  ]) {
+    assert.equal(isTrustedEmbedUrl(badEmbed), false, `embed.js must reject ${badEmbed}`);
+  }
+  assert.equal(isTrustedEmbedUrl("https://www.youtube.com/embed/dQw4w9WgXcQ"), true);
+  assert.equal(isTrustedEmbedUrl("https://player.twitch.tv/?channel=test&parent=watchlivo.online"), true);
+
+  // 2. edge_streams & edge_extractors host/ad blocklist
+  for (const badHost of [
+    "https://1xbet-tr.com/landing",
+    "https://melbet.org/stream",
+    "https://vidlink.pro/movie/1184606",
+    "https://popads.net/pop.js",
+  ]) {
+    assert.equal(isPublicHttpUrl(badHost), false, `isPublicHttpUrl must block ${badHost}`);
+  }
+  assert.equal(isBlockedAdHost("onebahis.com"), true);
+
+  // 3. M3U8 discontinuity ad stripping preserves real segments and drops betting discontinuities
+  const rawPlaylist = [
+    "#EXTM3U",
+    "#EXT-X-TARGETDURATION:6",
+    "#EXTINF:6.0,",
+    "https://cdn.example.com/seg1.ts",
+    "#EXT-X-DISCONTINUITY",
+    "#EXTINF:10.0,",
+    "https://ads.example.com/1xbet_preroll_01.ts",
+    "#EXT-X-DISCONTINUITY",
+    "#EXTINF:6.0,",
+    "https://cdn.example.com/seg2.ts",
+    "#EXT-X-ENDLIST",
+  ].join("\n");
+  const stripped = filterM3u8AdDiscontinuities(rawPlaylist);
+  assert.ok(stripped.includes("seg1.ts"));
+  assert.ok(stripped.includes("seg2.ts"));
+  assert.equal(stripped.includes("1xbet_preroll"), false);
+
+  // 4. Dean Edwards static unpacker without eval()
+  const packed = "eval(function(p,a,c,k,e,d){e=function(c){return c.toString(36)};if(!''.replace(/^/,String)){while(c--){d[c.toString(a)]=k[c]||c.toString(a)}k=[function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}('0 1=\"2://3.4/5.6\";',7,7,'var|u|https|cdn|test|master|m3u8'.split('|'),0,{}))";
+  assert.equal(unpackDeanEdwards(packed), 'var u="https://cdn.test/master.m3u8";');
+
+  // 5. handleEdgeResolveCatalog never falls back to vidlink.pro and extracts Turkish rapidvid live
+  const payloadJson = JSON.stringify({ cm: "https://s34.cdnimage123.shop/mm/test_stream", ct: [{ label: "Türkçe", file: "https://subs.rapidvid.org/1.vtt" }] });
+  const b64Inner = Buffer.from(payloadJson, "utf8").toString("base64");
+  const key = "K9L";
+  let shifted = "";
+  for (let i = 0; i < b64Inner.length; i++) shifted += String.fromCharCode(b64Inner.charCodeAt(i) + ((key.charCodeAt(i % 3) % 5) + 1));
+  const p8Enc = Buffer.from(shifted, "latin1").toString("base64").split("").reverse().join("");
+  const vodUrlB64 = Buffer.from("https://rapidvid.org/vx/testvod123", "utf8").toString("base64");
+  const vodRot13 = vodUrlB64.replace(/[a-zA-Z]/g, (c) => {
+    const b = c <= "Z" ? 65 : 97;
+    return String.fromCharCode(((c.charCodeAt(0) - b + 13) % 26) + b);
+  });
+
+  const env = { ...TEST_ENV, WATCHLIVO_KV: createMockKv() };
+  const jsonResp = (d, s = 200) => new Response(JSON.stringify(d), { status: s, headers: { "Content-Type": "application/json" } });
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const s = typeof input === "string" ? input : input.url;
+      if (s.includes("fullhdfilmizlesene.now/film/ataturk")) {
+        return new Response(`<script>var scx = {"atom":{"sx":{"t":["${vodRot13}"]}}};</script>`, { status: 200 });
+      }
+      if (s.includes("rapidvid.org/vx/testvod123")) {
+        return new Response(`<script>window._p8 = '${p8Enc}';</script>`, { status: 200 });
+      }
+      if (s.includes("vidmoly.biz/embed-abc123.html")) {
+        return new Response(`<html><script>file:"https://box-10.vmbox.space/hls/test/master.m3u8"</script></html>`, { status: 200 });
+      }
+      if (s.includes("vmbox.space/hls/test/master.m3u8")) {
+        return new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1200000\nhttps://box-10.vmbox.space/hls/test/720.m3u8\n", {
+          status: 200,
+          headers: { "Content-Type": "application/vnd.apple.mpegurl" },
+        });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+
+    const resFhf = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=1184606&type=movie&title=Ataturk&sourceUrl=https%3A%2F%2Fwww.fullhdfilmizlesene.now%2Ffilm%2Fataturk-1881-1919%2F"),
+      env,
+      jsonResp
+    );
+    assert.equal(resFhf.status, 200);
+    const fhfJson = await resFhf.json();
+    assert.equal(fhfJson.streamType, "hls");
+    assert.ok(fhfJson.url.startsWith("/api/rave/stream?"));
+    assert.equal(JSON.stringify(fhfJson).includes("vidlink.pro"), false);
+
+    // Miss case must return 404, never vidlink.pro
+    const resMiss = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=99999999&type=tv&season=1&episode=1&title=Nonexistent"),
+      env,
+      jsonResp
+    );
+    assert.equal(resMiss.status, 404);
+    assert.equal((await resMiss.text()).includes("vidlink.pro"), false);
+
+    // Vidmoly HTML embed inside HLS manifest endpoint unwraps cleanly to rewritten M3U8
+    const resVm = await handleEdgeHlsManifest(
+      new URL("https://watchlivo.online/api/rave/stream?url=https%3A%2F%2Fvidmoly.biz%2Fembed-abc123.html"),
+      env
+    );
+    assert.equal(resVm.status, 200);
+    const vmM3u8 = await resVm.text();
+    assert.ok(vmM3u8.includes("#EXTM3U"));
+    assert.ok(vmM3u8.includes("/api/rave/stream?sid="));
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("regression: Animecix null-tmdb_id cannot hijack Son Masa (316702), Sheila beats vmpx /hls2/, and Ataturk (1184606) resolves to CF-safe shard", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    const mockFetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u.includes("animecix.tv/secure/search/")) {
+        return new Response(JSON.stringify({
+          results: [{ id: 999999, name: "Final Table Anime", title_type: "anime", is_series: true, tmdb_id: null }],
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (u.includes("animecix.tv/secure/titles/999999")) {
+        return new Response(JSON.stringify({
+          title: { videos: [{ url: "https://anime.example.com/hijack.mp4", name: "720p" }] },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      if (u === "https://www.dizibox.live/final-table-1-sezon-1-bolum-izle/") {
+        return new Response(
+          `<html><title>Final Table 1. Sezon 1. Bölüm</title>` +
+          `<iframe src="https://www.dizibox.live/player/moly/moly.php?h=m1"></iframe>` +
+          `<iframe src="https://www.dizibox.live/player/king/king.php?v=k1"></iframe></html>`,
+          { status: 200, headers: { "Content-Type": "text/html" } }
+        );
+      }
+      if (u === "https://www.dizibox.live/player/moly/moly.php?h=m1") {
+        return new Response(`<iframe src="https://vidmoly.biz/embed-mockvmpx.html"></iframe>`, { status: 200 });
+      }
+      if (u === "https://vidmoly.biz/embed-mockvmpx.html") {
+        return new Response(`<script>sources: [{file:"https://prx-1350-ant-d.vmpx.online/hls2/01/master.m3u8"}]</script>`, { status: 200 });
+      }
+      if (u === "https://vidmoly.biz/embed-mockvmbox.html") {
+        return new Response(`<script>sources: [{file:"https://box-1093-w.vmbox.space/hls/master.m3u8"}]</script>`, { status: 200 });
+      }
+      if (u === "https://www.dizibox.live/player/king/king.php?v=k1") {
+        return new Response(`<iframe src="https://dbx.molystream.org/embed/sheilakey1"></iframe>`, { status: 200 });
+      }
+      if (u === "https://prx-1350-ant-d.vmpx.online/hls2/01/master.m3u8" || u === "https://box-1093-w.vmbox.space/hls/master.m3u8") {
+        return new Response("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nseg.m3u8\n", { status: 200 });
+      }
+      return new Response("Not Found", { status: 404 });
+    };
+    globalThis.fetch = mockFetch;
+
+    const jsonResp = (obj, st = 200) =>
+      new Response(JSON.stringify(obj), { status: st, headers: { "Content-Type": "application/json" } });
+    const env = {
+      ...TEST_ENV,
+      WATCHLIVO_KV: createMockKv(),
+      ASSETS: { async fetch() { return new Response("Not Found", { status: 404 }); } },
+    };
+    const rSonMasa = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?id=hfnl-final-table-2026&tmdbId=316702&type=tv&season=1&episode=1&title=Son+Masa&originalTitle=Final+Table"),
+      env,
+      jsonResp
+    );
+    assert.equal(rSonMasa.status, 200);
+    const sonMasaData = await rSonMasa.json();
+    assert.equal(sonMasaData.catalogProvider, "cinema");
+    const sonMasaRaw = JSON.stringify(sonMasaData);
+    assert.ok(
+      decodeURIComponent(sonMasaRaw).includes("dbx.molystream.org/embed/sheila/sheilakey1") ||
+      sonMasaRaw.includes("bW9seXN0cmVhbS5vcmcvZW1iZWQvc2hlaWxhL3NoZWlsYWtleTE")
+    );
+
+    const vmpxOrdered = await resolveTurkishCatalogStream({
+      title: "Son Masa",
+      displayTitle: "Son Masa",
+      originalTitle: "Final Table",
+      sourceUrl: "https://www.dizibox.so/diziler/final-table/",
+      mtype: "tv",
+      s: 1,
+      e: 1,
+      fetchPublicFn: async (target) => ({ resp: await mockFetch(target) }),
+    });
+    assert.equal(vmpxOrdered?.url, "https://dbx.molystream.org/embed/sheila/sheilakey1");
+    assert.equal(vmpxOrdered?.streams?.length, 2);
+    assert.ok(vmpxOrdered.streams[0].url.includes("dbx.molystream.org"));
+    assert.ok(vmpxOrdered.streams[1].url.includes("vmpx.online"));
+
+    const vmboxFetch = async (target) => {
+      if (target === "https://www.dizibox.live/player/moly/moly.php?h=m1") {
+        return { resp: new Response(`<iframe src="https://vidmoly.biz/embed-mockvmbox.html"></iframe>`, { status: 200 }) };
+      }
+      return { resp: await mockFetch(target) };
+    };
+    const vmboxOrdered = await resolveTurkishCatalogStream({
+      title: "Son Masa",
+      displayTitle: "Son Masa",
+      originalTitle: "Final Table",
+      sourceUrl: "https://www.dizibox.so/diziler/final-table/",
+      mtype: "tv",
+      s: 1,
+      e: 1,
+      fetchPublicFn: vmboxFetch,
+    });
+    assert.equal(vmboxOrdered?.url, "https://box-1093-w.vmbox.space/hls/master.m3u8");
+    assert.ok(vmboxOrdered.streams[0].url.includes("vmbox.space"));
+
+    const shardEnv = {
+      ...TEST_ENV,
+      WATCHLIVO_KV: createMockKv(),
+      ASSETS: {
+        async fetch(req) {
+          const u = new URL(typeof req === "string" ? req : req.url);
+          try {
+            const p = new URL(`../workers/ha-gateway/public${u.pathname}`, import.meta.url);
+            const txt = fs.readFileSync(p, "utf8");
+            return new Response(txt, { status: 200, headers: { "Content-Type": "application/json" } });
+          } catch {
+            return new Response("Not Found", { status: 404 });
+          }
+        },
+      },
+    };
+    const rAtaturk = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?id=fhd-ataturk-1881-1919&tmdbId=1184606&type=movie&title=Atat%C3%BCrk+1881-1919"),
+      shardEnv,
+      jsonResp
+    );
+    assert.equal(rAtaturk.status, 200);
+    const ataturkData = await rAtaturk.json();
+    assert.equal(ataturkData.catalogProvider, "netflix");
+    const ataturkRaw = JSON.stringify(ataturkData);
+    assert.ok(
+      decodeURIComponent(ataturkRaw).includes("s34.static8024.shop/m1/") ||
+      ataturkRaw.includes("aHR0cHM6Ly9zMzQuc3RhdGljODAyNC5zaG9wL20x"),
+      `Unexpected Ataturk payload: ${ataturkRaw.slice(0, 300)}`
+    );
+
+    const rSonMasaEp1 = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=316702&type=tv&season=1&episode=1&title=Son+Masa&originalTitle=Final+Table"),
+      shardEnv,
+      jsonResp
+    );
+    assert.equal(rSonMasaEp1.status, 200);
+    const sonMasaEp1Data = await rSonMasaEp1.json();
+    assert.equal(sonMasaEp1Data.catalogProvider, "netflix");
+    assert.ok(JSON.stringify(sonMasaEp1Data).includes("aHR0cHM6Ly9obHMwOC5jZG52aWRlbzExLnNob3AvaGxzMDgvMTM3OTAvRXAx"));
+    assert.ok(Array.isArray(sonMasaEp1Data.subtitleTracks) && sonMasaEp1Data.subtitleTracks.some((s) => s.lang === "tr"));
+
+    const rSonMasaEp2 = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=316702&type=tv&season=1&episode=2&title=Son+Masa&originalTitle=Final+Table"),
+      shardEnv,
+      jsonResp
+    );
+    assert.equal(rSonMasaEp2.status, 200);
+    const sonMasaEp2Data = await rSonMasaEp2.json();
+    assert.equal(sonMasaEp2Data.catalogProvider, "netflix");
+    assert.ok(JSON.stringify(sonMasaEp2Data).includes("aHR0cHM6Ly9obHMwOC5jZG52aWRlbzExLnNob3AvaGxzMDgvMTM3OTAvRXAy"));
+    assert.equal(inferStreamReferer("https://hls08.cdnvideo11.shop/hls08/13790/Ep1.v715_index.m3u8"), "https://kisskh.co/");
+    assert.equal(inferStreamReferer("https://hls08.streamingcdn5.site/13790/Ep1.v715_index0.ts"), "https://kisskh.co/");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("regression: handleEdgeStreamProxy allows cloaked javascript/font MPEG-TS as video/mp2t while blocking JS/HTML and surfacing upstream status", async () => {
+  const origFetch = globalThis.fetch;
+  try {
+    const cloakedTs = new Uint8Array([0x47, 0x40, 0x11, 0x10, 0x00, 0x42, 0xf0, 0x25]);
+
+    const jsSegUrl = "https://epsilon.3d7f5e49f95bc7.click/seg1.js";
+    const jsSegSig = await signProxySig(jsSegUrl, "", TEST_ENV);
+    globalThis.fetch = async () =>
+      new Response(cloakedTs, { status: 200, headers: { "Content-Type": "application/javascript" } });
+    const reqJsSeg = new URL(
+      `https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(jsSegUrl)}&sig=${jsSegSig}&ext=.js`
+    );
+    const rJsSeg = await handleEdgeStreamProxy(new Request(reqJsSeg), reqJsSeg, TEST_ENV);
+    assert.equal(rJsSeg.status, 200);
+    assert.equal(rJsSeg.headers.get("Content-Type"), "video/mp2t");
+    assert.deepEqual(new Uint8Array(await rJsSeg.arrayBuffer()), cloakedTs);
+
+    const fontSegUrl = "https://redirector.centralodsseyproud.click/seg2.ttf";
+    const fontSegSig = await signProxySig(fontSegUrl, "", TEST_ENV);
+    globalThis.fetch = async () =>
+      new Response(cloakedTs, { status: 200, headers: { "Content-Type": "font/ttf" } });
+    const reqFontSeg = new URL(
+      `https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(fontSegUrl)}&sig=${fontSegSig}&ext=.ttf`
+    );
+    const rFontSeg = await handleEdgeStreamProxy(new Request(reqFontSeg), reqFontSeg, TEST_ENV);
+    assert.equal(rFontSeg.status, 200);
+    assert.equal(rFontSeg.headers.get("Content-Type"), "video/mp2t");
+
+    const realJsUrl = "https://cdn.example.com/payload.js";
+    const realJsSig = await signProxySig(realJsUrl, "", TEST_ENV);
+    globalThis.fetch = async () =>
+      new Response("globalThis.x = 1; console.log(1);", { status: 200, headers: { "Content-Type": "application/javascript" } });
+    const reqRealJs = new URL(
+      `https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(realJsUrl)}&sig=${realJsSig}`
+    );
+    const rRealJs = await handleEdgeStreamProxy(new Request(reqRealJs), reqRealJs, TEST_ENV);
+    assert.equal(rRealJs.status, 502);
+    assert.equal(await rRealJs.text(), "Disallowed upstream content type");
+
+    const errHtmlUrl = "https://cdn.example.com/blocked.ts";
+    const errHtmlSig = await signProxySig(errHtmlUrl, "", TEST_ENV);
+    globalThis.fetch = async () =>
+      new Response("<html>403 Forbidden</html>", { status: 403, headers: { "Content-Type": "text/html" } });
+    const reqErrHtml = new URL(
+      `https://watchlivo.online/api/rave/stream-proxy?url=${encodeURIComponent(errHtmlUrl)}&sig=${errHtmlSig}`
+    );
+    const rErrHtml = await handleEdgeStreamProxy(new Request(reqErrHtml), reqErrHtml, TEST_ENV);
+    assert.equal(rErrHtml.status, 502);
+    assert.equal(await rErrHtml.text(), "Upstream 403");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("edge_extractors: webteizle movie, dizibox series & dead cdnimages shard fallback", async () => {
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const u = typeof input === "string" ? input : input.url;
+    if (u === "https://webteizle.info/ajax/arama.asp") {
+      return new Response(JSON.stringify({
+        status: "success",
+        results: { filmler: { results: [{ title: "Atatürk 1881 - 1919 Part 1 (2024)", description: "", url: "/hakkinda/ataturk-1881-1919" }] } },
+      }), { status: 200 });
+    }
+    if (u === "https://webteizle.info/hakkinda/ataturk-1881-1919") {
+      return new Response('<a href="/izle/dublaj/ataturk-1881-1919">İzle</a>', { status: 200 });
+    }
+    if (u === "https://webteizle.info/izle/dublaj/ataturk-1881-1919") {
+      return new Response('<div id="dilsec" data-id="16036"><a data-dil="0"></a></div>', { status: 200 });
+    }
+    if (u === "https://webteizle.info/ajax/dataAlternatif3.asp") {
+      return new Response(JSON.stringify({ status: "success", data: [{ id: 524129, baslik: "VidMoly", kalitesi: 1 }] }), { status: 200 });
+    }
+    if (u === "https://webteizle.info/ajax/dataEmbed.asp") {
+      return new Response("<script>vidmoly('xmtnmjjw6wa5','rv1');</script>", { status: 200 });
+    }
+    if (u.startsWith("https://vidmoly.biz/embed-xmtnmjjw6wa5.html")) {
+      return new Response("sources:[{file:'https://prx-1350-ant-d.vmget.online/hls2/02/xmtnmjjw6wa5/master.m3u8'}]", { status: 200 });
+    }
+    if (u === "https://www.dizibox.live/final-table-1-sezon-1-bolum-izle/") {
+      return new Response(
+        '<title>Final Table 1.Sezon 1.Bölüm - DiziBOX</title><iframe src="https://www.dizibox.live/player/king/king.php?v=abc123"></iframe>',
+        { status: 200 }
+      );
+    }
+    if (u.startsWith("https://www.dizibox.live/player/king/king.php")) {
+      return new Response('<iframe src="https://dbx.molystream.org/embed/24552-6adefc37f9a7672ac5127492"></iframe>', { status: 200 });
+    }
+    return new Response("Not Found", { status: 404 });
+  };
+  try {
+    const jsonResp = (obj, st = 200) => new Response(JSON.stringify(obj), { status: st, headers: { "content-type": "application/json" } });
+    // Vault has only dead cdnimages /hls/ shard -> must skip dead shard and resolve via Dizibox live extractor
+    const staleKv = new Map([
+      ["tmdb:tv:316702:s1e1", JSON.stringify({
+        streams: [["https://srv8.cdnimages3739.cyou/hls/finaltable-s01e01-webdl.mp4/txt/master.txt?s=expired", "hls_hfnl_multi"]],
+        subs: [],
+      })],
+    ]);
+    const env = {
+      PROXY_SECRET: "test-secret-key",
+      WATCHLIVO_KV: { async get(k) { return staleKv.get(k) || null; } },
+      ASSETS: { async fetch() { return new Response("Not Found", { status: 404 }); } },
+    };
+
+    const resTv = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=316702&type=tv&season=1&episode=1&title=Son+Masa&originalTitle=Final+Table"),
+      env,
+      jsonResp
+    );
+    assert.equal(resTv.status, 200);
+    const tvJson = await resTv.json();
+    assert.equal(tvJson.servers.length >= 1, true);
+    assert.ok(tvJson.url.includes("bW9seXN0cmVhb") || decodeURIComponent(tvJson.url).includes("stream?"));
+
+    const resMov = await handleEdgeResolveCatalog(
+      new URL("https://watchlivo.online/api/rave/resolve-catalog?tmdbId=1184606&type=movie&title=Atat%C3%BCrk+1881-1919&year=2024"),
+      env,
+      jsonResp
+    );
+    assert.equal(resMov.status, 200);
+    const movJson = await resMov.json();
+    assert.equal(movJson.streamType, "hls");
+    assert.ok(movJson.url.startsWith("/api/rave/stream?"));
+    assert.equal(inferStreamReferer("https://prx-1316-ant.vmget.online/hls2/a/master.m3u8"), "https://vidmoly.biz/");
   } finally {
     globalThis.fetch = origFetch;
   }

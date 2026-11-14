@@ -18,7 +18,14 @@ const BYPASS_WORKER_HOSTS = [
   "vmbox.",
   "vmnow.",
   "vmpx.",
-  "hdfilmcehennemi.mobi",
+  "vmget.",
+  "webteizle.",
+  "dizibox.",
+  "sezonlukdizi.",
+  "hdfilmcehennemi.",
+  "fullhdfilmizlesene.",
+  "rapidrame.",
+  "rapidvid.",
   "ag2m5.cfd",
   "uk-traffic-",
   "fastplay.",
@@ -405,8 +412,8 @@ async function safeFetchSecondary(
   }
   const ua = request.headers.get("user-agent") || "";
   const isBotUa = BOT_UA_RE.test(ua);
-  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
-  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
+  const rootCacheKey = isIdempotent && safePath === "/" && !isBotUa ? new Request("https://edge-cache-v216.watchlivo.internal/__root_shell__", { method: "GET" }) : null;
+  const staticCacheKey = isIdempotent && isStaticCacheablePath(safePath) ? new Request(`https://edge-cache-v216.watchlivo.internal${safePath}${url.search}`, { method: "GET" }) : null;
 
   let sawExplicitSuspension = false;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -546,7 +553,7 @@ export default {
       const edgeCache = getEdgeCache();
       if (edgeCache && (request.method === "GET" || request.method === "HEAD") && isStaticCacheablePath(safePath)) {
         try {
-          const staticKey = new Request(`https://edge-cache.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
+          const staticKey = new Request(`https://edge-cache-v216.watchlivo.internal${safePath}${url.search}`, { method: "GET" });
           const cachedStatic = await edgeCache.match(staticKey);
           if (cachedStatic) {
             const h = new Headers(cachedStatic.headers);

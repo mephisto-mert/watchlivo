@@ -1,3 +1,12 @@
+import {
+  isBlockedAdHost,
+  isAdSegmentOrPlaylistUrl,
+  isDirectEmbedPageUrl,
+  filterM3u8AdDiscontinuities,
+  resolveEmbedHtmlToHls,
+  resolveTurkishCatalogStream,
+} from "./edge_extractors.js";
+
 const UA_CHROME = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
@@ -38,8 +47,8 @@ export function inferStreamReferer(u) {
   }
   if (u.includes("uk-traffic-") || u.includes("cdn77s.com")) return "https://x.ag2m5.cfd/";
   if (u.includes("molystream") || u.includes("/sheila_")) return "https://dbx.molystream.org/";
-  if ((u.includes("cdnimages") && u.includes("/hls/")) || u.includes("playmix.uno") || u.includes("hdfilmcehennemi")) return "https://www.hdfilmcehennemi.nl/";
-  if (u.includes("fullhdfilmizlesene")) return "https://www.fullhdfilmizlesene.tv/";
+  if ((u.includes("cdnimages") && u.includes("/hls/")) || u.includes("playmix.uno") || u.includes("hdfilmcehennemi") || u.includes("rapidrame.")) return "https://www.hdfilmcehennemi.nl/";
+  if (u.includes("fullhdfilmizlesene")) return "https://www.fullhdfilmizlesene.now/";
   if (u.includes("dizibox")) return "https://www.dizibox.so/";
   if (u.includes("cdnimg") || u.includes("rapidvid") || /https:\/\/s\d+\.[^/]+\.shop\//.test(u)) return "https://rapidvid.org/";
   if (u.includes("makesomthingup") || u.includes("centralodsseyproud") || u.includes("/r6/")) return "https://one.makesomthingup.click/";
@@ -57,7 +66,8 @@ export function inferStreamReferer(u) {
   if (u.includes("trt.com.tr") || u.includes("trtizle.") || u.includes("trthaber")) return "https://www.trtizle.com/";
   if (u.includes("ensonhaber.com")) return "https://www.ensonhaber.com/";
   if (u.includes("powerapp.com.tr")) return "https://www.powerapp.com.tr/";
-  if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => u.includes(d))) return "https://vidmoly.biz/";
+  if (u.includes("cdnvideo11.") || u.includes("streamingcdn5.") || u.includes("kisskh.")) return "https://kisskh.co/";
+  if (["vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget."].some((d) => u.includes(d))) return "https://vidmoly.biz/";
   return "";
 }
 
@@ -72,7 +82,7 @@ export function isPublicHttpUrl(rawUrl) {
   if (u.username || u.password) return false;
   let host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   host = host.replace(/\.+$/, "");
-  if (!host) return false;
+  if (!host || isBlockedAdHost(host)) return false;
   if (
     host === "localhost" ||
     host === "localhost.localdomain" ||
@@ -179,8 +189,10 @@ async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeou
 
 const OFFLOAD_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
 const OFFLOAD_BYPASS_HOSTS = [
-  "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.",
-  "hdfilmcehennemi.mobi", "ag2m5.cfd", "uk-traffic-", "fastplay.",
+  "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget.",
+  "webteizle.", "dizibox.", "sezonlukdizi.",
+  "hdfilmcehennemi.", "fullhdfilmizlesene.", "rapidrame.", "rapidvid.",
+  "ag2m5.cfd", "uk-traffic-", "fastplay.",
   "radyotvonline.com", "radyotvonline.net", "nexa.mov", "dplayer", "playmix.",
   "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
   "dragonballzfans", "molystream.org", "irtau1.", "lightspeed.st",
@@ -230,18 +242,9 @@ async function lookupVaultStream(keys, env, expectedType = "") {
   return null;
 }
 
-function buildEmbedServers(tmdbId, mtype, s, e) {
-  if (!tmdbId) return [];
-  const tid = encodeURIComponent(tmdbId);
-  const isTv = mtype === "tv";
-  return [
-    {
-      id: "srv-vidlink",
-      label: "⚡ Sunucu 1 · Ultra HD (TR Altyazı)",
-      url: isTv ? `https://vidlink.pro/tv/${tid}/${s}/${e}?autoplay=true` : `https://vidlink.pro/movie/${tid}?autoplay=true`,
-      streamType: "embed",
-    },
-  ];
+function buildEmbedServers() {
+  // Foreign popup-ad embed fallbacks (vidlink.pro, vidsrc, 2embed) are permanently disabled to prevent betting/popunder redirects.
+  return [];
 }
 
 export async function handleEdgeResolveCatalog(url, env, jsonResp) {
@@ -250,7 +253,7 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const mtype = (url.searchParams.get("type") || url.searchParams.get("mediaType") || "movie").trim().toLowerCase() === "tv" ? "tv" : "movie";
   const s = Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1;
   const e = Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1;
-  const offUrl = (url.searchParams.get("officialUrl") || url.searchParams.get("url") || "").trim();
+  const offUrl = (url.searchParams.get("officialUrl") || url.searchParams.get("sourceUrl") || url.searchParams.get("url") || "").trim();
   const reqTitle = (url.searchParams.get("title") || url.searchParams.get("displayTitle") || "").trim();
   const reqOrigTitle = (url.searchParams.get("originalTitle") || "").trim();
   const reqPoster = (url.searchParams.get("poster") || "").trim();
@@ -297,8 +300,8 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   };
   try {
     const tidNum = Number(tmdbId || 0);
-    if (!acId && tidNum && env?.WATCHLIVO_KV) {
-      const cachedAc = await env.WATCHLIVO_KV.get(`ac_tmdb:${tidNum}`).catch(() => null);
+    if (!acId && tidNum && env?.WATCHLIVO_KV && !bypassCache) {
+      const cachedAc = await env.WATCHLIVO_KV.get(`ac_tmdb_v2:${tidNum}`).catch(() => null);
       if (cachedAc) acId = String(cachedAc).trim();
     }
     if (!acId) {
@@ -319,12 +322,16 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         if (!sr.ok) continue;
         const sd = await sr.json().catch(() => null);
         const results = Array.isArray(sd?.results) ? sd.results : [];
+        const isAcId = String(id || "").startsWith("ac-");
         const exactTmdb = tidNum ? results.find((x) => Number(x?.tmdb_id) === tidNum && (x?.title_type === "anime" || x?.is_series)) : null;
-        const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (mtype !== "tv" || x?.is_series) && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum)) || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
+        const picked = exactTmdb || ((!isAcId && tidNum > 0) ? null : (
+          results.find((x) => x?.title_type === "anime" && (mtype !== "tv" || x?.is_series) && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum)) ||
+          results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum))
+        ));
         if (picked?.id) {
           acId = String(picked.id);
           if (tidNum && env?.WATCHLIVO_KV) {
-            await env.WATCHLIVO_KV.put(`ac_tmdb:${tidNum}`, acId, { expirationTtl: 86400 }).catch(() => {});
+            await env.WATCHLIVO_KV.put(`ac_tmdb_v2:${tidNum}`, acId, { expirationTtl: 86400 }).catch(() => {});
           }
           break;
         }
@@ -406,12 +413,24 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
 
   const hitRaw = await lookupVaultStream(lookupKeys, env, mtype);
   const hitStreams = Array.isArray(hitRaw?.streams) ? hitRaw.streams : [];
-  const hasOnlyDeadOrYt = hitRaw && hitStreams.every((pair) => {
+  const isDeadShardPair = (pair) => {
     const u = String(Array.isArray(pair) ? pair[0] : pair?.url || "").toLowerCase();
     const k = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
-    return k === "yt" || u.includes("youtube.com/") || u.includes("youtu.be/") || u.includes("pilavyer") || u.includes("dragonballzfans") || u.includes("dplayer");
-  });
-  const hit = hasOnlyDeadOrYt ? null : hitRaw;
+    return (
+      k === "yt" ||
+      u.includes("youtube.com/") ||
+      u.includes("youtu.be/") ||
+      u.includes("pilavyer") ||
+      u.includes("dragonballzfans") ||
+      u.includes("dplayer") ||
+      u.includes("playmix.uno") ||
+      (u.includes("cdnimages") && (u.includes("/hls/") || u.includes("/master.txt"))) ||
+      u.includes("hdfilmcehennemi.mobi") ||
+      u.includes("lightspeed.st")
+    );
+  };
+  const aliveStreams = hitStreams.filter((pair) => !isDeadShardPair(pair));
+  const hit = hitRaw && aliveStreams.length ? { ...hitRaw, streams: aliveStreams } : null;
   if (!hit) {
     const liveAc = (id.startsWith("ac-") || reqTitle || reqOrigTitle)
       ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId, bypassCache)
@@ -440,30 +459,72 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         subtitleTracks: [],
       });
     }
-    const embedServers = buildEmbedServers(tmdbId, mtype, s, e);
-    const primaryEmbed = embedServers[0]?.url || "";
-    return jsonResp({
-      id: tmdbId || id,
-      provider: "embed",
-      catalogProvider: "cinema",
-      tmdbId,
-      mediaType: mtype,
-      season: mtype === "tv" ? s : 0,
-      episode: mtype === "tv" ? e : 0,
+    const trLive = await resolveTurkishCatalogStream({
       title: reqTitle,
-      seriesTitle: reqTitle,
-      originalTitle: reqOrigTitle || reqTitle,
+      displayTitle: url.searchParams.get("displayTitle") || reqTitle,
+      originalTitle: reqOrigTitle,
+      sourceUrl: offUrl,
       year: reqYear,
-      poster: reqPoster,
-      thumbnail: reqPoster,
-      backdrop: reqPoster,
-      streamType: "embed",
-      url: primaryEmbed,
-      embedUrl: primaryEmbed,
-      altUrls: embedServers.slice(1).map((x) => x.url),
-      servers: embedServers,
-      subtitleTracks: [],
+      mtype,
+      s,
+      e,
+      fetchPublicFn: fetchPublicWithRedirects,
     });
+    if (trLive?.url && isPublicHttpUrl(trLive.url)) {
+      const candList = Array.isArray(trLive.streams) && trLive.streams.length
+        ? trLive.streams
+        : [{ url: trLive.url, referer: trLive.referer, label: "" }];
+      const trUrls = [];
+      const trServers = [];
+      for (const cItem of candList) {
+        const rawC = String(cItem?.url || "").trim();
+        if (!rawC || !isPublicHttpUrl(rawC)) continue;
+        const cIsMp4 = /\.mp4(\?|$)/i.test(rawC);
+        const cProxied = cIsMp4
+          ? await buildSignedProxyPath(rawC, cItem.referer || inferStreamReferer(rawC), ".mp4", env)
+          : `/api/rave/stream?tmdbId=${encodeURIComponent(tmdbId || id)}&mtype=${encodeURIComponent(mtype)}&sid=${b64UrlEncode(rawC)}&ext=.m3u8`;
+        if (!trUrls.includes(cProxied)) {
+          trUrls.push(cProxied);
+          trServers.push({
+            id: `srv-${trServers.length + 1}`,
+            label: cItem.label || `📡 Sunucu ${trServers.length + 1} · Edge Direct (${cIsMp4 ? "MP4 HD" : "1080p HLS"})`,
+            url: cProxied,
+            streamType: cIsMp4 ? "mp4" : "hls",
+          });
+        }
+      }
+      if (trUrls.length) {
+        const trSubs = (trLive.subs || []).filter((t) => t?.url).map((t, idx) => ({
+          id: `sub-${idx}`,
+          lang: t.lang || "tr",
+          label: t.lang === "tr" ? "🇹🇷 Türkçe" : (t.lang === "en" ? "🇬🇧 İngilizce" : String(t.lang || "Altyazı").toUpperCase()),
+          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
+        }));
+        return jsonResp({
+          id: tmdbId || id,
+          provider: "netflix",
+          catalogProvider: "cinema",
+          tmdbId,
+          mediaType: mtype,
+          season: mtype === "tv" ? s : 0,
+          episode: mtype === "tv" ? e : 0,
+          title: reqTitle,
+          seriesTitle: reqTitle,
+          originalTitle: reqOrigTitle || reqTitle,
+          year: reqYear,
+          poster: reqPoster,
+          thumbnail: reqPoster,
+          backdrop: reqPoster,
+          streamType: trServers[0].streamType,
+          url: trUrls[0],
+          embedUrl: "",
+          altUrls: trUrls.slice(1),
+          servers: trServers,
+          subtitleTracks: trSubs,
+        });
+      }
+    }
+    return jsonResp({ ok: false, error: "Bu içerik için doğrudan akış kaynağı şu an bulunamadı." }, 404);
   }
 
   const urls = [];
@@ -474,7 +535,8 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     const kind = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
     if (!rawU) continue;
     const isYt = kind === "yt" || /youtube\.com\/|youtu\.be\//i.test(rawU);
-    const isEmbed = kind.includes("embed") || rawU.includes("/embed/");
+    const isDirectEmbedPage = isDirectEmbedPageUrl(rawU);
+    const isEmbed = !isDirectEmbedPage && (kind.includes("embed") || rawU.includes("/embed/"));
     if (isYt) {
       const mYt = rawU.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
       const vid = mYt ? mYt[1] : "";
@@ -484,6 +546,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       continue;
     }
     if (isEmbed) {
+      if (!isPublicHttpUrl(rawU)) continue;
       urls.push({ url: rawU, streamType: "embed", label: `🌐 Sunucu ${i + 1} · Embed HD` });
       servers.push({ id: `srv-${i + 1}`, label: `🌐 Sunucu ${i + 1} · Embed HD`, url: rawU, streamType: "embed" });
       continue;
@@ -503,14 +566,10 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
   }));
 
-  const fallbackEmbeds = buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e);
-  for (const es of fallbackEmbeds) {
-    if (es?.url && !urls.some((x) => x.url === es.url)) {
-      urls.push({ url: es.url, streamType: es.streamType || "embed", label: es.label });
-      servers.push(es);
-    }
+  if (!urls.length) {
+    return jsonResp({ ok: false, error: "Bu içerik için güvenli doğrudan akış kaynağı bulunamadı." }, 404);
   }
-  const primary = urls[0] || { url: "", streamType: "embed" };
+  const primary = urls[0];
   const resolvedTitle = reqTitle || hit.title || "";
   const backupAltUrls = urls.slice(1).filter((x) => x.url && x.streamType !== "embed").map((x) => x.url);
   return jsonResp({
@@ -547,7 +606,15 @@ export async function handleEdgeHlsManifest(url, env) {
   if (!isPublicHttpUrl(target)) {
     return new Response("Blocked target URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
-  const ref = inferStreamReferer(target);
+  let ref = inferStreamReferer(target);
+  if (isDirectEmbedPageUrl(target)) {
+    const unwrapped = await resolveEmbedHtmlToHls(target, fetchPublicWithRedirects).catch(() => null);
+    if (!unwrapped?.url || !isPublicHttpUrl(unwrapped.url)) {
+      return new Response("Upstream embed stream unavailable", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
+    target = unwrapped.url;
+    ref = unwrapped.referer || inferStreamReferer(target) || ref;
+  }
   const hdrs = { "User-Agent": UA_CHROME, Accept: "*/*" };
   if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
 
@@ -588,8 +655,9 @@ export async function handleEdgeHlsManifest(url, env) {
     const loc = await buildSignedProxyPath(finalBase, ref, ".mp4", env);
     return new Response(null, { status: 302, headers: { Location: loc, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
-  const isMaster = text.includes("#EXT-X-STREAM-INF");
-  const lines = text.split(/\r?\n/);
+  const cleanText = filterM3u8AdDiscontinuities(text);
+  const isMaster = cleanText.includes("#EXT-X-STREAM-INF");
+  const lines = cleanText.split(/\r?\n/);
   const out = await Promise.all(lines.map(async (line) => {
     const trimmed = line.trim();
     if (!trimmed) return line;
@@ -602,6 +670,7 @@ export async function handleEdgeHlsManifest(url, env) {
     let abs = "";
     try { abs = new URL(trimmed, finalBase).toString(); } catch { return "# blocked-invalid-uri"; }
     if (!isPublicHttpUrl(abs)) return "# blocked-non-public-uri";
+    if (isAdSegmentOrPlaylistUrl(abs)) return "# filtered-ad-uri";
     if (isMaster || /\.m3u8(\?|$)/i.test(abs)) {
       return `/api/rave/stream?sid=${b64UrlEncode(abs)}&proxy_segs=1&ext=.m3u8`;
     }
@@ -645,6 +714,39 @@ function resolveFallbackContentType(extHint, target) {
   return "video/mp2t";
 }
 
+function detectCloakedMediaMime(buf, extHint = "") {
+  if (!buf || buf.length < 2) return "";
+  const sampleLen = Math.min(buf.length, 32);
+  let hasBin = false;
+  for (let i = 0; i < sampleLen; i++) {
+    const b = buf[i];
+    if (b < 0x09 || (b > 0x0d && b < 0x20) || b >= 0x7f) {
+      hasBin = true;
+      break;
+    }
+  }
+  if (buf[0] === 0x47 && ((buf.length >= 189 && buf[188] === 0x47) || hasBin)) return "video/mp2t";
+  if (buf.length >= 3 && buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return "video/mp2t";
+  if (buf[0] === 0xff && (buf[1] & 0xf0) === 0xf0 && hasBin) return "audio/aac";
+  if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "video/webm";
+  if (buf.length >= 8) {
+    const box = String.fromCharCode(buf[4], buf[5], buf[6], buf[7]);
+    if (box === "ftyp" || box === "moof" || box === "styp" || box === "sidx" || box === "mdat") {
+      return String(extHint || "").toLowerCase() === ".m4s" ? "video/iso.segment" : "video/mp4";
+    }
+  }
+  return "";
+}
+
+async function readNonEmptyHeadChunk(reader) {
+  for (let i = 0; i < 4; i++) {
+    const { done, value } = await reader.read();
+    if (value && value.length > 0) return value;
+    if (done) return null;
+  }
+  return null;
+}
+
 export async function handleEdgeStreamProxy(request, url, env) {
   if (request?.method === "OPTIONS") {
     return new Response(null, {
@@ -682,31 +784,90 @@ export async function handleEdgeStreamProxy(request, url, env) {
   try {
     const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000);
     const upCt = (up.headers.get("Content-Type") || "").toLowerCase();
-    if (
-      upCt.includes("text/html") ||
-      upCt.includes("application/xhtml+xml") ||
-      upCt.includes("image/svg+xml") ||
-      upCt.includes("javascript") ||
-      upCt.includes("ecmascript")
-    ) {
+    const extHint = (url.searchParams.get("ext") || "").toLowerCase();
+    if (!up.ok && (upCt.includes("html") || upCt.includes("javascript") || upCt.includes("ecmascript") || upCt.includes("xml") || upCt.includes("text/plain"))) {
+      up.body?.cancel?.();
+      return new Response(`Upstream ${up.status}`, { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
+    if (upCt.includes("application/xhtml+xml") || upCt.includes("image/svg+xml")) {
       up.body?.cancel?.();
       return new Response("Disallowed upstream content type", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
+    let outBody = up.body;
+    let cloakedMime = "";
+    const needsCloakSniff =
+      upCt.includes("text/html") ||
+      upCt.includes("javascript") ||
+      upCt.includes("ecmascript") ||
+      upCt.includes("text/plain") ||
+      upCt.includes("font/");
+    if (needsCloakSniff) {
+      if (request?.method === "HEAD") {
+        const isAllowedHeadExt = extHint === ".ts" || extHint === ".m4s" || extHint === ".mp4" || extHint === ".aac" || extHint === ".key";
+        if (!isAllowedHeadExt) {
+          up.body?.cancel?.();
+          return new Response("Disallowed upstream content type", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+        }
+        cloakedMime = resolveFallbackContentType(extHint, target);
+      } else if (up.body) {
+        const reader = up.body.getReader();
+        const headChunk = await readNonEmptyHeadChunk(reader);
+        cloakedMime = detectCloakedMediaMime(headChunk, extHint);
+        const headAscii = headChunk
+          ? new TextDecoder("utf-8", { fatal: false }).decode(headChunk.subarray(0, Math.min(headChunk.length, 64))).replace(/^\ufeff/, "").trimStart()
+          : "";
+        const isValidTextMedia = upCt.includes("text/plain") && /^(?:#extm3u|webvtt|\d+\r?\n\d{2}:\d{2})/i.test(headAscii);
+        if (!cloakedMime && !isValidTextMedia) {
+          try { await reader.cancel(); } catch {}
+          return new Response("Disallowed upstream content type", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+        }
+        if (isValidTextMedia && !cloakedMime) {
+          cloakedMime = resolveFallbackContentType(extHint, target);
+        }
+        outBody = new ReadableStream({
+          start(controller) {
+            if (headChunk) controller.enqueue(headChunk);
+          },
+          async pull(controller) {
+            try {
+              const { done, value } = await reader.read();
+              if (done) controller.close();
+              else controller.enqueue(value);
+            } catch (err) {
+              try { await reader.cancel(); } catch {}
+              controller.error(err);
+            }
+          },
+          cancel(reason) {
+            return reader.cancel(reason);
+          },
+        });
+      }
     }
     const outHdrs = new Headers();
     for (const k of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {
       const v = up.headers.get(k);
       if (v) outHdrs.set(k, v);
     }
-    if (!outHdrs.has("Content-Type") || outHdrs.get("Content-Type").toLowerCase().includes("octet-stream")) {
-      outHdrs.set("Content-Type", resolveFallbackContentType(url.searchParams.get("ext"), target));
+    const rawOutCt = (outHdrs.get("Content-Type") || "").toLowerCase();
+    if (cloakedMime) {
+      outHdrs.set("Content-Type", cloakedMime);
+    } else if (
+      !outHdrs.has("Content-Type") ||
+      rawOutCt.includes("octet-stream") ||
+      rawOutCt.includes("font/") ||
+      rawOutCt.includes("javascript") ||
+      rawOutCt.includes("ecmascript")
+    ) {
+      outHdrs.set("Content-Type", resolveFallbackContentType(extHint, target));
     }
     outHdrs.set("Access-Control-Allow-Origin", "*");
-    outHdrs.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    outHdrs.set("Access-Control-Allow-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
     outHdrs.set("Vary", "Range");
     outHdrs.set("X-Content-Type-Options", "nosniff");
     outHdrs.set("Content-Security-Policy", "sandbox");
     outHdrs.set("Cache-Control", up.ok ? "public, max-age=300" : "no-store");
-    return new Response(up.body, { status: up.status, headers: outHdrs });
+    return new Response(outBody, { status: up.status, headers: outHdrs });
   } catch (err) {
     const blocked = String(err?.message || "").includes("Blocked");
     return new Response(blocked ? "Blocked redirect URL" : "Stream proxy upstream timeout", {

@@ -38,6 +38,11 @@ function isPublicHttpUrl(rawUrl) {
   if (u.username || u.password) return false;
   const host = (u.hostname || "").toLowerCase().replace(/\.$/, "");
   if (
+    /(?:^|\.)(?:1xbet|onebahis|melbet|mostbet|pinup|betwinner|casibom|grandpashabet|stake|meritking|jojobet|betway|bets10|mobilbahis|popads|adsterra|propellerads|exoclick|juicyads|hilltopads|trafficjunky|onclickalgo|acscdn|vidlink|vidsrc|2embed|multiembed|autoembed|smashystream|flixer|vidfast|vidora|rivestream|pstream)\b/i.test(host)
+  ) {
+    return false;
+  }
+  if (
     !host ||
     host === "localhost" ||
     host.endsWith(".localhost") ||
@@ -174,6 +179,9 @@ function inferReferer(url, explicitRef) {
   if ((url.includes("cdnimages") && url.includes("/hls/")) || url.includes("playmix.uno") || url.includes("hdfilmcehennemi.mobi")) {
     return "https://hdfilmcehennemi.mobi/";
   }
+  if (url.includes("rapidrame.") || url.includes("hdfilmcehennemi.nl")) {
+    return "https://www.hdfilmcehennemi.nl/";
+  }
   if (
     url.includes("cdnimgs") ||
     (url.includes("cdnimg") && !(url.includes("cdnimages") && url.includes("/hls/"))) ||
@@ -200,7 +208,8 @@ function inferReferer(url, explicitRef) {
   if (url.includes("trt.com.tr") || url.includes("trtizle.") || url.includes("trthaber")) return "https://www.trtizle.com/";
   if (url.includes("ensonhaber.com")) return "https://www.ensonhaber.com/";
   if (url.includes("powerapp.com.tr")) return "https://www.powerapp.com.tr/";
-  if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => url.includes(d))) return "https://vidmoly.biz/";
+  if (url.includes("cdnvideo11.") || url.includes("streamingcdn5.") || url.includes("kisskh.")) return "https://kisskh.co/";
+  if (["vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget."].some((d) => url.includes(d))) return "https://vidmoly.biz/";
   return "";
 }
 
@@ -575,18 +584,49 @@ export default {
     }
 
     const upCt = (upResp.headers.get("Content-Type") || "").toLowerCase();
-    if (upCt.includes("image/svg+xml") || upCt.includes("application/xhtml+xml") || upCt.includes("javascript")) {
+    if (upCt.includes("image/svg+xml") || upCt.includes("application/xhtml+xml")) {
       upResp.body?.cancel?.();
       return jsonResponse({ error: "Desteklenmeyen medya türü." }, 502);
     }
+    const isJsCloakCt = upCt.includes("javascript") || upCt.includes("ecmascript");
+    const isFontCloakCt = upCt.includes("font/");
     let streamBody = upResp.body;
-    if (upCt.includes("text/html") && upResp.body && request.method !== "HEAD") {
+    let cloakedMime = "";
+    const hasBinaryMediaMagic = (buf) => {
+      if (!buf || buf.length < 2) return false;
+      const sampleLen = Math.min(buf.length, 32);
+      let hasBin = false;
+      for (let i = 0; i < sampleLen; i++) {
+        const b = buf[i];
+        if (b < 0x09 || (b > 0x0d && b < 0x20) || b >= 0x7f) {
+          hasBin = true;
+          break;
+        }
+      }
+      if (buf[0] === 0x47 && ((buf.length >= 189 && buf[188] === 0x47) || hasBin)) return "video/mp2t";
+      if (buf.length >= 3 && buf[0] === 0x49 && buf[1] === 0x44 && buf[2] === 0x33) return "video/mp2t";
+      if (buf[0] === 0xff && (buf[1] & 0xf0) === 0xf0 && hasBin) return "audio/aac";
+      if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return "video/webm";
+      if (buf.length >= 8) {
+        const box = String.fromCharCode(buf[4], buf[5], buf[6], buf[7]);
+        if (box === "ftyp" || box === "moof" || box === "styp" || box === "sidx" || box === "mdat") {
+          return extHint === ".m4s" ? "video/iso.segment" : "video/mp4";
+        }
+      }
+      return "";
+    };
+    if ((upCt.includes("text/html") || isJsCloakCt || isFontCloakCt) && upResp.body && request.method !== "HEAD") {
       const reader = upResp.body.getReader();
       const first = await reader.read();
       const chunk = first?.value;
+      cloakedMime = hasBinaryMediaMagic(chunk);
       const headAscii = chunk
         ? new TextDecoder("utf-8", { fatal: false }).decode(chunk.subarray(0, Math.min(chunk.length, 256))).trimStart().toLowerCase()
         : "";
+      if (isJsCloakCt && !cloakedMime) {
+        try { await reader.cancel(); } catch {}
+        return jsonResponse({ error: "Desteklenmeyen medya türü." }, 502);
+      }
       if (!chunk || headAscii.startsWith("<!doctype") || headAscii.startsWith("<html") || headAscii.startsWith("<head") || headAscii.startsWith("<body")) {
         try { await reader.cancel(); } catch {}
         return jsonResponse({ error: "Akış kaynağı medya yerine HTML döndürdü." }, 502);
@@ -609,12 +649,13 @@ export default {
           return reader.cancel(reason);
         },
       });
-    } else if (upCt.includes("text/html") && request.method === "HEAD" && extHint !== ".key" && extHint !== ".ts" && extHint !== ".m4s" && extHint !== ".mp4" && extHint !== ".aac") {
+    } else if ((upCt.includes("text/html") || isJsCloakCt) && request.method === "HEAD" && extHint !== ".key" && extHint !== ".ts" && extHint !== ".m4s" && extHint !== ".mp4" && extHint !== ".aac") {
       upResp.body?.cancel?.();
       return jsonResponse({ error: "Akış kaynağı medya yerine HTML döndürdü." }, 502);
     }
 
-    const finalCt = resolveMediaContentType(targetUrl, extHint, upResp.headers.get("Content-Type") || "");
+    const baseCt = resolveMediaContentType(targetUrl, extHint, upResp.headers.get("Content-Type") || "");
+    const finalCt = (cloakedMime || isJsCloakCt || isFontCloakCt) ? (cloakedMime || (extHint === ".m4s" ? "video/iso.segment" : extHint === ".mp4" ? "video/mp4" : "video/mp2t")) : baseCt;
     const outHeaders = new Headers();
     outHeaders.set("Content-Type", finalCt);
     outHeaders.set("Accept-Ranges", "bytes");

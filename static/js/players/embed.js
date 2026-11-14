@@ -1,20 +1,18 @@
 // Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
 const _TRUSTED_EMBED_DOMAINS = [
   'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
-  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
-  'rutube.ru', 'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
-  'embed.su', 'vidfast.pro', 'vidora.su', 'rivestream.live', 'pstream.org', 'playmix.uno', 'nexa.mov', 'moviesapi.club',
-  'nontongo.win', 'vidbinge.dev', 'superembed.stream', 'uqload.net', 'sendvid.com', 'watchlivo.online',
+  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org',
+  'ok.ru', 'vk.com', 'vkvideo.ru', 'rutube.ru', 'sibnet.ru', 'watchlivo.online',
 ];
-const _TRUSTED_EMBED_PREFIX_RE = /^(?:(?:www|player|embed)\.)?(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid|closeload|filmmakinesi|dizilla|dizipal|sezonlukdizi|turkanime|dplayer\d*)\.(?:[a-z]{2,12}|(?:co|com|net|org|gov|edu)\.[a-z]{2})$/i;
+const _BLOCKED_EMBED_HOST_RE = /(?:^|\.)(?:1xbet|onebahis|melbet|mostbet|pinup|betwinner|casibom|grandpashabet|stake|meritking|jojobet|betway|bets10|mobilbahis|bahis|casino|popads|adsterra|propellerads|exoclick|juicyads|hilltopads|trafficjunky|onclickalgo|acscdn|vidlink|vidsrc|2embed|multiembed|autoembed|smashystream|flixer|vidfast|vidora|rivestream|pstream|cinejoy|vidbinge|superembed|streamtape|uqload|sendvid|dood|filemoon)\b|(?:^|\.)embed\.su$|(?:^|\.)vidy\.st$|(?:^|\.)nexa\.mov$|(?:^|\.)moviesapi\.club$|(?:^|\.)nontongo\.win$|(?:^|\.)voe\.sx$/i;
 
 export function isTrustedEmbedUrl(rawUrl) {
   try {
     const u = new URL(String(rawUrl || '').trim());
     if (u.protocol !== 'https:') return false;
     const h = u.hostname.toLowerCase().replace(/\.$/, '');
-    if (_TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d))) return true;
-    return _TRUSTED_EMBED_PREFIX_RE.test(h);
+    if (!h || _BLOCKED_EMBED_HOST_RE.test(h)) return false;
+    return _TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
   } catch (_) {
     return false;
   }
@@ -79,10 +77,7 @@ export class EmbedAdapter {
       const fallbackDrive = media.embedUrl || media.url || '';
       return _isTrustedEmbedUrl(fallbackDrive) ? fallbackDrive : 'about:blank';
     }
-    let u = media.embedUrl || media.url || '';
-    if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {
-      u += `${u.includes('?') ? '&' : '?'}startAt=${Math.floor(startAt)}`;
-    }
+    const u = media.embedUrl || media.url || '';
     return _isTrustedEmbedUrl(u) ? u : 'about:blank';
   }
 
@@ -127,7 +122,8 @@ export class EmbedAdapter {
     f.referrerPolicy = 'origin';
     f.style.background = '#050a14';
     f.style.colorScheme = 'dark';
-    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups');
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
+    f.setAttribute('referrerpolicy', 'no-referrer');
     f.src = initialEmbedSrc;
     this.frame = f;
     window.addEventListener('message', this._onMsg);

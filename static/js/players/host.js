@@ -2,7 +2,7 @@
 import { YouTubeAdapter } from './youtube.js?v=20261114_v215';
 import { Html5Adapter } from './html5.js?v=20261114_v215';
 import { VimeoAdapter } from './vimeo.js?v=20261114_v215';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v215';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v216';
 import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261114_v215';
 import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261114_v215';
 

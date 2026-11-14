@@ -3783,6 +3783,21 @@ console.log('V209_AUTONOMOUS_EDGE_OK');
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
         self.assertIn("V209_AUTONOMOUS_EDGE_OK", proc.stdout)
 
+    def test_v216_zero_popup_betting_and_turkish_extractors(self):
+        from pathlib import Path
+        repo = Path(__file__).resolve().parent.parent
+        embed_js = (repo / "static" / "js" / "players" / "embed.js").read_text(encoding="utf-8")
+        self.assertNotIn("allow-popups", embed_js)
+        self.assertIn("1xbet", embed_js)
+        self.assertNotIn("'vidlink.pro'", embed_js)
+
+        edge_streams = (repo / "workers" / "ha-gateway" / "edge_streams.js").read_text(encoding="utf-8")
+        self.assertNotIn("https://vidlink.pro/", edge_streams)
+        self.assertIn("resolveTurkishCatalogStream", edge_streams)
+
+        pub_embed = (repo / "workers" / "ha-gateway" / "public" / "static" / "js" / "players" / "embed.js").read_text(encoding="utf-8")
+        self.assertEqual(embed_js, pub_embed)
+
 
 if __name__ == '__main__':
     unittest.main()
