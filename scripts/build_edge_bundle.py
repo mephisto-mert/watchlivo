@@ -1,3 +1,4 @@
+import ast
 import io
 import json
 import shutil
@@ -32,7 +33,30 @@ def fetch_local_json(path: str, fallback):
     return fallback
 
 
+def _load_domestic_tr_originals() -> dict:
+    try:
+        src = (REPO / "server.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and tgt.id == "_DOMESTIC_TR_ORIGINALS":
+                        val = ast.literal_eval(node.value)
+                        return val if isinstance(val, dict) else {}
+    except Exception as exc:
+        print(f"[EdgeBundle] _DOMESTIC_TR_ORIGINALS parse skipped: {exc}")
+    return {}
+
+
 def main() -> None:
+    prev_boot = {}
+    prev_boot_path = EDGE_DIR / "bootstrap.json"
+    if prev_boot_path.exists():
+        try:
+            prev_boot = json.loads(prev_boot_path.read_text(encoding="utf-8"))
+        except Exception:
+            prev_boot = {}
+
     if PUBLIC_DIR.exists():
         shutil.rmtree(PUBLIC_DIR)
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,6 +122,42 @@ def main() -> None:
             tid = str(item.get("tmdbId") or "").strip()
             if tid:
                 tmdb_to_items.setdefault(tid, []).append(item)
+
+    # 2b. Merge curated Turkish originals (_DOMESTIC_TR_ORIGINALS) so Yerli Dizi & Film + domestic tabs never starve on Edge
+    for dom_prov, dom_items in _load_domestic_tr_originals().items():
+        if not isinstance(dom_items, list):
+            continue
+        for raw_d in dom_items:
+            if not isinstance(raw_d, dict):
+                continue
+            iid = str(raw_d.get("id") or raw_d.get("tmdbId") or "").strip()
+            tid = str(raw_d.get("tmdbId") or "").strip()
+            if not iid:
+                continue
+            if iid in seen_ids or (tid and tid in tmdb_to_items):
+                existing = id_to_item.get(iid) or (tmdb_to_items.get(tid) or [None])[0]
+                if isinstance(existing, dict):
+                    cats_ex = list(existing.get("categories") or [])
+                    if "tr" not in cats_ex:
+                        cats_ex.append("tr")
+                    existing["categories"] = cats_ex
+                    existing.setdefault("origLang", "tr")
+                    existing.setdefault("provider", dom_prov)
+                continue
+            cats_d = list(raw_d.get("categories") or [])
+            if "tr" not in cats_d:
+                cats_d.append("tr")
+            tr_item = {
+                **raw_d,
+                "origLang": str(raw_d.get("origLang") or "tr"),
+                "provider": str(raw_d.get("provider") or dom_prov),
+                "categories": cats_d,
+            }
+            seen_ids.add(iid)
+            all_items.append(tr_item)
+            id_to_item[iid] = tr_item
+            if tid:
+                tmdb_to_items.setdefault(tid, []).append(tr_item)
 
     # 3. Build 64 deterministic stream shards indexed by id:<id>, tmdb:<tmdbId>, url:<officialUrl>, and raw keys
     buckets: list[dict] = [{} for _ in range(NUM_BUCKETS)]
@@ -212,13 +272,13 @@ def main() -> None:
         shard_path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     # 4. Export curated Live TV rooms, new releases, and latest episodes
-    rooms_payload = fetch_local_json("/api/rooms", {"rooms": []})
+    rooms_payload = fetch_local_json("/api/rooms", {"rooms": prev_boot.get("curatedRooms") or []})
     curated_rooms = [r for r in rooms_payload.get("rooms", []) if isinstance(r, dict) and r.get("curated")]
-    new_rel = fetch_local_json("/api/rave/new-releases", {"ok": True, "items": all_items[:24]})
-    latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": []})
+    new_rel = fetch_local_json("/api/rave/new-releases", {"ok": True, "items": prev_boot.get("newReleases") or all_items[:24]})
+    latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": prev_boot.get("latestEpisodes") or []})
 
     bootstrap = {
-        "version": "20261112_v208",
+        "version": "20261114_v215",
         "catalog": all_items,
         "curatedRooms": curated_rooms,
         "newReleases": new_rel.get("items", all_items[:24]),

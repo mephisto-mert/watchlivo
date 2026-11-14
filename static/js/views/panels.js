@@ -239,10 +239,9 @@ function Friends() {
     let qrSrc = '';
     try {
       const cleanQr = new URL(shareUrl);
-      const rTok = state.mesh?.syncToken || (rid ? sessionStorage.getItem(`vortex_st_${rid}`) : '') || '';
-      if (rTok && !cleanQr.searchParams.get('r_tok')) {
-        cleanQr.searchParams.set('r_tok', rTok);
-      }
+      cleanQr.searchParams.delete('r_tok');
+      cleanQr.searchParams.delete('syncToken');
+      cleanQr.searchParams.delete('clientToken');
       qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(cleanQr.toString())}`;
     } catch (_) {
       qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=0&data=${encodeURIComponent(shareUrl || location.origin)}`;

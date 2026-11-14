@@ -726,7 +726,9 @@ export class Html5Adapter {
     const pushAlt = (u) => {
       const s = String(u || '').trim();
       const k = normDedupeKey(s);
-      if (!s || !k || isDrmUrl(s) || isDemoTestUrl(s) || (!canBrowserPlayHevc && isHevcUrl(s)) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
+      const looksDirectOrProxy = /\/api\/rave\/stream|\.(?:m3u8|mpd|mp4|m4v|webm|mkv|mp3|m4a|aac|ogg)(?:$|\?)/i.test(s);
+      const isEmbedPage = !looksDirectOrProxy && /youtube\.com\/(?:watch|embed)|youtu\.be\/|player\.twitch\.tv|player\.kick\.com|dailymotion\.com\/(?:embed|player)|tiktok\.com\/player|drive\.google\.com\/file|vidlink\.pro|vidsrc|flixer\.su|2embed|multiembed|autoembed|superembed|smashystream|embed\.su|vidfast\.pro|vidora\.su|rivestream\.live|pstream\.org/i.test(s);
+      if (!s || !k || isEmbedPage || isDrmUrl(s) || isDemoTestUrl(s) || (!canBrowserPlayHevc && isHevcUrl(s)) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
       if (this.isMusic && is30sPreviewUrl(s) && primaryIsPlayableFull) return;
       seenUrls.add(k);
       alts.push(s);
@@ -852,7 +854,6 @@ export class Html5Adapter {
               for (const fu of freshList) {
                 if (fu !== this.currentUrl) pushAlt(fu);
               }
-              if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
               const addedAny = alts.length > prevLen;
               if (addedAny && nativeAltIdx < alts.length) {
                 triedProxySegs = false;
@@ -1099,7 +1100,7 @@ export class Html5Adapter {
             if (codecOk) {
               maxAllowedIdx = idx;
             }
-            const isMobileFullHd = codecOk && ((w <= 2048 && h <= 1152 && (bw <= 15000000 || bw > 25000000)) || (w === 0 && h === 0 && bw <= 8500000));
+            const isMobileFullHd = codecOk && ((w <= 2048 && h <= 1152 && bw <= 15000000) || (w === 0 && h === 0 && bw <= 8500000));
             if (isMobileFullHd) {
               maxMobileHdIdx = idx;
             }
@@ -1546,7 +1547,12 @@ export class Html5Adapter {
           try {
             if (this.hls.levels?.length > 1) this.hls.nextAutoLevel = 0;
           } catch (e) { /* ignore */ }
+          this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);
+        } else {
+          handleExhaustedCandidates(this.currentUrl);
         }
+      } else if (isStuck) {
+        handleExhaustedCandidates(this.currentUrl);
       }
     };
     this.watchdogTimer = setTimeout(checkUniversalStall, stallWindowMs);

@@ -1,5 +1,6 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
 import { h, popup, toast, setBackground } from '../ui.js?v=20261114_v215';
+import { api } from '../api.js?v=20261114_v215';
 import { state, set, isLeader, canControlPlayback, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261114_v215';
 import { resolveMusicItem } from './selection-kinds.js?v=20261114_v215';
 import { MeshConnection } from '../realtime.js?v=20261114_v215';
@@ -477,12 +478,9 @@ async function loadMedia(media) {
           }
         }
         try {
-          const r = await fetch(media.url);
+          const res = await api(media.url, { timeout: 22000 });
           if (!ctx || ctx.loadSeq !== mySeq) return;
-          if (r.ok) {
-            const res = await r.json();
-            if (!ctx || ctx.loadSeq !== mySeq) return;
-            if (res && res.url) {
+          if (res && res.url) {
               const refMedia = state.mesh?.media || media;
               const roomStillUnresolved = String(refMedia?.url || '').startsWith('/api/rave/resolve-catalog');
               const freshExp = expectedPosition(refMedia);
@@ -521,7 +519,6 @@ async function loadMedia(media) {
               }
               break;
             }
-          }
         } catch (e) { /* retry */ }
       }
     }
@@ -733,9 +730,11 @@ function onMessage(data) {
       break;
     case 'chat':
       if (room && data.message) {
-        if (data.message.id && ctx?.seenChatIds?.has(data.message.id)) break;
+        const msgCid = data.message.clientMsgId || '';
+        if ((data.message.id && ctx?.seenChatIds?.has(data.message.id)) || (msgCid && ctx?.seenChatIds?.has(msgCid))) break;
         if (data.message.id) ctx?.seenChatIds?.add(data.message.id);
-        const updatedChat = [...(room.chat || []).filter((c) => c && c.id !== data.message.id), data.message].slice(-200);
+        if (msgCid) ctx?.seenChatIds?.add(msgCid);
+        const updatedChat = [...(room.chat || []).filter((c) => c && c.id !== data.message.id && (!msgCid || (c.id !== msgCid && c.clientMsgId !== msgCid))), data.message].slice(-200);
         const updatedRoom = { ...room, chat: updatedChat };
         set({ mesh: updatedRoom });
         if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;

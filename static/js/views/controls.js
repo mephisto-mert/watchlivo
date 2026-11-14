@@ -856,9 +856,8 @@ export function buildControls(frame, ctx) {
       if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       try {
         const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
-        if (r.ok) {
-          const sData = await r.json();
+        const sData = await api(`/api/rave/seasons?id=${encodeURIComponent(m.id || '')}&tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1, timeout: 6500 } : { timeout: 6500 });
+        if (sData && !sData.isFallback) {
           const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
           const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
           const foundEp = eps.find((x) => Number(x.episode) === targetEp);
@@ -872,9 +871,8 @@ export function buildControls(frame, ctx) {
               targetSeason += 1;
               targetEp = 1;
               const sig2 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-              const r2 = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig2 ? { signal: sig2 } : {});
-              if (r2.ok) {
-                const s2 = await r2.json();
+              const s2 = await api(`/api/rave/seasons?id=${encodeURIComponent(m.id || '')}&tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig2 ? { signal: sig2, timeout: 6500 } : { timeout: 6500 }).catch(() => null);
+              if (s2 && !s2.isFallback) {
                 const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
                 if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
                   epName = ep1.name.trim();
@@ -2921,10 +2919,9 @@ export function buildControls(frame, ctx) {
             season: String(sNum),
             v: '20261114_v215',
           });
-          fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
-            .then((r) => (r.ok ? r.json() : null))
+          api(`/api/rave/seasons?${q.toString()}`)
             .then((inf) => {
-              if (inf && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
+              if (inf && !inf.isFallback && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
                 const payload = {
                   episodeCount: Array.isArray(inf.episodes) ? inf.episodes.length : 0,
                   totalSeasons: Array.isArray(inf.seasons) ? inf.seasons.length : 0,

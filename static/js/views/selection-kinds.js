@@ -623,9 +623,16 @@ function itemMatchesCat(it, catId) {
   if (catId === 'movies') return !isTv;
   const cats = Array.isArray(it.categories) ? it.categories : [];
   if (catId === 'anime') {
+    const isJaAnime = it.origLang === 'ja' && (
+      isTv ||
+      cats.includes('animation') ||
+      cats.includes('animasyon') ||
+      (Array.isArray(it.genreIds) && it.genreIds.includes(16)) ||
+      /anim|manga|shonen|isekai/i.test(String(it.genreLabel || ''))
+    );
     return (
       cats.includes('anime') ||
-      it.origLang === 'ja' ||
+      isJaAnime ||
       String(it.sourceBadge || '').includes('Animetrix') ||
       /Naruto|One Piece|Bleach|Attack on Titan|Shingeki|Jujutsu|Kimetsu|İblis Keser|Solo Leveling|Death Note|Dragon Ball|Fullmetal|Hunter|Tokyo Ghoul|Demon Slayer|Doraemon|One Punch|Haikyuu|Chainsaw|Spy x Family|Boku no Hero|Fairy Tail|Gintama|Black Clover|Steins|Boruto|Frieren|Vinland|Code Geass|Evangelion|Ghibli|Spirited Away|Ruhların Kaçışı|Yürüyen Şato|Prenses Mononoke|Senin Adın|Your Name|Suzume/i.test(`${it.title || ''} ${it.originalTitle || ''}`)
     );
@@ -1368,6 +1375,24 @@ export async function resolveMusicItem(item, prov = { id: 'music', name: 'Müzik
       return res;
     }
   } catch (e) {
+    const ytMatch = String(item.url || '').match(/(?:v=|youtu\.be\/|embed\/|shorts\/)([A-Za-z0-9_-]{11})/);
+    const directYtId = /^[A-Za-z0-9_-]{11}$/.test(String(item.videoId || '')) ? String(item.videoId) : (ytMatch ? ytMatch[1] : '');
+    if (directYtId) {
+      const fb = {
+        provider: 'youtube',
+        streamType: 'youtube',
+        videoId: directYtId,
+        url: `https://www.youtube.com/watch?v=${directYtId}`,
+        title: item.songTitle || item.title || 'YouTube Müzik',
+        channel: item.artist || item.channel || 'Müzik & Klip',
+        thumbnail: item.poster || item.thumbnail || `https://i.ytimg.com/vi/${directYtId}/hqdefault.jpg`,
+        poster: item.poster || item.thumbnail || `https://i.ytimg.com/vi/${directYtId}/hqdefault.jpg`,
+        isMusic: true,
+        musicMode: effectiveMode === 'audio' ? 'audio' : 'video',
+      };
+      saveMusicHistory({ ...item, ...fb });
+      return fb;
+    }
     toast('Şarkı klibi şu an çözümlenemedi, lütfen tekrar dene.');
   }
   return null;
@@ -1538,6 +1563,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
       contentArea.replaceChildren(spinner());
       const media = await resolveMusicItem({ url: raw, title: `${p.name} Parçası` }, p);
       if (media) await pick(media);
+      else loadMusic('');
       return;
     }
     contentArea.replaceChildren(spinner());

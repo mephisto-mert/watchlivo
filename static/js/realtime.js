@@ -17,6 +17,7 @@ export class MeshConnection {
     this.clientToken = '';
     this.isCreator = false;
     this.needsMediaPush = false;
+    this._leaveBeaconSent = false;
     try {
       localStorage.removeItem(`vortex_st_${roomId}`);
       localStorage.removeItem(`vortex_ct_${roomId}`);
@@ -178,10 +179,11 @@ export class MeshConnection {
     }
     if (!this._pageHideHandler && typeof window !== 'undefined') {
       this._pageHideHandler = (ev) => {
-        if (this.closed || !this.clientId || ev?.persisted) return;
+        if (this.closed || this._leaveBeaconSent || !this.clientId || ev?.persisted) return;
+        this._leaveBeaconSent = true;
         try {
           if (this.mode === 'ws' && this.ws?.readyState === 1) {
-            try { this.ws.send(JSON.stringify({ type: 'leave' })); } catch (_) {}
+            try { this.ws.send(JSON.stringify({ type: 'leave', clientId: this.clientId, gracefulClose: true })); } catch (_) {}
           }
           const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
           const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
@@ -264,16 +266,19 @@ export class MeshConnection {
     }
     this.ws = ws;
     ws.onopen = () => {
+      if (this.ws !== ws || this.closed) return;
       opened = true;
       this.retry = 0;
       this.emitStatus('online');
       this.ping();
+      clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => this.ping(), 2500);
       while (this.outQueue.length && this.ws?.readyState === 1) {
         try { this.ws.send(JSON.stringify(this.outQueue.shift())); } catch (e) { break; }
       }
     };
     ws.onmessage = (ev) => {
+      if (this.ws !== ws || this.closed) return;
       let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.type === 'pong' && data.t0Epoch) clock.sample(Number(data.t0Epoch), Number(data.serverTime));
       if (data.type === 'init') {
@@ -291,6 +296,7 @@ export class MeshConnection {
       this.onMessage?.(data);
     };
     ws.onclose = () => {
+      if (this.ws !== ws) return;
       clearInterval(this.pingTimer);
       clearTimeout(this.wsRetryTimer);
       if (this.closed) return;
@@ -299,7 +305,10 @@ export class MeshConnection {
       this.retry += 1;
       this.wsRetryTimer = setTimeout(() => !this.closed && this.startWs(), Math.min(8000, 600 * this.retry));
     };
-    ws.onerror = () => { /* onclose handles retry/fallback */ };
+    ws.onerror = () => {
+      if (this.ws !== ws) return;
+      /* onclose handles retry/fallback */
+    };
   }
 
   ping() { this.sendRaw({ type: 'ping', t0: performance.now(), t0Epoch: Date.now() / 1000 }); }
@@ -458,9 +467,10 @@ export class MeshConnection {
         } catch (e) { /* ignore */ }
       }
       const initialCreatorSeed = Boolean(isInit && this.isCreator && this.lastRev === 0);
+      let sentMediaPush = false;
       if ((initialCreatorSeed || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
-        this.needsMediaPush = false;
+        sentMediaPush = true;
       }
       if (isPoll && this.lastRev > 0) {
         reqBody.sinceRev = this.lastRev;
@@ -482,6 +492,9 @@ export class MeshConnection {
         this._inFlightAborts.delete(reqAbort);
       }
       if (this.closed) return false;
+      if (sentMediaPush && res && !res.error) {
+        this.needsMediaPush = false;
+      }
       this.httpFailCount = 0;
       if (res?.roomClosed) {
         this.close(false);
@@ -781,28 +794,35 @@ export class MeshConnection {
           sessionStorage.removeItem(`vortex_creator_${this.roomId}`);
         }
       } catch (e) { /* ignore */ }
-      try {
-        if (this.ws && this.ws.readyState === 1) {
-          this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId, gracefulClose: true }));
+      if (!this._leaveBeaconSent) {
+        this._leaveBeaconSent = true;
+        let sentWsLeave = false;
+        try {
+          if (this.ws && this.ws.readyState === 1) {
+            this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId, gracefulClose: true }));
+            sentWsLeave = true;
+          }
+        } catch (e) { /* ignore */ }
+        if (!sentWsLeave) {
+          try {
+            const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
+            const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
+            if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
+            fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+              method: 'POST',
+              keepalive: true,
+              headers: leaveHeaders,
+              body: JSON.stringify({
+                type: shouldCloseRoom ? 'close_room' : 'leave',
+                clientId: this.clientId,
+                username: this.profile?.name || '',
+                clientToken: this.clientToken || undefined,
+                gracefulClose: true,
+              }),
+            }).catch(() => {});
+          } catch (e) { /* ignore */ }
         }
-      } catch (e) { /* ignore */ }
-      try {
-        const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
-        const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
-        if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
-        fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
-          method: 'POST',
-          keepalive: true,
-          headers: leaveHeaders,
-          body: JSON.stringify({
-            type: shouldCloseRoom ? 'close_room' : 'leave',
-            clientId: this.clientId,
-            username: this.profile?.name || '',
-            clientToken: this.clientToken || undefined,
-            gracefulClose: true,
-          }),
-        }).catch(() => {});
-      } catch (e) { /* ignore */ }
+      }
     }
     this.closed = true;
     this.outQueue = [];

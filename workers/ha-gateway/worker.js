@@ -23,6 +23,7 @@ const BYPASS_WORKER_HOSTS = [
   "uk-traffic-",
   "fastplay.",
   "radyotvonline.com",
+  "radyotvonline.net",
   "nexa.mov",
   "dplayer",
   "playmix.",
@@ -38,7 +39,6 @@ const BYPASS_WORKER_HOSTS = [
   "centralodsseyproud",
   "5d06cffcf9563c",
   "gamma.",
-  ".click",
 ];
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
@@ -399,7 +399,8 @@ async function safeFetchSecondary(
   const maxAttempts = isIdempotent ? 2 : 1;
   const cache = getEdgeCache();
   const safePath = normalizeSafePath(url.pathname);
-  if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+  const edgeOnlyOverride = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
+  if (hasAutonomousEdge(env) && (edgeOnlyOverride || Date.now() < tunnelOfflineUntil)) {
     return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
   }
   const ua = request.headers.get("user-agent") || "";
@@ -468,7 +469,7 @@ async function safeFetchSecondary(
     }
   }
 
-  if (allowPrimaryFallback && !url.hostname.endsWith(".workers.dev") && Date.now() >= primaryCircuitOpenUntil) {
+  if (allowPrimaryFallback && env.FORCE_SECONDARY !== "1" && !url.hostname.endsWith(".workers.dev") && Date.now() >= primaryCircuitOpenUntil) {
     try {
       const primaryFallbackResp = await fetchPrimary(request, url, bodyBuf, env);
       if (!shouldFailoverResponse(primaryFallbackResp)) {
@@ -566,12 +567,22 @@ export default {
         safePath === "/api/rave/stream_chunk" ||
         isEdgeFetchPath;
       if (isBinaryDownload || isStreamProxyPath) {
-        const cfFallback = url.searchParams.get("cf_fb") === "1";
+        const hasSigParam = Boolean((url.searchParams.get("sig") || "").trim());
+        const cfFallback = url.searchParams.get("cf_fb") === "1" && (hasSigParam || isAdminEdge(request, env));
         let bypassWorker = cfFallback;
         if (!bypassWorker && isStreamProxyPath && !isEdgeFetchPath) {
           const rawTarget = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
-          const rawLower = rawTarget.toLowerCase();
-          bypassWorker = BYPASS_WORKER_HOSTS.some((h) => rawLower.includes(h));
+          let rawHost = "";
+          try {
+            rawHost = new URL(rawTarget).hostname.toLowerCase();
+          } catch {}
+          if (rawHost) {
+            bypassWorker = BYPASS_WORKER_HOSTS.some((h) => {
+              const pat = String(h || "").toLowerCase();
+              if (!pat) return false;
+              return pat.endsWith(".") ? rawHost.includes(pat) : (rawHost === pat || rawHost.endsWith(`.${pat}`) || rawHost.includes(pat));
+            });
+          }
         }
         if (!bypassWorker) {
           if (env.STREAM_PROXY) {
@@ -584,10 +595,22 @@ export default {
                   headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
                 });
               }
-              return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx);
+              if (hasAutonomousEdge(env)) {
+                return await runAutonomousFallback(request, url, safePath, null, env);
+              }
+              return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx, false);
             }
           }
-          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx);
+          if (hasAutonomousEdge(env)) {
+            return await runAutonomousFallback(request, url, safePath, null, env);
+          }
+          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
+        }
+        if (bypassWorker) {
+          if (hasAutonomousEdge(env) && (Date.now() < tunnelOfflineUntil || env.FORCE_SECONDARY === "1")) {
+            return await runAutonomousFallback(request, url, safePath, null, env);
+          }
+          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
         }
       }
 
@@ -600,7 +623,8 @@ export default {
             headers: { Allow: "GET", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
           });
         }
-        if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+        const edgeOnlyWs = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
+        if (hasAutonomousEdge(env) && (edgeOnlyWs || Date.now() < tunnelOfflineUntil)) {
           return await handleAutonomousEdge(request, url, safePath, env);
         }
         if (env.FORCE_SECONDARY !== "1" && Date.now() < secondaryCircuitOpenUntil) {
@@ -753,7 +777,8 @@ export default {
         safePath === "/api/upload" ||
         safePath.startsWith("/uploads/");
 
-      if (hasAutonomousEdge(env) && (url.searchParams.get("__edge_only") === "1" || Date.now() < tunnelOfflineUntil)) {
+      const edgeOnlyHttp = isAdminEdge(request, env) && url.searchParams.get("__edge_only") === "1";
+      if (hasAutonomousEdge(env) && (edgeOnlyHttp || Date.now() < tunnelOfflineUntil)) {
         return await runAutonomousFallback(request, url, safePath, bodyBuf, env);
       }
 

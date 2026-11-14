@@ -1418,14 +1418,14 @@ export function buildChat(ctx) {
   }
 
   const recentSysMap = new Map();
-  function append(m) {
-    if (!m || !m.id || rendered.has(m.id)) return;
+  function append(m, batchFrag = null) {
+    if (!m || !m.id || rendered.has(m.id)) return false;
     const nowSec = Date.now() / 1000;
     const curTs = Number(m.ts || nowSec);
     if (m.system) {
       if (nowSec - curTs > 1800) {
         rendered.add(m.id);
-        return;
+        return false;
       }
       const txt = String(m.text || '');
       const isPresence = /katıldı|ayrıldı/i.test(txt);
@@ -1436,7 +1436,7 @@ export function buildChat(ctx) {
         const prevTs = recentSysMap.get(sysKey) || 0;
         if (prevTs && Math.abs(curTs - prevTs) < 3) {
           rendered.add(m.id);
-          return;
+          return false;
         }
         recentSysMap.set(sysKey, curTs);
         const remPresence = Array.from(list.querySelectorAll('.sysmsg[data-sys-kind="presence"]'));
@@ -1449,19 +1449,23 @@ export function buildChat(ctx) {
     }
     rendered.add(m.id);
     if (m.system) lastUser = null;
-    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-    const node = msgNode(m);
-    const lastChild = list.lastElementChild;
-    const lastTs = lastChild ? Number(lastChild.dataset?.ts || 0) : 0;
+    const refLast = (batchFrag && batchFrag.lastElementChild) ? batchFrag.lastElementChild : list.lastElementChild;
+    const lastTs = refLast ? Number(refLast.dataset?.ts || 0) : 0;
     let insertBeforeNode = null;
     if (lastTs > 0 && curTs > 0 && curTs < lastTs - 1) {
       insertBeforeNode = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs) || null;
     }
+    const node = msgNode(m);
     if (!m.system) {
-      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : list.lastElementChild?.dataset?.authorKey;
+      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : refLast?.dataset?.authorKey;
       const isCont = Boolean(node.dataset?.authorKey && prevAuthorKey === node.dataset.authorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
       node.classList.toggle('cont', isCont);
     }
+    if (batchFrag && !insertBeforeNode) {
+      batchFrag.append(node);
+      return true;
+    }
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     if (insertBeforeNode) {
       list.insertBefore(node, insertBeforeNode);
     } else {
@@ -1472,6 +1476,7 @@ export function buildChat(ctx) {
       list.firstElementChild?.classList?.remove('cont');
     }
     if (atBottom) list.scrollTop = list.scrollHeight;
+    return true;
   }
 
   function quickRoomBar() {
@@ -1677,7 +1682,22 @@ export function buildChat(ctx) {
         if (ts > 0 && nowSec - ts > 1800) node.remove();
       });
       const chatArr = state.mesh?.chat || [];
-      for (const m of chatArr) append(m);
+      if (chatArr.length) {
+        const frag = document.createDocumentFragment();
+        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+        let appendedAny = false;
+        for (const m of chatArr) {
+          if (append(m, frag)) appendedAny = true;
+        }
+        if (frag.childNodes.length) {
+          list.append(frag);
+          while (list.children.length > 150) {
+            list.firstElementChild?.remove();
+            list.firstElementChild?.classList?.remove('cont');
+          }
+        }
+        if (appendedAny && atBottom) list.scrollTop = list.scrollHeight;
+      }
       renderPolls();
       renderReactions();
       if (!onboarding && state.mesh) {

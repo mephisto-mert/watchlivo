@@ -214,10 +214,12 @@ export const isCreatorSelf = () => {
   if (!state.mesh || state.mesh.curated) return false;
   const myCid = state.clientId;
   if (!myCid) return false;
-  const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
+  const parts = Array.isArray(state.mesh.participants) ? state.mesh.participants : [];
+  const meP = parts.find((p) => p.id === myCid) || null;
   if (meP?.isCreator) return true;
+  if (parts.some((p) => p.isCreator && p.id !== myCid)) return false;
   if (state.mesh.creatorCid && state.mesh.creatorCid !== myCid) {
-    const creatorAlive = Array.isArray(state.mesh.participants) && state.mesh.participants.some((p) => p.id === state.mesh.creatorCid);
+    const creatorAlive = parts.some((p) => p.id === state.mesh.creatorCid);
     if (creatorAlive) return false;
   }
   try {

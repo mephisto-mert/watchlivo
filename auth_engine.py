@@ -1118,7 +1118,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
     users = (lk or {}).get("users") or []
     if users:
         u0 = users[0]
-        if u0.get("emailVerified") is not False:
+        if u0.get("email") and u0.get("emailVerified") is True:
             fb_email = str(u0.get("email") or "").strip().lower()
         fb_name = str(u0.get("displayName") or "").strip()[:24]
         fb_phone = re.sub(r"[^\d+]", "", str(u0.get("phoneNumber") or ""))

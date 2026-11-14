@@ -189,6 +189,17 @@ function inferReferer(url, explicitRef) {
   if (url.includes("daioncdn.net/startv")) return "https://www.startv.com.tr/";
   if (url.includes("daioncdn.net/ntv")) return "https://www.ntv.com.tr/";
   if (url.includes("daioncdn.net/halktv")) return "https://halktv.com.tr/";
+  if (url.includes("ercdn.net")) {
+    if (url.includes("showtv")) return "https://www.showtv.com.tr/";
+    if (url.includes("haberturk")) return "https://www.haberturk.com/";
+    if (url.includes("bloomberght")) return "https://www.bloomberght.com/";
+    return "https://www.ercdn.net/";
+  }
+  if (url.includes("tmgrup.com.tr") || url.includes("atv.com.tr")) return "https://www.atv.com.tr/";
+  if (url.includes("radyotvonline.")) return "https://www.radyotvonline.com/";
+  if (url.includes("trt.com.tr") || url.includes("trtizle.") || url.includes("trthaber")) return "https://www.trtizle.com/";
+  if (url.includes("ensonhaber.com")) return "https://www.ensonhaber.com/";
+  if (url.includes("powerapp.com.tr")) return "https://www.powerapp.com.tr/";
   if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => url.includes(d))) return "https://vidmoly.biz/";
   return "";
 }
@@ -213,7 +224,11 @@ function resolveMediaContentType(url, extHint, upstreamCt) {
     return "video/mp4";
   }
   if (cleanPath.endsWith(".webm") || extHint === ".webm") return "video/webm";
-  if (cleanPath.endsWith(".vtt")) return "text/vtt; charset=utf-8";
+  if (cleanPath.endsWith(".mp3") || extHint === ".mp3") return "audio/mpeg";
+  if (cleanPath.endsWith(".m4a") || extHint === ".m4a") return "audio/mp4";
+  if (cleanPath.endsWith(".aac") || extHint === ".aac") return "audio/aac";
+  if (cleanPath.endsWith(".m3u8") || extHint === ".m3u8") return "application/vnd.apple.mpegurl";
+  if (cleanPath.endsWith(".vtt") || extHint === ".vtt" || extHint === ".srt") return "text/vtt; charset=utf-8";
   if (
     extHint === ".ts" ||
     cleanPath.endsWith(".ts") ||
@@ -484,7 +499,7 @@ export default {
       return jsonResponse({ error: "Not found" }, 404);
     }
 
-    const ALLOWED_EXT_HINTS = new Set([".ts", ".m4s", ".mp4", ".webm", ".key", ".vtt", ".aac", ".m3u8"]);
+    const ALLOWED_EXT_HINTS = new Set([".ts", ".m4s", ".mp4", ".webm", ".key", ".vtt", ".srt", ".aac", ".mp3", ".m4a", ".m3u8"]);
     const targetUrl = (reqUrl.searchParams.get("url") || reqUrl.searchParams.get("u") || "").trim();
     const ref = (reqUrl.searchParams.get("referer") || "").trim();
     const sig = (reqUrl.searchParams.get("sig") || "").trim();
@@ -560,6 +575,10 @@ export default {
     }
 
     const upCt = (upResp.headers.get("Content-Type") || "").toLowerCase();
+    if (upCt.includes("image/svg+xml") || upCt.includes("application/xhtml+xml") || upCt.includes("javascript")) {
+      upResp.body?.cancel?.();
+      return jsonResponse({ error: "Desteklenmeyen medya türü." }, 502);
+    }
     let streamBody = upResp.body;
     if (upCt.includes("text/html") && upResp.body && request.method !== "HEAD") {
       const reader = upResp.body.getReader();
@@ -601,6 +620,8 @@ export default {
     outHeaders.set("Accept-Ranges", "bytes");
     outHeaders.set("Vary", "Range");
     outHeaders.set("X-Content-Type-Options", "nosniff");
+    outHeaders.set("Content-Security-Policy", "sandbox");
+    outHeaders.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
     for (const [k, v] of Object.entries(CORS_HEADERS)) outHeaders.set(k, v);
 
     const upCr = upResp.headers.get("Content-Range") || "";

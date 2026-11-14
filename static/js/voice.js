@@ -23,6 +23,7 @@ export class Voice {
     this.onMicLevel = onMicLevel;
     this.onP2pData = onP2pData;
     this.peers = new Map();
+    this._peerLocks = new Map();
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
@@ -769,6 +770,14 @@ export class Voice {
     if (this.destroyed) return;
     const from = data.fromId;
     if (!from || from === this.getSelfId()) return;
+    const prevLock = this._peerLocks.get(from) || Promise.resolve();
+    const nextLock = prevLock.then(() => this._handleSignalLocked(from, data)).catch(() => {});
+    this._peerLocks.set(from, nextLock);
+    return nextLock;
+  }
+
+  async _handleSignalLocked(from, data) {
+    if (this.destroyed) return;
     if (!this.peers.has(from) && this.peers.size >= 12) return;
     if (data.type === 'webrtc_offer' && this.peers.has(from)) {
       // Karşı taraf sayfayı yenilediyse yeni SDP oturum kimliği (o=- <sessId>) gelir; ICE restart aynı sessId'yi korur.
@@ -872,6 +881,7 @@ export class Voice {
         const score = (x) => (x?.isHost ? 8 : 0) + (x?.isCoHost ? 4 : 0) + (x?.isStageSpeaker ? 4 : 0) + ((!x?.muted || x?.cam || x?.screen || x?.speaking) ? 2 : 0);
         return score(b) - score(a);
       });
+      let peerCapExhausted = false;
       for (const p of prioritizedList) {
         if (p.id && p.id !== selfId && p.transport !== 'bot') {
           if (!p.cam && !p.screen) {
@@ -888,6 +898,7 @@ export class Voice {
               peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
             }
           }
+          if (peerCapExhausted && !this.peers.has(p.id)) continue;
           const peerActive = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
           if (!this.peers.has(p.id) && this.peers.size >= 12) {
@@ -904,9 +915,11 @@ export class Voice {
                 this._removeVideoBubble(evictId);
                 this.peers.delete(evictId);
               } else {
+                peerCapExhausted = true;
                 continue;
               }
             } else {
+              peerCapExhausted = true;
               continue;
             }
           }

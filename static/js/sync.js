@@ -104,8 +104,10 @@ export class SyncEngine {
   }
 
   loop() {
+    if (!this.enabled) return;
     let next = CYCLE_MS;
     try { next = this.step(); } catch (e) { console.warn('[sync]', e); }
+    if (!this.enabled) return;
     this.timer = setTimeout(() => this.loop(), next);
   }
 

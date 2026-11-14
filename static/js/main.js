@@ -52,6 +52,10 @@ function parseRoute() {
     try { roomId = decodeURIComponent(parts[1]); } catch (_) {}
     return { name: 'mesh', params: { ...params, id: roomId } };
   }
+  const legalMatch = String(location.pathname || '').match(/^\/(about|privacy|terms|dmca|cookies|contact)\/?$/i);
+  if (!location.hash && legalMatch) {
+    return { name: 'home', params: { ...params, legalTab: legalMatch[1].toLowerCase() } };
+  }
   return { name: 'home', params };
 }
 
@@ -201,6 +205,14 @@ async function route() {
     homeRoot.classList.remove('hidden');
     renderHome(homeRoot);
     homeRoot.querySelectorAll('.wl-seo-article-box').forEach((el) => el.remove());
+    if (r.params?.legalTab) {
+      const legalTab = r.params.legalTab;
+      try { history.replaceState({}, '', `/#${location.search || ''}`); } catch (_) {}
+      import(`./views/site-footer.js?v=${encodeURIComponent(MODULE_VER)}`).then(({ openLegalModal, openContactModal }) => {
+        if (legalTab === 'contact') openContactModal('request');
+        else openLegalModal(legalTab);
+      }).catch(() => {});
+    }
   }
   current = r.name;
 }

@@ -127,8 +127,7 @@ export class EmbedAdapter {
     f.referrerPolicy = 'origin';
     f.style.background = '#050a14';
     f.style.colorScheme = 'dark';
-    // Not: Gömülü oynatıcılar (vidlink, vidsrc…) "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
-    f.removeAttribute('sandbox');
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation allow-popups');
     f.src = initialEmbedSrc;
     this.frame = f;
     window.addEventListener('message', this._onMsg);
@@ -160,7 +159,10 @@ export class EmbedAdapter {
     if (shouldPlay) this.events.onPlay?.();
   }
 
-  _post(cmd) { try { this.frame?.contentWindow?.postMessage(cmd, '*'); } catch (e) { /* ignore */ } }
+  _post(cmd) {
+    if (!this._expectedOrigin || !this._expectedOrigin.startsWith('https://')) return;
+    try { this.frame?.contentWindow?.postMessage(cmd, this._expectedOrigin); } catch (e) { /* ignore */ }
+  }
   play() { this.wantPlaying = true; if (this.paused) { this.anchorPerf = performance.now(); this.paused = false; } this._post({ command: 'play' }); }
   pause() { this.wantPlaying = false; if (!this.paused) { this.baseTime = this.getTime(); this.paused = true; } this._post({ command: 'pause' }); }
   seek(t) { this.baseTime = Math.max(0, Number(t) || 0); this.anchorPerf = performance.now(); this._post({ command: 'seek', time: this.baseTime }); }

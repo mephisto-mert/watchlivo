@@ -21,11 +21,15 @@ function _scopedAccountsKey() {
   return `${LS_KEY}:${uid || 'guest'}`;
 }
 
+let _oldAccKeysCleaned = false;
 function readLocalAccounts() {
   try {
-    localStorage.removeItem('vortex_accounts_v4');
-    localStorage.removeItem('vortex_accounts_v5');
-    localStorage.removeItem('vortex_accounts_v6');
+    if (!_oldAccKeysCleaned) {
+      _oldAccKeysCleaned = true;
+      localStorage.removeItem('vortex_accounts_v4');
+      localStorage.removeItem('vortex_accounts_v5');
+      localStorage.removeItem('vortex_accounts_v6');
+    }
     const scopedKey = _scopedAccountsKey();
     const raw = localStorage.getItem(scopedKey) || '';
     return _zkDecode(raw);
@@ -1620,47 +1624,88 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
           }, sLabel);
         }));
 
-      const epGrid = h('div', { class: 'episode-grid' },
-        ...episodes.map((ep) => {
-          const rawEpName = String(ep.name || '').replace(/\s*\([^)]*HD[^)]*\)/gi, '').trim();
-          const isRedundantEpName = !rawEpName || new RegExp(`^(?:${ep.episode}\\.\\s*bölüm|bölüm\\s*${ep.episode}|episode\\s*${ep.episode})$`, 'i').test(rawEpName);
-          const epTitleText = isRedundantEpName
-            ? `${ep.episode}. Bölüm`
-            : `${ep.episode}. Bölüm — ${rawEpName}`;
-          const absEpVal = Number(ep.absEpisode || ep.episode || 1);
-          const epProg = findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype }, curSeason, ep.episode)
-            || (curSeason > 1 && absEpVal > ep.episode ? findSavedProgress({ tmdbId: tid, title, originalTitle: origTitle, mediaType: effMtype }, 1, absEpVal) : null);
-          const epProgSec = Number(epProg?.currentTime ?? epProg?.position ?? 0) > 3 && Number(epProg?.percent || 0) < 96
-            ? Math.floor(Number(epProg.currentTime ?? epProg.position ?? 0))
-            : 0;
-          const isSavedEp = epProgSec > 3;
-          const epStartSec = isSavedEp ? epProgSec : 0;
-          const rawDesc = String(ep.overview || '').trim();
-          const cleanDesc = (!rawDesc || new RegExp(`^${curSeason}\\.\\s*Sezon\\s*${ep.episode}\\.\\s*Bölüm$`, 'i').test(rawDesc))
-            ? `${title} · ${curSeason}. Sezon ${ep.episode}. Bölüm (${ep.runtime || 24} dk HD)`
-            : rawDesc;
-          return h('div', {
-            class: `episode-card ${isSavedEp ? 'is-saved-resume' : ''}`, role: 'button', tabindex: '0',
-            onclick: (ev) => playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, ev.currentTarget.querySelector('.episode-play'), epStartSec),
-            onkeydown: (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, null, epStartSec);
-              }
-            },
+      const epProgressMap = new Map();
+      if (rawSavedProg && typeof rawSavedProg === 'object') {
+        const curS = Math.max(1, Number(rawSavedProg.season || 1));
+        const curE = Math.max(1, Number(rawSavedProg.episode || 1));
+        if (!rawSavedProg.completed && Number(rawSavedProg.percent || 0) < 95) {
+          epProgressMap.set(`${curS}:${curE}`, rawSavedProg);
+        }
+        if (rawSavedProg.epProgress && typeof rawSavedProg.epProgress === 'object') {
+          for (const [k, epSaved] of Object.entries(rawSavedProg.epProgress)) {
+            if (!epSaved || Number(epSaved.pct ?? epSaved.percent ?? 0) >= 95) continue;
+            const epSec = Math.floor(Number(epSaved.currentTime ?? epSaved.position ?? epSaved.pos ?? 0));
+            if (epSec > 3 && !epProgressMap.has(k)) {
+              epProgressMap.set(k, {
+                currentTime: epSec,
+                position: epSec,
+                percent: Number(epSaved.percent ?? epSaved.pct ?? 0),
+              });
+            }
+          }
+        }
+      }
+      const buildEpCard = (ep) => {
+        const rawEpName = String(ep.name || '').replace(/\s*\([^)]*HD[^)]*\)/gi, '').trim();
+        const isRedundantEpName = !rawEpName || new RegExp(`^(?:${ep.episode}\\.\\s*bölüm|bölüm\\s*${ep.episode}|episode\\s*${ep.episode})$`, 'i').test(rawEpName);
+        const epTitleText = isRedundantEpName
+          ? `${ep.episode}. Bölüm`
+          : `${ep.episode}. Bölüm — ${rawEpName}`;
+        const absEpVal = Number(ep.absEpisode || ep.episode || 1);
+        const epProg = epProgressMap.get(`${curSeason}:${ep.episode}`)
+          || (curSeason > 1 && absEpVal > ep.episode ? epProgressMap.get(`1:${absEpVal}`) : null);
+        const epProgSec = Number(epProg?.currentTime ?? epProg?.position ?? 0) > 3 && Number(epProg?.percent || 0) < 96
+          ? Math.floor(Number(epProg.currentTime ?? epProg.position ?? 0))
+          : 0;
+        const isSavedEp = epProgSec > 3;
+        const epStartSec = isSavedEp ? epProgSec : 0;
+        const rawDesc = String(ep.overview || '').trim();
+        const cleanDesc = (!rawDesc || new RegExp(`^${curSeason}\\.\\s*Sezon\\s*${ep.episode}\\.\\s*Bölüm$`, 'i').test(rawDesc))
+          ? `${title} · ${curSeason}. Sezon ${ep.episode}. Bölüm (${ep.runtime || 24} dk HD)`
+          : rawDesc;
+        return h('div', {
+          class: `episode-card ${isSavedEp ? 'is-saved-resume' : ''}`, role: 'button', tabindex: '0',
+          onclick: (ev) => playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, ev.currentTarget.querySelector('.episode-play'), epStartSec),
+          onkeydown: (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              playEp(curSeason, ep.episode, isRedundantEpName ? '' : rawEpName, null, epStartSec);
+            }
           },
-          h('div', { class: 'episode-thumb' },
-            h('img', { src: ep.still || backdrop, alt: '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
-            h('span', {
-              class: 'episode-season-badge',
-              style: { position: 'absolute', top: '8px', left: '8px', background: 'rgba(15,23,42,.88)', color: '#e0e7ff', border: '1px solid rgba(99,102,241,.45)', borderRadius: '8px', padding: '3px 8px', fontSize: '.72rem', fontWeight: '700', backdropFilter: 'blur(6px)' },
-            }, `${curSeason}. Sezon · ${ep.episode}. Bölüm`),
-            h('span', { class: 'episode-dur' }, isSavedEp ? `⏱ ${fmtClock(epStartSec)} / ${ep.runtime || 45} dk` : `${ep.runtime || 45} dk`),
-            h('span', { class: 'episode-play' }, isSavedEp ? `▶ ${fmtClock(epStartSec)}'ten Devam Et` : '▶ Bölümü Başlat')),
-          h('div', { class: 'episode-info' },
-            h('div', { class: 'episode-title' }, epTitleText),
-            h('div', { class: 'episode-desc' }, cleanDesc)));
-        }));
+        },
+        h('div', { class: 'episode-thumb' },
+          h('img', { src: ep.still || backdrop, alt: '', loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
+          h('span', {
+            class: 'episode-season-badge',
+            style: { position: 'absolute', top: '8px', left: '8px', background: 'rgba(15,23,42,.88)', color: '#e0e7ff', border: '1px solid rgba(99,102,241,.45)', borderRadius: '8px', padding: '3px 8px', fontSize: '.72rem', fontWeight: '700', backdropFilter: 'blur(6px)' },
+          }, `${curSeason}. Sezon · ${ep.episode}. Bölüm`),
+          h('span', { class: 'episode-dur' }, isSavedEp ? `⏱ ${fmtClock(epStartSec)} / ${ep.runtime || 45} dk` : `${ep.runtime || 45} dk`),
+          h('span', { class: 'episode-play' }, isSavedEp ? `▶ ${fmtClock(epStartSec)}'ten Devam Et` : '▶ Bölümü Başlat')),
+        h('div', { class: 'episode-info' },
+          h('div', { class: 'episode-title' }, epTitleText),
+          h('div', { class: 'episode-desc' }, cleanDesc)));
+      };
+      const epGrid = h('div', { class: 'episode-grid' });
+      const initialChunk = episodes.slice(0, 60);
+      if (initialChunk.length) {
+        const frag = document.createDocumentFragment();
+        for (const ep of initialChunk) frag.appendChild(buildEpCard(ep));
+        epGrid.appendChild(frag);
+      }
+      if (episodes.length > 60) {
+        let offset = 60;
+        const appendNextChunk = () => {
+          if (mySeq !== seasonReqSeq || !epGrid.isConnected) return;
+          const batch = episodes.slice(offset, offset + 60);
+          offset += 60;
+          if (!batch.length) return;
+          const chunkFrag = document.createDocumentFragment();
+          for (const ep of batch) chunkFrag.appendChild(buildEpCard(ep));
+          epGrid.appendChild(chunkFrag);
+          if (offset < episodes.length) requestAnimationFrame(appendNextChunk);
+        };
+        requestAnimationFrame(appendNextChunk);
+      }
 
       detail.append(
         h('div', { class: 'section-head', style: { padding: '.8em 4px .3em', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' } },

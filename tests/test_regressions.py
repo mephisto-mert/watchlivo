@@ -901,9 +901,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261112_v208 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261114_v215 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261112_v208", index_html)
+        self.assertIn("20261114_v215", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -1217,7 +1217,11 @@ class RegressionTests(unittest.TestCase):
 
         # 1) Full 5.24 MB MPEG-TS segment under IS_VERCEL=True must NOT truncate at 3.5 MB
         sig1 = server._proxy_sig(test_ts_url, "")
-        with patch.object(server, "IS_VERCEL", True), patch.object(server, "_public_open", return_value=_FakeResp(big_ts)):
+        with patch.object(server, "IS_VERCEL", True), patch.object(
+            server, "_schedule_segment_prefetch", return_value=None
+        ), patch.object(
+            server._SEG_POOL, "request", side_effect=OSError("no live network in unit test")
+        ), patch.object(server, "_public_open", side_effect=lambda *a, **kw: _FakeResp(big_ts)):
             r_seg = self.client.get(f"/api/rave/stream-proxy?url={test_ts_url}&sig={sig1}&ext=.ts")
             self.assertEqual(r_seg.status_code, 200)
             self.assertEqual(len(r_seg.content), len(big_ts))
@@ -1227,6 +1231,10 @@ class RegressionTests(unittest.TestCase):
         trunc_url = "https://example.com/hls/movie1080/seg_trunc.ts"
         sig2 = server._proxy_sig(trunc_url, "")
         with patch.object(server, "IS_VERCEL", True), patch.object(
+            server, "_schedule_segment_prefetch", return_value=None
+        ), patch.object(
+            server._SEG_POOL, "request", side_effect=OSError("no live network in unit test")
+        ), patch.object(
             server, "_public_open", side_effect=lambda *a, **kw: _FakeResp(big_ts[:2_000_000], declared_len=len(big_ts))
         ):
             r_bad = self.client.get(f"/api/rave/stream-proxy?url={trunc_url}&sig={sig2}&ext=.ts")
@@ -1238,7 +1246,11 @@ class RegressionTests(unittest.TestCase):
         m4s_url = "https://example.com/hls/fmp4/seg_002.m4s"
         sig3 = server._proxy_sig(m4s_url, "")
         with patch.object(server, "IS_VERCEL", True), patch.object(
-            server, "_public_open", return_value=_FakeResp(m4s_body, content_type="video/iso.segment")
+            server, "_schedule_segment_prefetch", return_value=None
+        ), patch.object(
+            server._SEG_POOL, "request", side_effect=OSError("no live network in unit test")
+        ), patch.object(
+            server, "_public_open", side_effect=lambda *a, **kw: _FakeResp(m4s_body, content_type="video/iso.segment")
         ):
             r_m4s = self.client.get(f"/api/rave/stream-proxy?url={m4s_url}&sig={sig3}&ext=.m4s")
             self.assertEqual(r_m4s.status_code, 200)
@@ -1731,8 +1743,17 @@ class RegressionTests(unittest.TestCase):
         })
         self.assertEqual(r_oauth_notoken.status_code, 401)
 
-        # Valid Google token succeeds directly without password
-        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test"}]}):
+        # Unverified Google email must fail closed with 401
+        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test", "emailVerified": False}]}):
+            r_oauth_unverified = self.client.post("/api/auth/oauth", json={
+                "provider": "google",
+                "idToken": "unverified_token_123",
+                "email": test_email,
+            })
+            self.assertEqual(r_oauth_unverified.status_code, 401)
+
+        # Valid Google token with emailVerified=True succeeds directly without password
+        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test", "emailVerified": True}]}):
             r_oauth_direct = self.client.post("/api/auth/oauth", json={
                 "provider": "google",
                 "idToken": "valid_token_123",
@@ -1976,30 +1997,34 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("application/ld+json", idx_html)
         self.assertIn('"FAQPage"', idx_html)
         self.assertIn('"Organization"', idx_html)
-        self.assertIn("jokallame0@gmail.com", idx_html)
+        self.assertIn("dmca@watchlivo.online", idx_html)
         self.assertIn("https://www.googletagmanager.com/gtag/js", idx_html)
         self.assertIn("__initWatchlivoGA4", boot_js)
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
         self.assertTrue((root / "static" / "js" / "views" / "site-footer.js").exists())
 
-        # 2b. Verify legal & contact pages (/about, /privacy, /terms, /dmca, /contact) and /api/rave/contact
+        # 2b. Verify legal & contact pages (/about, /privacy, /terms, /dmca, /contact) and admin-gated /api/rave/contact
         for l_route in ("/about", "/privacy", "/terms", "/dmca", "/contact"):
             r_leg = self.client.get(l_route)
             self.assertEqual(r_leg.status_code, 200, f"Failed legal route {l_route}")
-            self.assertIn("jokallame0@gmail.com", r_leg.text)
+            self.assertIn("dmca@watchlivo.online", r_leg.text)
 
         r_cpost = self.client.post("/api/rave/contact", json={
             "category": "request",
             "name": "Mert Can",
-            "email": "jokallame0@gmail.com",
+            "email": "dmca@watchlivo.online",
             "subject": "Interstellar 4K",
             "message": "Lütfen IMAX versiyonunu da ekleyin",
         })
         self.assertEqual(r_cpost.status_code, 200)
         self.assertTrue(r_cpost.json().get("ok"))
-        r_cget = self.client.get("/api/rave/contact")
+        self.assertEqual(r_cpost.json().get("officialEmail"), "dmca@watchlivo.online")
+        self.assertEqual(self.client.get("/api/rave/contact").status_code, 403)
+        import os as _os_117
+        with patch.dict(_os_117.environ, {"ADMIN_SECRET": "test-admin-secret-v117"}):
+            r_cget = self.client.get("/api/rave/contact", headers={"x-admin-secret": "test-admin-secret-v117"})
         self.assertEqual(r_cget.status_code, 200)
-        self.assertEqual(r_cget.json().get("officialEmail"), "jokallame0@gmail.com")
+        self.assertEqual(r_cget.json().get("officialEmail"), "dmca@watchlivo.online")
         self.assertTrue(any(m.get("subject") == "Interstellar 4K" for m in (r_cget.json().get("messages") or [])))
 
         # 2c. Verify sw_iframe.html requests never return 0-byte 204 downloads on iOS
@@ -2023,24 +2048,29 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(r_post.json().get("ok"))
         self.assertEqual(r_post.json().get("gaMeasurementId"), "G-HQXSREQV3R")
 
-        r_get = self.client.get("/api/rave/analytics")
-        self.assertEqual(r_get.status_code, 200)
-        adata = r_get.json()
-        self.assertTrue(adata.get("ok"))
-        self.assertEqual(adata.get("gaMeasurementId"), "G-HQXSREQV3R")
-        pv_before = adata.get("todayPageviews", 0)
-        self.assertGreaterEqual(adata.get("todayUniqueVisitors", 0), 1)
-        self.assertGreaterEqual(pv_before, 1)
-        self.assertGreaterEqual(adata.get("devices", {}).get("ios", 0), 1)
+        r_get_pub = self.client.get("/api/rave/analytics")
+        self.assertEqual(r_get_pub.status_code, 200)
+        self.assertNotIn("todayUniqueVisitors", r_get_pub.json())
 
-        # Refreshing /stats or calling GET /api/rave/analytics must NEVER increment pageviews
-        r_dash = self.client.get("/stats")
-        self.assertEqual(r_dash.status_code, 200)
-        self.assertIn("Google Analytics 4", r_dash.text)
-        r_dash2 = self.client.get("/stats")
-        self.assertEqual(r_dash2.status_code, 200)
-        r_get_after = self.client.get("/api/rave/analytics").json()
-        self.assertEqual(r_get_after.get("todayPageviews"), pv_before)
+        with patch.dict(_os_117.environ, {"ADMIN_SECRET": "test-admin-secret-v117"}):
+            r_get = self.client.get("/api/rave/analytics", headers={"x-admin-secret": "test-admin-secret-v117"})
+            self.assertEqual(r_get.status_code, 200)
+            adata = r_get.json()
+            self.assertTrue(adata.get("ok"))
+            self.assertEqual(adata.get("gaMeasurementId"), "G-HQXSREQV3R")
+            pv_before = adata.get("todayPageviews", 0)
+            self.assertGreaterEqual(adata.get("todayUniqueVisitors", 0), 1)
+            self.assertGreaterEqual(pv_before, 1)
+            self.assertGreaterEqual(adata.get("devices", {}).get("ios", 0), 1)
+
+            # Refreshing /stats or calling GET /api/rave/analytics must NEVER increment pageviews
+            r_dash = self.client.get("/stats")
+            self.assertEqual(r_dash.status_code, 200)
+            self.assertIn("Google Analytics 4", r_dash.text)
+            r_dash2 = self.client.get("/stats")
+            self.assertEqual(r_dash2.status_code, 200)
+            r_get_after = self.client.get("/api/rave/analytics", headers={"x-admin-secret": "test-admin-secret-v117"}).json()
+            self.assertEqual(r_get_after.get("todayPageviews"), pv_before)
 
     def test_v130_room_invites_posters_and_10_agent_audit(self):
         # 1. Room share link (/r/{room_id}) forwards pwd, t, tmdbId, s, e, and r_tok; restores on cold instance
@@ -2506,19 +2536,23 @@ class RegressionTests(unittest.TestCase):
         )
         self.assertEqual(r_fake_mp4.status_code, 415)
 
-        # 6. GA4 Measurement ID overwrite blocked for non-admin (403) & contact email masked
+        # 6. GA4 Measurement ID overwrite blocked for non-admin (403), contact email masked in POST entry & GET requires admin
         r_ga_hijack = self.client.post("/api/rave/analytics", json={"gaMeasurementId": "G-EVILHACK99"})
         self.assertEqual(r_ga_hijack.status_code, 403)
-        self.client.post("/api/rave/contact", json={
+        r_c_mask = self.client.post("/api/rave/contact", json={
             "name": "Gizli Kullanici",
             "email": "secretuser@example.com",
             "subject": "Maskeleme Testi",
             "message": "E-posta maskelenmeli",
         })
-        msgs = self.client.get("/api/rave/contact").json().get("messages", [])
+        self.assertEqual(r_c_mask.status_code, 200)
+        self.assertEqual((r_c_mask.json().get("entry") or {}).get("email"), "s***@example.com")
+        self.assertEqual(self.client.get("/api/rave/contact").status_code, 403)
+        import os as _os_133
+        with patch.dict(_os_133.environ, {"ADMIN_SECRET": "test-admin-secret-v133"}):
+            msgs = self.client.get("/api/rave/contact", headers={"x-admin-secret": "test-admin-secret-v133"}).json().get("messages", [])
         hit_msg = next((m for m in msgs if m.get("subject") == "Maskeleme Testi"), None)
         self.assertIsNotNone(hit_msg)
-        self.assertEqual(hit_msg.get("email"), "s***@example.com")
 
         # 7. SelectiveGZipMiddleware compresses HTML/JSON while keeping APK binary unbuffered
         r_gz = self.client.get("/", headers={"Accept-Encoding": "gzip"})
@@ -2530,7 +2564,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261112_v208", sw_js)
+        self.assertIn("v20261114_v215", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2583,12 +2617,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261112_v208', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261114_v215', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261112_v208', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261114_v215', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261112_v208')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261114_v215')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -3197,8 +3231,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("has_vault_dub", server_py)
         self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
         self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261112_v208", index_html)
-        self.assertIn("20261112_v208", sw_js)
+        self.assertIn("20261114_v215", index_html)
+        self.assertIn("20261114_v215", sw_js)
 
     def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
         """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
@@ -3440,7 +3474,7 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         root = _pl.Path(__file__).resolve().parent.parent
         app_ver = _json.loads((root / "app_version.json").read_text(encoding="utf-8"))
-        self.assertEqual(app_ver.get("version"), "20261112_v208")
+        self.assertEqual(app_ver.get("version"), "20261114_v215")
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")

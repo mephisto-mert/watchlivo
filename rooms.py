@@ -1938,16 +1938,23 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
     if existing and existing_name and not existing_name.lower().startswith(("misafir", "izleyici")) and raw_uname.lower().startswith(("misafir", "izleyici")):
         raw_uname = existing_name
     raw_avatar = str(data.get("avatarUrl") or "").strip()
-    if raw_avatar and not (raw_avatar.startswith(("https://", "/static/", "/uploads/")) or (raw_avatar.startswith("data:image/") and len(raw_avatar) <= 45000)):
+    if raw_avatar and not (
+        raw_avatar.startswith(("https://", "/static/", "/uploads/"))
+        or (re.match(r"^data:image/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$", raw_avatar, re.I) and len(raw_avatar) <= 45000)
+    ):
         raw_avatar = ""
     hide_loc = _as_bool(data.get("hideLocation")) if "hideLocation" in data else _as_bool(p.get("hideLocation"))
     raw_country = re.sub(r"[^A-Z]", "", clean_str(data.get("country"), 2).upper())
+    safe_uid_field = clean_str(data.get("uid") or data.get("userId"), 64)
+    verified_uid_hint = clean_str(data.get("_verifiedUid"), 64)
+    if safe_uid_field.lower().startswith("u_wl_") and safe_uid_field != verified_uid_hint:
+        safe_uid_field = verified_uid_hint
     fields = {
         "name": raw_uname,
         "color": clean_str(data.get("color"), 16) if re.match(r"^#[0-9a-fA-F]{3,8}$", str(data.get("color") or "")) else "",
         "device": clean_str(data.get("device"), 16),
         "country": "XX" if hide_loc else (raw_country or p.get("country") or "TR"),
-        "uid": clean_str(data.get("uid") or data.get("userId"), 64),
+        "uid": safe_uid_field,
         "handle": clean_str(data.get("handle"), 24),
         "medal": clean_str(data.get("medal"), 32),
         "bio": clean_str(data.get("bio"), 160),
@@ -2806,7 +2813,10 @@ def _handle_social(room, cid, data, out, name, is_host):
         if "watchMinutes" in data:
             me["watchMinutes"] = _safe_int(data.get("watchMinutes"), 0, 0, 10_000_000)
         raw_av_upd = str(data.get("avatarUrl") or "").strip()
-        if raw_av_upd and (raw_av_upd.startswith(("https://", "/static/", "/uploads/")) or (raw_av_upd.startswith("data:image/") and len(raw_av_upd) <= 45000)):
+        if raw_av_upd and (
+            raw_av_upd.startswith(("https://", "/static/", "/uploads/"))
+            or (re.match(r"^data:image/(?:png|jpeg|jpg|gif|webp|avif);base64,[A-Za-z0-9+/=]+$", raw_av_upd, re.I) and len(raw_av_upd) <= 45000)
+        ):
             me["avatarUrl"] = raw_av_upd
         elif "avatarUrl" in data and not raw_av_upd:
             me["avatarUrl"] = ""
@@ -3550,7 +3560,19 @@ async def ws_endpoint(websocket: WebSocket):
                 if room["media"].pop("_frozenByEmpty", False) or not float(room["media"].get("lastExplicitPauseAt") or 0.0):
                     room["media"]["playing"] = True
             room.pop("emptySince", None)
-            p, is_new_ws = add_participant(room, cid, {**join_data, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "ws")
+            p, is_new_ws = add_participant(
+                room,
+                cid,
+                {
+                    **join_data,
+                    "rawUid": str(join_data.get("uid") or join_data.get("userId") or ""),
+                    "uid": safe_p_uid,
+                    "userId": safe_p_uid,
+                    "_verifiedUid": verified_uid,
+                    "_verifiedClientToken": bool(signed_cid and signed_cid == cid),
+                },
+                "ws",
+            )
             join_msg = sys_msg(room, "odaya katıldı", p["name"]) if is_new_ws else None
             SOCKETS.setdefault(room_id, {})[cid] = websocket
             registered = True
@@ -3731,7 +3753,14 @@ async def http_sync(request: Request):
             room = merge_sync_token(room, data.get("syncToken"), room_id)
         # A cid is only trusted when the server signed it, or when nobody is
         # currently using it (prevents session takeover by claiming a live cid).
-        if room is not None and not room.get("fromCreateApi") and not room.get("curated") and requested_cid and requested_cid == room.get("creatorCid") and not str(room.get("creatorId") or "").startswith("u_wl_"):
+        if (
+            room is not None
+            and not room.get("fromCreateApi")
+            and not room.get("curated")
+            and requested_cid
+            and requested_cid == room.get("creatorCid")
+            and ((signed_cid and signed_cid == requested_cid) or (verified_uid and verified_uid == room.get("creatorId")))
+        ):
             room["explicitCreatorCid"] = requested_cid
         cid = signed_cid or requested_cid
         cid_rejected = False
@@ -3828,7 +3857,13 @@ async def http_sync(request: Request):
         if not room.get("creatorId") and not room.get("curated") and not any(hp.get("transport") != "bot" for hp in (room.get("participants") or {}).values()):
             room["creatorId"] = verified_uid or cid
             room["creatorCid"] = cid
-        if not room.get("fromCreateApi") and not room.get("curated") and requested_cid and requested_cid == room.get("creatorCid") and not str(room.get("creatorId") or "").startswith("u_wl_"):
+        if (
+            not room.get("fromCreateApi")
+            and not room.get("curated")
+            and requested_cid
+            and requested_cid == room.get("creatorCid")
+            and ((signed_cid and signed_cid == requested_cid) or (verified_uid and verified_uid == room.get("creatorId")))
+        ):
             room["explicitCreatorCid"] = requested_cid
         safe_http_uid = _safe_participant_uid(verified_uid, data.get("uid") or data.get("userId"))
         room.setdefault("kicked", [])
@@ -3895,7 +3930,7 @@ async def http_sync(request: Request):
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now(), caller_can_seed=caller_can_seed_chat)
         if stale_empty_wipe and not restored_recent_chat:
             room["_explicit_chat_clear"] = True
-        p, is_new = add_participant(room, cid, {**data, "rawUid": raw_req_uid, "uid": safe_http_uid, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "http")
+        p, is_new = add_participant(room, cid, {**data, "rawUid": raw_req_uid, "uid": safe_http_uid, "_verifiedUid": verified_uid, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "http")
         join_msg_http = None
         join_ev_http = None
         if is_new:

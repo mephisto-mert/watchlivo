@@ -33,39 +33,158 @@ export function inferStreamReferer(u) {
   if (u.includes("dragonballzfans") || u.includes("hexa.su")) return "https://hexa.su/";
   if (u.includes("filmboom")) return "https://filmboom.top/";
   if (u.includes("tau-video") || u.includes("irtau1.")) return "https://tau-video.xyz/";
+  if (u.includes("fastplay.") || u.includes(".cfd/")) {
+    return u.includes("ag2m5.cfd") ? "https://x.ag2m5.cfd/" : "https://fastplay.mom/";
+  }
+  if (u.includes("uk-traffic-") || u.includes("cdn77s.com")) return "https://x.ag2m5.cfd/";
   if (u.includes("molystream") || u.includes("/sheila_")) return "https://dbx.molystream.org/";
   if ((u.includes("cdnimages") && u.includes("/hls/")) || u.includes("playmix.uno") || u.includes("hdfilmcehennemi")) return "https://www.hdfilmcehennemi.nl/";
   if (u.includes("fullhdfilmizlesene")) return "https://www.fullhdfilmizlesene.tv/";
   if (u.includes("dizibox")) return "https://www.dizibox.so/";
   if (u.includes("cdnimg") || u.includes("rapidvid") || /https:\/\/s\d+\.[^/]+\.shop\//.test(u)) return "https://rapidvid.org/";
   if (u.includes("makesomthingup") || u.includes("centralodsseyproud") || u.includes("/r6/")) return "https://one.makesomthingup.click/";
+  if (u.includes("daioncdn.net/startv")) return "https://www.startv.com.tr/";
+  if (u.includes("daioncdn.net/ntv")) return "https://www.ntv.com.tr/";
+  if (u.includes("daioncdn.net/halktv")) return "https://halktv.com.tr/";
+  if (u.includes("ercdn.net")) {
+    if (u.includes("showtv")) return "https://www.showtv.com.tr/";
+    if (u.includes("haberturk")) return "https://www.haberturk.com/";
+    if (u.includes("bloomberght")) return "https://www.bloomberght.com/";
+    return "https://www.ercdn.net/";
+  }
+  if (u.includes("tmgrup.com.tr") || u.includes("atv.com.tr")) return "https://www.atv.com.tr/";
+  if (u.includes("radyotvonline.")) return "https://www.radyotvonline.com/";
+  if (u.includes("trt.com.tr") || u.includes("trtizle.") || u.includes("trthaber")) return "https://www.trtizle.com/";
+  if (u.includes("ensonhaber.com")) return "https://www.ensonhaber.com/";
+  if (u.includes("powerapp.com.tr")) return "https://www.powerapp.com.tr/";
   if (["vidmoly.", "vmbox.", "vmnow.", "vmpx."].some((d) => u.includes(d))) return "https://vidmoly.biz/";
   return "";
 }
 
-let _hmacCacheKey = "";
-let _hmacCrypto = null;
+export function isPublicHttpUrl(rawUrl) {
+  let u;
+  try {
+    u = new URL(String(rawUrl || "").trim());
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (u.username || u.password) return false;
+  let host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  host = host.replace(/\.+$/, "");
+  if (!host) return false;
+  if (
+    host === "localhost" ||
+    host === "localhost.localdomain" ||
+    host.endsWith(".localhost") ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.endsWith(".arpa") ||
+    host.endsWith(".lan") ||
+    host.endsWith(".home") ||
+    host.includes("metadata")
+  ) {
+    return false;
+  }
+  const m = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]), c = Number(m[3]), d = Number(m[4]);
+    if (a > 255 || b > 255 || c > 255 || d > 255) return false;
+    if (a === 0 || a === 10 || a === 127) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 0 && c === 0) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 198 && (b === 18 || b === 19)) return false;
+    if (a >= 224) return false;
+    return true;
+  }
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) return false;
+  if (/^(0\d+|\d+|0x[0-9a-f]+)\./i.test(host) && !/[g-wyz]/i.test(host.replace(/x/gi, ""))) return false;
+  if (host.includes(":")) {
+    if (host === "::" || host === "::1" || host.startsWith("::ffff:")) return false;
+    const firstHex = parseInt(host.split(":")[0] || "0", 16);
+    if (!Number.isNaN(firstHex)) {
+      if ((firstHex & 0xfe00) === 0xfc00) return false;
+      if ((firstHex & 0xffc0) === 0xfe80) return false;
+      if ((firstHex & 0xff00) === 0xff00) return false;
+    }
+    return false;
+  }
+  if (!host.includes(".")) return false;
+  return true;
+}
+
+function timingSafeEqualStr(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+const _hmacKeyCache = new Map();
+async function getEdgeProxyCryptoKey(env, usage = "sign") {
+  const secret = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "").trim();
+  if (!secret) return null;
+  const cacheKey = `${secret}:${usage}`;
+  if (_hmacKeyCache.has(cacheKey)) return _hmacKeyCache.get(cacheKey);
+  const k = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [usage]);
+  if (_hmacKeyCache.size >= 8) _hmacKeyCache.clear();
+  _hmacKeyCache.set(cacheKey, k);
+  return k;
+}
 
 export async function signProxySig(targetUrl, ref, env) {
-  const secret = String(env?.PROXY_SECRET || env?.VORTEX_SECRET || "watchlivo-edge-default-secret-2026").trim();
-  if (!_hmacCrypto || _hmacCacheKey !== secret) {
-    _hmacCrypto = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    _hmacCacheKey = secret;
-  }
+  const key = await getEdgeProxyCryptoKey(env, "sign");
+  if (!key) return "";
   const exp = Math.floor(Date.now() / 1000) + 21600;
-  const mac = await crypto.subtle.sign("HMAC", _hmacCrypto, new TextEncoder().encode(`${targetUrl}|${ref || ""}|${exp}`));
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${targetUrl}|${ref || ""}|${exp}`));
   const hex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex}.${exp}`;
+}
+
+export async function verifyProxySig(targetUrl, ref, sig, env) {
+  if (!targetUrl || !sig || typeof sig !== "string") return false;
+  const parts = sig.split(".");
+  if (parts.length !== 2) return false;
+  const [hex, expRaw] = parts;
+  if (!/^[a-f0-9]{24}$/.test(hex) || !/^\d{9,12}$/.test(expRaw)) return false;
+  if (parseInt(expRaw, 10) < Math.floor(Date.now() / 1000)) return false;
+  const key = await getEdgeProxyCryptoKey(env, "sign");
+  if (!key) return false;
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${targetUrl}|${ref || ""}|${expRaw}`));
+  const expectedHex = Array.from(new Uint8Array(mac)).slice(0, 12).map((b) => b.toString(16).padStart(2, "0")).join("");
+  return timingSafeEqualStr(hex, expectedHex);
+}
+
+async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeoutMs = 15000, cfOpts = undefined) {
+  let curUrl = String(initialUrl || "").trim();
+  for (let hop = 0; hop <= maxHops; hop++) {
+    if (!isPublicHttpUrl(curUrl)) throw new Error("Blocked redirect target");
+    const init = { headers, redirect: "manual", signal: AbortSignal.timeout(timeoutMs) };
+    if (cfOpts) init.cf = cfOpts;
+    const resp = await fetch(curUrl, init);
+    if ([301, 302, 303, 307, 308].includes(resp.status)) {
+      const loc = resp.headers.get("Location");
+      if (!loc) return { resp, finalUrl: curUrl };
+      resp.body?.cancel?.();
+      curUrl = new URL(loc, curUrl).toString();
+      continue;
+    }
+    return { resp, finalUrl: curUrl };
+  }
+  throw new Error("Too many redirects");
 }
 
 const OFFLOAD_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
 const OFFLOAD_BYPASS_HOSTS = [
   "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.",
   "hdfilmcehennemi.mobi", "ag2m5.cfd", "uk-traffic-", "fastplay.",
-  "radyotvonline.com", "nexa.mov", "dplayer", "playmix.",
+  "radyotvonline.com", "radyotvonline.net", "nexa.mov", "dplayer", "playmix.",
   "makesomthingup.", "cdnimages.", "ercdn.net", "daioncdn.net",
   "dragonballzfans", "molystream.org", "irtau1.", "lightspeed.st",
-  "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.", ".click",
+  "bright67.", "centralodsseyproud", "5d06cffcf9563c", "gamma.",
 ];
 
 async function buildSignedProxyPath(targetUrl, ref, ext, env) {
@@ -73,26 +192,40 @@ async function buildSignedProxyPath(targetUrl, ref, ext, env) {
   const sig = await signProxySig(targetUrl, cleanRef, env);
   const q = new URLSearchParams({ url: targetUrl, sig, ext: ext || ".ts" });
   if (cleanRef) q.set("referer", cleanRef);
-  const lower = String(targetUrl || "").toLowerCase();
-  const useLocal = OFFLOAD_BYPASS_HOSTS.some((h) => lower.includes(h));
+  let targetHost = "";
+  try { targetHost = new URL(targetUrl).hostname.toLowerCase(); } catch {}
+  const useLocal = targetHost ? OFFLOAD_BYPASS_HOSTS.some((h) => h.endsWith(".") ? targetHost.includes(h) : (targetHost === h || targetHost.endsWith(`.${h}`) || targetHost.includes(h))) : false;
   const base = useLocal ? "" : OFFLOAD_PROXY_ORIGIN;
   return `${base}/api/rave/stream-proxy?${q.toString()}`;
 }
 
-async function lookupVaultStream(keys, env) {
+async function lookupVaultStream(keys, env, expectedType = "") {
   if (!env?.ASSETS) return null;
-  const seen = new Set();
+  const uniqueKeys = [];
+  const seenKeys = new Set();
+  const buckets = new Set();
   for (const k of keys) {
-    if (!k || seen.has(k)) continue;
-    seen.add(k);
-    const hex = fnv1aBucket(k).toString(16).padStart(2, "0");
+    if (!k || seenKeys.has(k)) continue;
+    seenKeys.add(k);
+    uniqueKeys.push(k);
+    buckets.add(fnv1aBucket(k).toString(16).padStart(2, "0"));
+  }
+  if (!uniqueKeys.length) return null;
+  const shardMap = new Map();
+  await Promise.all([...buckets].map(async (hex) => {
     try {
       const r = await env.ASSETS.fetch(new Request(`https://assets.local/_edge/streams/b${hex}.json`));
-      if (r.ok) {
-        const shard = await r.json();
-        if (shard && shard[k] && Array.isArray(shard[k].streams) && shard[k].streams.length) return shard[k];
-      }
+      if (r.ok) shardMap.set(hex, await r.json());
     } catch {}
+  }));
+  for (const k of uniqueKeys) {
+    const hex = fnv1aBucket(k).toString(16).padStart(2, "0");
+    const shard = shardMap.get(hex);
+    const entry = shard && shard[k];
+    if (entry && Array.isArray(entry.streams) && entry.streams.length) {
+      if (expectedType && entry.mediaType && entry.mediaType !== expectedType) continue;
+      return entry;
+    }
   }
   return null;
 }
@@ -124,13 +257,13 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const reqYear = (url.searchParams.get("year") || "").trim();
 
   const isFirstEp = mtype !== "tv" || (s === 1 && e === 1);
+  const bypassCache = url.searchParams.get("refresh") === "1";
   const lookupKeys = [];
   if (id) {
     if (mtype === "tv") lookupKeys.push(`id:${id}:s${s}e${e}`);
-    if (isFirstEp) lookupKeys.push(`id:${id}`);
+    if (isFirstEp && !/^\d+$/.test(id)) lookupKeys.push(`id:${id}`);
   }
   if (tmdbId) {
-    if (isFirstEp) lookupKeys.push(`id:${tmdbId}`);
     if (mtype === "tv") {
       lookupKeys.push(
         `tmdb:tv:${tmdbId}:s${s}e${e}`,
@@ -148,15 +281,13 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
         `tmdb:movie:${tmdbId}:1:1`,
         `tmdb:movie:${tmdbId}`,
         `movie:${tmdbId}:1:1`,
-        `movie:${tmdbId}`,
-        `tmdb:${tmdbId}:1:1`
+        `movie:${tmdbId}`
       );
     }
-    if (isFirstEp) lookupKeys.push(`tmdb:${tmdbId}`);
   }
   if (offUrl && isFirstEp) lookupKeys.push(`url:${offUrl}`);
 
-async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigTitle = "", tmdbId = "") {
+async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigTitle = "", tmdbId = "", bypassCache = false) {
   const m = String(id || "").match(/^ac-(\d+)$/);
   let acId = m ? m[1] : "";
   const hdrs = {
@@ -200,7 +331,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       }
     }
     if (!acId) return null;
-    if (env?.WATCHLIVO_KV) {
+    if (env?.WATCHLIVO_KV && !bypassCache) {
       const cachedEp = await env.WATCHLIVO_KV.get(`ac_ep:${acId}:${mtype}:${s}:${e}`).catch(() => null);
       if (cachedEp && cachedEp.startsWith("https://")) {
         const proxied = await buildSignedProxyPath(cachedEp, "https://tau-video.xyz/", ".mp4", env);
@@ -273,7 +404,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   return null;
 }
 
-  const hitRaw = await lookupVaultStream(lookupKeys, env);
+  const hitRaw = await lookupVaultStream(lookupKeys, env, mtype);
   const hitStreams = Array.isArray(hitRaw?.streams) ? hitRaw.streams : [];
   const hasOnlyDeadOrYt = hitRaw && hitStreams.every((pair) => {
     const u = String(Array.isArray(pair) ? pair[0] : pair?.url || "").toLowerCase();
@@ -283,7 +414,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   const hit = hasOnlyDeadOrYt ? null : hitRaw;
   if (!hit) {
     const liveAc = (id.startsWith("ac-") || reqTitle || reqOrigTitle)
-      ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId)
+      ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId, bypassCache)
       : null;
     if (liveAc) {
       return jsonResp({
@@ -347,7 +478,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     if (isYt) {
       const mYt = rawU.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
       const vid = mYt ? mYt[1] : "";
-      const embU = vid ? `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1` : rawU;
+      const embU = vid ? `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(url.origin)}` : rawU;
       urls.push({ url: embU, streamType: "embed", label: `▶ Sunucu ${i + 1} · YouTube HD` });
       servers.push({ id: `srv-${i + 1}`, label: `▶ Sunucu ${i + 1} · YouTube HD`, url: embU, streamType: "embed" });
       continue;
@@ -372,8 +503,16 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
   }));
 
-  const primary = urls[0] || buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e)[0] || { url: "", streamType: "embed" };
+  const fallbackEmbeds = buildEmbedServers(tmdbId || hit.tmdbId, mtype, s, e);
+  for (const es of fallbackEmbeds) {
+    if (es?.url && !urls.some((x) => x.url === es.url)) {
+      urls.push({ url: es.url, streamType: es.streamType || "embed", label: es.label });
+      servers.push(es);
+    }
+  }
+  const primary = urls[0] || { url: "", streamType: "embed" };
   const resolvedTitle = reqTitle || hit.title || "";
+  const backupAltUrls = urls.slice(1).filter((x) => x.url && x.streamType !== "embed").map((x) => x.url);
   return jsonResp({
     id: tmdbId || id,
     provider: primary.streamType === "embed" ? "embed" : "netflix",
@@ -392,134 +531,300 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     streamType: primary.streamType,
     url: primary.url,
     embedUrl: primary.streamType === "embed" ? primary.url : "",
-    altUrls: [],
-    servers: servers.slice(0, 1),
+    altUrls: backupAltUrls,
+    servers: servers.slice(0, 4),
     subtitleTracks: subs,
   });
 }
 
 export async function handleEdgeHlsManifest(url, env) {
-  let target = (url.searchParams.get("url") || "").trim();
+  let target = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
   const sid = (url.searchParams.get("sid") || "").trim();
   if (!target && sid) {
-    try { target = b64UrlDecode(sid); } catch { return new Response("Invalid sid", { status: 400 }); }
+    try { target = b64UrlDecode(sid); } catch { return new Response("Invalid sid", { status: 400, headers: { "Cache-Control": "no-store" } }); }
   }
-  if (!target.startsWith("http")) return new Response("Missing stream URL", { status: 400 });
+  if (!target) return new Response("Missing stream URL", { status: 400, headers: { "Cache-Control": "no-store" } });
+  if (!isPublicHttpUrl(target)) {
+    return new Response("Blocked target URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
   const ref = inferStreamReferer(target);
   const hdrs = { "User-Agent": UA_CHROME, Accept: "*/*" };
-  if (ref) { hdrs.Referer = ref; hdrs.Origin = ref.replace(/\/$/, ""); }
-  const up = await fetch(target, { headers: hdrs, redirect: "follow", signal: AbortSignal.timeout(14000) });
-  if (!up.ok) return new Response(`Upstream HLS ${up.status}`, { status: 502 });
-  const finalBase = up.url || target;
+  if (ref) { hdrs.Referer = ref; try { hdrs.Origin = new URL(ref).origin; } catch {} }
+
+  let up, finalBase;
+  try {
+    ({ resp: up, finalUrl: finalBase } = await fetchPublicWithRedirects(target, hdrs, 4, 14000));
+  } catch (err) {
+    const msg = String(err?.message || "").includes("Blocked") ? "Blocked target URL" : "Upstream HLS fetch failed";
+    return new Response(msg, { status: msg.startsWith("Blocked") ? 403 : 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (!up.ok) {
+    up.body?.cancel?.();
+    return new Response(`Upstream HLS ${up.status}`, { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (!isPublicHttpUrl(finalBase)) {
+    up.body?.cancel?.();
+    return new Response("Blocked redirect URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+
+  const ct = (up.headers.get("Content-Type") || "").toLowerCase();
+  const cl = Number(up.headers.get("Content-Length") || 0);
+  if (ct.includes("html") || ct.includes("svg") || ct.includes("javascript") || ct.includes("ecmascript")) {
+    up.body?.cancel?.();
+    return new Response("Upstream returned non-playlist document", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (ct.includes("video/") || ct.includes("audio/") || (cl > 4 * 1024 * 1024 && !ct.includes("mpegurl"))) {
+    up.body?.cancel?.();
+    const loc = await buildSignedProxyPath(finalBase, ref, ct.includes("mp4") ? ".mp4" : ".ts", env);
+    return new Response(null, { status: 302, headers: { Location: loc, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+
   const text = await up.text();
-  if (!text.trimStart().startsWith("#EXTM3U")) {
+  const trimmedHead = text.trimStart();
+  if (/^(?:<!doctype|<html|<script|<svg)/i.test(trimmedHead)) {
+    return new Response("Upstream returned HTML instead of HLS", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  if (!trimmedHead.startsWith("#EXTM3U")) {
     const loc = await buildSignedProxyPath(finalBase, ref, ".mp4", env);
-    return new Response(null, { status: 302, headers: { Location: loc, "Cache-Control": "no-store" } });
+    return new Response(null, { status: 302, headers: { Location: loc, "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
   const isMaster = text.includes("#EXT-X-STREAM-INF");
   const lines = text.split(/\r?\n/);
-  const out = [];
-  for (const line of lines) {
+  const out = await Promise.all(lines.map(async (line) => {
     const trimmed = line.trim();
-    if (!trimmed) { out.push(line); continue; }
+    if (!trimmed) return line;
     if (trimmed.startsWith("#")) {
       if (trimmed.includes('URI="')) {
-        const replaced = await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"));
-        out.push(replaced);
-      } else {
-        out.push(line);
+        return await replaceAsyncUri(line, finalBase, ref, env, trimmed.startsWith("#EXT-X-MEDIA"));
       }
-      continue;
+      return line;
     }
-    const abs = new URL(trimmed, finalBase).toString();
+    let abs = "";
+    try { abs = new URL(trimmed, finalBase).toString(); } catch { return "# blocked-invalid-uri"; }
+    if (!isPublicHttpUrl(abs)) return "# blocked-non-public-uri";
     if (isMaster || /\.m3u8(\?|$)/i.test(abs)) {
-      out.push(`/api/rave/stream?sid=${b64UrlEncode(abs)}&proxy_segs=1&ext=.m3u8`);
-    } else {
-      const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : ".ts";
-      out.push(await buildSignedProxyPath(abs, ref, ext, env));
+      return `/api/rave/stream?sid=${b64UrlEncode(abs)}&proxy_segs=1&ext=.m3u8`;
     }
-  }
+    const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : /\.mp4(\?|$)/i.test(abs) ? ".mp4" : ".ts";
+    return await buildSignedProxyPath(abs, ref, ext, env);
+  }));
   return new Response(out.join("\n"), {
     status: 200,
-    headers: { "Content-Type": "application/vnd.apple.mpegurl", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": "application/vnd.apple.mpegurl",
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
   });
 }
 
 async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {
   const m = line.match(/URI="([^"]+)"/);
   if (!m) return line;
-  const abs = new URL(m[1], base).toString();
+  let abs = "";
+  try { abs = new URL(m[1], base).toString(); } catch { return line.replace(m[0], 'URI="#blocked"'); }
+  if (!isPublicHttpUrl(abs)) return line.replace(m[0], 'URI="#blocked"');
   const rew = isMediaPlaylist || /\.m3u8(\?|$)/i.test(abs)
     ? `/api/rave/stream?sid=${b64UrlEncode(abs)}&proxy_segs=1&ext=.m3u8`
     : await buildSignedProxyPath(abs, ref, line.includes("#EXT-X-KEY") ? ".key" : ".mp4", env);
   return line.replace(m[0], `URI="${rew}"`);
 }
 
-export async function handleEdgeStreamProxy(request, url) {
+function resolveFallbackContentType(extHint, target) {
+  const hint = `${String(extHint || "").toLowerCase()} ${String(target || "").toLowerCase()}`;
+  if (hint.includes(".mp4")) return "video/mp4";
+  if (hint.includes(".m4s")) return "video/iso.segment";
+  if (hint.includes(".webm")) return "video/webm";
+  if (hint.includes(".mp3")) return "audio/mpeg";
+  if (hint.includes(".m4a") || hint.includes(".aac")) return "audio/mp4";
+  if (hint.includes(".m3u8")) return "application/vnd.apple.mpegurl";
+  if (hint.includes(".vtt")) return "text/vtt; charset=utf-8";
+  if (hint.includes(".srt")) return "application/x-subrip; charset=utf-8";
+  if (hint.includes(".key")) return "application/octet-stream";
+  return "video/mp2t";
+}
+
+export async function handleEdgeStreamProxy(request, url, env) {
+  if (request?.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
+        "Access-Control-Max-Age": "86400",
+      },
+    });
+  }
   const target = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
-  if (!target.startsWith("http")) return new Response("Missing stream URL", { status: 400 });
-  const ref = (url.searchParams.get("referer") || url.searchParams.get("ref") || inferStreamReferer(target)).trim();
+  if (!target) return new Response("Missing stream URL", { status: 400, headers: { "Cache-Control": "no-store" } });
+  if (!isPublicHttpUrl(target)) {
+    return new Response("Blocked target URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+  const explicitRef = (url.searchParams.get("referer") || url.searchParams.get("ref") || "").trim();
+  const ref = (explicitRef || inferStreamReferer(target)).trim();
+  const sig = (url.searchParams.get("sig") || "").trim();
+  const sigOk = (await verifyProxySig(target, explicitRef, sig, env))
+    || (!explicitRef && ref ? await verifyProxySig(target, ref, sig, env) : false);
+  if (!sigOk) {
+    return new Response("Invalid or expired stream signature", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+  }
+
   const hdrs = new Headers({ "User-Agent": UA_CHROME, Accept: "*/*" });
   if (ref) {
     hdrs.set("Referer", ref);
     try { hdrs.set("Origin", new URL(ref).origin); } catch {}
   }
-  const rangeHdr = request.headers.get("Range");
+  const rangeHdr = request?.headers?.get("Range");
   if (rangeHdr) hdrs.set("Range", rangeHdr);
   try {
-    const up = await fetch(target, { headers: hdrs, redirect: "follow", signal: AbortSignal.timeout(20000) });
+    const { resp: up } = await fetchPublicWithRedirects(target, hdrs, 4, 20000);
+    const upCt = (up.headers.get("Content-Type") || "").toLowerCase();
+    if (
+      upCt.includes("text/html") ||
+      upCt.includes("application/xhtml+xml") ||
+      upCt.includes("image/svg+xml") ||
+      upCt.includes("javascript") ||
+      upCt.includes("ecmascript")
+    ) {
+      up.body?.cancel?.();
+      return new Response("Disallowed upstream content type", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
     const outHdrs = new Headers();
     for (const k of ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]) {
       const v = up.headers.get(k);
       if (v) outHdrs.set(k, v);
     }
-    if (!outHdrs.has("Content-Type")) {
-      outHdrs.set("Content-Type", target.includes(".mp4") ? "video/mp4" : "video/mp2t");
+    if (!outHdrs.has("Content-Type") || outHdrs.get("Content-Type").toLowerCase().includes("octet-stream")) {
+      outHdrs.set("Content-Type", resolveFallbackContentType(url.searchParams.get("ext"), target));
     }
     outHdrs.set("Access-Control-Allow-Origin", "*");
-    outHdrs.set("Cache-Control", "public, max-age=300");
+    outHdrs.set("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    outHdrs.set("Vary", "Range");
+    outHdrs.set("X-Content-Type-Options", "nosniff");
+    outHdrs.set("Content-Security-Policy", "sandbox");
+    outHdrs.set("Cache-Control", up.ok ? "public, max-age=300" : "no-store");
     return new Response(up.body, { status: up.status, headers: outHdrs });
-  } catch {
-    return new Response("Stream proxy upstream timeout", { status: 502 });
+  } catch (err) {
+    const blocked = String(err?.message || "").includes("Blocked");
+    return new Response(blocked ? "Blocked redirect URL" : "Stream proxy upstream timeout", {
+      status: blocked ? 403 : 502,
+      headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
+    });
   }
 }
 
-export async function handleEdgeSubtitle(url) {
-  const target = (url.searchParams.get("url") || "").trim();
-  if (!target.startsWith("http")) return new Response("WEBVTT\n\n", { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
-  try {
-    const r = await fetch(target, { headers: { "User-Agent": UA_CHROME }, signal: AbortSignal.timeout(10000) });
-    let txt = await r.text();
-    if (!txt.trimStart().startsWith("WEBVTT")) {
-      txt = "WEBVTT\n\n" + txt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+function assTimeToVtt(t) {
+  const m = String(t || "").trim().match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/);
+  if (!m) return "";
+  return `${m[1].padStart(2, "0")}:${m[2]}:${m[3]}.${m[4]}0`;
+}
+
+function normalizeSubtitleToVtt(raw) {
+  let txt = String(raw || "").replace(/^\uFEFF/, "").trimStart();
+  if (!txt) return "WEBVTT\n\n";
+  if (/^(?:<!doctype|<html|<script|<svg)/i.test(txt)) return "";
+  if (txt.startsWith("WEBVTT")) return txt;
+  if (/^\[Script Info\]/im.test(txt) || /^Dialogue:/im.test(txt)) {
+    const cues = [];
+    for (const line of txt.split(/\r?\n/)) {
+      if (!line.startsWith("Dialogue:")) continue;
+      const parts = line.slice(9).split(",");
+      if (parts.length < 10) continue;
+      const start = assTimeToVtt(parts[1]);
+      const end = assTimeToVtt(parts[2]);
+      const body = parts.slice(9).join(",").replace(/\{\\[^}]*\}/g, "").replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").trim();
+      if (start && end && body) cues.push(`${start} --> ${end}\n${body}`);
     }
-    return new Response(txt, {
-      status: 200,
-      headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
-    });
-  } catch {
-    return new Response("WEBVTT\n\n", { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+    return "WEBVTT\n\n" + cues.join("\n\n");
   }
+  return "WEBVTT\n\n" + txt.replace(/(\d{1,2}):(\d{2}):(\d{2}),(\d{1,3})/g, (_, h, m, s, ms) => {
+    return `${h.padStart(2, "0")}:${m}:${s}.${ms.padEnd(3, "0")}`;
+  });
+}
+
+export async function handleEdgeSubtitle(url, env) {
+  const target = (url.searchParams.get("url") || "").trim();
+  if (!target) {
+    return new Response("WEBVTT\n\n", {
+      status: 200,
+      headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
+    });
+  }
+  if (!isPublicHttpUrl(target)) {
+    return new Response("Invalid subtitle URL", {
+      status: 403,
+      headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*", "X-Content-Type-Options": "nosniff" },
+    });
+  }
+  const ref = inferStreamReferer(target);
+  const hdrs = { "User-Agent": UA_CHROME, Accept: "text/vtt,text/plain,*/*" };
+  if (ref) hdrs.Referer = ref;
+  try {
+    const { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 10000);
+    if (!r.ok) {
+      r.body?.cancel?.();
+      return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
+    const buf = await r.arrayBuffer();
+    let raw = "";
+    try {
+      raw = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    } catch {
+      raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
+    }
+    const vtt = normalizeSubtitleToVtt(raw);
+    if (!vtt) {
+      return new Response("Invalid subtitle document", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
+    }
+    return new Response(vtt, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/vtt; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "public, max-age=3600",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (err) {
+    const blocked = String(err?.message || "").includes("Blocked");
+    return new Response(blocked ? "Blocked subtitle URL" : "Subtitle fetch timeout", {
+      status: blocked ? 403 : 502,
+      headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
+    });
+  }
+}
+
+const ALLOWED_POSTER_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif", "image/avif"]);
+function isSafeRasterImageType(ct) {
+  const clean = String(ct || "").split(";")[0].trim().toLowerCase();
+  return ALLOWED_POSTER_TYPES.has(clean);
 }
 
 export async function handleEdgePoster(url, env) {
   const target = (url.searchParams.get("u") || url.searchParams.get("url") || "").trim();
-  if (target.startsWith("http://") || target.startsWith("https://")) {
+  if (target && isPublicHttpUrl(target)) {
     try {
       const ref = inferStreamReferer(target);
-      const hdrs = { "User-Agent": UA_CHROME, Accept: "image/avif,image/webp,image/*,*/*;q=0.8" };
+      const hdrs = { "User-Agent": UA_CHROME, Accept: "image/avif,image/webp,image/png,image/jpeg,image/gif" };
       if (ref) hdrs.Referer = ref;
-      const r = await fetch(target, { headers: hdrs, cf: { cacheTtl: 86400, cacheEverything: true }, signal: AbortSignal.timeout(6000) });
-      if (r.ok) {
+      const { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 6000, { cacheTtl: 86400, cacheEverything: true });
+      const ct = r.headers.get("Content-Type") || "";
+      if (r.ok && isSafeRasterImageType(ct)) {
         return new Response(r.body, {
           status: r.status,
           headers: {
-            "Content-Type": r.headers.get("Content-Type") || "image/jpeg",
+            "Content-Type": ct.split(";")[0].trim(),
             "Access-Control-Allow-Origin": "*",
             "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
           },
         });
       }
+      r.body?.cancel?.();
     } catch {}
   }
 
@@ -547,12 +852,20 @@ export async function handleEdgePoster(url, env) {
     }
     if (posterPath) {
       const imgResp = await fetch(`https://image.tmdb.org/t/p/w500${posterPath}`, { cf: { cacheTtl: 86400, cacheEverything: true }, signal: AbortSignal.timeout(5000) });
-      if (imgResp.ok) {
+      const ict = imgResp.headers.get("Content-Type") || "";
+      if (imgResp.ok && isSafeRasterImageType(ict)) {
         return new Response(imgResp.body, {
           status: 200,
-          headers: { "Content-Type": imgResp.headers.get("Content-Type") || "image/jpeg", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400" },
+          headers: {
+            "Content-Type": ict.split(";")[0].trim(),
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox",
+          },
         });
       }
+      imgResp.body?.cancel?.();
     }
   } catch {}
 
@@ -561,9 +874,15 @@ export async function handleEdgePoster(url, env) {
     if (fallback.ok) {
       return new Response(fallback.body, {
         status: 200,
-        headers: { "Content-Type": "image/svg+xml", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600" },
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Access-Control-Allow-Origin": "*",
+          "Cache-Control": "public, max-age=3600",
+          "X-Content-Type-Options": "nosniff",
+          "Content-Security-Policy": "sandbox",
+        },
       });
     }
   }
-  return new Response("Poster unavailable", { status: 404 });
+  return new Response("Poster unavailable", { status: 404, headers: { "Cache-Control": "no-store" } });
 }

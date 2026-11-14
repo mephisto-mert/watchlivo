@@ -79,7 +79,10 @@ export function isCorsSafeMediaElement(el, rawOpts = {}) {
     try {
       const u = new URL(src, window.location.origin);
       if (u.origin === window.location.origin) {
-        return u.pathname.startsWith('/api/rave/') || u.pathname.startsWith('/uploads/') || Boolean(el.crossOrigin);
+        if (el.tagName === 'VIDEO' && u.pathname.startsWith('/api/rave/') && el.crossOrigin !== 'anonymous') {
+          return false;
+        }
+        return u.pathname.startsWith('/api/rave/') || u.pathname.startsWith('/uploads/') || el.crossOrigin === 'anonymous';
       }
     } catch (e) { /* ignore */ }
   }
@@ -246,6 +249,7 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     if (_streamNodes.has(audioEl)) {
       releaseStreamBoost(audioEl);
     }
+    try { audioEl.muted = clamped <= 0; } catch (e) { /* ignore */ }
     try { audioEl.volume = Math.max(0, Math.min(1, clamped / 100)); } catch (e) { /* ignore */ }
     return;
   }

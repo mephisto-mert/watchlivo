@@ -85,18 +85,18 @@ export function parseVtt(vttText) {
         textLines.push(lines[i].trim());
         i += 1;
       }
-      const joinedBlock = textLines.join('\n').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
+      const joinedBlock = textLines.join('\n')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&amp;/gi, '&')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;|&#x27;/gi, "'")
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+        .replace(/<[^>]*>/g, '');
       const rawLines = joinedBlock.split('\n')
         .filter((l) => !/\\p[1-9]\b/i.test(l))
         .map((l) => l
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .replace(/&#39;|&#x27;/gi, "'")
-          .replace(/&nbsp;/g, ' ')
-          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-          .replace(/<[^>]*>/g, '')
           .replace(/[<>]/g, '')
           .replace(/\{\\[^}]*\}/g, '')
           .replace(/[♪♫♬♩]+/g, ' ')
@@ -325,9 +325,11 @@ export class SubtitleDubController {
       this.selectedAudioId = studioTr.id;
       return studioTr;
     }
-    const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
-    this.selectedAudioId = origFallback?.id || 'orig';
-    return origFallback || null;
+    if (!pref) {
+      const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
+      this.selectedAudioId = origFallback?.id || 'orig';
+      return origFallback || null;
+    }
     if (pref === 'tr-ai-dub') {
       const isAnime = this.media?.provider === 'anime' || this.media?.origLang === 'ja' || this.media?.type === 'anime';
       if (!isAnime || studioTr) {
@@ -727,40 +729,8 @@ export class SubtitleDubController {
 
     // Direct residential browser fetch: Upstream sources like hdfilmcehennemi.mobi and subs5.strem.io
     // support CORS (Access-Control-Allow-Origin: *) but block datacenter IPs. The browser fetches them
-    // directly without 403 blocks!
-    const url = String(track.url || '');
-    let directUrl = track.rawUrl || '';
-    if (!directUrl && url && url.includes('/api/rave/subtitle.vtt')) {
-      try {
-        const uObj = new URL(url, location.origin);
-        directUrl = uObj.searchParams.get('url') || '';
-      } catch (_) {}
-    }
-
-    if (directUrl && /^https?:\/\//i.test(directUrl) && !/[?&]translate=/i.test(url)) {
-      try {
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 3500);
-        const dResp = await fetch(directUrl, { mode: 'cors', signal: ctrl.signal });
-        clearTimeout(tid);
-        if (dResp.ok) {
-          const buf = await dResp.arrayBuffer();
-          let dText = new TextDecoder('utf-8').decode(buf);
-          if (dText.includes('\uFFFD')) {
-            try { dText = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
-          }
-          const dCues = parseVtt(dText);
-          if (Array.isArray(dCues) && dCues.length >= 10) {
-            this.cuesCache.set(cacheKey, { vtt: dText, cues: dCues, failedAt: 0 });
-            return dCues;
-          }
-        }
-      } catch (_) {
-        // Direct fetch failed (CORS, network error, or timeout) - proceed to proxy fallback below
-      }
-    }
-
-    // Fallback: Backend proxy fetch (/api/rave/subtitle.vtt)
+    // Route all remote subtitle fetches through first-party proxy (/api/rave/subtitle.vtt)
+    // to avoid CORS failures (e.g. subs.rapidvid.org) and preserve windows-1254 / ASS normalization.
     if (track.url) {
       try {
         const r = await fetch(track.url);
@@ -768,7 +738,11 @@ export class SubtitleDubController {
           this.cuesCache.set(cacheKey, { vtt: '', cues: [], failedAt: Date.now() });
           return [];
         }
-        const vtt = await r.text();
+        const buf = await r.arrayBuffer();
+        let vtt = new TextDecoder('utf-8').decode(buf);
+        if (vtt.includes('\uFFFD')) {
+          try { vtt = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
+        }
         const cues = parseVtt(vtt);
         this.cuesCache.set(cacheKey, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
         return cues;
@@ -948,7 +922,7 @@ export class SubtitleDubController {
       let cues = await this._loadCuesForTrack(track);
       if (this._destroyed || this._mediaSeq !== seq) return null;
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
-      const minEnd = dur > 600 ? (dur * 0.5) : 900;
+      const minEnd = dur > 120 ? (dur * 0.45) : 300;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
       if (track.source === 'youtube-native') {
         this.selectedSubId = track.id;

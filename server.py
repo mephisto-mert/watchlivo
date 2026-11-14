@@ -2562,7 +2562,8 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         prov_tv_q = f"&with_networks={tv_net}" if tv_net else (f"&with_watch_providers={pid}&watch_region={reg}&with_watch_monetization_types=flatrate|free|ads" if pid else "")
         prov_mv_q = f"&with_watch_providers={pid}&watch_region={reg}&with_watch_monetization_types=flatrate|free|ads" if pid else ""
     base_tv = f"https://api.themoviedb.org/3/discover/tv?api_key={TMDB_API_KEY}&language=tr-TR{prov_tv_q}&without_genres=10763,10764,10766,10767&vote_count.gte=5"
-    base_mv = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR{prov_mv_q}&primary_release_date.lte=2026-04-30&vote_count.gte=10"
+    _today_lte = time.strftime("%Y-%m-%d")
+    base_mv = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR{prov_mv_q}&primary_release_date.lte={_today_lte}&vote_count.gte=10"
 
     eps = []
     if pg == 1 and cat == "all":
@@ -2927,7 +2928,7 @@ def _get_real_tmdb_totals_sync(prov: str, prov_tv_q: str = "", prov_mv_q: str = 
         ("2010-01-01", "2014-12-31"),
         ("2015-01-01", "2018-12-31"),
         ("2019-01-01", "2022-12-31"),
-        ("2023-01-01", "2026-04-30"),
+        ("2023-01-01", time.strftime("%Y-%m-%d")),
     )
     tv_eras = (
         ("1950-01-01", "1999-12-31"),
@@ -8057,7 +8058,7 @@ def _showcase_shuffle_sync(cat: str = "all", mt_filter: str = "", limit: int = 4
                 if r.get("poster_path"):
                     _add_cand(_tmdb_item(r, "tv"), "📺 Dizi+ Arşiv")
         if mt_c != "tv" and cat_c not in ("series", "anime"):
-            mv_u = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR&primary_release_date.lte=2026-04-30&vote_count.gte=80&sort_by=popularity.desc&page={rnd_pg}"
+            mv_u = f"https://api.themoviedb.org/3/discover/movie?api_key={TMDB_API_KEY}&language=tr-TR&primary_release_date.lte={time.strftime('%Y-%m-%d')}&vote_count.gte=80&sort_by=popularity.desc&page={rnd_pg}"
             for r in (_http_json(mv_u, timeout=2.0).get("results") or [])[:16]:
                 if r.get("poster_path"):
                     _add_cand(_tmdb_item(r, "movie"), "🎬 Sinema+ FullHD")
@@ -9724,11 +9725,22 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                             r_headers = {}
                             if use_pool:
                                 try:
-                                    pool_resp = _SEG_POOL.request("GET", url, headers=req_hdrs, preload_content=True, timeout=14.0)
-                                    if pool_resp.status in (200, 206):
-                                        r_data = pool_resp.data
-                                        r_status = pool_resp.status
-                                        r_headers = dict(pool_resp.headers)
+                                    cur_seg_u = url
+                                    for _hop in range(5):
+                                        if not public_http_url(cur_seg_u):
+                                            raise ValueError("Blocked non-public redirect target")
+                                        pool_resp = _SEG_POOL.request("GET", cur_seg_u, headers=req_hdrs, preload_content=True, timeout=14.0, redirect=False)
+                                        if pool_resp.status in (301, 302, 303, 307, 308):
+                                            loc_hdr = (pool_resp.headers.get("Location") or pool_resp.headers.get("location") or "").strip()
+                                            if not loc_hdr:
+                                                break
+                                            cur_seg_u = urllib.parse.urljoin(cur_seg_u, loc_hdr)
+                                            continue
+                                        if pool_resp.status in (200, 206):
+                                            r_data = pool_resp.data
+                                            r_status = pool_resp.status
+                                            r_headers = dict(pool_resp.headers)
+                                        break
                                 except Exception:
                                     r_data = None
                             if r_data is None:
@@ -11845,7 +11857,7 @@ async def health(request: Request):
     )
     return JSONResponse({
         "ok": True,
-        "version": "20261112_v208",
+        "version": "20261114_v215",
         "sharedStore": rooms.STORE.shared,
         "vercel": IS_VERCEL,
         "activeRooms": len(mem_rooms),
@@ -13045,8 +13057,11 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
                 pass
         ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
         return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store"})
+    ga_id = await asyncio.to_thread(_get_ga_measurement_id_sync)
+    if not _is_admin_request(request):
+        return JSONResponse({"ok": True, "gaMeasurementId": ga_id}, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
     summary = await _build_analytics_summary()
-    summary["gaMeasurementId"] = await asyncio.to_thread(_get_ga_measurement_id_sync)
+    summary["gaMeasurementId"] = ga_id
     return JSONResponse(summary, headers={"Cache-Control": "no-store, no-cache, must-revalidate"})
 
 
@@ -13106,22 +13121,10 @@ async def rave_contact_endpoint(request: Request) -> JSONResponse:
         await asyncio.to_thread(_save_contact_message_sync, entry)
         safe_entry = {**entry, "email": _mask_email(email)}
         return JSONResponse({"ok": True, "officialEmail": "dmca@watchlivo.online", "entry": safe_entry}, headers={"Cache-Control": "no-store"})
+    if not _is_admin_request(request):
+        return JSONResponse({"ok": False, "error": "Yönetici yetkisi gerekli."}, status_code=403, headers={"Cache-Control": "no-store"})
     msgs = await asyncio.to_thread(_get_contact_messages_sync)
-    if _is_admin_request(request):
-        pub_msgs = [m for m in msgs[:30] if isinstance(m, dict)]
-    else:
-        pub_msgs = [
-            {
-                "id": str(m.get("id") or ""),
-                "ts": str(m.get("ts") or ""),
-                "category": str(m.get("category") or "contact"),
-                "name": (str(m.get("name") or "M")[:1] + "***"),
-                "email": _mask_email(str(m.get("email") or "")),
-                "subject": str(m.get("subject") or ""),
-            }
-            for m in msgs[:30]
-            if isinstance(m, dict)
-        ]
+    pub_msgs = [m for m in msgs[:30] if isinstance(m, dict)]
     return JSONResponse({"ok": True, "officialEmail": "dmca@watchlivo.online", "messages": pub_msgs}, headers={"Cache-Control": "no-store"})
 
 

@@ -432,7 +432,7 @@ export class YouTubeAdapter {
     });
   }
 
-  async _loadNoCookieIframeFallback(mount, videoId, startAt = 0, autoplay = true) {
+  async _loadNoCookieIframeFallback(mount, videoId, startAt = 0, autoplay = true, useStdHost = false) {
     try {
       await loadYouTubeApi();
     } catch (err) {
@@ -447,12 +447,13 @@ export class YouTubeAdapter {
     await new Promise((resolve) => {
       let settled = false;
       const done = () => { if (!settled) { settled = true; resolve(); } };
+      const safeOrigin = (typeof location !== 'undefined' && /^https?:\/\//.test(location.origin)) ? location.origin : 'https://watchlivo.online';
       this.player = new window.YT.Player(mount, {
-        host: 'https://www.youtube-nocookie.com',
+        host: useStdHost ? 'https://www.youtube.com' : 'https://www.youtube-nocookie.com',
         width: '100%',
         height: '100%',
         videoId,
-        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: location.origin },
+        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: safeOrigin },
         events: {
           onReady: () => {
             if (this._destroyed) return;
@@ -471,8 +472,10 @@ export class YouTubeAdapter {
             done();
             this.events.onBuffering?.(false);
             this.events.onReady?.();
+            clearTimeout(this.autoplayTimer);
             if (autoplay) {
               this.autoplayTimer = setTimeout(() => {
+                if (this._destroyed || !this.wantPlaying || this.userExplicitMuted) return;
                 const st = this.player?.getPlayerState?.();
                 if (st === -1 || st === 5 || st === 2) {
                   this.player?.mute?.();
@@ -492,6 +495,7 @@ export class YouTubeAdapter {
               this.events.onBuffering?.(false);
               this.events.onPlay?.();
             } else if (e.data === S.PAUSED) {
+              clearTimeout(this.autoplayTimer);
               if (this._suppressYtPauseOnce || this._pipActive || this._bgAudioActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
                 this._suppressYtPauseOnce = false;
                 return;
@@ -505,9 +509,18 @@ export class YouTubeAdapter {
               this.events.onBuffering?.(false);
               this.events.onPause?.();
             } else if (e.data === S.BUFFERING) this.events.onBuffering?.(true);
-            else if (e.data === S.ENDED) { this.events.onBuffering?.(false); this.events.onEnded?.(); }
+            else if (e.data === S.ENDED) { clearTimeout(this.autoplayTimer); this.events.onBuffering?.(false); this.events.onEnded?.(); }
           },
           onError: (e) => {
+            clearTimeout(this.autoplayTimer);
+            const errCode = Number(e?.data || 0);
+            if (!useStdHost && [101, 150, 153].includes(errCode) && !this._destroyed) {
+              try { this.player?.destroy?.(); } catch (_) {}
+              this.player = null;
+              mount.replaceChildren();
+              this._loadNoCookieIframeFallback(mount, videoId, Math.floor(this.getTime() || startAt), this.wantPlaying, true).then(done, done);
+              return;
+            }
             if (this.altQueue.length > 0 && this.player?.loadVideoById) {
               const nextVid = this.altQueue.shift();
               try { this.player.loadVideoById(nextVid, Math.floor(this.getTime() || startAt)); done(); return; } catch (_) {}

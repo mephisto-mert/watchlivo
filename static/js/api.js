@@ -49,6 +49,7 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
   const isSafeIdempotentPost = normMethod === 'POST' && _IDEMPOTENT_POST_PATHS.some((p) => pathStr.startsWith(p));
   const canRetry = !isPollSync && (normMethod === 'GET' || normMethod === 'HEAD' || isSafeIdempotentPost);
   const maxRetries = canRetry ? 2 : 0;
+  let retriedEdgeToken = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     const ctl = new AbortController();
@@ -80,6 +81,37 @@ async function _execApi(path, { method = 'GET', body, headers: extraHeaders, tim
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (
+          res.status === 403 &&
+          !retriedEdgeToken &&
+          _isSameOriginPath(pathStr) &&
+          pathStr.startsWith('/api/rave/') &&
+          pathStr !== '/api/rave/session-token' &&
+          !pathStr.startsWith('/api/rave/admin') &&
+          !extSignal?.aborted
+        ) {
+          retriedEdgeToken = true;
+          try {
+            const tokRes = await fetch('/api/rave/session-token', {
+              method: 'GET',
+              cache: 'no-store',
+              credentials: 'same-origin',
+              signal: extSignal || undefined,
+            });
+            if (tokRes.ok) {
+              const tokData = await tokRes.json().catch(() => null);
+              if (tokData?.token) {
+                if (typeof window !== 'undefined') window.__WL_EDGE_TOKEN__ = String(tokData.token);
+                if (typeof document !== 'undefined') {
+                  const meta = document.querySelector('meta[name="wl-edge-token"]');
+                  if (meta) meta.setAttribute('content', String(tokData.token));
+                }
+                attempt -= 1;
+                continue;
+              }
+            }
+          } catch (_) {}
+        }
         const retryHdr = Number(res.headers?.get?.('retry-after') || data?.retryAfter || 0);
         const isGateway5xx = res.status === 502 || res.status === 503 || res.status === 504 || res.status === 530;
         const isTransientGateway = isGateway5xx || (res.status === 429 && (!data?.error || Boolean(data?.retryable) || /^HTTP\s*429\b/i.test(String(data.error))));
