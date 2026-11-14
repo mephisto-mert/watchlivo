@@ -240,7 +240,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   const hasOnlyDeadOrYt = hitRaw && hitStreams.every((pair) => {
     const u = String(Array.isArray(pair) ? pair[0] : pair?.url || "").toLowerCase();
     const k = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
-    return k === "yt" || u.includes("youtube.com/") || u.includes("youtu.be/") || u.includes("pilavyer") || u.includes("dragonballzfans");
+    return k === "yt" || u.includes("youtube.com/") || u.includes("youtu.be/") || u.includes("pilavyer") || u.includes("dragonballzfans") || u.includes("dplayer");
   });
   const hit = hasOnlyDeadOrYt ? null : hitRaw;
   if (!hit) {
