@@ -163,8 +163,12 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     "Referer": "https://animecix.tv/",
   };
   try {
+    const tidNum = Number(tmdbId || 0);
+    if (!acId && tidNum && env?.WATCHLIVO_KV) {
+      const cachedAc = await env.WATCHLIVO_KV.get(`ac_tmdb:${tidNum}`).catch(() => null);
+      if (cachedAc) acId = String(cachedAc).trim();
+    }
     if (!acId) {
-      const tidNum = Number(tmdbId || 0);
       const isLatin = (str) => Boolean(str && !/[\u3040-\u30ff\u4e00-\u9faf\u0400-\u04ff]/.test(str));
       const queries = [];
       if (isLatin(reqTitle)) queries.push(reqTitle);
@@ -186,11 +190,21 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
         if (picked?.id) {
           acId = String(picked.id);
+          if (tidNum && env?.WATCHLIVO_KV) {
+            await env.WATCHLIVO_KV.put(`ac_tmdb:${tidNum}`, acId, { expirationTtl: 86400 }).catch(() => {});
+          }
           break;
         }
       }
     }
     if (!acId) return null;
+    if (env?.WATCHLIVO_KV) {
+      const cachedEp = await env.WATCHLIVO_KV.get(`ac_ep:${acId}:${mtype}:${s}:${e}`).catch(() => null);
+      if (cachedEp && cachedEp.startsWith("https://")) {
+        const proxied = await buildSignedProxyPath(cachedEp, "https://tau-video.xyz/", ".mp4", env);
+        return { url: proxied, streamType: "mp4" };
+      }
+    }
     let vids = null;
     if (mtype === "tv") {
       const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
@@ -227,6 +241,9 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       });
       if (urls.length) {
         const mp4 = urls[0].url;
+        if (env?.WATCHLIVO_KV) {
+          await env.WATCHLIVO_KV.put(`ac_ep:${acId}:${mtype}:${s}:${e}`, mp4, { expirationTtl: 14400 }).catch(() => {});
+        }
         const proxied = await buildSignedProxyPath(mp4, "https://tau-video.xyz/", ".mp4", env);
         return { url: proxied, streamType: "mp4" };
       }

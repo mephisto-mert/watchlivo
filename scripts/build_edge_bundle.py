@@ -179,6 +179,34 @@ def main() -> None:
         except Exception as exc:
             print(f"[EdgeBundle] animecix_tau_map merge skipped: {exc}")
 
+    # 3c. Merge anime_tmdb_tau_map.json (harvested TMDB -> tau-video MP4s) into shards
+    tmdb_tau_path = REPO / "anime_tmdb_tau_map.json"
+    if tmdb_tau_path.exists():
+        try:
+            tmdb_tau = json.loads(tmdb_tau_path.read_text(encoding="utf-8"))
+            for tkey, info in tmdb_tau.items():
+                mp4 = str((info or {}).get("mp4") or "").strip()
+                tid = str((info or {}).get("tmdbId") or "").strip()
+                if not mp4.startswith("https://") or not tid:
+                    continue
+                entry = {
+                    "streams": [[mp4, "mp4"]],
+                    "subs": [],
+                    "title": info.get("title", ""),
+                    "originalTitle": info.get("title", ""),
+                    "year": "",
+                    "mediaType": "tv",
+                    "tmdbId": tid,
+                    "id": f"ac-{info.get('acId', '')}",
+                }
+                buckets[fnv1a_bucket(f"tmdb:{tkey}")][f"tmdb:{tkey}"] = entry
+                buckets[fnv1a_bucket(tkey)][tkey] = entry
+                if tkey.endswith(":s1e1"):
+                    for root_k in (f"tmdb:tv:{tid}", f"tmdb:{tid}", f"tv:{tid}"):
+                        buckets[fnv1a_bucket(root_k)][root_k] = entry
+        except Exception as exc:
+            print(f"[EdgeBundle] anime_tmdb_tau_map merge skipped: {exc}")
+
     for idx, data in enumerate(buckets):
         shard_path = SHARDS_DIR / f"b{idx:02x}.json"
         shard_path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
