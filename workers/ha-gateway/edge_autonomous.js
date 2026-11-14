@@ -592,34 +592,95 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     return edgeJson({ ok: true, items });
   }
   if (safePath === "/api/rave/seasons") {
-    const tid = (url.searchParams.get("tmdbId") || url.searchParams.get("id") || "").trim();
+    const rawId = (url.searchParams.get("id") || "").trim();
+    let tid = (url.searchParams.get("tmdbId") || (/^\d+$/.test(rawId) ? rawId : "")).trim();
+    const qTitle = (url.searchParams.get("title") || "").trim();
     const sNum = Math.max(1, Number(url.searchParams.get("season") || 1) || 1);
-    if (!/^\d+$/.test(tid)) return edgeJson({ ok: true, seasons: [{ season: 1, name: "1. Sezon", episodeCount: 1 }], episodes: [{ episode: 1, name: "1. Bölüm" }] });
+    const cacheKey = `seasons:v2:${tid || rawId || qTitle.toLowerCase()}:${sNum}`;
+    if (env?.WATCHLIVO_KV) {
+      const cached = await env.WATCHLIVO_KV.get(cacheKey, "json").catch(() => null);
+      if (cached && Array.isArray(cached.seasons) && cached.seasons.length && Array.isArray(cached.episodes) && cached.episodes.length) {
+        return edgeJson(cached);
+      }
+    }
     const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
+    let acTitleObj = null;
     try {
-      const [tvResp, seaResp] = await Promise.all([
-        fetch(`https://api.themoviedb.org/3/tv/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3000) }),
-        fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3000) }),
-      ]);
-      const tvJson = tvResp.ok ? await tvResp.json() : {};
-      const seaJson = seaResp.ok ? await seaResp.json() : {};
-      const seasons = (tvJson.seasons || []).filter((x) => Number(x.season_number) > 0).map((x) => ({
-        season: x.season_number,
-        name: x.name || `${x.season_number}. Sezon`,
-        episodeCount: x.episode_count || 1,
-      }));
-      const episodes = (seaJson.episodes || []).map((ep) => ({
-        episode: ep.episode_number,
-        name: ep.name || `${ep.episode_number}. Bölüm`,
-        overview: ep.overview || "",
-        still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : "",
-      }));
-      return edgeJson({
+      const acMatch = rawId.match(/^ac-(\d+)$/);
+      if (!/^\d+$/.test(tid) && acMatch) {
+        const acRes = await fetch(`https://animecix.tv/secure/titles/${acMatch[1]}?seasonNumber=${sNum}`, {
+          headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://animecix.tv/" },
+          signal: AbortSignal.timeout(3500),
+        }).catch(() => null);
+        if (acRes && acRes.ok) {
+          const acJson = await acRes.json().catch(() => null);
+          acTitleObj = acJson?.title || null;
+          if (acTitleObj?.tmdb_id && /^\d+$/.test(String(acTitleObj.tmdb_id))) {
+            tid = String(acTitleObj.tmdb_id);
+          }
+        }
+      }
+      if (!/^\d+$/.test(tid) && qTitle) {
+        const sr = await fetch(`https://api.themoviedb.org/3/search/tv?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(qTitle)}&language=tr-TR`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+        if (sr && sr.ok) {
+          const sj = await sr.json().catch(() => null);
+          const hit = (sj?.results || [])[0];
+          if (hit?.id) tid = String(hit.id);
+        }
+      }
+      let seasons = [];
+      let episodes = [];
+      if (/^\d+$/.test(tid)) {
+        const [tvResp, seaResp] = await Promise.all([
+          fetch(`https://api.themoviedb.org/3/tv/${tid}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3500) }),
+          fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=tr-TR`, { signal: AbortSignal.timeout(3500) }),
+        ]);
+        const tvJson = tvResp.ok ? await tvResp.json() : {};
+        let seaJson = seaResp.ok ? await seaResp.json() : {};
+        if (!Array.isArray(seaJson.episodes) || !seaJson.episodes.length) {
+          const enResp = await fetch(`https://api.themoviedb.org/3/tv/${tid}/season/${sNum}?api_key=${encodeURIComponent(apiKey)}&language=en-US`, { signal: AbortSignal.timeout(2500) }).catch(() => null);
+          if (enResp && enResp.ok) {
+            const enJson = await enResp.json().catch(() => null);
+            if (Array.isArray(enJson?.episodes) && enJson.episodes.length) seaJson = enJson;
+          }
+        }
+        seasons = (tvJson.seasons || []).filter((x) => Number(x.season_number) > 0 && Number(x.episode_count || 0) > 0).map((x) => ({
+          season: x.season_number,
+          name: x.name || `${x.season_number}. Sezon`,
+          episodeCount: x.episode_count || 1,
+        }));
+        episodes = (seaJson.episodes || []).map((ep) => ({
+          episode: ep.episode_number,
+          name: ep.name || `${ep.episode_number}. Bölüm`,
+          overview: ep.overview || "",
+          still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : "",
+        }));
+      }
+      if (!seasons.length && acTitleObj && Array.isArray(acTitleObj.seasons) && acTitleObj.seasons.length) {
+        seasons = acTitleObj.seasons.filter((x) => Number(x.number || x.season_number || 0) > 0).map((x) => ({
+          season: Number(x.number || x.season_number),
+          name: `${Number(x.number || x.season_number)}. Sezon`,
+          episodeCount: Number(x.episodes_count || x.episode_count || 1),
+        }));
+      }
+      if (!episodes.length && acTitleObj?.season?.episodes?.length) {
+        episodes = acTitleObj.season.episodes.map((ep, idx) => ({
+          episode: Number(ep.episode_number || idx + 1),
+          name: ep.name || `${Number(ep.episode_number || idx + 1)}. Bölüm`,
+          overview: ep.description || "",
+          still: ep.poster || "",
+        }));
+      }
+      const out = {
         ok: true,
         tmdbId: tid,
         seasons: seasons.length ? seasons : [{ season: 1, name: "1. Sezon", episodeCount: episodes.length || 1 }],
         episodes: episodes.length ? episodes : [{ episode: 1, name: "1. Bölüm" }],
-      });
+      };
+      if (env?.WATCHLIVO_KV && (seasons.length > 0 || episodes.length > 1)) {
+        await env.WATCHLIVO_KV.put(cacheKey, JSON.stringify(out), { expirationTtl: 3600 }).catch(() => {});
+      }
+      return edgeJson(out);
     } catch {
       return edgeJson({ ok: true, seasons: [{ season: 1, name: "1. Sezon", episodeCount: 1 }], episodes: [{ episode: 1, name: "1. Bölüm" }] });
     }

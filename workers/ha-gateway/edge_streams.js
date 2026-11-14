@@ -123,13 +123,14 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
   const reqPoster = (url.searchParams.get("poster") || "").trim();
   const reqYear = (url.searchParams.get("year") || "").trim();
 
+  const isFirstEp = mtype !== "tv" || (s === 1 && e === 1);
   const lookupKeys = [];
   if (id) {
     if (mtype === "tv") lookupKeys.push(`id:${id}:s${s}e${e}`);
-    lookupKeys.push(`id:${id}`);
+    if (isFirstEp) lookupKeys.push(`id:${id}`);
   }
   if (tmdbId) {
-    lookupKeys.push(`id:${tmdbId}`);
+    if (isFirstEp) lookupKeys.push(`id:${tmdbId}`);
     if (mtype === "tv") {
       lookupKeys.push(
         `tmdb:tv:${tmdbId}:s${s}e${e}`,
@@ -137,10 +138,11 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
         `tv:${tmdbId}:s${s}e${e}`,
         `tv:${tmdbId}:${s}:${e}`,
         `tmdb:${tmdbId}:s${s}e${e}`,
-        `tmdb:${tmdbId}:${s}:${e}`,
-        `tmdb:tv:${tmdbId}`,
-        `tv:${tmdbId}`
+        `tmdb:${tmdbId}:${s}:${e}`
       );
+      if (isFirstEp) {
+        lookupKeys.push(`tmdb:tv:${tmdbId}`, `tv:${tmdbId}`);
+      }
     } else {
       lookupKeys.push(
         `tmdb:movie:${tmdbId}:1:1`,
@@ -150,9 +152,9 @@ export async function handleEdgeResolveCatalog(url, env, jsonResp) {
         `tmdb:${tmdbId}:1:1`
       );
     }
-    lookupKeys.push(`tmdb:${tmdbId}`);
+    if (isFirstEp) lookupKeys.push(`tmdb:${tmdbId}`);
   }
-  if (offUrl) lookupKeys.push(`url:${offUrl}`);
+  if (offUrl && isFirstEp) lookupKeys.push(`url:${offUrl}`);
 
 async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigTitle = "", tmdbId = "") {
   const m = String(id || "").match(/^ac-(\d+)$/);
@@ -207,10 +209,29 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     }
     let vids = null;
     if (mtype === "tv") {
-      const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${e}&season=${s}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
-      if (r.ok) {
-        const d = await r.json().catch(() => null);
-        if (Array.isArray(d) && d.length) vids = d;
+      const seCandidates = [[s, e]];
+      if (tidNum === 85937 && s >= 2) {
+        seCandidates.push([s + 1, e]);
+        if (s === 2 && e > 7) seCandidates.push([3, e - 7]);
+        if (s === 3) seCandidates.push([2, e + 7]);
+        seCandidates.push([s - 1, e]);
+      } else if (s >= 2) {
+        seCandidates.push([s - 1, e], [s + 1, e]);
+      }
+      const seenSe = new Set();
+      for (const [cs, ce] of seCandidates) {
+        if (cs < 1 || ce < 1) continue;
+        const keySe = `${cs}:${ce}`;
+        if (seenSe.has(keySe)) continue;
+        seenSe.add(keySe);
+        const r = await fetch(`https://animecix.tv/secure/episode-videos?titleId=${acId}&episode=${ce}&season=${cs}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });
+        if (r.ok) {
+          const d = await r.json().catch(() => null);
+          if (Array.isArray(d) && d.length) {
+            vids = d;
+            break;
+          }
+        }
       }
     } else {
       const r = await fetch(`https://animecix.tv/secure/videos?titleId=${acId}`, { headers: hdrs, signal: AbortSignal.timeout(4500) });

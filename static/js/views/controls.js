@@ -2914,6 +2914,7 @@ export function buildControls(frame, ctx) {
         } else if (!cachedHyd) {
           window.__wlSeasonsHydrated[hydKey] = 'pending';
           const q = new URLSearchParams({
+            id: String(m.id || ''),
             tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '',
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',

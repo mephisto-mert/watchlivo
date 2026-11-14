@@ -1457,6 +1457,7 @@ export async function renderSeriesPicker(item, prov, container, onBack, onPick, 
     let info = {};
     try {
       info = await api(`/api/rave/seasons?${qs({
+        id: String(item.id || ''),
         tmdbId: /^\d+$/.test(String(item.tmdbId || '')) ? String(item.tmdbId) : (/^\d+$/.test(String(item.id || '')) ? String(item.id) : ''),
         title: item.title || '',
         mediaType: mtype,
