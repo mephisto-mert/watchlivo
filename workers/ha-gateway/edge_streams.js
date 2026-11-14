@@ -184,12 +184,12 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         }
       }
       for (const qRaw of queries) {
-        const sr = await fetch(`https://animecix.tv/secure/search/${encodeURIComponent(qRaw)}?limit=8`, { headers: hdrs, signal: AbortSignal.timeout(3500) });
+        const sr = await fetch(`https://animecix.tv/secure/search/${encodeURIComponent(qRaw)}?limit=20`, { headers: hdrs, signal: AbortSignal.timeout(3500) });
         if (!sr.ok) continue;
         const sd = await sr.json().catch(() => null);
         const results = Array.isArray(sd?.results) ? sd.results : [];
         const exactTmdb = tidNum ? results.find((x) => Number(x?.tmdb_id) === tidNum && (x?.title_type === "anime" || x?.is_series)) : null;
-        const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
+        const picked = exactTmdb || results.find((x) => x?.title_type === "anime" && (mtype !== "tv" || x?.is_series) && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum)) || results.find((x) => x?.title_type === "anime" && (!tidNum || !x?.tmdb_id || Number(x.tmdb_id) === tidNum));
         if (picked?.id) {
           acId = String(picked.id);
           if (tidNum && env?.WATCHLIVO_KV) {
