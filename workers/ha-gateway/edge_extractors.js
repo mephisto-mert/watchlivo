@@ -30,6 +30,7 @@ export function isDirectEmbedPageUrl(rawUrl) {
   if (s.includes("hdfilmcehennemi.mobi/video/embed/")) return true;
   if (/hdfilmcehennemi\.[a-z]+\/rplayer\//i.test(s)) return true;
   if (/rapidvid\.[a-z]+\/(?:vx|e)\//i.test(s)) return true;
+  if (/(?:filemoon|byse)\.[a-z0-9-]+\/(?:e|d)\/[a-z0-9_-]+/i.test(s)) return true;
   return false;
 }
 
@@ -332,6 +333,85 @@ async function fetchTextSafe(targetUrl, hdrs, fetchPublicFn, timeoutMs = 4500) {
   return await resp.text();
 }
 
+function b64UrlToBytes(str) {
+  const norm = String(str || "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = norm.length % 4 === 0 ? 0 : 4 - (norm.length % 4);
+  const bin = atob(norm + "=".repeat(pad));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** Decrypt FileMoon/Byse AES-256-GCM playback payload using WebCrypto. */
+export async function decryptFilemoonPlayback(pb) {
+  if (!pb || typeof pb !== "object" || !pb.payload || !pb.iv) return null;
+  const parts = Array.isArray(pb.key_parts) ? pb.key_parts : [];
+  if (!parts.length) return null;
+  const ver = String(pb.version || "").trim();
+  const vNum = Number(ver);
+  let selected = parts;
+  if (Number.isInteger(vNum) && vNum >= 1 && vNum <= 20) {
+    const a = vNum;
+    const b = 31 - vNum;
+    if (a >= 1 && b >= 1 && a <= parts.length && b <= parts.length && parts[a - 1] && parts[b - 1]) {
+      selected = [parts[a - 1], parts[b - 1]];
+    }
+  }
+  const keyChunks = selected.filter((p) => typeof p === "string" && p.length > 0).map(b64UrlToBytes);
+  const totalLen = keyChunks.reduce((acc, c) => acc + c.length, 0);
+  const rawKey = new Uint8Array(totalLen);
+  let off = 0;
+  for (const c of keyChunks) {
+    rawKey.set(c, off);
+    off += c.length;
+  }
+  const cryptoKey = await crypto.subtle.importKey("raw", rawKey, "AES-GCM", false, ["decrypt"]);
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: b64UrlToBytes(pb.iv) },
+    cryptoKey,
+    b64UrlToBytes(pb.payload)
+  );
+  return JSON.parse(new TextDecoder().decode(decrypted));
+}
+
+async function extractFilemoonStream(embedUrl, u, _fetchPublicFn) {
+  const mCode = u.pathname.match(/\/(?:e|d)\/([a-z0-9_-]+)/i);
+  if (!mCode || u.protocol !== "https:") return null;
+  if (!/^(?:[a-z0-9-]+\.)?(?:filemoon|byse)\.(?:sx|to|in|wf|nl|biz|org)$/i.test(u.hostname)) return null;
+  const apiUrl = `${u.origin}/api/videos/${encodeURIComponent(mCode[1])}`;
+  let rawJson = "";
+  try {
+    const resp = await fetch(apiUrl, {
+      headers: { "User-Agent": UA_EDGE, Referer: `${u.origin}/e/${mCode[1]}`, Accept: "application/json, text/plain, */*" },
+      redirect: "manual",
+      signal: AbortSignal.timeout(5500),
+    });
+    if (resp.ok) rawJson = await resp.text();
+  } catch {
+    return null;
+  }
+  if (!rawJson) return null;
+  let data;
+  try {
+    data = JSON.parse(rawJson);
+  } catch {
+    return null;
+  }
+  const decoded = await decryptFilemoonPlayback(data?.playback).catch(() => null);
+  const sources = Array.isArray(decoded?.sources) ? decoded.sources : [];
+  const hlsSrc = sources.find((s) => /mpegurl|\.m3u8/i.test(String(s?.mime_type || s?.url || ""))) || sources[0];
+  if (!hlsSrc?.url) return null;
+  try {
+    if (isBlockedAdHost(new URL(hlsSrc.url).hostname)) return null;
+  } catch {
+    return null;
+  }
+  const subs = (Array.isArray(decoded?.tracks) ? decoded.tracks : Array.isArray(data?.tracks) ? data.tracks : [])
+    .filter((t) => t?.url && (!t.kind || t.kind === "captions" || t.kind === "subtitles"))
+    .map((t) => ({ lang: String(t.lang || t.language || "tr").slice(0, 2).toLowerCase(), url: t.url }));
+  return { url: hlsSrc.url, referer: `${u.origin}/`, subs, tag: "hls_filemoon" };
+}
+
 export async function resolveEmbedHtmlToHls(embedUrl, fetchPublicFn) {
   const raw = String(embedUrl || "").trim();
   if (!raw) return null;
@@ -340,6 +420,9 @@ export async function resolveEmbedHtmlToHls(embedUrl, fetchPublicFn) {
     u = new URL(raw);
   } catch {
     return null;
+  }
+  if (/(?:filemoon|byse)\.[a-z0-9-]+/i.test(u.hostname)) {
+    return await extractFilemoonStream(raw, u, fetchPublicFn);
   }
   if (isBlockedAdHost(u.hostname)) return null;
   const low = raw.toLowerCase();

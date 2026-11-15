@@ -14,6 +14,8 @@ import {
 } from "../workers/ha-gateway/edge_streams.js";
 import {
   isBlockedAdHost,
+  isDirectEmbedPageUrl,
+  decryptFilemoonPlayback,
   filterM3u8AdDiscontinuities,
   unpackDeanEdwards,
   resolveTurkishCatalogStream,
@@ -1199,4 +1201,27 @@ test("edge_extractors & edge_music: no double dizibox call and plainLyrics/audio
   } finally {
     globalThis.fetch = origFetch;
   }
+});
+
+test("FileMoon AES-GCM playback decryption and direct embed page unwrapping", async () => {
+  assert.equal(isDirectEmbedPageUrl("https://filemoon.sx/e/axwfo34qzc9e"), true);
+  assert.equal(isBlockedAdHost("filemoon.sx"), true);
+
+  const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+  const ivBytes = crypto.getRandomValues(new Uint8Array(12));
+  const toB64Url = (u8) => Buffer.from(u8).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  const parts = Array.from({ length: 30 }, () => toB64Url(crypto.getRandomValues(new Uint8Array(16))));
+  parts[18] = toB64Url(keyBytes.slice(0, 16));
+  parts[11] = toB64Url(keyBytes.slice(16, 32));
+  const cryptoKey = await crypto.subtle.importKey("raw", keyBytes, "AES-GCM", false, ["encrypt"]);
+  const plain = JSON.stringify({ sources: [{ url: "https://cdn.example.net/master.m3u8", mime_type: "application/vnd.apple.mpegurl" }] });
+  const cipherBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBytes }, cryptoKey, new TextEncoder().encode(plain));
+
+  const decoded = await decryptFilemoonPlayback({
+    version: "19",
+    iv: toB64Url(ivBytes),
+    payload: toB64Url(new Uint8Array(cipherBuf)),
+    key_parts: parts,
+  });
+  assert.equal(decoded.sources[0].url, "https://cdn.example.net/master.m3u8");
 });

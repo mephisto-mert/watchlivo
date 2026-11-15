@@ -605,11 +605,12 @@ export async function handleEdgeHlsManifest(url, env) {
     try { target = b64UrlDecode(sid); } catch { return new Response("Invalid sid", { status: 400, headers: { "Cache-Control": "no-store" } }); }
   }
   if (!target) return new Response("Missing stream URL", { status: 400, headers: { "Cache-Control": "no-store" } });
-  if (!isPublicHttpUrl(target)) {
+  const isDirectEmbed = isDirectEmbedPageUrl(target);
+  if (!isDirectEmbed && !isPublicHttpUrl(target)) {
     return new Response("Blocked target URL", { status: 403, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
   }
   let ref = inferStreamReferer(target);
-  if (isDirectEmbedPageUrl(target)) {
+  if (isDirectEmbed) {
     const unwrapped = await resolveEmbedHtmlToHls(target, fetchPublicWithRedirects).catch(() => null);
     if (!unwrapped?.url || !isPublicHttpUrl(unwrapped.url)) {
       return new Response("Upstream embed stream unavailable", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
