@@ -1225,3 +1225,60 @@ test("FileMoon AES-GCM playback decryption and direct embed page unwrapping", as
   });
   assert.equal(decoded.sources[0].url, "https://cdn.example.net/master.m3u8");
 });
+
+test("rooms: GET /api/rooms filters 0-viewer and stale ghost rooms and leave removes empty public room from KV index", async () => {
+  const kv = createMockKv();
+  const nowS = Math.floor(Date.now() / 1000);
+  await kv.put("rooms:public_index", JSON.stringify([
+    { id: "wl-ghost-0", name: "Ghost Room", privacy: "public", curated: false, participantCount: 0, updatedAt: nowS },
+    { id: "wl-stale-1", name: "Stale Pentest Room", privacy: "public", curated: false, participantCount: 1, updatedAt: nowS - 300 },
+    { id: "wl-active-1", name: "Active Room", privacy: "public", curated: false, participantCount: 2, count: 2, updatedAt: nowS },
+  ]));
+  const env = {
+    PROXY_SECRET: "test-secret-key",
+    WATCHLIVO_KV: kv,
+    ASSETS: { async fetch() { return new Response("Not Found", { status: 404 }); } },
+  };
+  const req = new Request("https://watchlivo.online/api/rooms", { headers: { "User-Agent": "Mozilla/5.0" } });
+  const res = await handleAutonomousEdge(
+    req,
+    new URL(req.url),
+    "/api/rooms",
+    env
+  );
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.rooms.some((r) => r.id === "wl-ghost-0"), false);
+  assert.equal(data.rooms.some((r) => r.id === "wl-stale-1"), false);
+  assert.equal(data.rooms.some((r) => r.id === "wl-active-1"), true);
+  assert.equal(data.rooms.some((r) => r.id === "tv-atv"), true);
+
+  // Create a public room via KV fallback and leave it -> must be removed from rooms:public_index
+  const cRes = await handleEdgeRoomCreate(
+    new Request("https://watchlivo.online/api/rooms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Temp Room", privacy: "public", clientId: "host_1", username: "Host" }),
+    }),
+    env,
+    (obj, st = 200) => Response.json(obj, { status: st })
+  );
+  const cData = await cRes.json();
+  assert.equal(cData.ok, true);
+  const rId = cData.room.id;
+  let idx = await kv.get("rooms:public_index", "json");
+  assert.equal(idx.some((r) => r.id === rId), true);
+
+  await handleEdgeRoomSync(
+    rId,
+    new Request(`https://watchlivo.online/api/rooms/${rId}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "leave", clientId: "host_1", clientToken: cData.clientToken }),
+    }),
+    env,
+    (obj, st = 200) => Response.json(obj, { status: st })
+  );
+  idx = await kv.get("rooms:public_index", "json");
+  assert.equal(idx.some((r) => r.id === rId), false);
+});

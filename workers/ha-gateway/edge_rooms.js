@@ -317,6 +317,8 @@ function serializePublicSummary(roomOut) {
     creator: roomOut.creator,
     curated: roomOut.curated,
     participantCount: roomOut.participantCount,
+    count: roomOut.participantCount,
+    updatedAt: nowSec(),
     media: roomOut.media ? {
       title: roomOut.media.title || "",
       poster: roomOut.media.poster || "",
@@ -657,6 +659,19 @@ export class WatchlivoRoomDO {
         let msg; try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === "ping") {
           server.send(JSON.stringify({ type: "pong", t0: msg.t0, t0Epoch: msg.t0Epoch, serverTime: nowSec() }));
+          const tNow = nowSec();
+          if (rm.privacy === "public" && !rm.curated && (!rm._lastIdxSync || tNow - rm._lastIdxSync > 45)) {
+            rm._lastIdxSync = tNow;
+            await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
+          }
+          return;
+        }
+        if (msg.type === "close_room") {
+          if (!tokVerified || !isHostOrCreator(rm, cid) || rm.curated) {
+            server.send(JSON.stringify({ type: "error", error: "Sadece oda kurucusu odayı kapatabilir." }));
+            return;
+          }
+          await this._closeRoom(roomId);
           return;
         }
         const pr = pruneStaleParticipants(rm);
@@ -666,6 +681,9 @@ export class WatchlivoRoomDO {
           return;
         }
         if (res.dirty || pr) await this._save();
+        if (msg.type === "leave") {
+          await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
+        }
         for (const item of res.pushedEvents) {
           const pkt = item.attachRoom
             ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
@@ -678,8 +696,11 @@ export class WatchlivoRoomDO {
       });
       server.addEventListener("close", async () => {
         this.sockets.delete(server);
+        const closedMark = await this.state.storage.get("closed").catch(() => false);
+        if (closedMark || !this.room) return;
         const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
         await this._save();
+        await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, cid, this.env), this.env);
         for (const item of res?.pushedEvents || []) {
           const pkt = item.attachRoom
             ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
@@ -725,14 +746,7 @@ export class WatchlivoRoomDO {
       if (!tokenVerified || !isHostOrCreator(rm, cid) || rm.curated) {
         return Response.json({ ok: false, error: "Sadece oda kurucusu odayı kapatabilir." }, { status: 403 });
       }
-      this._broadcast({ type: "room_closed", roomId });
-      for (const [ws] of this.sockets.entries()) {
-        try { ws.close(4010, "room_closed"); } catch {}
-      }
-      this.sockets.clear();
-      await this.state.storage.delete("room");
-      await this.state.storage.put("closed", true);
-      this.room = null;
+      await this._closeRoom(roomId);
       return Response.json({ ok: true, roomClosed: true });
     }
 
@@ -754,12 +768,37 @@ export class WatchlivoRoomDO {
     const clientToken = tokenVerified ? suppliedTok : await signRoomClientToken(roomId, cid, this.env);
     return Response.json({ ok: true, clientId: cid, clientToken, serverTime: nowSec(), room: await serializeEdgeRoom(rm, cid, this.env) });
   }
+
+  async _closeRoom(roomId) {
+    this._broadcast({ type: "room_closed", roomId });
+    for (const [ws] of this.sockets.entries()) {
+      try { ws.close(4010, "room_closed"); } catch {}
+    }
+    this.sockets.clear();
+    await this.state.storage.delete("room");
+    await this.state.storage.put("closed", true);
+    this.room = null;
+    if (this.env?.WATCHLIVO_KV) {
+      await this.env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
+      await removePublicRoomIndex(roomId, this.env);
+    }
+  }
+}
+
+async function removePublicRoomIndex(roomId, env) {
+  if (!env?.WATCHLIVO_KV) return;
+  const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
+  const next = idx.filter((x) => x && x.id !== roomId);
+  if (next.length !== idx.length) {
+    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(next), { expirationTtl: 21600 }).catch(() => {});
+  }
 }
 
 async function syncPublicRoomIndex(roomId, serializedRoom, env) {
   if (!env?.WATCHLIVO_KV || !serializedRoom) return;
   const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
-  if (serializedRoom.privacy === "public") {
+  const hasViewers = Number(serializedRoom.participantCount || 0) > 0;
+  if (serializedRoom.privacy === "public" && (hasViewers || serializedRoom.curated)) {
     const summary = serializePublicSummary(serializedRoom);
     const filtered = [summary, ...idx.filter((x) => x && x.id !== roomId)].slice(0, 40);
     await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(filtered), { expirationTtl: 21600 }).catch(() => {});
@@ -811,7 +850,7 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
       const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
       await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
-    } else if (r.ok && data?.room && env.WATCHLIVO_KV && (["init", "join", "leave", "media", "set_media", "kick", "privacy"].includes(body.type) || Boolean(body.activeMedia))) {
+    } else if (r.ok && data?.room && env.WATCHLIVO_KV && (["init", "join", "leave", "hb", "heartbeat", "play", "pause", "seek", "media", "set_media", "kick", "privacy"].includes(body.type) || Boolean(body.activeMedia))) {
       await syncPublicRoomIndex(roomId, data.room, env);
     }
     return jsonResp(data, r.status);

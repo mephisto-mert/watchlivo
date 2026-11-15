@@ -977,7 +977,17 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   // 6. Rooms (24/7 Durable Object + KV + 21 Live TV Curated Rooms)
   if (safePath === "/api/rooms" || safePath === "/api/rave/meshes") {
     if (request.method === "POST") return await handleEdgeRoomCreate(request, env, edgeJson);
-    const pub = env?.WATCHLIVO_KV ? (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [] : [];
+    const rawPub = env?.WATCHLIVO_KV ? (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [] : [];
+    const nowS = Math.floor(Date.now() / 1000);
+    const pub = rawPub.filter((r) =>
+      r && r.id && (
+        r.curated ||
+        (Number(r.participantCount || r.count || 0) > 0 && Number(r.updatedAt || 0) > 0 && (nowS - Number(r.updatedAt)) < 120)
+      )
+    );
+    if (pub.length !== rawPub.length && env?.WATCHLIVO_KV) {
+      await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(pub), { expirationTtl: 21600 }).catch(() => {});
+    }
     const seen = new Set(pub.map((r) => r.id));
     const curated = (boot.curatedRooms && boot.curatedRooms.length) ? boot.curatedRooms : DEFAULT_CURATED_LIVE_ROOMS;
     const merged = [...pub, ...curated.filter((r) => !seen.has(r.id))];
