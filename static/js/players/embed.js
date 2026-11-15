@@ -119,7 +119,7 @@ export class EmbedAdapter {
     const f = document.createElement('iframe');
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;
-    f.referrerPolicy = 'origin';
+    f.referrerPolicy = 'no-referrer';
     f.style.background = '#050a14';
     f.style.colorScheme = 'dark';
     f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');

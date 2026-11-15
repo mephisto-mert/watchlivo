@@ -701,7 +701,12 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
 }
 
 async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl, year, s, e }, fetchPublicFn) {
-  const hdrs = { "User-Agent": UA_EDGE, Referer: "https://www.dizibox.live/", "Accept-Language": "tr-TR,tr;q=0.9" };
+  const hdrs = {
+    "User-Agent": UA_EDGE,
+    Referer: "https://www.dizibox.live/",
+    "Accept-Language": "tr-TR,tr;q=0.9",
+    Cookie: `LockUser=true; isTrustedUser=true; dbxu=${Date.now()}`,
+  };
   const reqTitles = [originalTitle, title, displayTitle].filter((x) => String(x || "").trim());
   const slugs = [];
   if (sourceUrl && /dizibox\./i.test(sourceUrl)) {
@@ -714,13 +719,13 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
     if (sl && !slugs.includes(`${sl}-izle`)) slugs.push(`${sl}-izle`);
   }
 
-  for (const sl of slugs.slice(0, 3)) {
+  const tryDiziboxSlug = async (sl) => {
     const epUrl = `https://www.dizibox.live/${sl}-${s}-sezon-${e}-bolum-izle/`;
     const html = await fetchTextSafe(epUrl, hdrs, fetchPublicFn, 5000);
-    if (!html) continue;
+    if (!html) return null;
     const tM = html.match(/<title>([^<]+)<\/title>/i);
     if (tM && !String(sourceUrl || "").includes("dizibox.")) {
-      if (titlesMatchScore(tM[1], reqTitles, year) < 0) continue;
+      if (titlesMatchScore(tM[1], reqTitles, year) < 0) return null;
     }
 
     const streams = [];
@@ -762,6 +767,12 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
     if (streams.length) {
       return { url: streams[0].url, referer: streams[0].referer, subs: [], streams, tag: "hls_dbx_live" };
     }
+    return null;
+  };
+
+  const results = await Promise.allSettled(slugs.slice(0, 3).map(tryDiziboxSlug));
+  for (const r of results) {
+    if (r.status === "fulfilled" && r.value?.url) return r.value;
   }
   return null;
 }
@@ -769,7 +780,9 @@ async function extractDiziboxEpisode({ title, displayTitle, originalTitle, sourc
 export async function resolveTurkishCatalogStream({ title, displayTitle, originalTitle, sourceUrl, year = "", mtype, s, e, fetchPublicFn }) {
   try {
     const src = String(sourceUrl || "").trim();
+    let triedDizibox = false;
     if (/dizibox\./i.test(src) && mtype === "tv") {
+      triedDizibox = true;
       const dbxRes = await extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn);
       if (dbxRes?.url) return dbxRes;
     }
@@ -785,7 +798,7 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
     if (mtype === "movie") {
       const wtRes = await extractWebteizleMovie({ title, displayTitle, originalTitle, year }, fetchPublicFn);
       if (wtRes?.url) return wtRes;
-    } else if (mtype === "tv") {
+    } else if (mtype === "tv" && !triedDizibox) {
       const dbxRes = await extractDiziboxEpisode({ title, displayTitle, originalTitle, sourceUrl: src, year, s, e }, fetchPublicFn);
       if (dbxRes?.url) return dbxRes;
     }

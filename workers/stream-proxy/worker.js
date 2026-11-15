@@ -59,10 +59,14 @@ function isPublicHttpUrl(rawUrl) {
   if (host.startsWith("[") || host.includes(":")) {
     return false;
   }
-  const ipv4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4) {
-    const [a, b, c, d] = [Number(ipv4[1]), Number(ipv4[2]), Number(ipv4[3]), Number(ipv4[4])];
-    if ([a, b, c, d].some((n) => n > 255)) return false;
+  if (/^\d+$/.test(host) || /^0x[0-9a-f]+$/i.test(host)) {
+    return false;
+  }
+  const ipv4Parts = host.split(".");
+  if (ipv4Parts.length === 4 && ipv4Parts.every((p) => /^(?:\d+|0x[0-9a-f]+)$/i.test(p))) {
+    const nums = ipv4Parts.map((p) => (p.toLowerCase().startsWith("0x") ? parseInt(p, 16) : (p.length > 1 && p.startsWith("0") ? parseInt(p, 8) : Number(p))));
+    if (nums.some((n) => !Number.isFinite(n) || n < 0 || n > 255)) return false;
+    const [a, b, c] = nums;
     if (a === 0 || a === 10 || a === 127) return false;
     if (a === 169 && b === 254) return false;
     if (a === 172 && b >= 16 && b <= 31) return false;

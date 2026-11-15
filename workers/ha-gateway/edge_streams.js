@@ -426,13 +426,15 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       u.includes("playmix.uno") ||
       (u.includes("cdnimages") && (u.includes("/hls/") || u.includes("/master.txt"))) ||
       u.includes("hdfilmcehennemi.mobi") ||
-      u.includes("lightspeed.st")
+      u.includes("lightspeed.st") ||
+      (u.includes("vmpx.") && (u.includes("asn=") || u.includes("&i=")))
     );
   };
   const aliveStreams = hitStreams.filter((pair) => !isDeadShardPair(pair));
   const hit = hitRaw && aliveStreams.length ? { ...hitRaw, streams: aliveStreams } : null;
   if (!hit) {
-    const liveAc = (id.startsWith("ac-") || reqTitle || reqOrigTitle)
+    const isAnimeCandidate = id.startsWith("ac-") || url.searchParams.get("isAnime") === "1" || url.searchParams.get("catalogProvider") === "anime" || hitRaw?.catalogProvider === "anime";
+    const liveAc = isAnimeCandidate
       ? await resolveAnimecixLive(id, mtype, s, e, env, reqTitle, reqOrigTitle, tmdbId, bypassCache)
       : null;
     if (liveAc) {
@@ -924,7 +926,11 @@ export async function handleEdgeSubtitle(url, env) {
   const hdrs = { "User-Agent": UA_CHROME, Accept: "text/vtt,text/plain,*/*" };
   if (ref) hdrs.Referer = ref;
   try {
-    const { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 10000);
+    let { resp: r } = await fetchPublicWithRedirects(target, hdrs, 4, 10000);
+    if (!r.ok && ref) {
+      r.body?.cancel?.();
+      ({ resp: r } = await fetchPublicWithRedirects(target, { "User-Agent": UA_CHROME, Accept: "*/*" }, 4, 8000));
+    }
     if (!r.ok) {
       r.body?.cancel?.();
       return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });

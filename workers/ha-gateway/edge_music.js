@@ -131,6 +131,19 @@ export function parseLrcToVtt(lrc) {
   return `WEBVTT\n\n${body}\n`;
 }
 
+function plainLyricsToVtt(plain) {
+  const lines = String(plain || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return "WEBVTT\n\n";
+  const fmt = (sec) => {
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.000`;
+  };
+  const body = lines.map((line, i) => `${fmt(i * 4)} --> ${fmt((i + 1) * 4)}\n${line}`).join("\n\n");
+  return `WEBVTT\n\n${body}\n`;
+}
+
 async function resolveYoutubeVideoId(q) {
   try {
     const r = await fetch(`https://www.youtube.com/results?${new URLSearchParams({ search_query: q })}`, {
@@ -209,6 +222,7 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     if (artist || title) {
       const lr = await fetchJsonSafe(`https://lrclib.net/api/get?${new URLSearchParams({ artist_name: artist, track_name: title })}`, 3000);
       if (lr?.syncedLyrics) vtt = parseLrcToVtt(lr.syncedLyrics);
+      else if (lr?.plainLyrics) vtt = plainLyricsToVtt(lr.plainLyrics);
     }
     return new Response(vtt, { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400" } });
   }
@@ -224,7 +238,10 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     const mode = (url.searchParams.get("mode") || "video").trim().toLowerCase();
     const cleanQ = `${artist} ${songTitle}`.trim();
     let vid = /^[\w-]{11}$/.test(vidParam) ? vidParam : "";
-    if (!vid && mode !== "audio" && cleanQ) vid = await resolveYoutubeVideoId(`${cleanQ} official video`);
+    if (!vid && cleanQ) {
+      if (mode !== "audio") vid = await resolveYoutubeVideoId(`${cleanQ} official video`);
+      else if (!prev) vid = await resolveYoutubeVideoId(`${cleanQ} official audio`);
+    }
     const dispTitle = artist && songTitle ? `${artist} — ${songTitle}` : (songTitle || artist || "Müzik");
     const lyricsUrl = `/api/rave/music-lyrics.vtt?${new URLSearchParams({ artist, title: songTitle })}`;
     if (vid) {

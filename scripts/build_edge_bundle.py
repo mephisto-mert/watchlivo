@@ -275,14 +275,19 @@ def main() -> None:
     rooms_payload = fetch_local_json("/api/rooms", {"rooms": prev_boot.get("curatedRooms") or []})
     curated_rooms = [r for r in rooms_payload.get("rooms", []) if isinstance(r, dict) and r.get("curated")]
     new_rel = fetch_local_json("/api/rave/new-releases", {"ok": True, "items": prev_boot.get("newReleases") or all_items[:24]})
-    latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": prev_boot.get("latestEpisodes") or []})
+    fallback_eps = prev_boot.get("latestEpisodes") or [
+        {**it, "season": 1, "episode": 1}
+        for it in all_items
+        if isinstance(it, dict) and it.get("mediaType") == "tv"
+    ][:16]
+    latest_eps = fetch_local_json("/api/rave/latest-episodes", {"ok": True, "items": fallback_eps})
 
     bootstrap = {
         "version": "20261114_v215",
         "catalog": all_items,
         "curatedRooms": curated_rooms,
-        "newReleases": new_rel.get("items", all_items[:24]),
-        "latestEpisodes": latest_eps.get("items", []),
+        "newReleases": new_rel.get("items") or all_items[:24],
+        "latestEpisodes": latest_eps.get("items") or fallback_eps,
     }
     (EDGE_DIR / "bootstrap.json").write_text(
         json.dumps(bootstrap, ensure_ascii=False, separators=(",", ":")),

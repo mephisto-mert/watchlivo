@@ -4,6 +4,7 @@ import {
   handleEdgeStreamProxy,
   handleEdgeSubtitle,
   handleEdgePoster,
+  isPublicHttpUrl,
 } from "./edge_streams.js";
 import {
   handleEdgeRoomCreate,
@@ -202,6 +203,10 @@ function edgeJson(obj, status = 200, extra = {}) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store, private",
+      "Content-Security-Policy": buildAppCsp(makeNonce()),
+      "Permissions-Policy": "camera=(self), microphone=(self), geolocation=()",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "X-Frame-Options": "SAMEORIGIN",
       "X-Watchlivo-Origin": "cf-autonomous-edge",
       "X-Content-Type-Options": "nosniff",
       "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
@@ -265,7 +270,7 @@ function buildCuratedLiveTvRooms() {
     : u;
   const tvSpecs = [
     ["trt1", "TRT 1", "https://tv-trt1.medya.trt.com.tr/master.m3u8"],
-    ["atv", "ATV", "https://trkvz-live.daioncdn.net/atv/atv.m3u8"],
+    ["atv", "ATV", "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv.m3u8"],
     ["now-tv", "NOW", "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8"],
     ["star-tv", "Star TV", "https://dogus.daioncdn.net/startv/startv.m3u8?ce=3&app=a20ac41e-bdc3-4aa1-934d-26b484480ac9"],
     ["trt-spor", "TRT Spor", "https://tv-trtspor1.medya.trt.com.tr/master.m3u8"],
@@ -288,16 +293,19 @@ function buildCuratedLiveTvRooms() {
     ["radyo-kral-fm", "Kral FM", "https://dygedge2.radyotvonline.net/kralfm/playlist.m3u8", "hls"],
     ["radyo-super-fm", "Süper FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/SUPER_FM_SC", "direct"],
     ["radyo-metro-fm", "Metro FM", "https://playerservices.streamtheworld.com/api/livestream-redirect/METRO_FM_SC", "direct"],
-    ["radyo-power-fm", "Power FM", "https://listen.powerapp.com.tr/powerfm/256/chunks.m3u8", "hls"],
+    ["radyo-power-fm", "Power FM", "https://listen.powerapp.com.tr/powerdance/abr/powerdance/128/playlist.m3u8", "hls"],
     ["radyo-joy-turk", "Joy Türk", "https://playerservices.streamtheworld.com/api/livestream-redirect/JOY_TURK_SC", "direct"],
     ["radyo-slow-turk", "Slow Türk", "https://radyo1.radyo-dinle.tc/8062/stream", "direct"],
     ["radyo-best-fm", "Best FM", "https://ssldyg.radyotvonline.com/best/bestfm.stream/playlist.m3u8", "hls"],
-    ["radyo-alem-fm", "Alem FM", "https://turkmedya.radyotvonline.com/turkmedya/alemfm.stream/playlist.m3u8", "hls"],
-  ].map(([rid, name, u, kind]) => {
+    ["radyo-alem-fm", "Alem FM", "https://turkmedya.radyotvonline.net/alemfmaac", "direct"],
+  ].map(([rid, name, u, kind, altU]) => {
     const playU = kind === "hls" ? wrapUrl(u) : u;
+    const altList = [];
+    if (playU !== u) altList.push(u);
+    if (altU) altList.push(wrapUrl(altU));
     return {
       id: rid, name: `7/24 ${name} Canlı Radyo`, creator: "Watchlivo Canlı Radyo", privacy: "public", playMode: "leader", curated: true,
-      media: { provider: kind, streamType: kind === "hls" ? "hls" : "mp3", title: `📻 ${name} · Canlı Radyo`, url: playU, altUrls: playU !== u ? [u] : [], channel: "Canlı Radyo · 7/24", thumbnail: "/static/watchlivo-poster.svg", live: true, isMusic: true, mediaType: "music", artist: name, songTitle: "Canlı Yayın", musicPlatformLabel: "Canlı Radyo", duration: 0 },
+      media: { provider: kind, streamType: kind === "hls" ? "hls" : "mp3", title: `📻 ${name} · Canlı Radyo`, url: playU, altUrls: altList, channel: "Canlı Radyo · 7/24", thumbnail: "/static/watchlivo-poster.svg", live: true, isMusic: true, mediaType: "music", artist: name, songTitle: "Canlı Yayın", musicPlatformLabel: "Canlı Radyo", duration: 0 },
     };
   });
   return [...tvSpecs, ...radioSpecs];
@@ -852,7 +860,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     let acTitleObj = null;
     try {
       const acMatch = rawId.match(/^ac-(\d+)$/);
-      if (!/^\d+$/.test(tid) && acMatch) {
+      if (acMatch) {
         const acRes = await fetch(`https://animecix.tv/secure/titles/${acMatch[1]}?seasonNumber=${sNum}`, {
           headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://animecix.tv/" },
           signal: AbortSignal.timeout(3500),
@@ -860,7 +868,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
         if (acRes && acRes.ok) {
           const acJson = await acRes.json().catch(() => null);
           acTitleObj = acJson?.title || null;
-          if (acTitleObj?.tmdb_id && /^\d+$/.test(String(acTitleObj.tmdb_id))) {
+          if (!/^\d+$/.test(tid) && acTitleObj?.tmdb_id && /^\d+$/.test(String(acTitleObj.tmdb_id))) {
             tid = String(acTitleObj.tmdb_id);
           }
         }
@@ -901,20 +909,30 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
           still: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : "",
         }));
       }
-      if (!seasons.length && acTitleObj && Array.isArray(acTitleObj.seasons) && acTitleObj.seasons.length) {
-        seasons = acTitleObj.seasons.filter((x) => Number(x.number || x.season_number || 0) > 0).map((x) => ({
-          season: Number(x.number || x.season_number),
-          name: `${Number(x.number || x.season_number)}. Sezon`,
-          episodeCount: Number(x.episodes_count || x.episode_count || 1),
-        }));
+      const acSeasons = (acTitleObj && Array.isArray(acTitleObj.seasons))
+        ? acTitleObj.seasons.filter((x) => Number(x.number || x.season_number || 0) > 0).map((x) => {
+            const num = Number(x.number || x.season_number);
+            return {
+              season: num,
+              name: x.name || `${num}. Sezon`,
+              episodeCount: Number(x.episodes_count || x.episode_count || 1),
+            };
+          })
+        : [];
+      const acEpisodes = acTitleObj?.season?.episodes?.length
+        ? acTitleObj.season.episodes.map((ep, idx) => ({
+            episode: Number(ep.episode_number || idx + 1),
+            name: ep.name || `${Number(ep.episode_number || idx + 1)}. Bölüm`,
+            overview: ep.description || "",
+            still: ep.poster || "",
+          }))
+        : [];
+      const preferAc = acSeasons.length > 0 && (!seasons.length || acSeasons.length > seasons.length);
+      if (preferAc) {
+        seasons = acSeasons;
       }
-      if (!episodes.length && acTitleObj?.season?.episodes?.length) {
-        episodes = acTitleObj.season.episodes.map((ep, idx) => ({
-          episode: Number(ep.episode_number || idx + 1),
-          name: ep.name || `${Number(ep.episode_number || idx + 1)}. Bölüm`,
-          overview: ep.description || "",
-          still: ep.poster || "",
-        }));
+      if ((!episodes.length || preferAc) && acEpisodes.length) {
+        episodes = acEpisodes;
       }
       const isFallback = !seasons.length && !episodes.length;
       const out = {
@@ -974,6 +992,17 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   }
 
   // 7. KV-backed Auth & Per-User Lists
+  if ((safePath === "/api/auth/register" || safePath === "/api/auth/login") && request.method === "POST" && env?.WATCHLIVO_KV) {
+    const ip = (request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown").split(",")[0].trim();
+    const bucket = Math.floor(Date.now() / 60000);
+    const ipHash = (await sha256Hex(ip)).slice(0, 16);
+    const rlKey = `rl:auth:${ipHash}:${bucket}`;
+    const attempts = Number(await env.WATCHLIVO_KV.get(rlKey).catch(() => 0)) || 0;
+    if (attempts >= 20) {
+      return edgeJson({ ok: false, error: "Çok fazla deneme. Lütfen bir dakika sonra tekrar deneyin." }, 429);
+    }
+    await env.WATCHLIVO_KV.put(rlKey, String(attempts + 1), { expirationTtl: 120 }).catch(() => {});
+  }
   if (safePath === "/api/auth/me") {
     const authRes = await resolveAuthUser(request, env);
     if (authRes.user) return edgeJson({ ok: true, authenticated: true, user: authRes.user });
@@ -1068,7 +1097,11 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   }
 
   // 8. Explicit 503 for origin-dependent media extraction / unresolved origin routes
-  if (safePath === "/api/rave/extract-video" || safePath === "/api/rave/resolve-music") {
+  if (safePath === "/api/rave/extract-video") {
+    const rawU = (url.searchParams.get("url") || "").trim();
+    if (!rawU || !isPublicHttpUrl(rawU)) {
+      return edgeJson({ ok: false, error: "Geçersiz veya yasaklı hedef URL." }, 400);
+    }
     return edgeJson({
       ok: false,
       error: "Medya çözümleme servisi geçici olarak meşgul, birkaç saniye sonra tekrar deneyin.",
@@ -1076,8 +1109,33 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
       mode: "cf-autonomous-edge",
     }, 503);
   }
+  if (safePath === "/api/rave/resolve-music") {
+    return edgeJson({
+      ok: false,
+      error: "Medya çözümleme servisi geçici olarak meşgul, birkaç saniye sonra tekrar deneyin.",
+      code: "origin_required",
+      mode: "cf-autonomous-edge",
+    }, 503);
+  }
+  if (safePath === "/api/rave/poster-proxy") {
+    return new Response(null, { status: 302, headers: { Location: "/static/watchlivo-poster.svg", "Cache-Control": "no-store" } });
+  }
+  if (safePath === "/api/rave/ai-status") {
+    return edgeJson({ ok: true, engines: [{ id: "edge-local", name: "Edge Local", configured: false }], mode: "cf-autonomous-edge" });
+  }
+  if (safePath === "/api/upload" || safePath === "/api/rave/ai-chat" || safePath === "/api/rave/suno-generate") {
+    const { user } = await resolveAuthUser(request, env);
+    if (!user) return edgeJson({ ok: false, error: "Oturum gerekli." }, 401);
+    return edgeJson({ ok: false, error: "not_implemented_on_edge" }, 501);
+  }
+  if (safePath === "/api/rave/accounts/login") {
+    return edgeJson({ ok: false, code: "unsupported", error: "Üçüncü taraf hesap doğrulaması kenar sunucuda desteklenmiyor." }, 501);
+  }
+  if (safePath === "/api/rave/accounts") {
+    return edgeJson({ ok: true, accounts: { netflix: { accountEmail: "", cookies: [], connected: false } }, mode: "cf-autonomous-edge" });
+  }
   if (safePath.startsWith("/api/")) {
-    return edgeJson({ ok: true, items: [], friends: [], notifications: [], mode: "cf-autonomous-edge" });
+    return edgeJson({ ok: false, error: "not_found" }, 404);
   }
 
   return await serveSpaIndex(env, request.method);

@@ -678,8 +678,14 @@ export class WatchlivoRoomDO {
       });
       server.addEventListener("close", async () => {
         this.sockets.delete(server);
-        applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
+        const res = applyRoomAction(rm, cid, { type: "leave" }, { tokenVerified: true });
         await this._save();
+        for (const item of res?.pushedEvents || []) {
+          const pkt = item.attachRoom
+            ? { ...item.ev, room: await serializeEdgeRoom(rm, item.ev.cid, this.env) }
+            : item.ev;
+          this._broadcast(pkt, null);
+        }
       });
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -750,6 +756,21 @@ export class WatchlivoRoomDO {
   }
 }
 
+async function syncPublicRoomIndex(roomId, serializedRoom, env) {
+  if (!env?.WATCHLIVO_KV || !serializedRoom) return;
+  const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
+  if (serializedRoom.privacy === "public") {
+    const summary = serializePublicSummary(serializedRoom);
+    const filtered = [summary, ...idx.filter((x) => x && x.id !== roomId)].slice(0, 40);
+    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(filtered), { expirationTtl: 21600 }).catch(() => {});
+  } else {
+    const next = idx.filter((x) => x && x.id !== roomId);
+    if (next.length !== idx.length) {
+      await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(next), { expirationTtl: 21600 }).catch(() => {});
+    }
+  }
+}
+
 export async function handleEdgeRoomCreate(request, env, jsonResp) {
   const body = await request.json().catch(() => ({}));
   const roomId = generateOpaqueRoomId();
@@ -769,10 +790,7 @@ export async function handleEdgeRoomCreate(request, env, jsonResp) {
     out = { ok: true, clientId: cid, clientToken: await signRoomClientToken(roomId, cid, env), room: await serializeEdgeRoom(rm, cid, env) };
   }
   if (env.WATCHLIVO_KV && out?.room?.privacy === "public") {
-    const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
-    const summary = serializePublicSummary(out.room);
-    const filtered = [summary, ...idx.filter((x) => x && x.id !== roomId)].slice(0, 40);
-    await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(filtered), { expirationTtl: 21600 });
+    await syncPublicRoomIndex(roomId, out.room, env);
   }
   return jsonResp(out);
 }
@@ -793,6 +811,8 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
       await env.WATCHLIVO_KV.put(`room_closed:${roomId}`, "1", { expirationTtl: 3600 }).catch(() => {});
       const idx = (await env.WATCHLIVO_KV.get("rooms:public_index", "json").catch(() => null)) || [];
       await env.WATCHLIVO_KV.put("rooms:public_index", JSON.stringify(idx.filter((x) => x && x.id !== roomId)), { expirationTtl: 21600 }).catch(() => {});
+    } else if (r.ok && data?.room && env.WATCHLIVO_KV && (["init", "join", "leave", "media", "set_media", "kick", "privacy"].includes(body.type) || Boolean(body.activeMedia))) {
+      await syncPublicRoomIndex(roomId, data.room, env);
     }
     return jsonResp(data, r.status);
   }
@@ -828,11 +848,15 @@ export async function handleEdgeRoomSync(roomId, request, env, jsonResp, curated
   const pruned = pruneStaleParticipants(rm);
   const res = applyRoomAction(rm, cid, body, { tokenVerified });
   if (res.forbiddenError) return jsonResp({ ok: false, error: res.forbiddenError }, 403);
+  const serialized = await serializeEdgeRoom(rm, cid, env);
   if ((res.dirty || pruned) && env.WATCHLIVO_KV) {
     await env.WATCHLIVO_KV.put(`room:${roomId}`, JSON.stringify(rm), { expirationTtl: 43200 });
+    if (["init", "join", "leave", "media", "set_media", "kick", "privacy"].includes(body.type) || Boolean(body.activeMedia) || pruned) {
+      await syncPublicRoomIndex(roomId, serialized, env);
+    }
   }
   const nextTok = tokenVerified ? suppliedTok : await signRoomClientToken(roomId, cid, env);
-  return jsonResp({ ok: true, clientId: cid, clientToken: nextTok, serverTime: nowSec(), room: await serializeEdgeRoom(rm, cid, env) });
+  return jsonResp({ ok: true, clientId: cid, clientToken: nextTok, serverTime: nowSec(), room: serialized });
 }
 
 export async function handleEdgeRoomWs(roomId, request, url, env) {

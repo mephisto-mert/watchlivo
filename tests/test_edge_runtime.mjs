@@ -26,7 +26,8 @@ import {
   handleEdgeRoomSync,
 } from "../workers/ha-gateway/edge_rooms.js";
 import { handleAutonomousEdge } from "../workers/ha-gateway/edge_autonomous.js";
-import { parseLrcToVtt } from "../workers/ha-gateway/edge_music.js";
+import { parseLrcToVtt, handleEdgeMusicRoute } from "../workers/ha-gateway/edge_music.js";
+import streamProxyWorker from "../workers/stream-proxy/worker.js";
 
 function createMockKv() {
   const map = new Map();
@@ -1097,6 +1098,104 @@ test("edge_extractors: webteizle movie, dizibox series & dead cdnimages shard fa
     assert.equal(movJson.streamType, "hls");
     assert.ok(movJson.url.startsWith("/api/rave/stream?"));
     assert.equal(inferStreamReferer("https://prx-1316-ant.vmget.online/hls2/a/master.m3u8"), "https://vidmoly.biz/");
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
+
+test("security & fail-closed routes: edgeJson headers, /api/* 404/401/501, extract-video SSRF, stream-proxy decimal/hex IP", async () => {
+  const env = {
+    PROXY_SECRET: "test-secret-key",
+    WATCHLIVO_KV: createMockKv(),
+    ASSETS: { async fetch() { return new Response("Not Found", { status: 404 }); } },
+  };
+  const callEdge = (path, init) => {
+    const u = new URL(`https://watchlivo.online${path}`);
+    return handleAutonomousEdge(new Request(u, init), u, u.pathname, env);
+  };
+  const hRes = await callEdge("/api/health");
+  assert.equal(hRes.status, 200);
+  assert.equal(hRes.headers.get("X-Frame-Options"), "SAMEORIGIN");
+  assert.equal(hRes.headers.get("Referrer-Policy"), "strict-origin-when-cross-origin");
+  assert.ok(hRes.headers.get("Content-Security-Policy")?.includes("frame-ancestors"));
+  assert.ok(hRes.headers.get("Permissions-Policy")?.includes("geolocation=()"));
+
+  const unkRes = await callEdge("/api/nonexistent-endpoint");
+  assert.equal(unkRes.status, 404);
+
+  const upRes = await callEdge("/api/upload", { method: "POST" });
+  assert.equal(upRes.status, 401);
+
+  const accLogin = await callEdge("/api/rave/accounts/login", { method: "POST" });
+  assert.equal(accLogin.status, 501);
+  assert.equal((await accLogin.json()).code, "unsupported");
+
+  const ssrfRes = await callEdge(
+    "/api/rave/extract-video?url=" + encodeURIComponent("http://127.0.0.1:8080/secret")
+  );
+  assert.equal(ssrfRes.status, 400);
+
+  for (const badHost of ["http://2130706433/v.mp4", "http://0x7f000001/v.mp4", "http://0177.0.0.1/v.mp4"]) {
+    const sig = await signProxySig(badHost, "", env);
+    const spRes = await streamProxyWorker.fetch(
+      new Request(`https://proxy.example.com/api/rave/stream-proxy?url=${encodeURIComponent(badHost)}&sig=${sig}`),
+      env
+    );
+    assert.equal(spRes.status, 403);
+  }
+});
+
+test("edge_extractors & edge_music: no double dizibox call and plainLyrics/audio YT fallback", async () => {
+  const origFetch = globalThis.fetch;
+  let dbxHits = 0;
+  try {
+    globalThis.fetch = async (input) => {
+      const u = typeof input === "string" ? input : input.url;
+      if (u.includes("dizibox.live")) {
+        dbxHits++;
+        return new Response("Not Found", { status: 404 });
+      }
+      if (u.startsWith("https://lrclib.net/api/get")) {
+        return new Response(JSON.stringify({ plainLyrics: "Line one\nLine two" }), { status: 200 });
+      }
+      if (u.startsWith("https://www.youtube.com/results")) {
+        return new Response('{"videoId":"dQw4w9WgXcQ"}', { status: 200 });
+      }
+      return new Response("", { status: 404 });
+    };
+
+    const resDbx = await resolveTurkishCatalogStream({
+      title: "Missing Show",
+      originalTitle: "Missing Show",
+      sourceUrl: "https://www.dizibox.live/diziler/missing-show/",
+      mtype: "tv",
+      s: 1,
+      e: 2,
+      fetchPublicFn: async (u) => ({ resp: await fetch(u), finalUrl: u }),
+    });
+    assert.equal(resDbx, null);
+    assert.equal(dbxHits, 2); // 2 unique slugs once, NOT 4 (no double invocation)
+
+    const env = { WATCHLIVO_KV: createMockKv() };
+    const vttRes = await handleEdgeMusicRoute(
+      new Request("https://watchlivo.online/api/rave/music-lyrics.vtt?artist=Test&title=Song"),
+      new URL("https://watchlivo.online/api/rave/music-lyrics.vtt?artist=Test&title=Song"),
+      "/api/rave/music-lyrics.vtt",
+      env
+    );
+    assert.equal(vttRes.status, 200);
+    const vttTxt = await vttRes.text();
+    assert.ok(vttTxt.includes("Line one") && vttTxt.includes("Line two"));
+
+    const audRes = await handleEdgeMusicRoute(
+      new Request("https://watchlivo.online/api/rave/music-resolve?artist=Test&title=Song&mode=audio"),
+      new URL("https://watchlivo.online/api/rave/music-resolve?artist=Test&title=Song&mode=audio"),
+      "/api/rave/music-resolve",
+      env
+    );
+    assert.equal(audRes.status, 200);
+    const audJson = await audRes.json();
+    assert.equal(audJson.videoId, "dQw4w9WgXcQ");
   } finally {
     globalThis.fetch = origFetch;
   }
