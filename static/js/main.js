@@ -935,8 +935,9 @@ function initSpatialTvNavigation() {
     const dir = map[e.key];
     const active = document.activeElement;
     const isTextInput = active && (
-      (active.tagName === 'INPUT' && !['button', 'checkbox', 'radio', 'range'].includes(active.type)) ||
+      (active.tagName === 'INPUT' && !['button', 'checkbox', 'radio'].includes(active.type)) ||
       active.tagName === 'TEXTAREA' ||
+      active.tagName === 'SELECT' ||
       active.isContentEditable
     );
     if (isTextInput) return;
@@ -1017,3 +1018,21 @@ function bootstrapGoogleAnalytics4() {
 window.vortexSendAnalytics = sendWatchlivoAnalytics;
 bootstrapGoogleAnalytics4();
 setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);
+
+// Global unhandled error boundary
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Unhandled Rejection]', event.reason);
+  const msg = event?.reason?.message || String(event?.reason || '');
+  if (/fatal|crash|critical/i.test(msg)) {
+    toast(`⚠️ Beklenmeyen bir hata oluştu: ${msg.slice(0, 80)}`, 4000);
+  }
+});
+
+window.onerror = (message, source, lineno, colno, error) => {
+  console.error('[Window Error]', { message, source, lineno, colno, error });
+  const msg = error?.message || String(message || '');
+  if (/fatal|crash|critical/i.test(msg)) {
+    toast(`⚠️ Kritik sistem hatası: ${msg.slice(0, 80)}`, 4000);
+  }
+  return false;
+};

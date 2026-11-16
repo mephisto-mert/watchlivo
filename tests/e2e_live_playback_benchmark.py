@@ -132,7 +132,10 @@ def run_e2e_benchmark():
     guest_token = res_guest_join.get("clientToken")
     assert guest_token, "Step 3 Failed: Missing guest clientToken"
     assert res_guest_join.get("clientId") == guest_cid, "Step 3 Failed: Guest CID mismatch"
-    assert res_guest_join.get("room", {}).get("host_id") == host_cid, "Step 3 Failed: Host hijacked by guest"
+    # In edge zero-trust architecture (edge_rooms.js:286), host_id is masked as "" for non-host viewers; local server returns host_cid
+    assert res_guest_join.get("room", {}).get("host_id") in (host_cid, ""), "Step 3 Failed: Host hijacked by guest"
+    guest_parts = res_guest_join.get("room", {}).get("participants", [])
+    assert any(p.get("isHost") or p.get("clientId") == host_cid or p.get("id") == host_cid for p in guest_parts), "Step 3 Failed: Host missing from participants"
     record_metric(3, "Guest Join Room", lat_guest_join, "PASS", f"Guest CID: {guest_cid}, Host Preserved: {host_cid}")
     print(f"[STEP 3 PASS] Guest joined: {guest_cid} (RTT: {lat_guest_join:.2f}ms)")
 

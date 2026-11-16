@@ -49,13 +49,14 @@ export function expectedPosition(media) {
 }
 
 export class SyncEngine {
-  constructor({ getMedia, getAdapter, isLeader, isSolo, onLeaderSync, onStatus }) {
+  constructor({ getMedia, getAdapter, isLeader, isSolo, onLeaderSync, onStatus, clock: syncClock }) {
     this.getMedia = getMedia;
     this.getAdapter = getAdapter;
     this.isLeader = isLeader || (() => false);
     this.isSolo = isSolo || (() => false);
     this.onLeaderSync = onLeaderSync || (() => {});
     this.onStatus = onStatus || (() => {});
+    this.clock = syncClock || clock;
     this.timer = null;
     this.lastDelta = 0; this.inSyncCount = 0; this.flipCount = 0;
     this.seekUntil = 0;
@@ -303,6 +304,9 @@ export class SyncEngine {
       if (abs <= 3.2 && curr >= Math.max(0, expected - 3.5)) {
         this.didInitialSync = true;
       } else if (expected >= 0.8 && abs > 3.2 && now >= this.seekUntil) {
+        if (abs < 4.0 && (this.clock?.samples || 0) < 4) {
+          return 600;
+        }
         const inBufInit = buffered(expected);
         const initLead = inBufInit ? 0 : Math.min(2.5, Number(this.bufferLatency || 0));
         const initTarget = dur > 0 ? Math.min(Math.max(0, dur - 0.5), expected + initLead) : (expected + initLead);
@@ -342,7 +346,8 @@ export class SyncEngine {
       this.bufferLatency = Math.min(5, Math.max(0.2, (this.bufferLatency || 0.4) * 0.5 + lat * 0.5));
       this.pendingSeekAt = 0;
     }
-    if ((stateChanged && abs > 2.8 && now > this.seekUntil) || abs > JUMP_DELTA) {
+    const allowDriftJump = abs >= 4.0 || (this.clock?.samples || 0) >= 4;
+    if (allowDriftJump && ((stateChanged && abs > 2.8 && now > this.seekUntil) || abs > JUMP_DELTA)) {
       const inBuf = buffered(expected);
       const behindAct = (this.didInitialSync && delta > 0 && delta < 8.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)

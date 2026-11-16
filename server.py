@@ -2825,7 +2825,9 @@ def _provider_catalog_page_sync(prov: str, q: str = "", page: int = 1, category:
         if custom_rels:
             filtered_custom = [
                 dict(x) for x in custom_rels
-                if cat in ("all", "vizyon", "trend", "movies", "series") or cat in (x.get("categories") or [])
+                if (cat in ("all", "vizyon", "trend", "movies", "series") or cat in (x.get("categories") or []))
+                and (prov in ("cinema", "all", "vizyon") or x.get("provider") == prov)
+                and (mt_flt not in ("tv", "movie") or x.get("mediaType") == mt_flt)
             ]
             items = filtered_custom + items
     items = [x for x in items if x.get("customRelease") or x.get("isVizyon") or not (float(x.get("rating") or 0) == 0.0 and str(x.get("year") or "") >= "2026")]
@@ -7427,7 +7429,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             fut_pmeta = cat_pool.submit(_fetch_platform_meta_sync, prov, tr_title or orig_title, tid, mtype)
             direct_list = fut_direct.result()
             try:
-                pmeta = fut_pmeta.result(timeout=0.35)
+                pmeta = fut_pmeta.result(timeout=0.85)
             except Exception:
                 def_aud, def_sub = PLATFORM_LANG_PROFILES.get(prov if prov in PROV_LABELS else "cinema", PLATFORM_LANG_PROFILES["cinema"])
                 pmeta = {"prov": prov if prov in PROV_LABELS else "cinema", "officialUrl": "", "audioLangs": list(def_aud), "subLangs": list(def_sub)}
@@ -7599,7 +7601,7 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 fut_subs = sub_pool.submit(_fetch_subtitles_sync, eff_tid, imdb_id, mtype, s, e, eff_prov, pmeta, direct_list)
                 fut_intro_api = sub_pool.submit(_detect_intro_sync, imdb_id, tid, mtype, s, e, None)
                 fut_audio = sub_pool.submit(_build_audio_tracks, wrapped[0][0], direct_list, eff_prov, eff_tid, s, e, pmeta, mtype)
-                concurrent.futures.wait([fut_subs, fut_intro_api, fut_audio], timeout=0.95)
+                concurrent.futures.wait([fut_subs, fut_intro_api, fut_audio], timeout=1.8)
                 try:
                     sub_tracks = fut_subs.result(timeout=0.05) if fut_subs.done() else []
                 except Exception:
@@ -9541,7 +9543,7 @@ _PREFETCHED_URLS: set[str] = set()
 
 def _schedule_segment_prefetch(current_url: str, ref: str):
     clean_u = current_url.split("?")[0].split("#")[0]
-    m = re.search(r'([a-zA-Z_-]*)(\d+)(\.(?:jpg|ts|m4s|mp4|aac|webp|png|key))$', clean_u, re.I)
+    m = re.search(r'([a-zA-Z_-]*)(\d+)(\.(?:jpg|ts|m4s|mp4|aac|webp|png))$', clean_u, re.I)
     if not m:
         return
     prefix, num_str, ext = m.group(1), m.group(2), m.group(3)
@@ -9746,7 +9748,8 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                             if r_data is None:
                                 req = urllib.request.Request(url, headers=req_hdrs)
                                 with _public_open(req, timeout=16) as r:
-                                    data = r.read(28 * 1024 * 1024)
+                                    max_seg_buf = 48 * 1024 * 1024
+                                    data = r.read(max_seg_buf)
                                     raw_ct_low = (r.headers.get("Content-Type") or "").lower()
                                     r_headers = dict(r.headers)
                                     r_status = r.status
@@ -9765,7 +9768,7 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
                                 return data, 206, cr_up, ("video/mp4" if is_mp4_206 else "video/mp2t")
                             raw_cl = (r_headers.get("Content-Length") or r_headers.get("content-length") or "").strip()
                             up_total = int(raw_cl) if raw_cl.isdigit() else 0
-                            if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total and up_total <= 28 * 1024 * 1024:
+                            if is_seg_url and not use_seg_rng and up_total > 0 and len(data) < up_total:
                                 raise IOError(f"Incomplete upstream segment ({len(data)}/{up_total} bytes)")
                             is_mpegts = len(data) >= 189 and data[0] == 0x47 and data[188] == 0x47
                             is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")

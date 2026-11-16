@@ -21,7 +21,14 @@ export function buildLayout(app, ctx) {
   let theaterMode = false;
   let controls = null;
   let chat = null;
-  const handle = h('div', { class: 'resize-handle', title: 'Sürükleyerek boyutlandır' });
+  const handle = h('div', {
+    class: 'resize-handle',
+    title: 'Sürükleyerek boyutlandır',
+    role: 'separator',
+    tabindex: '0',
+    'aria-orientation': 'vertical',
+    'aria-label': 'Sohbet paneli boyutlandırıcı',
+  });
   const chatPanel = h('div', { class: 'panel-chat' });
   const videoChat = h('div', { class: 'video-chat' }, h('div', { class: 'panel-video' }, frame), handle, chatPanel);
   const layout = h('div', { class: 'mesh-layout' }, leftPanel, h('div'), videoChat, h('div'), rightPanel);
@@ -266,5 +273,29 @@ function initResize(handle, chatPanel) {
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
   });
+
+  handle.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const curW = chatPanel.getBoundingClientRect().width || 380;
+      const nextW = Math.max(240, curW - 25);
+      chatPanel.style.setProperty('--chat-w', `${nextW}px`);
+      localStorage.setItem('vortex_chat_w', String(Math.round(nextW)));
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      const maxW = typeof window !== 'undefined' ? window.innerWidth * 0.55 : 640;
+      const curW = chatPanel.getBoundingClientRect().width || 380;
+      const nextW = Math.min(maxW, curW + 25);
+      chatPanel.style.setProperty('--chat-w', `${nextW}px`);
+      localStorage.setItem('vortex_chat_w', String(Math.round(nextW)));
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const curW = Math.round(chatPanel.getBoundingClientRect().width || 380);
+      const targetW = (Math.abs(curW - 380) < 15) ? 280 : 380;
+      chatPanel.style.setProperty('--chat-w', `${targetW}px`);
+      localStorage.setItem('vortex_chat_w', String(targetW));
+    }
+  });
+
   return cleanupDragListeners;
 }

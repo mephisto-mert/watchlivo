@@ -638,11 +638,6 @@ export function buildChat(ctx) {
   }
   let lastTyping = 0;
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp' && input.value.length > 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
     if (e.key === 'Enter' || e.keyCode === 13) {
       e.preventDefault();
       send();

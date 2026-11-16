@@ -519,7 +519,7 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
     clean_artist = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", artist or "").strip()
     q = f"{clean_artist} {clean_title}".strip() or f"{artist} {song_title}".strip()
     if not q:
-        return "WEBVTT\n\n"
+        return "WEBVTT\n\n1\n00:00:01.000 --> 00:03:30.000\n🎵 [Enstrümantal / Sözsüz Parça]\n"
     ckey = q.lower()
     if ckey in _LYRICS_CACHE and time.time() - _LYRICS_CACHE[ckey][0] < 3600:
         return _LYRICS_CACHE[ckey][1]
@@ -555,9 +555,11 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
         for idx_l, ln in enumerate(lines[:60]):
             parsed.append((6.0 + idx_l * 3.8, ln))
     if not parsed:
-        vtt_empty = "WEBVTT\n\n"
-        _LYRICS_CACHE[ckey] = (time.time(), vtt_empty)
-        return vtt_empty
+        desc_parts = [p.strip() for p in (artist, song_title) if p and p.strip()]
+        cue_text = f"🎵 {' — '.join(desc_parts)}" if desc_parts else "🎵 [Enstrümantal / Sözsüz Parça]"
+        vtt_fallback = f"WEBVTT\n\n1\n00:00:01.000 --> 00:03:30.000\n{cue_text}\n"
+        _LYRICS_CACHE[ckey] = (time.time(), vtt_fallback)
+        return vtt_fallback
     cues = []
     for idx, (st, txt) in enumerate(parsed):
         et = parsed[idx + 1][0] - 0.08 if idx + 1 < len(parsed) else st + 4.5

@@ -218,11 +218,15 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
   if (safePath === "/api/rave/music-lyrics.vtt") {
     const artist = (url.searchParams.get("artist") || "").trim().slice(0, 80);
     const title = (url.searchParams.get("title") || "").trim().slice(0, 100);
-    let vtt = "WEBVTT\n\n";
+    let vtt = "";
     if (artist || title) {
       const lr = await fetchJsonSafe(`https://lrclib.net/api/get?${new URLSearchParams({ artist_name: artist, track_name: title })}`, 3000);
       if (lr?.syncedLyrics) vtt = parseLrcToVtt(lr.syncedLyrics);
       else if (lr?.plainLyrics) vtt = plainLyricsToVtt(lr.plainLyrics);
+    }
+    if (!vtt || !vtt.includes("-->")) {
+      const label = [artist, title].filter(Boolean).join(" — ") || "[Enstrümantal / Sözsüz Parça]";
+      vtt = `WEBVTT\n\n1\n00:00:01.000 --> 00:03:30.000\n🎵 ${label}\n`;
     }
     return new Response(vtt, { status: 200, headers: { "Content-Type": "text/vtt; charset=utf-8", "Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400" } });
   }

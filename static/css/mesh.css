@@ -191,7 +191,7 @@ body.vortex-fs .panel-video {
 .timeline .cur { background: #fff; }
 .timeline .knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translate(-50%, -50%) scale(0); transition: transform .15s; }
 .timeline:hover .knob { transform: translate(-50%, -50%) scale(1); }
-@media (max-width: 960px), (pointer: coarse) {
+@media (max-width: 900px), (pointer: coarse) {
   .timeline:not(.locked) .knob { transform: translate(-50%, -50%) scale(.88); }
   .timeline:not(.locked) .track { height: 4px; }
 }

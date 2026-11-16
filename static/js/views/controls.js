@@ -357,6 +357,7 @@ export function buildControls(frame, ctx) {
     'aria-valuemin': '0',
     'aria-valuemax': '100',
     'aria-valuenow': '0',
+    'aria-valuetext': '0:00 / 0:00',
     onkeydown: (e) => {
       if (e.key === 'Home' && canSeekNow()) {
         e.preventDefault();
@@ -1277,7 +1278,7 @@ export function buildControls(frame, ctx) {
     if (document.body.classList.contains('mesh-minimized')) return;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const tag = (e.target?.tagName || '').toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
+    if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target?.isContentEditable || document.querySelector('.popup-backdrop')) return;
     if (e.key === 'Escape') {
       if (!menu.classList.contains('hidden')) { e.preventDefault(); closeMenu(); return; }
       const toolsPop = document.getElementById('chat-tools-popover');
@@ -1308,11 +1309,13 @@ export function buildControls(frame, ctx) {
       revealControls();
     }
     else if (e.key === 'ArrowLeft') {
+      if (tag === 'button' || tag === 'select') return;
       e.preventDefault();
       if (canControlPlayback()) seekStep(-10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
     else if (e.key === 'ArrowRight') {
+      if (tag === 'button' || tag === 'select') return;
       e.preventDefault();
       if (canControlPlayback()) seekStep(10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
@@ -1828,20 +1831,18 @@ export function buildControls(frame, ctx) {
       });
       const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`).catch(() => null);
       if (fresh && fresh.url) {
-        if (true) {
-          m.url = fresh.url;
-          if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
-          if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
-          if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-          host.key = '';
-          host.loadedUrl = '';
-          await host.setMedia(m, curPos, true);
-          ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
-          loading.classList.add('hidden');
-          showOverlay('✅ Yayın kaynağı yenilendi', 2200);
-          update();
-          return;
-        }
+        m.url = fresh.url;
+        if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
+        if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
+        if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
+        host.key = '';
+        host.loadedUrl = '';
+        await host.setMedia(m, curPos, true);
+        ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
+        loading.classList.add('hidden');
+        showOverlay('✅ Yayın kaynağı yenilendi', 2200);
+        update();
+        return;
       }
     } catch (e) { /* ignore */ }
     if (m.url || m.videoId) {
@@ -2126,10 +2127,13 @@ export function buildControls(frame, ctx) {
               || stickyPref === 'tr'
               || String(stickyPref).startsWith('tr-dub-')
               || (!stickyPref && m?.origLang && m.origLang !== 'tr');
-            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream?') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`)) {
+            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`)) {
+              const delim = nextSrvUrl.includes('?') ? '&' : '?';
               nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
                 ? nextSrvUrl.replace('&ext=.m3u8', '&aud=tr&ext=.m3u8')
-                : `${nextSrvUrl}&aud=tr`;
+                : (nextSrvUrl.includes('?ext=.m3u8')
+                  ? nextSrvUrl.replace('?ext=.m3u8', '?aud=tr&ext=.m3u8')
+                  : `${nextSrvUrl}${delim}aud=tr`);
             }
             m.url = nextSrvUrl;
             if (host.loadedUrl) host.loadedUrl = nextSrvUrl;
@@ -3260,10 +3264,16 @@ export function buildControls(frame, ctx) {
       if (ev === 'subtitle-cue') {
         const curSub = host.adapter?.getSelectedSubtitleId?.() || 'off';
         const primaryTxt = curSub === 'off' ? '' : (typeof arg === 'object' ? (arg?.primary || '') : (arg || ''));
+        const secondaryTxt = typeof arg === 'object' ? (arg?.secondary || '') : '';
         subCue.textContent = primaryTxt;
-        dualCue.textContent = '';
-        dualCue.classList.add('hidden');
-        subOverlay.classList.toggle('hidden', !primaryTxt || curSub === 'off');
+        if (secondaryTxt) {
+          dualCue.textContent = secondaryTxt;
+          dualCue.classList.remove('hidden');
+        } else {
+          dualCue.textContent = '';
+          dualCue.classList.add('hidden');
+        }
+        subOverlay.classList.toggle('hidden', (!primaryTxt && !secondaryTxt) || curSub === 'off');
         return;
       }
       if (ev === 'pip-change') {

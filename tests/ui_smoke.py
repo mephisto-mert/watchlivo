@@ -39,4 +39,6 @@ async def main():
         print("errors:", *errs[:20], sep="\n  ")
         await b.close()
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(main())

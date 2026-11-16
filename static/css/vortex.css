@@ -170,6 +170,7 @@ body {
   overflow: hidden; -webkit-font-smoothing: antialiased; user-select: none;
   -webkit-text-size-adjust: 100%;
 }
+.popup, .modal, .modal-backdrop, .legal-modal, .about-content, .toast-content, .log-container { user-select: text; -webkit-user-select: text; }
 input, textarea, button, select { font: inherit; color: inherit; }
 button { cursor: pointer; border: none; background: none; }
 button:active, .pressable:active { transform: var(--click-transform); }

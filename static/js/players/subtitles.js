@@ -1028,15 +1028,56 @@ export class SubtitleDubController {
   }
 
   async _syncSecondaryDualTrack() {
+    if (this.dualSubEnabled && this.selectedDualSubId && this.selectedDualSubId !== 'off') {
+      const track = this.subtitleTracks.find((t) => t.id === this.selectedDualSubId)
+        || this.subtitleTracks.find((t) => t.lang === this.selectedDualSubId);
+      if (track) {
+        this.secondaryCues = (await this._loadCuesForTrack(track)) || [];
+        return;
+      }
+    }
     this.secondaryCues = [];
   }
 
-  async setDualSubtitle() {
-    this.dualSubEnabled = false;
-    this.secondaryCues = [];
-    this.onTimeUpdate(this.adapter.getTime(), true);
-    this.adapter.events.onTracksChanged?.();
-    return false;
+  async setDualSubtitle(subId) {
+    const cleanId = subId || 'off';
+    if (cleanId === 'off') {
+      this.dualSubEnabled = false;
+      this.selectedDualSubId = 'off';
+      this.secondaryCues = [];
+      this.activeSecondaryCueText = '';
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return false;
+    }
+    const track = this.subtitleTracks.find((t) => t.id === cleanId)
+      || this.subtitleTracks.find((t) => t.lang === cleanId)
+      || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId));
+    if (!track) {
+      this.dualSubEnabled = false;
+      this.selectedDualSubId = 'off';
+      this.secondaryCues = [];
+      this.activeSecondaryCueText = '';
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return false;
+    }
+    this.selectedDualSubId = track.id;
+    try {
+      const cues = await this._loadCuesForTrack(track);
+      if (this._destroyed) return false;
+      this.secondaryCues = cues || [];
+      this.dualSubEnabled = true;
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return true;
+    } catch (e) {
+      this.dualSubEnabled = false;
+      this.secondaryCues = [];
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return false;
+    }
   }
 
   async setAudioTrack(id, isInit = false) {
