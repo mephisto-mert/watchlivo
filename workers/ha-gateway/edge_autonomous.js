@@ -1115,6 +1115,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
           headers: { "User-Agent": "WatchlivoAuth/1.0" },
           signal: AbortSignal.timeout(5000),
         });
+        console.log("TokenInfo response:", gResp.status, await gResp.clone().text());
         if (gResp.ok) {
           const gInfo = await gResp.json().catch(() => ({}));
           const aud = String(gInfo?.aud || "");
