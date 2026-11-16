@@ -542,6 +542,9 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
   let phonePendingNumber = '';
   let phoneSending = false;
   const lastProvider = localStorage.getItem(LAST_PROVIDER_KEY) || '';
+  // Preload Firebase Auth SDK while modal opens so Google click preserves synchronous user-gesture for window.open()
+  let _preloadedFb = null;
+  getFirebaseAuth().then((res) => { _preloadedFb = res; }).catch(() => {});
   const root = h('div', { class: 'wl-auth-modal' });
   let modalRef = null;
 
@@ -591,12 +594,11 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
         return;
       }
-      const fb = await getFirebaseAuth();
+      const fb = _preloadedFb || await getFirebaseAuth();
       if (!fb?.auth || !fb?.signInWithPopup) {
         showErr('Giriş servisi yüklenemedi. Sayfayı yenileyip tekrar deneyin.');
         return;
       }
-      try { await fb.auth.signOut?.(); } catch (_) {}
       const gProv = new fb.GoogleAuthProvider();
       gProv.addScope('email');
       gProv.addScope('profile');
@@ -613,8 +615,10 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         return;
       }
       try {
+        // Call signInWithPopup synchronously before any await/DOM churn so browser popup blocker preserves user gesture
+        const popPromise = fb.signInWithPopup(fb.auth, gProv);
         toast('Google ile giriş penceresi açılıyor...');
-        const cred = await fb.signInWithPopup(fb.auth, gProv);
+        const cred = await popPromise;
         if (cred?.user) {
           idToken = await cred.user.getIdToken(true);
           fbEmail = (cred.user.email || '').trim().toLowerCase();
@@ -622,15 +626,18 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
       } catch (popErr) {
         console.warn('Popup login failed, attempting fallback redirect:', popErr);
-        if (fb.signInWithRedirect && /popup-blocked|operation-not-supported/i.test(String(popErr?.code || popErr?.message || ''))) {
+        const errCode = String(popErr?.code || popErr?.message || '');
+        if (fb.signInWithRedirect && /popup-blocked|operation-not-supported|cancelled-popup-request/i.test(errCode)) {
           localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
           sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
           if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
-          toast('Google giriş sayfasına aktarılıyorsunuz...');
+          toast('Açılır pencere engellendi — Google giriş sayfasına aktarılıyorsunuz...');
           await fb.signInWithRedirect(fb.auth, gProv);
           return;
         }
-        showErr('Google girişi iptal edildi veya tamamlanmadı. Lütfen tekrar deneyin.');
+        showErr(/unauthorized-domain/i.test(errCode)
+          ? 'Bu alan adı Firebase Google Auth için yetkilendirilmemiş.'
+          : 'Google girişi iptal edildi veya tamamlanmadı. Lütfen tekrar deneyin.');
         return;
       }
       if (!idToken) {
