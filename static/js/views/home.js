@@ -605,23 +605,23 @@ export function destroyHome() {
 }
 
 function joinByCode() {
-  const input = h('input', { class: 'input', placeholder: 'Oda kodu veya davet bağlantısı' });
+  const input = h('input', { class: 'input', value: '', autocomplete: 'off', placeholder: 'Örn: wl-a1b2c3 veya davet bağlantısı' });
   popup({ title: 'Odaya Katıl', content: input, options: [{ label: 'Katıl', primary: true, onClick: () => {
     const v = input.value.trim();
     const m = v.match(/\/(?:r|join)\/([^/?#]+)/i) || v.match(/mesh\/([^/?#]+)/i) || v.match(/[?&]room=([^&#]+)/i);
-    const id = m ? decodeURIComponent(m[1]) : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
-    if (!id) {
-      toast('Lütfen geçerli bir oda kodu veya davet bağlantısı girin');
+    const id = m ? decodeURIComponent(m[1]).trim() : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (!id || id.length < 4 || !/^[a-z0-9-]+$/i.test(id)) {
+      toast('Lütfen geçerli bir oda kodu (en az 4 karakter) veya davet bağlantısı girin');
       input.focus();
       return true;
     }
     openRoom({ id });
   } }, { label: 'Vazgeç' }] });
-  setTimeout(() => input.focus(), 30);
+  setTimeout(() => { input.value = ''; input.focus(); }, 30);
 }
 
 function openAppSettings() {
-  openThemeModal();
+  profileSetup({ current: state.self, initialTab: 'account' });
 }
 
 function updateMiniPip() {

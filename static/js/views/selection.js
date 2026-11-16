@@ -1219,6 +1219,26 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('div', { class: 'wl-continue-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
           h('button', {
             type: 'button',
+            class: 'btn sm ghost wl-shelf-nav-btn',
+            'aria-label': 'Önceki bölümler',
+            title: 'Sola kaydır',
+            onclick: (e) => {
+              const strip = e.currentTarget.closest('section')?.querySelector('.wl-continue-strip');
+              if (strip) strip.scrollBy({ left: -420, behavior: 'smooth' });
+            },
+          }, '‹'),
+          h('button', {
+            type: 'button',
+            class: 'btn sm ghost wl-shelf-nav-btn',
+            'aria-label': 'Sonraki bölümler',
+            title: 'Sağa kaydır',
+            onclick: (e) => {
+              const strip = e.currentTarget.closest('section')?.querySelector('.wl-continue-strip');
+              if (strip) strip.scrollBy({ left: 420, behavior: 'smooth' });
+            },
+          }, '›'),
+          h('button', {
+            type: 'button',
             class: 'btn sm ghost',
             onclick: () => openVizyonModal(pickSafe),
           }, '🍿 Tüm Vizyon & Yeni Bölümler'))),
@@ -1297,7 +1317,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('span', { html: icons.search, style: { display: 'flex', opacity: .7 } }),
       input,
       voiceSearchBtn,
-      !compact ? h('kbd', { class: 'wl-search-kbd', title: 'Hızlı Arama (Ctrl+K)', onclick: () => input.focus() }, '⌘K') : null,
+      !compact ? h('kbd', {
+        class: 'wl-search-kbd',
+        title: `Hızlı Arama (${/Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl+K'})`,
+        onclick: () => input.focus(),
+      }, /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl+K') : null,
       h('button', { class: 'btn primary', onclick: run }, 'Ara'));
     if (!compact && !document._cmdkOutsideBound) {
       document._cmdkOutsideBound = true;

@@ -422,9 +422,12 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
                 type: 'button',
                 class: 'wl-footer-copy-btn',
                 title: 'E-posta adresini kopyala',
-                onclick: () => {
+                onclick: (e) => {
+                  const btn = e.currentTarget;
                   navigator.clipboard?.writeText(OFFICIAL_CONTACT_EMAIL).catch(() => {});
                   toast(`📋 Kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
+                  btn.textContent = '✓ Kopyalandı';
+                  setTimeout(() => { btn.textContent = 'Kopyala'; }, 1800);
                 },
               }, 'Kopyala')))),
 

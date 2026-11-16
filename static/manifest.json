@@ -1,0 +1,19 @@
+{
+  "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
+  "short_name": "Watchlivo",
+  "description": "Arkadaşlarınla senkronize film, dizi, anime ve müzik izle.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#090c15",
+  "theme_color": "#090c15",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "/static/watchlivo-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

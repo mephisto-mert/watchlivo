@@ -174,6 +174,8 @@ export function buildLayout(app, ctx) {
         theaterMode
           ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(), { selected: true, id: 'nav-toggle-chat' })
           : roomActionBtn('panelRightClose', 'Sinema', 'Sohbeti Gizle / Sinema Modu (T)', () => toggleTheaterMode(), { selected: false, id: 'nav-toggle-chat' })));
+    const toggleBtn = nav.querySelector('#nav-toggle-chat');
+    if (toggleBtn) toggleBtn.setAttribute('aria-pressed', String(theaterMode));
   }
 
   function update() {

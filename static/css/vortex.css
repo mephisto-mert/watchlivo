@@ -7953,3 +7953,72 @@ body.in-room:not(.mesh-minimized) nav.floating-dock,
     gap: 8px !important;
   }
 }
+
+/* === UI/UX Audit Fixes (ISS-02, ISS-04, ISS-05, ISS-07, ISS-14, ISS-17, ISS-20, ISS-21, ISS-22) === */
+body:not(.in-room) {
+  overflow-y: auto !important;
+  overflow-x: clip !important;
+}
+.wl-continue-strip,
+.rave-top-bar .cat-row,
+.wl-theme-strip-pills {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+.wl-shelf-nav-btn {
+  min-width: 32px !important;
+  min-height: 32px !important;
+  font-size: 1.05rem !important;
+  font-weight: 800 !important;
+  line-height: 1 !important;
+}
+.meshthumb .dim,
+.wl-continue-card .dim,
+.wl-meta-sub {
+  color: #cbd5e1 !important;
+}
+@media (max-width: 768px) {
+  .top-nav-capsule .nav-icon,
+  .top-nav-capsule .icon-btn,
+  .floating-dock .dock-btn,
+  .super-close,
+  .wl-modal-close {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  .floating-dock,
+  nav.floating-dock {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  .wl-auth-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 4px !important;
+  }
+  .wl-auth-tabs > button {
+    font-size: 11px !important;
+    padding: 8px 4px !important;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+@media (max-width: 600px) {
+  .brand-logo,
+  .top-nav-capsule .brand-logo {
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+  }
+  .brand-wordmark,
+  .logo-wordmark {
+    display: inline-block !important;
+    font-size: 0.92rem !important;
+  }
+}
+@media (max-width: 520px) {
+  .super-results {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 10px !important;
+  }
+}

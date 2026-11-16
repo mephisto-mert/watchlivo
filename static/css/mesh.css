@@ -6263,3 +6263,29 @@ body.ctl-menu-open .video-frame .ctl-top {
   pointer-events: none !important;
   opacity: 0.25 !important;
 }
+
+/* === Room UI/UX Audit Fixes (ISS-02, ISS-08, ISS-14, ISS-18) === */
+@media (min-width: 1181px) {
+  .mesh-layout.has-right {
+    --right-w: clamp(260px, 22vw, 340px) !important;
+    --gap-r: 6px !important;
+  }
+  .mesh-layout.has-right .panel-right {
+    min-width: 260px !important;
+  }
+}
+@media (max-width: 768px) {
+  #mesh-root .room-nav-pill,
+  #mesh-root .ctl-action,
+  #mesh-root .ctl-btn,
+  #mesh-root .panel-close {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  #mesh-root .chatbar {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.mesh-minimized #mesh-root {
+    bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}

@@ -743,6 +743,17 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
         return new Response(request.method === "HEAD" ? null : ar.body, { status: 200, headers: h });
       }
     }
+    if (safePath === "/manifest.json" || safePath === "/manifest.webmanifest") {
+      return edgeJson({
+        name: "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
+        short_name: "Watchlivo",
+        start_url: "/",
+        display: "standalone",
+        background_color: "#090c15",
+        theme_color: "#090c15",
+        icons: [{ src: "/static/watchlivo-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
+      }, 200, { "Content-Type": "application/manifest+json; charset=utf-8" });
+    }
     return new Response("Not Found", {
       status: 404,
       headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
@@ -1002,7 +1013,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   }
 
   // 7. KV-backed Auth & Per-User Lists
-  if ((safePath === "/api/auth/register" || safePath === "/api/auth/login") && request.method === "POST" && env?.WATCHLIVO_KV) {
+  if ((safePath === "/api/auth/register" || safePath === "/api/auth/login" || safePath === "/api/auth/oauth") && request.method === "POST" && env?.WATCHLIVO_KV) {
     const ip = (request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "unknown").split(",")[0].trim();
     const bucket = Math.floor(Date.now() / 60000);
     const ipHash = (await sha256Hex(ip)).slice(0, 16);
@@ -1061,6 +1072,95 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     const authToken = `${rec.user.id}_${makeNonce()}${makeNonce()}`;
     await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify(rec.user), { expirationTtl: 2592000 });
     return edgeJson({ ok: true, authToken, user: rec.user }, 200, {
+      "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
+    });
+  }
+  if (safePath === "/api/auth/oauth" && request.method === "POST" && env?.WATCHLIVO_KV) {
+    const b = await request.json().catch(() => ({}));
+    const idToken = String(b.idToken || "").trim();
+    const provider = String(b.provider || "google").trim().toLowerCase() || "google";
+    if (!idToken) {
+      return edgeJson({ ok: false, error: "Giriş doğrulanamadı. Lütfen sağlayıcı penceresinden giriş yapın." }, 401);
+    }
+    let fbEmail = "";
+    let fbName = "";
+    const fbApiKey = env?.FIREBASE_WEB_API_KEY || "AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo";
+    try {
+      const fbResp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(fbApiKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+        signal: AbortSignal.timeout(5500),
+      });
+      if (fbResp.ok) {
+        const fbData = await fbResp.json().catch(() => ({}));
+        const u0 = Array.isArray(fbData?.users) ? fbData.users[0] : null;
+        if (u0) {
+          if (u0.email && u0.emailVerified === true) {
+            fbEmail = String(u0.email).trim().toLowerCase();
+          }
+          fbName = String(u0.displayName || "").trim().slice(0, 40);
+          const fbPhone = String(u0.phoneNumber || "").replace(/[^\d+]/g, "");
+          if (!fbEmail && fbPhone) {
+            const digits = fbPhone.replace(/^\+/, "");
+            fbEmail = `p${digits}@phone.watchlivo.online`;
+            if (!fbName) fbName = `Üye ${digits.slice(-4)}`;
+          }
+        }
+      }
+    } catch {}
+    if (!fbEmail && provider === "google") {
+      try {
+        const gResp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`, {
+          headers: { "User-Agent": "WatchlivoAuth/1.0" },
+          signal: AbortSignal.timeout(5000),
+        });
+        if (gResp.ok) {
+          const gInfo = await gResp.json().catch(() => ({}));
+          const aud = String(gInfo?.aud || "");
+          const audOk = aud === "watchlivo-38ab6" || aud.endsWith(".apps.googleusercontent.com");
+          if (audOk && gInfo?.email && (gInfo.email_verified === true || String(gInfo.email_verified).toLowerCase() === "true")) {
+            fbEmail = String(gInfo.email).trim().toLowerCase();
+            fbName = String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
+          }
+        }
+      } catch {}
+    }
+    if (!fbEmail) {
+      return edgeJson({ ok: false, error: "Google oturumu doğrulanamadı. Oturum süresi dolmuş veya geçersiz." }, 401);
+    }
+    const expectedEmail = String(b.email || "").trim().toLowerCase();
+    if (expectedEmail && expectedEmail.includes("@") && expectedEmail !== fbEmail) {
+      return edgeJson({ ok: false, error: `Yazdığınız e-posta (${expectedEmail}) ile seçilen Google hesabı (${fbEmail}) eşleşmiyor.` }, 401);
+    }
+    let rec = await env.WATCHLIVO_KV.get(`acct:${fbEmail}`, "json").catch(() => null);
+    let user = rec?.user || null;
+    if (!user) {
+      const uid = `u_${(await sha256Hex(fbEmail)).slice(0, 14)}`;
+      const displayName = (fbName || String(b.name || "").trim() || fbEmail.split("@")[0] || "Kullanıcı").slice(0, 40);
+      const handleBase = normalizeSearchText(displayName).replace(/\s+/g, "").slice(0, 18) || uid.slice(2, 10);
+      user = {
+        id: uid,
+        uid,
+        email: fbEmail,
+        name: displayName,
+        username: displayName,
+        handle: handleBase,
+        color: /^#[0-9a-fA-F]{6}$/.test(String(b.color || "")) ? b.color : "#27DCC8",
+        provider,
+        verified: true,
+      };
+      const pass = String(b.password || "");
+      const passHash = pass.length >= 6 ? await hashPasswordPbkdf2(pass) : "";
+      await env.WATCHLIVO_KV.put(`acct:${fbEmail}`, JSON.stringify({ user, passHash }));
+      const nameKey = normalizeSearchText(displayName);
+      if (nameKey && !(await env.WATCHLIVO_KV.get(`acct_name:${nameKey}`))) {
+        await env.WATCHLIVO_KV.put(`acct_name:${nameKey}`, fbEmail);
+      }
+    }
+    const authToken = `${user.id}_${makeNonce()}${makeNonce()}`;
+    await env.WATCHLIVO_KV.put(`session:${authToken}`, JSON.stringify(user), { expirationTtl: 2592000 });
+    return edgeJson({ ok: true, authToken, user }, 200, {
       "Set-Cookie": `wl_auth=${encodeURIComponent(authToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`,
     });
   }
@@ -1143,6 +1243,12 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   }
   if (safePath === "/api/rave/accounts") {
     return edgeJson({ ok: true, accounts: { netflix: { accountEmail: "", cookies: [], connected: false } }, mode: "cf-autonomous-edge" });
+  }
+  if (safePath === "/api/rave/social/state") {
+    return edgeJson({ ok: true, friends: [], incomingRequests: [], outgoingRequests: [], roomInvites: [], onlineUsers: [], mode: "cf-autonomous-edge" });
+  }
+  if (safePath === "/api/rave/social/presence" || safePath === "/api/rave/analytics") {
+    return edgeJson({ ok: true, recorded: true, mode: "cf-autonomous-edge" });
   }
   if (safePath.startsWith("/api/")) {
     return edgeJson({ ok: false, error: "not_found" }, 404);

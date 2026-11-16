@@ -127,7 +127,10 @@ window.vortexCloseMinimizedRoom = () => {
   toast('Odadan ayrıldın');
 };
 
+let _routeSeq = 0;
+
 async function route() {
+  const mySeq = ++_routeSeq;
   const r = parseRoute();
   const app = document.getElementById('app');
   const { homeRoot, meshRoot } = ensureViewRoots(app);
@@ -157,7 +160,9 @@ async function route() {
       enteringMeshRoomId = r.params.id;
       try {
         const { enterMesh } = await loadMeshModule();
+        if (mySeq !== _routeSeq) return;
         await enterMesh(meshRoot, r.params);
+        if (mySeq !== _routeSeq) return;
       } catch (err) {
         console.error('[Route] enterMesh error:', err);
         activeMeshRoomId = null;
@@ -213,6 +218,14 @@ async function route() {
         else openLegalModal(legalTab);
       }).catch(() => {});
     }
+  }
+  if (mySeq !== _routeSeq) return;
+  const latestR = parseRoute();
+  if (latestR.name === 'mesh') {
+    homeRoot.classList.add('hidden');
+    meshRoot.classList.remove('hidden');
+  } else {
+    homeRoot.classList.remove('hidden');
   }
   current = r.name;
 }

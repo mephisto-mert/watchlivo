@@ -1282,3 +1282,64 @@ test("rooms: GET /api/rooms filters 0-viewer and stale ghost rooms and leave rem
   idx = await kv.get("rooms:public_index", "json");
   assert.equal(idx.some((r) => r.id === rId), false);
 });
+
+test("auth/oauth (Google Firebase), /manifest.json, and /api/rave/social/* + analytics return 200", async () => {
+  const kv = createMockKv();
+  const env = {
+    PROXY_SECRET: "test-secret-key",
+    WATCHLIVO_KV: kv,
+    ASSETS: { async fetch() { return new Response("Not Found", { status: 404 }); } },
+  };
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async (u) => {
+    const s = String(u);
+    if (s.includes("identitytoolkit.googleapis.com/v1/accounts:lookup")) {
+      return Response.json({ users: [{ email: "tris@gmail.com", emailVerified: true, displayName: "Tris" }] });
+    }
+    return new Response("Not Found", { status: 404 });
+  };
+  try {
+    // 1. Missing idToken -> 401
+    const rBad = await handleAutonomousEdge(
+      new Request("https://watchlivo.online/api/auth/oauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
+        body: JSON.stringify({ provider: "google" }),
+      }),
+      new URL("https://watchlivo.online/api/auth/oauth"),
+      "/api/auth/oauth",
+      env
+    );
+    assert.equal(rBad.status, 401);
+
+    // 2. Valid Firebase idToken -> 200 + wl_auth cookie + user
+    const rOk = await handleAutonomousEdge(
+      new Request("https://watchlivo.online/api/auth/oauth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0" },
+        body: JSON.stringify({ provider: "google", idToken: "fake-valid-fb-jwt" }),
+      }),
+      new URL("https://watchlivo.online/api/auth/oauth"),
+      "/api/auth/oauth",
+      env
+    );
+    assert.equal(rOk.status, 200);
+    const jOk = await rOk.json();
+    assert.equal(jOk.ok, true);
+    assert.equal(jOk.user.email, "tris@gmail.com");
+    assert.ok((rOk.headers.get("Set-Cookie") || "").includes("wl_auth="));
+
+    // 3. /manifest.json + social/state + social/presence + analytics -> 200
+    for (const p of ["/manifest.json", "/api/rave/social/state", "/api/rave/social/presence", "/api/rave/analytics"]) {
+      const rp = await handleAutonomousEdge(
+        new Request(`https://watchlivo.online${p}`, { headers: { "User-Agent": "Mozilla/5.0" } }),
+        new URL(`https://watchlivo.online${p}`),
+        p,
+        env
+      );
+      assert.equal(rp.status, 200, `${p} expected 200`);
+    }
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});
