@@ -1,11 +1,56 @@
-// HTTP API helpers with explicit timeouts.
-export async function api(path, { method = 'GET', body, timeout = 12000 } = {}) {
+// HTTP API helpers with explicit timeouts and automatic Bearer token injection.
+function _getAuthToken() {
+  try {
+    const v2Raw = localStorage.getItem('vortex_profile_v2');
+    if (v2Raw !== null) {
+      const p2 = JSON.parse(v2Raw);
+      if (p2) {
+        if (!p2.isGuest && p2.authToken) return String(p2.authToken);
+        if (p2.isGuest && p2.guestToken) return String(p2.guestToken);
+      }
+    }
+    const tmpGuestRaw = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('vortex_temp_guest_v1') : null;
+    if (tmpGuestRaw) {
+      const gp = JSON.parse(tmpGuestRaw);
+      if (gp && gp.isGuest && gp.guestToken) return String(gp.guestToken);
+    }
+    for (const k of ['vortex_profile_v1', 'vortex_self']) {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const p = JSON.parse(raw);
+      if (p && p.authToken && !p.isGuest) return String(p.authToken);
+    }
+  } catch (_) {}
+  return '';
+}
+
+function _isSameOriginPath(path) {
+  const s = String(path || '');
+  if (s.startsWith('/') && !s.startsWith('//')) return true;
+  if (typeof window !== 'undefined' && window.location?.origin && s.startsWith(`${window.location.origin}/`)) return true;
+  return false;
+}
+
+export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
+  const onExtAbort = () => ctl.abort();
+  if (extSignal) {
+    if (extSignal.aborted) ctl.abort();
+    else extSignal.addEventListener('abort', onExtAbort, { once: true });
+  }
   try {
+    const hdrs = { ...(extraHeaders || {}) };
+    if (body) hdrs['Content-Type'] = 'application/json';
+    const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
+    if (tok && !hdrs.Authorization && !hdrs.authorization) {
+      hdrs.Authorization = `Bearer ${tok}`;
+    }
     const res = await fetch(path, {
       method,
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: Object.keys(hdrs).length ? hdrs : undefined,
       body: body ? JSON.stringify(body) : undefined,
       signal: ctl.signal,
     });
@@ -19,6 +64,9 @@ export async function api(path, { method = 'GET', body, timeout = 12000 } = {}) 
     return data;
   } finally {
     clearTimeout(timer);
+    if (extSignal) {
+      try { extSignal.removeEventListener('abort', onExtAbort); } catch (_) {}
+    }
   }
 }
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import secrets
@@ -23,6 +24,7 @@ from typing import Dict, Optional, Tuple
 # ---------------------------------------------------------------------------
 _EPHEMERAL: Dict[str, bytes] = {}
 _WARNED: set[str] = set()
+_SECRET_LOCK = threading.Lock()
 
 
 def server_secret(name: str, *, min_len: int = 16) -> bytes:
@@ -42,15 +44,151 @@ def server_secret(name: str, *, min_len: int = 16) -> bytes:
             f"{name} ortam değişkeni tanımlı değil veya çok kısa (>= {min_len} karakter). "
             "WATCHLIVO_STRICT_SECRETS=1 iken uygulama başlamaz."
         )
-    if name not in _EPHEMERAL:
-        seed = f"watchlivo-deterministic-secret-v1:{name}:{os.environ.get('VERCEL_GIT_COMMIT_SHA', 'default')}"
-        _EPHEMERAL[name] = hashlib.sha256(seed.encode("utf-8")).digest()
-        if name not in _WARNED:
-            _WARNED.add(name)
-            print(
-                f"[security] {name} tanımlı değil — deterministik çalışma sırrı üretildi."
-            )
-    return _EPHEMERAL[name]
+    with _SECRET_LOCK:
+        if name not in _EPHEMERAL:
+            shared_entropy = ""
+            for env_key in ("VORTEX_SECRET", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN", "REDIS_URL"):
+                cand = (os.environ.get(env_key) or "").strip()
+                if len(cand) >= 24:
+                    shared_entropy = cand
+                    break
+            if shared_entropy:
+                _EPHEMERAL[name] = (
+                    hmac.new(
+                        shared_entropy.encode("utf-8"),
+                        f"watchlivo-shared-secret-v4:{name}".encode("utf-8"),
+                        hashlib.sha256,
+                    )
+                    .hexdigest()[:32]
+                    .encode("ascii")
+                )
+                if name not in _WARNED:
+                    _WARNED.add(name)
+                    print(f"[security] {name} tanımlı değil — özel küme entropisinden deterministik ASCII HMAC sırrı üretildi.")
+            else:
+                _EPHEMERAL[name] = secrets.token_hex(16).encode("ascii")
+                if name not in _WARNED:
+                    _WARNED.add(name)
+                    print(f"[security] {name} tanımlı değil — süreç bazlı rastgele CSPRNG sırrı üretildi.")
+        return _EPHEMERAL[name]
+
+
+class BoundedTTLCache:
+    """Thread-safe dict-compatible LRU + TTL cache preventing unbounded RAM growth."""
+
+    def __init__(self, maxsize: int = 2048, default_ttl: float = 1800.0, ttl: Optional[float] = None) -> None:
+        self.maxsize = max(16, int(maxsize))
+        self.default_ttl = float(ttl if ttl is not None else default_ttl)
+        self._lock = threading.RLock()
+        self._data: "OrderedDict[object, Tuple[object, float]]" = OrderedDict()
+
+    def _purge_expired_locked(self, now_t: float, max_scan: int = 64) -> None:
+        scanned = 0
+        stale = []
+        for k, (_, exp) in self._data.items():
+            if exp > 0 and exp <= now_t:
+                stale.append(k)
+            scanned += 1
+            if scanned >= max_scan:
+                break
+        for k in stale:
+            self._data.pop(k, None)
+
+    def get(self, key: object, default: object = None) -> object:
+        now_t = time.time()
+        with self._lock:
+            item = self._data.get(key)
+            if item is None:
+                return default
+            val, exp = item
+            if exp > 0 and exp <= now_t:
+                self._data.pop(key, None)
+                return default
+            self._data.move_to_end(key)
+            return val
+
+    def set(self, key: object, value: object, ttl: Optional[float] = None) -> None:
+        eff_ttl = self.default_ttl if ttl is None else float(ttl)
+        now_t = time.time()
+        exp = (now_t + eff_ttl) if eff_ttl > 0 else 0.0
+        with self._lock:
+            if key in self._data:
+                self._data.pop(key, None)
+            self._data[key] = (value, exp)
+            if len(self._data) > self.maxsize:
+                self._purge_expired_locked(now_t, max_scan=128)
+                while len(self._data) > self.maxsize:
+                    self._data.popitem(last=False)
+
+    def __getitem__(self, key: object) -> object:
+        sentinel = object()
+        val = self.get(key, sentinel)
+        if val is sentinel:
+            raise KeyError(key)
+        return val
+
+    def __setitem__(self, key: object, value: object) -> None:
+        self.set(key, value)
+
+    def __contains__(self, key: object) -> bool:
+        sentinel = object()
+        return self.get(key, sentinel) is not sentinel
+
+    def setdefault(self, key: object, default: object = None) -> object:
+        sentinel = object()
+        with self._lock:
+            cur = self.get(key, sentinel)
+            if cur is not sentinel:
+                return cur
+            self.set(key, default)
+            return default
+
+    def pop(self, key: object, *args: object) -> object:
+        now_t = time.time()
+        with self._lock:
+            item = self._data.pop(key, None)
+            if item is not None:
+                val, exp = item
+                if exp <= 0 or exp > now_t:
+                    return val
+            if args:
+                return args[0]
+            raise KeyError(key)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+    def keys(self):
+        now_t = time.time()
+        with self._lock:
+            return [k for k, (_, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def values(self):
+        now_t = time.time()
+        with self._lock:
+            return [v for _, (v, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def items(self):
+        now_t = time.time()
+        with self._lock:
+            return [(k, v) for k, (v, exp) in list(self._data.items()) if exp <= 0 or exp > now_t]
+
+    def delete(self, key: object) -> None:
+        with self._lock:
+            self._data.pop(key, None)
+
+    def update(self, mapping: Any) -> None:
+        items = mapping.items() if hasattr(mapping, "items") else mapping
+        for k, v in items:
+            self.set(k, v)
+
+    def __iter__(self):
+        return iter(self.keys())
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
 
 
 def constant_time_eq(left: str, right: str) -> bool:
@@ -76,11 +214,12 @@ def sign_b64(key: bytes, payload: dict) -> str:
 
 def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict]:
     import base64
+    import math
 
     if not token or not isinstance(token, str) or len(token) > 4096 or "." not in token:
         return None
     b64, sig = token.rsplit(".", 1)
-    if not hmac.compare_digest(sign_blob(key, b64)[:32], sig):
+    if not sig.isascii() or not hmac.compare_digest(sign_blob(key, b64)[:32], sig):
         return None
     try:
         pad = "=" * (-len(b64) % 4)
@@ -90,8 +229,12 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
     if not isinstance(data, dict):
         return None
     if max_age > 0:
-        issued = float(data.get("iat") or 0.0)
-        if issued <= 0 or time.time() - issued > max_age:
+        try:
+            issued = float(data.get("iat") or 0.0)
+        except (TypeError, ValueError):
+            return None
+        now_t = time.time()
+        if not math.isfinite(issued) or issued <= 0 or issued > now_t + 60.0 or (now_t - issued > max_age):
             return None
     return data
 
@@ -102,9 +245,17 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
 class RateLimiter:
     """Token-free sliding window limiter.
 
-    Uses Upstash Redis when configured (works across serverless instances),
-    otherwise an in-process ordered mapping.
+    Uses Upstash Redis single-RTT Lua EVAL when configured (atomic across serverless
+    instances), otherwise an in-process ordered mapping.
     """
+
+    _LUA_HIT = (
+        "local c = redis.call('INCR', KEYS[1]); "
+        "if c == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end; "
+        "local ttl = redis.call('PTTL', KEYS[1]); "
+        "if ttl < 0 then redis.call('PEXPIRE', KEYS[1], ARGV[1]); ttl = tonumber(ARGV[1]) end; "
+        "return {c, ttl}"
+    )
 
     def __init__(self, limit: int, window: float, *, name: str = "rl") -> None:
         self.limit = max(1, int(limit))
@@ -140,19 +291,37 @@ class RateLimiter:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
         if url:
+            win_ms = max(1000, int(round(self.window * 1000)))
+            eval_res = self._kv("EVAL", self._LUA_HIT, "1", key, str(win_ms))
+            if isinstance(eval_res, list) and len(eval_res) >= 2:
+                try:
+                    count_int = int(eval_res[0])
+                    pttl_ms = float(eval_res[1])
+                except (TypeError, ValueError):
+                    count_int = None
+                    pttl_ms = -1.0
+                if count_int is not None:
+                    if count_int > self.limit:
+                        retry = (pttl_ms / 1000.0) if pttl_ms > 0 else self.window
+                        return False, max(1.0, retry)
+                    return True, 0.0
+            win_sec = int(self.window) or 1
             count = self._kv("INCR", key)
             try:
                 count_int = int(count)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 count_int = None
             if count_int == 1:
-                self._kv("EXPIRE", key, int(self.window) or 1)
+                self._kv("EXPIRE", key, win_sec)
             if count_int is not None:
                 if count_int > self.limit:
                     ttl = self._kv("TTL", key)
                     try:
                         retry = float(ttl)  # type: ignore[arg-type]
                     except (TypeError, ValueError):
+                        retry = self.window
+                    if retry < 0:
+                        self._kv("EXPIRE", key, win_sec)
                         retry = self.window
                     return False, max(1.0, retry)
                 return True, 0.0
@@ -168,52 +337,160 @@ class RateLimiter:
             if len(self._hits) > 20000:
                 for stale in [k for k, v in list(self._hits.items())[:5000] if not v or v[-1] < cutoff]:
                     self._hits.pop(stale, None)
+                if len(self._hits) > 20000:
+                    for old_k in list(self._hits.keys())[:4000]:
+                        self._hits.pop(old_k, None)
             if len(bucket) >= self.limit:
                 retry = max(1.0, self.window - (t - bucket[0]))
                 return False, retry
             bucket.append(t)
             return True, 0.0
 
+    def peek(self, key: str) -> Tuple[bool, float]:
+        """Check whether key is currently rate-limited without consuming a token."""
+        full_key = f"{self.name}:{key}"[:200]
+        url, _ = self._kv_cfg()
+        if url:
+            raw_cnt = self._kv("GET", full_key)
+            try:
+                cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                cnt_int = 0
+            if cnt_int >= self.limit:
+                ttl = self._kv("TTL", full_key)
+                try:
+                    retry = max(1.0, float(ttl))  # type: ignore[arg-type]
+                except (TypeError, ValueError):
+                    retry = self.window
+                return False, retry
+            return True, 0.0
+        t = time.time()
+        with self._lock:
+            bucket = self._hits.get(full_key) or []
+            cutoff = t - self.window
+            live = [ts for ts in bucket if ts >= cutoff]
+            if len(live) >= self.limit:
+                return False, max(1.0, self.window - (t - live[0]))
+            return True, 0.0
+
     def reset(self, key: str) -> None:
         key = f"{self.name}:{key}"[:200]
+        url, _ = self._kv_cfg()
+        if url:
+            self._kv("DEL", key)
         with self._lock:
             self._hits.pop(key, None)
 
 
+_DOC_TEST_NETS = (
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+)
+
+
+def _is_trusted_proxy_peer(peer: str) -> bool:
+    p = (peer or "").strip()
+    if not p:
+        return False
+    if p in ("127.0.0.1", "::1", "localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(p)
+        if isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in _DOC_TEST_NETS):
+            return False
+        return bool(ip.is_private or ip.is_loopback)
+    except Exception:
+        return False
+
+
 def client_ip(scope_or_request) -> str:
-    """Best-effort client IP honouring common proxy headers."""
-    headers = {}
-    try:
-        headers = scope_or_request.headers  # type: ignore[assignment]
-    except Exception:
-        pass
-    fwd = ""
-    try:
-        fwd = (headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    except Exception:
-        fwd = ""
-    if fwd:
-        return fwd[:64]
-    try:
-        real = headers.get("x-real-ip") or ""
-        if real:
-            return str(real)[:64]
-    except Exception:
-        pass
+    """Best-effort client IP honouring verified proxy headers without client spoofing."""
+    headers: Dict[str, str] = {}
+    if isinstance(scope_or_request, dict):
+        for k, v in (scope_or_request.get("headers") or []):
+            try:
+                headers[k.decode("latin-1").lower()] = v.decode("latin-1")
+            except Exception:
+                continue
+    else:
+        try:
+            headers = scope_or_request.headers  # type: ignore[assignment]
+        except Exception:
+            pass
+    edge_secret = (os.environ.get("EDGE_ORIGIN_SECRET") or os.environ.get("ADMIN_SECRET") or "").strip()
+    req_edge_secret = (headers.get("x-watchlivo-edge-secret") or "").strip()
+    if edge_secret and req_edge_secret and constant_time_eq(req_edge_secret, edge_secret):
+        for hdr_name in ("x-watchlivo-client-ip", "cf-connecting-ip"):
+            edge_ip = (headers.get(hdr_name) or "").split(",")[0].strip()
+            if edge_ip:
+                try:
+                    ipaddress.ip_address(edge_ip)
+                    return edge_ip[:64]
+                except Exception:
+                    continue
+    peer = ""
     try:
         client = getattr(scope_or_request, "client", None)
         if client and getattr(client, "host", None):
-            return str(client.host)[:64]
+            peer = str(client.host).strip()[:64]
     except Exception:
         pass
-    scope = getattr(scope_or_request, "scope", None) or {}
-    try:
-        client = scope.get("client")
-        if client:
-            return str(client[0])[:64]
-    except Exception:
-        pass
-    return "unknown"
+    if not peer:
+        scope = scope_or_request if isinstance(scope_or_request, dict) else (getattr(scope_or_request, "scope", None) or {})
+        try:
+            client = scope.get("client")
+            if client and client[0]:
+                peer = str(client[0]).strip()[:64]
+        except Exception:
+            pass
+    trust_vercel = os.environ.get("VERCEL") == "1"
+    trust_proxy = (
+        os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
+        or bool(os.environ.get("RENDER"))
+        or _is_trusted_proxy_peer(peer)
+    )
+    if trust_vercel and not trust_proxy:
+        v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
+        if v_ip:
+            try:
+                ipaddress.ip_address(v_ip)
+                return v_ip[:64]
+            except Exception:
+                pass
+    elif trust_proxy:
+        cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
+        if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
+            try:
+                ipaddress.ip_address(cf_ip)
+                return cf_ip[:64]
+            except Exception:
+                pass
+        xff = headers.get("x-forwarded-for") or ""
+        if xff:
+            fallback_cand = ""
+            for raw_part in reversed(xff.split(",")):
+                cand = raw_part.strip()
+                if not cand:
+                    continue
+                try:
+                    ipaddress.ip_address(cand)
+                    if not fallback_cand:
+                        fallback_cand = cand[:64]
+                    if not _is_trusted_proxy_peer(cand):
+                        return cand[:64]
+                except Exception:
+                    continue
+            if fallback_cand:
+                return fallback_cand
+        real_ip = (headers.get("x-real-ip") or "").split(",")[0].strip()
+        if real_ip:
+            try:
+                ipaddress.ip_address(real_ip)
+                return real_ip[:64]
+            except Exception:
+                pass
+    return peer or "unknown"
 
 
 def too_many_response(retry_after: float):
@@ -224,3 +501,74 @@ def too_many_response(retry_after: float):
         status_code=429,
         headers={"Retry-After": str(int(max(1, retry_after)))},
     )
+
+
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+_NAT64_NETWORK = ipaddress.ip_network("64:ff9b::/96")
+_NAT64_LOCAL_NETWORK = ipaddress.ip_network("64:ff9b:1::/48")
+
+
+def is_ip_public_global(ip_obj: ipaddress._BaseAddress | str) -> bool:
+    """Validate that an IPv4/IPv6 address (and any embedded/mapped IPv4) is globally routable."""
+    if isinstance(ip_obj, str):
+        s = ip_obj.strip()
+        if not s:
+            return False
+        try:
+            ip_obj = ipaddress.ip_address(s)
+        except ValueError:
+            return False
+    candidates = [ip_obj]
+    if isinstance(ip_obj, ipaddress.IPv6Address):
+        if ip_obj.ipv4_mapped is not None:
+            candidates.append(ip_obj.ipv4_mapped)
+        if ip_obj.sixtofour is not None:
+            candidates.append(ip_obj.sixtofour)
+        if ip_obj.teredo is not None:
+            candidates.extend(ip_obj.teredo)
+        if ip_obj in _NAT64_NETWORK or ip_obj in _NAT64_LOCAL_NETWORK:
+            candidates.append(ipaddress.IPv4Address(int(ip_obj) & 0xFFFFFFFF))
+    for ip in candidates:
+        if (
+            not ip.is_global
+            or ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+            or (isinstance(ip, ipaddress.IPv4Address) and ip in _CGNAT_NETWORK)
+        ):
+            return False
+    return True
+
+
+def is_safe_public_url(url: str) -> bool:
+    """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT/NAT64 ranges."""
+    import socket
+    import urllib.parse
+
+    try:
+        p = urllib.parse.urlparse(str(url or "").strip())
+        if p.scheme not in ("http", "https") or not p.hostname:
+            return False
+        host = p.hostname.lower().rstrip(".")
+        if not host or host in ("localhost", "metadata.google.internal", "metadata") or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
+            return False
+        try:
+            lit_ip = ipaddress.ip_address(host)
+            return is_ip_public_global(lit_ip)
+        except ValueError:
+            pass
+        port = int(p.port or (443 if p.scheme == "https" else 80))
+        infos = socket.getaddrinfo(host, port)
+        if not infos:
+            return False
+        for info in infos:
+            ip = ipaddress.ip_address(info[4][0])
+            if not is_ip_public_global(ip):
+                return False
+        return True
+    except Exception:
+        return False
+

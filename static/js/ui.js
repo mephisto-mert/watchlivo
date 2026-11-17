@@ -1,7 +1,7 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, THEME_SCHEMAS } from './store.js';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v183';
 
-const SVG = (d, extra = '') => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
+const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
 export const icons = {
   close: SVG('<path d="M18 6 6 18M6 6l12 12"/>'),
@@ -35,6 +35,9 @@ export const icons = {
   sparkle: SVG('<path d="m12 3 1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"/><path d="M19 16v4M17 18h4"/>'),
   audioWave: SVG('<path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4"/>'),
   pip: SVG('<rect x="2" y="4" width="20" height="15" rx="2.5"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/>'),
+  cast: SVG('<path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6"/><line x1="2" y1="20" x2="2.01" y2="20"/>'),
+  minimize: SVG('<rect x="2" y="4" width="20" height="15" rx="2.5"/><rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor"/><path d="M6 8l4 4M10 8v4H6"/>'),
+  expand: SVG('<path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>'),
   speed: SVG('<path d="M12 14 15.5 9.5"/><path d="M3.3 17a10 10 0 1 1 17.4 0"/>'),
   externalLink: SVG('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><path d="M15 3h6v6"/><path d="M10 14 21 3"/>'),
   reply: SVG('<polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>'),
@@ -60,6 +63,21 @@ export const icons = {
   windows: SVG('<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>'),
   sync: SVG('<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5M3 21v-5h5"/>'),
   chat: SVG('<path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12z"/>'),
+  theater: SVG('<rect x="2" y="4" width="20" height="16" rx="2.5"/><path d="M16 4v16"/>'),
+  panelRightClose: SVG('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/><path d="m10 15 3-3-3-3"/>'),
+  panelRightOpen: SVG('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M15 3v18"/><path d="m12 9-3 3 3 3"/>'),
+  phoneCall: SVG('<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92z"/>'),
+  phoneOff: SVG('<path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0 1 22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="2" y1="2" x2="22" y2="22"/>'),
+  headphones: SVG('<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 18 0v7a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3"/>'),
+  headphonesOff: SVG('<path d="M3 14h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-7a9 9 0 0 1 14.36-7.24"/><path d="M21 14h-3a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-5"/><line x1="2" y1="2" x2="22" y2="22"/>'),
+  clock: SVG('<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>'),
+  barChart: SVG('<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>'),
+  qr: SVG('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3zM18 18h3v3h-3zM18 14h3M14 18v3"/>'),
+  swap: SVG('<path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/>'),
+  layoutGrid: SVG('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/>'),
+  sliders: SVG('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/>'),
+  chevronRight: SVG('<polyline points="9 18 15 12 9 6"/>'),
+  cameraSnap: SVG('<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>'),
   palette: SVG('<circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.6-.7 1.6-1.6 0-.4-.2-.8-.4-1.1-.3-.3-.4-.7-.4-1.1 0-.9.7-1.6 1.6-1.6H16c3.3 0 6-2.7 6-6 0-4.9-4.5-8.6-10-8.6z"/>'),
 };
 
@@ -76,9 +94,22 @@ export function h(tag, attrs = {}, ...children) {
       }
     }
     else if (k === 'html') el.innerHTML = v;
-    else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
-    else if (k === 'dataset') Object.assign(el.dataset, v);
-    else el.setAttribute(k, v === true ? '' : v);
+    else if (k.startsWith('on')) {
+      if (typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
+    } else if (k === 'dataset') Object.assign(el.dataset, v);
+    else {
+      if (k === 'srcdoc') continue;
+      if ((k === 'href' || k === 'src' || k === 'action' || k === 'formaction') && typeof v === 'string') {
+        const cleanV = v.replace(/[\u0000-\u0020]+/g, '');
+        const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
+        const isTrustedStaticSvg = (
+          isSafeSvgImg &&
+          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)
+        );
+        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
+      }
+      el.setAttribute(k, v === true ? '' : v);
+    }
   }
   for (const c of children.flat(Infinity)) {
     if (c === null || c === undefined || c === false) continue;
@@ -92,52 +123,271 @@ export const icon = (name) => h('span', { html: icons[name] || '', style: { disp
 // replaceChildren() stringifies null/false ("null" text); fill() drops them like h() does.
 export const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
 
-export function toast(text, ms = 2600) {
-  const t = h('div', { class: 'toast acrylic' }, text);
-  document.getElementById('toast-root').append(t);
-  setTimeout(() => t.remove(), ms);
+export function toast(text, ms = 2800, opts = null) {
+  const orb = h('span', { class: 'wl-toast-orb', 'aria-hidden': 'true' });
+  const label = h('span', { class: 'wl-toast-text' }, text);
+  const actionBtn = (opts && opts.actionLabel && typeof opts.onAction === 'function')
+    ? h('button', {
+        type: 'button',
+        class: 'wl-toast-action-btn',
+        onclick: (e) => {
+          e.stopPropagation();
+          try { opts.onAction(); } catch (_) {}
+          t.remove();
+        },
+      }, opts.actionLabel)
+    : null;
+  const t = h('div', { class: 'toast acrylic wl-dynamic-toast' }, orb, label, actionBtn);
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  let host = document.getElementById('toast-root');
+  if (fsEl && host && !fsEl.contains(host)) {
+    fsEl.appendChild(host);
+  } else if (!fsEl && host && host.parentElement !== document.body) {
+    document.body.appendChild(host);
+  }
+  const targetHost = host || document.body;
+  targetHost.querySelectorAll('.wl-dynamic-toast').forEach((old) => old.remove());
+  targetHost.append(t);
+  setTimeout(() => {
+    t.classList.add('is-leaving');
+    setTimeout(() => t.remove(), 190);
+  }, ms);
 }
 
-// Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable }
-export function popup({ title, message, options = [], content = null, dismissable = true } = {}) {
+if (typeof window !== 'undefined' && !window.__wlCmdKBound) {
+  window.__wlCmdKBound = true;
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'k' || e.key === 'K')) {
+      const meshRoot = document.getElementById('mesh-root');
+      if (meshRoot && !meshRoot.classList.contains('hidden') && !document.body.classList.contains('mesh-minimized')) {
+        e.preventDefault();
+        if (!document.querySelector('.mesh-layout.has-left')) {
+          document.getElementById('nav-search-video')?.click();
+        } else if (!document.querySelector('.panel-left input.input, .sel-search input')) {
+          const searchTabBtn = document.querySelector('.panel-left .drawer-tabs button') || document.getElementById('nav-search-video');
+          searchTabBtn?.click?.();
+        }
+        setTimeout(() => {
+          const mInp = document.querySelector('.panel-left input.input, .sel-search input');
+          mInp?.focus();
+          mInp?.select?.();
+        }, 40);
+        return;
+      }
+      const inp = document.querySelector('.home-search input');
+      if (inp && inp.offsetParent !== null) {
+        e.preventDefault();
+        inp.focus();
+        inp.select?.();
+      }
+    }
+  });
+}
+
+function restoreOverlayPortals() {
+  if (typeof document === 'undefined' || !document.body) return;
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  if (fsEl) return;
+  for (const id of ['popup-root', 'toast-root']) {
+    const el = document.getElementById(id);
+    if (el && el.parentElement !== document.body) {
+      document.body.appendChild(el);
+    }
+  }
+}
+
+if (typeof document !== 'undefined' && typeof window !== 'undefined' && !window.__wlOverlayPortalSync) {
+  window.__wlOverlayPortalSync = true;
+  document.addEventListener('fullscreenchange', restoreOverlayPortals);
+  document.addEventListener('webkitfullscreenchange', restoreOverlayPortals);
+}
+
+// Rave PopUp: { title, message, options:[{label, primary, danger, onClick}], content(Node), dismissable, onClose }
+let _popupSeq = 0;
+export function popup({ title, message, options = [], content = null, dismissable = true, wide = false, persistOnNavigate = false, onClose = null } = {}) {
+  const prevFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const titleId = title ? `wl-popup-title-${++_popupSeq}` : '';
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
   const root = document.getElementById('popup-root');
+  if (fsEl && root && !fsEl.contains(root)) {
+    fsEl.appendChild(root);
+  } else if (!fsEl && root && root.parentElement !== document.body) {
+    document.body.appendChild(root);
+  }
+  const getTrapItems = () => Array.from(card.querySelectorAll(
+    'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )).filter((el) => el instanceof HTMLElement && el.getClientRects().length > 0);
   const onKey = (e) => {
-    if (e.key === 'Escape' && dismissable) {
+    if (!back.isConnected) {
+      window.removeEventListener('keydown', onKey, true);
+      return;
+    }
+    const openBacks = root ? Array.from(root.querySelectorAll(':scope > .popup-backdrop:not(.is-closing)')) : [];
+    const isTop = !openBacks.length || openBacks[openBacks.length - 1] === back;
+    if ((e.key === 'Escape' || e.key === 'Esc' || e.code === 'Escape') && dismissable && isTop) {
+      e.preventDefault();
+      e.stopPropagation();
       close();
+      return;
+    }
+    if (e.key === 'Tab' && isTop) {
+      const focusables = getTrapItems();
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || !card.contains(document.activeElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (document.activeElement === last || !card.contains(document.activeElement))) {
+        e.preventDefault();
+        first.focus();
+      }
     }
   };
+  let closing = false;
   const close = () => {
-    window.removeEventListener('keydown', onKey);
-    back.remove();
+    if (closing) return;
+    closing = true;
+    window.removeEventListener('keydown', onKey, true);
+    try { onClose?.(); } catch (_) {}
+    back.classList.add('is-closing');
+    card.classList.add('is-closing');
+    try {
+      const appEl = document.getElementById('app');
+      if (appEl && !document.querySelector('#popup-root > .popup-backdrop:not(.is-closing), body > .popup-backdrop:not(.is-closing)')) {
+        appEl.inert = false;
+      }
+    } catch (_) {}
+    setTimeout(() => {
+      back.remove();
+      if (prevFocus && prevFocus.isConnected) {
+        try { prevFocus.focus({ preventScroll: true }); } catch (_) {}
+      }
+    }, 175);
   };
-  if (dismissable) window.addEventListener('keydown', onKey);
+  let touchMoved = false;
+  const drawerHandle = dismissable ? h('div', {
+    class: 'wl-drawer-handle',
+    title: 'Kapatmak için dokun',
+    onclick: () => { if (dismissable && !touchMoved) close(); },
+  }, h('span', { class: 'wl-drawer-pill' })) : null;
   const closeBtn = dismissable
     ? h('button', {
         type: 'button',
         class: 'popup-close-x',
         'aria-label': 'Kapat',
         title: 'Kapat (ESC)',
-        style: { position: 'absolute', top: '12px', right: '14px', width: '28px', height: '28px', borderRadius: '50%', background: 'rgba(255,255,255,.08)', color: '#fff', fontSize: '14px', fontWeight: '800', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' },
         onclick: () => close(),
-      }, '✕')
+        html: icons.close,
+      })
     : null;
-  const card = h('div', { class: 'popup acrylic', role: 'dialog', 'aria-modal': 'true', style: { position: 'relative' } },
+  let optBusy = false;
+  const card = h('div', {
+    class: `popup ${wide ? 'popup-wide ' : ''}acrylic wl-vaul-sheet`,
+    role: 'dialog',
+    'aria-modal': 'true',
+    ...(titleId ? { 'aria-labelledby': titleId } : { 'aria-label': 'İletişim Kutusu' }),
+  },
+    drawerHandle,
     closeBtn,
-    title ? h('h3', { style: dismissable ? { paddingRight: '32px' } : null }, title) : null,
+    title ? h('h3', { id: titleId, class: dismissable ? 'popup-title-pad' : '' }, title) : null,
     message ? h('p', {}, message) : null,
     content,
     options.length ? h('div', { class: 'popup-options' }, options.map((o) =>
-      h('button', { class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''}`, onclick: async () => { const keep = await o.onClick?.(); if (keep !== true) close(); } }, o.label))) : null);
+      h('button', {
+        type: 'button',
+        class: `btn ${o.primary ? 'primary' : ''} ${o.danger ? 'danger' : ''} ${o.class || ''}`.trim(),
+        onclick: async (e) => {
+          if (optBusy) return;
+          optBusy = true;
+          const btnEl = e?.currentTarget;
+          if (btnEl) btnEl.disabled = true;
+          try {
+            const fn = o.onClick || o.action;
+            const keep = await fn?.();
+            if (keep !== true) close();
+          } finally {
+            optBusy = false;
+            if (btnEl) btnEl.disabled = false;
+          }
+        },
+      }, o.label))) : null);
   const back = h('div', { class: 'popup-backdrop', onclick: (e) => { if (dismissable && e.target === back) close(); } }, card);
-  root.append(back);
+  if (persistOnNavigate) back.dataset.persistOnNavigate = '1';
+  if (dismissable && drawerHandle) {
+    let startY = 0, deltaY = 0, dragging = false;
+    drawerHandle.addEventListener('touchstart', (e) => {
+      if (!e.touches?.[0]) return;
+      startY = e.touches[0].clientY;
+      deltaY = 0;
+      touchMoved = false;
+      dragging = true;
+      card.style.transition = 'none';
+    }, { passive: true });
+    drawerHandle.addEventListener('touchmove', (e) => {
+      if (!dragging || !e.touches?.[0]) return;
+      deltaY = Math.max(0, e.touches[0].clientY - startY);
+      if (deltaY > 6) touchMoved = true;
+      card.style.transform = `translateY(${deltaY}px)`;
+    }, { passive: true });
+    const endDrag = () => {
+      if (!dragging) return;
+      dragging = false;
+      card.style.transition = '';
+      if (deltaY > 88) {
+        close();
+      } else {
+        card.style.transform = '';
+      }
+      setTimeout(() => { touchMoved = false; }, 50);
+    };
+    drawerHandle.addEventListener('touchend', endDrag, { passive: true });
+    drawerHandle.addEventListener('touchcancel', endDrag, { passive: true });
+  }
+  const syncAppInert = () => {
+    const appEl = document.getElementById('app');
+    if (!appEl) return;
+    const hostRoot = document.getElementById('popup-root');
+    if (hostRoot && appEl.contains(hostRoot)) return;
+    const hasOpen = Boolean(document.querySelector('#popup-root > .popup-backdrop:not(.is-closing), body > .popup-backdrop:not(.is-closing)'));
+    appEl.inert = hasOpen;
+  };
+  if (typeof window !== 'undefined' && typeof MutationObserver !== 'undefined' && root && !window.__wlPopupInertObs) {
+    window.__wlPopupInertObs = new MutationObserver(syncAppInert);
+    window.__wlPopupInertObs.observe(root, { childList: true, subtree: false, attributes: true, attributeFilter: ['class'] });
+  }
+  back._closePopup = close;
+  if (root) root.append(back);
+  else document.body.append(back);
+  syncAppInert();
+  window.addEventListener('keydown', onKey, true);
+  queueMicrotask(() => {
+    const focusables = getTrapItems();
+    const target = focusables.find((el) => !el.classList.contains('popup-close-x')) || focusables[0];
+    if (target) {
+      try { target.focus({ preventScroll: true }); } catch (_) {}
+    }
+  });
   return { close, card };
 }
 
 export const confirmPopup = (message, yes = 'Evet', no = 'Hayır') => new Promise((resolve) => {
-  popup({ message, dismissable: false, options: [
-    { label: yes, primary: true, onClick: () => resolve(true) },
-    { label: no, onClick: () => resolve(false) },
-  ] });
+  let settled = false;
+  const done = (val) => {
+    if (!settled) {
+      settled = true;
+      resolve(val);
+    }
+  };
+  popup({
+    message,
+    dismissable: true,
+    onClose: () => done(false),
+    options: [
+      { label: yes, primary: true, onClick: () => done(true) },
+      { label: no, onClick: () => done(false) },
+    ],
+  });
 });
 
 export function fmtTime(sec) {
@@ -170,11 +420,50 @@ const DEFAULT_SUNO_KEY = '';
 
 export function getAiApiConfig() {
   return {
-    openaiModel: localStorage.getItem('kinox_openai_model') || 'gpt-6.1-sol',
+    openaiModel: localStorage.getItem('kinox_openai_model') || 'claude-sonnet-4-5',
     openaiKey: localStorage.getItem('kinox_openai_key') || DEFAULT_OPENAI_KEY,
-    sunoModel: localStorage.getItem('kinox_suno_model') || 'suno-v4.5-mureka-9.5',
+    sunoModel: localStorage.getItem('kinox_suno_model') || 'suno-v4.5',
     sunoKey: localStorage.getItem('kinox_suno_key') || DEFAULT_SUNO_KEY,
   };
+}
+
+export function openAiConfigModal(onSaved) {
+  const cur = getAiApiConfig();
+  const modelInp = h('input', { class: 'input', value: cur.openaiModel, placeholder: 'Dil & DJ Modeli (örn. claude-sonnet-4-5, deepseek-v3)' });
+  const keyInp = h('input', { class: 'input', type: 'password', value: cur.openaiKey, placeholder: 'Özel AI API Anahtarı (isteğe bağlı)' });
+  const sunoModelInp = h('input', { class: 'input', value: cur.sunoModel, placeholder: 'Müzik Motoru (örn. suno-v4.5)' });
+  const sunoKeyInp = h('input', { class: 'input', type: 'password', value: cur.sunoKey, placeholder: 'Özel Suno/Mureka API Anahtarı (isteğe bağlı)' });
+  const box = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+    h('div', { class: 'dim', style: { fontSize: '.83rem', lineHeight: '1.45' } },
+      'Watchlivo AI DJ, şarkı sözü senkronizasyonu ve müzik üretim motoru ayarlarını buradan yapılandırabilirsiniz.'),
+    h('label', { style: { fontSize: '.78rem', fontWeight: '700' } }, 'AI DJ & Sohbet Modeli'),
+    modelInp,
+    keyInp,
+    h('label', { style: { fontSize: '.78rem', fontWeight: '700' } }, 'Suno / Mureka Müzik Motoru'),
+    sunoModelInp,
+    sunoKeyInp
+  );
+  popup({
+    title: '🔑 AI & Müzik Motoru Yapılandırması',
+    content: box,
+    options: [
+      {
+        label: '✓ Ayarları Kaydet',
+        primary: true,
+        onClick: () => {
+          try {
+            localStorage.setItem('kinox_openai_model', modelInp.value.trim() || 'claude-sonnet-4-5');
+            localStorage.setItem('kinox_openai_key', keyInp.value.trim());
+            localStorage.setItem('kinox_suno_model', sunoModelInp.value.trim() || 'suno-v4.5');
+            localStorage.setItem('kinox_suno_key', sunoKeyInp.value.trim());
+          } catch (_) {}
+          toast('✓ AI & Model yapılandırması kaydedildi');
+          onSaved?.(getAiApiConfig());
+        },
+      },
+      { label: 'Kapat' },
+    ],
+  });
 }
 
 export function buildThemeStudio() {
@@ -182,23 +471,29 @@ export function buildThemeStudio() {
   const draw = () => {
     const scroller = wrap.closest('.popup, .panel-body');
     const prevScroll = scroller ? scroller.scrollTop : 0;
-    const prefs = state.uiPrefs || { theme: 'obsidian', ambient: 'low', density: 'comfortable', cardStyle: 'glass' };
+    const prefs = state.uiPrefs || { theme: 'supabase', ambient: 'low', density: 'comfortable', cardStyle: 'glass' };
 
     wrap.replaceChildren(
-      h('div', { class: 'theme-sec-title' }, '🎨 Koyu Tema Şeması (Dark Mode)'),
-      h('div', { class: 'theme-grid' }, THEME_SCHEMAS.map((t) =>
+      h('div', { class: 'theme-sec-title' }, '🎨 Sinema Temaları'),
+      h('div', { class: 'theme-grid theme-grid-8' }, THEME_SCHEMAS.map((t) =>
         h('button', {
           type: 'button',
           class: `theme-card ${prefs.theme === t.id ? 'on' : ''}`,
           'data-theme-id': t.id,
-          onclick: () => { setUiPref({ theme: t.id }); draw(); },
+          onclick: (e) => {
+            transitionTheme(t.id, e);
+            setTimeout(() => draw(), 20);
+            toast(`🎨 Tema uygulandı: ${t.name}`);
+          },
         },
           h('span', { class: 'theme-swatch', style: { background: t.swatch, '--swatch-accent': t.accent } },
             h('span', { class: 'theme-swatch-dot', style: { background: t.accent } })),
           h('div', { class: 'theme-meta' },
-            h('b', {}, t.name),
+            h('div', { class: 'theme-title-row' },
+              h('b', {}, t.name),
+              t.badge ? h('span', { class: 'theme-score-badge', style: { '--badge-c': t.accent } }, t.badge) : null),
             h('small', {}, t.desc))))),
-      h('div', { class: 'theme-sec-title' }, '✨ Sahne Ambiyans Işığı'),
+      h('div', { class: 'theme-sec-title' }, '✨ Sahne Ambiyans Işığı (Aurora / Glow)'),
       h('div', { class: 'seg' }, [
         ['off', 'Kapalı', 'Saf siyah arka plan'],
         ['low', 'Loş Sinema', 'Göz yormayan hafif ambiyans'],
@@ -223,66 +518,181 @@ export function buildThemeStudio() {
   return wrap;
 }
 
+export function isNativeWatchlivoApp() {
+  if (typeof navigator === 'undefined') return false;
+  if (typeof window !== 'undefined' && (window.isWatchlivoNativeIOS || window.webkit?.messageHandlers?.watchlivoPiP)) return true;
+  const ua = navigator.userAgent || '';
+  return /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
+}
+if (typeof document !== 'undefined' && isNativeWatchlivoApp()) {
+  document.documentElement.classList.add('is-native-apk');
+}
+
+async function handleWindowsAppDownload(ev) {
+  ev?.preventDefault?.();
+  try {
+    const r = await fetch('/download/windows?check=1', { cache: 'no-store' });
+    const d = r.ok ? await r.json().catch(() => null) : null;
+    if (d?.available) {
+      toast('💻 Windows Masaüstü paketi indiriliyor...', 4000);
+      window.location.href = d.url || '/download/windows';
+      return;
+    }
+  } catch (_) {}
+  if (typeof window !== 'undefined' && window.__deferredInstallPrompt) {
+    try {
+      window.__deferredInstallPrompt.prompt();
+      await window.__deferredInstallPrompt.userChoice;
+      window.__deferredInstallPrompt = null;
+      return;
+    } catch (_) {}
+  }
+  popup({
+    title: '💻 Watchlivo Windows Masaüstü Kurulumu',
+    message: 'Watchlivo Windows 10/11 üzerinde imzasız EXE uyarısı olmadan doğrudan yerel WebView2 / PWA masaüstü uygulaması olarak kurulur: Tarayıcı adres çubuğunun sağındaki "Watchlivo Uygulamasını Yükle (⊕)" simgesine tıklayarak tek tıkla başlat menüsüne ve görev çubuğuna sabitleyebilirsiniz.',
+    options: [{ label: 'Tamam', primary: true }],
+  });
+}
+
 export function openThemeModal() {
+  const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'theme-modal-body' },
     buildThemeStudio(),
-    h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları'),
-    h('div', { class: 'wl-modal-download-actions' },
+    !inApk ? h('div', { class: 'theme-sec-title', style: { marginTop: '1.2em' } }, '📲 Watchlivo Resmi Uygulamaları') : null,
+    !inApk ? h('div', { class: 'wl-modal-download-actions' },
       h('a', {
-        class: 'btn primary wl-btn-apk-dl',
-        href: '/download/apk',
-        download: 'Watchlivo-v1.1.0.apk',
-        onclick: () => toast('📱 Android APK indiriliyor...', 4000)
-      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android APK İndir (v1.1)'),
+        class: 'btn primary wl-btn-ios-dl',
+        href: '/download/ipa',
+        download: 'Watchlivo.ipa',
+        onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
+      }, '🍎 iPhone IPA İndir (v1.2)'),
+      h('a', {
+        class: 'btn wl-btn-apk-dl',
+        href: '/download/Watchlivo-v2.0.apk',
+        download: 'Watchlivo-v2.0.apk',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+      }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.2)'),
       h('a', {
         class: 'btn wl-btn-win-dl',
         href: '/download/windows',
-        download: 'Watchlivo.exe',
-        onclick: () => toast('💻 Windows Masaüstü indiriliyor...', 4000)
-      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows İndir (EXE)'))
+        onclick: handleWindowsAppDownload
+      }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } }), 'Windows Masaüstü Kur')) : null
   );
-  popup({ title: 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
+  popup({ title: inApk ? 'Görünüm & Tema Ayarları' : 'Görünüm & Uygulama İndir', content: box, options: [{ label: 'Tamam', primary: true }] });
 }
 
 export function openDownloadModal() {
+  const inApk = isNativeWatchlivoApp();
   const box = h('div', { class: 'wl-download-modal' },
     h('div', { class: 'wl-download-header' },
       h('h3', {}, '📱 Watchlivo Cihaz Uygulamaları'),
       h('p', {}, 'Tek tıkla, tam ekran, yüksek performans ve arkadaşlarınla sıfır gecikmeli izle.')
     ),
     h('div', { class: 'wl-download-grid' },
-      h('div', { class: 'wl-download-card apk' },
+      !inApk ? h('div', { class: 'wl-download-card ios' },
+        h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
+        h('div', { class: 'wl-download-info' },
+          h('b', {}, 'iPhone & iPad (iOS IPA)'),
+          h('small', {}, 'v1.2.0 • iOS 15+ Arka Plan PiP & AltStore / TrollStore'),
+          h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi ve arka plan ses desteği.')
+        ),
+        h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
+          h('a', {
+            class: 'btn primary wl-download-action',
+            href: '/download/ipa',
+            download: 'Watchlivo.ipa',
+            onclick: () => toast('🍎 Watchlivo iOS IPA indiriliyor...', 4000)
+          }, 'IPA İndir (.ipa)'),
+          h('a', {
+            class: 'btn wl-download-action',
+            href: '/download/ios',
+            onclick: () => toast('📲 iOS WebClip profili açılıyor...', 4000)
+          }, 'WebClip Profili'))
+      ) : null,
+      !inApk ? h('div', { class: 'wl-download-card apk' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
-          h('b', {}, 'Android Uygulaması (APK)'),
-          h('small', {}, 'v1.1.0 • Android 5.0+ Tüm Telefon & Tabletler'),
-          h('p', {}, 'Hızlı bağlantı, senkron odalar, reklamsız tam ekran oynatıcı.')
+          h('b', {}, 'Android Uygulaması (Native APK)'),
+          h('small', {}, 'v2.0.2 • Gerçek Native Oynatıcı, Otomatik PiP & Rave.io Otomatik Güncelleme'),
+          h('p', {}, 'Tarayıcısız saf Android donanım oynatıcı, sistem PiP penceresi ve yeni sürüm çıktığında kendi kendini otomatik güncelleyen altyapı.')
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/apk',
-          download: 'Watchlivo-v1.0.apk',
-          onclick: () => toast('📱 Android APK indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir (.apk)')
-      ),
+          href: '/download/Watchlivo-v2.0.apk',
+          download: 'Watchlivo-v2.0.apk',
+          onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.2)')
+      ) : null,
       h('div', { class: 'wl-download-card windows' },
         h('div', { class: 'wl-download-icon' }, h('span', { html: icons.windows || icons.desktop, style: { display: 'flex' } })),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'Windows Masaüstü'),
-          h('small', {}, 'v1.0 • Windows 10 / 11 64-bit'),
+          h('small', {}, 'v1.2.0 • Windows 10 / 11 64-bit'),
           h('p', {}, 'Masaüstü donma önleyici, ultra düşük gecikme ve sistem bildirimleri.')
         ),
         h('a', {
           class: 'btn wl-download-action',
           href: '/download/windows',
-          download: 'Watchlivo.exe',
-          onclick: () => toast('💻 Windows Masaüstü indiriliyor...', 4000)
-        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows İndir (.exe)')
+          onclick: handleWindowsAppDownload
+        }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Windows Masaüstü Kur')
       )
     ),
-    h('div', { class: 'wl-download-footer-note' },
+    !inApk ? h('div', { class: 'wl-download-footer-note' },
       'ℹ️ İndirilen APK dosyasını açmak için cihazınızda "Bilinmeyen kaynaklardan yüklemeye izin ver" seçeneğini onaylayabilirsiniz.'
-    )
+    ) : null
   );
   popup({ title: 'Watchlivo İndir', content: box, options: [{ label: 'Kapat', primary: true }] });
+}
+
+let _activeCtxCleanup = null;
+
+export function openContextMenu(x, y, items = []) {
+  if (typeof _activeCtxCleanup === 'function') {
+    try { _activeCtxCleanup(); } catch (_) {}
+    _activeCtxCleanup = null;
+  }
+  document.querySelectorAll('.context-menu').forEach((m) => m.remove());
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('click', close, true);
+    document.removeEventListener('contextmenu', close, true);
+    window.removeEventListener('keydown', onEsc, true);
+    if (_activeCtxCleanup === close) _activeCtxCleanup = null;
+  };
+  const onEsc = (e) => {
+    if (e.key === 'Escape') close();
+  };
+  const menu = h('div', {
+    class: 'context-menu acrylic',
+    role: 'menu',
+    style: { position: 'fixed', left: `${x}px`, top: `${y}px`, zIndex: 215000 },
+  }, (items || []).filter(Boolean).map((it) =>
+    it.sep
+      ? h('div', { class: 'ctx-sep', role: 'separator' })
+      : h('button', {
+          type: 'button',
+          class: `ctx-item ${it.danger ? 'danger' : ''}`.trim(),
+          role: 'menuitem',
+          onclick: (e) => {
+            e.stopPropagation();
+            close();
+            it.onClick?.();
+          },
+        }, it.icon ? icon(it.icon) : null, h('span', {}, it.label || ''))
+  ));
+  document.body.append(menu);
+  const rect = menu.getBoundingClientRect();
+  const clampedLeft = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  const clampedTop = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = `${clampedLeft}px`;
+  menu.style.top = `${clampedTop}px`;
+  _activeCtxCleanup = close;
+  setTimeout(() => {
+    if (_activeCtxCleanup === close) {
+      document.addEventListener('click', close, true);
+      document.addEventListener('contextmenu', close, true);
+      window.addEventListener('keydown', onEsc, true);
+    }
+  }, 0);
+  return { close, menu };
 }

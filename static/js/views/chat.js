@@ -1,9 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, toast, popup } from '../ui.js';
-import { state, isLeader, setView, getMusicHistory } from '../store.js';
-import { avatar } from '../profile.js';
-import { api, qs } from '../api.js';
-import { resolveMusicItem } from './selection-kinds.js';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v183';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261110_v183';
+import { avatar } from '../profile.js?v=20261110_v183';
+import { api, qs } from '../api.js?v=20261110_v183';
+import { resolveMusicItem } from './selection-kinds.js?v=20261110_v183';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v183';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -16,6 +17,7 @@ const SOUNDBOARD = [
 let _sfxAudioCtx = null;
 
 export function playRoomSfx(sfx) {
+  if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -34,6 +36,7 @@ export function playRoomSfx(sfx) {
         const g = ac.createGain();
         g.gain.setValueAtTime(0.18, now + i * 0.075);
         src.buffer = buf;
+        src.onended = () => { try { src.disconnect(); g.disconnect(); } catch (_) {} };
         src.connect(g).connect(ac.destination);
         src.start(now + i * 0.075);
       }
@@ -75,7 +78,94 @@ export function playRoomSfx(sfx) {
         osc.stop(now + i * 0.09 + 0.26);
       });
     }
-    setTimeout(() => ac.close().catch(() => {}), 1400);
+  } catch (e) { /* ignore */ }
+}
+
+export function playEmojiSfx(emoji) {
+  if (typeof window !== 'undefined' && window.__vortexVoiceDeafened) return;
+  try {
+    if (emoji === '👏') { playRoomSfx('clap'); return; }
+    if (emoji === '😂') { playRoomSfx('laugh'); return; }
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!_sfxAudioCtx || _sfxAudioCtx.state === 'closed') {
+      _sfxAudioCtx = new Ctx();
+    }
+    const ac = _sfxAudioCtx;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+    const now = ac.currentTime;
+    if (emoji === '❤️') {
+      [523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.065);
+        g.gain.setValueAtTime(0.14, now + i * 0.065);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.065 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.065);
+        osc.stop(now + i * 0.065 + 0.24);
+      });
+    } else if (emoji === '😮') {
+      const osc = ac.createOscillator();
+      const g = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(310, now);
+      osc.frequency.exponentialRampToValueAtTime(720, now + 0.26);
+      g.gain.setValueAtTime(0.15, now);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(g).connect(ac.destination);
+      osc.start(now);
+      osc.stop(now + 0.32);
+    } else if (emoji === '😢') {
+      [440, 392, 329.63].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.12);
+        g.gain.setValueAtTime(0.12, now + i * 0.12);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.12 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.12);
+        osc.stop(now + i * 0.12 + 0.24);
+      });
+    } else if (emoji === '🔥') {
+      [587.33, 880, 1174.66].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, now + i * 0.05);
+        g.gain.setValueAtTime(0.09, now + i * 0.05);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.16);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.05);
+        osc.stop(now + i * 0.05 + 0.18);
+      });
+    } else if (emoji === '☕') {
+      [587.33, 880, 1046.5].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + i * 0.085);
+        g.gain.setValueAtTime(0.16, now + i * 0.085);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.085 + 0.22);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.085);
+        osc.stop(now + i * 0.085 + 0.24);
+      });
+    } else {
+      [640, 920].forEach((freq, i) => {
+        const osc = ac.createOscillator();
+        const g = ac.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.055);
+        g.gain.setValueAtTime(0.15, now + i * 0.055);
+        g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.055 + 0.09);
+        osc.connect(g).connect(ac.destination);
+        osc.start(now + i * 0.055);
+        osc.stop(now + i * 0.055 + 0.1);
+      });
+    }
   } catch (e) { /* ignore */ }
 }
 const PRIVACY = [
@@ -84,46 +174,193 @@ const PRIVACY = [
   ['private', 'Gizli', 'lock', 'Yalnızca davet edilenler katılabilir'],
 ];
 
-export const inviteUrl = () => `${location.origin}/#/mesh/${encodeURIComponent(state.mesh?.id || state.route.params.id || '')}`;
+export const inviteUrl = () => {
+  const rid = state.mesh?.id || state.route.params.id || '';
+  const qp = new URLSearchParams();
+  let pwd = state.route?.params?.pwd || '';
+  if (!pwd && rid) {
+    try { pwd = sessionStorage.getItem('vortex_pwd_' + rid) || ''; } catch (_) {}
+  }
+  if (pwd) qp.set('pwd', pwd);
+  const m = state.mesh?.media;
+  if (m?.title) qp.set('t', m.title);
+  if (m?.tmdbId) qp.set('tmdbId', String(m.tmdbId));
+  if (m?.mediaType) qp.set('mt', m.mediaType);
+  if (m?.season) qp.set('s', String(m.season));
+  if (m?.episode) qp.set('e', String(m.episode));
+  const qs = qp.toString();
+  return `${location.origin}/r/${encodeURIComponent(rid)}${qs ? '?' + qs : ''}`;
+};
 
 export async function copyInvite() {
-  try { await navigator.clipboard.writeText(inviteUrl()); toast('Paylaşım bağlantısı panoya kopyalandı'); }
-  catch (e) { prompt('Davet bağlantısı', inviteUrl()); }
+  const url = inviteUrl();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast('Paylaşım bağlantısı panoya kopyalandı');
+      return;
+    }
+  } catch (e) { /* fallback below */ }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    const copied = document.execCommand('copy');
+    ta.remove();
+    if (copied) {
+      toast('Paylaşım bağlantısı panoya kopyalandı');
+      return;
+    }
+  } catch (e) { /* fallback below */ }
+  prompt('Davet bağlantısı', url);
 }
 
 export function buildChat(ctx) {
   const { actions } = ctx;
-  const list = h('div', { class: 'chat-list', id: 'chat-list' });
-  const typing = h('div', { class: 'typing' });
-  const input = h('input', { placeholder: 'Sohbet', maxlength: '1000', 'aria-label': 'Mesaj', id: 'chat-input' });
-  const micBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Mikrofon', 'data-tip': 'Mikrofon', id: 'btn-mic', onclick: () => toggleMic() }, h('span', { html: icons.micOff, style: { display: 'flex' } }));
-  const camBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Kamera', 'data-tip': 'Kamera Aç/Kapat', id: 'btn-cam', onclick: () => toggleCam() }, h('span', { html: icons.cameraOff, style: { display: 'flex' } }));
-  const screenBtn = h('button', { class: 'mic-btn off', 'aria-label': 'Ekran Paylaş', 'data-tip': 'Ekran Yansıt', id: 'btn-screen', onclick: () => toggleScreen() }, h('span', { html: icons.screenShare, style: { display: 'flex' } }));
-  const gifBtn = h('button', { class: 'ctl-action', 'aria-label': 'GIF', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
-  const sendBtn = h('button', { class: 'ctl-action', 'aria-label': 'Gönder', onclick: () => send() }, h('span', { html: icons.send, style: { display: 'contents' } }));
+  const list = h('div', { class: 'chat-list', id: 'chat-list', role: 'log', 'aria-live': 'polite', 'aria-relevant': 'additions' });
+  const typing = h('div', { class: 'typing', 'aria-live': 'polite' });
+  const input = h('input', { placeholder: 'Sohbete mesaj yazın...', maxlength: '1000', enterkeyhint: 'send', autocomplete: 'off', 'aria-label': 'Mesaj', id: 'chat-input' });
+  const gifBtn = h('button', { type: 'button', class: 'ctl-action', id: 'btn-chat-gif', 'aria-label': 'GIF', title: 'GIF Ara ve Gönder', onclick: () => toggleGif() }, h('span', { html: icons.gif, style: { display: 'contents' } }));
+  const sendBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action',
+    id: 'btn-chat-send',
+    'aria-label': 'Gönder',
+    onpointerdown: (e) => { e.preventDefault(); send(); },
+    onclick: () => send(),
+  }, h('span', { html: icons.send, style: { display: 'contents' } }));
+  let toolsPopover = null;
+  let toolsBtn = null;
+  const closeToolsPopover = () => {
+    toolsPopover?.classList.add('hidden');
+    toolsBtn?.classList.remove('active');
+  };
   const pollBtn = h('button', {
     type: 'button',
     class: 'sfx-pill poll-pill',
     id: 'btn-chat-poll',
     title: 'Odada Canlı Anket Başlat',
-    onclick: () => openPollModal(),
+    onclick: () => { closeToolsPopover(); openPollModal(); },
   }, h('span', { html: icons.poll, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Anket');
+  const canClearChat = () => Boolean(
+    state.mesh && (
+      state.mesh.host_id === state.clientId ||
+      (state.mesh.co_hosts || []).includes(state.clientId) ||
+      (state.self?.uid && state.mesh.creatorId === state.self.uid) ||
+      isHostOnly()
+    )
+  );
   const clearChatBtn = h('button', {
     type: 'button',
     class: 'sfx-pill',
     id: 'btn-chat-clear',
-    title: 'Oda Sohbetini Temizle',
+    title: 'Oda Sohbetini Temizle (Lider)',
     onclick: () => {
+      closeToolsPopover();
+      if (!canClearChat()) {
+        toast('⚠️ Sohbeti yalnızca oda lideri temizleyebilir');
+        return;
+      }
       clear();
       actions.clearChat?.();
       toast('🧹 Oda sohbeti temizlendi');
     },
-  }, '🗑️ Temizle');
+  }, h('span', { html: icons.trash, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Temizle');
+  const snapSceneBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-snap',
+    title: 'Oynatılan Sahneden Kare Yakala ve Sohbette Paylaş',
+    onclick: () => {
+      closeToolsPopover();
+      const cap = input.value.trim();
+      const res = window.vortexCaptureSceneToChat?.(cap);
+      if (res && cap) input.value = '';
+    },
+  }, h('span', { html: icons.cameraSnap, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Sahne');
+  const stampTimeBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-ts',
+    title: 'Videodaki Anlık Dakika:Saniye Damgasını Mesaja Ekle',
+    onclick: () => {
+      closeToolsPopover();
+      const sec = Number(window.vortexGetVideoPosition?.() || 0);
+      const stamp = fmtTime(sec);
+      input.value = `${input.value ? input.value.trimEnd() + ' ' : ''}${stamp} `;
+      input.focus();
+    },
+  }, h('span', { html: icons.clock, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'An');
+  const breakBarBtn = h('button', {
+    type: 'button',
+    class: 'react-break-btn',
+    id: 'btn-chat-break',
+    'aria-label': 'Mola Zamanı',
+    title: 'Mola (duraklatma) isteği gönder veya odayı duraklat',
+    onclick: () => {
+      if (state.mesh?.curated) {
+        toast('7/24 canlı TV yayını duraklatılamaz');
+        return;
+      }
+      if (isLeader()) {
+        actions.pause?.();
+        toast('☕ Mola verildi — video duraklatıldı');
+        return;
+      }
+      actions.requestBreak?.();
+    },
+  }, h('span', { class: 'break-lbl-full' }, '☕ Mola Zamanı'), h('span', { class: 'break-lbl-short' }, '☕ Mola'));
+  const gifToolBtn = h('button', {
+    type: 'button',
+    class: 'sfx-pill',
+    id: 'btn-chat-tool-gif',
+    title: 'Sohbete GIF Ara ve Gönder',
+    onclick: (e) => { e.stopPropagation(); toggleGif(); },
+  }, h('span', { html: icons.gif, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'GIF');
   const reactions = h('div', { class: 'reaction-bar' },
-    ...REACTIONS.map((e) => h('button', { onclick: () => actions.reaction(e), 'aria-label': `Tepki ${e}` }, e)),
-    ...SOUNDBOARD.map(([k, lbl]) => h('button', { class: 'sfx-pill', onclick: () => actions.soundfx?.(k), title: `Sesli Efekt: ${lbl}` }, lbl)),
-    pollBtn,
-    clearChatBtn);
+    h('div', { class: 'reaction-emoji-grid' },
+      ...REACTIONS.map((e) => h('button', {
+        type: 'button',
+        class: 'react-emoji-btn',
+        onclick: (ev) => {
+          spawnReactionBurst(ev.currentTarget, e);
+          spawnEmojiFountain(ev.currentTarget, e);
+          actions.reaction(e);
+        },
+        'aria-label': `Tepki ${e}`,
+        title: `Sahneye ${e} gönder`,
+      }, e)),
+      breakBarBtn));
+
+  toolsPopover = h('div', { class: 'chat-tools-popover acrylic hidden', id: 'chat-tools-popover' },
+    h('div', { class: 'chat-tools-sec-title' }, '⚡ Oda Araçları & Hızlı Paylaşım'),
+    h('div', { class: 'reaction-tools-row' }, snapSceneBtn, stampTimeBtn, gifToolBtn, pollBtn, clearChatBtn),
+    h('div', { class: 'chat-tools-sec-title' }, '🔊 Ses Efektleri (Soundboard)'),
+    h('div', { class: 'reaction-tools-row' },
+      ...SOUNDBOARD.map(([k, lbl]) => h('button', {
+        type: 'button',
+        class: 'sfx-pill',
+        onclick: () => { actions.soundfx?.(k); closeToolsPopover(); },
+        title: `Sesli Efekt: ${lbl}`,
+      }, lbl))));
+
+  toolsBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action chat-tools-toggle',
+    id: 'btn-chat-tools',
+    'aria-label': 'Oda Araçları ve Ses Efektleri',
+    title: 'Oda Araçları: Anket, Sahne Paylaş, Saniye Ekle & Ses Efektleri (+)',
+    onclick: (e) => {
+      e.stopPropagation();
+      gifPanel.classList.add('hidden');
+      const isHidden = toolsPopover.classList.toggle('hidden');
+      toolsBtn.classList.toggle('active', !isHidden);
+    },
+  }, h('span', { html: icons.plus, style: { display: 'contents' } }));
 
   const discordCallPeers = h('div', { class: 'discord-call-peers', id: 'discord-call-peers' });
   const dCallStatusBadge = h('span', { class: 'discord-call-badge', id: 'discord-call-badge' }, 'Canlı');
@@ -131,44 +368,87 @@ export function buildChat(ctx) {
     type: 'button',
     class: 'discord-join-btn',
     id: 'btn-discord-call',
+    'aria-label': 'Sesliye Katıl',
     onclick: () => toggleCallJoin(),
-  }, '📞 Aramaya Katıl');
+  }, h('span', { class: 'd-btn-ico', html: icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }), h('span', { class: 'd-join-full' }, 'Sesliye Katıl'), h('span', { class: 'd-join-short' }, 'Katıl'));
+  const dHeadMicBtn = h('button', {
+    type: 'button',
+    class: 'discord-stage-btn head-mic-btn',
+    id: 'btn-discord-head-mic',
+    'aria-label': 'Mikrofon',
+    title: 'Oda İçi Mikrofonu Aç / Kapat',
+    onclick: () => toggleMic(),
+  }, h('span', { class: 'd-btn-ico', html: icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Mikrofon'));
+  const dHeadCamBtn = h('button', {
+    type: 'button',
+    class: 'discord-stage-btn head-cam-btn',
+    id: 'btn-discord-head-cam',
+    'aria-label': 'Kamera',
+    title: 'Kamerayı Aç / Kapat (Yuvarlak Görüntülü Sohbet Baloncuğu)',
+    onclick: () => toggleCam(),
+  }, h('span', { class: 'd-btn-ico', html: icons.camera, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Kamera'));
+  const dShareQuickBtn = h('button', {
+    type: 'button',
+    class: 'discord-stage-btn share-toggle-btn',
+    id: 'btn-discord-share-toggle',
+    'aria-label': 'Paylaş',
+    title: 'Hızlı Davet Linki, WhatsApp, QR & Oda Gizliliği',
+    onclick: () => {
+      onboarding = true;
+      quickAccessZone.replaceChildren(quickRoomBar());
+      const hiddenNow = quickAccessZone.classList.toggle('hidden');
+      dShareQuickBtn.classList.toggle('on', !hiddenNow);
+    },
+  }, h('span', { class: 'd-btn-ico', html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Paylaş'));
   const dSwapBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-swap',
+    'aria-label': 'Yer Değiştir',
     title: 'Kamera Ekranlarının Yerini Değiştir',
     onclick: () => { ctx.voice?.swapCameraPositions?.(); syncVoiceUi(); },
-  }, '⇄ Yer Değiştir');
+  }, h('span', { class: 'd-btn-ico', html: icons.swap, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Yer Değiştir'));
   const dStripBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-strip',
+    'aria-label': 'Şerit',
     title: 'Kameraları Kanal Şeridine veya Video Köşelerine Al',
     onclick: () => { ctx.voice?.toggleStripMode?.(); syncVoiceUi(); },
-  }, '📌 Şerit');
+  }, h('span', { class: 'd-btn-ico', html: icons.theater, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Şerit'));
   const dStageBtn = h('button', {
     type: 'button',
     class: 'discord-stage-btn',
     id: 'btn-discord-stage',
+    'aria-label': 'Sahne',
     title: 'Kamera ve Ekran Paylaşımlarını Sahne / Izgara Görünümünde Aç',
     onclick: () => { ctx.voice?.toggleStageGrid?.(); syncVoiceUi(); },
-  }, '📐 Sahne');
+  }, h('span', { class: 'd-btn-ico', html: icons.layoutGrid, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, 'Sahne'));
   const dMicPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-mic', onclick: () => toggleMic() }, '🎙️ Mikrofon');
   const dDeafPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-deafen', onclick: () => toggleDeafen() }, '🎧 Ses Açık');
   const dCamPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-cam', onclick: () => toggleCam() }, '📷 Kamera');
   const dScreenPill = h('button', { type: 'button', class: 'discord-ctl-pill', id: 'btn-discord-screen', onclick: () => toggleScreen() }, '🖥️ Ekran Yansıt');
+  const dStageMicPill = h('button', {
+    type: 'button',
+    class: 'discord-ctl-pill stage-mic-pill',
+    id: 'btn-discord-stage-mic',
+    onclick: () => {
+      if (isLeader()) actions.toggleStageMode?.();
+      else actions.raiseHand?.();
+    },
+  }, '🎤 Sahne');
 
   const discordCallBar = h('div', { class: 'discord-call-bar', id: 'discord-call-bar' },
     h('div', { class: 'discord-call-head' },
       h('div', { class: 'discord-call-title' },
         h('span', { class: 'discord-live-dot' }),
-        h('span', {}, '🔊 Ses & Yayın Kanalı'),
+        h('span', { html: icons.audioWave, style: { display: 'inline-flex', width: '14px', height: '14px', color: '#27DCC8' } }),
+        h('span', { class: 'd-title-txt' }, 'Ses Kanalı'),
         dCallStatusBadge),
-      h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dJoinBtn)),
+      h('div', { class: 'discord-call-head-actions' }, dSwapBtn, dStripBtn, dStageBtn, dShareQuickBtn, dHeadMicBtn, dHeadCamBtn, dJoinBtn)),
     discordCallPeers,
     h('div', { class: 'discord-call-controls', id: 'discord-call-controls' },
-      dMicPill, dDeafPill, dCamPill, dScreenPill));
+      dMicPill, dDeafPill, dCamPill, dScreenPill, dStageMicPill));
 
   let musicTab = 'similar';
   let lastSimKey = '';
@@ -230,8 +510,19 @@ export function buildChat(ctx) {
 
   const gifPanel = h('div', { class: 'gif-panel acrylic hidden' });
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
-  const bar = h('div', { class: 'chatbar' }, micBtn, camBtn, screenBtn, h('div', { class: 'chat-input' }, input, gifBtn, sendBtn), gifPanel);
-  const el = h('div', { class: 'chat' }, discordCallBar, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
+  const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
+  let voiceRecState = null;
+  const voiceRecOverlay = h('div', { class: 'voice-rec-overlay hidden', id: 'chat-voice-rec-overlay' });
+  const voiceRecBtn = h('button', {
+    type: 'button',
+    class: 'ctl-action voice-note-btn',
+    id: 'btn-chat-voice-rec',
+    'aria-label': 'Sesli Mesaj Gönder',
+    title: 'Sesli Mesaj Kaydet (Tıkla Başlat / Gönder)',
+    onclick: () => toggleVoiceNoteRecording(),
+  }, h('span', { html: icons.mic, style: { display: 'contents' } }));
+  const bar = h('div', { class: 'chatbar' }, h('div', { class: 'chat-input' }, toolsBtn, input, voiceRecOverlay, voiceRecBtn, gifBtn, sendBtn), toolsPopover, gifPanel);
+  const el = h('div', { class: 'chat' }, discordCallBar, quickAccessZone, musicSimilarBar, list, typing, reactions, replyDraftBar, bar);
   const rendered = new Set();
   let lastUser = null;
   let onboarding = false;
@@ -243,10 +534,85 @@ export function buildChat(ctx) {
     replyDraftBar.replaceChildren();
   }
 
+  let mutedLiveCallForVoiceNote = false;
+  function restoreLiveCallMicAfterVoiceNote() {
+    if (!mutedLiveCallForVoiceNote) return;
+    mutedLiveCallForVoiceNote = false;
+    if (ctx.voice?.micOn && !ctx.voice?.deafened) {
+      ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = true; });
+    }
+  }
+
+  function stopVoiceRecorder(sendIt = false) {
+    const st = voiceRecState;
+    restoreLiveCallMicAfterVoiceNote();
+    if (!st) return;
+    voiceRecState = null;
+    voiceRecBtn.classList.remove('recording');
+    voiceRecOverlay.classList.add('hidden');
+    input.classList.remove('hidden');
+    st.stop?.(Boolean(sendIt));
+  }
+  if (typeof window !== 'undefined') {
+    window.__vortexCancelChatVoiceRec = () => stopVoiceRecorder(false);
+  }
+
+  async function toggleVoiceNoteRecording() {
+    if (voiceRecState) {
+      stopVoiceRecorder(true);
+      return;
+    }
+    if (ctx.voice?.micOn) {
+      mutedLiveCallForVoiceNote = true;
+      ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
+    }
+    const timerLbl = h('span', { class: 'voice-rec-timer' }, '🔴 0:00');
+    const cancelBtn = h('button', { type: 'button', class: 'voice-rec-cancel', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(false); } }, 'İptal');
+    const doneBtn = h('button', { type: 'button', class: 'voice-rec-send', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(true); } }, 'Gönder ➤');
+    const handle = await startUniversalVoiceRecorder({
+      maxSeconds: 24,
+      apiFn: api,
+      onTick: (elapsed) => {
+        timerLbl.textContent = `🔴 0:${String(elapsed).padStart(2, '0')}`;
+      },
+      onFinish: (audioNote) => {
+        voiceRecState = null;
+        restoreLiveCallMicAfterVoiceNote();
+        voiceRecBtn.classList.remove('recording');
+        voiceRecOverlay.classList.add('hidden');
+        input.classList.remove('hidden');
+        const extra = { audioNote };
+        if (activeReply) extra.replyTo = activeReply;
+        actions.sendChat('', extra);
+        clearReply();
+      },
+      onError: (msg) => {
+        voiceRecState = null;
+        restoreLiveCallMicAfterVoiceNote();
+        voiceRecBtn.classList.remove('recording');
+        voiceRecOverlay.classList.add('hidden');
+        input.classList.remove('hidden');
+        toast(msg || 'Sesli mesaj için mikrofon izni gerekli');
+      },
+    });
+    if (!handle) {
+      restoreLiveCallMicAfterVoiceNote();
+      return;
+    }
+    voiceRecState = handle;
+    voiceRecOverlay.replaceChildren(timerLbl, cancelBtn, doneBtn);
+    input.classList.add('hidden');
+    voiceRecOverlay.classList.remove('hidden');
+    voiceRecBtn.classList.add('recording');
+  }
+
   function setReplyTo(m) {
     if (!m || m.system) return;
-    const snippet = (m.text || (m.gif ? 'GIF Gönderdi' : m.pollId ? '📊 Anket' : '')).slice(0, 110);
-    activeReply = { id: m.id, user: m.user, text: snippet, color: m.color || '#00f5d4' };
+    const fallbackKind = m.audioNote
+      ? `🎙️ Sesli Mesaj (${Math.max(1, Math.round(Number(m.audioNote.duration || 1)))}sn)`
+      : m.snapshot ? '📸 Sahne Karesi' : m.gif ? 'GIF Gönderdi' : m.pollId ? '📊 Anket' : '';
+    const snippet = (m.text || fallbackKind).slice(0, 110);
+    activeReply = { id: m.id, user: m.user, text: snippet, color: m.color || '#6366f1' };
     replyDraftBar.replaceChildren(
       h('div', { class: 'reply-draft-info', style: { '--quote-color': activeReply.color } },
         h('span', { class: 'reply-draft-user', style: { color: activeReply.color } }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px', marginRight: '4px' } }), `${m.user} yanıtlanıyor`),
@@ -257,9 +623,13 @@ export function buildChat(ctx) {
     input.focus();
   }
 
+  let lastSendAt = 0;
   function send() {
+    const nowMs = Date.now();
+    if (nowMs - lastSendAt < 80) return;
     const v = input.value;
     if (!v.trim()) return;
+    lastSendAt = nowMs;
     const extra = activeReply ? { replyTo: activeReply } : {};
     actions.sendChat(v, extra);
     input.value = '';
@@ -267,16 +637,52 @@ export function buildChat(ctx) {
     list.querySelectorAll('.sys-card').forEach((c) => c.remove());
   }
   let lastTyping = 0;
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowUp' && input.value.length > 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (e.key === 'Enter' || e.keyCode === 13) {
+      e.preventDefault();
+      send();
+    }
+  });
   input.addEventListener('input', () => { if (Date.now() - lastTyping > 2000) { lastTyping = Date.now(); actions.typing(); } });
-  input.addEventListener('blur', () => {
+  const isVirtualKbDevice = () => Boolean(
+    (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches) ||
+    (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && typeof window !== 'undefined' && window.innerWidth <= 960 && !window.matchMedia?.('(pointer: fine)')?.matches)
+  );
+  input.addEventListener('focus', () => {
+    if (!document.body.classList.contains('kb-open')) {
+      const curW = window.innerWidth || document.documentElement.clientWidth || 0;
+      const curH = window.innerHeight || document.documentElement.clientHeight || 0;
+      if (curW > 0 && curH > 0) {
+        preKbPortrait = curH >= curW;
+        if (preKbPortrait) maxPortraitH = Math.max(maxPortraitH, curH);
+        else maxLandscapeH = Math.max(maxLandscapeH, curH);
+      }
+    }
+    if (isVirtualKbDevice()) {
+      document.body.classList.add('kb-open');
+      if (preKbPortrait) document.body.classList.add('kb-portrait');
+    }
+    try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
     setTimeout(() => {
+      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
+      if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
+      list.scrollTop = list.scrollHeight;
+    }, 60);
+  });
+  input.addEventListener('blur', () => {
+    document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
+    setTimeout(() => {
+      if (typeof onVisualViewportResize === 'function') onVisualViewportResize();
       try {
-        window.scrollTo(0, 0);
         document.documentElement.scrollLeft = 0;
         document.body.scrollLeft = 0;
       } catch (e) { /* ignore */ }
-    }, 60);
+    }, 80);
   });
 
   function syncVoiceUi() {
@@ -288,29 +694,41 @@ export function buildChat(ctx) {
     const inCall = Boolean(v?.inCall || micOn || camOn || screenOn);
     const stageOn = Boolean(v?.stageGridMode);
 
-    micBtn.classList.toggle('on', micOn); micBtn.classList.toggle('off', !micOn);
-    micBtn.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'flex' } }));
-    camBtn.classList.toggle('on', camOn); camBtn.classList.toggle('off', !camOn);
-    camBtn.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'flex' } }));
-    screenBtn.classList.toggle('on', screenOn); screenBtn.classList.toggle('off', !screenOn);
-
     discordCallBar.classList.toggle('in-call', inCall);
     dJoinBtn.classList.toggle('active', inCall);
-    dJoinBtn.textContent = inCall ? '📴 Ayrıl' : '📞 Aramaya Katıl';
+    dJoinBtn.setAttribute('aria-pressed', String(inCall));
+    dJoinBtn.setAttribute('aria-label', inCall ? 'Ayrıl' : 'Sesliye Katıl');
+    dHeadMicBtn.setAttribute('aria-pressed', String(micOn));
+    dHeadCamBtn.setAttribute('aria-pressed', String(camOn));
+    dMicPill.setAttribute('aria-pressed', String(micOn));
+    dDeafPill.setAttribute('aria-pressed', String(deafened));
+    dCamPill.setAttribute('aria-pressed', String(camOn));
+    dScreenPill.setAttribute('aria-pressed', String(screenOn));
+    dStageBtn.setAttribute('aria-pressed', String(stageOn));
+    dStripBtn.setAttribute('aria-pressed', String(Boolean(v?.stripMode)));
+    dJoinBtn.replaceChildren(
+      h('span', { class: 'd-btn-ico', html: inCall ? icons.phoneOff : icons.phoneCall, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '4px' } }),
+      inCall ? h('span', { class: 'd-join-active' }, 'Ayrıl') : h('span', { class: 'd-join-full' }, 'Sesliye Katıl'),
+      inCall ? null : h('span', { class: 'd-join-short' }, 'Katıl'),
+    );
     dStageBtn.classList.toggle('on', stageOn);
     dStripBtn.classList.toggle('on', Boolean(v?.stripMode));
     dMicPill.classList.toggle('on', micOn);
-    dMicPill.textContent = micOn ? '🎙️ Mikrofon Açık' : '🔇 Mikrofon';
+    dMicPill.replaceChildren(h('span', { html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), micOn ? 'Mikrofon' : 'Sessiz');
+    dHeadMicBtn.classList.toggle('on', micOn);
+    dHeadMicBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: micOn ? icons.mic : icons.micOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, micOn ? 'Mikrofon Açık' : 'Mikrofon'));
     dDeafPill.classList.toggle('on', deafened);
-    dDeafPill.textContent = deafened ? '🔇 Sağırlaştırıldı' : '🎧 Ses Açık';
+    dDeafPill.replaceChildren(h('span', { html: deafened ? icons.headphonesOff : icons.headphones, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), deafened ? 'Sağır' : 'Kulaklık');
     dCamPill.classList.toggle('on', camOn);
-    dCamPill.textContent = camOn ? '📷 Kamera Açık' : '📷 Kamera';
+    dHeadCamBtn.classList.toggle('on', camOn);
+    dHeadCamBtn.replaceChildren(h('span', { class: 'd-btn-ico', html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), h('span', { class: 'd-btn-lbl' }, camOn ? 'Kamera Açık' : 'Kamera'));
+    dCamPill.replaceChildren(h('span', { html: camOn ? icons.camera : icons.cameraOff, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), 'Kamera');
     dScreenPill.classList.toggle('on', screenOn);
-    dScreenPill.textContent = screenOn ? '🖥️ Yayını Durdur' : '🖥️ Ekran Yansıt';
+    dScreenPill.replaceChildren(h('span', { html: icons.screenShare, style: { display: 'inline-flex', width: '13px', height: '13px', marginRight: '3px' } }), screenOn ? 'Durdur' : 'Ekran');
 
     const rawParts = state.mesh?.participants || [];
     const selfId = ctx.voice?.getSelfId?.() || state.clientId || state.self?.id;
-    const callPeers = rawParts.map((p) => {
+    const mappedPeers = rawParts.map((p) => {
       if (p.id === selfId) {
         return {
           ...p,
@@ -324,27 +742,79 @@ export function buildChat(ctx) {
       }
       return p;
     });
+    const peerById = new Map();
+    for (const p of mappedPeers) {
+      if (!p || !p.id) continue;
+      peerById.set(p.id, p);
+    }
+    const callPeers = Array.from(peerById.values());
+    const nameTotals = new Map();
+    for (const p of callPeers) {
+      const nk = (p.name || 'Misafir').trim().toLowerCase();
+      nameTotals.set(nk, (nameTotals.get(nk) || 0) + 1);
+    }
+    const isStageVoip = state.mesh?.voipMode === 'stage';
+    const mePeerObj = peerById.get(selfId);
+    const canSpeakInStage = Boolean(isLeader() || mePeerObj?.isHost || mePeerObj?.isCoHost || mePeerObj?.isStageSpeaker);
+    if (isLeader()) {
+      dStageMicPill.classList.remove('hidden');
+      dStageMicPill.classList.toggle('on', isStageVoip);
+      dStageMicPill.textContent = isStageVoip ? '🎤 Sahne Açık' : '🎤 Sahne Modu';
+      dStageMicPill.title = '20+ kişilik odalar için Sahne (Söz İstemeli) Modunu aç/kapat';
+    } else if (isStageVoip && !canSpeakInStage) {
+      dStageMicPill.classList.remove('hidden');
+      dStageMicPill.classList.toggle('on', Boolean(mePeerObj?.handRaised));
+      dStageMicPill.textContent = mePeerObj?.handRaised ? '✋ El İndir' : '✋ Söz İste';
+      dStageMicPill.title = 'Konuşmak için oda liderinden söz iste';
+    } else {
+      dStageMicPill.classList.add('hidden');
+    }
     const activeVoiceCount = callPeers.filter((p) => p.inCall || !p.muted || p.cam || p.screen || p.speaking).length;
-    dCallStatusBadge.textContent = activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`;
-    dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0);
+    dCallStatusBadge.textContent = isStageVoip
+      ? `🎤 Sahne · ${activeVoiceCount > 0 ? `${activeVoiceCount} Konuşmacı` : `${callPeers.length || 1} Dinleyici`}`
+      : (activeVoiceCount > 0 ? `${activeVoiceCount} Aktif` : `${callPeers.length || 1} Odada`);
+    dCallStatusBadge.classList.toggle('live', activeVoiceCount > 0 || isStageVoip);
 
     const shownPeers = callPeers.slice(0, 12);
-    const sig = shownPeers.map((p) => `${p.id}:${p.name}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}`).join('|');
+    const sig = `${isStageVoip}:${isLeader()}|` + shownPeers.map((p) => `${p.id}:${p.name}:${p.device}:${!p.muted}:${!!p.speaking}:${!!p.cam}:${!!p.screen}:${!!p.inCall}:${!!p.deafened}:${!!p.handRaised}:${!!p.isStageSpeaker}`).join('|');
     if (discordCallPeers.dataset.sig !== sig) {
       discordCallPeers.dataset.sig = sig;
+      const seenNameIdx = new Map();
       discordCallPeers.replaceChildren(...shownPeers.map((p) => {
+        const nk = (p.name || 'Misafir').trim().toLowerCase();
+        const idx = (seenNameIdx.get(nk) || 0) + 1;
+        seenNameIdx.set(nk, idx);
+        const dupCount = nameTotals.get(nk) || 1;
+        const labelText = dupCount > 1
+          ? `${p.name || 'Misafir'} (${p.id === selfId ? 'Sen' : (p.device || `#${idx}`)})`
+          : (p.name || 'Misafir');
         const isAct = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
         const badges = [];
-        if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, '🖥️ YAYINDA'));
-        if (p.cam) badges.push(h('span', { class: 'd-peer-badge cam' }, '📷'));
-        if (p.deafened) badges.push(h('span', { class: 'd-peer-badge deaf' }, '🎧✕'));
-        else if (!p.muted) badges.push(h('span', { class: 'd-peer-badge mic-on' }, '🎙️'));
-        else badges.push(h('span', { class: 'd-peer-badge mic-off' }, '🔇'));
+        if (p.handRaised) {
+          badges.push(h('span', {
+            class: 'd-peer-badge hand-raised',
+            title: isLeader() ? `${labelText} söz istiyor — mikrofon vermek için tıkla` : `${labelText} söz istiyor`,
+            onclick: isLeader() ? (ev) => { ev.stopPropagation(); actions.toggleStageSpeaker?.(p.id); } : null,
+          }, '✋'));
+        }
+        if (p.screen) badges.push(h('span', { class: 'd-peer-badge live-screen' }, 'YAYINDA'));
+        if (p.cam) badges.push(h('span', { class: 'd-peer-badge cam', html: icons.camera }));
+        if (p.deafened) badges.push(h('span', { class: 'd-peer-badge deaf', html: icons.headphonesOff }));
+        else if (!p.muted) badges.push(h('span', { class: 'd-peer-badge mic-on', html: icons.mic }));
+        else badges.push(h('span', { class: 'd-peer-badge mic-off', html: icons.micOff }));
         const av = avatar(p, 26);
         if (p.speaking) av.classList.add('speaking');
+        if (p.id !== selfId && !String(p.id || '').startsWith('bot_')) {
+          av.style.cursor = 'pointer';
+          av.title = `${labelText} profilini aç / arkadaş ekle`;
+          av.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            window.vortexOpenUserProfile?.(p);
+          });
+        }
         return h('div', {
           class: `discord-peer-chip ${isAct ? 'in-call' : ''} ${p.speaking ? 'is-speaking' : ''} ${p.screen ? 'has-screen' : ''}`.trim(),
-          title: p.screen ? `${p.name} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${p.name}`,
+          title: p.screen ? `${labelText} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${labelText}`,
           onclick: () => {
             const targetCamId = p.id === selfId ? (screenOn ? 'self-screen' : 'self') : p.id;
             const bubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${targetCamId}"]`);
@@ -355,7 +825,7 @@ export function buildChat(ctx) {
               toggleCallJoin();
             }
           },
-        }, av, h('span', { class: 'd-peer-name' }, p.name || 'Misafir'), ...badges);
+        }, av, h('span', { class: 'd-peer-name' }, labelText), ...badges);
       }));
     }
   }
@@ -364,11 +834,49 @@ export function buildChat(ctx) {
     ctx.voice.onStateChange = () => syncVoiceUi();
   }
 
+  function canActivateVoip(kind = 'mic') {
+    const voipMode = state.mesh?.voipMode;
+    if (voipMode === 'off') {
+      toast('Bu odada sesli ve görüntülü sohbet kapalı');
+      return false;
+    }
+    if (voipMode === 'leader' && !isLeader()) {
+      toast('Sadece oda başkanı mikrofon/kamera açabilir');
+      return false;
+    }
+    const selfId = ctx.voice?.getSelfId?.() || state.clientId;
+    const meP = (state.mesh?.participants || []).find((x) => x.id === selfId);
+    if (voipMode === 'stage' && !isLeader()) {
+      if (!meP?.isHost && !meP?.isCoHost && !meP?.isStageSpeaker) {
+        if (!meP?.handRaised) actions.raiseHand?.();
+        else toast('🎤 Sahne Modu açık — oda liderinin söz vermesi bekleniyor ✋');
+        return false;
+      }
+    }
+    const alreadyActive = Boolean(ctx.voice?.micOn || ctx.voice?.camOn || ctx.voice?.screenOn);
+    if (!alreadyActive && !isLeader() && !meP?.isHost && !meP?.isCoHost) {
+      const activeSpeakers = (state.mesh?.participants || []).filter((p) => p && p.id !== selfId && (!p.muted || p.cam || p.screen)).length;
+      if (activeSpeakers >= 8) {
+        toast('Odada aynı anda en fazla 8 aktif konuşmacı olabilir');
+        return false;
+      }
+    }
+    return true;
+  }
+
   async function toggleCallJoin() {
     if (!ctx.voice) return;
     const isAct = Boolean(ctx.voice.inCall || ctx.voice.micOn || ctx.voice.camOn || ctx.voice.screenOn);
-    if (isAct) await ctx.voice.leaveCall();
-    else await ctx.voice.joinCall({ withMic: true });
+    if (isAct) {
+      await ctx.voice.leaveCall();
+    } else {
+      if (state.mesh?.voipMode === 'off') {
+        toast('Bu odada sesli ve görüntülü sohbet kapalı');
+        return;
+      }
+      const allowMic = canActivateVoip('mic');
+      await ctx.voice.joinCall({ withMic: allowMic });
+    }
     syncVoiceUi();
   }
 
@@ -378,28 +886,32 @@ export function buildChat(ctx) {
   }
 
   async function toggleMic() {
+    if (!ctx.voice?.micOn && !canActivateVoip('mic')) return;
     await ctx.voice?.toggleMic();
     syncVoiceUi();
   }
 
   async function toggleCam() {
+    if (!ctx.voice?.camOn && !canActivateVoip('cam')) return;
     await ctx.voice?.toggleCamera?.();
     syncVoiceUi();
   }
 
   async function toggleScreen() {
+    if (!ctx.voice?.screenOn && !canActivateVoip('screen')) return;
     await ctx.voice?.toggleScreenShare?.();
     syncVoiceUi();
   }
 
   async function toggleGif() {
+    closeToolsPopover();
     if (!gifPanel.classList.contains('hidden')) { gifPanel.classList.add('hidden'); return; }
     const q = h('input', { class: 'input', placeholder: 'GIF ara...' });
     const grid = h('div', { class: 'gif-grid' });
     const load = async () => {
       grid.replaceChildren(h('div', { class: 'spinner' }));
       const res = await api(`/api/rave/gifs?${qs({ q: q.value || 'funny' })}`).catch(() => ({ gifs: [] }));
-      grid.replaceChildren(...(res.gifs || []).map((g) => h('img', { src: g.preview || g.url, loading: 'lazy', alt: g.title || 'gif', onclick: () => { actions.sendChat('', { gif: g.url }); gifPanel.classList.add('hidden'); } })));
+      grid.replaceChildren(...(res.gifs || []).map((g) => h('img', { src: g.preview || g.url, loading: 'lazy', alt: g.title || 'gif', onclick: () => { actions.sendChat('', { gif: g.url, ...(activeReply ? { replyTo: activeReply } : {}) }); clearReply(); gifPanel.classList.add('hidden'); } })));
     };
     q.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
     gifPanel.replaceChildren(q, grid);
@@ -450,7 +962,10 @@ export function buildChat(ctx) {
       return;
     }
     const myName = state.self?.name || '';
-    const sig = `${myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
+    const myBase = myName.split('#')[0];
+    const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myVoteTag = myCidTail ? `${myBase}#${myCidTail}` : '';
+    const sig = `${myVoteTag || myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
     if (wrap.dataset.pollSig === sig) return;
     wrap.dataset.pollSig = sig;
     const total = (poll.options || []).reduce((acc, o) => acc + (o.votes?.length || 0), 0);
@@ -459,7 +974,7 @@ export function buildChat(ctx) {
       h('div', { class: 'chat-poll-opts' }, ...(poll.options || []).map((opt, idx) => {
         const count = (opt.votes || []).length;
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-        const voted = (opt.votes || []).includes(myName);
+        const voted = (opt.votes || []).some((u) => (myVoteTag ? (u === myVoteTag || (!String(u).includes('#') && u === myName)) : u === myName));
         return h('button', {
           type: 'button',
           class: `chat-poll-opt ${voted ? 'voted' : ''}`,
@@ -479,6 +994,32 @@ export function buildChat(ctx) {
   }
 
   const MSG_QUICK_EMOJIS = ['❤️', '😂', '🔥', '👍', '😮'];
+
+  function spawnEmojiFountain(anchorEl, emoji) {
+    try {
+      const rect = anchorEl?.getBoundingClientRect?.();
+      if (!rect || (!rect.width && !rect.height)) return;
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top;
+      for (let i = 0; i < 4; i += 1) {
+        const sway = `${Math.round((Math.random() - 0.5) * 68)}px`;
+        const rise = `${-Math.round(95 + Math.random() * 75)}px`;
+        const delay = `${i * 55}ms`;
+        const f = h('div', {
+          class: 'wl-fountain-emoji',
+          style: {
+            left: `${Math.round(cx - 12)}px`,
+            top: `${Math.round(cy - 10)}px`,
+            '--sway': sway,
+            '--rise': rise,
+            animationDelay: delay,
+          },
+        }, emoji);
+        (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(f);
+        setTimeout(() => f.remove(), 1150 + i * 60);
+      }
+    } catch (_) {}
+  }
 
   function spawnReactionBurst(anchorEl, emoji) {
     try {
@@ -503,7 +1044,7 @@ export function buildChat(ctx) {
             '--rot': rot,
           },
         }, emoji);
-        document.body.appendChild(p);
+        (document.fullscreenElement || document.webkitFullscreenElement || document.body).appendChild(p);
         setTimeout(() => p.remove(), 700);
       }
     } catch (e) { /* ignore */ }
@@ -525,6 +1066,9 @@ export function buildChat(ctx) {
     if (!e.target?.closest?.('.gif-panel, [aria-label="GIF"]')) {
       gifPanel.classList.add('hidden');
     }
+    if (!e.target?.closest?.('.chat-tools-popover, #btn-chat-tools')) {
+      closeToolsPopover();
+    }
   };
   document.addEventListener('pointerdown', onDocOutsideTap, { passive: true });
 
@@ -532,8 +1076,11 @@ export function buildChat(ctx) {
     const msgObj = (state.mesh?.chat || []).find((x) => x.id === msgId);
     const reacts = msgObj?.reactions || {};
     const myName = state.self?.name || 'Misafir';
+    const myBase = myName.split('#')[0];
+    const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myReactTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const entries = Object.entries(reacts).filter(([, u]) => Array.isArray(u) && u.length > 0);
-    const sig = `${myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
+    const sig = `${myReactTag || myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
     if (wrap.dataset.reactSig === sig) return;
     wrap.dataset.reactSig = sig;
     if (!entries.length) {
@@ -543,11 +1090,11 @@ export function buildChat(ctx) {
     }
     wrap.classList.remove('empty');
     wrap.replaceChildren(...entries.map(([em, users]) => {
-      const mine = users.includes(myName);
+      const mine = users.some((u) => (myReactTag ? (u === myReactTag || (!String(u).includes('#') && u === myName)) : u === myName));
       return h('button', {
         type: 'button',
         class: `msg-react-pill ${mine ? 'mine' : ''}`,
-        title: users.join(', '),
+        title: users.map((u) => String(u).split('#')[0]).join(', '),
         onclick: (e) => {
           e.stopPropagation();
           spawnReactionBurst(e.currentTarget, em);
@@ -568,15 +1115,16 @@ export function buildChat(ctx) {
 
   function buildQuoteBlock(rep) {
     if (!rep) return null;
-    const obj = typeof rep === 'object' ? rep : { id: '', user: 'Mesaj', text: String(rep), color: '#00f5d4' };
+    const obj = typeof rep === 'object' ? rep : { id: '', user: 'Mesaj', text: String(rep), color: '#6366f1' };
     if (!obj.user && !obj.text) return null;
     return h('div', {
       class: 'msg-quote',
-      style: { '--quote-color': obj.color || '#00f5d4' },
+      style: { '--quote-color': obj.color || '#6366f1' },
       onclick: (e) => {
         e.stopPropagation();
         if (!obj.id) return;
-        const target = list.querySelector(`.msg[data-id="${obj.id}"]`);
+        const safeId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(String(obj.id)) : String(obj.id).replace(/["\\]/g, '\\$&');
+        const target = list.querySelector(`.msg[data-id="${safeId}"]`);
         if (target) {
           target.scrollIntoView({ behavior: 'smooth', block: 'center' });
           target.classList.add('msg-highlight');
@@ -584,19 +1132,120 @@ export function buildChat(ctx) {
         }
       },
     },
-      h('span', { class: 'msg-quote-user', style: { color: obj.color || '#00f5d4' } }, obj.user || 'Alıntı'),
+      h('span', { class: 'msg-quote-user', style: { color: obj.color || '#6366f1' } }, obj.user || 'Alıntı'),
       h('span', { class: 'msg-quote-text' }, obj.text || ''));
   }
 
+  function parseStampToSec(stamp) {
+    const parts = String(stamp || '').split(':').map((x) => Number(x));
+    if (parts.some((n) => !Number.isFinite(n))) return null;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return null;
+  }
+
+  function renderRichMessageText(rawText) {
+    const text = String(rawText || '');
+    if (!text) return [];
+    const re = /\b((?:\d{1,2}:)?\d{1,2}:\d{2})\b/g;
+    const out = [];
+    let lastIdx = 0;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        out.push(text.slice(lastIdx, match.index));
+      }
+      const stamp = match[1];
+      const sec = parseStampToSec(stamp);
+      if (sec !== null) {
+        out.push(h('button', {
+          type: 'button',
+          class: 'chat-ts-badge',
+          title: `${stamp} sahnesine git`,
+          onclick: (e) => {
+            e.stopPropagation();
+            window.vortexSeekToTimestamp?.(sec);
+          },
+        }, `⏱️ ${stamp}`));
+      } else {
+        out.push(stamp);
+      }
+      lastIdx = re.lastIndex;
+    }
+    if (lastIdx < text.length) {
+      out.push(text.slice(lastIdx));
+    }
+    return out;
+  }
+
+  function buildAudioNoteWidget(m) {
+    return buildUniversalAudioNotePlayer(m?.audioNote, { h, toast });
+  }
+
+  function buildSnapshotWidget(m) {
+    if (!m?.snapshot || !/^data:image\/(?:jpeg|jpg|png|webp);base64,/i.test(String(m.snapshot))) return null;
+    const hasTime = m.videoTime !== null && m.videoTime !== undefined && m.videoTime !== '' && Number.isFinite(Number(m.videoTime)) && Number(m.videoTime) >= 0;
+    const sec = hasTime ? Math.round(Number(m.videoTime)) : null;
+    return h('div', {
+      class: 'chat-snapshot-card',
+      onclick: (e) => {
+        e.stopPropagation();
+        if (sec !== null) window.vortexSeekToTimestamp?.(sec);
+      },
+    },
+      h('img', { class: 'chat-snapshot-img', src: m.snapshot, alt: 'Sahne', loading: 'lazy' }),
+      sec !== null
+        ? h('button', {
+            type: 'button',
+            class: 'chat-snapshot-time',
+            onclick: (e) => {
+              e.stopPropagation();
+              window.vortexSeekToTimestamp?.(sec);
+            },
+          }, `▶ ${fmtTime(sec)} Sahnesine Git`)
+        : null);
+  }
+
+  function formatLocalTime(m) {
+    const ts = Number(m?.ts || 0);
+    if (ts > 1000000000) {
+      try {
+        const d = new Date(ts * 1000);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        return `${hh}:${mm}`;
+      } catch (e) { /* ignore */ }
+    }
+    return m?.time || '';
+  }
+
   function msgNode(m) {
+    const dispTime = formatLocalTime(m);
     if (m.system) {
-      const t = h('div', { class: 'sysmsg' });
-      if (m.user) t.append(h('b', {}, m.user), ' ');
-      t.append(m.text || '');
+      const txt = String(m.text || '');
+      const isJoin = /katıldı/i.test(txt);
+      const isLeave = /ayrıldı/i.test(txt);
+      const isMedia = /oynatılıyor|başlatıldı|eklendi/i.test(txt);
+      const sysKind = (isJoin || isLeave) ? 'presence' : isMedia ? 'media' : 'other';
+      const badgeIcon = isJoin ? '🟢' : isLeave ? '🔴' : isMedia ? '🎬' : '✨';
+      const displayTxt = txt === 'katıldı' ? 'odaya katıldı' : txt === 'ayrıldı' ? 'odadan ayrıldı' : txt;
+      const t = h('div', {
+        class: `sysmsg ${isJoin ? 'sysmsg-join' : isLeave ? 'sysmsg-leave' : isMedia ? 'sysmsg-media' : ''}`,
+        'data-sys-user': m.user || '',
+        'data-sys-kind': sysKind,
+        'data-ts': String(m.ts || (Date.now() / 1000)),
+      },
+        h('span', { class: 'sysmsg-ico' }, badgeIcon),
+        m.user ? h('b', { class: 'sysmsg-user' }, m.user) : null,
+        m.user ? ' ' : null,
+        h('span', { class: 'sysmsg-txt' }, displayTxt),
+        dispTime ? h('time', { class: 'sysmsg-time' }, dispTime) : null);
       return t;
     }
-    const cont = lastUser === m.user && !m.pollId && !m.replyTo;
-    lastUser = m.pollId ? null : m.user;
+    const msgAuthorKey = String(m.cid || m.uid || m.user || '');
+    const isCont = Boolean(msgAuthorKey && lastUser === msgAuthorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
+    const cont = isCont;
+    lastUser = (m.pollId || m.snapshot || m.audioNote) ? null : msgAuthorKey;
     const reactWrap = h('div', { class: 'msg-reactions empty', 'data-react-for': m.id });
     fillReactionBadges(reactWrap, m.id);
     let row = null;
@@ -628,48 +1277,199 @@ export function buildChat(ctx) {
         },
       }, h('span', { html: icons.reply, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Yanıtla'));
 
+    const isSelfMsg = Boolean(
+      (m.cid && state.clientId && m.cid === state.clientId) ||
+      (m.uid && (state.self?.uid || state.self?.id) && m.uid === (state.self?.uid || state.self?.id)) ||
+      (!m.cid && !m.uid && m.user && state.self?.name && m.user === state.self.name)
+    );
+    const isBotMsg = String(m.cid || m.uid || '').startsWith('bot_') || m.cid === 'kinox_bot';
+    const isAlreadyFriend = (state.social?.friends || []).some((f) =>
+      (f.uid && m.uid && f.uid === m.uid) ||
+      (f.handle && m.handle && f.handle.toLowerCase() === m.handle.toLowerCase()) ||
+      f.name === m.user
+    );
+    const incomingFriendReq = (state.social?.requests || []).find((r) =>
+      (r.fromUid && m.uid && r.fromUid === m.uid) ||
+      (r.fromHandle && m.handle && r.fromHandle.toLowerCase() === m.handle.toLowerCase()) ||
+      r.fromName === m.user
+    );
+    const addFriendInlineBtn = (!isSelfMsg && !isBotMsg && !isAlreadyFriend) ? h('button', {
+      type: 'button',
+      class: 'chat-inline-friend-btn',
+      style: { marginLeft: '6px', padding: '1px 6px', fontSize: '.68rem', borderRadius: '999px', border: '1px solid rgba(39,220,200,0.35)', background: 'rgba(39,220,200,0.1)', color: '#5eead4', cursor: 'pointer' },
+      title: incomingFriendReq ? `${m.user} arkadaşlık isteğini kabul et` : `${m.user} kişisini arkadaş ekle`,
+      onclick: async (ev) => {
+        ev.stopPropagation();
+        const btn = ev.currentTarget;
+        const reqUid = incomingFriendReq?.fromUid || m.uid || '';
+        if (incomingFriendReq && reqUid) {
+          const r = await updateFriendAction('accept', { requestId: incomingFriendReq.id, targetUid: reqUid });
+          if (r?.ok) {
+            toast(`🎉 ${m.user} ile artık arkadaşsınız!`);
+            if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
+            btn.remove();
+          }
+          return;
+        }
+        const targetIdent = m.uid || m.handle || m.user || '';
+        if (!targetIdent) return;
+        const res = await sendFriendRequest(targetIdent, m.uid ? { targetUid: m.uid } : {});
+        if (res?.ok) {
+          toast(res.mutualAccepted || res.status === 'FRIENDS' ? `🎉 ${m.user} ile artık arkadaşsınız!` : `📩 ${m.user} kişisine arkadaşlık isteği gönderildi`);
+          if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('vortex_friends_updated'));
+          btn.textContent = (res.mutualAccepted || res.status === 'FRIENDS') ? '✓ Arkadaş' : '⏳ İstekli';
+          btn.disabled = true;
+        } else {
+          toast(res?.error || 'Arkadaşlık isteği gönderilemedi');
+        }
+      },
+    }, incomingFriendReq ? '✓ Onayla' : '+ Arkadaş') : null;
+
     row = h('div', {
       class: `msg ${cont ? 'cont' : ''}`,
       'data-id': m.id,
+      'data-author-key': msgAuthorKey,
+      'data-ts': String(m.ts || (Date.now() / 1000)),
       onmouseleave: () => row.classList.remove('msg-closing'),
+      ondblclick: (e) => {
+        if (e.target.closest('button, a, .chat-voice-note, .chat-poll-card')) return;
+        setReplyTo(m);
+      },
       onclick: (e) => {
-        if (e.target.closest('button, a, .chat-poll-card, .msg-actions, .msg-reactions')) return;
+        if (e.target.closest('button, a, .chat-poll-card, .chat-snapshot-card, .chat-voice-note, .msg-actions, .msg-reactions')) return;
         const wasOpen = row.classList.contains('msg-active');
         list.querySelectorAll('.msg.msg-active').forEach((n) => n.classList.remove('msg-active'));
         row.classList.remove('msg-closing');
         if (!wasOpen) row.classList.add('msg-active');
       },
     },
-      avatar({ name: m.user, color: m.color }, 30),
+      (() => {
+        const msgPeer = (state.mesh?.participants || []).find((x) =>
+          (m.cid && x.id === m.cid) ||
+          (m.uid && x.uid && x.uid === m.uid) ||
+          (m.user && x.name === m.user)
+        ) || {
+          uid: m.uid || '',
+          name: m.user,
+          handle: m.handle || '',
+          color: m.color,
+          avatarUrl: m.avatarUrl || '',
+        };
+        const msgAv = avatar(msgPeer, 30);
+        if (!String(msgPeer.id || '').startsWith('bot_')) {
+          msgAv.style.cursor = 'pointer';
+          msgAv.title = `${m.user} profilini aç / arkadaş ekle`;
+          msgAv.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            window.vortexOpenUserProfile?.(msgPeer);
+          });
+        }
+        return msgAv;
+      })(),
       h('div', { class: 'msg-body' },
         h('div', { class: 'msg-head-row' },
-          h('div', { class: 'msg-name' }, h('span', { style: { color: m.color } }, m.user), h('time', {}, m.time || '')),
+          h('div', { class: 'msg-name' },
+            h('span', {
+              style: { color: m.color, cursor: 'pointer' },
+              title: `${m.user} profilini aç / arkadaş ekle`,
+              onclick: (ev) => {
+                ev.stopPropagation();
+                const msgPeer = (state.mesh?.participants || []).find((x) =>
+                  (m.cid && x.id === m.cid) ||
+                  (m.uid && x.uid && x.uid === m.uid) ||
+                  (m.user && x.name === m.user)
+                ) || {
+                  uid: m.uid || '',
+                  name: m.user,
+                  handle: m.handle || '',
+                  color: m.color,
+                  avatarUrl: m.avatarUrl || '',
+                };
+                window.vortexOpenUserProfile?.(msgPeer);
+              },
+            }, m.user),
+            addFriendInlineBtn,
+            h('time', {}, dispTime)),
           actionBar),
         buildQuoteBlock(m.replyTo),
         m.pollId
           ? buildPollWidget(m.pollId)
-          : h('div', { class: 'msg-text' }, m.text || '', m.gif ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
+          : h('div', { class: 'msg-text' },
+              ...renderRichMessageText(m.text || ''),
+              buildAudioNoteWidget(m),
+              buildSnapshotWidget(m),
+              (m.gif && /^https:\/\//i.test(String(m.gif))) ? h('img', { class: 'gif', src: m.gif, alt: 'gif', loading: 'lazy' }) : null),
         reactWrap));
+    let swX = 0;
+    let swY = 0;
+    row.addEventListener('touchstart', (ev) => {
+      const t = ev.touches?.[0];
+      if (t) { swX = t.clientX; swY = t.clientY; }
+    }, { passive: true });
+    row.addEventListener('touchend', (ev) => {
+      const t = ev.changedTouches?.[0];
+      if (!t || !swX) return;
+      const dx = t.clientX - swX;
+      const dy = Math.abs(t.clientY - swY);
+      swX = 0;
+      if (dx > 52 && dy < 28) setReplyTo(m);
+    }, { passive: true });
     return row;
   }
 
+  const recentSysMap = new Map();
   function append(m) {
-    if (!m || rendered.has(m.id)) return;
-    if (m.system && m.user) {
-      const joinKey = `join:${m.user}`;
-      if (m.text === 'katıldı') {
-        if (rendered.has(joinKey)) return;
-        rendered.add(joinKey);
-      } else if (m.text === 'ayrıldı') {
-        rendered.delete(joinKey);
+    if (!m || !m.id || rendered.has(m.id)) return;
+    const nowSec = Date.now() / 1000;
+    const curTs = Number(m.ts || nowSec);
+    if (m.system) {
+      if (nowSec - curTs > 1800) {
+        rendered.add(m.id);
+        return;
+      }
+      const txt = String(m.text || '');
+      const isPresence = /katıldı|ayrıldı/i.test(txt);
+      const isMedia = /oynatılıyor|başlatıldı|eklendi/i.test(txt);
+      if (m.user && isPresence) {
+        const normAct = /katıldı/i.test(txt) ? 'join' : 'leave';
+        const sysKey = `${m.user}:${normAct}`;
+        const prevTs = recentSysMap.get(sysKey) || 0;
+        if (prevTs && Math.abs(curTs - prevTs) < 3) {
+          rendered.add(m.id);
+          return;
+        }
+        recentSysMap.set(sysKey, curTs);
+        const remPresence = Array.from(list.querySelectorAll('.sysmsg[data-sys-kind="presence"]'));
+        while (remPresence.length >= 6) {
+          remPresence.shift()?.remove();
+        }
+      } else if (isMedia) {
+        list.querySelectorAll('.sysmsg[data-sys-kind="media"]').forEach((node) => node.remove());
       }
     }
     rendered.add(m.id);
     if (m.system) lastUser = null;
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-    list.append(msgNode(m));
-    while (list.children.length > 120) {
+    const node = msgNode(m);
+    const lastChild = list.lastElementChild;
+    const lastTs = lastChild ? Number(lastChild.dataset?.ts || 0) : 0;
+    let insertBeforeNode = null;
+    if (lastTs > 0 && curTs > 0 && curTs < lastTs - 1) {
+      insertBeforeNode = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs) || null;
+    }
+    if (!m.system) {
+      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : list.lastElementChild?.dataset?.authorKey;
+      const isCont = Boolean(node.dataset?.authorKey && prevAuthorKey === node.dataset.authorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
+      node.classList.toggle('cont', isCont);
+    }
+    if (insertBeforeNode) {
+      list.insertBefore(node, insertBeforeNode);
+    } else {
+      list.append(node);
+    }
+    while (list.children.length > 150) {
       list.firstElementChild?.remove();
+      list.firstElementChild?.classList?.remove('cont');
     }
     if (atBottom) list.scrollTop = list.scrollHeight;
   }
@@ -683,9 +1483,11 @@ export function buildChat(ctx) {
     let barEl = null;
     barEl = h('div', { class: 'chat-quick-bar', id: 'privacy-card' },
       h('div', { class: 'chat-quick-pills' },
-        h('button', { type: 'button', class: 'chat-q-pill primary', onclick: copyInvite, title: 'Davet bağlantısını kopyala' }, '🔗 Davet Linki'),
-        h('a', { class: 'chat-q-pill', href: waUrl, target: '_blank', rel: 'noopener', title: 'WhatsApp ile davet et' }, '💬 WhatsApp'),
-        h('button', { type: 'button', class: 'chat-q-pill', onclick: () => { setView('right', 'Friends'); ctx.layout.update(); }, title: 'Davet Kartı & QR' }, '📲 QR'),
+        h('button', { type: 'button', class: 'chat-q-pill primary', onclick: copyInvite, title: 'Davet bağlantısını kopyala' }, h('span', { html: icons.link, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'Davet Linki'),
+        h('button', { type: 'button', class: 'chat-q-pill friend-add-pill', id: 'btn-room-add-friend', onclick: () => { if (typeof window.vortexOpenFriendsModal === 'function') window.vortexOpenFriendsModal(); else { setView('right', 'Friends'); ctx.layout.update(); } }, title: 'Arkadaş Ekle & Arkadaş Listem' }, h('span', { html: icons.addUser, style: { display: 'inline-flex', width: '12px', height: '12px' } }), '+ Arkadaş Ekle'),
+        h('a', { class: 'chat-q-pill', href: waUrl, target: '_blank', rel: 'noopener', title: 'WhatsApp ile davet et' }, h('span', { html: icons.share, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'WhatsApp'),
+        h('button', { type: 'button', class: 'chat-q-pill', onclick: () => { setView('right', 'Friends'); ctx.layout.update(); }, title: 'Davet Kartı & QR' }, h('span', { html: icons.qr, style: { display: 'inline-flex', width: '12px', height: '12px' } }), 'QR')),
+      h('div', { class: 'chat-access-seg', 'data-active-privacy': cur },
         ...PRIVACY.map(([k, label, ic, desc]) => h('button', {
           type: 'button',
           class: `chat-q-pill privacy-opt ${cur === k ? 'on' : ''}`,
@@ -695,8 +1497,8 @@ export function buildChat(ctx) {
             if (!isLeader()) { toast('Bu ayarı yalnızca oda lideri değiştirebilir'); return; }
             actions.hostAction('set_privacy', { privacy: k });
           },
-        }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), label))),
-      h('button', { type: 'button', class: 'chat-q-close', 'aria-label': 'Kapat', onclick: () => barEl.remove() }, '✕'));
+        }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), h('span', { class: 'priv-opt-lbl' }, cur === k && k === 'friends' ? 'Sadece Arkadaşlar' : label)))),
+      h('button', { type: 'button', class: 'chat-q-close', 'aria-label': 'Kapat', onclick: () => { quickAccessZone.classList.add('hidden'); dShareQuickBtn.classList.remove('on'); } }, '✕'));
     return barEl;
   }
 
@@ -742,11 +1544,11 @@ export function buildChat(ctx) {
     btnTabSimilar.classList.toggle('active', musicTab === 'similar');
     btnTabRecent.classList.toggle('active', musicTab === 'recent');
     const recentList = getMusicHistory();
-    const seedArtist = (curMedia?.isMusic && curMedia?.artist) ? curMedia.artist : (recentList[0]?.artist || 'Semicenk');
-    const seedTitle = (curMedia?.isMusic && curMedia?.songTitle) ? curMedia.songTitle : (recentList[0]?.songTitle || 'Çıkmaz Bir Sokakta');
+    const seedArtist = (curMedia?.isMusic && curMedia?.artist) ? curMedia.artist : (recentList[0]?.artist || '');
+    const seedTitle = (curMedia?.isMusic && curMedia?.songTitle) ? curMedia.songTitle : (recentList[0]?.songTitle || curMedia?.title || '');
     const titleEl = musicSimilarBar.querySelector('#music-similar-title');
     if (titleEl) {
-      titleEl.textContent = musicTab === 'recent' ? '🕘 Son Çalınanlar' : `🎵 Diğer Müzikler (${seedArtist} Mix)`;
+      titleEl.textContent = musicTab === 'recent' ? '🕘 Son Çalınanlar' : (seedArtist ? `🎵 Diğer Müzikler (${seedArtist} Mix)` : '🎵 Diğer Müzikler');
     }
     if (musicTab === 'recent') {
       renderMusicStripItems(recentList);
@@ -778,9 +1580,81 @@ export function buildChat(ctx) {
 
   function clear() {
     rendered.clear();
+    recentSysMap.clear();
     lastUser = null;
+    clearReply();
     list.querySelectorAll('.msg, .sysmsg, .chat-msg, .chat-sys, .chat-poll-card').forEach((n) => n.remove());
   }
+
+  let maxPortraitH = (typeof window !== 'undefined' && window.innerHeight >= window.innerWidth) ? window.innerHeight : 0;
+  let maxLandscapeH = (typeof window !== 'undefined' && window.innerWidth > window.innerHeight) ? window.innerHeight : 0;
+  let preKbPortrait = typeof window !== 'undefined' ? (window.innerHeight >= window.innerWidth) : true;
+  let destroyed = false;
+  const onVisualViewportResize = () => {
+    if (destroyed) return;
+    const rawW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const rawH = window.innerHeight || document.documentElement.clientHeight || 0;
+    const vv = window.visualViewport;
+    const vvH = vv ? vv.height : rawH;
+    const activeEl = document.activeElement;
+    const isInputTag = Boolean(activeEl && /^(INPUT|TEXTAREA)$/i.test(activeEl.tagName) && activeEl.type !== 'range' && activeEl.type !== 'checkbox' && activeEl.type !== 'radio' && activeEl.type !== 'file');
+    const isChatFocused = Boolean(activeEl && (activeEl === input || (el.contains(activeEl) && isInputTag)));
+    const isRoomOrPopupInput = Boolean(isChatFocused || (isInputTag && activeEl.closest?.('#mesh-root, #popup-root')));
+    const kbWasOpen = document.body.classList.contains('kb-open');
+    const physicalPortrait = (kbWasOpen || isRoomOrPopupInput)
+      ? preKbPortrait
+      : ((rawW > 0 && rawH > 0) ? (rawH >= rawW) : preKbPortrait);
+    if (!isRoomOrPopupInput && !kbWasOpen) preKbPortrait = physicalPortrait;
+    const isLandscape = !physicalPortrait && (rawW > rawH * 1.08);
+    if (!isRoomOrPopupInput) {
+      if (isLandscape) maxLandscapeH = Math.max(maxLandscapeH, rawH, vvH || 0);
+      else maxPortraitH = Math.max(maxPortraitH, rawH, vvH || 0);
+    }
+    const baseH = isLandscape
+      ? Math.max(maxLandscapeH, Math.min(rawW, rawH))
+      : Math.max(maxPortraitH, rawH, vvH || 0);
+    const kbOpen = Boolean(isRoomOrPopupInput && ((vv && (baseH - vvH > 95)) || (baseH - rawH > 95)));
+    if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
+      try { window.scrollTo(0, 0); document.documentElement.scrollTop = 0; document.body.scrollTop = 0; } catch (e) { /* ignore */ }
+    }
+    if (kbOpen) {
+      const effH = Math.max(120, Math.round(vv ? vvH : rawH));
+      const vvTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
+      document.documentElement.style.setProperty('--vvh', `${effH}px`);
+      document.documentElement.style.setProperty('--vv-top', `${vvTop}px`);
+    } else {
+      document.documentElement.style.setProperty('--vvh', '100%');
+      document.documentElement.style.setProperty('--vv-top', '0px');
+    }
+    document.body.classList.toggle('kb-open', kbOpen);
+    document.body.classList.toggle('kb-chat-focus', Boolean(kbOpen && isChatFocused));
+    document.body.classList.toggle('kb-portrait', Boolean(kbOpen && physicalPortrait));
+    window.__wlSyncViewport?.();
+    if (kbOpen && isChatFocused) {
+      list.scrollTop = list.scrollHeight;
+    }
+  };
+  const onWindowOrientationOrResize = () => {
+    onVisualViewportResize();
+    [60, 200, 500].forEach((ms) => setTimeout(onVisualViewportResize, ms));
+  };
+  input.addEventListener('focus', () => {
+    setTimeout(onVisualViewportResize, 80);
+    setTimeout(onVisualViewportResize, 260);
+  });
+  input.addEventListener('blur', () => {
+    document.body.classList.remove('kb-open');
+    document.documentElement.style.setProperty('--vvh', '100%');
+    document.documentElement.style.setProperty('--vv-top', '0px');
+    setTimeout(onVisualViewportResize, 80);
+  });
+  window.addEventListener('resize', onWindowOrientationOrResize);
+  window.addEventListener('orientationchange', onWindowOrientationOrResize);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onVisualViewportResize);
+    window.visualViewport.addEventListener('scroll', onVisualViewportResize);
+  }
+  onVisualViewportResize();
 
   let typingTimer = null;
   setTimeout(() => { syncVoiceUi(); syncMusicSimilarUi(true); }, 0);
@@ -797,25 +1671,38 @@ export function buildChat(ctx) {
       }
       syncVoiceUi();
       syncMusicSimilarUi();
+      const nowSec = Date.now() / 1000;
+      list.querySelectorAll('.sysmsg').forEach((node) => {
+        const ts = Number(node.dataset.ts || 0);
+        if (ts > 0 && nowSec - ts > 1800) node.remove();
+      });
       const chatArr = state.mesh?.chat || [];
-      if (chatArr.length === 0 && rendered.size > 0) {
-        clear();
-      }
       for (const m of chatArr) append(m);
       renderPolls();
       renderReactions();
-      const card = list.querySelector('#privacy-card');
+      if (!onboarding && state.mesh) {
+        onboarding = true;
+        quickAccessZone.replaceChildren(quickRoomBar());
+      }
+      const card = el.querySelector('#privacy-card');
       if (card) {
         const cur = state.mesh?.privacy || 'public';
+        const segEl = card.querySelector('.chat-access-seg');
+        if (segEl) segEl.dataset.activePrivacy = cur;
         card.querySelectorAll('.privacy-opt').forEach((btn) => {
-          btn.classList.toggle('on', btn.dataset.privacy === cur);
+          const isOn = btn.dataset.privacy === cur;
+          btn.classList.toggle('on', isOn);
+          const lbl = btn.querySelector('.priv-opt-lbl');
+          if (lbl && btn.dataset.privacy === 'friends') {
+            lbl.textContent = isOn ? 'Sadece Arkadaşlar' : 'Arkadaşlar';
+          }
         });
       }
     },
     showOnboarding() {
       if (onboarding) return;
       onboarding = true;
-      list.append(quickRoomBar());
+      quickAccessZone.replaceChildren(quickRoomBar());
     },
     showTyping(user) {
       if (!user || user === state.self?.name) return;
@@ -825,14 +1712,29 @@ export function buildChat(ctx) {
     },
     setMicLevel(lvl) {
       const n = Math.max(0, Math.min(1, Number(lvl || 0)));
-      micBtn.classList.toggle('speaking', n > 0.08);
-      micBtn.style.setProperty('--mic-lvl', n.toFixed(2));
       dMicPill.classList.toggle('speaking', n > 0.08);
       dMicPill.style.setProperty('--mic-lvl', n.toFixed(2));
+      dHeadMicBtn.classList.toggle('speaking', n > 0.08);
+      dHeadMicBtn.style.setProperty('--mic-lvl', n.toFixed(2));
     },
     destroy() {
+      destroyed = true;
+      stopVoiceRecorder(false);
+      if (typeof window !== 'undefined') {
+        window.__vortexCancelChatVoiceRec = null;
+      }
+      stopActiveVoiceNoteGlobal();
       clearTimeout(typingTimer);
+      document.body.classList.remove('kb-open', 'kb-chat-focus', 'kb-portrait');
+      document.documentElement.style.setProperty('--vvh', '100%');
+      document.documentElement.style.setProperty('--vv-top', '0px');
       document.removeEventListener('pointerdown', onDocOutsideTap);
+      window.removeEventListener('resize', onWindowOrientationOrResize);
+      window.removeEventListener('orientationchange', onWindowOrientationOrResize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', onVisualViewportResize);
+        window.visualViewport.removeEventListener('scroll', onVisualViewportResize);
+      }
     },
   };
 }

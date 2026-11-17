@@ -1,13 +1,24 @@
-// Voice, Camera & P2P DataChannel mesh with perfect negotiation; signaling relayed by mesh socket / HTTP sync.
-import { toast } from './ui.js';
+// Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
+import { toast } from './ui.js?v=20261110_v183';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261110_v183';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261110_v183';
 
-const ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:global.stun.twilio.com:3478' }];
+const ICE = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:global.stun.twilio.com:3478' },
+];
+const getIceServers = () => (typeof window !== 'undefined' && Array.isArray(window.WATCHLIVO_ICE_SERVERS) && window.WATCHLIVO_ICE_SERVERS.length)
+  ? window.WATCHLIVO_ICE_SERVERS
+  : ICE;
 
 export class Voice {
-  constructor({ send, getSelfId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
+  constructor({ send, getSelfId, getRoomId, getSelfProfile, onDuckChange, onMicLevel, onP2pData }) {
     this.send = send;
     this.getSelfId = getSelfId;
-    this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#00f5d4' }));
+    this.getRoomId = getRoomId || (() => '');
+    this.getSelfProfile = getSelfProfile || (() => ({ name: 'Sen', color: '#6366f1' }));
     this.onDuckChange = onDuckChange;
     this.onMicLevel = onMicLevel;
     this.onP2pData = onP2pData;
@@ -15,21 +26,40 @@ export class Voice {
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
+    this._avatarCamCanvasStream = null;
     this.synthTimer = null;
     this.screenSynthTimer = null;
     this.micSynthTimer = null;
     this.micOn = false;
     this.camOn = false;
     this.screenOn = false;
+    this.camPending = false;
+    this.screenPending = false;
     this.inCall = false;
+    this.destroyed = false;
     this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
     this.stageGridMode = false;
+    this.stripMode = false;
     this.selfSpeaking = false;
     this.speakTimer = null;
     this.audioCtx = null;
+    this.analyser = null;
+    this.relayPlayCtx = null;
+    this.relayPollTimer = null;
+    this.relaySinceTs = 0;
+    this.relaySeq = 0;
+    this.relayNextPlayAtByPeer = new Map();
+    this.relaySeenIds = new Set();
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
     this.participants = [];
     this.peerVolumes = new Map();
-    this.onStateChange = null;
+    this._chimeCtxs = new Set();
+    this._onStateChange = null;
+    this._syncStoreVoice();
     this._unlockBound = () => {
       for (const st of this.peers.values()) {
         if (st.audio && st.audio.srcObject && st.audio.paused) {
@@ -39,16 +69,51 @@ export class Voice {
       if (this.audioCtx && this.audioCtx.state === 'suspended') {
         this.audioCtx.resume().catch(() => {});
       }
+      if (this.relayPlayCtx && this.relayPlayCtx.state === 'suspended') {
+        this.relayPlayCtx.resume().catch(() => {});
+      }
     };
     window.addEventListener('pointerdown', this._unlockBound, { passive: true });
     window.addEventListener('keydown', this._unlockBound, { passive: true });
   }
 
+  set onStateChange(fn) {
+    this._onStateChange = typeof fn === 'function' ? fn : null;
+  }
+
+  get onStateChange() {
+    return () => {
+      this._syncStoreVoice();
+      this._onStateChange?.();
+    };
+  }
+
+  _syncStoreVoice() {
+    try {
+      if (typeof window !== 'undefined') {
+        window.__vortexVoiceDeafened = Boolean(this.deafened && !this.destroyed);
+      }
+      const stObj = typeof window !== 'undefined' ? window.__wlStoreSingleton?.state : null;
+      if (stObj) {
+        stObj.voice = {
+          inCall: Boolean(this.inCall && !this.destroyed),
+          micOn: Boolean(this.micOn && !this.destroyed),
+          camOn: Boolean(this.camOn && !this.destroyed),
+          screenOn: Boolean(this.screenOn && !this.destroyed),
+          deafened: Boolean(this.deafened && !this.destroyed),
+          speaking: Boolean(this.selfSpeaking && !this.destroyed),
+        };
+      }
+    } catch (_) {}
+  }
+
   _playCallChime(join = true) {
+    if (this.destroyed) return;
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
       const ac = new Ctx();
+      this._chimeCtxs.add(ac);
       const notes = join ? [440, 587.33] : [523.25, 349.23];
       notes.forEach((freq, idx) => {
         const osc = ac.createOscillator();
@@ -61,19 +126,40 @@ export class Voice {
         osc.start(ac.currentTime + idx * 0.085);
         osc.stop(ac.currentTime + idx * 0.085 + 0.15);
       });
-      setTimeout(() => ac.close().catch(() => {}), 500);
+      setTimeout(() => {
+        this._chimeCtxs.delete(ac);
+        try { if (ac.state !== 'closed') ac.close().catch(() => {}); } catch (_) {}
+      }, 420);
     } catch (e) { /* ignore */ }
   }
 
-  toggleDeafen() {
+  async toggleDeafen() {
     this.deafened = !this.deafened;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = this.deafened;
+    if (this.deafened && this.micOn) {
+      this._mutedByDeafen = true;
+      await this.toggleMic().catch(() => {});
+    } else if (!this.deafened && this._mutedByDeafen && !this.micOn) {
+      this._mutedByDeafen = false;
+      await this.toggleMic().catch(() => {});
+    } else if (!this.deafened) {
+      this._mutedByDeafen = false;
+    }
+    if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
+      if (this.deafened) this.relayPlayCtx.suspend().catch(() => {});
+      else if (this.inCall) this.relayPlayCtx.resume().catch(() => {});
+    }
     for (const [id, st] of this.peers.entries()) {
       if (st?.audio) {
         const volPct = this.getPeerVolume(id);
-        st.audio.muted = this.deafened || volPct === 0;
+        const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
+        applyStreamBoost(st.audio, st.audio.srcObject, effVol);
+        st.audio.muted = !this.inCall || this.deafened || effVol === 0 || effVol > 100;
+        if (effVol <= 100) st.audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
       }
     }
-    this.send('voice_state', { deafened: this.deafened });
+    this._updateDuckState();
+    this.send('voice_state', { deafened: this.deafened, muted: !this.micOn });
     this.onStateChange?.();
     toast(this.deafened ? '🎧 Kulaklık sesi kapatıldı (Sağırlaştırıldı)' : '🎧 Kulaklık sesi açıldı');
     return this.deafened;
@@ -177,7 +263,8 @@ export class Voice {
 
   _updateDuckState() {
     const peerSpeaking = (this.participants || []).some((p) => p.speaking && p.id !== this.getSelfId());
-    const anySpeaking = Boolean(this.selfSpeaking || peerSpeaking);
+    const activeVoice = Boolean((this.inCall || this.micOn || this.camOn || this.screenOn) && !this.deafened);
+    const anySpeaking = Boolean(activeVoice && (this.selfSpeaking || peerSpeaking));
     if (typeof window !== 'undefined') {
       window.__kinoxVoiceDuckFactor = anySpeaking ? 0.32 : 1.0;
       window.__kinoxSyncDuckVolume?.();
@@ -186,7 +273,8 @@ export class Voice {
     const selfCam = document.querySelector('#vortex-cam-dock [data-cam-id="self"]');
     if (selfCam) selfCam.classList.toggle('is-speaking', Boolean(this.selfSpeaking));
     for (const p of this.participants || []) {
-      const bubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${p.id}"]`);
+      const escPid = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(p.id || '')) : String(p.id || '').replace(/["\\]/g, '\\$&');
+      const bubble = escPid ? document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`) : null;
       if (bubble) bubble.classList.toggle('is-speaking', Boolean(p.speaking));
     }
     this.onStateChange?.();
@@ -201,8 +289,16 @@ export class Voice {
     this.peerVolumes.set(id, val);
     const st = this.peers.get(id);
     if (st?.audio) {
-      st.audio.volume = Math.min(1, Math.max(0, val / 100));
-      st.audio.muted = this.deafened || val === 0;
+      if (!this.inCall || this.deafened) {
+        applyStreamBoost(st.audio, st.audio.srcObject, 0);
+        st.audio.muted = true;
+      } else {
+        applyStreamBoost(st.audio, st.audio.srcObject, val);
+        st.audio.muted = val === 0 || val > 100;
+        if (val <= 100) {
+          st.audio.volume = Math.min(1.0, Math.max(0, val / 100));
+        }
+      }
     }
     return val;
   }
@@ -229,7 +325,8 @@ export class Voice {
       frame.appendChild(dock);
       if (!this._resizeObserverBound) {
         this._resizeObserverBound = true;
-        window.addEventListener('resize', () => this._layoutCameraBubbles(), { passive: true });
+        this._onResizeBound = () => this._layoutCameraBubbles();
+        window.addEventListener('resize', this._onResizeBound, { passive: true });
       }
     } else if (dock.parentElement !== frame) {
       if (callBar) {
@@ -435,10 +532,13 @@ export class Voice {
           this._resolveBubbleOverlap(wrap);
         }
       } else {
-        wrap.classList.toggle('controls-visible');
-        clearTimeout(wrap._ctlTimer);
-        if (wrap.classList.contains('controls-visible')) {
-          wrap._ctlTimer = setTimeout(() => wrap.classList.remove('controls-visible'), 4000);
+        const nowTap = Date.now();
+        if (wrap._lastTapAt && nowTap - wrap._lastTapAt < 320) {
+          wrap._lastTapAt = 0;
+          wrap.classList.toggle('expanded');
+          this._layoutCameraBubbles();
+        } else {
+          wrap._lastTapAt = nowTap;
         }
       }
       swapCandidate = null;
@@ -451,7 +551,8 @@ export class Voice {
   _attachVideoBubble(id, stream, label = 'Kamera', isScreen = false) {
     if (!stream || !stream.getVideoTracks().length) return;
     const dock = this._ensureDock();
-    let wrap = dock.querySelector(`[data-cam-id="${id}"]`);
+    const escId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(id || '')) : String(id || '').replace(/["\\]/g, '\\$&');
+    let wrap = dock.querySelector(`[data-cam-id="${escId}"]`);
     if (!wrap) {
       wrap = document.createElement('div');
       wrap.className = `cam-bubble ${isScreen ? 'is-screen-share' : ''}`.trim();
@@ -471,44 +572,7 @@ export class Voice {
       const tag = document.createElement('span');
       tag.className = 'cam-bubble-tag';
       tag.textContent = label;
-      const swapBtn = document.createElement('button');
-      swapBtn.type = 'button';
-      swapBtn.className = 'cam-bubble-btn swap-btn';
-      swapBtn.title = 'Kamera Yerini Değiştir (Sürükle veya Tıkla)';
-      swapBtn.textContent = '⇄';
-      swapBtn.onclick = (e) => {
-        e.stopPropagation();
-        this.swapCameraPositions(wrap);
-      };
-      const spotBtn = document.createElement('button');
-      spotBtn.type = 'button';
-      spotBtn.className = 'cam-bubble-btn spot-btn';
-      spotBtn.title = 'Sahneye Büyüt (Spotlight)';
-      spotBtn.textContent = '🖥️';
-      spotBtn.onclick = (e) => {
-        e.stopPropagation();
-        const nextSpot = !wrap.classList.contains('spotlight');
-        dock.querySelectorAll('.cam-bubble.spotlight').forEach((n) => n.classList.remove('spotlight'));
-        wrap.classList.toggle('spotlight', nextSpot);
-        dock.classList.toggle('has-spotlight', nextSpot);
-        this._layoutCameraBubbles();
-      };
-      const sizeBtn = document.createElement('button');
-      sizeBtn.type = 'button';
-      sizeBtn.className = 'cam-bubble-btn size-btn';
-      sizeBtn.title = 'Büyüt / Küçült';
-      sizeBtn.textContent = '⤢';
-      sizeBtn.onclick = (e) => {
-        e.stopPropagation();
-        if (wrap.classList.contains('spotlight')) {
-          wrap.classList.remove('spotlight');
-          dock.classList.remove('has-spotlight');
-        } else {
-          wrap.classList.toggle('expanded');
-        }
-        this._layoutCameraBubbles();
-      };
-      wrap.append(vid, tag, swapBtn, spotBtn, sizeBtn);
+      wrap.append(vid, tag);
       this._makeBubbleInteractive(wrap, dock);
       dock.appendChild(wrap);
       requestAnimationFrame(() => this._layoutCameraBubbles());
@@ -526,7 +590,8 @@ export class Voice {
   }
 
   _removeVideoBubble(id) {
-    const el = document.querySelector(`#vortex-cam-dock [data-cam-id="${id}"]`);
+    const escId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(id || '')) : String(id || '').replace(/["\\]/g, '\\$&');
+    const el = escId ? document.querySelector(`#vortex-cam-dock [data-cam-id="${escId}"]`) : null;
     if (el) {
       el.remove();
       this._layoutCameraBubbles();
@@ -543,44 +608,98 @@ export class Voice {
   }
 
   async _negotiate(id, st) {
-    const { pc } = st;
-    if (st.makingOffer || pc.signalingState !== 'stable') return;
-    try {
-      st.makingOffer = true;
-      const offer = await pc.createOffer();
-      if (pc.signalingState !== 'stable') return;
-      await pc.setLocalDescription(offer);
-      this.send('webrtc_offer', { targetId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
-    } catch (err) {
-      console.warn('[voice] offer', err);
-    } finally {
-      st.makingOffer = false;
+    if (this.destroyed || !st?.pc) return;
+    if (st.makingOffer || st.pc.signalingState !== 'stable') {
+      st.needsNegotiation = true;
+      return;
     }
+    st.sigChain = (st.sigChain || Promise.resolve()).then(async () => {
+      const { pc } = st;
+      if (this.destroyed || !pc || this.peers.get(id) !== st) return;
+      if (st.makingOffer || pc.signalingState !== 'stable') {
+        st.needsNegotiation = true;
+        return;
+      }
+      try {
+        st.makingOffer = true;
+        if (!st.audioSender && !st.audioTransceiver && (this.inCall || this.micOn)) {
+          try {
+            st.audioTransceiver = pc.addTransceiver('audio', { direction: 'recvonly' });
+            st.audioSender = st.audioTransceiver.sender;
+          } catch (e) { /* ignore */ }
+        }
+        const offerOpts = st.iceRestartPending ? { iceRestart: true } : undefined;
+        st.iceRestartPending = false;
+        const offer = await pc.createOffer(offerOpts);
+        if (pc.signalingState !== 'stable') {
+          st.needsNegotiation = true;
+          return;
+        }
+        await pc.setLocalDescription(offer);
+        this.send('webrtc_offer', { targetId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+      } catch (err) {
+        console.warn('[voice] offer', err);
+      } finally {
+        st.makingOffer = false;
+        if (st.needsNegotiation && !st.makingOffer && st.pc.signalingState === 'stable') {
+          st.needsNegotiation = false;
+          this._negotiate(id, st);
+        }
+      }
+    }).catch(() => {});
+    return st.sigChain;
   }
 
-  peer(id) {
+  _orderedPeerTargets() {
+    const selfId = this.getSelfId();
+    return [...(this.participants || [])]
+      .filter((p) => p && p.id && p.id !== selfId)
+      .sort((a, b) => Number(Boolean(b.inCall || b.cam || b.screen || b.speaking)) - Number(Boolean(a.inCall || a.cam || a.screen || a.speaking)))
+      .slice(0, 12);
+  }
+
+  peer(id, { forOffer = false } = {}) {
     if (this.peers.has(id)) return this.peers.get(id);
-    const pc = new RTCPeerConnection({ iceServers: ICE });
+    if (this.peers.size >= 12) return null;
+    const pc = new RTCPeerConnection({ iceServers: getIceServers() });
     const audio = document.createElement('audio');
     audio.autoplay = true;
     audio.playsInline = true;
     audio.setAttribute('playsinline', '');
     this._ensureAudioHost().appendChild(audio);
-    let dc = null;
-    try {
-      dc = pc.createDataChannel('vortex-p2p', { negotiated: true, id: 0 });
-      dc.onmessage = (ev) => {
-        try { this.onP2pData?.(JSON.parse(ev.data)); } catch (e) { /* ignore */ }
-      };
-    } catch (e) { /* ignore */ }
-    const st = { pc, dc, makingOffer: false, ignoreOffer: false, audio, audioSender: null, videoSender: null };
+    const st = { pc, dc: null, makingOffer: false, ignoreOffer: false, needsNegotiation: false, iceRestartPending: false, _recovering: false, iceQueue: [], sigChain: Promise.resolve(), audio, audioSender: null, videoSender: null, audioTransceiver: null };
     this.peers.set(id, st);
-    if (this.stream) {
-      for (const t of this.stream.getAudioTracks()) {
-        st.audioSender = pc.addTrack(t, this.stream);
+    const activeVid = this.screenStream || this.camStream;
+    if (!forOffer || activeVid) {
+      try {
+        const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
+        st.audioTransceiver = pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
+        st.audioSender = st.audioTransceiver.sender;
+        if (aTrack) {
+          st.audioSender.replaceTrack(aTrack).catch(() => {});
+        }
+      } catch (e) {
+        if (this.stream && this.stream.getAudioTracks().length) {
+          for (const t of this.stream.getAudioTracks()) {
+            st.audioSender = pc.addTrack(t, this.stream);
+          }
+        }
       }
     }
-    const activeVid = this.screenStream || this.camStream;
+    try {
+      const dc = pc.createDataChannel('vortex-p2p', { negotiated: true, id: 0 });
+      st.dc = dc;
+      dc.onmessage = (ev) => {
+        try {
+          const pkt = JSON.parse(ev.data);
+          if (!pkt || typeof pkt !== 'object') return;
+          pkt.fromCid = id;
+          const evType = pkt.event?.type;
+          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync', 'room_state', 'room_closed'].includes(evType)) return;
+          this.onP2pData?.(pkt);
+        } catch (e) { /* ignore */ }
+      };
+    } catch (e) { /* ignore */ }
     if (activeVid) {
       for (const t of activeVid.getVideoTracks()) {
         st.videoSender = pc.addTrack(t, activeVid);
@@ -589,16 +708,28 @@ export class Voice {
     pc.ontrack = (e) => {
       if (e.track.kind === 'video') {
         const vStream = new MediaStream([e.track]);
+        st.remoteVideoStream = vStream;
         const p = (this.participants || []).find((x) => x.id === id);
-        this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı');
+        this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı', Boolean(p?.screen));
         e.track.onended = () => this._removeVideoBubble(id);
-        e.track.onunmute = () => this._attachVideoBubble(id, vStream, p?.name || 'Katılımcı');
+        e.track.onunmute = () => {
+          const curP = (this.participants || []).find((x) => x.id === id);
+          if (!curP?.cam && !curP?.screen) return;
+          this._attachVideoBubble(id, vStream, curP?.name || 'Katılımcı', Boolean(curP?.screen));
+        };
       } else if (e.track.kind === 'audio') {
         const aStream = new MediaStream([e.track]);
         audio.srcObject = aStream;
         const volPct = this.getPeerVolume(id);
-        audio.muted = volPct === 0;
-        audio.volume = Math.min(1.0, Math.max(0, volPct / 100));
+        const effVol = (!this.inCall || this.deafened) ? 0 : volPct;
+        if (effVol > 100) {
+          audio.muted = true;
+          applyStreamBoost(audio, aStream, effVol);
+        } else {
+          releaseStreamBoost(audio);
+          audio.muted = !this.inCall || Boolean(this.deafened) || effVol === 0;
+          audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
+        }
         audio.play().catch(() => {});
       }
     };
@@ -608,22 +739,33 @@ export class Voice {
       }
     };
     pc.onnegotiationneeded = () => this._negotiate(id, st);
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        try { pc.restartIce?.(); } catch (e) { /* ignore */ }
-        this._negotiate(id, st);
+    const recoverPeer = async () => {
+      if (this.destroyed || st._recovering || this.peers.get(id) !== st) return;
+      st._recovering = true;
+      try {
+        if (pc.signalingState !== 'stable') await pc.setLocalDescription({ type: 'rollback' });
+      } catch (e) { /* ignore */ }
+      try { pc.restartIce?.(); } catch (e) { /* ignore */ }
+      st.iceRestartPending = true;
+      try {
+        await this._negotiate(id, st);
+      } finally {
+        setTimeout(() => { st._recovering = false; }, 2000);
       }
     };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') st._recovering = false;
+      else if (pc.connectionState === 'failed') recoverPeer();
+    };
     pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-        try { pc.restartIce?.(); } catch (e) { /* ignore */ }
-        this._negotiate(id, st);
-      }
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') st._recovering = false;
+      else if (pc.iceConnectionState === 'failed') recoverPeer();
     };
     return st;
   }
 
   async onSignal(data) {
+    if (this.destroyed) return;
     const from = data.fromId;
     if (!from || from === this.getSelfId()) return;
     if (!this.peers.has(from) && this.peers.size >= 12) return;
@@ -632,41 +774,81 @@ export class Voice {
       const old = this.peers.get(from);
       const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
       const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (newU && oldU && newU !== oldU) {
+      if (old.pc.connectionState === 'closed' || (newU && oldU && newU !== oldU)) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
-        try { old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
+        try { releaseStreamBoost(old.audio); old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
         this.peers.delete(from);
       }
     }
-    const st = this.peer(from);
-    const { pc } = st;
-    const polite = String(this.getSelfId()) < String(from);
-    try {
-      if (data.type === 'webrtc_offer' || data.type === 'webrtc_answer') {
-        const desc = data.sdp;
-        if (!desc || !desc.type) return;
-        const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
-        st.ignoreOffer = !polite && collision;
-        if (st.ignoreOffer) return;
-        await pc.setRemoteDescription(new RTCSessionDescription(desc));
-        if (desc.type === 'offer') {
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+    const st = this.peer(from, { forOffer: data.type === 'webrtc_offer' });
+    if (!st) return;
+    st.sigChain = (st.sigChain || Promise.resolve()).then(async () => {
+      if (this.destroyed || this.peers.get(from) !== st) return;
+      const { pc } = st;
+      const polite = String(this.getSelfId()) < String(from);
+      try {
+        if (data.type === 'webrtc_offer' || data.type === 'webrtc_answer') {
+          const desc = data.sdp;
+          if (!desc || !desc.type) return;
+          if (desc.type === 'answer') {
+            st.ignoreOffer = false;
+            if (pc.signalingState !== 'have-local-offer') return;
+          }
+          const collision = desc.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
+          st.ignoreOffer = !polite && collision;
+          if (st.ignoreOffer) return;
+          if (collision) {
+            st.iceQueue = [];
+            try { await pc.setLocalDescription({ type: 'rollback' }); } catch (e) { /* ignore */ }
+          }
+          await pc.setRemoteDescription(new RTCSessionDescription(desc));
+          const tr = pc.getTransceivers?.().find((t) => t.mid !== null && (t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio'))
+            || pc.getTransceivers?.().find((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio');
+          if (tr) {
+            st.audioTransceiver = tr;
+            st.audioSender = tr.sender || st.audioSender;
+            if (this.micOn && this.stream?.getAudioTracks?.()[0]) {
+              const aTrack = this.stream.getAudioTracks()[0];
+              tr.direction = 'sendrecv';
+              try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
+            }
+          }
+          if (st.iceQueue?.length) {
+            const queued = st.iceQueue.splice(0, st.iceQueue.length);
+            for (const cand of queued) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { /* ignore */ }
+            }
+          }
+          if (desc.type === 'offer') {
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            this.send('webrtc_answer', { targetId: from, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } });
+          }
+          if (st.needsNegotiation && !st.makingOffer && st.pc.signalingState === 'stable') {
+            st.needsNegotiation = false;
+            this._negotiate(from, st);
+          }
+        } else if (data.type === 'webrtc_ice' && data.candidate) {
+          if (st.ignoreOffer) return;
+          if (!pc.remoteDescription || !pc.remoteDescription.type) {
+            st.iceQueue = st.iceQueue || [];
+            if (st.iceQueue.length < 60) st.iceQueue.push(data.candidate);
+          } else {
+            try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
+          }
         }
-      } else if (data.type === 'webrtc_ice' && data.candidate) {
-        try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { if (!st.ignoreOffer) console.warn('[voice] ice', e); }
-      }
-    } catch (e) { console.warn('[voice] signal', e); }
+      } catch (e) { console.warn('[voice] signal', e); }
+    }).catch(() => {});
+    return st.sigChain;
   }
 
   onPeerJoined(id) {
     if (!id || id === this.getSelfId()) return;
-    if (!this.micOn && !this.camOn && !this.screenOn) return;
+    if (!this.inCall && !this.micOn && !this.camOn && !this.screenOn) return;
     if (!this.peers.has(id) && this.peers.size >= 12) return;
     const st = this.peer(id);
-    if (String(this.getSelfId()) < String(id)) this._negotiate(id, st);
+    if (st && String(this.getSelfId()) < String(id)) this._negotiate(id, st);
   }
 
   syncPeers(participants) {
@@ -676,6 +858,7 @@ export class Voice {
     for (const [id, st] of this.peers) {
       if (!ids.has(id)) {
         st.pc.close();
+        releaseStreamBoost(st.audio);
         st.audio.srcObject = null;
         st.audio.remove();
         this._removeVideoBubble(id);
@@ -683,18 +866,54 @@ export class Voice {
       }
     }
     if (selfId) {
-      const iAmActive = Boolean(this.micOn || this.camOn || this.screenOn);
-      for (const p of list) {
-        if (p.id && p.id !== selfId) {
-          if (p.cam === false && p.screen === false) {
+      const iAmActive = Boolean(this.inCall || this.micOn || this.camOn || this.screenOn);
+      const prioritizedList = [...list].sort((a, b) => {
+        const score = (x) => (x?.isHost ? 8 : 0) + (x?.isCoHost ? 4 : 0) + (x?.isStageSpeaker ? 4 : 0) + ((!x?.muted || x?.cam || x?.screen || x?.speaking) ? 2 : 0);
+        return score(b) - score(a);
+      });
+      for (const p of prioritizedList) {
+        if (p.id && p.id !== selfId && p.transport !== 'bot') {
+          if (!p.cam && !p.screen) {
             this._removeVideoBubble(p.id);
+          } else if (p.cam || p.screen) {
+            const escPid = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(p.id || '')) : String(p.id || '').replace(/["\\]/g, '\\$&');
+            const existingSt = this.peers.get(p.id);
+            if (existingSt?.remoteVideoStream && !document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`)) {
+              this._attachVideoBubble(p.id, existingSt.remoteVideoStream, p.name || 'Katılımcı', Boolean(p.screen));
+            }
+            const peerBubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${escPid}"]`);
+            if (peerBubble) {
+              peerBubble.classList.toggle('is-speaking', Boolean(p.speaking));
+              peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
+            }
           }
-          const peerActive = Boolean(!p.muted || p.cam || p.screen || p.speaking);
+          const peerActive = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
-          if (!this.peers.has(p.id) && this.peers.size >= 12) continue;
+          if (!this.peers.has(p.id) && this.peers.size >= 12) {
+            if (peerActive || p.isHost || p.isStageSpeaker) {
+              const idleEntry = [...this.peers.entries()].find(([pid]) => {
+                const meta = list.find((u) => u.id === pid);
+                return meta && !meta.isHost && !meta.isStageSpeaker && meta.muted && !meta.cam && !meta.screen && !meta.speaking;
+              });
+              if (idleEntry) {
+                const [evictId, evictSt] = idleEntry;
+                try { evictSt.pc.close(); } catch (e) { /* ignore */ }
+                try { releaseStreamBoost(evictSt.audio); evictSt.audio?.pause?.(); if (evictSt.audio) evictSt.audio.srcObject = null; } catch (e) { /* ignore */ }
+                evictSt.audio?.remove();
+                this._removeVideoBubble(evictId);
+                this.peers.delete(evictId);
+              } else {
+                continue;
+              }
+            } else {
+              continue;
+            }
+          }
           const had = this.peers.has(p.id);
           const st = this.peer(p.id);
           if (!had && (iAmActive || (peerActive && String(selfId) < String(p.id)))) {
+            this._negotiate(p.id, st);
+          } else if (had && st && iAmActive && peerActive && st.pc.connectionState === 'new' && st.pc.signalingState === 'stable' && !st.makingOffer && String(selfId) < String(p.id)) {
             this._negotiate(p.id, st);
           }
         }
@@ -702,17 +921,22 @@ export class Voice {
     }
     this.participants = list;
     this._updateDuckState();
+    this._ensureRelayLoops();
   }
 
   _createAvatarCamStream() {
+    if (this._avatarCamCanvasStream) {
+      try { this._avatarCamCanvasStream.getTracks().forEach((t) => t.stop()); } catch (_) {}
+      this._avatarCamCanvasStream = null;
+    }
     const c = document.createElement('canvas');
     c.width = 320;
     c.height = 240;
     const ctx2d = c.getContext('2d');
-    const prof = this.getSelfProfile();
     let tick = 0;
     clearInterval(this.synthTimer);
     const draw = () => {
+      const prof = this.getSelfProfile() || { name: 'Sen', color: '#6366f1' };
       tick += 0.08;
       const g = ctx2d.createLinearGradient(0, 0, 320, 240);
       g.addColorStop(0, '#0b0e18');
@@ -722,11 +946,11 @@ export class Voice {
       const pulse = this.selfSpeaking ? 10 + Math.sin(tick * 4) * 6 : Math.sin(tick) * 2;
       ctx2d.beginPath();
       ctx2d.arc(160, 105, 44 + pulse, 0, Math.PI * 2);
-      ctx2d.fillStyle = 'rgba(0, 245, 212, 0.18)';
+      ctx2d.fillStyle = 'rgba(99, 102, 241, 0.18)';
       ctx2d.fill();
       ctx2d.beginPath();
       ctx2d.arc(160, 105, 38, 0, Math.PI * 2);
-      ctx2d.fillStyle = prof.color || '#00f5d4';
+      ctx2d.fillStyle = prof.color || '#6366f1';
       ctx2d.fill();
       ctx2d.fillStyle = '#07090e';
       ctx2d.font = 'bold 28px Inter, system-ui, sans-serif';
@@ -736,23 +960,32 @@ export class Voice {
       ctx2d.fillStyle = '#f5f7ff';
       ctx2d.font = '600 14px Inter, system-ui, sans-serif';
       ctx2d.fillText(prof.name || 'Katılımcı', 160, 178);
-      ctx2d.fillStyle = '#00f5d4';
+      ctx2d.fillStyle = '#6366f1';
       ctx2d.font = '500 11px Inter, system-ui, sans-serif';
       ctx2d.fillText(this.selfSpeaking ? '🎙️ Konuşuyor...' : '📷 Canlı Avatar Kamerası', 160, 200);
     };
     draw();
     this.synthTimer = setInterval(draw, 66);
-    return c.captureStream ? c.captureStream(15) : null;
+    this._avatarCamCanvasStream = c.captureStream ? c.captureStream(15) : null;
+    return this._avatarCamCanvasStream;
   }
 
   async _attachOrReplaceVideoTrack(stream) {
     const vTrack = stream?.getVideoTracks?.()[0] || null;
-    for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+    for (const p of this._orderedPeerTargets()) this.peer(p.id);
     for (const [id, st] of this.peers.entries()) {
       try {
         if (st.videoSender) {
           await st.videoSender.replaceTrack(vTrack);
         } else if (vTrack) {
+          if (!st.audioSender && !st.audioTransceiver) {
+            try {
+              const aTrack = (this.micOn && this.stream?.getAudioTracks?.()[0]) ? this.stream.getAudioTracks()[0] : null;
+              st.audioTransceiver = st.pc.addTransceiver('audio', { direction: aTrack ? 'sendrecv' : 'recvonly' });
+              st.audioSender = st.audioTransceiver.sender;
+              if (aTrack) st.audioSender.replaceTrack(aTrack).catch(() => {});
+            } catch (_) {}
+          }
           st.videoSender = st.pc.addTrack(vTrack, stream);
         }
         await this._negotiate(id, st);
@@ -780,12 +1013,12 @@ export class Voice {
       if (mainVid && mainVid.readyState >= 2) {
         try { ctx2d.drawImage(mainVid, 20, 44, 600, 268); } catch (e) { /* cross-origin fallback */ }
       } else {
-        ctx2d.strokeStyle = 'rgba(0,245,212,0.28)';
+        ctx2d.strokeStyle = 'rgba(99, 102, 241,0.28)';
         ctx2d.lineWidth = 2;
         ctx2d.strokeRect(32, 52, 576, 250);
         for (let i = 0; i < 5; i += 1) {
           const y = 92 + i * 38;
-          ctx2d.fillStyle = i % 2 === 0 ? 'rgba(0,245,212,0.16)' : 'rgba(139,92,246,0.18)';
+          ctx2d.fillStyle = i % 2 === 0 ? 'rgba(99, 102, 241,0.16)' : 'rgba(139,92,246,0.18)';
           ctx2d.fillRect(56, y, 260 + Math.sin(tick + i) * 90, 18);
         }
       }
@@ -800,7 +1033,7 @@ export class Voice {
       ctx2d.font = 'bold 14px Inter, system-ui, sans-serif';
       ctx2d.textAlign = 'left';
       ctx2d.fillText(`🖥️ ${prof.name || 'Sen'} · CANLI EKRAN YANSITMA (1080p 60fps)`, 40, 24);
-      ctx2d.fillStyle = '#00f5d4';
+      ctx2d.fillStyle = '#6366f1';
       ctx2d.font = '600 12px Inter, system-ui, sans-serif';
       ctx2d.fillText('📺 KINOX Discord Sahne & Ekran Paylaşımı Aktif', 20, 344);
     };
@@ -810,75 +1043,107 @@ export class Voice {
   }
 
   async toggleCamera() {
-    if (this.camOn) {
-      clearInterval(this.synthTimer);
-      this.camStream?.getTracks().forEach((t) => t.stop());
-      this.camStream = null;
-      this.camOn = false;
-      this._removeVideoBubble('self');
-      await this._attachOrReplaceVideoTrack(this.screenStream || null);
-      this.send('voice_state', { cam: false, inCall: Boolean(this.inCall || this.micOn || this.screenOn) });
-      this.onStateChange?.();
-      toast('📷 Kamera kapatıldı');
-      return false;
-    }
+    if (this.camPending) return this.camOn;
+    this.camPending = true;
     try {
-      this._isAvatarCam = false;
-      this.camStream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
-      toast('📷 Kamera açıldı');
-    } catch (e) {
-      this._isAvatarCam = true;
-      this.camStream = this._createAvatarCamStream();
-      if (!this.camStream) {
-        toast('⚠️ Kamera cihazı bulunamadı.');
+      if (this.camOn) {
+        clearInterval(this.synthTimer);
+        this.camStream?.getTracks().forEach((t) => t.stop());
+        this.camStream = null;
+        this.camOn = false;
+        this._removeVideoBubble('self');
+        await this._attachOrReplaceVideoTrack(this.screenStream || null);
+        this.send('voice_state', { cam: false, inCall: Boolean(this.inCall || this.micOn || this.screenOn) });
+        this.onStateChange?.();
+        toast('📷 Kamera kapatıldı');
         return false;
       }
-      toast('📷 Canlı Avatar Kamerası açıldı');
+      try {
+        this._isAvatarCam = false;
+        const freshCam = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 320 }, height: { ideal: 240 }, facingMode: 'user' }, audio: false });
+        if (this.destroyed) { freshCam.getTracks().forEach((t) => t.stop()); return false; }
+        if (this.camStream && this.camStream !== freshCam) {
+          this.camStream.getTracks().forEach((t) => t.stop());
+        }
+        this.camStream = freshCam;
+        toast('📷 Kamera açıldı');
+      } catch (e) {
+        this._isAvatarCam = true;
+        if (this.camStream) {
+          this.camStream.getTracks().forEach((t) => t.stop());
+        }
+        this.camStream = this._createAvatarCamStream();
+        if (!this.camStream) {
+          toast('⚠️ Kamera cihazı bulunamadı.');
+          return false;
+        }
+        toast('📷 Canlı Avatar Kamerası açıldı');
+      }
+      this.camOn = true;
+      this.inCall = true;
+      this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
+      await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
+      this.send('voice_state', { cam: true, inCall: true });
+      this.onStateChange?.();
+      return true;
+    } finally {
+      this.camPending = false;
     }
-    this.camOn = true;
-    this.inCall = true;
-    this._attachVideoBubble('self', this.camStream, `📷 ${this.getSelfProfile().name || 'Sen'}`, false);
-    await this._attachOrReplaceVideoTrack(this.screenStream || this.camStream);
-    this.send('voice_state', { cam: true, inCall: true });
-    this.onStateChange?.();
-    return true;
   }
 
   async toggleScreenShare() {
-    if (this.screenOn) {
-      clearInterval(this.screenSynthTimer);
-      this.screenStream?.getTracks().forEach((t) => t.stop());
-      this.screenStream = null;
-      this.screenOn = false;
-      this._removeVideoBubble('self-screen');
-      await this._attachOrReplaceVideoTrack(this.camStream || null);
-      this.send('voice_state', { screen: false, inCall: Boolean(this.inCall || this.micOn || this.camOn) });
-      this.onStateChange?.();
-      toast('🖥️ Ekran yansıtma durduruldu');
-      return false;
-    }
+    if (this.screenPending) return this.screenOn;
+    this.screenPending = true;
     try {
-      if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
-        this.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
-      } else {
-        this.screenStream = this._createScreenShareFallbackStream();
+      if (this.screenOn) {
+        clearInterval(this.screenSynthTimer);
+        this.screenStream?.getTracks().forEach((t) => t.stop());
+        this.screenStream = null;
+        this.screenOn = false;
+        this._removeVideoBubble('self-screen');
+        await this._attachOrReplaceVideoTrack(this.camStream || null);
+        this.send('voice_state', { screen: false, inCall: Boolean(this.inCall || this.micOn || this.camOn) });
+        this.onStateChange?.();
+        toast('🖥️ Ekran yansıtma durduruldu');
+        return false;
       }
-    } catch (e) {
-      this.screenStream = this._createScreenShareFallbackStream();
+      try {
+        if (navigator.mediaDevices?.getDisplayMedia && !navigator.webdriver) {
+          const freshScreen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30, max: 60 } }, audio: true });
+          if (this.destroyed) { freshScreen?.getTracks?.().forEach((t) => t.stop()); return false; }
+          if (this.screenStream && this.screenStream !== freshScreen) {
+            this.screenStream.getTracks().forEach((t) => t.stop());
+          }
+          this.screenStream = freshScreen;
+        } else if (navigator.webdriver) {
+          if (this.screenStream) {
+            this.screenStream.getTracks().forEach((t) => t.stop());
+          }
+          this.screenStream = this._createScreenShareFallbackStream();
+        } else {
+          toast('⚠️ Bu tarayıcı ekran paylaşımını desteklemiyor');
+          return false;
+        }
+      } catch (e) {
+        toast('Ekran paylaşımı iptal edildi');
+        return false;
+      }
+      if (!this.screenStream) {
+        toast('⚠️ Ekran paylaşımı başlatılamadı');
+        return false;
+      }
+      this.screenOn = true;
+      this.inCall = true;
+      this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
+      this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
+      await this._attachOrReplaceVideoTrack(this.screenStream);
+      this.send('voice_state', { screen: true, inCall: true });
+      this.onStateChange?.();
+      toast('🖥️ Ekran yansıtma başlatıldı — odadaki herkes ekranını görebilir');
+      return true;
+    } finally {
+      this.screenPending = false;
     }
-    if (!this.screenStream) {
-      toast('⚠️ Ekran paylaşımı başlatılamadı');
-      return false;
-    }
-    this.screenOn = true;
-    this.inCall = true;
-    this._attachVideoBubble('self-screen', this.screenStream, `🖥️ ${this.getSelfProfile().name || 'Sen'} · Ekran Yayını`, true);
-    this.screenStream.getVideoTracks()[0]?.addEventListener('ended', () => { if (this.screenOn) this.toggleScreenShare(); });
-    await this._attachOrReplaceVideoTrack(this.screenStream);
-    this.send('voice_state', { screen: true, inCall: true });
-    this.onStateChange?.();
-    toast('🖥️ Ekran yansıtma başlatıldı — odadaki herkes ekranını görebilir');
-    return true;
   }
 
   _createSyntheticAudioStream() {
@@ -886,6 +1151,7 @@ export class Voice {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return null;
       const ac = new Ctx();
+      this.synthAudioCtx = ac;
       const dest = ac.createMediaStreamDestination();
       const osc = ac.createOscillator();
       const g = ac.createGain();
@@ -900,7 +1166,24 @@ export class Voice {
 
   async toggleMic() {
     if (this.micOn) {
-      this.stream?.getTracks().forEach((t) => { t.enabled = false; });
+      const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+      const isIos = /iP(hone|ad|od)/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      if (isIos) {
+        clearInterval(this.speakTimer);
+        this.speakTimer = null;
+        try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+        this._relayProc = null;
+        this._relaySrc = null;
+        this._relayMute = null;
+        this.analyser = null;
+        this.audioCtx?.close?.().catch(() => {});
+        this.audioCtx = null;
+        this.stream?.getAudioTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
+        this.stream = null;
+        try { if (navigator.audioSession && !window.isWatchlivoNativeIOS) navigator.audioSession.type = 'playback'; } catch (_) {}
+      } else {
+        this.stream?.getTracks().forEach((t) => { t.enabled = false; });
+      }
       this.micOn = false;
       this.selfSpeaking = false;
       this.onMicLevel?.(0);
@@ -911,62 +1194,191 @@ export class Voice {
       return false;
     }
     try {
-      if (!this.stream) {
+      const hasLiveTrack = Boolean(this.stream?.getAudioTracks?.().some((t) => t.readyState === 'live'));
+      let realMicAcquired = Boolean(this.stream && !this._usingSynthStream && hasLiveTrack);
+      if (!this.stream || this._usingSynthStream || !hasLiveTrack) {
+        this.micPending = true;
+        this.onStateChange?.();
         try {
-          this.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+          const timeoutPromise = new Promise((_, rej) => setTimeout(() => rej(new Error('gum-timeout')), 9000));
+          const freshStream = await Promise.race([acquireMicStreamSafe(), timeoutPromise]);
+          if (this.destroyed) { freshStream?.getTracks?.().forEach((t) => t.stop()); return false; }
+          if (this.stream && this.stream !== freshStream) {
+            this.stream.getTracks().forEach((t) => { try { t.stop(); } catch (_) {} });
+          }
+          if (this._usingSynthStream) {
+            this.synthAudioCtx?.close?.().catch(() => {});
+            this.synthAudioCtx = null;
+          }
+          clearInterval(this.speakTimer);
+          this.speakTimer = null;
+          try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+          this._relayProc = null;
+          this._relaySrc = null;
+          this._relayMute = null;
+          this.analyser = null;
+          this.stream = freshStream;
+          this._usingSynthStream = false;
+          realMicAcquired = true;
           this.watchSpeaking();
         } catch (err) {
-          this.stream = this._createSyntheticAudioStream();
+          realMicAcquired = false;
+        } finally {
+          this.micPending = false;
         }
       }
+      if (!realMicAcquired) {
+        this.micOn = false;
+        this.selfSpeaking = false;
+        if (this.inCall) {
+          for (const p of this._orderedPeerTargets()) this.peer(p.id);
+          this._ensureRelayLoops();
+          this.send('voice_state', { muted: true, speaking: false, inCall: true });
+        }
+        this.onStateChange?.();
+        toast('🎧 Mikrofon izni verilmedi veya cihaz bulunamadı — dinleyici modundasın');
+        return false;
+      }
       this.stream?.getTracks().forEach((t) => { t.enabled = true; });
-      this.micOn = true;
       this.inCall = true;
-      for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+      if (!this.micOn && this.deafened) {
+        this.deafened = false;
+        this._mutedByDeafen = false;
+        if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
+        if (this.relayPlayCtx && this.relayPlayCtx.state === 'suspended') {
+          this.relayPlayCtx.resume().catch(() => {});
+        }
+        for (const [id, st] of this.peers.entries()) {
+          if (st?.audio) {
+            const volPct = this.getPeerVolume(id);
+            applyStreamBoost(st.audio, st.audio.srcObject, volPct);
+            st.audio.muted = volPct === 0 || volPct > 100;
+            if (volPct <= 100) st.audio.volume = Math.min(1.0, Math.max(0, volPct / 100));
+          }
+        }
+        this._updateDuckState();
+      }
+      this.micOn = true;
+      this._ensureRelayPlayCtx();
+      for (const p of this._orderedPeerTargets()) this.peer(p.id);
       const aTrack = this.stream?.getAudioTracks?.()[0];
       if (aTrack) {
         for (const [id, st] of this.peers.entries()) {
           try {
-            if (st.audioSender) await st.audioSender.replaceTrack(aTrack);
-            else st.audioSender = st.pc.addTrack(aTrack, this.stream);
+            const aTrs = st.pc.getTransceivers?.().filter((t) => t.receiver?.track?.kind === 'audio' || t.sender?.track?.kind === 'audio') || [];
+            if (aTrs.length) {
+              for (const tr of aTrs) {
+                tr.direction = 'sendrecv';
+                try { await tr.sender.replaceTrack(aTrack); } catch (_) {}
+              }
+              st.audioTransceiver = aTrs.find((t) => t.mid !== null) || aTrs[0];
+              st.audioSender = st.audioTransceiver.sender;
+            } else if (st.audioTransceiver) {
+              st.audioTransceiver.direction = 'sendrecv';
+              await st.audioTransceiver.sender.replaceTrack(aTrack);
+            } else if (st.audioSender) {
+              await st.audioSender.replaceTrack(aTrack);
+            } else {
+              st.audioSender = st.pc.addTrack(aTrack, this.stream);
+            }
             await this._negotiate(id, st);
           } catch (err) { /* ignore */ }
         }
       }
-      this.send('voice_state', { muted: false, inCall: true });
+      this._ensureRelayLoops();
+      this.send('voice_state', { muted: false, deafened: this.deafened, inCall: true });
       this.onStateChange?.();
       toast('🎙️ Mikrofon açıldı — sesin odaya iletiliyor');
       return true;
     } catch (e) {
-      toast('⚠️ Mikrofon açılamadı.');
+      this.micPending = false;
+      this.onStateChange?.();
+      toast('⚠️ Mikrofon açılamadı — izinleri kontrol edin.');
       return false;
     }
   }
 
   async joinCall({ withMic = true, withCam = false } = {}) {
+    prepareAudioSessionForMic();
     this.inCall = true;
-    this._playCallChime(true);
-    for (const p of this.participants || []) if (p.id !== this.getSelfId()) this.peer(p.id);
+    this.onStateChange?.();
     if (withMic && !this.micOn) {
       await this.toggleMic();
+    }
+    this._ensureRelayPlayCtx();
+    this._playCallChime(true);
+    for (const p of this._orderedPeerTargets()) {
+      const st = this.peer(p.id);
+      if (st && st.pc.signalingState === 'stable' && st.pc.connectionState === 'new') {
+        this._negotiate(p.id, st);
+      }
+    }
+    for (const [id, st] of this.peers.entries()) {
+      if (st?.audio) {
+        const volPct = this.getPeerVolume(id);
+        const effVol = this.deafened ? 0 : volPct;
+        st.audio.muted = Boolean(this.deafened) || volPct === 0 || effVol > 100;
+        if (effVol <= 100) {
+          st.audio.volume = Math.min(1.0, Math.max(0, effVol / 100));
+        }
+        if (st.audio.srcObject) {
+          applyStreamBoost(st.audio, st.audio.srcObject, effVol);
+          st.audio.play?.().catch(() => {});
+        }
+      }
     }
     if (withCam && !this.camOn) {
       await this.toggleCamera();
     }
+    this._ensureRelayLoops();
     this.send('voice_state', { inCall: true, muted: !this.micOn, cam: this.camOn, screen: this.screenOn, deafened: this.deafened });
     this.onStateChange?.();
-    toast('📞 Ses & Yayın Kanalına katıldın!');
+    toast(this.micOn ? '📞 Ses Kanalına katıldın — mikrofonun açık!' : '🎧 Ses Kanalına dinleyici olarak katıldın');
     return true;
   }
 
   async leaveCall() {
+    this.micPending = false;
     if (this.micOn) await this.toggleMic();
     if (this.camOn) await this.toggleCamera();
     if (this.screenOn) await this.toggleScreenShare();
+    clearInterval(this.speakTimer);
+    this.speakTimer = null;
+    clearInterval(this.relayPollTimer);
+    this.relayPollTimer = null;
+    this.relayNextPlayAtByPeer.clear();
+    try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
+    this.analyser = null;
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
+    this._usingSynthStream = false;
+    this.audioCtx?.close?.().catch(() => {});
+    this.audioCtx = null;
+    this.relayPlayCtx?.close?.().catch(() => {});
+    this.relayPlayCtx = null;
+    this.synthAudioCtx?.close?.().catch(() => {});
+    this.synthAudioCtx = null;
     this.inCall = false;
     this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
+    this.selfSpeaking = false;
+    this._removeVideoBubble('self');
+    this._removeVideoBubble('self-screen');
+    if (typeof window !== 'undefined') {
+      window.__kinoxVoiceDuckFactor = 1.0;
+      window.__kinoxSyncDuckVolume?.();
+    }
+    this.onDuckChange?.(false);
     for (const st of this.peers.values()) {
-      if (st?.audio) st.audio.muted = false;
+      try { st.audioSender?.replaceTrack?.(null); } catch (_) {}
+      if (st?.audio) {
+        applyStreamBoost(st.audio, st.audio.srcObject, 0);
+        st.audio.muted = true;
+      }
     }
     this._playCallChime(false);
     this.send('voice_state', { inCall: false, muted: true, speaking: false, cam: false, screen: false, deafened: false });
@@ -975,13 +1387,199 @@ export class Voice {
     return false;
   }
 
+  _isPeerP2pConnected(peerId) {
+    const st = this.peers.get(peerId);
+    if (!st?.pc) return false;
+    const cs = st.pc.connectionState;
+    const ics = st.pc.iceConnectionState;
+    const pcOk = cs === 'connected' || ics === 'connected' || ics === 'completed';
+    if (!pcOk) return false;
+    const p = (this.participants || []).find((x) => x.id === peerId);
+    if (p && p.inCall && !p.muted && !st.audio?.srcObject) return false;
+    return true;
+  }
+
+  _hasUnconnectedCallPeers() {
+    const selfId = this.getSelfId();
+    for (const p of (this.participants || [])) {
+      if (!p || !p.id || p.id === selfId || p.transport === 'bot') continue;
+      const active = Boolean(p.inCall || p.speaking);
+      if (active && !this._isPeerP2pConnected(p.id)) return true;
+    }
+    return false;
+  }
+
+  _getClientToken(roomId) {
+    if (!roomId) return '';
+    if (typeof window !== 'undefined' && window.__vortexActiveConn?.roomId === roomId && window.__vortexActiveConn?.clientToken) {
+      return String(window.__vortexActiveConn.clientToken);
+    }
+    try { return sessionStorage.getItem(`vortex_ct_${roomId}`) || sessionStorage.getItem(`vortex_ctok_${roomId}`) || ''; } catch (_) { return ''; }
+  }
+
+  _ensureRelayPlayCtx() {
+    if (this.destroyed || !this.inCall) return null;
+    if (this.relayPlayCtx && this.relayPlayCtx.state !== 'closed') {
+      if (this.relayPlayCtx.state === 'suspended') this.relayPlayCtx.resume().catch(() => {});
+      return this.relayPlayCtx;
+    }
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        this.relayPlayCtx = new Ctx();
+        if (this.relayPlayCtx.state === 'suspended') this.relayPlayCtx.resume().catch(() => {});
+      }
+    } catch (_) {}
+    return this.relayPlayCtx;
+  }
+
+  _ensureRelayLoops() {
+    if (this.destroyed || !this.inCall) {
+      if (this.relayPollTimer) {
+        clearInterval(this.relayPollTimer);
+        this.relayPollTimer = null;
+      }
+      return;
+    }
+    if (this.relayPollTimer) return;
+    this.relayPollTimer = setInterval(() => {
+      if (this.destroyed || !this.inCall || this.deafened) return;
+      if (!this._hasUnconnectedCallPeers()) return;
+      const roomId = this.getRoomId?.();
+      const selfId = this.getSelfId?.();
+      if (!roomId || !selfId || this._relayFetching) return;
+      this._relayFetching = true;
+      const ctok = this._getClientToken(roomId);
+      fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}?clientId=${encodeURIComponent(selfId)}&sinceTs=${this.relaySinceTs || 0}${ctok ? `&clientToken=${encodeURIComponent(ctok)}` : ''}`, { cache: 'no-store' })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(async (res) => {
+          if (!res?.ok || !Array.isArray(res.packets)) return;
+          if (!this.relaySinceTs && res.serverTime) {
+            this.relaySinceTs = Math.max(0, Number(res.serverTime) - 1.2);
+          }
+          for (const pkt of res.packets) {
+            const pts = Number(pkt.ts || 0);
+            if (pts > this.relaySinceTs) this.relaySinceTs = pts;
+            if (!pkt.id || this.relaySeenIds.has(pkt.id)) continue;
+            this.relaySeenIds.add(pkt.id);
+            if (this.relaySeenIds.size > 80) {
+              const first = this.relaySeenIds.values().next().value;
+              this.relaySeenIds.delete(first);
+            }
+            if (!pkt.fromId || pkt.fromId === selfId || this._isPeerP2pConnected(pkt.fromId)) continue;
+            await this._playRelayPacket(pkt);
+          }
+        })
+        .catch(() => {})
+        .finally(() => { this._relayFetching = false; });
+    }, 680);
+  }
+
+  async _playRelayPacket(pkt) {
+    if (this.deafened || !pkt?.b64) return;
+    const volPct = this.getPeerVolume(pkt.fromId);
+    if (volPct <= 0) return;
+    const ctx = this._ensureRelayPlayCtx();
+    if (!ctx) return;
+    try {
+      const bin = atob(pkt.b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      const audioBuf = await ctx.decodeAudioData(bytes.buffer.slice(0));
+      if (this.destroyed || !this.inCall || this.deafened || ctx.state === 'closed') return;
+      const src = ctx.createBufferSource();
+      const gain = ctx.createGain();
+      gain.gain.value = Math.min(2.0, Math.max(0, volPct / 100));
+      src.buffer = audioBuf;
+      src.connect(gain);
+      gain.connect(ctx.destination);
+      const peerKey = String(pkt.fromId || 'peer');
+      const prevNext = this.relayNextPlayAtByPeer.get(peerKey) || 0;
+      const clampedPrev = prevNext > ctx.currentTime + 1.5 ? ctx.currentTime + 0.06 : prevNext;
+      const startAt = Math.max(ctx.currentTime + 0.04, clampedPrev);
+      this.relayNextPlayAtByPeer.set(peerKey, startAt + audioBuf.duration);
+      src.onended = () => { try { src.disconnect(); gain.disconnect(); } catch (_) {} };
+      src.start(startAt);
+    } catch (_) {}
+  }
+
   watchSpeaking() {
     try {
+      try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+      this.audioCtx?.close?.().catch(() => {});
       this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       const src = this.audioCtx.createMediaStreamSource(this.stream);
       const an = this.audioCtx.createAnalyser();
       an.fftSize = 256;
       src.connect(an);
+      this.analyser = an;
+
+      const srcRate = this.audioCtx.sampleRate || 48000;
+      const relayProc = this.audioCtx.createScriptProcessor(4096, 1, 1);
+      const relayMute = this.audioCtx.createGain();
+      relayMute.gain.value = 0;
+      this._relayProc = relayProc;
+      this._relaySrc = src;
+      this._relayMute = relayMute;
+      let relayChunks = [];
+      let relayFrames = 0;
+      let relayMaxRms = 0;
+      let relayTailCount = 0;
+      const targetFrames = Math.round(srcRate * 0.72);
+      relayProc.onaudioprocess = (ev) => {
+        if (!this.micOn || !this.inCall || this.destroyed) {
+          relayChunks = [];
+          relayFrames = 0;
+          return;
+        }
+        if (!this._hasUnconnectedCallPeers()) {
+          relayChunks = [];
+          relayFrames = 0;
+          return;
+        }
+        const ch = ev.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(ch.length);
+        let sq = 0;
+        for (let i = 0; i < ch.length; i += 1) {
+          copy[i] = ch[i];
+          sq += ch[i] * ch[i];
+        }
+        const rms = Math.sqrt(sq / Math.max(1, ch.length));
+        if (rms > relayMaxRms) relayMaxRms = rms;
+        relayChunks.push(copy);
+        relayFrames += copy.length;
+        if (relayFrames >= targetFrames) {
+          const hasSpeech = relayMaxRms > 0.008;
+          if (hasSpeech) relayTailCount = 1;
+          if (hasSpeech || relayTailCount > 0) {
+            if (!hasSpeech) relayTailCount -= 1;
+            const merged = new Float32Array(relayFrames);
+            let off = 0;
+            for (const c of relayChunks) { merged.set(c, off); off += c.length; }
+            const down = downsampleFloat32(merged, srcRate, 8000);
+            const wav = encodeWavBytes(down, 8000);
+            const b64 = uint8ToBase64(wav);
+            const roomId = this.getRoomId?.();
+            const selfId = this.getSelfId?.();
+            if (roomId && selfId && b64.length < 70000) {
+              this.relaySeq += 1;
+              const clientToken = this._getClientToken(roomId);
+              fetch(`/api/rave/voice-relay/${encodeURIComponent(roomId)}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ clientId: selfId, clientToken, seq: this.relaySeq, mime: 'audio/wav', b64 }),
+              }).catch(() => {});
+            }
+          }
+          relayChunks = [];
+          relayFrames = 0;
+          relayMaxRms = 0;
+        }
+      };
+      src.connect(relayProc);
+      relayProc.connect(relayMute);
+      relayMute.connect(this.audioCtx.destination);
+
       const buf = new Uint8Array(an.frequencyBinCount);
       let speaking = false;
       clearInterval(this.speakTimer);
@@ -991,12 +1589,19 @@ export class Voice {
           if (speaking) { speaking = false; this.selfSpeaking = false; this._updateDuckState(); }
           return;
         }
-        if (this.audioCtx?.state === 'suspended') this.audioCtx.resume().catch(() => {});
+        if (this.audioCtx?.state === 'suspended' && !(typeof document !== 'undefined' && document.hidden)) this.audioCtx.resume().catch(() => {});
         an.getByteFrequencyData(buf);
         const avg = buf.reduce((a, b) => a + b, 0) / (buf.length || 1);
         const norm = Math.min(1, avg / 55);
         this.onMicLevel?.(norm);
         const now = avg > 14;
+        const rmsSq = buf.reduce((acc, val) => acc + (val / 255) * (val / 255), 0) / (buf.length || 1);
+        this._rmsVol = Math.max(Math.sqrt(rmsSq), (this._rmsVol || 0) * 0.78);
+        const selfBubble = document.querySelector('#vortex-cam-dock [data-cam-id="self"]');
+        if (selfBubble) {
+          selfBubble.classList.toggle('is-speaking', now);
+          selfBubble.style.setProperty('--voice-scale', now ? (1 + Math.min(0.14, this._rmsVol * 0.42)).toFixed(3) : '1');
+        }
         if (now !== speaking) {
           speaking = now;
           this.selfSpeaking = now;
@@ -1008,13 +1613,32 @@ export class Voice {
   }
 
   destroy() {
+    this.destroyed = true;
+    this.inCall = false;
+    this.micOn = false;
+    this.camOn = false;
+    this.screenOn = false;
+    this.deafened = false;
+    this._mutedByDeafen = false;
+    if (typeof window !== 'undefined') window.__vortexVoiceDeafened = false;
+    this.selfSpeaking = false;
+    this.onDuckChange?.(false);
     clearInterval(this.speakTimer);
+    this.speakTimer = null;
     clearInterval(this.synthTimer);
     clearInterval(this.screenSynthTimer);
+    clearInterval(this.relayPollTimer);
+    this.relayPollTimer = null;
     window.removeEventListener('pointerdown', this._unlockBound);
     window.removeEventListener('keydown', this._unlockBound);
+    if (this._onResizeBound) {
+      window.removeEventListener('resize', this._onResizeBound);
+      this._onResizeBound = null;
+      this._resizeObserverBound = false;
+    }
     for (const st of this.peers.values()) {
       try { st.pc.close(); } catch (e) { /* ignore */ }
+      releaseStreamBoost(st.audio);
       st.audio.srcObject = null;
       st.audio.remove();
     }
@@ -1022,10 +1646,29 @@ export class Voice {
     this.stream?.getTracks().forEach((t) => t.stop());
     this.camStream?.getTracks().forEach((t) => t.stop());
     this.screenStream?.getTracks().forEach((t) => t.stop());
+    this._avatarCamCanvasStream?.getTracks?.().forEach((t) => t.stop());
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
+    this._avatarCamCanvasStream = null;
+    this.analyser = null;
     document.getElementById('vortex-cam-dock')?.remove();
+    document.getElementById('vortex-audio-host')?.remove();
+    try { this._relayProc?.disconnect?.(); this._relaySrc?.disconnect?.(); this._relayMute?.disconnect?.(); } catch (_) {}
+    this._relayProc = null;
+    this._relaySrc = null;
+    this._relayMute = null;
+    if (this._chimeCtxs?.size) {
+      for (const cac of this._chimeCtxs) {
+        try { if (cac.state !== 'closed') cac.close().catch(() => {}); } catch (_) {}
+      }
+      this._chimeCtxs.clear();
+    }
     this.audioCtx?.close?.().catch(() => {});
+    this.relayPlayCtx?.close?.().catch(() => {});
+    this.synthAudioCtx?.close?.().catch(() => {});
+    try { closeSharedAudioContext(); } catch (_) {}
+    this._syncStoreVoice();
+    if (typeof window !== 'undefined') { window.__kinoxVoiceDuckFactor = 1.0; window.__kinoxSyncDuckVolume?.(); }
   }
 }

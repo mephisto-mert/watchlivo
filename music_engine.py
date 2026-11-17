@@ -1,9 +1,11 @@
 # Watchlivo Unified Multi-Platform Music & Music Video Party Engine
 # Aggregates real data from Spotify, Apple Music, Deezer, YouTube Music & SoundCloud
 import asyncio
+from collections import OrderedDict
 import concurrent.futures
 import json
 import re
+import struct
 import time
 import urllib.parse
 import urllib.request
@@ -47,13 +49,26 @@ SPOTIFY_PLAYLISTS = {
     "global_pop": "37i9dQZEVXbMDoHDwVN2tF", # Global Top 50
 }
 
+class _BoundedCache(OrderedDict):
+    def __init__(self, maxsize: int = 512):
+        super().__init__()
+        self._maxsize = maxsize
+
+    def __setitem__(self, key, value):
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
+
+
 _TR_ASCII = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
-_MUSIC_CACHE: dict[str, tuple[float, dict]] = {}
-_SIMILAR_CACHE: dict[str, tuple[float, list]] = {}
-_RESOLVE_MUSIC_CACHE: dict[str, tuple[float, dict]] = {}
-_LYRICS_CACHE: dict[str, tuple[float, str]] = {}
-_SPOTIFY_PL_CACHE: dict[str, tuple[float, list]] = {}
-_YT_IOS_STREAM_CACHE: dict[str, tuple[float, dict]] = {}
+_MUSIC_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(512)
+_SIMILAR_CACHE: dict[str, tuple[float, list]] = _BoundedCache(512)
+_RESOLVE_MUSIC_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(1024)
+_LYRICS_CACHE: dict[str, tuple[float, str]] = _BoundedCache(512)
+_SPOTIFY_PL_CACHE: dict[str, tuple[float, list]] = _BoundedCache(128)
+_YT_IOS_STREAM_CACHE: dict[str, tuple[float, dict]] = _BoundedCache(512)
 
 _REMIX_KW_RE = re.compile(
     r"\b(remix|rmx|bootleg|mashup|edit|rework|flip|club\s*mix|extended\s*mix|radio\s*edit|vip\s*mix|"
@@ -70,7 +85,7 @@ def _norm_raw(s: str) -> str:
 
 
 def _classify_track_variant(title: str, album: str = "", artist: str = "") -> tuple[bool, str]:
-    raw = _norm_raw(f"{title or ''} {album or ''} {artist or ''}")
+    raw = _norm_raw(f"{title or ''} {album or ''}")
     if _REMIX_KW_RE.search(raw):
         return True, "🎛️ Remix"
     if _ACOUSTIC_KW_RE.search(raw):
@@ -112,7 +127,7 @@ def _http_get_json(url: str, timeout: float = 4.5, headers: dict | None = None, 
     hdrs = {"User-Agent": UA_MUSIC, "Accept": "application/json", **(headers or {})}
     req = urllib.request.Request(url, data=data, headers=hdrs)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read(1024 * 600).decode("utf-8", errors="ignore"))
+        return json.loads(r.read(2 * 1024 * 1024).decode("utf-8", errors="ignore"))
 
 
 def _spotify_playlist_sync(playlist_id: str, limit: int = 20) -> list[dict]:
@@ -132,7 +147,7 @@ def _spotify_playlist_sync(playlist_id: str, limit: int = 20) -> list[dict]:
         data = json.loads(m.group(1))
         entity = ((data.get("props") or {}).get("pageProps") or {}).get("state", {}).get("data", {}).get("entity") or {}
         cover_list = ((entity.get("coverArt") or {}).get("sources") or [])
-        default_cover = cover_list[0].get("url") if cover_list else "/static/kinox-poster.svg"
+        default_cover = cover_list[0].get("url") if cover_list else "/static/watchlivo-poster.svg"
         tracks = entity.get("trackList") or []
         out = []
         for idx, tr in enumerate(tracks):
@@ -194,8 +209,9 @@ def _itunes_music_video_sync(term: str, limit: int = 8, country: str = "TR") -> 
         if not title or not artist:
             continue
         art100 = it.get("artworkUrl100") or ""
-        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/kinox-poster.svg"
-        dur_sec = max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
+        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/watchlivo-poster.svg"
+        is_prev = bool(re.search(r"mzstatic\.com|itunes\.apple\.com|apple\.com/itunes-assets|Video\d+|mzvf_|AudioPreview", mv_url, re.I))
+        dur_sec = 30 if is_prev else max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
         out.append({
             "id": f"amv_{tid}",
             "trackId": tid,
@@ -206,8 +222,9 @@ def _itunes_music_video_sync(term: str, limit: int = 8, country: str = "TR") -> 
             "year": (it.get("releaseDate") or "2025")[:4],
             "genre": it.get("primaryGenreName") or "Video Klip",
             "sourcePlatform": "Apple Music",
-            "sourceBadge": "🍎 Apple Music Klip",
+            "sourceBadge": "🍎 Apple Music · Önizleme (30 sn)" if is_prev else "🍎 Apple Music Klip",
             "duration": dur_sec,
+            "isPreview": is_prev,
             "poster": poster,
             "backdrop": poster,
             "thumbnail": poster,
@@ -247,7 +264,7 @@ def _itunes_search_sync(term: str, limit: int = 20, country: str = "TR") -> list
             continue
         seen.add(dk)
         art100 = it.get("artworkUrl100") or ""
-        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/kinox-poster.svg"
+        poster = art100.replace("100x100bb", "600x600bb") if art100 else "/static/watchlivo-poster.svg"
         dur_sec = max(30, int((it.get("trackTimeMillis") or 200000) / 1000))
         out.append({
             "id": f"trk_{tid}" if tid else f"trk_{abs(hash(dk)) % 10000000}",
@@ -287,7 +304,7 @@ def _deezer_search_sync(term: str, limit: int = 12) -> list[dict]:
         if not title or not artist:
             continue
         alb = it.get("album") or {}
-        poster = alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium") or "/static/kinox-poster.svg"
+        poster = alb.get("cover_xl") or alb.get("cover_big") or alb.get("cover_medium") or "/static/watchlivo-poster.svg"
         out.append({
             "id": f"dz_{it.get('id')}",
             "trackId": str(it.get("id") or ""),
@@ -431,12 +448,14 @@ def _dedup_and_enrich(lists: list[list[dict]], global_seen: set | None = None, a
 
 
 def _detect_artist_category(artist: str, genre: str = "") -> str:
-    a_low = (artist or "").lower()
-    g_low = (genre or "").lower()
-    for cat_id, seeds in CATEGORY_SEEDS.items():
-        for s in seeds:
-            if s.lower() in a_low or a_low in s.lower():
-                return cat_id
+    a_low = (artist or "").lower().strip()
+    g_low = (genre or "").lower().strip()
+    if len(a_low) >= 3:
+        for cat_id, seeds in CATEGORY_SEEDS.items():
+            for s in seeds:
+                s_low = s.lower()
+                if s_low in a_low or (len(a_low) >= 4 and a_low in s_low):
+                    return cat_id
     if "rap" in g_low or "hip-hop" in g_low:
         return "tr_rap"
     if "rock" in g_low or "alternative" in g_low:
@@ -481,7 +500,7 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
     clean_artist = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", artist or "").strip()
     q = f"{clean_artist} {clean_title}".strip() or f"{artist} {song_title}".strip()
     if not q:
-        return "WEBVTT\n\n1\n00:00:01.000 --> 00:00:08.000\n🎤 Watchlivo Hi-Fi Müzik & Karaoke\n"
+        return "WEBVTT\n\n"
     ckey = q.lower()
     if ckey in _LYRICS_CACHE and time.time() - _LYRICS_CACHE[ckey][0] < 3600:
         return _LYRICS_CACHE[ckey][1]
@@ -517,12 +536,9 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
         for idx_l, ln in enumerate(lines[:60]):
             parsed.append((6.0 + idx_l * 3.8, ln))
     if not parsed:
-        disp_head = f"{clean_artist} — {clean_title}".strip(" —") or q
-        parsed = [
-            (1.0, f"{disp_head} · Hi-Fi Stüdyo"),
-            (8.0, f"{clean_title or disp_head} · Orijinal Kayıt"),
-            (16.0, f"{clean_artist or 'Watchlivo Müzik'} · Senkron Ses Akışı"),
-        ]
+        vtt_empty = "WEBVTT\n\n"
+        _LYRICS_CACHE[ckey] = (time.time(), vtt_empty)
+        return vtt_empty
     cues = []
     for idx, (st, txt) in enumerate(parsed):
         et = parsed[idx + 1][0] - 0.08 if idx + 1 < len(parsed) else st + 4.5
@@ -593,9 +609,9 @@ def _build_music_catalog_sync(provider: str, category: str, query: str, recent_a
         return batches
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as main_pool:
-        f_sim = main_pool.submit(_find_similar_songs_sync, recent_artist or "Semicenk", recent_title or "Çıkmaz Bir Sokakta", category, 14)
+        f_sim = main_pool.submit(_find_similar_songs_sync, recent_artist, recent_title, category, 14) if recent_artist.strip() else None
         cat_futs = [(c, main_pool.submit(_fetch_cat_raw, c)) for c in target_cats]
-        sim_items = f_sim.result() or []
+        sim_items = (f_sim.result() or []) if f_sim else []
         cat_raw_results = [(c, fut.result() or []) for c, fut in cat_futs]
 
     rap_block = ("lvbel", "blok3", "uzi", "motive", "ati242", "cakal", "reckol", "batuflex", "murda")
@@ -645,6 +661,7 @@ def _get_sc_client_id_sync(force_refresh: bool = False) -> str:
                 return _SC_CLIENT_ID
     except Exception:
         pass
+    _SC_CID_TS = time.time() - 3300.0
     return _SC_CLIENT_ID
 
 
@@ -744,87 +761,263 @@ def _sc_resolve_full_track_sync(artist: str, song_title: str, expected_dur_sec: 
 
 
 UA_YT_IOS = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
+UA_YT_VR = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
+_YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = _BoundedCache(512)
 
 
-def _yt_ios_extract_sync(video_id: str) -> dict | None:
+def _parse_dash_rng(val) -> dict | None:
+    if isinstance(val, dict) and "start" in val and "end" in val:
+        return {"start": str(val["start"]), "end": str(val["end"])}
+    m = re.match(r"^(\d+)-(\d+)$", str(val or "").strip())
+    return {"start": m.group(1), "end": m.group(2)} if m else None
+
+
+def _yt_piped_fallback_sync(vid: str) -> dict | None:
+    for inv_host in ("https://yt.chocolatemoo53.com", "https://inv.nadeko.net", "https://invidious.nerdvpn.de"):
+        try:
+            req = urllib.request.Request(f"{inv_host}/api/v1/videos/{vid}?local=true", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=5.0) as r:
+                d = json.loads(r.read(768 * 1024).decode("utf-8", errors="ignore"))
+            def _abs_u(raw_u: str) -> str:
+                u_s = str(raw_u or "").strip()
+                return (inv_host + u_s) if u_s.startswith("/") else u_s
+            mux_u = ""
+            for fs in (d.get("formatStreams") or []):
+                if str(fs.get("itag") or "") in ("22", "18") and fs.get("url"):
+                    mux_u = _abs_u(fs["url"])
+                    break
+            v_fmt, a_fmt, aud_u, vid_u = None, None, "", ""
+            af_list = d.get("adaptiveFormats") or []
+            for it_a in ("140", "139", "251", "250"):
+                cand_a = [f for f in af_list if str(f.get("itag") or "") == it_a and f.get("url")]
+                cand_a.sort(key=lambda x: (not bool((x.get("audioTrack") or {}).get("audioIsDefault", True)), str((x.get("audioTrack") or {}).get("id") or "")))
+                for f in cand_a:
+                    fu = _abs_u(f["url"])
+                    aud_u = aud_u or fu
+                    ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
+                    if it_a in ("140", "139") and ir and xr and not a_fmt:
+                        a_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "bandwidth": int(f.get("bitrate") or 132000), "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
+                    break
+                if aud_u:
+                    break
+            for it_v in ("137", "136", "135", "134"):
+                for f in af_list:
+                    if str(f.get("itag") or "") == it_v and f.get("url"):
+                        bw_v = int(f.get("bitrate") or 1200000)
+                        if it_v == "137" and bw_v > 4800000:
+                            continue
+                        fu = _abs_u(f["url"])
+                        vid_u = vid_u or fu
+                        ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
+                        if ir and xr and not v_fmt:
+                            res_m = re.match(r"(\d+)x(\d+)", str(f.get("size") or ""))
+                            def_w = 1920 if it_v == "137" else (1280 if it_v == "136" else (854 if it_v == "135" else 640))
+                            def_h = 1080 if it_v == "137" else (720 if it_v == "136" else (480 if it_v == "135" else 360))
+                            w = int(res_m.group(1)) if res_m else def_w
+                            h = int(res_m.group(2)) if res_m else def_h
+                            v_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "width": w, "height": h, "bandwidth": bw_v, "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
+                        break
+                if v_fmt:
+                    break
+            hls_u = _abs_u(d.get("hlsUrl") or "")
+            if hls_u or (v_fmt and a_fmt) or mux_u or aud_u:
+                return {"hlsUrl": hls_u, "muxedUrl": mux_u, "audioUrl": aud_u or mux_u, "videoUrl": mux_u or vid_u, "videoFmt": v_fmt, "audioFmt": a_fmt, "duration": int(d.get("lengthSeconds") or 0), "external": True, "ua": UA_MUSIC}
+        except Exception:
+            continue
+    return None
+
+def _yt_mobile_live_hls_sync(vid: str) -> str:
+    try:
+        req = urllib.request.Request(
+            f"https://m.youtube.com/watch?v={vid}&hl=tr",
+            headers={"User-Agent": UA_SAFARI_IOS, "Accept-Language": "tr-TR,tr;q=0.9"},
+        )
+        with urllib.request.urlopen(req, timeout=4.5) as r:
+            html = r.read(900 * 1024).decode("utf-8", errors="ignore")
+        m = re.search(r'"hlsManifestUrl"\s*:\s*"([^"]+)"', html)
+        if m:
+            return m.group(1).encode("utf-8").decode("unicode_escape").replace("\\/", "/")
+    except Exception:
+        pass
+    return ""
+
+
+def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     vid = (video_id or "").strip()
     if not re.match(r"^[A-Za-z0-9_-]{11}$", vid):
         return None
     cached = _YT_IOS_STREAM_CACHE.get(vid)
     if cached and time.time() - cached[0] < 1200:
-        return cached[1]
-    payload = {
-        "videoId": vid,
-        "context": {
-            "client": {
-                "clientName": "IOS",
-                "clientVersion": "20.03.02",
-                "deviceMake": "Apple",
-                "deviceModel": "iPhone16,2",
-                "osName": "iPhone",
-                "osVersion": "18.2.1.22C161",
-                "hl": "tr",
-                "gl": "TR",
-            }
+        if not (want_live and not cached[1].get("hlsUrl")):
+            return cached[1]
+    ios_cli = (
+        UA_YT_IOS,
+        {
+            "clientName": "IOS",
+            "clientVersion": "20.03.02",
+            "deviceMake": "Apple",
+            "deviceModel": "iPhone16,2",
+            "osName": "iPhone",
+            "osVersion": "18.2.1.22C161",
+            "hl": "tr",
+            "gl": "TR",
         },
-    }
-    try:
-        req = urllib.request.Request(
-            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "User-Agent": UA_YT_IOS},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=5.0) as r:
-            data = json.loads(r.read(1024 * 900).decode("utf-8", errors="ignore"))
-        sd = data.get("streamingData") or {}
-        fmts = (sd.get("adaptiveFormats") or []) + (sd.get("formats") or [])
-        audio_url = ""
-        video_url = ""
-        for pref_itag in (140, 139, 251, 250):
-            for f in fmts:
-                if f.get("itag") == pref_itag and f.get("url"):
+    )
+    android_cli = (
+        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
+        {
+            "clientName": "ANDROID",
+            "clientVersion": "20.10.38",
+            "androidSdkVersion": 34,
+            "osName": "Android",
+            "osVersion": "14",
+            "hl": "tr",
+            "gl": "TR",
+        },
+    )
+    vr_cli = (
+        UA_YT_VR,
+        {
+            "clientName": "ANDROID_VR",
+            "clientVersion": "1.60.19",
+            "deviceMake": "Oculus",
+            "deviceModel": "Quest 3",
+            "androidSdkVersion": 32,
+            "osName": "Android",
+            "osVersion": "12L",
+            "hl": "tr",
+            "gl": "TR",
+        },
+    )
+    clients = (ios_cli, android_cli, vr_cli) if want_live else (android_cli, ios_cli, vr_cli)
+    for cli_ua, cli_ctx in clients:
+        try:
+            req = urllib.request.Request(
+                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
+                data=json.dumps({"videoId": vid, "context": {"client": cli_ctx}}).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": cli_ua},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as r:
+                data = json.loads(r.read(1024 * 900).decode("utf-8", errors="ignore"))
+            sd = data.get("streamingData") or {}
+            hls_url = str(sd.get("hlsManifestUrl") or "").strip()
+            fmts = (sd.get("adaptiveFormats") or []) + (sd.get("formats") or [])
+            audio_url, video_url, muxed_url = "", "", ""
+            video_fmt, audio_fmt = None, None
+            for m_itag in (22, 18):
+                for f in (sd.get("formats") or []):
+                    if f.get("itag") == m_itag and f.get("url"):
+                        muxed_url = f["url"]
+                        break
+                if muxed_url:
+                    break
+            for pref_itag in (140, 139, 251, 250):
+                cand_a = [f for f in fmts if f.get("itag") == pref_itag and f.get("url")]
+                cand_a.sort(key=lambda x: (not bool((x.get("audioTrack") or {}).get("audioIsDefault", True)), str((x.get("audioTrack") or {}).get("id") or "")))
+                for f in cand_a:
                     audio_url = f["url"]
+                    if pref_itag in (140, 139) and f.get("initRange") and f.get("indexRange") and not audio_fmt:
+                        audio_fmt = {
+                            "url": f["url"],
+                            "initRange": f["initRange"],
+                            "indexRange": f["indexRange"],
+                            "bandwidth": int(f.get("bitrate") or 132000),
+                            "codecs": str(f.get("mimeType") or ""),
+                            "ua": cli_ua,
+                        }
                     break
-            if audio_url:
-                break
-        for pref_vitag in (136, 135, 134, 18):
-            for f in fmts:
-                if f.get("itag") == pref_vitag and f.get("url"):
-                    video_url = f["url"]
+                if audio_url:
                     break
-            if video_url:
-                break
-        dur_s = int((data.get("videoDetails") or {}).get("lengthSeconds") or 0)
-        if audio_url or video_url:
-            out = {"audioUrl": audio_url, "videoUrl": video_url, "duration": dur_s}
-            _YT_IOS_STREAM_CACHE[vid] = (time.time(), out)
-            return out
-    except Exception:
-        pass
+            for pref_vitag in (137, 136, 135, 134, 22, 18):
+                for f in fmts:
+                    if f.get("itag") == pref_vitag and f.get("url"):
+                        bw_v = int(f.get("bitrate") or 1500000)
+                        if pref_vitag == 137 and bw_v > 4800000:
+                            continue
+                        if not video_url:
+                            video_url = f["url"]
+                        if pref_vitag in (137, 136, 135, 134) and f.get("initRange") and f.get("indexRange") and not video_fmt:
+                            video_fmt = {
+                                "url": f["url"],
+                                "initRange": f["initRange"],
+                                "indexRange": f["indexRange"],
+                                "width": int(f.get("width") or (1920 if pref_vitag == 137 else 1280)),
+                                "height": int(f.get("height") or (1080 if pref_vitag == 137 else 720)),
+                                "bandwidth": bw_v,
+                                "codecs": str(f.get("mimeType") or ""),
+                                "ua": cli_ua,
+                            }
+                        break
+                if video_fmt:
+                    break
+            if (want_live or (data.get("videoDetails") or {}).get("isLiveContent")) and not hls_url:
+                hls_url = _yt_mobile_live_hls_sync(vid)
+            dur_s = int((data.get("videoDetails") or {}).get("lengthSeconds") or 0)
+            if hls_url or (video_fmt and audio_fmt) or muxed_url or audio_url or video_url:
+                out = {
+                    "hlsUrl": hls_url,
+                    "muxedUrl": muxed_url,
+                    "audioUrl": audio_url,
+                    "videoUrl": muxed_url or video_url,
+                    "videoFmt": video_fmt,
+                    "audioFmt": audio_fmt,
+                    "duration": dur_s,
+                    "ua": cli_ua,
+                }
+                _YT_IOS_STREAM_CACHE[vid] = (time.time(), out)
+                return out
+        except Exception:
+            continue
+    ext_fb = _yt_piped_fallback_sync(vid)
+    if ext_fb:
+        _YT_IOS_STREAM_CACHE[vid] = (time.time(), ext_fb)
+        return ext_fb
     return None
 
 
-def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str):
-    hdrs = {"User-Agent": UA_YT_IOS, "Accept": "*/*"}
-    chunk_sz = 2048 * 1024
-    start, end = 0, chunk_sz - 1
+def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False, client_ua: str = ""):
+    use_ua = client_ua or (UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC)
+    hdrs = {"User-Agent": use_ua, "Accept": "*/*"}
+    open_chunk_sz = 2 * 1024 * 1024
+    max_closed_sz = 4 * 1024 * 1024
+    start, end = 0, open_chunk_sz - 1
+    read_cap = open_chunk_sz
     if range_hdr and range_hdr.startswith("bytes="):
+        m_suf = re.match(r"bytes=-(\d+)", range_hdr)
         m = re.match(r"bytes=(\d+)-(\d*)", range_hdr)
-        if m:
+        if m_suf:
+            suf_n = min(int(m_suf.group(1)), max_closed_sz)
+            hdrs["Range"] = f"bytes=-{suf_n}"
+            read_cap = suf_n
+        elif m:
             start = int(m.group(1))
-            end = int(m.group(2)) if m.group(2) else start + chunk_sz - 1
-            if end - start >= chunk_sz:
-                end = start + chunk_sz - 1
-    hdrs["Range"] = f"bytes={start}-{end}"
+            if m.group(2):
+                end = int(m.group(2))
+                if end - start >= max_closed_sz:
+                    end = start + max_closed_sz - 1
+                read_cap = max(1, end - start + 1)
+            else:
+                end = start + open_chunk_sz - 1
+                read_cap = open_chunk_sz
+            hdrs["Range"] = f"bytes={start}-{end}"
+    elif is_head:
+        hdrs["Range"] = "bytes=0-0"
+        read_cap = 1
+    else:
+        hdrs["Range"] = f"bytes={start}-{end}"
     req = urllib.request.Request(target_url, headers=hdrs)
     with urllib.request.urlopen(req, timeout=9.0) as r:
-        data = r.read(chunk_sz + 1024)
+        data = r.read(read_cap + 1024)
         cr = r.headers.get("Content-Range") or ""
         ct = (r.headers.get("Content-Type") or default_ct).split(";")[0].strip()
+        if is_head and not range_hdr:
+            m_tot = re.search(r"/(\d+)$", cr)
+            tot_len = int(m_tot.group(1)) if m_tot else len(data)
+            return b"", 200, str(tot_len), ct
         status = 206 if cr else 200
         return data, status, cr, ct
-
 
 def _yt_fallback_audio_url_sync(vid: str) -> str:
     try:
@@ -838,41 +1031,207 @@ def _yt_fallback_audio_url_sync(vid: str) -> str:
                     return it["audioPreviewUrl"]
     except Exception:
         pass
-    it_def = _itunes_search_sync("Semicenk", 2)
-    for it in (it_def or []):
-        if it.get("audioPreviewUrl"):
-            return it["audioPreviewUrl"]
     return ""
 
 
+def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int, int, float]]:
+    ckey = f"{vid}:{kind}"
+    cached = _YT_SIDX_CACHE.get(ckey)
+    if cached and time.time() - cached[0] < 1200:
+        return cached[1]
+    idx_rng = fmt.get("indexRange") or {}
+    i_start = int(idx_rng.get("start") or 0)
+    i_end = int(idx_rng.get("end") or 2047)
+    fmt_ua = fmt.get("ua") or (UA_YT_IOS if "googlevideo.com" in fmt["url"] else UA_MUSIC)
+    req = urllib.request.Request(
+        fmt["url"],
+        headers={"User-Agent": fmt_ua, "Range": f"bytes={i_start}-{i_end}"},
+    )
+    with urllib.request.urlopen(req, timeout=5.5) as r:
+        buf = r.read(65536)
+    pos = buf.find(b"sidx")
+    if pos < 4 or len(buf) < pos + 28:
+        return []
+    box_start = pos - 4
+    ver = buf[pos + 4]
+    if ver != 0 and len(buf) < pos + 36:
+        return []
+    p_off = pos + 8 + 4
+    timescale = struct.unpack(">I", buf[p_off:p_off + 4])[0] or 1000
+    p_off += 4
+    if ver == 0:
+        _, first_offset = struct.unpack(">II", buf[p_off:p_off + 8])
+        p_off += 8
+    else:
+        _, first_offset = struct.unpack(">QQ", buf[p_off:p_off + 16])
+        p_off += 16
+    p_off += 2
+    ref_cnt = struct.unpack(">H", buf[p_off:p_off + 2])[0]
+    p_off += 2
+    box_sz = struct.unpack(">I", buf[box_start:box_start + 4])[0]
+    cur_off = i_start + box_start + box_sz + first_offset
+    segs: list[tuple[int, int, float]] = []
+    for _ in range(ref_cnt):
+        if p_off + 12 > len(buf):
+            break
+        w1, sub_dur, _ = struct.unpack(">III", buf[p_off:p_off + 12])
+        p_off += 12
+        sz = w1 & 0x7FFFFFFF
+        dur = max(0.2, float(sub_dur) / float(timescale))
+        segs.append((sz, cur_off, dur))
+        cur_off += sz
+    if segs:
+        _YT_SIDX_CACHE[ckey] = (time.time(), segs)
+    return segs
+
+
+def _extract_rfc_codec(mime_or_codecs: str, fallback: str) -> str:
+    m = re.search(r'codecs="([^"]+)"', str(mime_or_codecs or ""))
+    return m.group(1).strip() if m and m.group(1).strip() else fallback
+
+
+async def yt_pip_hls_master(request: Request):
+    cors_hdrs = {"Access-Control-Allow-Origin": "*", "Cache-Control": "no-store"}
+    vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
+    want_live = request.query_params.get("live") == "1"
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid, want_live), timeout=6.5)
+    except Exception:
+        info = None
+    if not info:
+        return JSONResponse({"error": "PiP akışı bulunamadı"}, status_code=404, headers=cors_hdrs)
+    v_fmt = info.get("videoFmt")
+    a_fmt = info.get("audioFmt")
+    hls_u = str(info.get("hlsUrl") or "").strip()
+    if not want_live and v_fmt and a_fmt:
+        w = int(v_fmt.get("width") or 1280)
+        h = int(v_fmt.get("height") or 720)
+        bw = int(v_fmt.get("bandwidth") or 1500000) + int(a_fmt.get("bandwidth") or 132000)
+        v_codec = _extract_rfc_codec(v_fmt.get("codecs") or "", "avc1.4d401f")
+        a_codec = _extract_rfc_codec(a_fmt.get("codecs") or "", "mp4a.40.2")
+        q_vid = urllib.parse.quote(vid, safe="")
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:7",
+            "#EXT-X-INDEPENDENT-SEGMENTS",
+            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Orijinal",DEFAULT=YES,AUTOSELECT=YES,URI="/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=audio"',
+            f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="{v_codec},{a_codec}",RESOLUTION={w}x{h},AUDIO="aud"',
+            f"/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=video",
+        ]
+        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+    if hls_u:
+        prox = f"/api/rave/stream?u={urllib.parse.quote(hls_u, safe='')}&proxy_segs=1&ext=.m3u8"
+        lines = [
+            "#EXTM3U",
+            "#EXT-X-VERSION:6",
+            "#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720",
+            prox,
+        ]
+        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+    return JSONResponse({"error": "Uyumlu HLS PiP katmanı yok"}, status_code=404, headers=cors_hdrs)
+
+
+async def yt_pip_hls_track(request: Request):
+    cors_hdrs = {"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=600"}
+    vid = (request.query_params.get("v") or "").strip()[:20]
+    kind = "video" if (request.query_params.get("kind") or "").lower() == "video" else "audio"
+    try:
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid, False), timeout=6.5)
+    except Exception:
+        info = None
+    fmt = (info or {}).get("videoFmt" if kind == "video" else "audioFmt")
+    if not fmt:
+        return JSONResponse({"error": "Katman bulunamadı"}, status_code=404, headers=cors_hdrs)
+    try:
+        segs = await asyncio.wait_for(asyncio.to_thread(_fetch_sidx_segments_sync, vid, kind, fmt), timeout=6.5)
+    except Exception:
+        segs = []
+    if not segs:
+        return JSONResponse({"error": "Segment dizini okunamadı"}, status_code=502, headers=cors_hdrs)
+    init_rng = fmt.get("initRange") or {}
+    init_s = int(init_rng.get("start") or 0)
+    init_len = max(1, int(init_rng.get("end") or 739) - init_s + 1)
+    max_d = max(1, int(max(s[2] for s in segs) + 0.999))
+    base_uri = f"/api/rave/yt-music-stream?v={urllib.parse.quote(vid, safe='')}&kind={'video_fmp4' if kind == 'video' else 'audio'}"
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:7",
+        f"#EXT-X-TARGETDURATION:{max_d}",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        f'#EXT-X-MAP:URI="{base_uri}",BYTERANGE="{init_len}@{init_s}"',
+    ]
+    for sz, off, dur in segs:
+        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"#EXT-X-BYTERANGE:{sz}@{off}")
+        lines.append(base_uri)
+    lines.append("#EXT-X-ENDLIST")
+    return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
+
+
 async def yt_music_stream(request: Request):
+    cors_hdrs = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+        "Access-Control-Allow-Headers": "Range, Content-Type",
+        "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
+    }
+    if request.method == "OPTIONS":
+        return Response(b"", status_code=204, headers=cors_hdrs)
     vid = (request.query_params.get("v") or request.query_params.get("videoId") or "").strip()[:20]
     kind = (request.query_params.get("kind") or "audio").strip().lower()
-    info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
-    target = (info or {}).get("videoUrl" if kind == "video" else "audioUrl") or (info or {}).get("audioUrl") or ""
-    if not target:
-        target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
-    if not target:
-        return JSONResponse({"error": "Akış bulunamadı"}, status_code=404)
-    rng = request.headers.get("range") or ("bytes=0-1023" if request.method == "HEAD" else "")
-    def_ct = "video/mp4" if kind == "video" else "audio/mp4"
+    is_video_req = kind in ("video", "video_fmp4", "muxed")
     try:
-        data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct), timeout=11.0)
+        info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.5)
+    except Exception:
+        info = None
+    if kind == "video_fmp4":
+        target = ((info or {}).get("videoFmt") or {}).get("url") or (info or {}).get("videoUrl") or ""
+    elif kind == "muxed":
+        target = (info or {}).get("muxedUrl") or ""
+    elif kind == "video":
+        target = (info or {}).get("muxedUrl") or (info or {}).get("videoUrl") or ""
+    else:
+        target = (info or {}).get("audioUrl") or ""
+    if not target and not is_video_req:
+        try:
+            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+        except Exception:
+            target = ""
+    if not target:
+        return JSONResponse({"error": "Akış bulunamadı"}, status_code=404, headers=cors_hdrs)
+    rng = request.headers.get("range") or ""
+    is_head = request.method == "HEAD"
+    def_ct = "video/mp4" if is_video_req else "audio/mp4"
+    cli_ua = str((info or {}).get("ua") or "")
+    try:
+        try:
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, cli_ua), timeout=11.0)
+        except Exception:
+            _YT_IOS_STREAM_CACHE.pop(vid, None)
+            if is_video_req:
+                raise
+            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
+            if not target:
+                raise
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, ""), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
-            "Content-Length": str(len(data)),
+            "Content-Length": cr if (is_head and status == 200 and cr.isdigit()) else str(len(data)),
             "Accept-Ranges": "bytes",
-            "Access-Control-Allow-Origin": "*",
+            "Vary": "Range",
             "Cache-Control": "public, max-age=1800",
+            **cors_hdrs,
         }
         if cr and status == 206:
             hdrs["Content-Range"] = cr
-        return Response(b"" if request.method == "HEAD" else data, status_code=status, headers=hdrs)
+        return Response(b"" if is_head else data, status_code=status, headers=hdrs)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=502)
-
+        return JSONResponse({"error": str(e)}, status_code=502, headers=cors_hdrs)
 
 def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, provider: str, poster: str, preview_url: str, mv_url_param: str = "", mode: str = "") -> dict:
+    if not url and video_id and re.match(r"^[A-Za-z0-9_-]{11}$", video_id):
+        url = f"https://www.youtube.com/watch?v={video_id}"
     is_generic_title = not song_title or song_title.strip() in ("Müzik & Klip Parçası", "Müzik", "Track")
     if url and is_generic_title:
         try:
@@ -921,9 +1280,11 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         sp = song_title.replace("🎵", "").split(" - ", 1)
         artist, song_title = sp[0].strip(), sp[1].strip()
     want_remix, var_badge = _classify_track_variant(song_title, "", artist)
-    clean_q = f"{artist} {song_title}".strip() or "Semicenk Çıkmaz Bir Sokakta"
+    clean_q = f"{artist} {song_title}".strip()
+    if not clean_q and not video_id and not url and not preview_url and not mv_url_param:
+        return {"error": "Şarkı adı veya bağlantı gerekli", "url": ""}
     mode_norm = "video" if mode.lower() in ("video", "clip", "mv") else ("audio" if mode.lower() in ("audio", "song") else "")
-    ckey = f"v14|{clean_q.lower()}|{'rmx' if want_remix else 'orig'}|{mode_norm}"
+    ckey = f"v15|{clean_q.lower()}|{'rmx' if want_remix else 'orig'}|{mode_norm}|{video_id}|{url}|{preview_url}|{mv_url_param}"
     cached = _RESOLVE_MUSIC_CACHE.get(ckey)
     if cached and time.time() - cached[0] < 120:
         return cached[1]
@@ -954,6 +1315,8 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
             artist = trk.get("artist") or artist
         if not song_title:
             song_title = trk.get("songTitle") or song_title
+            if not target_norm_s and song_title:
+                target_norm_s = _norm_key(song_title)
         if not poster or "scdn.co" in poster or "kinox-poster" in poster:
             poster = trk.get("poster") or poster
         if target_norm_s and target_norm_s in _norm_key(trk.get("songTitle", "")):
@@ -1027,39 +1390,58 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
     fmt_m, fmt_s = divmod(full_dur, 60)
     fmt_dur_lbl = f"{fmt_m}:{fmt_s:02d}"
 
+    def _is_preview_clip(u_val: str) -> bool:
+        return bool(u_val and re.search(r"mzstatic\.com|itunes\.apple\.com|apple\.com/itunes-assets|dzcdn\.net|Video\d+|mzvf_|AudioPreview", str(u_val), re.I))
+
+    is_preview_mv = _is_preview_clip(exact_mv)
     audio_tracks = []
     if sc_url:
         audio_tracks.append({"id": "full-studio", "lang": "orig", "targetLang": "orig", "label": f"🎵 {var_badge} Stüdyo Ses ({fmt_dur_lbl} · Hi-Fi)", "mode": "stream", "url": sc_url})
     for idx_alt, alt_u in enumerate(sc_alts[:2]):
         audio_tracks.append({"id": f"full-alt-{idx_alt + 1}", "lang": "orig", "targetLang": "orig", "label": f"🎵 Alternatif Tam Süre Kaynak #{idx_alt + 2} ({fmt_dur_lbl})", "mode": "stream", "url": alt_u})
     if exact_mv:
-        audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": "🎬 Resmi HD Video Klip (Apple Music 1080p)", "mode": "stream", "url": exact_mv})
+        mv_track_lbl = "🎬 Video Klip · Önizleme (30 sn)" if is_preview_mv else "🎬 Resmi HD Video Klip (Apple Music 1080p)"
+        audio_tracks.append({"id": "mv-hd", "lang": "orig", "targetLang": "orig", "label": mv_track_lbl, "mode": "stream", "url": exact_mv})
 
-    if mode_norm == "video" and exact_mv:
+    if mode_norm == "video" and exact_mv and not is_preview_mv:
         primary_prov = "direct"
         primary_stype = "mp4"
         primary_url = exact_mv
         alt_urls = [u for u in ([sc_url] + sc_alts + [audio_stream, artist_mv]) if u and u != primary_url]
+    elif mode_norm == "video" and (clip_vid or primary_vid):
+        primary_prov = "youtube"
+        primary_stype = "youtube"
+        primary_url = f"https://www.youtube.com/watch?v={clip_vid or primary_vid}"
+        alt_urls = [u for u in ([sc_url] + sc_alts) if u]
     elif sc_url:
         primary_prov = "direct"
         primary_stype = sc_stype
         primary_url = sc_url
-        alt_urls = [u for u in (sc_alts + [exact_mv, audio_stream]) if u and u != primary_url]
-    elif exact_mv:
+        alt_urls = [u for u in (sc_alts + ([exact_mv] if not is_preview_mv else []) + [audio_stream]) if u and u != primary_url]
+    elif mode_norm == "audio" and primary_vid:
         primary_prov = "direct"
         primary_stype = "mp4"
-        primary_url = exact_mv
-        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
+        primary_url = f"/api/rave/yt-music-stream?v={urllib.parse.quote(primary_vid, safe='')}&kind=audio"
+        alt_urls = [u for u in [audio_stream, exact_mv] if u and u != primary_url]
     elif primary_vid:
         primary_prov = "youtube"
         primary_stype = "youtube"
         primary_url = f"https://www.youtube.com/watch?v={clip_vid if mode_norm == 'video' and clip_vid else primary_vid}"
         alt_urls = []
+    elif exact_mv and not is_preview_mv:
+        primary_prov = "direct"
+        primary_stype = "mp4"
+        primary_url = exact_mv
+        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
     else:
         primary_prov = "direct"
         primary_stype = "mp4"
-        primary_url = audio_stream or artist_mv
-        alt_urls = [u for u in [audio_stream, artist_mv] if u and u != primary_url]
+        primary_url = audio_stream or exact_mv or artist_mv or preview_url or mv_url_param or url
+        alt_urls = [u for u in [audio_stream, exact_mv, artist_mv, preview_url, mv_url_param] if u and u != primary_url]
+
+    is_preview_only = bool(not sc_url and not primary_vid and _is_preview_clip(primary_url))
+    eff_dur = 30 if is_preview_only else full_dur
+    channel_dur_lbl = "Önizleme (30 sn)" if is_preview_only else f"Tam Süre ({fmt_dur_lbl})"
 
     disp_song = _ensure_variant_title(song_title, want_remix, var_badge)
     disp_title = f"{artist} — {disp_song}" if artist and disp_song and artist.lower() not in disp_song.lower() else (disp_song or clean_q)
@@ -1069,11 +1451,12 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         "provider": primary_prov,
         "streamType": primary_stype,
         "catalogProvider": "music",
-        "musicPlatformLabel": f"{source_plat} · {var_badge}",
+        "musicPlatformLabel": f"{source_plat} · Önizleme (30 sn)" if is_preview_only else f"{source_plat} · {var_badge}",
         "isMusic": True,
-        "musicMode": mode_norm or ("video" if (exact_mv and not sc_url) else "audio"),
+        "isPreview": is_preview_only,
+        "musicMode": mode_norm or ("video" if (exact_mv and not is_preview_mv and not sc_url) else "audio"),
         "isRemix": want_remix,
-        "versionBadge": var_badge,
+        "versionBadge": "Önizleme (30 sn)" if is_preview_only else var_badge,
         "mediaType": "music",
         "url": primary_url,
         "altUrls": alt_urls,
@@ -1087,12 +1470,14 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         "poster": poster or (f"https://i.ytimg.com/vi/{primary_vid}/hqdefault.jpg" if primary_vid else "/static/watchlivo-poster.svg"),
         "thumbnail": poster or (f"https://i.ytimg.com/vi/{primary_vid}/hqdefault.jpg" if primary_vid else "/static/watchlivo-poster.svg"),
         "audioPreviewUrl": sc_url or audio_stream or exact_mv,
-        "mvUrl": exact_mv or artist_mv or "",
-        "duration": full_dur,
-        "channel": f"{artist or 'Sanatçı'} · {var_badge} · Tam Süre ({fmt_dur_lbl})",
+        "mvUrl": (exact_mv if not is_preview_mv else "") or artist_mv or "",
+        "duration": eff_dur,
+        "channel": f"{artist or 'Sanatçı'} · {var_badge} · {channel_dur_lbl}",
         "subtitleTracks": [{"id": "lyrics-tr", "lang": "tr", "label": "🎤 Senkron Şarkı Sözleri (Karaoke)", "url": lyrics_vtt_url, "default": True}],
         "similar": sim,
     }
+    if len(_RESOLVE_MUSIC_CACHE) >= 400:
+        _RESOLVE_MUSIC_CACHE.pop(next(iter(_RESOLVE_MUSIC_CACHE)), None)
     _RESOLVE_MUSIC_CACHE[ckey] = (time.time(), res)
     return res
 
@@ -1101,9 +1486,12 @@ async def music_catalog(request: Request):
     prov = (request.query_params.get("provider") or "music").strip().lower()
     cat = (request.query_params.get("category") or "all").strip().lower()
     q = (request.query_params.get("q") or "").strip()[:120]
-    rec_artist = (request.query_params.get("recentArtist") or "Semicenk").strip()[:80]
+    rec_artist = (request.query_params.get("recentArtist") or "").strip()[:80]
     rec_title = (request.query_params.get("recentTitle") or "").strip()[:80]
-    data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
+    try:
+        data = await asyncio.wait_for(asyncio.to_thread(_build_music_catalog_sync, prov, cat, q, rec_artist, rec_title), timeout=12.0)
+    except Exception:
+        data = {"provider": prov, "category": cat, "shelves": [], "sections": [], "items": [], "similarItems": []}
     return JSONResponse(data, headers={"Cache-Control": "public, max-age=120, s-maxage=600, stale-while-revalidate=1800"})
 
 
@@ -1114,13 +1502,20 @@ async def music_similar(request: Request):
     if not artist and "—" in title:
         sp = title.replace("🎵", "").split("—", 1)
         artist, title = sp[0].strip(), sp[1].strip()
-    items = await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist or "Semicenk", title, cat, 16), timeout=9.0)
+    try:
+        items = (await asyncio.wait_for(asyncio.to_thread(_find_similar_songs_sync, artist, title, cat, 16), timeout=9.0)) if (artist or title or cat) else []
+    except Exception:
+        items = []
     return JSONResponse({"artist": artist, "title": title, "items": items}, headers={"Cache-Control": "public, max-age=120, s-maxage=600"})
 
 
 async def music_resolve(request: Request):
     artist = (request.query_params.get("artist") or "").strip()[:80]
-    title = (request.query_params.get("title") or request.query_params.get("songTitle") or "").strip()[:120]
+    title = (request.query_params.get("title") or request.query_params.get("songTitle") or request.query_params.get("q") or "").strip()[:120]
+    if not artist and (" — " in title or " - " in title):
+        sep = " — " if " — " in title else " - "
+        parts = title.split(sep, 1)
+        artist, title = parts[0].strip()[:80], parts[1].strip()[:120]
     vid = (request.query_params.get("videoId") or "").strip()[:20]
     url = (request.query_params.get("url") or "").strip()[:500]
     prov = (request.query_params.get("provider") or "music").strip()[:30]
@@ -1128,12 +1523,18 @@ async def music_resolve(request: Request):
     prev_u = (request.query_params.get("audioPreviewUrl") or "").strip()[:500]
     mv_u = (request.query_params.get("mvUrl") or "").strip()[:500]
     mode = (request.query_params.get("mode") or "").strip()[:20]
-    res = await asyncio.wait_for(asyncio.to_thread(_resolve_music_sync, artist, title, vid, url, prov, poster, prev_u, mv_u, mode), timeout=11.0)
+    try:
+        res = await asyncio.wait_for(asyncio.to_thread(_resolve_music_sync, artist, title, vid, url, prov, poster, prev_u, mv_u, mode), timeout=11.0)
+    except Exception:
+        res = {"provider": "direct", "streamType": "mp4", "catalogProvider": "music", "isMusic": True, "mediaType": "music", "url": prev_u or mv_u or url, "title": f"🎵 {artist} — {title}".strip(" —"), "artist": artist, "songTitle": title, "poster": poster or "/static/watchlivo-poster.svg", "duration": 180}
     return JSONResponse(res, headers={"Cache-Control": "public, max-age=60, s-maxage=90"})
 
 
 async def music_lyrics_vtt(request: Request):
     artist = (request.query_params.get("artist") or "").strip()[:80]
     title = (request.query_params.get("title") or "").strip()[:100]
-    vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_lrc_vtt_sync, artist, title), timeout=6.0)
+    try:
+        vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_lrc_vtt_sync, artist, title), timeout=6.0)
+    except Exception:
+        vtt = "WEBVTT\n\n"
     return Response(vtt.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400"})
