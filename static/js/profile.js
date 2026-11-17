@@ -682,8 +682,6 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       h('span', {}, '👤 Misafir Sekmesine Geç'),
       lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null);
   }
-      h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Resmi Google Hesabınız ile Tek Tıkla Güvenli Giriş'));
-  };
 
   const draw = () => {
     root.replaceChildren();
