@@ -167,7 +167,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     const uLabel = ytConnected
       ? `${prefs.googleChannelTitle || state.self.name || 'YouTube Hesabım'} (${prefs.googleEmail})`
       : signedIn
-        ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'}) — YouTube Hesabı Henüz Bağlı Değil`
+        ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'})`
         : 'Giriş Yap';
     const subCount = prefs.subscriptions.length;
     const likeCount = prefs.likedVideos.length;

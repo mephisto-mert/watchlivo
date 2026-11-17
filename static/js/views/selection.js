@@ -445,7 +445,7 @@ export function openYtPersonalizeModal(onUpdated) {
               btn.disabled = false;
             }
           },
-        }, '🔴 Bağlan & YouTube Hesabını Eşitle')),
+        }, '🔗 Kanalı Güncelle')),
       h('div', { style: { display: 'flex', gap: '8px' } },
         chInp,
         h('button', { type: 'button', class: 'btn primary', onclick: addCustomCh }, '+ Takip Et')),

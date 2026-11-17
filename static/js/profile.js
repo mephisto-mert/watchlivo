@@ -618,70 +618,30 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
 
-      // Google login removed per user request. Use Email/Password login.
-      return;
-      if (!idToken) {
-        showErr('Google girişi doğrulanamadı.');
-        return;
-      }
-      if (cleanEmail && fbEmail && cleanEmail !== fbEmail) {
-        try { await fb.auth.signOut?.(); } catch (_) {}
-        showErr(`Yazdığınız e-posta (${cleanEmail}) ile seçtiğiniz Google hesabı (${fbEmail}) eşleşmiyor!`);
-        return;
-      }
-      const baseName = fbName || ((current && current.name && !/^Misafir/i.test(current.name)) ? current.name : fallbackName);
-      const res = await api('/api/auth/oauth', {
-        method: 'POST',
-        body: { provider, idToken, email: cleanEmail || fbEmail, name: baseName, color, password: cleanPw },
-      });
-      if (res?.ok && res.user) {
-        const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
-        finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak Google ile giriş yapıldı`);
-      }
-    } catch (e) {
-      showErr(e.message || 'Google ile giriş başarısız oldu');
+      // Google login removed per user request.
+
+    const doGuestLogin = (customName = '') => {
+      const prof = saveGuestProfile({ name: customName, color });
+      finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
+    };
+
+    function renderSocialButtons({ hideGuestBtn = false, getFormCreds = null } = {}) {
+      return h('div', { class: 'wl-social-stack' },
+        !hideGuestBtn ? h('button', {
+          type: 'button',
+          id: 'wl-instant-guest-btn',
+          class: 'wl-social-btn wl-social-guest',
+          style: {
+            background: 'rgba(148, 163, 184, 0.12)',
+            border: '1px solid rgba(148, 163, 184, 0.32)',
+            color: '#cbd5e1',
+            fontWeight: '600',
+          },
+          onclick: () => { activeTab = 'guest'; draw(); },
+        },
+        h('span', {}, '👤 Misafir Sekmesine Geç'),
+        lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null);
     }
-  };
-
-  const renderColorPicker = () => {
-    const row = h('div', { class: 'avatar-choices' }, AVATAR_COLORS.map((c) => {
-      const b = h('button', {
-        type: 'button',
-        class: `avatar-choice ${c === color ? 'on' : ''}`,
-        style: { background: c },
-        'aria-label': c,
-        onclick: () => {
-          color = c;
-          row.querySelectorAll('.avatar-choice').forEach((x) => x.classList.toggle('on', x === b));
-        },
-      });
-      return b;
-    }));
-    return row;
-  };
-
-  const doGuestLogin = (customName = '') => {
-    const prof = saveGuestProfile({ name: customName, color });
-    finish(prof, `🎬 ${prof.name} olarak misafir girişi yapıldı — İyi seyirler!`);
-  };
-
-  function renderSocialButtons({ hideGuestBtn = false, getFormCreds = null } = {}) {
-    return h('div', { class: 'wl-social-stack' },
-      !hideGuestBtn ? h('button', {
-        type: 'button',
-        id: 'wl-instant-guest-btn',
-        class: 'wl-social-btn wl-social-guest',
-        style: {
-          background: 'rgba(148, 163, 184, 0.12)',
-          border: '1px solid rgba(148, 163, 184, 0.32)',
-          color: '#cbd5e1',
-          fontWeight: '600',
-        },
-        onclick: () => { activeTab = 'guest'; draw(); },
-      },
-      h('span', {}, '👤 Misafir Sekmesine Geç'),
-      lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null);
-  }
 
   const draw = () => {
     root.replaceChildren();
