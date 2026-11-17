@@ -1119,7 +1119,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
         if (gResp.ok) {
           const gInfo = await gResp.json().catch(() => ({}));
           const aud = String(gInfo?.aud || "");
-          const audOk = aud === "watchlivo-38ab6" || aud.endsWith(".apps.googleusercontent.com");
+          const audOk = aud === "watchlivo-38ab6" || aud.includes("googleusercontent.com");
           if (audOk && gInfo?.email && (gInfo.email_verified === true || String(gInfo.email_verified).toLowerCase() === "true")) {
             fbEmail = String(gInfo.email).trim().toLowerCase();
             fbName = String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
