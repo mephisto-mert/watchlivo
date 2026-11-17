@@ -1188,7 +1188,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
                 pwh_claim = _pw_verifier(uid, password)
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_claim, issued_override=issued_ts)})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_claim, issued_override=issued_ts), "isLoginHandover": True})
     else:
         uid = "u_wl_" + hashlib.sha256(f"{provider}:{handle}".encode("utf-8")).hexdigest()[:12]
         raw_email = f"{handle}@{provider}.watchlivo.online"
@@ -1196,7 +1196,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
         if ex:
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier="")})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=""), "isLoginHandover": True})
     salt = _new_salt()
     has_init_pw = bool(password and len(password) >= 6)
     pw_hash = _hash_pw(password if has_init_pw else _new_salt(), salt)
@@ -1217,7 +1217,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
         pass
     user = _row_to_user(row)
     _sync_user_to_social(user)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(user["uid"]), password) if has_init_pw else "")})
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(user["uid"]), password) if has_init_pw else ""), "isLoginHandover": True})
 
 
 _PHONE_CODES = BoundedTTLCache(maxsize=1000, default_ttl=300.0)

@@ -440,13 +440,12 @@ export function openYtPersonalizeModal(onUpdated) {
               onUpdated?.();
               modalRef?.close?.();
             } catch (err) {
-              ytErrBox.textContent = err?.message || 'Google / YouTube girişi doğrulanamadı. Lütfen tekrar deneyin.';
+              ytErrBox.textContent = err?.message || 'Hesap eşitleme doğrulanamadı. Lütfen tekrar deneyin.';
             } finally {
               btn.disabled = false;
-              btn.textContent = '🔴 Google ile Bağlan & YouTube Hesabını Eşitle';
             }
           },
-        }, '🔴 Google ile Bağlan & YouTube Hesabını Eşitle')),
+        }, '🔴 Bağlan & YouTube Hesabını Eşitle')),
       h('div', { style: { display: 'flex', gap: '8px' } },
         chInp,
         h('button', { type: 'button', class: 'btn primary', onclick: addCustomCh }, '+ Takip Et')),

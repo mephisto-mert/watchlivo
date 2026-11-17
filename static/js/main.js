@@ -810,9 +810,7 @@ function initRaveNotifications() {
     notifPollBusy = true;
     try {
       const name = state.self?.name || '';
-      const uid = (profile && profile.uid) || (window.wlState && window.wlState.uid);
-  if (!uid) return;
-  const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
+      const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
       if (!res?.ok) return;
 
       const prevReq = Number(state.social?.requestCount || 0);

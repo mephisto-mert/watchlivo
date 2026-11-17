@@ -168,7 +168,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       ? `${prefs.googleChannelTitle || state.self.name || 'YouTube Hesabım'} (${prefs.googleEmail})`
       : signedIn
         ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'}) — YouTube Hesabı Henüz Bağlı Değil`
-        : 'YouTube / Google ile Giriş Yap (Şifre Doğrulamalı)';
+        : 'Giriş Yap';
     const subCount = prefs.subscriptions.length;
     const likeCount = prefs.likedVideos.length;
     fill(authHolder, 

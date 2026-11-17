@@ -667,34 +667,21 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
 
   function renderSocialButtons({ hideGuestBtn = false, getFormCreds = null } = {}) {
     return h('div', { class: 'wl-social-stack' },
-      h('div', { class: 'wl-auth-divider' }, h('span', {}, hideGuestBtn ? 'veya Google ile Hızlı Giriş' : 'veya Diğer Giriş Seçenekleri')),
-      h('div', { class: 'wl-social-row' },
-        h('button', {
-          type: 'button',
-          id: 'wl-google-signin-btn',
-          class: 'wl-social-btn wl-social-google',
-          onclick: () => {
-            const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
-            doSocialLogin('google', 'GmailÜyesi', creds);
-          },
+      !hideGuestBtn ? h('button', {
+        type: 'button',
+        id: 'wl-instant-guest-btn',
+        class: 'wl-social-btn wl-social-guest',
+        style: {
+          background: 'rgba(148, 163, 184, 0.12)',
+          border: '1px solid rgba(148, 163, 184, 0.32)',
+          color: '#cbd5e1',
+          fontWeight: '600',
         },
-        h('span', { html: BRAND_SVGS.google || '', style: { display: 'inline-flex', alignItems: 'center' } }),
-        h('span', {}, 'Google ile Giriş Yap'),
-        lastProvider === 'google' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null),
-        !hideGuestBtn ? h('button', {
-          type: 'button',
-          id: 'wl-instant-guest-btn',
-          class: 'wl-social-btn wl-social-guest',
-          style: {
-            background: 'rgba(148, 163, 184, 0.12)',
-            border: '1px solid rgba(148, 163, 184, 0.32)',
-            color: '#cbd5e1',
-            fontWeight: '600',
-          },
-          onclick: () => { activeTab = 'guest'; draw(); },
-        },
-        h('span', {}, '👤 Misafir Sekmesine Geç'),
-        lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null),
+        onclick: () => { activeTab = 'guest'; draw(); },
+      },
+      h('span', {}, '👤 Misafir Sekmesine Geç'),
+      lastProvider === 'guest' ? h('span', { class: 'wl-last-used-badge' }, 'Son') : null) : null);
+  }
       h('div', { class: 'wl-security-footer' }, '🔒 256-bit SSL · Resmi Google Hesabınız ile Tek Tıkla Güvenli Giriş'));
   };
 
