@@ -2,6 +2,9 @@
 import asyncio, sys, pathlib
 from playwright.async_api import async_playwright
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 OUT = pathlib.Path(r"C:\Users\pc\.gemini\antigravity\brain\0bcd2c58-ffcb-4ebe-873b-242386b0f07a\scratch\shots")
 OUT.mkdir(parents=True, exist_ok=True)
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://localhost:8765"
@@ -22,9 +25,10 @@ async def main():
         await page.wait_for_timeout(2500)
         await page.screenshot(path=str(OUT / "02_home.png"))
         print("tiles:", await page.locator(".provider-tile").count())
-        await page.click('.provider-tile[data-provider="youtube"]')
-        await page.wait_for_timeout(4000)
-        await page.screenshot(path=str(OUT / "03_home_youtube.png"))
+        try:
+            await page.locator(".vcard").first.wait_for(state="visible", timeout=10000)
+        except Exception:
+            await page.wait_for_timeout(4000)
         print("yt cards:", await page.locator(".vcard").count())
         await page.locator(".vcard").first.click()
         await page.wait_for_timeout(6000)
@@ -33,4 +37,6 @@ async def main():
         print("errors:", *errs[:20], sep="\n  ")
         await b.close()
 
-asyncio.run(main())
+
+if __name__ == "__main__":
+    asyncio.run(main())

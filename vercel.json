@@ -1,5 +1,8 @@
 {
   "version": 2,
+  "env": {
+    "VERCEL_FORCE_PYTHON_STREAMING": "1"
+  },
   "regions": [
     "fra1"
   ],
@@ -9,33 +12,25 @@
       "use": "@vercel/static"
     },
     {
-      "src": "catalog_api.py",
-      "use": "@vercel/python",
-      "config": {
-        "maxLambdaSize": "50mb",
-        "includeFiles": [
-          "server.py",
-          "rooms.py",
-          "auth_engine.py",
-          "security.py",
-          "music_engine.py",
-          "animecix_tau_map.json",
-          "hidden_titles.json",
-          "main_sites_vault.json"
-        ]
-      }
-    },
-    {
       "src": "server.py",
       "use": "@vercel/python",
       "config": {
         "maxLambdaSize": "50mb",
+        "maxDuration": 60,
+        "excludeFiles": "{tests/**,desktop/**,audit/**,rave_extracted/**,uploads/**,workers/**,static/Watchlivo*,static/js/**,static/css/**,*.db,*.bak}",
         "includeFiles": [
           "rooms.py",
           "auth_engine.py",
           "security.py",
           "music_engine.py",
+          "social_engine.py",
+          "catalog_api.py",
           "static/index.html",
+          "static/desktop-auth.html",
+          "static/sw.js",
+          "static/Watchlivo.mobileconfig",
+          "app_version.json",
+          "ios_version.json",
           "animecix_tau_map.json",
           "hidden_titles.json",
           "main_sites_vault.json"
@@ -47,13 +42,14 @@
     {
       "src": "/",
       "headers": {
-        "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/index.html"
     },
@@ -61,62 +57,136 @@
       "src": "/index.html",
       "dest": "/static/index.html",
       "headers": {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       }
     },
     {
-      "src": "/(favicon\\.ico|apple-touch-icon.*\\.png)",
-      "dest": "/static/watchlivo-logo.svg",
+      "src": "/desktop-auth\\.html",
+      "dest": "/static/desktop-auth.html",
       "headers": {
+        "Cache-Control": "private, no-store, no-cache, must-revalidate, max-age=0",
+        "X-Robots-Tag": "noindex, nofollow",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       }
     },
     {
-      "src": "/download/(apk|windows)",
+      "src": "/apple-touch-icon.*\\.png",
+      "dest": "/static/watchlivo-icon-192.png",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "public, max-age=86400"
+      }
+    },
+    {
+      "src": "/favicon\\.ico",
+      "dest": "/static/watchlivo-logo.svg",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "public, max-age=86400"
+      }
+    },
+    {
+      "src": "/download/(apk|Watchlivo.*\\.apk|ipa|Watchlivo.*\\.ipa|ios|windows|exe)",
       "dest": "server.py"
+    },
+    {
+      "src": "/static/(Watchlivo.*\\.apk)",
+      "headers": {
+        "Content-Type": "application/vnd.android.package-archive",
+        "Content-Disposition": "attachment; filename=\"Watchlivo-v2.0.apk\"",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/static/(Watchlivo.*\\.ipa)",
+      "headers": {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": "attachment; filename=\"Watchlivo.ipa\"",
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "X-Content-Type-Options": "nosniff"
+      },
+      "dest": "/static/$1"
+    },
+    {
+      "src": "/static/Watchlivo\\.mobileconfig",
+      "headers": {
+        "Content-Type": "application/x-apple-aspen-config",
+        "Content-Disposition": "inline; filename=\"Watchlivo.mobileconfig\"",
+        "Cache-Control": "no-store"
+      },
+      "dest": "/static/Watchlivo.mobileconfig"
     },
     {
       "src": "/static/(.*)",
       "headers": {
         "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/$1"
     },
     {
-      "src": "/api/(search|rave|upload)(.*)",
-      "dest": "catalog_api.py"
-    },
-    {
-      "src": "/api/(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact|meshes|report|accounts|browser-proxy|bridge|site-data)(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store, no-cache, must-revalidate"
+      },
       "dest": "server.py"
     },
     {
-      "src": "/(manifest\\.json|sw\\.js)",
+      "src": "/api/(search|rave|upload)(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff"
+      },
+      "dest": "server.py"
+    },
+    {
+      "src": "/api/(.*)",
+      "headers": {
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store, no-cache, must-revalidate"
+      },
+      "dest": "server.py"
+    },
+    {
+      "src": "/(r|join)/(.*)",
+      "dest": "server.py"
+    },
+    {
+      "src": "/(manifest\\.json|manifest\\.webmanifest|sw\\.js|ios_version\\.json|app_version\\.json|robots\\.txt|sitemap\\.xml|b8f4e2a9c1d74e36a5b09f82c4e1d3a7\\.txt|stats|analytics|about|privacy|terms|dmca|contact)",
       "dest": "server.py"
     },
     {
       "src": "/(.*)",
       "headers": {
         "Cache-Control": "public, max-age=0, must-revalidate",
-        "Alt-Svc": "clear",
         "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "strict-origin-when-cross-origin",
         "X-Frame-Options": "SAMEORIGIN",
         "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-        "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'"
+        "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss: ws: blob: data: http://127.0.0.1:* http://localhost:*; frame-src 'self' https:; frame-ancestors 'self'; object-src 'none'; base-uri 'self'; form-action 'self'",
+        "Permissions-Policy": "camera=(self), microphone=(self), geolocation=(), display-capture=(self), autoplay=*, fullscreen=*, picture-in-picture=*"
       },
       "dest": "/static/index.html"
     }

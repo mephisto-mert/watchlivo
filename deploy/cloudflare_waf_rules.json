@@ -1,0 +1,26 @@
+{
+  "description": "Watchlivo Cloudflare WAF & Anti-Crawler Armor Ruleset",
+  "version": "2026-11-10",
+  "rules": [
+    {
+      "name": "Block / Challenge Datacenter Bots & Copyright Scrapers",
+      "action": "managed_challenge",
+      "expression": "(cf.bot_management.score lt 30) or (ip.geoip.asnum in {16509 14618 16276 24940 14061 51167 63949})",
+      "description": "Challenges requests from major datacenter ASNs (AWS, Hetzner, OVH, DigitalOcean) and requests with low bot scores."
+    },
+    {
+      "name": "Enforce No-Index & No-Archive on All HTTP Responses",
+      "action": "response_header_transform",
+      "headers": {
+        "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"
+      },
+      "description": "Edge-level response header transformation to ensure zero search engine indexing."
+    },
+    {
+      "name": "Block Cross-Site Hotlinking on Stream & Catalog Endpoints",
+      "action": "block",
+      "expression": "(http.request.uri.path contains \"/api/rave/resolve-catalog\" or http.request.uri.path contains \"/api/rave/stream\") and (http.request.headers[\"sec-fetch-site\"][0] eq \"cross-site\")",
+      "description": "Terminates cross-site unauthorized embedding and external API scraping before hitting the origin server."
+    }
+  ]
+}

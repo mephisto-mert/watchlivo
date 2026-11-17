@@ -191,7 +191,7 @@ body.vortex-fs .panel-video {
 .timeline .cur { background: #fff; }
 .timeline .knob { position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: #fff; transform: translate(-50%, -50%) scale(0); transition: transform .15s; }
 .timeline:hover .knob { transform: translate(-50%, -50%) scale(1); }
-@media (max-width: 960px), (pointer: coarse) {
+@media (max-width: 900px), (pointer: coarse) {
   .timeline:not(.locked) .knob { transform: translate(-50%, -50%) scale(.88); }
   .timeline:not(.locked) .track { height: 4px; }
 }
@@ -4047,6 +4047,26 @@ body > .ctl-menu.acrylic.is-body-portal .ctl-menu-close,
   gap: 6px;
   flex-shrink: 0;
 }
+<<<<<<< HEAD
+=======
+@media (max-width: 720px), (max-height: 520px) {
+  .rave-notif-stack {
+    top: calc(58px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    bottom: auto !important;
+    left: 12px !important;
+    right: 12px !important;
+    max-width: none !important;
+  }
+  .rave-notif-stack .rave-notif-card:nth-child(n+2) {
+    display: none !important;
+  }
+  .rave-notif-card {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    padding: 10px 12px !important;
+  }
+}
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
 @keyframes raveNotifIn {
   from { opacity: 0; transform: translateY(14px) scale(0.96); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -4746,6 +4766,7 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
     max-height: var(--vvh, 100%) !important;
   }
   body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root > .navbar {
+<<<<<<< HEAD
     height: 36px !important;
     min-height: 36px !important;
     padding-top: 0 !important;
@@ -4755,6 +4776,17 @@ body > .ctl-menu.acrylic.is-body-portal.hidden,
     height: calc(100% - 36px) !important;
     min-height: 0 !important;
     max-height: calc(100% - 36px) !important;
+=======
+    height: calc(36px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    min-height: calc(36px + var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    padding-top: var(--top-safe-offset, env(safe-area-inset-top, 0px)) !important;
+    padding-bottom: 0 !important;
+  }
+  body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh {
+    height: calc(100% - 36px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+    min-height: 0 !important;
+    max-height: calc(100% - 36px - var(--top-safe-offset, env(safe-area-inset-top, 0px))) !important;
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
   }
   body.kb-open:not(.vortex-fs):not(.mesh-minimized) #mesh-root .mesh-layout {
     padding-top: 2px !important;
@@ -5628,6 +5660,7 @@ html.is-android-pip .rave-subtitle-cue {
   }
 }
 
+<<<<<<< HEAD
 /* v137: Ultra-Narrow 320px-390px Control Bar Protection — Guarantees #ctl-fs Never Clips on >1h Feature Films */
 @media (max-width: 390px) {
   .video-frame:not(.fullscreen) .ctl-bar-row {
@@ -5641,6 +5674,29 @@ html.is-android-pip .rave-subtitle-cue {
   }
   .video-frame:not(.fullscreen) .ctl-action,
   .video-frame:not(.fullscreen) #ctl-sub-btn {
+=======
+/* v137/v193: Ultra-Narrow 320px-430px Control Bar Protection — Guarantees #ctl-fs & .ctl-time Never Collide on iPhone 15/16 (393px) */
+@media (max-width: 560px) {
+  .video-frame.fullscreen .ctl-fs-reactions,
+  #video-frame:fullscreen .ctl-fs-reactions,
+  #video-frame:-webkit-full-screen .ctl-fs-reactions,
+  body.vortex-fs .video-frame .ctl-fs-reactions {
+    display: none !important;
+  }
+}
+@media (max-width: 430px) {
+  .video-frame .ctl-bar-row {
+    gap: 2px !important;
+    padding: 0 2px !important;
+  }
+  .video-frame #ctl-speed-btn,
+  .video-frame #ctl-theater,
+  .video-frame #ctl-sub-btn .ctl-btn-lbl {
+    display: none !important;
+  }
+  .video-frame .ctl-action,
+  .video-frame #ctl-sub-btn {
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
     width: 28px !important;
     height: 28px !important;
     min-width: 28px !important;
@@ -5648,9 +5704,15 @@ html.is-android-pip .rave-subtitle-cue {
     flex: 0 0 28px !important;
     padding: 0 !important;
   }
+<<<<<<< HEAD
   .video-frame:not(.fullscreen) .ctl-time {
     font-size: 9.5px !important;
     padding: 0 1px !important;
+=======
+  .video-frame .ctl-time {
+    font-size: 9.5px !important;
+    padding: 0 2px !important;
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
     letter-spacing: -0.02em !important;
   }
 }
@@ -5702,7 +5764,11 @@ html.is-android-pip .rave-subtitle-cue {
 .reaction-emoji-grid::-webkit-scrollbar {
   display: none !important;
 }
+<<<<<<< HEAD
 .react-emoji-btn {
+=======
+.reaction-bar .react-emoji-btn:not(.ctl-fs-react-btn) {
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
   flex: 1 0 28px !important;
   min-width: 28px !important;
   height: 28px !important;
@@ -5943,11 +6009,25 @@ html.is-android-pip .rave-subtitle-cue {
   }
 }
 
+<<<<<<< HEAD
 @container (max-width: 385px) {
   .ctl-bottom {
     padding: 4px 5px 5px !important;
   }
   #ctl-theater {
+=======
+@container (max-width: 560px) {
+  .ctl-fs-reactions {
+    display: none !important;
+  }
+}
+@container (max-width: 430px) {
+  .ctl-bottom {
+    padding: 4px 5px 5px !important;
+  }
+  #ctl-theater,
+  #ctl-speed-btn {
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
     display: none !important;
   }
   .ctl-action,
@@ -6208,3 +6288,56 @@ html.is-android-pip .rave-subtitle-cue {
     font-size: 0.56rem !important;
   }
 }
+<<<<<<< HEAD
+=======
+
+@container (max-width: 390px) {
+  .video-frame .ctl-bar-row .ctl-time {
+    font-size: 0.59rem !important;
+    padding: 2px 4px !important;
+  }
+}
+
+@media (max-width: 380px) {
+  #mesh-root > .navbar .privacy-chip {
+    display: none !important;
+  }
+}
+
+/* v195: Subtitle/Settings Menu Z-Order & Top-Pill Non-Interception Guard */
+.video-frame .ctl-menu:not(.hidden),
+body > .ctl-menu.is-body-portal:not(.hidden) {
+  z-index: 220050 !important;
+}
+.video-frame.menu-open .ctl-top,
+body.ctl-menu-open .video-frame .ctl-top {
+  pointer-events: none !important;
+  opacity: 0.25 !important;
+}
+
+/* === Room UI/UX Audit Fixes (ISS-02, ISS-08, ISS-14, ISS-18) === */
+@media (min-width: 1181px) {
+  .mesh-layout.has-right {
+    --right-w: clamp(260px, 22vw, 340px) !important;
+    --gap-r: 6px !important;
+  }
+  .mesh-layout.has-right .panel-right {
+    min-width: 260px !important;
+  }
+}
+@media (max-width: 768px) {
+  #mesh-root .room-nav-pill,
+  #mesh-root .ctl-action,
+  #mesh-root .ctl-btn,
+  #mesh-root .panel-close {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+  #mesh-root .chatbar {
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+  body.mesh-minimized #mesh-root {
+    bottom: calc(78px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+}
+>>>>>>> fd1b292b142958c2a521d474978d23e1dd493358

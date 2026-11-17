@@ -1,0 +1,38 @@
+name = "watchlivo-ha-gateway"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = false
+
+routes = [
+  { pattern = "watchlivo.online/*", zone_name = "watchlivo.online" },
+  { pattern = "www.watchlivo.online/*", zone_name = "watchlivo.online" }
+]
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[[kv_namespaces]]
+binding = "WATCHLIVO_KV"
+id = "c8d3386531db4195910a66cc5c630a3e"
+
+[[durable_objects.bindings]]
+name = "ROOM_DO"
+class_name = "WatchlivoRoomDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["WatchlivoRoomDO"]
+
+[[services]]
+binding = "STREAM_PROXY"
+service = "watchlivo-stream-proxy"
+
+[triggers]
+crons = ["*/10 * * * *"]
+
+[vars]
+SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
+STREAM_PROXY_ORIGIN = "https://watchlivo.online"
+FORCE_SECONDARY = "1"

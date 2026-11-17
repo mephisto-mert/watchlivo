@@ -30,7 +30,7 @@ Watchlivo; arkadaşlarınızla gerçek zamanlı senkronize video izleme, müzik 
 1. Depoyu klonlayın:
 
    ```bash
-   git clone https://github.com/mephisto-mert/watchlivo.git
+   cd watchlivo
    cd watchlivo
    ```
 
