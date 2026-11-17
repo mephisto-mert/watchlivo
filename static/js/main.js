@@ -1,6 +1,6 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
 import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261114_v215';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261114_v215';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261117_v216';
 import { renderHome, destroyHome } from './views/home.js?v=20261114_v215';
 import { api } from './api.js?v=20261114_v215';
 import { h, toast } from './ui.js?v=20261114_v215';
@@ -810,7 +810,9 @@ function initRaveNotifications() {
     notifPollBusy = true;
     try {
       const name = state.self?.name || '';
-      const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
+      const uid = (profile && profile.uid) || (window.wlState && window.wlState.uid);
+  if (!uid) return;
+  const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
       if (!res?.ok) return;
 
       const prevReq = Number(state.social?.requestCount || 0);
