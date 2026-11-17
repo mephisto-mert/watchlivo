@@ -618,13 +618,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
 
-      // Bypass Firebase Auth popup/handler completely: redirect directly to Google OAuth Consent
-      const GOOGLE_CLIENT_ID = '1034129375158-watchlivo.apps.googleusercontent.com';
-      const redirectUri = encodeURIComponent('https://watchlivo.online/api/auth/oauth');
-      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=token&scope=email%20profile&state=${Date.now()}`;
-
-      toast('Google giriş sayfasına aktarılıyorsunuz...');
-      window.location.href = authUrl;
+      // Google login removed per user request. Use Email/Password login.
       return;
       if (!idToken) {
         showErr('Google girişi doğrulanamadı.');
