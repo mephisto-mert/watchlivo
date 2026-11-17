@@ -605,41 +605,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       const customParams = { prompt: 'select_account' };
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
-      const isStandaloneApk = /WatchlivoApp/i.test(navigator.userAgent);
-      if (isStandaloneApk) {
-        localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
-        sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
-        if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
-        toast('Google giriş sayfasına aktarılıyorsunuz...');
-        await fb.signInWithRedirect(fb.auth, gProv);
-        return;
-      }
-      try {
-        // Call signInWithPopup synchronously before any await/DOM churn so browser popup blocker preserves user gesture
-        const popPromise = fb.signInWithPopup(fb.auth, gProv);
-        toast('Google ile giriş penceresi açılıyor...');
-        const cred = await popPromise;
-        if (cred?.user) {
-          idToken = await cred.user.getIdToken(true);
-          fbEmail = (cred.user.email || '').trim().toLowerCase();
-          fbName = cred.user.displayName || '';
-        }
-      } catch (popErr) {
-        console.warn('Popup login failed, attempting fallback redirect:', popErr);
-        const errCode = String(popErr?.code || popErr?.message || '');
-        if (fb.signInWithRedirect && /popup-blocked|operation-not-supported|cancelled-popup-request/i.test(errCode)) {
-          localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
-          sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
-          if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
-          toast('Açılır pencere engellendi — Google giriş sayfasına aktarılıyorsunuz...');
-          await fb.signInWithRedirect(fb.auth, gProv);
-          return;
-        }
-        showErr(/unauthorized-domain/i.test(errCode)
-          ? 'Bu alan adı Firebase Google Auth için yetkilendirilmemiş.'
-          : 'Google girişi iptal edildi veya tamamlanmadı. Lütfen tekrar deneyin.');
-        return;
-      }
+
+      localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
+      sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
+      if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
+      toast('Google giriş sayfasına aktarılıyorsunuz...');
+      await fb.signInWithRedirect(fb.auth, gProv);
+      return;
       if (!idToken) {
         showErr('Google girişi doğrulanamadı.');
         return;
