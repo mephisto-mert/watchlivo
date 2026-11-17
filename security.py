@@ -687,7 +687,6 @@ def is_safe_public_url(url: str) -> bool:
         host = p.hostname.lower().rstrip(".")
         if (
             not host
-            or host in ("localhost", "metadata.google.internal", "metadata", "watchlivo.online", "www.watchlivo.online", "watchlivo-origin-eu.onrender.com")
             or host.endswith((".localhost", ".local", ".internal", ".home.arpa", ".watchlivo.online"))
         ):
             return False

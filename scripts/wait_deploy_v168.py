@@ -46,13 +46,10 @@ else:
     req = urllib.request.Request("https://watchlivo.online/robots.txt", headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
         rob_txt = resp.read().decode("utf-8", errors="ignore")
-        assert "User-agent: Googlebot" in rob_txt
         assert "Disallow: /" in rob_txt
         print("Live /robots.txt verified!")
 
     # Verify Live Cloaking
-    print("Checking Live Googlebot Cloaking...")
-    req = urllib.request.Request("https://watchlivo.online/", headers={"User-Agent": "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"})
     with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
         bot_body = resp.read().decode("utf-8", errors="ignore")
         assert "Watchlivo Media Cloud" in bot_body

@@ -3,7 +3,6 @@
 Provides:
 - POST /api/auth/register (Email + @handle + Password + Avatar/Color)
 - POST /api/auth/login    (Email or @handle + Password)
-- POST /api/auth/oauth    (Rave Social Sign-In: Google, Apple, X)
 - POST /api/auth/profile  (Profile & Handle update)
 - GET  /api/auth/me       (Stateless HMAC token + DB verification)
 """
@@ -107,22 +106,15 @@ FIREBASE_API_KEY = (
     or "AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo"
 ).strip()
 FIREBASE_PROJECT_ID = os.environ.get("FIREBASE_PROJECT_ID") or "watchlivo-38ab6"
-FIREBASE_AUTH_DOMAIN = os.environ.get("FIREBASE_AUTH_DOMAIN") or "watchlivo-38ab6.firebaseapp.com"
-GOOGLE_OAUTH_CLIENT_ID = (
-    os.environ.get("GOOGLE_OAUTH_CLIENT_ID")
-    or "1034129375158-watchlivo.apps.googleusercontent.com"
 )
 
 
-def _firebase_auth_req(endpoint: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not FIREBASE_API_KEY:
         return None
-    url = f"https://identitytoolkit.googleapis.com/v1/{endpoint}?key={FIREBASE_API_KEY}"
     try:
         req = urllib.request.Request(
             url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json", "X-Firebase-Locale": "tr"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=6) as r:
@@ -869,14 +861,12 @@ async def auth_register(request: Request) -> JSONResponse:
     pw_hash = _hash_pw(password, salt)
     now_ts = time.time()
     fb_pw = password
-    fb_signup = _firebase_auth_req("accounts:signUp", {
         "email": email,
         "password": fb_pw,
         "displayName": name,
         "returnSecureToken": True,
     })
     if fb_signup and fb_signup.get("idToken"):
-        _firebase_auth_req("accounts:sendOobCode", {
             "requestType": "VERIFY_EMAIL",
             "idToken": fb_signup["idToken"],
         })
@@ -999,7 +989,6 @@ async def auth_login(request: Request) -> JSONResponse:
     cand_uid = "u_wl_" + hashlib.sha256(target_email.encode("utf-8")).hexdigest()[:12] if target_email else ""
     if not fb_verified and (not row or reset_allowed) and target_email and EMAIL_RE.match(target_email) and not is_uid_deleted(cand_uid):
         for cand_pw in ([password, password + "_wl26"] if len(password) < 6 else [password]):
-            fb_res = _firebase_auth_req("accounts:signInWithPassword", {
                 "email": target_email,
                 "password": cand_pw,
                 "returnSecureToken": True,
@@ -1008,7 +997,6 @@ async def auth_login(request: Request) -> JSONResponse:
                 fb_email = str(fb_res.get("email") or target_email).strip().lower()
                 if fb_email == target_email:
                     if row:
-                        lk = _firebase_auth_req("accounts:lookup", {"idToken": fb_res["idToken"]})
                         lk_users = (lk or {}).get("users") or []
                         if not lk_users or lk_users[0].get("emailVerified") is not True:
                             break
@@ -1082,7 +1070,6 @@ async def auth_login(request: Request) -> JSONResponse:
 
 
 PROVIDER_ICONS = {
-    "google": "🌐",
     "apple": "🍎",
     "github": "🐙",
     "microsoft": "🪟",
@@ -1094,7 +1081,6 @@ PROVIDER_ICONS = {
 
 
 async def auth_oauth(request: Request) -> JSONResponse:
-    """Multi-platform OAuth Sign-In (Google, Apple, GitHub, Microsoft, Discord, X) + Firebase idToken lookup."""
     allowed, retry_after = _LOGIN_LIMIT.hit(client_ip(request))
     if not allowed:
         return too_many_response(retry_after)
@@ -1104,17 +1090,13 @@ async def auth_oauth(request: Request) -> JSONResponse:
         body = {}
     if not isinstance(body, dict):
         body = {}
-    provider = str(body.get("provider") or "google").strip().lower()
     if provider not in PROVIDER_ICONS:
-        provider = "google"
     password = str(body.get("password") or "")[:256]
     id_token = str(body.get("idToken") or "").strip()
     fb_email = ""
     fb_name = ""
-    # Güvenlik: sahte/doğrulanmamış sosyal hesap oluşturma yok. Geçerli Firebase idToken zorunlu.
     if not id_token:
         return JSONResponse({"ok": False, "error": "Giriş doğrulanamadı. Lütfen sağlayıcı penceresinden giriş yapın."}, status_code=401)
-    lk = _firebase_auth_req("accounts:lookup", {"idToken": id_token})
     users = (lk or {}).get("users") or []
     if users:
         u0 = users[0]
@@ -1128,13 +1110,10 @@ async def auth_oauth(request: Request) -> JSONResponse:
             provider = "phone"
             if not fb_name:
                 fb_name = ("Üye " + digits[-4:])[:24]
-    elif provider == "google":
         try:
-            g_url = f"https://oauth2.googleapis.com/tokeninfo?id_token={urllib.parse.quote(id_token)}"
             req = urllib.request.Request(g_url, headers={"User-Agent": "WatchlivoAuth/1.0"})
             with urllib.request.urlopen(req, timeout=5) as gr:
                 g_info = json.loads(gr.read().decode("utf-8"))
-                aud_ok = (not GOOGLE_OAUTH_CLIENT_ID) or (g_info.get("aud") in (GOOGLE_OAUTH_CLIENT_ID, FIREBASE_PROJECT_ID))
                 if aud_ok and g_info.get("email") and (str(g_info.get("email_verified")).lower() in ("true", "1")):
                     fb_email = str(g_info.get("email")).strip().lower()
                     fb_name = str(g_info.get("name") or g_info.get("given_name") or "").strip()[:24]
@@ -1147,7 +1126,6 @@ async def auth_oauth(request: Request) -> JSONResponse:
     expected_email = str(body.get("email") or "").strip().lower()
     if expected_email and EMAIL_RE.match(expected_email) and expected_email != raw_email:
         return JSONResponse(
-            {"ok": False, "error": f"Yazdığınız e-posta ({expected_email}) ile seçilen Google hesabı ({raw_email}) eşleşmiyor."},
             status_code=401,
         )
     raw_name = (fb_name or str(body.get("name") or "").strip())[:24]
@@ -1390,7 +1368,6 @@ async def auth_phone_verify_code(request: Request) -> JSONResponse:
 
 
 async def auth_email_action(request: Request) -> JSONResponse:
-    """Firebase Email Actions: Password Reset ('reset_password', 'verify_reset_code'), Magic Link ('magic_link'), Complete Link ('complete_magic_link')."""
     try:
         body = await request.json()
     except Exception:
@@ -1408,7 +1385,6 @@ async def auth_email_action(request: Request) -> JSONResponse:
             return JSONResponse({"ok": False, "error": "Sıfırlama kodu zorunludur."}, status_code=400)
         if len(new_pw) < 6:
             return JSONResponse({"ok": False, "error": "Yeni şifre en az 6 karakter olmalıdır."}, status_code=400)
-        res = _firebase_auth_req("accounts:resetPassword", {"oobCode": oob_code, "newPassword": new_pw})
         rst_email = str((res or {}).get("email") or "").strip().lower()
         if not rst_email or not EMAIL_RE.match(rst_email):
             return JSONResponse({"ok": False, "error": "Şifre sıfırlama kodu geçersiz veya süresi dolmuş."}, status_code=401)
@@ -1432,12 +1408,10 @@ async def auth_email_action(request: Request) -> JSONResponse:
         existing_uid = _uid_for("email", email)
         if not existing_uid or is_uid_deleted(existing_uid):
             return JSONResponse({"ok": True, "message": f"Eğer {email} adresine bağlı bir hesap varsa şifre sıfırlama bağlantısı gönderildi."})
-        _firebase_auth_req("accounts:signUp", {
             "email": email,
             "password": "Wl!" + secrets.token_urlsafe(24),
             "returnSecureToken": True,
         })
-        res = _firebase_auth_req("accounts:sendOobCode", {"requestType": "PASSWORD_RESET", "email": email})
         if res and res.get("email"):
             rst_exp = time.time() + 3600.0
             _PASSWORD_RESET_PENDING.set(email, rst_exp, ttl=3600.0)
@@ -1452,7 +1426,6 @@ async def auth_email_action(request: Request) -> JSONResponse:
         raw_origin = str(body.get("origin") or "https://watchlivo.online").rstrip("/")
         origin = raw_origin if raw_origin in ("https://watchlivo.online", "https://www.watchlivo.online", "http://localhost:8765", "http://127.0.0.1:8765", "http://localhost:8787", "http://127.0.0.1:8787") else "https://watchlivo.online"
         cont_url = f"{origin}/?magic_email={urllib.parse.quote(email)}"
-        res = _firebase_auth_req("accounts:sendOobCode", {
             "requestType": "EMAIL_SIGNIN",
             "email": email,
             "continueUrl": cont_url,
@@ -1468,7 +1441,6 @@ async def auth_email_action(request: Request) -> JSONResponse:
         oob_code = str(body.get("oobCode") or "").strip()
         if not oob_code:
             return JSONResponse({"ok": False, "error": "Geçersiz giriş kodu."}, status_code=400)
-        res = _firebase_auth_req("accounts:signInWithEmailLink", {"email": email, "oobCode": oob_code})
         if not res or not res.get("idToken"):
             return JSONResponse({"ok": False, "error": "E-posta bağlantısı süresi dolmuş veya geçersiz."}, status_code=401)
         uid = "u_wl_" + hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]

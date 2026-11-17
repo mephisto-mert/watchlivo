@@ -792,10 +792,8 @@ export function buildControls(frame, ctx) {
       showOverlay(`⏮️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4000);
       if (manual) toast(`⏮️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
       const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
       const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
       const rawSrcUrl = String(m.sourceUrl || '').trim();
-      const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
       const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
       const prevMedia = await resolveCatalogItem(
         { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
@@ -811,7 +809,6 @@ export function buildControls(frame, ctx) {
           id: prevMedia.id || m.id || '',
           tmdbId: prevMedia.tmdbId || m.tmdbId || '',
           imdbId: prevMedia.imdbId || m.imdbId || '',
-          catalogProvider: (prevMedia.catalogProvider && prevMedia.catalogProvider !== 'youtube') ? prevMedia.catalogProvider : safeProvId,
           mediaType: 'tv',
           season: targetSeason,
           episode: targetEp,
@@ -888,10 +885,8 @@ export function buildControls(frame, ctx) {
         }
       } catch (e) { /* fallback to +1 */ }
       const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
       const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
       const rawSrcUrl = String(m.sourceUrl || '').trim();
-      const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
       const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
       showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
       const nextMedia = await resolveCatalogItem(
@@ -908,7 +903,6 @@ export function buildControls(frame, ctx) {
           id: nextMedia.id || m.id || '',
           tmdbId: nextMedia.tmdbId || m.tmdbId || '',
           imdbId: nextMedia.imdbId || m.imdbId || '',
-          catalogProvider: (nextMedia.catalogProvider && nextMedia.catalogProvider !== 'youtube') ? nextMedia.catalogProvider : safeProvId,
           mediaType: 'tv',
           season: targetSeason,
           episode: targetEp,
@@ -1666,7 +1660,6 @@ export function buildControls(frame, ctx) {
       'puhutv': "puhutv'de Aç",
       'MUBI': "MUBI'de Aç",
       'Crunchyroll': "Crunchyroll'da Aç",
-      'YouTube': "YouTube'da Aç",
       'Twitch': "Twitch'te Aç",
       'Kick': "Kick'te Aç",
     };
@@ -1701,12 +1694,10 @@ export function buildControls(frame, ctx) {
     const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
     if (isMovie || (m.mediaType !== 'tv' && !parsedEp)) return;
     const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-    const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
     const prov = getProvider(safeProvId) || getProvider('cinema') || getProvider('netflix');
     const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
     const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
     const rawSrcUrl = String(m.sourceUrl || '').trim();
-    const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
     const box = h('div', { style: { minHeight: '280px' } });
     const epModal = popup({ title: `📺 ${cleanTitle} — Sezon & Bölüm Seç`, content: box, options: [{ label: 'Kapat' }] });
     renderSeriesPicker(
@@ -1736,7 +1727,6 @@ export function buildControls(frame, ctx) {
             id: nextMedia.id || m.id || '',
             tmdbId: nextMedia.tmdbId || m.tmdbId || '',
             imdbId: nextMedia.imdbId || m.imdbId || '',
-            catalogProvider: (nextMedia.catalogProvider && nextMedia.catalogProvider !== 'youtube') ? nextMedia.catalogProvider : safeProvId,
             mediaType: 'tv',
             seriesTitle: cleanTitle,
             originalTitle: nextMedia.originalTitle || cleanOrigTitle,
@@ -1815,7 +1805,6 @@ export function buildControls(frame, ctx) {
     const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
     const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
     const rawRefreshProv = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-    const safeRefreshProv = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawRefreshProv) ? 'cinema' : rawRefreshProv;
     try {
       const qs = new URLSearchParams({
         provider: safeRefreshProv,
@@ -3009,7 +2998,6 @@ export function buildControls(frame, ctx) {
         m.id ||
         m.title ||
         m.videoId ||
-        m.provider === 'youtube' ||
         availSubs.length
       )
     );

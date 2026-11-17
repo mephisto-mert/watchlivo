@@ -1,15 +1,12 @@
 import re
 
 _CRAWLER_BOT_REGEX = re.compile(
-    r"(?i)(googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|"
     r"dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|"
     r"muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)"
 )
 
 test_uas = [
     # Should match (Crawlers)
-    ("Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", True),
-    ("Googlebot/2.1 (+http://www.google.com/bot.html)", True),
     ("Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)", True),
     ("Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)", True),
     ("Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)", True),

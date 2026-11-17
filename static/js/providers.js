@@ -114,10 +114,8 @@ export const LOGOS = {
     '<path d="M20 9l-9 5.8 9 5.8 9-5.8-9-5.8zm18 0l-9 5.8 9 5.8 9-5.8-9-5.8zM11 26.4l9 5.8 9-5.8-9-5.8-9 5.8zm27-5.8l-9 5.8 9 5.8 9-5.8-9-5.8z" fill="#0061ff"/>' +
     '<text x="92" y="28.5" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="18.5" letter-spacing="-0.3">Dropbox</text>'
   ),
-  youtube: svgRaw(
     '<rect x="6" y="8" width="38" height="28" rx="8" fill="#ff0033"/>' +
     '<path d="M21 15.5v13l11-6.5-11-6.5z" fill="#ffffff"/>' +
-    '<text x="50" y="29" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20" letter-spacing="-0.5">YouTube</text>'
   ),
   crunchyroll: svgRaw(
     '<circle cx="22" cy="22" r="13" fill="#f47521"/>' +
@@ -196,7 +194,6 @@ export const LOGOS = {
     '<circle cx="21" cy="22" r="13.5" fill="#ff0033"/>' +
     '<circle cx="21" cy="22" r="8.2" fill="none" stroke="#ffffff" stroke-width="1.6"/>' +
     '<path d="M18.5 17.8v8.4l7-4.2-7-4.2z" fill="#ffffff"/>' +
-    '<text x="41" y="21" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13">YouTube</text>' +
     '<text x="41" y="34" fill="#ff0033" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="13">MUSIC</text>'
   ),
   spotify: svgRaw(
@@ -270,9 +267,6 @@ export const PROVIDERS = [
       (u.match(/yabancidizi\.[a-z.]+\/(?:dizi|izle)\/([\w-]+)/i) || [])[1] ||
       (u.match(/animecix\.[a-z.]+\/(?:titles|watch)\/([\w-]+)/i) || [])[1] || null
     ) },
-  { id: 'youtube', name: 'YouTube', cat: 'global', badge: 'Hesap Bağla · Sana Özel Önerilenler & Geçmiş', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search', freeNoAuth: true,
-    homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
-    idParser: (u) => (!/music\.youtube\.com/i.test(u) && (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1]) || null },
   { id: 'netflix', name: 'Netflix', cat: 'global', badge: '4K HDR · 1080p TR Dublaj & Altyazı', logo: LOGOS.netflix, bg: '#10121a', accent: '#e50914', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://www.netflix.com/browse', placeholder: "Netflix vitrininde dizi veya film ara...",
     idParser: (u) => (u.match(/netflix\.com\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?(?:watch|title)\/(\d+)/i) || [])[1] || null },
@@ -342,13 +336,8 @@ export const PROVIDERS = [
   { id: 'tubi', name: 'Tubi', cat: 'global', badge: 'Ücretsiz Sinema & Dizi', logo: LOGOS.tubi, bg: '#10121a', accent: '#ff3e2e', web: true, kind: 'catalog', freeNoAuth: true,
     homeUrl: 'https://tubitv.com', placeholder: "Tubi vitrininde ücretsiz film veya dizi ara...",
     idParser: (u) => (u.match(/tubitv\.com\/(?:video|movies|tv-shows|series)\/(\d+)/i) || [])[1] || null },
-  { id: 'drive', name: 'Google Drive', cat: 'global', badge: 'Klasör Gezgini · MKV / MP4 1080p', logo: LOGOS.drive, bg: '#10121a', accent: '#00ac47', web: true, kind: 'drive', freeNoAuth: true,
-    homeUrl: 'https://drive.google.com', placeholder: "Google Drive klasör veya MKV/MP4 dosya bağlantısı yapıştır...",
-    idParser: (u) => (u.match(/drive\.google\.com\/(?:drive\/folders\/|file\/d\/|open\?id=)([\w-]+)/i) || [])[1] || null },
   { id: 'ravedj', name: 'Watchlivo DJ', cat: 'global', badge: '2 Şarkıyı AI ile Birleştir · Mashup & Mix', logo: LOGOS.ravedj, bg: '#10121a', accent: '#00f5d4', web: true, kind: 'ravedj', freeNoAuth: true,
-    homeUrl: 'https://rave.dj', placeholder: "Watchlivo DJ Mashup için şarkı veya YouTube bağlantısı gir...",
     idParser: (u) => (u.match(/rave\.dj\/([\w-]+)/i) || [])[1] || null },
-  { id: 'music', name: 'Müzik & Karaoke', cat: 'global', badge: 'Spotify · YouTube Music · Klip & Sözler', logo: LOGOS.music, bg: '#10121a', accent: '#1db954', web: true, kind: 'music', freeNoAuth: true,
     homeUrl: '', placeholder: 'Şarkı, sanatçı, klip ara veya bağlantı yapıştır...',
     idParser: () => null },
   { id: 'upload', name: 'Dosya Yükle', cat: 'global', badge: 'MP4 · WebM · MOV Bulut Senkron', logo: LOGOS.upload, bg: '#10121a', accent: '#6366f1', web: true, kind: 'upload', freeNoAuth: true,
@@ -357,9 +346,6 @@ export const PROVIDERS = [
 ];
 
 const INTERNAL_FALLBACK_PROVIDERS = [
-  { id: 'ytmusic', name: 'YouTube Music', logo: LOGOS.ytmusic, bg: '#10121a', accent: '#ff0033', web: true, kind: 'music', freeNoAuth: true,
-    placeholder: "YouTube Music'te şarkı, sanatçı veya klip ara...",
-    idParser: (u) => /music\.youtube\.com/i.test(u) ? ((u.match(/[?&]v=([^"&?/\s]{11})/i) || u.match(/music\.youtube\.com\/(?:watch\?v=|playlist\?list=|browse\/)?([\w-]+)/i) || [])[1] || u) : null },
   { id: 'spotify', name: 'Spotify', logo: LOGOS.spotify, bg: '#10121a', accent: '#1db954', web: true, kind: 'music', freeNoAuth: true,
     placeholder: "Spotify'da şarkı, sanatçı veya bağlantı ara...",
     idParser: (u) => (u.match(/open\.spotify\.com\/(?:intl-[a-z]{2}\/)?(?:track|album|playlist|artist)\/([a-zA-Z0-9]+)/i) || [])[1] || (/open\.spotify\.com/i.test(u) ? u : null) },
@@ -417,7 +403,6 @@ const PROVIDER_ID_ALIASES = {
   beinsports: 'tod',
   trt: 'tabii',
   turkcell: 'tvplus',
-  youtubemusic: 'ytmusic',
   direct: 'web',
   hls: 'web',
   mp4: 'web',

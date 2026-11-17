@@ -3,10 +3,8 @@ Implements Rave's internal social, chat, AI, playlist, Drive folder, and RaveDJ 
 1. Direct Messages (DMThreads / DirectMessageView) & Server-Backed Friendships + Medals
 2. OpenGraph Rich Link Previews (LinkPreview)
 3. Multi-Language Chat Auto-Translation ([Mesh][translateChat])
-4. YouTube Playlist Importer (PlaylistsSelection)
 5. RaveDJ AI Dual-Track Mashup & Mix Engine (RAVEDJ RENDERER PROVIDER)
 6. In-Room AI Image Studio (StableDiffusion / StableDiffusionHistory / StableDiffusionTag)
-7. Google Drive Folder & Multi-Quality MKV/MP4 Browser (GoogleDriveSelection)
 8. Moderation & Abuse Reporting (ReportPopUp)
 """
 from __future__ import annotations
@@ -1725,7 +1723,6 @@ async def link_preview(request: Request) -> JSONResponse:
 
     parsed = urllib.parse.urlparse(raw_url)
     host = (parsed.hostname or "").lower()
-    favicon = f"https://www.google.com/s2/favicons?domain={urllib.parse.quote(host)}&sz=64"
     preview: Dict[str, Any] = {
         "url": raw_url,
         "site": host.replace("www.", ""),
@@ -1735,13 +1732,11 @@ async def link_preview(request: Request) -> JSONResponse:
         "favicon": favicon,
     }
 
-    # Instant YouTube recognition
     yt_m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", raw_url)
     def _fetch_link_meta_sync() -> None:
         if yt_m:
             vid = yt_m.group(1)
             try:
-                oembed_u = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
                 if is_safe_public_url(oembed_u):
                     req = urllib.request.Request(oembed_u, headers={"User-Agent": UA_CHROME})
                     with urllib.request.urlopen(req, timeout=2.5) as r:
@@ -1749,7 +1744,6 @@ async def link_preview(request: Request) -> JSONResponse:
                         if od.get("title"):
                             preview["title"] = _clean(od["title"], 140)
                         if od.get("author_name"):
-                            preview["description"] = f"Kanal: {_clean(od['author_name'], 80)} · YouTube"
             except Exception:
                 pass
             return
@@ -1785,9 +1779,6 @@ async def link_preview(request: Request) -> JSONResponse:
     if yt_m:
         vid = yt_m.group(1)
         preview.update({
-            "site": "YouTube",
-            "title": f"YouTube Video ({vid})",
-            "description": "YouTube üzerinden Watchlivo odasında senkronize izlenebilir.",
             "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
         })
         await asyncio.to_thread(_fetch_link_meta_sync)
@@ -1838,7 +1829,6 @@ async def translate_chat(request: Request) -> JSONResponse:
     detected_src = "auto"
     try:
         gt_url = (
-            "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto"
             f"&tl={urllib.parse.quote(target)}&dt=t&q={urllib.parse.quote(text)}"
         )
         req = urllib.request.Request(gt_url, headers={"User-Agent": UA_CHROME})
@@ -1863,19 +1853,14 @@ async def translate_chat(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# 4. YouTube Playlist Importer (PlaylistsSelection)
 # ---------------------------------------------------------------------------
-async def youtube_playlist(request: Request) -> JSONResponse:
     raw = _clean(request.query_params.get("url") or request.query_params.get("list"), 600)
     m = re.search(r"(?:[?&]list=|^)((?:PL|UU|FL|OLAK|RD)[A-Za-z0-9_-]{8,120})", raw)
     list_id = m.group(1) if m else ""
     if not list_id:
-        return JSONResponse({"ok": False, "error": "Geçerli bir YouTube Playlist bağlantısı veya ID'si girin."}, status_code=400)
 
     items: List[Dict[str, Any]] = []
-    playlist_title = f"YouTube Playlist ({list_id[:12]})"
     try:
-        pl_url = f"https://www.youtube.com/playlist?list={urllib.parse.quote(list_id)}&hl=tr"
         req = urllib.request.Request(pl_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9"})
         with urllib.request.urlopen(req, timeout=4.0) as r:
             html_str = r.read(650000).decode("utf-8", errors="ignore")
@@ -1912,10 +1897,7 @@ async def youtube_playlist(request: Request) -> JSONResponse:
             if dur_sec <= 0:
                 dur_sec = 210
             items.append({
-                "provider": "youtube",
                 "videoId": vid,
-                "url": f"https://www.youtube.com/watch?v={vid}",
-                "title": _clean(v_title, 140) or f"YouTube #{len(items) + 1}",
                 "channel": playlist_title,
                 "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
                 "duration": dur_sec,
@@ -2072,10 +2054,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "The Weeknd - Blinding Lights",
                 "trackB": "a-ha - Take On Me",
                 "bpm": 126,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "4NRXx6U8ABQ",
-                "url": "https://www.youtube.com/watch?v=4NRXx6U8ABQ",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=4NRXx6U8ABQ&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/4NRXx6U8ABQ/hqdefault.jpg",
                 "duration": 200,
@@ -2088,10 +2067,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "The Weeknd - Starboy",
                 "trackB": "Daft Punk - Get Lucky",
                 "bpm": 120,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "34Na4j8AVgA",
-                "url": "https://www.youtube.com/watch?v=34Na4j8AVgA",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=34Na4j8AVgA&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/34Na4j8AVgA/hqdefault.jpg",
                 "duration": 230,
@@ -2104,10 +2080,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "Dua Lipa - Levitating",
                 "trackB": "Bruno Mars - Treasure",
                 "bpm": 118,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "TUVcZfQe-Kw",
-                "url": "https://www.youtube.com/watch?v=TUVcZfQe-Kw",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=TUVcZfQe-Kw&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/TUVcZfQe-Kw/hqdefault.jpg",
                 "duration": 203,
@@ -2120,10 +2093,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "The Weeknd - Can't Feel My Face",
                 "trackB": "Michael Jackson - Billie Jean",
                 "bpm": 116,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "KEI4qSrkPAs",
-                "url": "https://www.youtube.com/watch?v=KEI4qSrkPAs",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=KEI4qSrkPAs&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/KEI4qSrkPAs/hqdefault.jpg",
                 "duration": 213,
@@ -2136,10 +2106,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "David Guetta ft Sia - Titanium",
                 "trackB": "Linkin Park - In The End",
                 "bpm": 124,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "JRfuAukYTKg",
-                "url": "https://www.youtube.com/watch?v=JRfuAukYTKg",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=JRfuAukYTKg&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/JRfuAukYTKg/hqdefault.jpg",
                 "duration": 245,
@@ -2152,10 +2119,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                 "trackA": "Daft Punk - One More Time",
                 "trackB": "Daft Punk - Around The World",
                 "bpm": 123,
-                "provider": "youtube",
-                "streamType": "youtube",
                 "videoId": "FGBhQbmPwH8",
-                "url": "https://www.youtube.com/watch?v=FGBhQbmPwH8",
                 "audioPreviewUrl": "/api/rave/yt-music-stream?v=FGBhQbmPwH8&kind=audio",
                 "thumbnail": "https://i.ytimg.com/vi/FGBhQbmPwH8/hqdefault.jpg",
                 "duration": 320,
@@ -2263,7 +2227,6 @@ async def ai_image_history(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# 7. Google Drive Folder & Multi-Quality MKV/MP4 Browser (GoogleDriveSelection)
 # ---------------------------------------------------------------------------
 def _sign_drive_proxy(dl_u: str) -> str:
     try:
@@ -2283,7 +2246,6 @@ _NON_VIDEO_DRIVE_RE = re.compile(r"\.(?:pdf|jpg|jpeg|png|gif|webp|zip|rar|7z|doc
 async def gdrive_folder_browse(request: Request) -> JSONResponse:
     raw_url = _clean(request.query_params.get("url"), 1000)
     if not raw_url:
-        return JSONResponse({"ok": False, "error": "Google Drive klasör veya dosya bağlantısı girin."}, status_code=400)
 
     folder_m = re.search(r"/folders/([A-Za-z0-9_-]{10,})", raw_url)
     file_m = re.search(r"/file/d/([A-Za-z0-9_-]{10,})|[?&]id=([A-Za-z0-9_-]{10,})", raw_url)
@@ -2292,7 +2254,6 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
     if folder_m:
         fid = folder_m.group(1)
         try:
-            f_url = f"https://drive.google.com/drive/folders/{fid}"
             req = urllib.request.Request(f_url, headers={"User-Agent": UA_CHROME})
             with urllib.request.urlopen(req, timeout=3.5) as r:
                 html_str = r.read(450000).decode("utf-8", errors="ignore")
@@ -2304,7 +2265,6 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
                     continue
                 seen_ids.add(d_id)
                 ext = clean_t.rsplit(".", 1)[-1].lower() if "." in clean_t else "mp4"
-                dl_u = f"https://drive.usercontent.google.com/download?id={d_id}&export=download&confirm=t"
                 p_main = _sign_drive_proxy(dl_u)
                 p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
                 p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
@@ -2332,14 +2292,11 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
     id_fallback_m = re.search(r"([A-Za-z0-9_-]{15,45})", raw_url)
     fid_single = (file_m.group(1) or file_m.group(2)) if file_m else (id_fallback_m.group(1) if id_fallback_m else "")
     if not fid_single:
-        return JSONResponse({"ok": False, "error": "Geçerli bir Google Drive dosya veya klasör bağlantısı girin."}, status_code=400)
-    dl_u = f"https://drive.usercontent.google.com/download?id={urllib.parse.quote(fid_single)}&export=download&confirm=t"
     proxied = _sign_drive_proxy(dl_u)
     p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
     p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
     items.append({
         "id": fid_single,
-        "title": f"Google Drive Video ({fid_single[:10]})",
         "format": "MP4/MKV",
         "mime": "video/mp4",
         "url": proxied,
@@ -2932,7 +2889,6 @@ async def server_health_get(request: Request) -> JSONResponse:
     hmap = _load_health_map()
     return JSONResponse({"ok": True, "servers": hmap, "count": len(hmap)})
 # ---------------------------------------------------------------------------
-# 12. Account-Bound YouTube Personalization Graph & OAuth Sync (v91)
 # ---------------------------------------------------------------------------
 _USER_YT_PREFS = BoundedTTLCache(maxsize=2048, default_ttl=86400.0)
 
@@ -2945,9 +2901,6 @@ def _default_yt_prefs() -> Dict[str, Any]:
         "dismissedVideoIds": [],
         "blockedChannels": [],
         "topics": [],
-        "googleConnected": False,
-        "googleEmail": "",
-        "googleChannelTitle": "",
         "updatedAt": 0.0,
     }
 
@@ -2969,7 +2922,6 @@ def _norm_yt_prefs(raw: Any) -> Dict[str, Any]:
         seen_ch.add(ck)
         subs.append({
             "channelId": cid,
-            "name": cname or "YouTube Kanalı",
             "avatar": _clean(ch.get("avatar") or ch.get("thumbnail"), 800),
             "handle": _clean(ch.get("handle"), 64),
             "addedAt": _finite_float(ch.get("addedAt"), _now()),
@@ -2985,8 +2937,6 @@ def _norm_yt_prefs(raw: Any) -> Dict[str, Any]:
         seen_vid.add(vid)
         liked.append({
             "videoId": vid,
-            "title": _clean(lv.get("title"), 160) or "YouTube Videosu",
-            "channel": _clean(lv.get("channel"), 100) or "YouTube",
             "channelId": _clean(lv.get("channelId"), 48),
             "channelAvatar": _clean(lv.get("channelAvatar"), 800),
             "thumbnail": _clean(lv.get("thumbnail"), 800) or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
@@ -3020,9 +2970,6 @@ def _norm_yt_prefs(raw: Any) -> Dict[str, Any]:
         "dismissedVideoIds": dismissed[:200],
         "blockedChannels": blocked[:80],
         "topics": topics[:20],
-        "googleConnected": bool(raw.get("googleConnected")),
-        "googleEmail": _clean(raw.get("googleEmail"), 120),
-        "googleChannelTitle": _clean(raw.get("googleChannelTitle"), 100),
         "updatedAt": _finite_float(raw.get("updatedAt"), _now()),
     })
     return base
@@ -3044,14 +2991,12 @@ def _save_user_yt_prefs(ukey: str, prefs: Dict[str, Any]) -> Dict[str, Any]:
     return norm
 
 
-def _fetch_google_yt_oauth_data(access_token: str) -> Dict[str, Any]:
     tok = _clean(access_token, 2048)
     out: Dict[str, Any] = {"subs": [], "likes": [], "channelTitle": "", "ok": False}
     if not tok or len(tok) < 16:
         return out
     hdrs = {"Authorization": f"Bearer {tok}", "Accept": "application/json", "User-Agent": "Watchlivo/2.0"}
     try:
-        req_me = urllib.request.Request("https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true", headers=hdrs)
         with urllib.request.urlopen(req_me, timeout=5) as r:
             me_data = json.loads(r.read().decode("utf-8", errors="ignore"))
             ch_items = me_data.get("items") or []
@@ -3061,7 +3006,6 @@ def _fetch_google_yt_oauth_data(access_token: str) -> Dict[str, Any]:
     except Exception:
         pass
     try:
-        req_sub = urllib.request.Request("https://www.googleapis.com/youtube/v3/subscriptions?part=snippet&mine=true&maxResults=35", headers=hdrs)
         with urllib.request.urlopen(req_sub, timeout=6) as r:
             sub_data = json.loads(r.read().decode("utf-8", errors="ignore"))
             out["ok"] = True
@@ -3076,7 +3020,6 @@ def _fetch_google_yt_oauth_data(access_token: str) -> Dict[str, Any]:
     except Exception:
         pass
     try:
-        req_lk = urllib.request.Request("https://www.googleapis.com/youtube/v3/videos?part=snippet&myRating=like&maxResults=25", headers=hdrs)
         with urllib.request.urlopen(req_lk, timeout=6) as r:
             lk_data = json.loads(r.read().decode("utf-8", errors="ignore"))
             out["ok"] = True
@@ -3163,8 +3106,6 @@ async def user_yt_prefs_save(request: Request) -> JSONResponse:
             if action == "like_video" or (action == "toggle_like" and not existed):
                 likes.insert(0, {
                     "videoId": vid,
-                    "title": _clean(lv.get("title"), 160) or "YouTube Videosu",
-                    "channel": _clean(lv.get("channel"), 100) or "YouTube",
                     "channelId": _clean(lv.get("channelId"), 48),
                     "channelAvatar": _clean(lv.get("channelAvatar"), 800),
                     "thumbnail": _clean(lv.get("thumbnail"), 800) or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
@@ -3198,26 +3139,16 @@ async def user_yt_prefs_save(request: Request) -> JSONResponse:
             prefs["searchHistory"] = sh[:25]
     elif action == "import_oauth":
         tok = _clean(body.get("ytAccessToken"), 2048)
-        oauth_res = await asyncio.to_thread(_fetch_google_yt_oauth_data, tok) if tok else {"ok": False, "subs": [], "likes": [], "channelTitle": ""}
         if oauth_res.get("subs"):
             prefs["subscriptions"] = oauth_res["subs"] + list(prefs.get("subscriptions") or [])
         if oauth_res.get("likes"):
             prefs["likedVideos"] = oauth_res["likes"] + list(prefs.get("likedVideos") or [])
-        prefs["googleConnected"] = bool(oauth_res.get("ok") or body.get("googleConnected", True))
-        prefs["googleEmail"] = _clean(body.get("googleEmail") or prefs.get("googleEmail"), 120)
-        prefs["googleChannelTitle"] = _clean(oauth_res.get("channelTitle") or body.get("googleChannelTitle") or prefs.get("googleChannelTitle"), 100)
         imported_stats = {"importedSubs": len(oauth_res.get("subs") or []), "importedLikes": len(oauth_res.get("likes") or []), "oauthOk": bool(oauth_res.get("ok"))}
     else:
         incoming = body.get("prefs") if isinstance(body.get("prefs"), dict) else body
         for k in ("subscriptions", "likedVideos", "searchHistory", "dismissedVideoIds", "blockedChannels", "topics"):
             if isinstance(incoming.get(k), list):
                 prefs[k] = incoming[k] + list(prefs.get(k) or [])
-        if "googleConnected" in incoming:
-            prefs["googleConnected"] = bool(incoming.get("googleConnected"))
-        if incoming.get("googleEmail"):
-            prefs["googleEmail"] = _clean(incoming.get("googleEmail"), 120)
-        if incoming.get("googleChannelTitle"):
-            prefs["googleChannelTitle"] = _clean(incoming.get("googleChannelTitle"), 100)
 
     saved = _save_user_yt_prefs(ukey, prefs)
     return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "prefs": saved, **imported_stats}, headers=_PRIVATE_HEADERS)

@@ -332,7 +332,6 @@ export function logoutProfile() {
     sessionStorage.removeItem('vortex_temp_guest_v1');
   } catch (e) { /* ignore */ }
   try {
-    getFirebaseAuth().then((fb) => fb?.auth?.signOut?.()).catch(() => {});
   } catch (_) {}
   resetCloudSyncState();
   const gTag = Math.floor(1000 + Math.random() * 9000);
@@ -455,13 +454,11 @@ export function avatar(user, size = 32, { speaking = false, online = false } = {
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo',
-  authDomain: 'watchlivo-38ab6.firebaseapp.com',
   projectId: 'watchlivo-38ab6',
   appId: '1:1034129375158:web:6ce9d8f15e625925090b17',
 };
 
 const BRAND_SVGS = {
-  google: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="#EA4335" d="M12 10.2v3.9h5.5c-.2 1.2-.9 2.3-2 3l3.2 2.5c1.9-1.7 3-4.3 3-7.4 0-.7-.1-1.4-.2-2H12z"/><path fill="#34A853" d="M12 22c2.7 0 5-.9 6.7-2.4l-3.2-2.5c-.9.6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.3H2.9v2.6C4.6 19.8 8 22 12 22z"/><path fill="#FBBC05" d="M6.2 13.8c-.2-.6-.3-1.2-.3-1.8s.1-1.2.3-1.8V7.6H2.9C2.3 8.9 2 10.4 2 12s.3 3.1.9 4.4l3.3-2.6z"/><path fill="#4285F4" d="M12 5.9c1.5 0 2.8.5 3.9 1.5l2.9-2.9C17 2.9 14.7 2 12 2 8 2 4.6 4.2 2.9 7.6l3.3 2.6c.8-2.5 3.1-4.3 5.8-4.3z"/></svg>',
   apple: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>',
   github: '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>',
   microsoft: '<svg width="16" height="16" viewBox="0 0 24 24"><path fill="#F25022" d="M2 2h9.5v9.5H2z"/><path fill="#7FBA00" d="M12.5 2H22v9.5h-9.5z"/><path fill="#00A4EF" d="M2 12.5h9.5V22H2z"/><path fill="#FFB900" d="M12.5 12.5H22V22h-9.5z"/></svg>',
@@ -470,15 +467,10 @@ const BRAND_SVGS = {
 };
 
 let _fbAuthPromise = null;
-async function getFirebaseAuth() {
   if (_fbAuthPromise) return _fbAuthPromise;
   _fbAuthPromise = (async () => {
-    const [{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, RecaptchaVerifier, signInWithPhoneNumber }] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
     ]);
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
-    return { auth: getAuth(app), GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, RecaptchaVerifier, signInWithPhoneNumber };
   })().catch(() => {
     _fbAuthPromise = null;
     return null;
@@ -495,7 +487,6 @@ export async function checkRedirectAuth() {
   return Promise.race([
     (async () => {
       try {
-        const fb = await getFirebaseAuth();
         if (!fb?.auth || !fb?.getRedirectResult) return null;
         const cred = await (async () => {
           let attempt = 0;
@@ -516,7 +507,6 @@ export async function checkRedirectAuth() {
           const fbName = cred.user.displayName || '';
           const res = await api('/api/auth/oauth', {
             method: 'POST',
-            body: { provider: 'google', idToken, email: pendingEmail || fbEmail, name: fbName, password: pendingPw.length >= 6 ? pendingPw : '' },
           });
           if (res?.ok && res.user) {
             localStorage.removeItem('watchlivo_auth_pending_redirect');
@@ -529,7 +519,6 @@ export async function checkRedirectAuth() {
         }
       } catch (e) {
         console.warn('Redirect auth check failed:', e);
-        toast(e?.message || 'Google girişi doğrulanamadı.');
       } finally {
         localStorage.removeItem('watchlivo_auth_pending_redirect');
         sessionStorage.removeItem('watchlivo_auth_pending_pw');
@@ -554,9 +543,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
   let phonePendingNumber = '';
   let phoneSending = false;
   const lastProvider = localStorage.getItem(LAST_PROVIDER_KEY) || '';
-  // Preload Firebase Auth SDK while modal opens so Google click preserves synchronous user-gesture for window.open()
   let _preloadedFb = null;
-  getFirebaseAuth().then((res) => { _preloadedFb = res; }).catch(() => {});
   const root = h('div', { class: 'wl-auth-modal' });
   let modalRef = null;
 
@@ -579,21 +566,15 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       let idToken = '';
       let fbEmail = '';
       let fbName = '';
-      if (provider !== 'google') {
-        showErr('Bu giriş yöntemi henüz etkin değil. Google veya e-posta ile giriş yapın.');
         return;
       }
       const cleanPw = String(password || '');
       const cleanEmail = String(expectedEmail || email || '').trim().toLowerCase();
       if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(cleanEmail)) {
-        showErr('Lütfen geçerli bir Google e-posta adresi girin (örn. ad@gmail.com).');
         return;
       }
 
-      if (window.isWatchlivoDesktop && window.pywebview?.api?.start_google_login) {
-        toast('Google ile giriş için varsayılan tarayıcınız açılıyor...');
         try {
-          const res = await window.pywebview.api.start_google_login();
           if (res?.ok && res.user) {
             const prof = saveProfile({ ...res.user, authToken: res.authToken, isGuest: false, verified: true });
             finish(prof, '✓ ' + prof.name + ' (@' + prof.handle + ') olarak giriş yapıldı');
@@ -606,19 +587,16 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
         }
         return;
       }
-      const fb = _preloadedFb || await getFirebaseAuth();
       if (!fb?.auth || !fb?.signInWithPopup) {
         showErr('Giriş servisi yüklenemedi. Sayfayı yenileyip tekrar deneyin.');
         return;
       }
-      const gProv = new fb.GoogleAuthProvider();
       gProv.addScope('email');
       gProv.addScope('profile');
       const customParams = { prompt: 'select_account' };
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
 
-      // Google login removed per user request.
 
     const doGuestLogin = (customName = '') => {
       const prof = saveGuestProfile({ name: customName, color });
@@ -2336,4 +2314,3 @@ export function openUserProfileModal(targetUser) {
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
-// Google Auth and YouTube Sync references removed.

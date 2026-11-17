@@ -72,7 +72,6 @@
   var origAppend = Element.prototype.appendChild;
   Element.prototype.appendChild = function (node) {
     try {
-      if (node && node.tagName === 'IFRAME' && /sw_iframe|service_worker|googletagmanager/i.test(String(node.src || ''))) {
         return node;
       }
     } catch (_) {}

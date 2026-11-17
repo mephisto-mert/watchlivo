@@ -76,9 +76,7 @@ def run_e2e_benchmark():
         "clientId": host_cid,
         "creator": "Host_Benchmark",
         "media": {
-            "provider": "youtube",
             "videoId": "dQw4w9WgXcQ",
-            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "title": "Never Gonna Give You Up (Official Music Video)",
             "duration": 212.0,
             "currentTime": 0.0
@@ -236,9 +234,7 @@ def run_e2e_benchmark():
         "type": "change_media",
         "clientId": host_cid,
         "clientToken": host_token,
-        "provider": "youtube",
         "videoId": "kJQP7kiw5Fk",
-        "url": "https://www.youtube.com/watch?v=kJQP7kiw5Fk",
         "title": "Luis Fonsi - Despacito ft. Daddy Yankee",
         "duration": 282.0,
         "currentTime": 0.0

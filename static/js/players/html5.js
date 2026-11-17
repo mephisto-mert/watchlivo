@@ -182,7 +182,6 @@ export class Html5Adapter {
         bgYtEl.className = 'music-bg-mv';
         bgYtEl.allow = 'autoplay; encrypted-media';
         bgYtEl.referrerPolicy = 'origin';
-        bgYtEl.dataset.clipSrc = `https://www.youtube.com/embed/${clipVid}?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&loop=1&playlist=${clipVid}&modestbranding=1&playsinline=1&rel=0`;
         bgYtEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;z-index:2;pointer-events:none;display:none;';
       }
       this.bgMvEl = bgMvEl;
@@ -727,8 +726,6 @@ export class Html5Adapter {
       const s = String(u || '').trim();
       const k = normDedupeKey(s);
       const looksDirectOrProxy = /\/api\/rave\/stream|\.(?:m3u8|mpd|mp4|m4v|webm|mkv|mp3|m4a|aac|ogg)(?:$|\?)/i.test(s);
-      const isEmbedPage = !looksDirectOrProxy && /youtube\.com\/(?:watch|embed)|youtu\.be\/|player\.twitch\.tv|player\.kick\.com|dailymotion\.com\/(?:embed|player)|tiktok\.com\/player|drive\.google\.com\/file|vidlink\.pro|vidsrc|flixer\.su|2embed|multiembed|autoembed|superembed|smashystream|embed\.su|vidfast\.pro|vidora\.su|rivestream\.live|pstream\.org/i.test(s);
-      if (!s || !k || isEmbedPage || isDrmUrl(s) || isDemoTestUrl(s) || (!canBrowserPlayHevc && isHevcUrl(s)) || /youtube\.com\/watch|youtu\.be\//i.test(s) || seenUrls.has(k)) return;
       if (this.isMusic && is30sPreviewUrl(s) && primaryIsPlayableFull) return;
       seenUrls.add(k);
       alts.push(s);
@@ -2324,7 +2321,6 @@ export class Html5Adapter {
       { id: '360', num: 360, label: '📱 360p' }
     ];
 
-    // YouTube-honest filter: only expose resolution tiers genuinely present in upstream manifest
     const realTiers = (avail && avail.size > 0)
       ? allTiers.filter((t) => avail.has(t.id))
       : allTiers.filter((t) => t.num <= 1080);

@@ -206,7 +206,6 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         html5_js = (static_root / "js" / "players" / "html5.js").read_text(encoding="utf-8")
         gain_js = (static_root / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
         subs_js = (static_root / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
-        yt_js = (static_root / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         host_js = (static_root / "js" / "players" / "host.js").read_text(encoding="utf-8")
         ctl_js = (static_root / "js" / "views" / "controls.js").read_text(encoding="utf-8")
 
@@ -223,10 +222,8 @@ class V83SocialHistoryUiTests(unittest.TestCase):
         self.assertIn("navigator.audioSession.type = 'playback'", gain_js)
         self.assertIn("syncNativeTrackToElement", subs_js)
 
-        # 3. YouTube adapter has 1-tap synchronous iOS native <video> PiP bridge + backend HLS mux endpoint
         self.assertIn("_ensureIosPipBridge", yt_js)
         self.assertIn("/api/rave/yt-pip-hls.m3u8", yt_js)
-        self.assertIn("watchlivoResolveYouTube", yt_js)
         self.assertIn("__onWatchlivoNativePiP", host_js)
         self.assertIn(":not(.wl-ios-pip-standby)", ctl_js)
 

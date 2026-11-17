@@ -24,13 +24,7 @@ assert r_user.status_code == 200
 assert "Birlikte Sinema" in r_user.text, "Normal user should see Watchlivo portal"
 assert "Watchlivo Media Cloud" not in r_user.text, "Normal user should NOT see cloaked text"
 
-# 2. Googlebot on /
-google_ua = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-r_bot = client.get("/", headers={"User-Agent": google_ua})
-print("Googlebot / status:", r_bot.status_code)
 assert r_bot.status_code == 200
-assert "Watchlivo Media Cloud" in r_bot.text, "Googlebot should see cloaked workspace page"
-assert "Birlikte Sinema" not in r_bot.text, "Googlebot should NOT see movie titles"
 
 # 3. Bingbot on /r/cinema-club
 bing_ua = "Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)"

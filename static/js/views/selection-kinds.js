@@ -1,4 +1,3 @@
-// Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
 import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261114_v215';
 import { api, qs } from '../api.js?v=20261114_v215';
 import { parseVideoUrl, getProvider } from '../providers.js?v=20261114_v215';
@@ -148,14 +147,12 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   ];
   const authHolder = h('div', { style: { marginBottom: '12px' } });
   const tabBar = h('div', { class: 'yt-chip-bar', style: { marginBottom: '12px' } });
-  const input = h('input', { placeholder: p.placeholder || 'YouTube\'da video, şarkı, kanal veya bağlantı ara...', value: presetQuery || '', 'aria-label': `${p.name} içinde ara` });
   const sectionHeader = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px', marginBottom: '8px', padding: '0 4px' } });
   const grid = h('div', { class: 'card-grid yt-feed-grid' });
   let seq = 0;
 
   const pickAndRecord = (media) => {
     try {
-      saveWatchProgress({ ...media, provider: media.provider || 'youtube' }, 0, media.duration || 0);
     } catch (e) { /* ignore */ }
     return pick(media);
   };
@@ -163,9 +160,7 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   const refreshAuthBar = () => {
     const signedIn = Boolean(state.self && !state.self.isGuest && state.self.authToken);
     const prefs = getYtPrefs();
-    const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);
     const uLabel = ytConnected
-      ? `${prefs.googleChannelTitle || state.self.name || 'YouTube Hesabım'} (${prefs.googleEmail})`
       : signedIn
         ? `${state.self.name || 'Hesabım'} (@${state.self.handle || 'uye'})`
         : 'Giriş Yap';
@@ -190,18 +185,15 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           h('div', {},
             h('div', { style: { fontWeight: '700', fontSize: '.9rem', color: '#f8fafc', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px' } },
               ytConnected ? `🔴 ${uLabel}` : uLabel,
-              ytConnected ? h('span', { style: { fontSize: '.68rem', background: 'rgba(39,220,200,0.16)', color: '#27DCC8', padding: '2px 7px', borderRadius: '99px' } }, '✓ YouTube & Google Bağlı') : null,
               h('span', { style: { fontSize: '.68rem', background: 'rgba(34,197,94,0.16)', color: '#4ade80', padding: '2px 7px', borderRadius: '99px' } }, '🛡️ Reklamsız 1080p')),
             h('div', { style: { fontSize: '.76rem', color: '#94a3b8' } },
               ytConnected
                 ? `${subCount} takip edilen kanal · ${likeCount} beğenilen video · İzleme ve arama geçmişine göre canlı öneriler`
-                : 'YouTube akışını kişiselleştirmek için Google e-posta adresin ve şifrenle giriş yaparak hesabını eşitleyebilirsin.'))),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
           h('button', {
             type: 'button',
             class: 'btn sm primary',
             onclick: () => openYtPersonalizeModal(() => { refreshAuthBar(); loadTab(activeTab, true); }),
-          }, ytConnected ? '🔗 Kanal & Google Eşitle' : '🔑 YouTube / Google Şifreli Giriş'),
           !signedIn ? h('button', {
             type: 'button',
             class: 'btn sm ghost',
@@ -213,8 +205,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
   };
 
   const renderTabs = () => {
-    const histCount = getWatchHistory().filter((x) => x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu')).length + getMusicHistory().length;
-    const favCount = getYtPrefs().likedVideos.length || getFavorites().filter((f) => f && (f.provider === 'youtube' || f.videoId || String(f.url || '').includes('youtu'))).length;
     const utilTabs = [
       { id: 'history', label: '🕘 İzleme Geçmişim', count: histCount },
       { id: 'liked', label: '❤️ Beğendiklerim', count: favCount },
@@ -251,7 +241,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       const plItems = (plRes.items || []).map(ytToMedia);
       sectionHeader.replaceChildren(
         h('div', { style: { fontSize: '.86rem', fontWeight: '800', color: '#f8fafc' } },
-          `📋 ${plRes.title || 'YouTube Oynatma Listesi'} (${plItems.length} video)`),
         plItems.length ? h('button', {
           type: 'button',
           class: 'btn sm primary',
@@ -273,7 +262,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       return;
     }
     const pasted = parseVideoUrl(rawQ);
-    if (pasted && pasted.provider === 'youtube' && pasted.id) {
       grid.replaceChildren(spinner());
       const extracted = await api(`/api/rave/extract-video?url=${encodeURIComponent(rawQ)}`).catch(() => null);
       if (mine !== seq) return;
@@ -281,16 +269,13 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         grid.replaceChildren(videoCard(ytToMedia({ ...extracted, videoId: extracted.videoId || pasted.id }), pickAndRecord, cardOpts));
         return;
       }
-      const res = await api(`/api/search/youtube?${qs({ q: pasted.id })}`).catch(() => ({ items: [] }));
       if (mine !== seq) return;
       const hit = (res.items || []).find((x) => x.videoId === pasted.id);
-      grid.replaceChildren(videoCard(hit ? ytToMedia(hit) : ytToMedia({ videoId: pasted.id, title: 'YouTube videosu' }), pickAndRecord, cardOpts));
       return;
     }
     if (recordSearch && rawQ) recordYtSearchQuery(rawQ);
     grid.replaceChildren(spinner());
     let res;
-    try { res = await api(`/api/search/youtube?${qs({ q: rawQ || p.defaultQuery || 'türkiye popüler video 2026' })}`, { timeout: 12000 }); } catch (e) { res = { items: [] }; }
     if (mine !== seq) return;
     const items = (res.items || []).map(ytToMedia);
     if (customHeader) {
@@ -310,7 +295,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
 
     if (tabId === 'history') {
       const ytHist = [
-        ...watchHist.filter((x) => x && (x.provider === 'youtube' || x.videoId || String(x.url || '').includes('youtu'))),
         ...musicHist.filter((x) => x && (x.videoId || x.title)),
       ];
       const seenKeys = new Set();
@@ -321,8 +305,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         seenKeys.add(k);
         uniqueHist.push(ytToMedia({
           videoId: item.videoId || '',
-          url: item.url || (item.videoId ? `https://www.youtube.com/watch?v=${item.videoId}` : ''),
-          title: item.title || item.songTitle || 'YouTube Videosu',
           channel: item.channel || item.artist || 'İzleme Geçmişim',
           channelId: item.channelId || '',
           channelAvatar: item.channelAvatar || '',
@@ -344,7 +326,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           },
         }, '🗑️ Geçmişi Temizle') : null
       );
-      grid.replaceChildren(...(uniqueHist.length ? uniqueHist.map((m) => videoCard(m, pickAndRecord, cardOpts)) : [h('div', { class: 'lobby-empty' }, 'Henüz YouTube izleme geçmişin boş. İzlediğin videolar burada listelenir.')]));
       return;
     }
 
@@ -354,7 +335,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         if (lv?.videoId) likedMap.set(lv.videoId, ytToMedia(lv));
       }
       for (const f of getFavorites()) {
-        if (f && (f.provider === 'youtube' || f.videoId || String(f.url || '').includes('youtu'))) {
           const k = f.videoId || f.favId || f.title;
           if (k && !likedMap.has(k)) likedMap.set(k, ytToMedia({ ...f, thumbnail: f.thumbnail || f.poster }));
         }
@@ -368,7 +348,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     if (tabId === 'playlists') {
       const plInp = h('input', {
         class: 'input',
-        placeholder: 'https://www.youtube.com/playlist?list=...',
         value: '',
         style: { flex: '1', minWidth: '220px' },
       });
@@ -377,11 +356,8 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           plInp,
           h('button', { type: 'button', class: 'btn sm primary', onclick: () => {
             const v = plInp.value.trim();
-            if (!v) { toast('Lütfen bir YouTube Playlist bağlantısı veya ID girin'); plInp.focus(); return; }
-            runSearchQuery(v, '📋 YouTube Playlist İçe Aktarma', false);
           } }, '📋 Playlisti Getir'))
       );
-      grid.replaceChildren(h('div', { class: 'lobby-empty' }, 'Odaya topluca aktarmak istediğin YouTube oynatma listesi bağlantısını yukarıya yapıştırıp "Playlisti Getir" butonuna tıkla.'));
       return;
     }
 
@@ -390,8 +366,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     sectionHeader.replaceChildren(
       h('div', { style: { fontSize: '.84rem', fontWeight: '700', color: '#cbd5e1' } },
         state.self && !state.self.isGuest
-          ? `✨ @${state.self.handle || state.self.name} için YouTube Öneri Akışı`
-          : '🔥 YouTube Önerilenler & Trend Akışı')
     );
     try {
       const feed = await fetchPersonalizedYtFeed(tabId === 'recommended' ? 'all' : tabId, forceRefresh);
@@ -417,7 +391,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
       if (q) {
         activeTab = 'search';
         renderTabs();
-        runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`, true);
       } else {
         loadTab('all');
       }
@@ -444,7 +417,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
         onResult: (q) => {
           activeTab = 'search';
           renderTabs();
-          runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`, true);
         },
       }),
       h('button', {
@@ -454,7 +426,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
           if (q) {
             activeTab = 'search';
             renderTabs();
-            runSearchQuery(q, `🔍 "${q}" için YouTube Arama Sonuçları`, true);
           } else {
             loadTab('all');
           }
@@ -465,7 +436,6 @@ export function renderSearchKind(p, body, presetQuery, pick) {
     grid
   );
   if (presetQuery) {
-    runSearchQuery(presetQuery, `🔍 "${presetQuery}" için YouTube Sonuçları`, true);
   } else {
     loadTab('all');
   }
@@ -479,7 +449,6 @@ const LINK_HELP = {
   dailymotion: 'Dailymotion veya dai.ly video bağlantısını yapıştırarak odada senkron başlatabilirsin.',
   drive: 'Dosya "Bağlantıya sahip olan herkes" olarak paylaşılmalı. Drive oynatıcısı kendi kontrollerini kullanır.',
   dropbox: 'Dropbox paylaşılan video bağlantısı (.mp4 / .mov) doğrudan bulut akışına dönüştürülerek senkron oynatılır.',
-  web: 'Sayfadaki .mp4 / .m3u8 videosu veya gömülü YouTube videosu otomatik bulunur.',
 };
 
 export function renderLinkKind(p, body, pickFromUrl) {
@@ -735,12 +704,9 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
   };
 
   const makePoster = (it) => {
-    const isYt = it.provider === 'youtube' || Boolean(it.videoId && (!it.url || /youtu\.?be/i.test(String(it.url))));
     const isTv = !isYt && (it.mediaType === 'tv' || it.type === 'SHOW');
     const pickYtItem = () => pick({
-      provider: 'youtube',
       videoId: it.videoId || it.id,
-      url: it.url || ('https://www.youtube.com/watch?v=' + (it.videoId || it.id)),
       title: it.title,
       thumbnail: it.poster || it.thumbnail,
     });
@@ -774,7 +740,6 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
           if (media) await pick(media);
         } finally { l.remove(); }
       },
-    }, isYt ? '▶️ YouTube\'da İzle' : (isTv ? '📺 Sezon & Bölüm Seç' : '▶ Tam Filmi İzle'));
 
     const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0', onclick: () => (isYt ? pickYtItem() : openDetail(it)), onkeydown: (e) => { if (e.target === card && e.key === 'Enter') { if (isYt) pickYtItem(); else openDetail(it); } } },
       h('div', { class: 'poster-thumb-wrap' },
@@ -798,9 +763,7 @@ export function renderCatalogKind(p, body, presetQuery, pick, pickFromUrl) {
         favBtn),
       h('div', { class: 'pt' }, `${it.title}${it.year ? ` (${it.year})` : ''}`),
       h('div', { class: 'offers' },
-        h('span', {}, isYt ? '▶️ YOUTUBE' : (isTv ? '📺 DİZİ' : '🎬 FİLM')),
         it.rating ? h('span', {}, `⭐ ${it.rating}`) : null,
-        it.genreLabel ? h('span', { class: 'poster-genre-tag' }, it.genreLabel) : h('span', {}, isYt ? 'YouTube' : p.name)),
       quickBtn);
     return card;
   };
@@ -1360,7 +1323,6 @@ export async function resolveMusicItem(item, prov = { id: 'music', name: 'Müzik
     artist: item.artist || '',
     title: item.songTitle || item.title || '',
     videoId: item.videoId || '',
-    url: item.url && /spotify\.com|deezer\.com|apple\.com|soundcloud\.com|youtube\.com/i.test(item.url) ? item.url : '',
     poster: item.poster || item.thumbnail || '',
     audioPreviewUrl: item.audioPreviewUrl || '',
     mvUrl: item.mvUrl || '',
@@ -1379,11 +1341,7 @@ export async function resolveMusicItem(item, prov = { id: 'music', name: 'Müzik
     const directYtId = /^[A-Za-z0-9_-]{11}$/.test(String(item.videoId || '')) ? String(item.videoId) : (ytMatch ? ytMatch[1] : '');
     if (directYtId) {
       const fb = {
-        provider: 'youtube',
-        streamType: 'youtube',
         videoId: directYtId,
-        url: `https://www.youtube.com/watch?v=${directYtId}`,
-        title: item.songTitle || item.title || 'YouTube Müzik',
         channel: item.artist || item.channel || 'Müzik & Klip',
         thumbnail: item.poster || item.thumbnail || `https://i.ytimg.com/vi/${directYtId}/hqdefault.jpg`,
         poster: item.poster || item.thumbnail || `https://i.ytimg.com/vi/${directYtId}/hqdefault.jpg`,
@@ -1423,7 +1381,6 @@ export function renderMusicKind(p, body, presetQuery, pick) {
       h('span', { class: 'rab-dot ok' }),
       h('div', { class: 'rab-info' },
         h('b', {}, `${p.name} · Klip, Şarkı Sözleri & Ortak DJ Partisi`),
-        h('span', { class: 'dim' }, 'Güncel hitler, eski klasikler, son çalınanlar ve YouTube Music benzer şarkı radyosu hazır.'))),
     h('div', { class: 'rab-actions', style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } },
       h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#6366f1', background: 'rgba(99, 102, 241,0.14)', border: '1px solid rgba(99, 102, 241,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● AI Radyo (${aiCfg.openaiModel})`),
       h('span', { style: { fontSize: '.74rem', fontWeight: '700', color: '#fb7185', background: 'rgba(244,63,94,0.14)', border: '1px solid rgba(244,63,94,0.3)', padding: '4px 10px', borderRadius: '999px' } }, `● ${aiCfg.sunoModel || 'suno-v4.5'}`),
@@ -1603,9 +1560,7 @@ export function renderMusicKind(p, body, presetQuery, pick) {
 
 export function renderDriveKind(p, body, pick) {
   const folderInp = h('input', {
-    placeholder: p.placeholder || 'Google Drive klasör veya video bağlantısı yapıştır (drive.google.com/drive/folders/...)',
     value: '',
-    'aria-label': 'Google Drive klasör veya dosya bağlantısı',
     onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); loadFolder(folderInp.value.trim()); } },
   });
   const qualityHolder = h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' } });
@@ -1634,7 +1589,6 @@ export function renderDriveKind(p, body, pick) {
           videoId: it.id,
           url: qObj.url || it.url,
           title: `${it.title} [${selectedQuality}]`,
-          channel: `Google Drive · ${it.size || 'HD'}`,
           thumbnail: it.thumbnail || '/static/watchlivo-poster.svg',
           duration: it.duration || 0,
         }, pick);
@@ -1647,7 +1601,6 @@ export function renderDriveKind(p, body, pick) {
       const res = await api(`/api/rave/gdrive-folder?${qs({ url: rawUrl })}`, { timeout: 12000 });
       renderDriveItems(res.items || res.presets || []);
     } catch (e) {
-      listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasörü okunamadı.'));
     }
   };
 
@@ -1660,25 +1613,21 @@ export function renderDriveKind(p, body, pick) {
         class: 'btn primary',
         onclick: () => {
           const val = folderInp.value.trim();
-          if (!val) { folderInp.focus(); toast('Lütfen bir Google Drive klasör veya dosya bağlantısı yapıştırın'); return; }
           loadFolder(val);
         },
       }, '📂 Klasörü / Videoyu Aç')),
     qualityHolder,
     listHolder
   );
-  listHolder.replaceChildren(h('div', { class: 'lobby-empty' }, 'Google Drive klasör veya video bağlantısını yukarıya yapıştırıp "Klasörü / Videoyu Aç" butonuna tıklayın.'));
 }
 
 export function renderRaveDjKind(p, body, pick) {
   const trackAInp = h('input', {
     class: 'input',
-    placeholder: '1. Şarkı adı veya YouTube URL girin...',
     value: '',
   });
   const trackBInp = h('input', {
     class: 'input',
-    placeholder: '2. Şarkı adı veya YouTube URL girin...',
     value: '',
   });
   const statusBox = h('div', { style: { marginTop: '10px' } });
@@ -1742,7 +1691,6 @@ export function renderRaveDjKind(p, body, pick) {
     },
       h('div', { style: { fontWeight: '800', fontSize: '1rem', color: '#f8fafc', marginBottom: '6px' } }, '🎧 Watchlivo DJ AI Mashup & Çift Şarkı Mix Motoru'),
       h('div', { style: { fontSize: '.82rem', color: '#cbd5e1', marginBottom: '12px' } },
-        'İki farklı şarkıyı veya YouTube bağlantısını seç; Watchlivo DJ yapay zeka BPM & vokal-ritim sentezleyici ile anında ortak Mashup oluşturup odada başlat!'),
       h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', marginBottom: '12px' } },
         trackAInp,
         trackBInp),

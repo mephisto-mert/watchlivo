@@ -53,7 +53,6 @@ export function thumbFor(roomOrMedia, roomId = '') {
   }
   if (primaryImg) return primaryImg;
   if (brandSpec) return makeLiveBrandSvg(brandSpec);
-  if (m.provider === 'youtube' && m.videoId) return `https://i.ytimg.com/vi/${m.videoId}/hqdefault.jpg`;
   return m.thumbnail || '/static/watchlivo-poster.svg';
 }
 

@@ -4,7 +4,6 @@ const rawPort = Number(params.get('port') || '49223');
 const port = (Number.isInteger(rawPort) && rawPort >= 1024 && rawPort <= 65535) ? String(rawPort) : '';
 const state = (params.get('state') || '').trim();
 const statusEl = document.getElementById('status');
-const btn = document.getElementById('google-btn');
 
 function setStatus(text, type = '', spinning = false) {
   statusEl.className = 'status-box ' + (type ? 'status-' + type : '');
@@ -19,7 +18,6 @@ function setStatus(text, type = '', spinning = false) {
 
 const FIREBASE_CONFIG = {
   apiKey: 'AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo',
-  authDomain: 'watchlivo-38ab6.firebaseapp.com',
   projectId: 'watchlivo-38ab6',
   appId: '1:1034129375158:web:6ce9d8f15e625925090b17',
 };
@@ -74,7 +72,6 @@ try {
   if (port && state && saved && saved.authToken && saved.name && !saved.isGuest) {
     const confirmBtn = document.createElement('button');
     confirmBtn.type = 'button';
-    confirmBtn.className = 'btn-google';
     confirmBtn.style.cssText = 'margin-bottom:12px;background:#00f5d4;color:#041014;font-weight:800;';
     confirmBtn.textContent = `${saved.name} (@${saved.handle || 'uye'}) olarak Masaüstüne Bağlan`;
     confirmBtn.addEventListener('click', async () => {
@@ -134,18 +131,12 @@ formEl?.addEventListener('submit', async (ev) => {
     return;
   }
   btn.disabled = true;
-  setStatus('Google penceresi açılıyor...', '', true);
   try {
-    const [{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
     ]);
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     const auth = getAuth(app);
-    const provider = new GoogleAuthProvider();
     provider.setCustomParameters({ prompt: 'select_account' });
     const cred = await signInWithPopup(auth, provider);
-    if (!cred?.user) throw new Error('Google girişi tamamlanmadı.');
 
     setStatus('Hesap doğrulanıyor...', '', true);
     const idToken = await cred.user.getIdToken();
@@ -153,10 +144,8 @@ formEl?.addEventListener('submit', async (ev) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        provider: 'google',
         idToken,
         email: cred.user.email || '',
-        name: cred.user.displayName || 'Google Üyesi',
         password: pw,
       }),
     });

@@ -19,7 +19,6 @@ const _edgeSearchCache = new Map();
 let _blockedCache = { ts: 0, set: new Set() };
 const DEFAULT_TMDB_KEY = "4f042878f22ef63cb94f25e60cb4ec6e";
 
-const CRAWLER_BOT_RX = /(?:googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)/i;
 const SOCIAL_PREVIEW_BOT_RX = /(?:telegrambot|twitterbot|discordbot|whatsapp|facebookexternalhit|slackbot)/i;
 
 const CLOAKED_HTML = `<!DOCTYPE html>
@@ -182,9 +181,7 @@ function makeNonce() {
 function buildAppCsp(nonce) {
   return [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com`,
     "worker-src 'self' blob:",
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
     "media-src 'self' data: blob: https:",
@@ -841,7 +838,6 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   if (safePath === "/api/rave/supersearch") {
     const res = await handleEdgeCatalogSearch(boot, url, env);
     const filtered = blockedSet.size ? (res.items || []).filter((it) => !isItemBlocked(it, blockedSet)) : (res.items || []);
-    return edgeJson({ query: res.query || "", tmdb: filtered, justwatch: [], youtube: [], items: filtered });
   }
   if (safePath === "/api/rave/new-releases") {
     const items = blockedSet.size ? boot.newReleases.filter((it) => !isItemBlocked(it, blockedSet)) : boot.newReleases;
@@ -1078,7 +1074,6 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   if (safePath === "/api/auth/oauth" && request.method === "POST" && env?.WATCHLIVO_KV) {
     const b = await request.json().catch(() => ({}));
     const idToken = String(b.idToken || "").trim();
-    const provider = String(b.provider || "google").trim().toLowerCase() || "google";
     if (!idToken) {
       return edgeJson({ ok: false, error: "Giriş doğrulanamadı. Lütfen sağlayıcı penceresinden giriş yapın." }, 401);
     }
@@ -1086,7 +1081,6 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     let fbName = "";
     const fbApiKey = env?.FIREBASE_WEB_API_KEY || "AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo";
     try {
-      const fbResp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(fbApiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
@@ -1109,15 +1103,11 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
         }
       }
     } catch {}
-    if (!fbEmail && provider === "google") {
       try {
-        // Broaden validation: Google's response might be large, use full fetch
-        const gResp = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
         if (gResp.ok) {
           const gInfo = await gResp.json().catch(() => ({}));
           // Log for debugging
           console.log("DEBUG: TokenInfo", JSON.stringify(gInfo));
-          // Accept any Google-signed token if aud is ours or general google client
           fbEmail = String(gInfo.email || "").trim().toLowerCase();
           fbName = String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
         }
@@ -1126,11 +1116,9 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
       }
     }
     if (!fbEmail) {
-      return edgeJson({ ok: false, error: "Google oturumu doğrulanamadı. Oturum süresi dolmuş veya geçersiz." }, 401);
     }
     const expectedEmail = String(b.email || "").trim().toLowerCase();
     if (expectedEmail && expectedEmail.includes("@") && expectedEmail !== fbEmail) {
-      return edgeJson({ ok: false, error: `Yazdığınız e-posta (${expectedEmail}) ile seçilen Google hesabı (${fbEmail}) eşleşmiyor.` }, 401);
     }
     let rec = await env.WATCHLIVO_KV.get(`acct:${fbEmail}`, "json").catch(() => null);
     let user = rec?.user || null;

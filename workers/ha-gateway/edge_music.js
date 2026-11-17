@@ -144,9 +144,7 @@ function plainLyricsToVtt(plain) {
   return `WEBVTT\n\n${body}\n`;
 }
 
-async function resolveYoutubeVideoId(q) {
   try {
-    const r = await fetch(`https://www.youtube.com/results?${new URLSearchParams({ search_query: q })}`, {
       headers: { "User-Agent": MUSIC_UA, "Accept-Language": "tr-TR,tr;q=0.9" },
       signal: AbortSignal.timeout(2600),
     });
@@ -243,21 +241,16 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     const cleanQ = `${artist} ${songTitle}`.trim();
     let vid = /^[\w-]{11}$/.test(vidParam) ? vidParam : "";
     if (!vid && cleanQ) {
-      if (mode !== "audio") vid = await resolveYoutubeVideoId(`${cleanQ} official video`);
-      else if (!prev) vid = await resolveYoutubeVideoId(`${cleanQ} official audio`);
     }
     const dispTitle = artist && songTitle ? `${artist} — ${songTitle}` : (songTitle || artist || "Müzik");
     const lyricsUrl = `/api/rave/music-lyrics.vtt?${new URLSearchParams({ artist, title: songTitle })}`;
     if (vid) {
       return musicJson({
-        provider: "youtube", streamType: "youtube", catalogProvider: "music", isMusic: true, mediaType: "music",
-        musicMode: mode, videoId: vid, clipVideoId: vid, url: `https://www.youtube.com/watch?v=${vid}`,
         title: `🎵 ${dispTitle}`, artist, songTitle, poster, duration: 210, lyricsUrl, audioPreviewUrl: prev,
       }, 200, 60);
     }
     const directUrl = mv || prev || rawUrl;
     return musicJson({
-      provider: directUrl ? "direct" : "youtube", streamType: directUrl ? "mp4" : "youtube", catalogProvider: "music",
       isMusic: true, isPreview: Boolean(directUrl), mediaType: "music", musicMode: mode, url: directUrl,
       title: `🎵 ${dispTitle}`, artist, songTitle, poster, duration: directUrl ? 30 : 210, lyricsUrl,
     }, 200, 60);

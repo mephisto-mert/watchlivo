@@ -4,9 +4,6 @@ import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from '.
 import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261114_v215';
 
 const ICE = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
   { urls: 'stun:global.stun.twilio.com:3478' },
 ];
 const getIceServers = () => (typeof window !== 'undefined' && Array.isArray(window.WATCHLIVO_ICE_SERVERS) && window.WATCHLIVO_ICE_SERVERS.length)

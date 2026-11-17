@@ -1,4 +1,3 @@
-// YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
 import { SubtitleDubController } from './subtitles.js?v=20261114_v215';
 import { applyElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261114_v215';
 import { ensureHlsJs } from './hls-loader.js?v=20261114_v215';
@@ -6,17 +5,11 @@ import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v215';
 import { expectedPosition } from '../sync.js?v=20261114_v215';
 
 let apiPromise = null;
-function loadYouTubeApi() {
   if (window.YT && window.YT.Player) return Promise.resolve();
   if (apiPromise) return apiPromise;
   apiPromise = new Promise((resolve, reject) => {
-    const prev = window.onYouTubeIframeAPIReady;
-    window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(); };
     const s = document.createElement('script');
-    s.src = 'https://www.youtube.com/iframe_api';
-    s.onerror = () => { apiPromise = null; reject(new Error('YouTube API yüklenemedi')); };
     document.head.append(s);
-    setTimeout(() => { if (!(window.YT && window.YT.Player)) { apiPromise = null; reject(new Error('YouTube API zaman aşımı')); } }, 12000);
   });
   return apiPromise;
 }
@@ -45,7 +38,6 @@ function applyOptimalPipAttrs(v) {
   } catch (_) {}
 }
 
-export class YouTubeAdapter {
   constructor(container, events) {
     this.container = container;
     this.events = events;
@@ -91,7 +83,6 @@ export class YouTubeAdapter {
     this.container.replaceChildren(mount);
 
     if (media?.isMusic) this._mountVinylOverlay(media);
-    this.subs.initForMedia({ ...this.media, videoId, provider: this.media.provider || 'youtube' }).then(() => {
       if (media?.isMusic && this.subs.subtitleTracks?.length) {
         this.subs.setSubtitleTrack(this.subs.subtitleTracks[0].id);
       }
@@ -164,10 +155,8 @@ export class YouTubeAdapter {
     if (this._destroyed) return false;
 
     const streamCandidates = [];
-    if (typeof window !== 'undefined' && typeof window.watchlivoResolveYouTube === 'function') {
       try {
         const sd = await Promise.race([
-          window.watchlivoResolveYouTube(videoId),
           new Promise((r) => setTimeout(() => r(null), 2200)),
         ]);
         if (sd) {
@@ -434,7 +423,6 @@ export class YouTubeAdapter {
 
   async _loadNoCookieIframeFallback(mount, videoId, startAt = 0, autoplay = true, useStdHost = false) {
     try {
-      await loadYouTubeApi();
     } catch (err) {
       if (this.media?.audioPreviewUrl || this.media?.isMusic) {
         this._activateAudioFallback(startAt, autoplay);
@@ -449,7 +437,6 @@ export class YouTubeAdapter {
       const done = () => { if (!settled) { settled = true; resolve(); } };
       const safeOrigin = (typeof location !== 'undefined' && /^https?:\/\//.test(location.origin)) ? location.origin : 'https://watchlivo.online';
       this.player = new window.YT.Player(mount, {
-        host: useStdHost ? 'https://www.youtube.com' : 'https://www.youtube-nocookie.com',
         width: '100%',
         height: '100%',
         videoId,
@@ -531,7 +518,6 @@ export class YouTubeAdapter {
               return;
             }
             done();
-            this.events.onError?.(`YouTube oynatıcı hatası (${e.data})`);
           },
         },
       });
@@ -554,8 +540,6 @@ export class YouTubeAdapter {
             this.subs.subtitleTracks.push({
               id: `yt-native-${lc}-${idx}`,
               lang: lc,
-              label: `🎬 ${dn} (YouTube Altyazı)`,
-              source: 'youtube-native',
               ytNativeLang: lc,
             });
             added = true;
@@ -809,8 +793,6 @@ export class YouTubeAdapter {
         return true;
       };
       applyCandidate(srvHls);
-      if (typeof window !== 'undefined' && typeof window.watchlivoResolveYouTube === 'function') {
-        window.watchlivoResolveYouTube(videoId).then((sd) => {
           if (this._destroyed || this._pipActive || this.pipVideo !== pv || !sd) return;
           const directHls = sd.hlsManifestUrl || '';
           const fmts = Array.isArray(sd.formats) ? sd.formats : [];

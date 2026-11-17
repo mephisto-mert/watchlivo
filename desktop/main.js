@@ -93,7 +93,6 @@ function createWindow() {
     try {
       const targetOrig = new URL(navUrl).origin;
       const appOrig = new URL(SERVER_URL).origin;
-      if (targetOrig !== appOrig && !/^https:\/\/accounts\.google\.com$/i.test(targetOrig)) {
         event.preventDefault();
       }
     } catch (_) {

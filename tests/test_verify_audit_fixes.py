@@ -31,9 +31,6 @@ def test_music_drm_and_shelves_and_lyrics():
     dz = client.get("/api/rave/music-resolve?url=https://www.deezer.com/track/3135556").json()
     assert dz.get("songTitle") and dz.get("songTitle") != "Müzik & Klip Parçası"
 
-def test_youtube_search_and_twitch_kick_extract():
-    # 6. YouTube search with Turkish chars
-    yt = client.get("/api/search/youtube?q=tarkan+%C5%9F%C4%B1mar%C4%B1k")
     assert yt.status_code == 200 and len(yt.json().get("items", [])) >= 1
     # 7. Twitch & Kick extract
     tw = client.get("/api/rave/extract-video?url=https://www.twitch.tv/elraenn")

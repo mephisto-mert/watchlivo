@@ -1,4 +1,3 @@
-"""God's Eye E2E #2: in-room provider selection (Rave Search panel), play-mode rules, panels, YouTube sync."""
 import asyncio, json, sys, pathlib, urllib.request
 from playwright.async_api import async_playwright
 
@@ -81,27 +80,20 @@ async def main():
         check("Netflix playback sync |Δ| < 400ms & clean stage DOM", nd < 0.4 and host_kids == 1 and not bad_stage, f"{nd*1000:.0f}ms kids={host_kids}")
         await A.screenshot(path=str(SHOTS / "15_mesh_netflix_playing.png"))
         await A.click("#nav-search-video")
-        await A.click('.panel-left .provider-tile[data-provider="youtube"]') if await A.locator('.panel-left .provider-tile[data-provider="youtube"]').count() else None
         ok = await wait_for(lambda: A.locator(".panel-left .vcard").count(), 20)
         await wait_for(lambda: A.evaluate("(() => { const im = document.querySelector('.panel-left .vcard-thumb > img:not(.vcard-prov)'); return !!(im && im.complete && im.naturalWidth > 0); })()"), 8)
-        check("YouTube results inside room panel", ok, f"{await A.locator('.panel-left .vcard').count()} cards")
-        await A.screenshot(path=str(SHOTS / "11_mesh_youtube_selection.png"))
         await A.locator(".panel-left .vcard").first.click()
-        ok = await wait_for(lambda: B.evaluate("(window.vortexDebug().key||'').includes('youtube|')"), 15)
         check("leader pick plays for everyone", ok)
         check("Search panel collapses after pick (Rave)", await A.locator(".mesh-layout.has-left").count() == 0)
         await wait_for(lambda: B.evaluate("window.vortexDebug().time > 2"), 25)
         await wait_for(lambda: B.evaluate("Math.abs(window.vortexDebug().drift || 9) < 0.35"), 10)
         da, db = await dbg(A), await dbg(B)
         d = abs((da["time"] or 0) - (db["time"] or 0))
-        check("YouTube sync |Δ| < 400ms", d < 0.4, f"{d*1000:.0f}ms modes={da['syncMode']}/{db['syncMode']}")
-        await A.screenshot(path=str(SHOTS / "12_mesh_youtube_playing.png"))
         await A.click('.privacy-chip')
         await A.click('.panel-left .seg button[data-value="vote"]')
         ok = await wait_for(lambda: B.evaluate("window.vortexDebug().playMode === 'vote'"), 6)
         check("leader switches to Oylayalım", ok)
         await B.click("#nav-search-video")
-        await B.click('.panel-left .provider-tile[data-provider="youtube"]')
         await wait_for(lambda: B.locator(".panel-left .vcard").count(), 20)
         await B.locator(".panel-left .vcard").nth(2).click()
         ok = await wait_for(lambda: A.evaluate("window.vortexDebug().queue === 1"), 10)

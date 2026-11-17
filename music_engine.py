@@ -1,5 +1,4 @@
 # Watchlivo Unified Multi-Platform Music & Music Video Party Engine
-# Aggregates real data from Spotify, Apple Music, Deezer, YouTube Music & SoundCloud
 import asyncio
 from collections import OrderedDict
 import concurrent.futures
@@ -362,7 +361,6 @@ def _yt_innertube_search_sync(query: str, limit: int = 10) -> list[dict]:
     }).encode("utf-8")
     try:
         data = _http_get_json(
-            "https://www.youtube.com/youtubei/v1/search?prettyPrint=false",
             timeout=4.5,
             headers={"Content-Type": "application/json"},
             data=body,
@@ -404,11 +402,7 @@ def _yt_innertube_search_sync(query: str, limit: int = 10) -> list[dict]:
                 "title": f"{artist} — {song_title}",
                 "songTitle": song_title,
                 "artist": artist,
-                "album": "YouTube Music Klip",
                 "year": "2025",
-                "genre": "YouTube Music",
-                "sourcePlatform": "YouTube Music",
-                "sourceBadge": "🔴 YouTube Music",
                 "duration": dur_sec,
                 "poster": thumb,
                 "backdrop": thumb,
@@ -781,8 +775,6 @@ def _sc_resolve_full_track_sync(artist: str, song_title: str, expected_dur_sec: 
     return None
 
 
-UA_YT_IOS = "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
-UA_YT_VR = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
 UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Mobile/15E148 Safari/604.1"
 _YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = _BoundedCache(512)
 
@@ -851,7 +843,6 @@ def _yt_piped_fallback_sync(vid: str) -> dict | None:
 def _yt_mobile_live_hls_sync(vid: str) -> str:
     try:
         req = urllib.request.Request(
-            f"https://m.youtube.com/watch?v={vid}&hl=tr",
             headers={"User-Agent": UA_SAFARI_IOS, "Accept-Language": "tr-TR,tr;q=0.9"},
         )
         with urllib.request.urlopen(req, timeout=4.5) as r:
@@ -886,7 +877,6 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
         },
     )
     android_cli = (
-        "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip",
         {
             "clientName": "ANDROID",
             "clientVersion": "20.10.38",
@@ -915,7 +905,6 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
     for cli_ua, cli_ctx in clients:
         try:
             req = urllib.request.Request(
-                "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
                 data=json.dumps({"videoId": vid, "context": {"client": cli_ctx}}).encode("utf-8"),
                 headers={"Content-Type": "application/json", "User-Agent": cli_ua},
                 method="POST",
@@ -999,7 +988,6 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
 
 
 def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False, client_ua: str = ""):
-    use_ua = client_ua or (UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC)
     hdrs = {"User-Agent": use_ua, "Accept": "*/*"}
     open_chunk_sz = 2 * 1024 * 1024
     max_closed_sz = 4 * 1024 * 1024
@@ -1042,7 +1030,6 @@ def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_he
 
 def _yt_fallback_audio_url_sync(vid: str) -> str:
     try:
-        oemb = _http_get_json(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json", timeout=3.5)
         raw_t = (oemb or {}).get("title") or ""
         raw_a = (oemb or {}).get("author_name") or ""
         if raw_t:
@@ -1063,7 +1050,6 @@ def _fetch_sidx_segments_sync(vid: str, kind: str, fmt: dict) -> list[tuple[int,
     idx_rng = fmt.get("indexRange") or {}
     i_start = int(idx_rng.get("start") or 0)
     i_end = int(idx_rng.get("end") or 2047)
-    fmt_ua = fmt.get("ua") or (UA_YT_IOS if "googlevideo.com" in fmt["url"] else UA_MUSIC)
     req = urllib.request.Request(
         fmt["url"],
         headers={"User-Agent": fmt_ua, "Range": f"bytes={i_start}-{i_end}"},
@@ -1262,7 +1248,6 @@ async def yt_music_stream(request: Request):
 
 def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, provider: str, poster: str, preview_url: str, mv_url_param: str = "", mode: str = "") -> dict:
     if not url and video_id and re.match(r"^[A-Za-z0-9_-]{11}$", video_id):
-        url = f"https://www.youtube.com/watch?v={video_id}"
     is_generic_title = not song_title or song_title.strip() in ("Müzik & Klip Parçası", "Müzik", "Track")
     if url and is_generic_title:
         try:
@@ -1290,11 +1275,9 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
                         artist = res_ap[0].get("artistName") or artist
                         poster = (res_ap[0].get("artworkUrl100") or "").replace("100x100bb", "600x600bb") or poster
                         preview_url = res_ap[0].get("previewUrl") or preview_url
-            elif "youtube.com/" in url or "youtu.be/" in url:
                 m_yt = re.search(r"(?:v=|youtu\.be/)([A-Za-z0-9_-]{11})", url)
                 if m_yt:
                     video_id = video_id or m_yt.group(1)
-                    oemb = _http_get_json(f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json", timeout=4.0)
                     song_title = oemb.get("title") or song_title
                     artist = artist or (oemb.get("author_name") or "").replace(" - Topic", "").strip()
             elif "soundcloud.com/" in url:
@@ -1440,9 +1423,6 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         primary_url = exact_mv
         alt_urls = [u for u in ([sc_url] + sc_alts + [audio_stream, artist_mv]) if u and u != primary_url]
     elif mode_norm == "video" and (clip_vid or primary_vid):
-        primary_prov = "youtube"
-        primary_stype = "youtube"
-        primary_url = f"https://www.youtube.com/watch?v={clip_vid or primary_vid}"
         alt_urls = [u for u in ([sc_url] + sc_alts) if u]
     elif sc_url:
         primary_prov = "direct"
@@ -1455,9 +1435,6 @@ def _resolve_music_sync(artist: str, song_title: str, video_id: str, url: str, p
         primary_url = f"/api/rave/yt-music-stream?v={urllib.parse.quote(primary_vid, safe='')}&kind=audio"
         alt_urls = [u for u in [audio_stream, exact_mv] if u and u != primary_url]
     elif primary_vid:
-        primary_prov = "youtube"
-        primary_stype = "youtube"
-        primary_url = f"https://www.youtube.com/watch?v={clip_vid if mode_norm == 'video' and clip_vid else primary_vid}"
         alt_urls = []
     elif exact_mv and not is_preview_mv:
         primary_prov = "direct"

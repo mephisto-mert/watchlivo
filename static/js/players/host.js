@@ -1,5 +1,4 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261114_v215';
 import { Html5Adapter } from './html5.js?v=20261114_v215';
 import { VimeoAdapter } from './vimeo.js?v=20261114_v215';
 import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v216';
@@ -17,8 +16,6 @@ export function adapterFor(media) {
   const vid = String(media.videoId || '');
   const isYtDirectStream = /\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8/i.test(url);
   if (
-    !(/youtube\.com|youtu\.be/i.test(url)) &&
-    !(media.provider === 'youtube' && !isYtDirectStream) && (
       ['direct', 'hls', 'upload', 'web-direct'].includes(media.provider) ||
       media.streamType === 'hls' ||
       media.streamType === 'mp4' ||
@@ -32,8 +29,6 @@ export function adapterFor(media) {
     return WebviewAdapter;
   }
   if (media.provider === 'vimeo') return VimeoAdapter;
-  if (media.provider === 'youtube' || ((!media.provider || media.provider === 'web') && /^[A-Za-z0-9_-]{11}$/.test(vid)) || /youtube\.com|youtu\.be/i.test(url)) {
-    return YouTubeAdapter;
   }
   return EmbedAdapter;
 }

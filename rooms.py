@@ -402,9 +402,7 @@ def _media_defaults(room: Dict[str, Any]) -> Dict[str, Any]:
 
 
 _TRUSTED_EMBED_HOSTS = (
-    "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com",
     "vimeo.com", "dailymotion.com", "dai.ly", "twitch.tv",
-    "drive.google.com", "docs.google.com", "ok.ru", "odnoklassniki.ru",
     "sibnet.ru", "rutube.ru", "my.mail.ru", "vk.com", "vkvideo.ru",
     "vidmoly.to", "vidmoly.me", "vidmoly.net", "vidmoly.biz",
     "vmbox.", "vmnow.", "vmpx.", "vidsrc.", "vidlink.", "2embed.",
@@ -605,7 +603,6 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         "musicPlatformLabel": clean_str(data.get("musicPlatformLabel"), 120),
         "mvUrl": _clean_media_url(data.get("mvUrl"), 1500, allow_relative=True, require_media_or_trusted=True),
         "bgVideoUrl": _clean_media_url(data.get("bgVideoUrl"), 1500, allow_relative=True, require_media_or_trusted=True),
-        "bgYoutubeId": clean_str(data.get("bgYoutubeId"), 40),
         "artist": clean_str(data.get("artist"), 100),
         "songTitle": clean_str(data.get("songTitle"), 120),
         "poster": poster_clean,
@@ -2281,11 +2278,9 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                     return out
                 if not inc_url.startswith(("/api/rave/stream", "/api/rave/stream-proxy", "https://")):
                     return out
-                if incoming.get("provider") in ("embed", "youtube"):
                     return out
                 if incoming.get("provider") in ("", "web") and inc_url.startswith("https://"):
                     incoming["provider"] = "hls" if ".m3u8" in inc_url.lower() else "mp4"
-                for unsafe_k in ("embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "providerUrl", "officialUrl", "sourceUrl", "videoId"):
                     incoming.pop(unsafe_k, None)
             allow_unresolved = can_control if not cur_url else (can_control or same_key)
             if (cur_unresolved and allow_unresolved) or (can_control and same_key and inc_url != cur_url):
@@ -2313,7 +2308,6 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
                 allowed_res_keys = (
                     ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "poster", "thumbnail")
                     if not can_control
-                    else ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "episodeCount", "totalSeasons", "seasonsMeta", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar")
                 )
                 for k in allowed_res_keys:
                     if incoming.get(k):
@@ -3969,7 +3963,6 @@ async def http_sync(request: Request):
                     cur_ct_val = float(room["media"].get("currentTime") or 0.0)
                     cur_el = max(0.0, t_sync_now - float(room["media"].get("updatedAt") or t_sync_now)) * float(room["media"].get("rate") or 1.0) if (room["media"].get("playing") and was_anc) else 0.0
                     cur_live_val = max(0.0, cur_ct_val + cur_el)
-                    for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "mvUrl", "audioPreviewUrl", "bgVideoUrl", "bgYoutubeId", "poster", "thumbnail", "artist", "songTitle", "musicMode", "musicPlatformLabel", "similar"):
                         if incoming_clean.get(k):
                             room["media"][k] = incoming_clean[k]
                     if was_anc or cur_live_val > 2.0:

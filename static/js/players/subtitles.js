@@ -410,7 +410,6 @@ export class SubtitleDubController {
     const seenUrls = new Set();
     const out = [];
     for (const raw of (Array.isArray(tracks) ? tracks : [])) {
-      if (!raw || (!raw.url && raw.source !== 'youtube-native')) continue;
       if (raw.url && seenUrls.has(raw.url)) continue;
       if (raw.url) seenUrls.add(raw.url);
       let baseId = String(raw.id || raw.lang || 'sub').trim() || 'sub';
@@ -458,7 +457,6 @@ export class SubtitleDubController {
         ];
     const hasTrSub = this.subtitleTracks.some((t) => t.lang === 'tr');
     const hasInitialAudio = rawAudio.length > 1;
-    const needsSubFetch = !(this.subtitleTracks.length > 0 && hasTrSub && hasInitialAudio) && Boolean(media.tmdbId || media.imdbId || media.videoId || media.provider === 'youtube' || !this.subtitleTracks.length || !hasTrSub);
     if (needsSubFetch) {
       try {
         const queryParams = {
@@ -924,7 +922,6 @@ export class SubtitleDubController {
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
       const minEnd = dur > 120 ? (dur * 0.45) : 300;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
-      if (track.source === 'youtube-native') {
         this.selectedSubId = track.id;
         this.subCues = [];
         this.secondaryCues = [];
@@ -1264,7 +1261,6 @@ export class SubtitleDubController {
     const scale = Number.isFinite(this.fpsScale) && this.fpsScale > 0.8 ? this.fpsScale : 1.0;
     const adjT = (t * scale) - (this.offsetSec || 0);
     const curSubObj = this.subtitleTracks.find((tr) => tr.id === this.selectedSubId);
-    if (!this._loadingSubTrack && !this.subCues.length && this.selectedSubId !== 'off' && curSubObj?.source !== 'youtube-native' && this.subtitleTracks.length && (this._emptyReloadCount || 0) < 2) {
       const nowMs = Date.now();
       if (!this._lastEmptyReload || nowMs - this._lastEmptyReload > 8000) {
         this._lastEmptyReload = nowMs;

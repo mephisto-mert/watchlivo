@@ -1,7 +1,4 @@
-// Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
 const _TRUSTED_EMBED_DOMAINS = [
-  'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
-  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org',
   'ok.ru', 'vk.com', 'vkvideo.ru', 'rutube.ru', 'sibnet.ru', 'watchlivo.online',
 ];
 const _BLOCKED_EMBED_HOST_RE = /(?:^|\.)(?:1xbet|onebahis|melbet|mostbet|pinup|betwinner|casibom|grandpashabet|stake|meritking|jojobet|betway|bets10|mobilbahis|bahis|casino|popads|adsterra|propellerads|exoclick|juicyads|hilltopads|trafficjunky|onclickalgo|acscdn|vidlink|vidsrc|2embed|multiembed|autoembed|smashystream|flixer|vidfast|vidora|rivestream|pstream|cinejoy|vidbinge|superembed|streamtape|uqload|sendvid|dood|filemoon)\b|(?:^|\.)embed\.su$|(?:^|\.)vidy\.st$|(?:^|\.)nexa\.mov$|(?:^|\.)moviesapi\.club$|(?:^|\.)nontongo\.win$|(?:^|\.)voe\.sx$/i;
@@ -72,7 +69,6 @@ export class EmbedAdapter {
       this.caps.seek = false;
       const fid = String(media.videoId || media.fileId || (String(media.url || '').match(/(?:\/d\/|id=)([A-Za-z0-9_-]{15,})/) || [])[1] || '').trim();
       if (/^[A-Za-z0-9_-]{10,120}$/.test(fid)) {
-        return `https://drive.google.com/file/d/${encodeURIComponent(fid)}/preview`;
       }
       const fallbackDrive = media.embedUrl || media.url || '';
       return _isTrustedEmbedUrl(fallbackDrive) ? fallbackDrive : 'about:blank';

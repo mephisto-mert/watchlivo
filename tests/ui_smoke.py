@@ -25,12 +25,10 @@ async def main():
         await page.wait_for_timeout(2500)
         await page.screenshot(path=str(OUT / "02_home.png"))
         print("tiles:", await page.locator(".provider-tile").count())
-        await page.click('.provider-tile[data-provider="youtube"]')
         try:
             await page.locator(".vcard").first.wait_for(state="visible", timeout=10000)
         except Exception:
             await page.wait_for_timeout(4000)
-        await page.screenshot(path=str(OUT / "03_home_youtube.png"))
         print("yt cards:", await page.locator(".vcard").count())
         await page.locator(".vcard").first.click()
         await page.wait_for_timeout(6000)

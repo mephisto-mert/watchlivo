@@ -529,8 +529,6 @@ class RegressionTests(unittest.TestCase):
         root = pathlib.Path(__file__).resolve().parent.parent
         # 1. clean_media & merge_sync_token preserve musicMode, clipVideoId, and playable similar fields
         cm = rooms.clean_media({
-            "provider": "youtube",
-            "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
             "title": "Test Song",
             "isMusic": True,
             "musicMode": "video",
@@ -967,9 +965,7 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_poll.json()["room"]["host_id"], "h_ayse_v80")
 
         # 3. Signed Drive proxy emits HMAC sig= and stream-proxy blocks unsigned Drive URLs (403)
-        r_unsigned = self.client.get("/api/rave/stream-proxy?u=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3D1AbCdEfGhIjKlMnOp")
         self.assertEqual(r_unsigned.status_code, 403)
-        r_drv = self.client.get("/api/rave/gdrive-folder?url=https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrSt/view")
         self.assertEqual(r_drv.status_code, 200)
         self.assertIn("sig=", r_drv.json()["items"][0]["url"])
 
@@ -1376,9 +1372,7 @@ class RegressionTests(unittest.TestCase):
 
         profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
         self.assertNotIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
-        self.assertIn("Google ile Giriş Yap", profile_js)
 
-    def test_v102_series_prev_episode_poster_cors_and_youtube_muxed_playback(self):
         from pathlib import Path
         import music_engine
         root = Path(__file__).resolve().parent.parent
@@ -1397,16 +1391,13 @@ class RegressionTests(unittest.TestCase):
         # 2. External <video poster> URLs routed via /api/rave/poster to prevent CORS errors with crossOrigin='anonymous'
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
         self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", html5_js)
-        yt_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", yt_js)
 
-        # Verify /api/rave/poster whitelists TMDB/YouTube poster domains and serves Access-Control-Allow-Origin: *
         with patch.object(server, "_fetch_poster_sync", return_value=(b"\xff\xd8\xff\xe0testjpeg", "image/jpeg")):
             r_poster = self.client.get("/api/rave/poster?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Fw780%2Ftest.jpg")
         self.assertEqual(r_poster.status_code, 200)
         self.assertEqual(r_poster.headers.get("access-control-allow-origin"), "*")
 
-        # 3. YouTube VOD prioritizes progressive muxed MP4 (kind=muxed) and ANDROID 20.10.38 client to avoid 60s GVS 403/502
         self.assertLess(yt_js.index("kind=muxed"), yt_js.index("streamCandidates.push(srvHls)"))
         me_py = (root / "music_engine.py").read_text(encoding="utf-8")
         self.assertIn('"clientName": "ANDROID"', me_py)
@@ -1491,7 +1482,6 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. _yt_search_sync caches results in _YT_SEARCH_CACHE for 300s to prevent cold YouTube feed timeouts
         server._YT_SEARCH_CACHE.clear()
         with patch.object(server, "_http", side_effect=OSError("simulated timeout")), \
              patch.object(server.music_engine, "_yt_innertube_search_sync", return_value=[{"videoId": "dQw4w9WgXcQ", "title": "Cached Hit", "artist": "Watchlivo", "duration": 212}]) as mock_it:
@@ -1693,7 +1683,6 @@ class RegressionTests(unittest.TestCase):
         # 4. iOS/Android Lock Screen MediaSession API & Background Audio Continuity
         controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        youtube_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         self.assertIn("bindMediaSessionHandlers", controls_js)
         self.assertIn("updateMediaSessionPositionImmediate", controls_js)
         self.assertIn("previoustrack", controls_js)
@@ -1701,9 +1690,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("ctl-opt-bgaudio", controls_js)
         self.assertIn("vortex_bg_audio", html5_js)
         self.assertIn("_userPausedViaMediaSession", html5_js)
-        self.assertIn("_userPausedViaMediaSession", youtube_js)
 
-    def test_v109_strict_password_auth_google_youtube_register_and_guest_isolation(self):
         import uuid
         from pathlib import Path
         from unittest.mock import patch
@@ -1736,41 +1723,29 @@ class RegressionTests(unittest.TestCase):
         })
         self.assertEqual(r_dup.status_code, 409)
 
-        # 2. Google / YouTube OAuth (/api/auth/oauth) allows direct 1-click Google verified login
         r_oauth_notoken = self.client.post("/api/auth/oauth", json={
-            "provider": "google",
             "email": test_email,
         })
         self.assertEqual(r_oauth_notoken.status_code, 401)
 
-        # Unverified Google email must fail closed with 401
-        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test", "emailVerified": False}]}):
             r_oauth_unverified = self.client.post("/api/auth/oauth", json={
-                "provider": "google",
                 "idToken": "unverified_token_123",
                 "email": test_email,
             })
             self.assertEqual(r_oauth_unverified.status_code, 401)
 
-        # Valid Google token with emailVerified=True succeeds directly without password
-        with patch.object(auth_engine, "_firebase_auth_req", return_value={"users": [{"email": test_email, "displayName": "Deniz Test", "emailVerified": True}]}):
             r_oauth_direct = self.client.post("/api/auth/oauth", json={
-                "provider": "google",
                 "idToken": "valid_token_123",
                 "email": test_email,
             })
             self.assertEqual(r_oauth_direct.status_code, 200)
             self.assertTrue(r_oauth_direct.json().get("ok"))
 
-        # 3. Frontend static verification for Google, YouTube, Register & Provider password gates
         profile_js = (root / "static" / "js" / "profile.js").read_text(encoding="utf-8")
         selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
         selection_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
         accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
 
-        self.assertIn("Google ile Giriş Yap", profile_js)
-        self.assertIn("export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '')", profile_js)
-        self.assertIn("const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);", selection_kinds_js)
         self.assertIn("hesap şifreniz (en az 6 karakter — zorunlu)", accounts_js)
 
     def test_v110_thirty_subagent_security_hardening(self):
@@ -1990,7 +1965,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("<loc>https://watchlivo.online/dmca</loc>", r_map.text)
         self.assertIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
 
-        # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org (Organization + FAQPage), and Google Analytics 4 gtag.js
         idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
         boot_js = (root / "static" / "js" / "bootstrap.js").read_text(encoding="utf-8")
         self.assertIn("https://watchlivo.online/static/watchlivo-og.png", idx_html)
@@ -1998,7 +1972,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('"FAQPage"', idx_html)
         self.assertIn('"Organization"', idx_html)
         self.assertIn("dmca@watchlivo.online", idx_html)
-        self.assertIn("https://www.googletagmanager.com/gtag/js", idx_html)
         self.assertIn("__initWatchlivoGA4", boot_js)
         self.assertTrue((root / "static" / "watchlivo-og.png").exists())
         self.assertTrue((root / "static" / "js" / "views" / "site-footer.js").exists())
@@ -2066,7 +2039,6 @@ class RegressionTests(unittest.TestCase):
             # Refreshing /stats or calling GET /api/rave/analytics must NEVER increment pageviews
             r_dash = self.client.get("/stats")
             self.assertEqual(r_dash.status_code, 200)
-            self.assertIn("Google Analytics 4", r_dash.text)
             r_dash2 = self.client.get("/stats")
             self.assertEqual(r_dash2.status_code, 200)
             r_get_after = self.client.get("/api/rave/analytics", headers={"x-admin-secret": "test-admin-secret-v117"}).json()
@@ -3478,7 +3450,6 @@ console.log('HA_UNIT_TESTS_PASSED');
 
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        yt_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         gain_js = (root / "static" / "js" / "players" / "audio-gain.js").read_text(encoding="utf-8")
         mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
         rt_js = (root / "static" / "js" / "realtime.js").read_text(encoding="utf-8")
@@ -3488,7 +3459,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("&& !bgAudioAllowed;", sync_js)
         self.assertIn("const activeEl = ad._activeMediaEl?.() || ad.video;", sync_js)
 
-        # 2. Pre-unlocked background <audio> relay & seamless handoff bridge in Html5Adapter & YouTubeAdapter
         self.assertIn("export function getBgRelayAudio()", gain_js)
         self.assertIn("export function primeBgRelayAudio()", gain_js)
         self.assertIn("_startBgAudioBridge()", html5_js)
@@ -3606,7 +3576,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertEqual(tot_tv_s, 5 * 15000)
         self.assertGreater(tot_tv_s + tot_mv_s, 150000)
 
-    def test_v207_honest_youtube_quality_and_bandwidth_sanitization(self):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
         srv_py = (root / "server.py").read_text(encoding="utf-8")

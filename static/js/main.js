@@ -380,7 +380,6 @@ async function boot() {
   }
   const isRedirectPending = Boolean(localStorage.getItem('watchlivo_auth_pending_redirect'));
   if (isRedirectPending) {
-    toast('Google hesabınız doğrulanıyor, lütfen bekleyin...', 8000);
   }
   let routed = false;
   const start = (p) => {
@@ -1002,7 +1001,6 @@ function sendWatchlivoAnalytics(ev = 'pageview', extra = {}) {
   } catch (_) {}
 }
 
-function bootstrapGoogleAnalytics4() {
   try {
     window.addEventListener('hashchange', () => {
       setTimeout(() => sendWatchlivoAnalytics('route_view'), 300);
@@ -1016,7 +1014,6 @@ function bootstrapGoogleAnalytics4() {
 }
 
 window.vortexSendAnalytics = sendWatchlivoAnalytics;
-bootstrapGoogleAnalytics4();
 setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);
 
 // Global unhandled error boundary

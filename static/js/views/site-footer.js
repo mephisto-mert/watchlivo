@@ -8,7 +8,6 @@ export const OFFICIAL_CONTACT_EMAIL = 'dmca@watchlivo.online';
 export const FAQ_ITEMS = [
   {
     q: 'Watchlivo nedir ve nasıl çalışır?',
-    a: 'Watchlivo, arkadaşlarınla veya sevgilinle mesafeleri ortadan kaldırarak aynı anda, saliselik senkronizasyonla film, dizi, anime, YouTube videoları ve 7/24 canlı TV kanalları izleyebileceğin yeni nesil bir birlikte izleme (watch party) platformudur. Oda kurduğunda veya bir odaya katıldığında video oynatma, duraklatma ve ileri/geri sarma işlemleri odadaki herkes için anında eşitlenir.',
   },
   {
     q: 'Watchlivo ücretli mi, izlemek için üyelik gerekiyor mu?',
@@ -59,7 +58,6 @@ const LEGAL_SECTIONS = {
         <li><b>Misafir ve Üye Profil Bilgileri:</b> Kayıtsız misafir kullanıcılar için yalnızca geçici bir rumuz oluşturulur. Üye olan kullanıcılarımızın e-posta adresi, kullanıcı adı (@handle) ve profil tercihleri güvenli şifreleme ile yalnızca oturum doğrulaması ve arkadaş listesi senkronizasyonu amacıyla saklanır.</li>
         <li><b>Sesli ve Görüntülü Sohbet Güvenliği (WebRTC):</b> Oda içi sesli sohbet akışları anlık olarak iletilir ve sunucularımızda <b>kesinlikle kaydedilmez veya depolanmaz</b>.</li>
         <li><b>İzleme Geçmişi ve Tercihler:</b> Kaldığınız yerden devam edebilmeniz için izleme geçmişiniz ve tema/altyazı ayarlarınız tarayıcınızın yerel belleğinde (localStorage) ve hesabınızda tutulur; dilediğiniz an tek tıkla silebilirsiniz.</li>
-        <li><b>Anonim Analitik (Google Analytics 4):</b> Platform performansını iyileştirmek ve anlık yoğunluğu ölçmek amacıyla anonimleştirilmiş ziyaret istatistikleri işlenir.</li>
       </ul>
       <h4>2. Üçüncü Taraflarla Paylaşım</h4>
       <p>Kişisel verileriniz hiçbir koşulda üçüncü taraf reklam ağlarına satılmaz veya pazarlama amacıyla paylaşılmaz. Hesap silme ve veri bilgi talepleriniz için <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;">${OFFICIAL_CONTACT_EMAIL}</a> adresine yazabilirsiniz.</p>
@@ -88,7 +86,6 @@ const LEGAL_SECTIONS = {
     html: `
       <p><b>Watchlivo (watchlivo.online)</b>, 5651 sayılı Kanun ve uluslararası Dijital Binyıl Telif Hakkı Yasası (DMCA - 17 U.S.C. § 512) kapsamında <b>"Yer Sağlayıcı / İçerik Barındırmayan Senkronize Oynatıcı (Non-Hosting Index & Watch-Party Tool)"</b> statüsünde hizmet vermektedir.</p>
       <h4>1. Medya Barındırmama Beyanı</h4>
-      <p>Watchlivo sunucularında hiçbir film, dizi, video veya ses dosyası fiziksel olarak barındırılmamaktadır. Platformda görüntülenen tüm videolar YouTube, herkese açık harici video sunucuları ve üçüncü taraf embed servisleri üzerinden anlık olarak çağrılmaktadır.</p>
       <h4>2. Uyar-Kaldır (Notice and Takedown) Prosedürü</h4>
       <p>Telif hakkı kendisine ait olan bir yapımın indeksimizden veya katalog bağlantılarımızdan kaldırılmasını talep eden hak sahipleri ya da yetkili vekilleri, aşağıdaki bilgilerle birlikte resmi bildirimde bulunabilir:</p>
       <ul>
@@ -107,7 +104,6 @@ const LEGAL_SECTIONS = {
       <ul>
         <li><b>Zorunlu Oturum Verileri:</b> Odaya girdiğinizde bağlantınızın kopmaması, rumuzunuzun hatırlanması ve sesli sohbet eşleşmesi için kullanılır.</li>
         <li><b>Kişiselleştirme Verileri:</b> Seçtiğiniz sinema teması, ses seviyesi, altyazı boyutu ve kaldığınız film/dizi dakikası cihazınızda saklanır.</li>
-        <li><b>Performans ve Analitik:</b> Google Analytics 4 aracılığıyla hangi sayfaların ve içeriklerin popüler olduğu anonim olarak ölçülür.</li>
       </ul>
       <p>Tarayıcı ayarlarınızdan çerezleri dilediğiniz zaman temizleyebilirsiniz.</p>
     `,
@@ -327,7 +323,6 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
   const trustCards = [
     ['⚡', 'Saliselik Senkronizasyon', 'Arkadaşlarınla aynı karede durdur, sar ve sıfır gecikmeyle birlikte izle.'],
     ['🎙️', 'Kristal Netliğinde Sesli Sohbet', 'Oda içi WebRTC düşük gecikmeli mikrofon, sesli not ve anlık emoji tepkileri.'],
-    ['🇹🇷', '4K Türkçe Dublaj & Altyazı', 'Vizyon filmleri, popüler diziler, animeler, 7/24 canlı TV ve YouTube akışları.'],
     ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.2 ile tam ekran izle.'],
   ];
 
@@ -358,9 +353,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       faqBox),
 
     h('article', { class: 'wl-seo-article-box' },
-      h('h2', { class: 'wl-seo-title' }, 'Watchlivo — Arkadaşlarla Online Birlikte Film, Dizi, Anime ve YouTube İzleme Platformu'),
       h('p', { class: 'wl-seo-p' },
-        'Watchlivo (watchlivo.online); uzaktaki arkadaşlarınla, sevgilinle veya topluluğunla aynı anda tek kare gecikmesiz sinema keyfi yaşaman için tasarlanmış Türkiye\'nin yeni nesil birlikte izleme (Watch Party) platformudur. Üyelik zorunluluğu olmadan saniyeler içinde herkese açık veya şifreli özel sinema odası kurabilir; Türkçe dublaj ve Türkçe altyazılı binlerce film, popüler yabancı ve yerli dizi, güncel anime bölümleri, 7/24 kesintisiz canlı televizyon kanalları ve YouTube videolarını senkronize olarak izleyebilirsin.'),
       h('p', { class: 'wl-seo-p' },
         'Rave, Teleparty ve Kosmi gibi uygulamalara kıyasla ekstra eklenti kurulumu gerektirmeyen Watchlivo; doğrudan Chrome, Brave, Safari, iOS, Android ve masaüstü tarayıcılarında çalışır. Oda içi düşük gecikmeli WebRTC sesli sohbet, sesli mesaj (voice note), gerçek zamanlı çeviri destekli yazılı sohbet ve akıllı TV kumanda navigasyonu ile sinema salonunu ekranına taşır.'),
       h('div', { class: 'wl-seo-tags' },

@@ -232,7 +232,6 @@ function resolveMediaContentType(url, extHint, upstreamCt) {
     cleanPath.includes("/init.") ||
     cleanPath.includes("_init.") ||
     url.toLowerCase().includes("/file/tau-video/") ||
-    url.toLowerCase().includes("drive.usercontent.google.com")
   ) {
     return "video/mp4";
   }

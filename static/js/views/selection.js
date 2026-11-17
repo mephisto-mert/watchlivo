@@ -4,7 +4,6 @@ import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsa
 import { api, qs } from '../api.js?v=20261114_v215';
 import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261114_v215';
 import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261114_v215';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261114_v215';
 import { createVoiceSearchButton } from '../voice-note.js?v=20261114_v215';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
@@ -29,12 +28,8 @@ export const parseDuration = (s) => {
 };
 
 export const ytToMedia = (it) => ({
-  provider: 'youtube',
   videoId: it.videoId || '',
-  url: it.url || `https://www.youtube.com/watch?v=${it.videoId}`,
-  title: it.title || 'YouTube Videosu',
   thumbnail: it.thumbnail || `https://i.ytimg.com/vi/${it.videoId}/hqdefault.jpg`,
-  channel: it.channel || 'YouTube',
   channelId: it.channelId || '',
   channelAvatar: it.channelAvatar || '',
   views: it.views || '',
@@ -54,7 +49,6 @@ const OFFER_MAP = [
   [/apple/i, 'apple'], [/mubi/i, 'mubi'], [/hulu/i, 'hulu'], [/paramount/i, 'paramount'], [/peacock/i, 'peacock'],
   [/plex/i, 'plex'], [/pluto/i, 'pluto'], [/exxen/i, 'exxen'], [/blutv/i, 'blutv'], [/gain/i, 'gain'],
   [/\btod\b|bein/i, 'tod'], [/tabii|trt/i, 'tabii'], [/tv\+|tvplus|turkcell/i, 'tvplus'], [/puhu/i, 'puhutv'],
-  [/crunchyroll/i, 'crunchyroll'], [/youtube/i, 'youtube'], [/tubi/i, 'tubi'], [/vimeo/i, 'vimeo'],
 ];
 const offerProvider = (name) => (OFFER_MAP.find(([re]) => re.test(name)) || [])[1] || null;
 
@@ -64,7 +58,6 @@ export function attachTilt(card) {
 
 const PROVIDER_SUBTITLES = {
   cinema: 'Film · Dizi · Anime · 4K HDR',
-  youtube: 'Video, Müzik & Canlı Yayın',
   ravedj: 'AI Mashup & Ortak DJ Mix',
   drive: 'Bulut 1080p MKV & MP4',
   netflix: '4K HDR · TR Dublaj & Altyazı',
@@ -92,7 +85,6 @@ const PROVIDER_SUBTITLES = {
 
 const PROVIDER_CORNER_TAGS = {
   cinema: '4K ARŞİV',
-  youtube: 'CANLI & 4K',
   ravedj: 'AI MASHUP',
   drive: 'DIRECT HD',
   netflix: '4K DUBLAJ',
@@ -192,15 +184,12 @@ function _chanColor(name) {
 
 export function videoCard(media, onPick, opts = {}) {
   const prov = getProvider(media.provider);
-  const isYt = media.provider === 'youtube' || Boolean(media.videoId);
   const inRoom = Boolean(window.vortexActions?.queueMusic && location.hash.startsWith('#/mesh/'));
   const durBadge = media.live ? '🔴 CANLI' : (media.durationText || (media.duration ? fmtDur(media.duration) : ''));
-  const chName = media.channel || prov?.name || 'YouTube';
   const chInitials = chName.replace(/^@/, '').trim().slice(0, 2).toUpperCase() || 'YT';
   let liked = isYt ? isYtVideoLiked(media.videoId) : false;
   let followed = isYt ? isYtChannelFollowed(media.channelId, chName) : false;
 
-  const followBtn = isYt && chName !== 'YouTube' ? h('button', {
     type: 'button',
     class: `yt-card-follow-btn ${followed ? 'active' : ''}`,
     title: followed ? 'Takipten çıkar' : `${chName} kanalını takip et`,
@@ -221,7 +210,6 @@ export function videoCard(media, onPick, opts = {}) {
     onclick: (e) => {
       e.stopPropagation();
       liked = toggleYtVideoLike(media);
-      toggleFavoriteMedia({ ...media, provider: 'youtube' });
       likeBtn.classList.toggle('liked', liked);
       likeBtn.textContent = liked ? '❤️' : '🤍';
       toast(liked ? '❤️ Beğenilen videolara eklendi — önerilerin güncellenecek' : 'Beğeni kaldırıldı');
@@ -282,7 +270,6 @@ export function videoCard(media, onPick, opts = {}) {
           `${media.views || ''}${media.views && media.published ? ' • ' : ''}${media.published || ''}`) : null),
       h('div', { class: 'yt-card-actions' },
         likeBtn,
-        opts.allowDismiss && chName !== 'YouTube' ? h('button', {
           type: 'button',
           class: 'yt-card-act-btn mute-ch',
           title: `${chName} kanalını bir daha önerme`,
@@ -305,7 +292,6 @@ export function videoCard(media, onPick, opts = {}) {
     card.append(l);
     try {
       if (isYt) {
-        try { saveWatchProgress({ ...media, provider: 'youtube' }, 0, media.duration || 0); } catch (e) { /* ignore */ }
       }
       await onPick(media);
     } finally { l.remove(); }
@@ -366,9 +352,7 @@ export function openYtPersonalizeModal(onUpdated) {
   const ytEmailInp = h('input', {
     class: 'input',
     type: 'email',
-    placeholder: 'Google / YouTube E-posta Adresiniz (opsiyonel, örn. ad@gmail.com)',
     autocomplete: 'email',
-    value: getYtPrefs().googleEmail || ((!state.self?.isGuest && state.self?.email) ? state.self.email : ''),
   });
   const ytErrBox = h('div', {
     style: { fontSize: '.78rem', color: '#fb7185', minHeight: '18px', fontWeight: '600' },
@@ -376,7 +360,6 @@ export function openYtPersonalizeModal(onUpdated) {
   const chInp = h('input', {
     class: 'input',
     type: 'text',
-    placeholder: 'Takip etmek istediğin YouTube kanal adı veya @handle yaz (örn. Barış Özcan)',
   });
   const subsWrap = h('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' } });
   const renderSubsList = () => {
@@ -411,11 +394,9 @@ export function openYtPersonalizeModal(onUpdated) {
   chInp.addEventListener('keydown', (e) => { if (e.key === 'Enter') addCustomCh(); });
 
   const modalRef = popup({
-    title: '🔴 YouTube & Google Hesabı ve Kanal Eşitleme',
     content: h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
       h('div', { class: 'yt-oauth-banner', style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
         h('div', { style: { fontSize: '.82rem', lineHeight: '1.45', color: '#e2e8f0' } },
-          '🔗 Google / YouTube hesabınızı tek tıkla OAuth penceresi üzerinden bağlayarak aboneliklerinizi ve beğenilerinizi eşitleyin:'),
         ytEmailInp,
         ytErrBox,
         h('button', {
@@ -426,16 +407,12 @@ export function openYtPersonalizeModal(onUpdated) {
             ytErrBox.textContent = '';
             const expectedEmail = ytEmailInp.value.trim();
             if (expectedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(expectedEmail)) {
-              ytErrBox.textContent = '⚠️ Lütfen geçerli bir Google / YouTube e-posta adresi girin veya alanı boş bırakın.';
               ytEmailInp.focus();
               return;
             }
             const btn = e.currentTarget;
             btn.disabled = true;
-            btn.textContent = '⏳ Google OAuth Açılıyor & YouTube Eşitleniyor...';
             try {
-              const res = await syncGoogleYoutubeOAuth(expectedEmail, '');
-              toast(`🔴 Google YouTube hesabı eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
               renderSubsList();
               onUpdated?.();
               modalRef?.close?.();
@@ -508,7 +485,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     const nextSig = `${Boolean(st.self && !st.self.isGuest)}|${getAccountStorageScope()}|${st.cloudSyncedAt || 0}`;
     if (nextSig !== _lastAuthWatchSig) {
       _lastAuthWatchSig = nextSig;
-      if (provider?.id === 'youtube') render();
     }
   });
   const _onDocPointerDown = (ev) => {
@@ -691,7 +667,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   }
 
   const RAVE_TOP_IDS = [
-    'cinema', 'youtube', 'ravedj', 'drive',
     'netflix', 'disney', 'prime', 'max', 'apple', 'exxen', 'blutv', 'gain',
     'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'hulu', 'paramount', 'peacock', 'ytmusic',
     'vk', 'rutube', 'pluto', 'tubi',
@@ -1073,12 +1048,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
               else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
               try {
-                if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
                   const ytVid = item.videoId || item.id;
                   await pickSafe({
-                    provider: 'youtube',
                     videoId: ytVid,
-                    url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
                     title: item.title,
                     thumbnail: item.poster || item.thumbnail,
                     duration: item.duration || 0,
@@ -1087,13 +1059,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                   });
                   return;
                 }
-                const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
                 const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
                 const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
                 const cleanOrigTitle = String(item.originalTitle || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim() || cleanHistTitle;
                 const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
                 const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-                const savedStreamUrl = item.streamUrl || (item.url && !String(item.url).includes('youtube.com') ? item.url : '');
 
                 let resolved = null;
                 if (!item.isMusic) {
@@ -1612,7 +1582,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       try {
         const catRes = await api(`/api/rave/catalog?${qs({ provider: 'cinema', q })}`, { timeout: 9000, signal: ac.signal });
         if (Array.isArray(catRes?.items) && catRes.items.length) {
-          data = { tmdb: catRes.items, justwatch: [], youtube: [] };
         }
       } catch (_) { /* ignore fallback error */ }
     }
@@ -1660,12 +1629,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       const k = normTitle(jw.title);
       return k && !matchedJwKeys.has(k);
     }).slice(0, 24);
-    const yt = (data.youtube || []).slice(0, 12).map(ytToMedia);
     const hasAny = Boolean(tmdb.length || titles.length || yt.length);
     fill(box,
       tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
       tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard(t, box)), ...titles.map((t) => posterCard(t, box))]) : null,
-      yt.length ? h('div', { class: 'section-head' }, h('h2', {}, 'YouTube'), h('span', { class: 'dim' }, `${yt.length} video`)) : null,
       yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : (!hasAny ? h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen içerik bulunamadı.') : null));
   }
 
@@ -1824,14 +1791,12 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     const p = getProvider(provider);
     return resolveMusicItem({ url, videoId: provider === 'ytmusic' ? id : '', title: fallbackTitle || `${p?.name || 'Müzik'} Parçası` }, p);
   }
-  if (provider === 'youtube') return { provider, videoId: id, url: `https://www.youtube.com/watch?v=${id}`, title: fallbackTitle || 'YouTube videosu', thumbnail: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, channel: 'YouTube' };
   if (provider === 'twitch') return { provider, videoId: id, url: `https://www.twitch.tv/${id.startsWith('v') ? 'videos/' + id.slice(1) : (/^\d+$/.test(id) ? 'videos/' + id : id)}`, embedUrl: id.startsWith('v') ? 'https://player.twitch.tv/?video=' + id.slice(1) + '&parent=' + location.hostname : 'https://player.twitch.tv/?channel=' + id + '&parent=' + location.hostname, title: fallbackTitle || `Twitch · ${id}`, channel: 'Twitch', thumbnail: (id.startsWith('v') || /^\d+$/.test(id)) ? '' : `https://static-cdn.jtvnw.net/previews-ttv/live_user_${id.toLowerCase()}-640x360.jpg` };
   if (provider === 'kick') return { provider, videoId: id, url: `https://kick.com/${id}`, embedUrl: `https://player.kick.com/${encodeURIComponent(id)}?autoplay=true`, title: fallbackTitle || `Kick · ${id}`, channel: 'Kick', live: true };
   if (provider === 'dailymotion') return { provider, videoId: id, url: `https://www.dailymotion.com/video/${id}`, embedUrl: `https://www.dailymotion.com/embed/video/${id}`, title: fallbackTitle || `Dailymotion · ${id}`, thumbnail: `https://www.dailymotion.com/thumbnail/video/${id}`, channel: 'Dailymotion' };
   if (provider === 'tiktok') return { provider, videoId: id, url, embedUrl: `https://www.tiktok.com/embed/v2/${id}`, title: fallbackTitle || `TikTok · #${id}`, channel: 'TikTok' };
   if (provider === 'vk') return { provider: 'vk', videoId: id, url, embedUrl: `https://vk.com/video_ext.php?oid=${String(id).split('_')[0]}&id=${String(id).split('_')[1] || id}&hd=2`, title: fallbackTitle || `VK Video · ${id}`, channel: 'VK Video' };
   if (provider === 'rutube') return { provider: 'rutube', videoId: id, url, embedUrl: `https://rutube.ru/play/embed/${encodeURIComponent(id)}`, title: fallbackTitle || `Rutube · ${id}`, channel: 'Rutube' };
-  if (provider === 'drive') return { provider, videoId: id, url, embedUrl: 'https://drive.google.com/file/d/' + id + '/preview', title: fallbackTitle || 'Google Drive videosu', channel: 'Google Drive', thumbnail: `https://drive.google.com/thumbnail?id=${id}&sz=w640` };
   if (provider === 'dropbox') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');
     return { provider: 'direct', videoId: id, url: directUrl, streamType: 'mp4', title: fallbackTitle || 'Dropbox Videosu', channel: 'Dropbox' };
@@ -1874,7 +1839,6 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
   if (provider === 'web') {
     try {
       const r = await api(`/api/rave/extract-video?${qs({ url, title: fallbackTitle })}`, { timeout: 15000 });
-      if (r.provider === 'youtube') return { ...r, channel: 'YouTube' };
       if (r.url) return { provider: r.provider === 'hls' ? 'hls' : 'direct', url: r.url, title: r.title || fallbackTitle || 'Web videosu', thumbnail: r.thumbnail || '', channel: new URL(url).hostname };
     } catch (e) {
       toast(e.data?.error || 'Bu sayfada oynatılabilir video bulunamadı');
@@ -1940,12 +1904,9 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     modalRef?.close?.();
     if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
     else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
-    if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
       const ytVid = item.videoId || item.id;
       await pickFn({
-        provider: 'youtube',
         videoId: ytVid,
-        url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
         title: item.title,
         thumbnail: item.poster || item.thumbnail,
         duration: item.duration || 0,
@@ -1959,8 +1920,6 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
     const cleanOrigTitle = String(item.originalTitle || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim() || cleanHistTitle;
     const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
     const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-    const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
-    const savedStreamUrl = item.streamUrl || (item.url && !String(item.url).includes('youtube.com') ? item.url : '');
     let resolved = null;
     if (!item.isMusic) {
       try {

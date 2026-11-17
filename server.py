@@ -239,7 +239,6 @@ _CLOAKED_HTML = b"""<!DOCTYPE html>
 </html>"""
 
 _CRAWLER_BOT_REGEX = re.compile(
-    r"(?i)(googlebot|bingbot|yandex|baiduspider|slurp|duckduckbot|ahrefsbot|semrushbot|"
     r"dotbot|mj12bot|bytespider|petalbot|markmonitor|corsearch|opsec|digimarc|"
     r"muso|leakix|censys|shodan|netcraft|screaming\s*frog|turnitin|scrapy)"
 )
@@ -403,9 +402,7 @@ class SecurityHeaders:
                     else:
                         csp_val = (
                             "default-src 'self'; "
-                            f"script-src 'self' 'nonce-{csp_nonce}' blob: https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://www.gstatic.com https://apis.google.com https://www.youtube.com https://s.ytimg.com https://player.vimeo.com https://www.googletagmanager.com https://www.google-analytics.com https://ssl.google-analytics.com; "
                             "worker-src 'self' blob:; "
-                            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
                             "font-src 'self' data: https://fonts.gstatic.com; "
                             "img-src 'self' data: blob: https:; "
                             "media-src 'self' data: blob: https:; "
@@ -715,7 +712,6 @@ def fetch_user_page(url: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Content search (Rave SuperSearch: YouTube + titles with "where to watch" offers)
 # ---------------------------------------------------------------------------
 _YT_SEARCH_CACHE: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
 
@@ -729,7 +725,6 @@ def _yt_search_sync(q: str):
             return list(cached[0])
     items = []
     try:
-        html = _http("https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"}), timeout=4.2).decode("utf-8", errors="ignore")
         m = re.search(r"var ytInitialData\s*=\s*(\{.*?\});</script>", html, re.S)
         if m:
             data = json.loads(m.group(1))
@@ -743,7 +738,6 @@ def _yt_search_sync(q: str):
                     vid = vr["videoId"]
                     title = "".join(r.get("text", "") for r in vr.get("title", {}).get("runs", [])) or "Video"
                     owner_runs = vr.get("ownerText", {}).get("runs", []) or vr.get("longBylineText", {}).get("runs", [])
-                    channel = "".join(r.get("text", "") for r in owner_runs) or "YouTube"
                     ch_id = ""
                     if owner_runs and isinstance(owner_runs[0], dict):
                         ch_id = (((owner_runs[0].get("navigationEndpoint") or {}).get("browseEndpoint") or {}).get("browseId") or "")
@@ -758,7 +752,6 @@ def _yt_search_sync(q: str):
                         "channelAvatar": ch_avatar, "views": views, "published": published,
                         "duration": dur, "live": live,
                         "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                        "url": f"https://www.youtube.com/watch?v={vid}",
                     })
                     if len(items) >= 24:
                         break
@@ -778,11 +771,9 @@ def _yt_search_sync(q: str):
                 items.append({
                     "videoId": vid,
                     "title": r.get("title") or r.get("songTitle") or "Video",
-                    "channel": r.get("artist") or "YouTube",
                     "duration": dur_str,
                     "live": False,
                     "thumbnail": r.get("poster") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                    "url": f"https://www.youtube.com/watch?v={vid}",
                 })
         except Exception:
             pass
@@ -793,7 +784,6 @@ def _yt_search_sync(q: str):
     return items
 
 
-async def search_youtube(request: Request):
     q = (request.query_params.get("q") or "").strip()[:200]
     if not q:
         return JSONResponse({"items": []})
@@ -801,7 +791,6 @@ async def search_youtube(request: Request):
         items = await asyncio.wait_for(asyncio.to_thread(_yt_search_sync, q), timeout=9)
         return JSONResponse({"items": items})
     except Exception as e:
-        return JSONResponse({"items": [], "error": f"YouTube araması başarısız: {type(e).__name__}"}, status_code=502)
 
 import concurrent.futures
 import xml.etree.ElementTree as ET
@@ -852,13 +841,11 @@ def _parse_lockup_view_model(lvm: dict, exclude_vid: str = "") -> dict | None:
     ch_avatar = str(av_srcs[-1].get("url") or "") if av_srcs and isinstance(av_srcs[-1], dict) else ""
     ch_id = str(((((((av_vm.get("rendererContext") or {}).get("commandContext") or {}).get("onTap") or {}).get("innertubeCommand") or {}).get("browseEndpoint") or {}).get("browseId") or "")).strip()
     rows = (((meta.get("metadata") or {}).get("contentMetadataViewModel") or {}).get("metadataRows")) or []
-    channel = "YouTube"
     views = ""
     published = ""
     if len(rows) >= 1 and isinstance(rows[0], dict):
         p0 = rows[0].get("metadataParts") or []
         if p0 and isinstance(p0[0], dict):
-            channel = str(((p0[0].get("text") or {}).get("content") or channel)).strip() or "YouTube"
     if len(rows) >= 2 and isinstance(rows[1], dict):
         p1 = rows[1].get("metadataParts") or []
         if len(p1) >= 1 and isinstance(p1[0], dict):
@@ -882,7 +869,6 @@ def _parse_lockup_view_model(lvm: dict, exclude_vid: str = "") -> dict | None:
         "channelAvatar": ch_avatar, "views": views, "published": published,
         "duration": "" if live else dur, "live": live,
         "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-        "url": f"https://www.youtube.com/watch?v={vid}",
     }
 
 
@@ -906,7 +892,6 @@ def _yt_next_related_sync(video_id: str, reason: str = "") -> list:
                 "videoId": vid,
             }).encode("utf-8")
             req = urllib.request.Request(
-                "https://www.youtube.com/youtubei/v1/next?prettyPrint=false",
                 data=payload,
                 headers={"Content-Type": "application/json", "User-Agent": UA, "Accept-Language": "tr-TR,tr;q=0.9"},
             )
@@ -928,7 +913,6 @@ def _yt_next_related_sync(video_id: str, reason: str = "") -> list:
                         if _YT_VID_RE.match(cvid) and cvid not in seen:
                             seen.add(cvid)
                             ctitle = (cvr.get("title") or {}).get("simpleText") or "".join(x.get("text", "") for x in (cvr.get("title") or {}).get("runs", []))
-                            cchan = "".join(x.get("text", "") for x in (cvr.get("longBylineText") or {}).get("runs", [])) or "YouTube"
                             cdur = (cvr.get("lengthText") or {}).get("simpleText") or ""
                             cviews = (cvr.get("shortViewCountText") or {}).get("simpleText") or ""
                             cpub = (cvr.get("publishedTimeText") or {}).get("simpleText") or ""
@@ -939,7 +923,6 @@ def _yt_next_related_sync(video_id: str, reason: str = "") -> list:
                                     "channelAvatar": "", "views": cviews, "published": cpub,
                                     "duration": cdur, "live": clive,
                                     "thumbnail": f"https://i.ytimg.com/vi/{cvid}/hqdefault.jpg",
-                                    "url": f"https://www.youtube.com/watch?v={cvid}",
                                 })
                     for v in node.values():
                         if isinstance(v, (dict, list)):
@@ -978,12 +961,9 @@ def _yt_channel_feed_sync(channel_id: str, channel_name: str = "", channel_avata
     items = []
     if cid.startswith("UC") and len(cid) >= 20:
         try:
-            feed_url = "https://www.youtube.com/feeds/videos.xml?" + urllib.parse.urlencode({"channel_id": cid})
             xml_bytes = _http(feed_url, timeout=4.5)
             root = ET.fromstring(xml_bytes)
-            ns = {"atom": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015", "media": "http://search.yahoo.com/mrss/"}
             author_el = root.find("atom:author/atom:name", ns)
-            resolved_ch = (author_el.text.strip() if author_el is not None and author_el.text else cname) or "YouTube"
             for entry in root.findall("atom:entry", ns)[:12]:
                 vid_el = entry.find("yt:videoId", ns)
                 tit_el = entry.find("atom:title", ns)
@@ -1000,7 +980,6 @@ def _yt_channel_feed_sync(channel_id: str, channel_name: str = "", channel_avata
                     "channelAvatar": channel_avatar, "views": v_cnt, "published": pub_str,
                     "duration": "", "live": False,
                     "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
-                    "url": f"https://www.youtube.com/watch?v={vid}",
                     "reason": f"🔔 {resolved_ch}",
                     "sourceKind": "subscription",
                 })
@@ -1085,10 +1064,8 @@ def _build_yt_personalized_feed_sync(ukey: str, params: dict) -> dict:
     freq_channels = list(followed[:5])
     seen_fc_names = {str(c.get("name") or "").lower() for c in freq_channels if c.get("name")}
     for p in prog_list:
-        if str(p.get("provider") or "").lower() != "youtube":
             continue
         ch_n = str(p.get("channel") or "").strip()
-        if ch_n and ch_n.lower() not in ("youtube", "sinema", "video") and "·" not in ch_n and ch_n.lower() not in seen_fc_names:
             seen_fc_names.add(ch_n.lower())
             freq_channels.append({"channelId": str(p.get("channelId") or ""), "name": ch_n, "avatar": str(p.get("channelAvatar") or "")})
 
@@ -1102,7 +1079,6 @@ def _build_yt_personalized_feed_sync(ukey: str, params: dict) -> dict:
         if art and art.lower() != "sanatçı" and len(affinity_queries) < 5:
             affinity_queries.append((f"{art} resmi klip canlı", f"🎵 {art}"))
     for p in prog_list[:3]:
-        if str(p.get("provider") or "") != "youtube" and p.get("title") and len(affinity_queries) < 5:
             mt = str(p.get("seriesTitle") or p.get("title") or "").split("—")[0].strip()[:36]
             if mt:
                 affinity_queries.append((f"{mt} fragman inceleme sahne", f"🎬 İzlediğin: {mt[:22]}"))
@@ -2249,7 +2225,6 @@ def _register_custom_release_stream(it_obj: dict) -> None:
     tid_k = str(it_obj.get("tmdbId") or it_obj.get("id") or "").strip()
     nt_k = _norm_title(it_obj.get("title") or "")
     no_k = _norm_title(it_obj.get("originalTitle") or "")
-    st_type = "mp4_fhd" if ".mp4" in st_u.lower() else ("yt" if ("youtube.com" in st_u.lower() or "youtu.be" in st_u.lower()) else "hls_fhd_multi")
     entry = {"streams": [[st_u, st_type]], "customDirect": True, "title": it_obj.get("title") or ""}
     keys = []
     if tid_k:
@@ -2326,7 +2301,6 @@ def _has_vault_stream(it_obj: dict) -> int:
                 if not isinstance(s, (list, tuple)) or len(s) < 2:
                     continue
                 su, st_t = str(s[0]), str(s[1])
-                if st_t == "yt" or "youtube.com" in su:
                     continue
                 if IS_VERCEL and (
                     st_t in ("hls_dbx", "hls_dp", "hls_hfnl", "hls_hfnl_multi")
@@ -3547,7 +3521,6 @@ PROV_BROWSE = {
     "dizilife": "https://dizi84.life",
     "fullhdfilm": "https://www.fullhdfilmizlesene.now",
     "yabancidizi": "https://yabancidizi.tv",
-    "music": "https://music.youtube.com",
 }
 
 
@@ -4063,7 +4036,6 @@ def _stream_matches_title(stream_url: str, valid_titles: list, year: str = "", i
     if not stream_url or not isinstance(stream_url, str):
         return False
     u = stream_url.lower()
-    if u.startswith("/api/rave/") or "youtube.com/" in u or "youtu.be/" in u:
         return True
     ti = str(imdb_id or "").strip().lower()
     if re.fullmatch(r"tt\d{6,9}", ti):
@@ -6594,7 +6566,6 @@ def _fetch_subtitles_sync(tid: str, imdb_id: str, mtype: str, s: int, e: int, pr
                                 score -= 40000
                             if any(k in fn for k in ("extended", "director.s.cut", "directors.cut", "director's cut", "unrated", "remastered.extended")):
                                 score -= 25000
-                            if str(it.get("SubAutoTranslation") or "0") == "1" or any(k in fn for k in ("autotrans", "makine", "google")):
                                 score -= 50000
                             if any(k in fn for k in ("web-dl", "webrip", "web.dl", "web.rip", ".nf.", "nf.web", "amzn", "dsnp", "atvp", "hmax")):
                                 score += 25000
@@ -7123,7 +7094,6 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
                     if valid_norms and not any(vn in vn_compact for vn in valid_norms if len(vn) >= 2):
                         continue
                     owner_runs = (vr.get("ownerText") or {}).get("runs") or (vr.get("longBylineText") or {}).get("runs") or []
-                    channel = "".join(r_t.get("text", "") for r_t in owner_runs) or "YouTube"
                     return {"videoId": vid, "title": v_title, "channel": channel, "duration": dur_secs}
             return None
 
@@ -7136,7 +7106,6 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
                     "query": q,
                 }).encode("utf-8")
                 req_it = urllib.request.Request(
-                    "https://www.youtube.com/youtubei/v1/search?prettyPrint=false",
                     data=it_body,
                     headers={"Content-Type": "application/json", "User-Agent": UA137, "Accept-Language": "tr-TR,tr;q=0.9"},
                 )
@@ -7149,7 +7118,6 @@ def _extract_official_yt_sync(title: str, s: int, e: int, mtype: str, extra_titl
             except Exception:
                 pass
             try:
-                u_yt = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": q, "hl": "tr", "gl": "TR"})
                 req = urllib.request.Request(u_yt, headers={"User-Agent": UA137})
                 with urllib.request.urlopen(req, timeout=3.8) as r:
                     html = r.read(MAX_PAGE_BYTES).decode("utf-8", errors="ignore")
@@ -7546,8 +7514,6 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                             if v_ent.get("customDirect") or _stream_matches_title(st_u, [orig_title, tr_title, disp, title], year, imdb_id):
                                 fb_candidates.append((st_u, st_t))
             direct_list = fb_candidates[:5]
-        has_non_yt = any(st != "yt" and "youtube.com/watch?v=" not in str(u) for u, st in (direct_list or []))
-        yt_vault_hit = "" if has_non_yt else next((u for u, st in (direct_list or []) if st == "yt" or "youtube.com/watch?v=" in str(u)), "")
         if yt_vault_hit:
             m_yv = YT_RE.search(yt_vault_hit)
             if m_yv:
@@ -7556,24 +7522,17 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 full_title = f"{disp or tr_title or orig_title} — {s}. Sezon {e}. Bölüm" if mtype == "tv" else (disp or tr_title or orig_title)
                 return {
                     "id": eff_tid or tid,
-                    "provider": "youtube",
-                    "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "sourceUrl": source_url or "",
-                    "streamType": "youtube",
-                    "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
-                    "embedUrl": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1",
                     "altUrls": [],
                     "subtitleTracks": [],
                     "audioTracks": [{"id": "tr-dub", "label": f"🇹🇷 Türkçe ({label} Orijinal Ses)", "language": "tr", "lang": "tr", "kind": "main"}],
                     "intro": None,
                     "platformAudioLangs": ["tr"],
                     "platformSubLangs": [],
-                    "officialUrl": f"https://www.youtube.com/watch?v={vid}",
-                    "providerUrl": f"https://www.youtube.com/watch?v={vid}",
                     "title": full_title,
                     "thumbnail": poster or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
                     "channel": f"{label} · Resmi Tam Yayın (1080p HD)",
@@ -7725,7 +7684,6 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
             }
         is_tr_yt_eligible = (
             orig_lang == "tr"
-            or prov in ("exxen", "blutv", "gain", "tod", "tabii", "tvplus", "puhutv", "youtube")
             or (not tid.isdigit() and any(ch in f"{orig_title} {title}" for ch in "çğıöşüÇĞİÖŞÜ"))
         )
         if not direct_list and is_tr_yt_eligible:
@@ -7739,24 +7697,17 @@ def _resolve_catalog_sync(prov: str, title: str, year: str, tmdb_id: str, media_
                 yt_poster = poster or (m_cached or {}).get("poster") or f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"
                 return {
                     "id": eff_tid or tid,
-                    "provider": "youtube",
-                    "catalogProvider": prov if prov in PROV_LABELS else "youtube",
                     "tmdbId": tid, "imdbId": imdb_id, "mediaType": mtype, "season": s if mtype == "tv" else 0, "episode": e if mtype == "tv" else 0,
                     "seriesTitle": disp or tr_title or orig_title,
                     "originalTitle": orig_title, "year": year, "origLang": orig_lang or "tr",
                     "sourceUrl": source_url or "",
-                    "streamType": "youtube",
-                    "url": f"https://www.youtube.com/watch?v={vid}",
                     "videoId": vid,
-                    "embedUrl": f"https://www.youtube-nocookie.com/embed/{vid}?autoplay=1",
                     "altUrls": [],
                     "subtitleTracks": [],
                     "audioTracks": [{"id": "yt-audio", "label": yt_aud_label, "language": yt_aud_lang, "lang": yt_aud_lang, "kind": "main"}],
                     "intro": None,
                     "platformAudioLangs": [yt_aud_lang],
                     "platformSubLangs": [],
-                    "officialUrl": f"https://www.youtube.com/watch?v={vid}",
-                    "providerUrl": f"https://www.youtube.com/watch?v={vid}",
                     "title": full_title,
                     "poster": yt_poster,
                     "thumbnail": yt_poster,
@@ -8531,7 +8482,6 @@ async def rave_latest_episodes(request: Request):
 async def supersearch(request: Request):
     q = _BIDI_CTRL_RE.sub("", request.query_params.get("q") or "").strip()[:200]
     if not q:
-        return JSONResponse({"youtube": [], "tmdb": [], "justwatch": []})
     qkey = _norm_title(q) or q.replace("İ", "i").replace("I", "ı").lower()
     cached = _SUPERSEARCH_CACHE.get(qkey)
     cc_hdrs = {"Cache-Control": "public, max-age=60, s-maxage=300, stale-while-revalidate=900"}
@@ -8589,7 +8539,6 @@ async def supersearch(request: Request):
                 and f"{'tv' if x.get('mediaType') == 'tv' else 'movie'}:{x.get('id') or x.get('tmdbId') or ''}" not in _HIDDEN_TMDB_IDS
             )
         ]
-    payload = {"query": q, "youtube": yt, "tmdb": tmdb, "justwatch": jw}
     try:
         await asyncio.to_thread(_track_analytics_sync, "search", query=q)
     except Exception:
@@ -8622,7 +8571,6 @@ async def gifs(request: Request):
 # ---------------------------------------------------------------------------
 # Link resolution (Rave captureURLChange -> idParser -> fetchSelected for web-playable sources)
 # ---------------------------------------------------------------------------
-YT_RE = re.compile(r"(?:youtube\.com/(?:[^/\n\s]+/\s*)?(?:v/|u/\w/|live/|embed/|watch\?v=|&v=|shorts/)|youtu\.be/)([^\"&?/\s]{11})", re.I)
 
 
 async def vimeo_oembed(request: Request):
@@ -8642,15 +8590,12 @@ def _extract_sync(url: str, fallback_title: str):
     m = YT_RE.search(url)
     if m:
         vid = m.group(1)
-        return {"provider": "youtube", "videoId": vid, "url": f"https://www.youtube.com/watch?v={vid}", "title": fallback_title or "YouTube videosu", "thumbnail": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"}
     m_vim = re.search(r"vimeo\.com/(?:video/|channels/[^/]+/)?(\d+)", url, re.I)
     if m_vim:
         v_id = m_vim.group(1)
         return {"provider": "vimeo", "videoId": v_id, "url": url, "embedUrl": f"https://player.vimeo.com/video/{v_id}?autoplay=1", "title": fallback_title or f"Vimeo #{v_id}"}
-    m_drv = re.search(r"drive\.google\.com/(?:file/d/|open\?id=)([A-Za-z0-9_-]{10,})", url, re.I)
     if m_drv:
         fid = m_drv.group(1)
-        return {"provider": "drive", "fileId": fid, "url": f"https://drive.google.com/file/d/{fid}/preview", "embedUrl": f"https://drive.google.com/file/d/{fid}/preview", "title": fallback_title or "Google Drive Video"}
     if "dropbox.com/" in url.lower():
         dbx_u = re.sub(r"[?&]dl=0\b", "?raw=1", url)
         if "raw=1" not in dbx_u and "dl=1" not in dbx_u:
@@ -8686,7 +8631,6 @@ def _extract_sync(url: str, fallback_title: str):
         return {"provider": "hls", "url": url, "title": fallback_title or "Canlı yayın"}
     matched_prov = None
     for pkey, pcfg in RAVE_PROVIDERS_SPEC.items():
-        if pkey in ("youtube", "drive", "twitch", "vimeo", "dropbox", "dailymotion", "tiktok", "kick"):
             continue
         if re.search(pcfg["idRegex"], url, re.I) or pcfg["domain"].lstrip(".") in url.lower():
             matched_prov = pkey
@@ -8720,12 +8664,10 @@ def _extract_sync(url: str, fallback_title: str):
     if og:
         yt = YT_RE.search(og.group(1))
         if yt:
-            return {"provider": "youtube", "videoId": yt.group(1), "url": f"https://www.youtube.com/watch?v={yt.group(1)}", "title": title, "thumbnail": f"https://i.ytimg.com/vi/{yt.group(1)}/hqdefault.jpg"}
         if re.search(r"\.(mp4|webm|m3u8)(\?|$)", og.group(1), re.I) and public_http_url(og.group(1)):
             return {"provider": "hls" if ".m3u8" in og.group(1) else "direct", "url": og.group(1), "title": title, "thumbnail": thumb}
     emb = YT_RE.search(html)
     if emb:
-        return {"provider": "youtube", "videoId": emb.group(1), "url": f"https://www.youtube.com/watch?v={emb.group(1)}", "title": title, "thumbnail": f"https://i.ytimg.com/vi/{emb.group(1)}/hqdefault.jpg"}
     return None
 
 
@@ -8754,8 +8696,6 @@ RAVE_PROVIDERS_SPEC = {
     "tiktok":      {"name": "TikTok", "domain": ".tiktok.com", "loginUrl": "https://www.tiktok.com/login", "browseUrl": "https://www.tiktok.com", "authCookies": ["sessionid", "tt_webid"], "idRegex": r"tiktok\.com/.*?(?:video)/(\d+)"},
     "dailymotion": {"name": "Dailymotion", "domain": ".dailymotion.com", "loginUrl": "https://www.dailymotion.com/signin", "browseUrl": "https://www.dailymotion.com", "authCookies": ["sid", "dm_token"], "idRegex": r"(?:dailymotion\.com/video/|dai\.ly/)([a-zA-Z0-9]+)"},
     "dropbox":     {"name": "Dropbox", "domain": ".dropbox.com", "loginUrl": "https://www.dropbox.com/login", "browseUrl": "https://www.dropbox.com/home", "authCookies": ["t", "jar"], "idRegex": r"dropbox\.com/(?:s|scl/fi)/([\w/-]+)"},
-    "youtube":     {"name": "YouTube", "domain": ".youtube.com", "loginUrl": "https://accounts.google.com/ServiceLogin?service=youtube", "browseUrl": "https://www.youtube.com", "authCookies": ["LOGIN_INFO", "SAPISID", "SID"], "idRegex": r"(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([^\"&?/\s]{11})"},
-    "drive":       {"name": "Google Drive", "domain": ".google.com", "loginUrl": "https://accounts.google.com/ServiceLogin?service=wise", "browseUrl": "https://drive.google.com/drive/my-drive", "authCookies": ["drive_oauth_token", "SID", "HSID"], "idRegex": r"drive\.google\.com/file/d/([\w-]+)"},
     "twitch":      {"name": "Twitch", "domain": ".twitch.tv", "loginUrl": "https://www.twitch.tv/login", "browseUrl": "https://www.twitch.tv", "authCookies": ["auth-token", "twilight-user"], "idRegex": r"twitch\.tv/(?:videos/(\d+)|([a-zA-Z0-9_]+))"},
     "vimeo":       {"name": "Vimeo", "domain": ".vimeo.com", "loginUrl": "https://vimeo.com/log_in", "browseUrl": "https://vimeo.com/watch", "authCookies": ["vimeo", "vuid"], "idRegex": r"vimeo\.com/(?:video/)?(\d+)"},
     "cinema":          {"name": "Sinema, Dizi & Anime+", "domain": ".fullhdfilmizlesene.now", "loginUrl": "", "browseUrl": "https://www.fullhdfilmizlesene.now", "authCookies": ["cinema_free"], "idRegex": r"(?:fullhdfilmizlesene|hdfilmcehennemi|dizibox|animecix|dizi\d*)\.[a-z.]+/((?:film|dizi|bolum|titles|diziler)/?[\w-]+)"},
@@ -8764,7 +8704,6 @@ RAVE_PROVIDERS_SPEC = {
     "dizilife":        {"name": "Dizibox+", "domain": ".dizibox.live", "loginUrl": "", "browseUrl": "https://www.dizibox.live", "authCookies": ["dl_free"], "idRegex": r"(?:dizibox|dizi\d*)\.(?:live|life|com|org)/((?:dizi|film|diziler)/?[\w-]+)"},
     "fullhdfilm":      {"name": "FullHDFilmizlesene", "domain": ".fullhdfilmizlesene.now", "loginUrl": "", "browseUrl": "https://www.fullhdfilmizlesene.now", "authCookies": ["fhd_free"], "idRegex": r"(?:fullhdfilmizlesene|jetfilmizle)\.[a-z.]+/(?:film/)?([\w-]+)"},
     "yabancidizi":     {"name": "Maraton+", "domain": ".yabancidizi.tv", "loginUrl": "", "browseUrl": "", "authCookies": ["yd_free"], "idRegex": r"yabancidizi\.[a-z.]+/(?:dizi|izle)/([\w-]+)"},
-    "ytmusic":         {"name": "YouTube Music", "domain": "music.youtube.com", "loginUrl": "", "browseUrl": "", "authCookies": ["ytm_free"], "idRegex": r"music\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})"},
     "spotify":         {"name": "Spotify Music", "domain": "open.spotify.com", "loginUrl": "", "browseUrl": "", "authCookies": ["sp_free"], "idRegex": r"open\.spotify\.com/(?:intl-[a-z]+/)?(?:track|album|playlist)/([A-Za-z0-9]+)"},
     "deezer":          {"name": "Deezer Hi-Fi", "domain": "deezer.com", "loginUrl": "", "browseUrl": "", "authCookies": ["dz_free"], "idRegex": r"deezer\.com/(?:[a-z]+/)?(?:track|album|playlist)/(\d+)"},
     "applemusic":      {"name": "Apple Music", "domain": "music.apple.com", "loginUrl": "", "browseUrl": "", "authCookies": ["am_free"], "idRegex": r"music\.apple\.com/[a-z]{2}/(?:album|playlist)/[^/]+/(\d+)"},
@@ -9676,7 +9615,6 @@ def _proxy_chunk_sync(url: str, ref: str, rng: str, ext_hint: str = ""):
     clean_u_path = url.lower().split("?", 1)[0]
     is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)
     is_fmp4_seg = is_fmp4_init or ext_hint == ".m4s" or clean_u_path.endswith(".m4s")
-    is_explicit_mp4 = (not is_fmp4_seg) and (ext_hint in (".mp4", ".webm", ".mkv") or url in _KNOWN_LARGE_MP4_URLS or any(clean_u_path.endswith(x) for x in (".mp4", ".webm", ".mkv")) or "/file/tau-video/" in url.lower() or "drive.usercontent.google.com" in url.lower())
     is_seg_url = is_fmp4_seg or ext_hint in (".ts", ".aac", ".key", ".vtt", ".m3u8") or ((not is_explicit_mp4) and any(x in url for x in (".ts", ".png", ".jpg", ".m4s", "init-", "/r6/", ".aac", ".vtt", ".m3u8", ".cfd/", ".click/", "key.php", "pilavyer")))
     has_high_range = False
     if rng and rng.startswith("bytes=") and not is_seg_url:
@@ -10846,7 +10784,6 @@ async def poster_proxy(request: Request):
             "hdfilmcehennemi.mobi", "hdfilmcehennemi.com", "hdfilmcehennemi.de", "hdfilmcehennemi.nl",
             "dizibox.live", "dizibox.com", "dizibox.tv",
             "cdnhipter.com", "ddizimag.com", "image.tmdb.org", "themoviedb.org", "ytimg.com",
-            "ggpht.com", "googleusercontent.com", "mzstatic.com", "dzcdn.net", "scdn.co",
             "spotifycdn.com", "media-amazon.com", "media-imdb.com",
         )
     )
@@ -11191,8 +11128,6 @@ def _fetch_vtt_sync(url: str, timeout: float = 8.0) -> str:
             _SUB_VTT_CACHE.move_to_end(url)
             return _SUB_VTT_CACHE[url]
     ua_use = (
-        "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)"
-        if "youtube.com/api/timedtext" in url
         else ("TemporaryUserAgent" if "opensubtitles.org" in url else UA137)
     )
     hdrs = {
@@ -11319,7 +11254,6 @@ def _translate_vtt_to_tr_sync(vtt: str, target_lang: str = "tr") -> str:
     def _tr_batch(b_tuple):
         b_idxs, b_txts = b_tuple
         joined = "\n ||| \n".join(b_txts)
-        u = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={tl_code}&dt=t&q={urllib.parse.quote(joined)}"
         try:
             data = _raw_get_json(u, headers={"User-Agent": UA137}, timeout=3.5)
             full_tr = "".join(seg[0] for seg in (data[0] or []) if seg and seg[0])
@@ -11385,15 +11319,12 @@ def _fetch_yt_subtitles_and_audio_sync(video_id: str) -> dict:
     }
     subs = []
     audio = [
-        {"id": "orig", "lang": "orig", "targetLang": "orig", "audioLang": "orig", "label": "🎬 Orijinal Ses (YouTube HD)", "mode": "stream", "url": ""},
     ]
     try:
         req = urllib.request.Request(
-            "https://www.youtube.com/youtubei/v1/player?prettyPrint=false",
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "com.google.ios.youtube/20.03.02 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X;)",
             },
             method="POST",
         )
@@ -11435,7 +11366,6 @@ def _fetch_yt_subtitles_and_audio_sync(video_id: str) -> dict:
                 "label": lbl,
                 "url": vtt_proxy,
                 "kind": "subtitles",
-                "source": "youtube-asr" if is_asr else "youtube",
             })
         if not has_tr and best_src_vtt_url:
             tr_proxy = f"/api/rave/subtitle.vtt?url={urllib.parse.quote(best_src_vtt_url, safe='')}&lang=tr&translate=tr"
@@ -11443,7 +11373,6 @@ def _fetch_yt_subtitles_and_audio_sync(video_id: str) -> dict:
                 "id": "tr-auto-translate",
                 "lang": "tr",
                 "ytLangCode": "tr",
-                "label": "🇹🇷 Türkçe (YouTube Otomatik Çeviri Senkron)",
                 "url": tr_proxy,
                 "kind": "subtitles",
                 "source": "ai-tr",
@@ -11644,8 +11573,6 @@ def _fetch_tts_mp3_sync(text: str, lang: str = "tr") -> bytes:
             _TTS_CACHE.move_to_end(ck)
             return _TTS_CACHE[ck]
     q = urllib.parse.quote(clipped)
-    u = f"https://translate.googleapis.com/translate_tts?ie=UTF-8&client=tw-ob&tl={urllib.parse.quote(lang[:5])}&q={q}"
-    req = urllib.request.Request(u, headers={"User-Agent": UA137, "Referer": "https://translate.google.com/"})
     with urllib.request.urlopen(req, timeout=4.5) as r:
         data = r.read(256 * 1024)
     if data:
@@ -11748,7 +11675,6 @@ def _has_valid_upload_magic(ext: str, head: bytes) -> bool:
 
 async def upload_file(request: Request):
     if IS_VERCEL:
-        return JSONResponse({"error": "Dosya yükleme bulut sürümünde kapalı. Dosyanı Google Drive'a yükleyip bağlantısını kullanabilirsin."}, status_code=501)
     # Uploads are expensive (disk, bandwidth): verified accounts only (never guest tokens).
     uid = str(request.scope.get("wl_uid") or "")
     claims = request.scope.get("wl_claims") or {}
@@ -12756,10 +12682,6 @@ def _track_analytics_sync(
 async def robots_txt_endpoint(request: Request) -> Response:
     txt = (
         "# Watchlivo Private Streaming Infrastructure & Anti-Crawler Directives\n"
-        "User-agent: Googlebot\nDisallow: /\n\n"
-        "User-agent: Googlebot-Image\nDisallow: /\n\n"
-        "User-agent: Googlebot-Video\nDisallow: /\n\n"
-        "User-agent: Mediapartners-Google\nDisallow: /\n\n"
         "User-agent: Bingbot\nDisallow: /\n\n"
         "User-agent: Slurp\nDisallow: /\n\n"
         "User-agent: Yandex\nDisallow: /\n\n"
@@ -12892,7 +12814,6 @@ def _get_ga_measurement_id_sync() -> str:
 def _set_ga_measurement_id_sync(ga_id: str) -> str:
     clean_id = (ga_id or "").strip().upper()
     if clean_id and not re.fullmatch(r"G-[A-Z0-9]{6,16}", clean_id):
-        raise ValueError("Geçersiz Google Analytics 4 Ölçüm Kimliği (Örn: G-XXXXXXXXXX)")
     _GA_MEASUREMENT_ID_CACHE["id"] = clean_id
     _GA_MEASUREMENT_ID_CACHE["ts"] = time.time()
     try:
@@ -12936,7 +12857,6 @@ def _send_server_ga4_hit_sync(vid_hash: str, ua_str: str, ip_str: str, ev: str =
                 "_ee": "1",
                 "_uip": ip_str if ip_str and ip_str != "127.0.0.1" else "",
             })
-            url = f"https://www.google-analytics.com/g/collect?{q}"
             req = _ur.Request(
                 url,
                 data=b"",
@@ -12956,7 +12876,6 @@ _GA_PROXY_LIMIT = RateLimiter(240, 60.0, name="ga_proxy")
 
 
 async def rave_ga_collect_proxy(request: Request) -> Response:
-    """First-party transport_url relay for Google Analytics 4 (/api/rave/ga-collect/g/collect)."""
     import urllib.request as _ur
     if request.method == "OPTIONS":
         return Response(b"", status_code=204, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET, POST, OPTIONS"})
@@ -12979,7 +12898,6 @@ async def rave_ga_collect_proxy(request: Request) -> Response:
         qs = f"{qs}&_uip={ip_str}" if qs else f"_uip={ip_str}"
 
     def _forward():
-        for host in ("https://www.google-analytics.com/g/collect", "https://www.google.com/g/collect"):
             try:
                 req = _ur.Request(
                     f"{host}?{qs}",
@@ -13037,7 +12955,6 @@ async def rave_analytics_endpoint(request: Request) -> JSONResponse:
             cur_ga = await asyncio.to_thread(_get_ga_measurement_id_sync)
             if req_ga != cur_ga and not _is_admin_request(request):
                 return JSONResponse(
-                    {"ok": False, "error": "Google Analytics kimliğini değiştirmek için yönetici yetkisi gerekli."},
                     status_code=403,
                     headers={"Cache-Control": "no-store"},
                 )
@@ -13152,7 +13069,6 @@ async def legal_page_endpoint(request: Request) -> HTMLResponse:
             "<p><b>Watchlivo (watchlivo.online)</b> olarak kullanıcılarımızın gizliliğine ve 6698 sayılı KVKK ile GDPR standartlarına en üst düzeyde önem veriyoruz.</p>"
             "<ul><li><b>Oda İçi Sesli Sohbet (WebRTC):</b> Sesli görüşmeler anlık iletilir ve sunucularımızda kesinlikle kaydedilmez.</li>"
             "<li><b>Üye ve Misafir Verileri:</b> Kayıtsız misafirler için yalnızca geçici oturum rumuzu kullanılır. Üye bilgileri üçüncü taraflarla paylaşılmaz.</li>"
-            "<li><b>Çerezler ve Analitik:</b> Tema, ses ve kaldığınız dakika bilgileri tarayıcınızda tutulur; performans ölçümü için anonim Google Analytics 4 kullanılır.</li></ul>"
         ),
         "terms": (
             "Kullanım Koşulları & Topluluk Kuralları — Watchlivo",
@@ -13333,7 +13249,6 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>Watchlivo — Google Analytics 4 & SEO Yönetim Paneli</title>
   <style>
     body {{ margin:0; background:#070b12; color:#f8fafc; font-family:Inter,system-ui,sans-serif; padding:24px; }}
     .wrap {{ max-width:1080px; margin:0 auto; }}
@@ -13356,8 +13271,6 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
   <div class="wrap">
     <div class="top">
       <div>
-        <h1 style="margin:0;font-size:22px;">📈 Watchlivo — Google Analytics 4 (`gtag.js`) & SEO Yönetimi</h1>
-        <div style="color:#94a3b8;font-size:13px;margin-top:4px;">Bu sayfayı yenilemek sayacı ARTIRMAZ · Yalnızca gerçek tekil oturumlar ve Google Analytics 4 olayları işlenir.</div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;">
         <span class="badge">{ga_status}</span>
@@ -13365,11 +13278,8 @@ async def analytics_dashboard_page(request: Request) -> HTMLResponse:
       </div>
     </div>
     <div class="card" style="margin-bottom:20px;border-color:rgba(39,220,200,.35);">
-      <div class="lbl">🔗 Resmi Google Analytics 4 (`gtag.js`) Bağlantısı</div>
-      <p style="font-size:13px;color:#cbd5e1;margin:8px 0 12px;">Google Analytics 4 mülkünüzün <b>G-XXXXXXXXXX</b> Ölçüm Kimliğini aşağıya girip kaydedin; tüm sayfa görüntülemeleri, film/dizi aramaları ve oda katılımları doğrudan resmi Google Analytics 4 panelinize (`analytics.google.com`) akar.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
         <input id="ga-inp" class="inp" placeholder="G-XXXXXXXXXX" value="{html_mod.escape(ga_id)}" />
-        <button id="btn-save-ga" type="button" class="btn">Kaydet & Google Analytics'i Aktifleştir</button>
         <span id="ga-msg" style="font-size:13px;color:#27dcc8;font-weight:700;"></span>
       </div>
     </div>
@@ -13549,7 +13459,6 @@ app = Starlette(
         Route("/api/rave/social/voice-relay", social_engine.voice_relay_endpoint, methods=["GET", "POST", "OPTIONS"]),
         Route("/api/rave/link-preview", social_engine.link_preview, methods=["GET"]),
         Route("/api/rave/translate-chat", social_engine.translate_chat, methods=["GET"]),
-        Route("/api/rave/playlist", social_engine.youtube_playlist, methods=["GET"]),
         Route("/api/rave/ravedj-mashup", social_engine.ravedj_mashup, methods=["GET", "POST"]),
         Route("/api/rave/ravedj-trending", social_engine.ravedj_trending, methods=["GET"]),
         Route("/api/rave/ai-image", social_engine.ai_image_generate, methods=["GET", "POST"]),
@@ -13574,8 +13483,6 @@ app = Starlette(
         Route("/api/rave/ai-status", rave_ai_status),
         Route("/api/rave/ai-chat", rave_ai_chat, methods=["GET", "POST"]),
         Route("/api/rave/suno-generate", rave_suno_generate, methods=["POST"]),
-        Route("/api/search/youtube", search_youtube),
-        Route("/api/rave/yt-search", search_youtube),
         Route("/api/rave/supersearch", supersearch),
         Route("/api/rave/catalog", provider_catalog),
         Route("/api/rave/provider-catalog", provider_catalog),

@@ -93,7 +93,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
     def test_03_auth_local_password_never_overwritten_and_search_wildcard_safe(self):
         u1, h1 = self._register("koruma@watchlivo.online", "koruma_vip", "Koruma VIP", "GercekSifre#2026!")
-        with patch.object(auth_engine, "_firebase_auth_req", return_value={"idToken": "tok_x", "users": [{"emailVerified": True, "email": "koruma@watchlivo.online"}]}):
             bad = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "SahteSifre#999"})
             self.assertEqual(bad.status_code, 401)
         good = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "GercekSifre#2026!"})
@@ -152,23 +151,16 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertIn("isTrustedWatchlivoHost:", ios_main)
 
 
-    def test_06_adfree_youtube_fmp4_hls_and_nocookie_fallback(self):
         import music_engine
         repo = pathlib.Path(__file__).resolve().parents[1]
-        yt_js = (repo / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         self.assertIn("yt-adfree-video", yt_js)
         self.assertIn("/api/rave/yt-pip-hls.m3u8", yt_js)
         self.assertIn("kind=muxed", yt_js)
-        self.assertIn("https://www.youtube-nocookie.com", yt_js)
         self.assertIn("enterAutoPiP", yt_js)
 
         fake_info = {
-            "hlsUrl": "https://manifest.googlevideo.com/api/manifest/hls_variant/ip/1.2.3.4/index.m3u8",
             "muxedUrl": "",
-            "audioUrl": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140",
-            "videoUrl": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=137",
             "videoFmt": {
-                "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=137",
                 "initRange": {"start": "0", "end": "739"},
                 "indexRange": {"start": "740", "end": "1227"},
                 "width": 1920,
@@ -178,7 +170,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
                 "ua": music_engine.UA_YT_IOS,
             },
             "audioFmt": {
-                "url": "https://rr1---sn-test.googlevideo.com/videoplayback?itag=140",
                 "initRange": {"start": "0", "end": "631"},
                 "indexRange": {"start": "632", "end": "999"},
                 "bandwidth": 130000,
@@ -204,7 +195,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
 
 
-    def test_07_personalized_youtube_feed_account_isolation_and_lockup_parser(self):
         # 1. Unauthenticated /api/user/yt-preferences must be rejected with 401
         r_unauth = self.client.get("/api/user/yt-preferences")
         self.assertEqual(r_unauth.status_code, 401)
@@ -214,11 +204,9 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         u1, h1 = self._register("yt_u1@watchlivo.test", "ytuser1", "YT User One")
         u2, h2 = self._register("yt_u2@watchlivo.test", "ytuser2", "YT User Two")
 
-        # Save YouTube watch progress with videoId/channel/channelId/channelAvatar for u1
         pr = self.client.post("/api/user/progress", headers=h1, json={
             "action": "upsert",
             "key": "yt:kJQP7kiw5Fk",
-            "provider": "youtube",
             "videoId": "kJQP7kiw5Fk",
             "title": "Luis Fonsi - Despacito",
             "channel": "LuisFonsiVEVO",
@@ -246,13 +234,11 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.client.post("/api/user/yt-preferences", headers=h1, json={"action": "dismiss_video", "videoId": "HIDE_ME_123"})
         self.client.post("/api/user/yt-preferences", headers=h1, json={"action": "block_channel", "channel": "MutedSpamChannel"})
 
-        # Verify u2 sees ZERO of u1's YouTube preferences or history
         prefs_u2 = self.client.get("/api/user/yt-preferences", headers=h2).json()["prefs"]
         self.assertEqual(prefs_u2["subscriptions"], [])
         self.assertEqual(prefs_u2["likedVideos"], [])
         self.assertEqual(prefs_u2["searchHistory"], [])
 
-        # 3. Verify 2026 YouTube lockupViewModel parser
         sample_lvm = {
             "contentId": "AbCdEfGh123",
             "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
@@ -291,7 +277,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
         # 4. Verify /api/rave/yt-personalized-feed interleaves & filters dismissed/blocked items with private no-store headers
         mock_next = [
-            {"videoId": "AbCdEfGh123", "title": "Derin Uzay Belgeseli 4K", "channel": "Evrim Ağacı", "channelId": "UCq-Fj5jknLsUf-MWSy4_brA", "views": "420 B", "published": "2 gün önce", "duration": "12:45", "live": False, "thumbnail": "https://i.ytimg.com/vi/AbCdEfGh123/hqdefault.jpg", "url": "https://www.youtube.com/watch?v=AbCdEfGh123", "reason": "✨ İzlediğin videoya göre"},
             {"videoId": "HIDE_ME_123", "title": "Gizlenen Video", "channel": "Other", "channelId": "", "views": "10 B", "published": "1 gün önce", "duration": "3:10", "live": False, "thumbnail": "", "url": ""},
             {"videoId": "SPAM_VID_99", "title": "Spam Video", "channel": "MutedSpamChannel", "channelId": "", "views": "1 B", "published": "1 saat önce", "duration": "1:00", "live": False, "thumbnail": "", "url": ""},
         ]
@@ -357,7 +342,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
                 f"Missing direct .cfd MP4 for Chainsaw Man S1E{ep_n}: {entries}",
             )
 
-        # 3. Keşfet (selection.js) must NOT render ytHomeMount until YouTube is explicitly opened
         sel_js = (repo / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
         self.assertIn("const showYtHome = false;", sel_js)
         self.assertNotIn("...(showYtHome ? [ytHomeMount] : [])", sel_js)
@@ -366,7 +350,6 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         store_js = (repo / "static" / "js" / "store.js").read_text(encoding="utf-8")
         self.assertNotIn("fragman inceleme`", store_js)
 
-        # 4. Dead stream (-1) must NOT be served as 200 OK, and foreign series must NOT trigger Turkish YouTube fallback
         dead_u = "https://white-tooth-83b1.wellsrobertsonkmlt.workers.dev/video.m3u8"
         server._STREAM_RES_HINT[dead_u] = -1
         with patch.object(server, "_get_tmdb_meta_sync", return_value={"originalTitle": "From", "trTitle": "From", "year": "2022", "imdbId": "tt9813792", "origLang": "en", "runtime": 50}), \

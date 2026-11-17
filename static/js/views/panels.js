@@ -106,7 +106,6 @@ function Vote(ctx) {
   const removeQueueItem = (i, id) => (ctx.actions.removeQueueItem || ctx.actions.removeQueue)?.(i, id);
   const urlInput = h('input', {
     class: 'input',
-    placeholder: 'YouTube, MP4, M3U8, Kick bağlantısı yapıştır...',
     'aria-label': 'Sıraya video bağlantısı ekle',
     style: { flex: '1', fontSize: '.78rem', padding: '7px 10px' },
   });
@@ -153,7 +152,6 @@ function Vote(ctx) {
       urlInput,
       h('button', { type: 'button', class: 'btn sm primary', onclick: () => addFromInput(false) }, '+ Ekle')),
     h('div', { style: { display: 'flex', gap: '6px' } },
-      h('button', { type: 'button', class: 'btn sm ghost', style: { flex: '1', justifyContent: 'center' }, onclick: () => ctx?.layout?.openSearch?.() }, '🔍 Katalog & YouTube Ara')));
 
   const update = () => {
     if (el.contains(document.activeElement) && document.activeElement === urlInput) return;

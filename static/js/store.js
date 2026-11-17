@@ -1375,7 +1375,6 @@ export function saveMusicHistory(item) {
   } catch (e) { /* ignore */ }
 }
 // ---------------------------------------------------------------------------
-// Account-Bound YouTube Personalization Graph & Feed Client (v91)
 // ---------------------------------------------------------------------------
 export function getYtPrefs() {
   try {
@@ -1388,9 +1387,6 @@ export function getYtPrefs() {
         dismissedVideoIds: Array.isArray(raw.dismissedVideoIds) ? raw.dismissedVideoIds : [],
         blockedChannels: Array.isArray(raw.blockedChannels) ? raw.blockedChannels : [],
         topics: Array.isArray(raw.topics) ? raw.topics : [],
-        googleConnected: Boolean(raw.googleConnected),
-        googleEmail: String(raw.googleEmail || ''),
-        googleChannelTitle: String(raw.googleChannelTitle || ''),
         updatedAt: Number(raw.updatedAt || 0),
       };
     }
@@ -1398,7 +1394,6 @@ export function getYtPrefs() {
   return {
     subscriptions: [], likedVideos: [], searchHistory: [],
     dismissedVideoIds: [], blockedChannels: [], topics: [],
-    googleConnected: false, googleEmail: '', googleChannelTitle: '', updatedAt: 0,
   };
 }
 
@@ -1476,8 +1471,6 @@ export function toggleYtVideoLike(media) {
   if (!existed) {
     likes.unshift({
       videoId: vid,
-      title: String(media.title || 'YouTube Videosu'),
-      channel: String(media.channel || 'YouTube'),
       channelId: String(media.channelId || ''),
       channelAvatar: String(media.channelAvatar || ''),
       thumbnail: String(media.thumbnail || `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`),

@@ -163,15 +163,11 @@ def check_client_quality_generator():
     has_get_quality = "getQualityLevels()" in js
     has_set_quality = "setQualityLevel(idx)" in js
     has_clean_master = "replace(/[?&]res=[^&]+/g, '')" in js
-    has_youtube_tiers = "4K Ultra HD (2160p)" in js and "1080p Full HD" in js and "720p HD" in js
     has_localstorage = "watchlivo_quality_lock" in js
     
-    ok = has_get_quality and has_set_quality and has_clean_master and has_youtube_tiers and has_localstorage
-    return ok, f"html5.js contains full YouTube quality engine (all 5 checks passed)", {
         "getQuality": has_get_quality,
         "setQuality": has_set_quality,
         "cleanMaster": has_clean_master,
-        "youtubeTiers": has_youtube_tiers,
         "storage": has_localstorage
     }
 
