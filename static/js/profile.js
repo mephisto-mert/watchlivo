@@ -497,7 +497,19 @@ export async function checkRedirectAuth() {
       try {
         const fb = await getFirebaseAuth();
         if (!fb?.auth || !fb?.getRedirectResult) return null;
-        const cred = await fb.getRedirectResult(fb.auth).catch(() => null);
+        const cred = await (async () => {
+          let attempt = 0;
+          while (attempt < 3) {
+            try {
+              const res = await fb.getRedirectResult(fb.auth);
+              return res;
+            } catch (e) {
+              attempt++;
+              if (attempt >= 3) throw e;
+              await new Promise(r => setTimeout(r, 1000 * attempt));
+            }
+          }
+        })().catch(() => null);
         if (cred?.user) {
           const idToken = await cred.user.getIdToken();
           const fbEmail = cred.user.email || '';
@@ -606,26 +618,13 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
 
-      // Use the newly authenticated user to update Watchlivo session
-      try {
-        const result = await fb.getRedirectResult(fb.auth);
-        if (result?.user) {
-          idToken = await result.user.getIdToken(true);
-          fbEmail = (result.user.email || '').trim().toLowerCase();
-          fbName = result.user.displayName || '';
-          // Immediately call auth flow now that we have the result
-          await finishSocialLogin('google', idToken, fbEmail, fbName);
-          return;
-        }
-      } catch (err) {
-        console.error('Redirect result error:', err);
-      }
-      
-      localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
-      sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
-      if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
+      // Bypass Firebase Auth popup/handler completely: redirect directly to Google OAuth Consent
+      const GOOGLE_CLIENT_ID = '1034129375158-watchlivo.apps.googleusercontent.com';
+      const redirectUri = encodeURIComponent('https://watchlivo.online/api/auth/oauth');
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${redirectUri}&response_type=token&scope=email%20profile&state=${Date.now()}`;
+
       toast('Google giriş sayfasına aktarılıyorsunuz...');
-      await fb.signInWithRedirect(fb.auth, gProv);
+      window.location.href = authUrl;
       return;
       if (!idToken) {
         showErr('Google girişi doğrulanamadı.');
