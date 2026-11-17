@@ -606,6 +606,21 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
       if (cleanEmail) customParams.login_hint = cleanEmail;
       gProv.setCustomParameters(customParams);
 
+      // Use the newly authenticated user to update Watchlivo session
+      try {
+        const result = await fb.getRedirectResult(fb.auth);
+        if (result?.user) {
+          idToken = await result.user.getIdToken(true);
+          fbEmail = (result.user.email || '').trim().toLowerCase();
+          fbName = result.user.displayName || '';
+          // Immediately call auth flow now that we have the result
+          await finishSocialLogin('google', idToken, fbEmail, fbName);
+          return;
+        }
+      } catch (err) {
+        console.error('Redirect result error:', err);
+      }
+      
       localStorage.setItem('watchlivo_auth_pending_redirect', Date.now().toString());
       sessionStorage.setItem('watchlivo_auth_pending_pw', cleanPw);
       if (cleanEmail) sessionStorage.setItem('watchlivo_auth_pending_email', cleanEmail);
