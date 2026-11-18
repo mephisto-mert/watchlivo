@@ -418,6 +418,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     const k = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
     return (
       k === "yt" ||
+      u.includes("youtube.com/") ||
       u.includes("youtu.be/") ||
       u.includes("pilavyer") ||
       u.includes("dragonballzfans") ||
@@ -535,11 +536,15 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     const rawU = Array.isArray(pair) ? pair[0] : pair?.url;
     const kind = String(Array.isArray(pair) ? pair[1] || "" : pair?.kind || "").toLowerCase();
     if (!rawU) continue;
+    const isYt = kind === "yt" || /youtube\.com\/|youtu\.be\//i.test(rawU);
     const isDirectEmbedPage = isDirectEmbedPageUrl(rawU);
     const isEmbed = !isDirectEmbedPage && (kind.includes("embed") || rawU.includes("/embed/"));
     if (isYt) {
       const mYt = rawU.match(/(?:v=|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
       const vid = mYt ? mYt[1] : "";
+      const embU = vid ? `https://www.youtube.com/embed/${vid}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(url.origin)}` : rawU;
+      urls.push({ url: embU, streamType: "embed", label: `▶ Sunucu ${i + 1} · YouTube HD` });
+      servers.push({ id: `srv-${i + 1}`, label: `▶ Sunucu ${i + 1} · YouTube HD`, url: embU, streamType: "embed" });
       continue;
     }
     if (isEmbed) {
