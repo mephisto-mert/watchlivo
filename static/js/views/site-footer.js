@@ -1,7 +1,7 @@
 // Watchlivo footer: FAQ, legal pages (privacy / terms / copyright takedown) and contact form.
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261118_v184';
-import { api } from '../api.js?v=20261118_v184';
-import { state } from '../store.js?v=20261118_v184';
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261118_v216';
+import { api } from '../api.js?v=20261118_v216';
+import { state } from '../store.js?v=20261118_v216';
 
 export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
@@ -44,7 +44,7 @@ const LEGAL_SECTIONS = {
         <li><b>Kristal Netliğinde WebRTC Sesli Sohbet:</b> Harici bir uygulamaya ihtiyaç duymadan oda içinde mikrofonla konuşabilir, sesli not ve canlı tepkiler gönderebilirsiniz.</li>
         <li><b>Kendi Hesabınla Platformlar:</b> Netflix, Disney+, Prime Video, Max, Exxen, BluTV ve diğerleri Watchlivo uygulamasının dahili tarayıcısında, herkesin kendi aboneliğiyle açılır.</li>
         <li><b>Doğrudan Kaynaklar:</b> YouTube, kendi Google Drive dosyaların, yüklediğin videolar ve müzik servisleri tarayıcıda senkron çalışır.</li>
-        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0.2), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
+        <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0.6), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
       </ul>
       <p>Resmi İletişim & İşbirliği: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
     `,
@@ -329,7 +329,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv } = {})
     ['⚡', 'Saliselik Senkronizasyon', 'Arkadaşlarınla aynı karede durdur, sar ve sıfır gecikmeyle birlikte izle.'],
     ['🎙️', 'Kristal Netliğinde Sesli Sohbet', 'Oda içi WebRTC düşük gecikmeli mikrofon, sesli not ve anlık emoji tepkileri.'],
     ['🔑', 'Kendi Hesabınla Platformlar', 'Netflix, Disney+, Exxen, BluTV ve diğerleri uygulamada, herkesin kendi aboneliğiyle senkron.'],
-    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.2 ile tam ekran izle.'],
+    ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.6 ile tam ekran izle.'],
   ];
 
   const faqBox = h('div', { class: 'wl-faq-list' },
@@ -408,13 +408,13 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv } = {})
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v184', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v216', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
             'Arkadaşlarınla aynı anda senkron izleme ve müzik odaları.'),
           h('div', { class: 'wl-footer-status-pill' },
             h('span', { class: 'wl-status-dot' }),
-            'Tüm Sunucular Aktif · Senkron Motoru'),
+            'Watchlivo · Senkron Odalar'),
           h('div', { class: 'wl-footer-mail-box' },
             h('span', { class: 'wl-footer-mail-lbl' }, '📩 Resmi İletişim & Destek E-Postası:'),
             h('div', { class: 'wl-footer-mail-row' },

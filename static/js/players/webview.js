@@ -5,7 +5,7 @@
 // - Elsewhere: shows a room-clock bridge that opens the platform in the in-app browser / a separate
 //   window (own login) and explains that the Watchlivo app is needed for fully synced playback.
 
-import { getProvider } from '../providers.js?v=20261118_v184';
+import { getProvider } from '../providers.js?v=20261118_v216';
 
 const _DRM_WEBVIEW_HOSTS = [
   'netflix.com', 'disneyplus.com', 'primevideo.com', 'amazon.com', 'max.com', 'hbomax.com',

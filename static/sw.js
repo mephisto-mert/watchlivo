@@ -1,4 +1,4 @@
-// Watchlivo Service Worker v20261118_v184 (Rave model: no catalog / stream endpoints)
+// Watchlivo Service Worker v20261118_v216 (Rave model: no catalog / stream endpoints)
 // Watchlivo Rave-Parity Service Worker (Zero-Cache Network-Only + Offline Fallback + Push & OS Notifications)
 const OFFLINE_HTML = `<!doctype html>
 <html lang="tr">

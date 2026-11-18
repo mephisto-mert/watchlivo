@@ -229,9 +229,9 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
 
   // 2. Robots.txt & SPA HTML routes & /r/<id> invite redirect
   if (safePath === "/robots.txt") {
-    return new Response("User-agent: *\nAllow: /$\nDisallow: /api/\nDisallow: /ws/\n", {
+    return new Response("User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /ws/\nDisallow: /uploads/\nDisallow: /stats\nDisallow: /analytics\nDisallow: /desktop-auth.html\n\nSitemap: https://watchlivo.online/sitemap.xml\n", {
       status: 200,
-      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=86400" },
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" },
     });
   }
   if (safePath.startsWith("/r/") || safePath.startsWith("/join/")) {
@@ -252,7 +252,6 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     const today = new Date().toISOString().slice(0, 10);
     const urls = [
       ["https://watchlivo.online/", "1.0", "daily"],
-      ["https://watchlivo.online/r/radyo-power-turk", "0.8", "daily"],
     ].map(([loc, prio, freq]) => `  <url><loc>${loc}</loc><lastmod>${today}</lastmod><changefreq>${freq}</changefreq><priority>${prio}</priority></url>`).join("\n");
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
     return new Response(request.method === "HEAD" ? null : xml, {
@@ -469,7 +468,10 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
           const gInfo = await gResp.json().catch(() => ({}));
           const verified = gInfo.email_verified === true || gInfo.email_verified === "true";
           const expectedAud = String(env?.GOOGLE_CLIENT_ID || "").trim();
-          const audOk = !expectedAud || String(gInfo.aud || "") === expectedAud;
+          const tokenAud = String(gInfo.aud || "");
+          const firebaseProject = String(env?.FIREBASE_PROJECT_ID || "watchlivo-38ab6").trim();
+          const acceptedAudiences = [expectedAud, firebaseProject].filter(Boolean);
+          const audOk = acceptedAudiences.length === 0 || acceptedAudiences.includes(tokenAud);
           if (gInfo.email && verified && audOk) {
             fbEmail = String(gInfo.email).trim().toLowerCase();
             fbName = fbName || String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
@@ -555,6 +557,63 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
   const musicResp = await handleEdgeMusicRoute(request, url, safePath, env);
   if (musicResp) {
     return musicResp;
+  }
+
+  if (safePath === "/api/rave/catalog") {
+    const query = String(url.searchParams.get("q") || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 120);
+    const type = String(url.searchParams.get("type") || "all").toLowerCase();
+    const page = Math.max(1, Math.min(500, Number.parseInt(url.searchParams.get("page") || "1", 10) || 1));
+    if (!["all", "movie", "tv"].includes(type)) return edgeJson({ ok: false, error: "invalid_type" }, 400);
+    const apiKey = String(env?.TMDB_API_KEY || "").trim();
+    if (!apiKey) return edgeJson({ ok: false, error: "catalog_not_configured" }, 503);
+    const getPage = async (mediaType) => {
+      const endpoint = query ? "search" : "discover";
+      const params = new URLSearchParams({ api_key: apiKey, language: "tr-TR", page: String(page), include_adult: "false" });
+      if (query) params.set("query", query);
+      else params.set("sort_by", "popularity.desc");
+      const response = await fetch(`https://api.themoviedb.org/3/${endpoint}/${mediaType}?${params}`, { signal: AbortSignal.timeout(7000) });
+      if (!response.ok) throw new Error("tmdb_unavailable");
+      const data = await response.json();
+      return { mediaType, items: (data.results || []).filter((row) => row && row.id).map((row) => {
+        const title = String(row.title || row.name || "").trim();
+        const date = String(row.release_date || row.first_air_date || "");
+        const id = String(row.id);
+        return { id, tmdbId: id, mediaType, title, originalTitle: row.original_title || row.original_name || title, year: date.slice(0, 4), rating: Math.round(Number(row.vote_average || 0) * 10) / 10, overview: String(row.overview || "").slice(0, 700), poster: row.poster_path ? `https://image.tmdb.org/t/p/w500${row.poster_path}` : "", backdrop: row.backdrop_path ? `https://image.tmdb.org/t/p/w780${row.backdrop_path}` : "", metadataUrl: `https://www.themoviedb.org/${mediaType}/${id}` };
+      }), total: Math.max(0, Number(data.total_results || 0)), pages: Math.min(500, Number(data.total_pages || 0)) };
+    };
+    try {
+      const kinds = type === "all" ? ["movie", "tv"] : [type];
+      const results = await Promise.all(kinds.map(getPage));
+      const items = results.flatMap((result) => result.items).sort((a, b) => b.rating - a.rating || b.year.localeCompare(a.year));
+      return edgeJson({ ok: true, source: "TMDB", metadataOnly: true, type, query, page, items, totalAvailable: results.reduce((sum, result) => sum + result.total, 0), totalPages: Math.max(...results.map((result) => result.pages)), hasMore: page < Math.max(...results.map((result) => result.pages)) }, 200, { "Cache-Control": "public, max-age=60, s-maxage=300" });
+    } catch {
+      return edgeJson({ ok: false, error: "catalog_upstream_unavailable" }, 502);
+    }
+  }
+
+  if (safePath === "/api/rave/catalog/watch-options") {
+    const id = String(url.searchParams.get("id") || "");
+    const type = String(url.searchParams.get("type") || "movie").toLowerCase();
+    const region = String(url.searchParams.get("region") || "TR").toUpperCase();
+    if (!/^\d+$/.test(id) || !["movie", "tv"].includes(type) || !/^[A-Z]{2}$/.test(region)) return edgeJson({ ok: false, error: "invalid_title" }, 400);
+    const apiKey = String(env?.TMDB_API_KEY || "").trim();
+    if (!apiKey) return edgeJson({ ok: false, error: "catalog_not_configured" }, 503);
+    try {
+      const params = new URLSearchParams({ api_key: apiKey });
+      const response = await fetch(`https://api.themoviedb.org/3/${type}/${id}/watch/providers?${params}`, { signal: AbortSignal.timeout(6000) });
+      if (!response.ok) throw new Error("tmdb_unavailable");
+      const data = await response.json();
+      const regional = data.results?.[region] || {};
+      const providers = [];
+      const seen = new Set();
+      for (const group of ["flatrate", "free", "ads", "rent", "buy"]) for (const item of regional[group] || []) {
+        const name = String(item.provider_name || "").trim();
+        if (name && !seen.has(name.toLowerCase())) { seen.add(name.toLowerCase()); providers.push({ name, type: group }); }
+      }
+      return edgeJson({ ok: true, region, providers, link: String(regional.link || "") }, 200, { "Cache-Control": "public, max-age=300" });
+    } catch {
+      return edgeJson({ ok: false, error: "watch_options_unavailable" }, 502);
+    }
   }
 
   // 8. Origin-dependent routes

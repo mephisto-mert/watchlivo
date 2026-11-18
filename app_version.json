@@ -11,7 +11,7 @@
   "autoInstall": true,
   "publishedAt": "2026-11-11T23:45:00.000000+03:00",
   "changelog": "Watchlivo v2.0.6 — Rave tarzı birlikte izleme: oda senkronu, sohbet, sesli sohbet, YouTube ve müzik.",
-  "version": "20261114_v215",
+  "version": "20261118_v216",
   "build": 1,
   "description": "Rave-model watch party client"
 }

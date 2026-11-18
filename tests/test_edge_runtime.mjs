@@ -320,6 +320,11 @@ test("edge_autonomous: /r/ query preservation, PBKDF2 auth+logout, removed media
   const edgeToken = homeHtml.match(/name="wl-edge-token" content="([^"]+)"/)?.[1];
   assert.ok(edgeToken);
 
+  const catalogPath = "/api/rave/catalog";
+  const unconfiguredCatalog = await handleAutonomousEdge(new Request(`https://watchlivo.online${catalogPath}`), new URL(`https://watchlivo.online${catalogPath}`), catalogPath, env);
+  assert.equal(unconfiguredCatalog.status, 503);
+  assert.equal((await unconfiguredCatalog.json()).error, "catalog_not_configured");
+
   // 2. /r/<id>?pwd=123&s=2&e=5 preserves query params in redirect
   const rInvite = await handleAutonomousEdge(
     new Request("https://watchlivo.online/r/cinema-club?pwd=123&s=2&e=5"),
@@ -388,10 +393,48 @@ test("edge_autonomous: /r/ query preservation, PBKDF2 auth+logout, removed media
   );
   assert.equal(rMeAfter.status, 401);
 
-  // 3. Removed catalog / resolve / stream routes are not served by the edge
-  for (const p of ["/api/rave/catalog", "/api/rave/resolve-catalog", "/api/rave/stream-proxy", "/api/rave/extract-video", "/api/rave/supersearch"]) {
+  // 3. Removed resolve / stream routes are not served by the edge
+  for (const p of ["/api/rave/resolve-catalog", "/api/rave/stream-proxy", "/api/rave/extract-video", "/api/rave/supersearch"]) {
     const r = await handleAutonomousEdge(new Request(`https://watchlivo.online${p}`), new URL(`https://watchlivo.online${p}`), p, env);
     assert.equal(r.status, 404, `${p} must be 404`);
+  }
+});
+
+test("edge catalog: uses TMDB metadata counts and regional official watch links", async () => {
+  const env = { ...TEST_ENV, TMDB_API_KEY: "test-tmdb-key" };
+  const origFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const u = new URL(typeof input === "string" ? input : input.url);
+      if (u.pathname.endsWith("/watch/providers")) {
+        return new Response(JSON.stringify({ results: { TR: { flatrate: [{ provider_name: "Test Platform" }], link: "https://www.justwatch.com/tr/film/test" } } }), { status: 200 });
+      }
+      const isTv = u.pathname.endsWith("/tv");
+      return new Response(JSON.stringify({
+        page: 1,
+        total_results: isTv ? 42000 : 61000,
+        total_pages: 500,
+        results: [{ id: isTv ? 22 : 11, title: isTv ? undefined : "Test Film", name: isTv ? "Test Dizi" : undefined, release_date: isTv ? undefined : "2020-01-01", first_air_date: isTv ? "2021-01-01" : undefined, vote_average: 8.2, poster_path: "/test.jpg" }],
+      }), { status: 200 });
+    };
+
+    const catalogUrl = "https://watchlivo.online/api/rave/catalog?type=all&page=1";
+    const catalogResponse = await handleAutonomousEdge(new Request(catalogUrl), new URL(catalogUrl), "/api/rave/catalog", env);
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json();
+    assert.equal(catalog.totalAvailable, 103000);
+    assert.equal(catalog.metadataOnly, true);
+    assert.deepEqual(catalog.items.map((item) => item.mediaType).sort(), ["movie", "tv"]);
+    assert.ok(catalog.items.every((item) => !("streamUrl" in item) && !("url" in item)));
+
+    const watchUrl = "https://watchlivo.online/api/rave/catalog/watch-options?id=11&type=movie&region=TR";
+    const watchResponse = await handleAutonomousEdge(new Request(watchUrl), new URL(watchUrl), "/api/rave/catalog/watch-options", env);
+    assert.equal(watchResponse.status, 200);
+    const watch = await watchResponse.json();
+    assert.equal(watch.providers[0].name, "Test Platform");
+    assert.match(watch.link, /^https:\/\/www\.justwatch\.com\//);
+  } finally {
+    globalThis.fetch = origFetch;
   }
 });
 

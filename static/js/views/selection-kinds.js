@@ -1,18 +1,118 @@
 // Provider selection views by kind (Rave YouTubeSelection / WebSelection / Catalog / upload).
-import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261118_v184';
-import { api, qs } from '../api.js?v=20261118_v184';
-import { parseVideoUrl, getProvider, isDesktop, isNativeShell } from '../providers.js?v=20261118_v184';
-import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261118_v184';
-import { renderAccountBar } from '../accounts.js?v=20261118_v184';
-import { profileSetup } from '../profile.js?v=20261118_v184';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
+import { h, fill, icons, toast, popup, openThemeModal, openAiConfigModal, getAiApiConfig } from '../ui.js?v=20261118_v216';
+import { api, qs } from '../api.js?v=20261118_v216';
+import { parseVideoUrl, getProvider, isDesktop, isNativeShell } from '../providers.js?v=20261118_v216';
+import { videoCard, ytToMedia, resolveMedia, openYtPersonalizeModal } from './selection.js?v=20261118_v216';
+import { renderAccountBar } from '../accounts.js?v=20261118_v216';
+import { profileSetup } from '../profile.js?v=20261118_v216';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v216';
 import {
   getFavorites, isFavoriteMedia, toggleFavoriteMedia, getMusicHistory, saveMusicHistory, clearMusicHistory,
   getWatchHistory, clearWatchHistory, saveWatchProgress, findSavedProgress,
   getYtPrefs, recordYtSearchQuery, fetchPersonalizedYtFeed, subscribe, state,
-} from '../store.js?v=20261118_v184';
+} from '../store.js?v=20261118_v216';
 
 const spinner = () => h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.2em' } }, h('div', { class: 'spinner' }));
+
+export function renderTitleCatalogKind(body, presetQuery = '', pick) {
+  let kind = 'all';
+  let page = 1;
+  let query = String(presetQuery || '').trim();
+  let sequence = 0;
+  const search = h('input', { class: 'input', value: query, placeholder: 'Film veya dizi adı ara…', 'aria-label': 'Katalogda film veya dizi ara' });
+  const status = h('div', { class: 'dim', style: { margin: '10px 4px' } }, 'TMDB kataloğu yükleniyor…');
+  const grid = h('div', { class: 'card-grid' });
+  const more = h('button', { class: 'btn', type: 'button', style: { display: 'none', margin: '14px auto' } }, 'Daha fazla yükle');
+  const types = h('div', { class: 'yt-chip-bar', style: { margin: '10px 0' } });
+
+  const showDetails = async (item, box) => {
+    box.replaceChildren(h('div', { class: 'dim' }, 'Türkiye için resmi izleme seçenekleri aranıyor…'));
+    try {
+      const result = await api(`/api/rave/catalog/watch-options?${qs({ id: item.id, type: item.mediaType, region: 'TR' })}`, { timeout: 8000 });
+      const providers = result.providers || [];
+      box.replaceChildren(
+        item.overview ? h('div', { class: 'dim', style: { marginBottom: '8px' } }, item.overview) : null,
+        h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
+          providers.length
+            ? h('span', { class: 'dim' }, `Türkiye’de sunulan seçenekler: ${providers.map((p) => p.name).join(', ')}`)
+            : h('span', { class: 'dim' }, 'Türkiye için resmi yayın seçeneği TMDB’de listelenmiyor.'),
+          result.link ? h('a', { class: 'btn', href: result.link, target: '_blank', rel: 'noopener noreferrer' }, 'Resmi izleme sayfası') : null,
+          item.metadataUrl ? h('a', { class: 'btn', href: item.metadataUrl, target: '_blank', rel: 'noopener noreferrer' }, 'TMDB bilgisi') : null),
+        h('div', { class: 'dim', style: { marginTop: '6px' } }, 'Tam film/dizi oynatma hakkı platform sağlayıcısına aittir. Fragmanlar YouTube üzerinden senkron açılır.'),
+        h('button', { class: 'btn primary', type: 'button', style: { marginTop: '8px' }, onclick: (event) => { event.stopPropagation(); trailer(item); } }, 'Fragmanı odada oynat')
+      );
+    } catch (_) {
+      box.replaceChildren(h('div', { class: 'dim' }, 'İzleme seçenekleri şu anda alınamadı. TMDB başlık bilgisi kullanılabilir.'));
+    }
+  };
+
+  const load = async (append = false) => {
+    const mine = ++sequence;
+    if (!append) { page = 1; grid.replaceChildren(spinner()); }
+    status.textContent = 'Katalog bilgisi yükleniyor…';
+    more.disabled = true;
+    try {
+      const result = await api(`/api/rave/catalog?${qs({ type: kind, q: query, page })}`, { timeout: 14000 });
+      if (mine !== sequence) return;
+      const items = result.items || [];
+      const cards = items.map((item) => {
+        const detail = h('div', { style: { gridColumn: '1 / -1' } });
+        const card = h('div', { class: 'poster catalog-card', tabindex: '0', role: 'button', 'aria-label': `${item.title} ayrıntıları`, onclick: () => showDetails(item, detail), onkeydown: (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); showDetails(item, detail); } } },
+          h('div', { class: 'poster-thumb-wrap' },
+            h('img', { src: item.poster || '/static/watchlivo-poster.svg', alt: item.title, loading: 'lazy', onerror: (event) => { event.target.src = '/static/watchlivo-poster.svg'; } }),
+            h('span', { class: 'poster-rating-badge' }, item.rating ? `★ ${item.rating}` : item.mediaType === 'tv' ? 'Dizi' : 'Film')),
+          h('div', { class: 'poster-title' }, item.title),
+          h('div', { class: 'dim' }, `${item.year || 'Yıl bilgisi yok'} · ${item.mediaType === 'tv' ? 'Dizi' : 'Film'}`),
+          h('button', { class: 'btn', type: 'button', style: { marginTop: '8px' }, onclick: (event) => { event.stopPropagation(); showDetails(item, detail); } }, 'İzleme seçenekleri'),
+          detail);
+        return card;
+      });
+      grid.replaceChildren(...(append ? [...grid.children, ...cards] : cards));
+      const count = Number(result.totalAvailable || 0).toLocaleString('tr-TR');
+      status.textContent = `${count} eşleşen başlık · TMDB metadata kataloğu · Sayfa ${result.page}`;
+      more.style.display = result.hasMore ? 'block' : 'none';
+      more.disabled = false;
+      if (!cards.length && !append) grid.replaceChildren(h('div', { class: 'lobby-empty' }, 'Bu aramada başlık bulunamadı.'));
+    } catch (error) {
+      if (mine !== sequence) return;
+      const message = error?.message === 'catalog_not_configured'
+        ? 'TMDB anahtarı sunucuda tanımlı değil.'
+        : error?.message === 'catalog_upstream_unavailable'
+          ? 'TMDB geçici olarak yanıt vermiyor. Biraz sonra tekrar dene.'
+          : 'Katalog şu anda yanıt vermiyor.';
+      grid.replaceChildren(h('div', { class: 'lobby-empty' }, message));
+      status.textContent = message;
+      more.style.display = 'none';
+    }
+  };
+
+  const renderTypes = () => {
+    types.replaceChildren(...[
+      ['all', 'Tümü'], ['movie', 'Filmler'], ['tv', 'Diziler'],
+    ].map(([id, label]) => h('button', { class: `chip${kind === id ? ' active' : ''}`, type: 'button', onclick: () => { kind = id; renderTypes(); load(); } }, label)));
+  };
+  const searchNow = () => { query = search.value.trim(); load(); };
+  const trailer = async (item) => {
+    const terms = `${item.title} ${item.year || ''} official trailer`;
+    try {
+      const response = await api(`/api/search/youtube?${qs({ q: terms })}`, { timeout: 12000 });
+      const candidate = (response.items || []).find((video) => video.videoId);
+      if (!candidate) { toast('Bu başlık için YouTube fragmanı bulunamadı.'); return; }
+      await pick(ytToMedia(candidate));
+    } catch (_) { toast('Fragman araması şu anda başarısız.'); }
+  };
+  body.append(
+    h('div', { class: 'sel-search' }, search, h('button', { class: 'btn primary', type: 'button', onclick: searchNow }, 'Ara')),
+    types, status, grid,
+    h('div', { style: { display: 'flex', justifyContent: 'center' } }, more),
+    h('div', { class: 'section-head', style: { marginTop: '18px' } }, h('h3', {}, 'Resmi yayın bilgisi ve fragman')),
+    h('div', { class: 'dim', style: { marginBottom: '8px' } }, 'Bir başlıktaki seçeneklere dokun. Fragman düğmesi ilgili YouTube videosunu odada açar.')
+  );
+  search.addEventListener('keydown', (event) => { if (event.key === 'Enter') searchNow(); });
+  more.addEventListener('click', () => { page += 1; load(true); });
+  renderTypes();
+  load();
+}
 
 export function renderSearchKind(p, body, presetQuery, pick) {
   let activeTab = presetQuery ? 'search' : 'all';

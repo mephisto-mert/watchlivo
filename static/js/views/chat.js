@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261118_v184';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261118_v184';
-import { avatar } from '../profile.js?v=20261118_v184';
-import { api, qs } from '../api.js?v=20261118_v184';
-import { resolveMusicItem } from './selection-kinds.js?v=20261118_v184';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261118_v184';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261118_v216';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261118_v216';
+import { avatar } from '../profile.js?v=20261118_v216';
+import { api, qs } from '../api.js?v=20261118_v216';
+import { resolveMusicItem } from './selection-kinds.js?v=20261118_v216';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261118_v216';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [

@@ -35,6 +35,7 @@ wrangler secret put EDGE_ORIGIN_SECRET    # origin'e iletilen X-Watchlivo-Edge-S
 wrangler secret put PROXY_SECRET          # oda / istemci token imzalama anahtarı
 wrangler secret put GOOGLE_CLIENT_ID      # (isteğe bağlı) Google kimlik token'ı aud doğrulaması
 wrangler secret put FIREBASE_WEB_API_KEY  # (isteğe bağlı) Firebase kimlik doğrulaması
+wrangler secret put TMDB_API_KEY          # Sinema+ katalog metadata ve resmi izleme seçenekleri
 ```
 
 İsteğe bağlı değişkenler (`[vars]` veya secret): `SECONDARY_ORIGIN`, `TERTIARY_ORIGIN`, `FORCE_SECONDARY`.

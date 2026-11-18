@@ -1,12 +1,12 @@
 // Rave Selection parity: provider grid + YouTube search → provider selection view → onPick(media).
 // Subscription platforms (kind 'account') always use each participant's own account in the app.
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261118_v184';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable, isNativeShell, ACCOUNT_PROVIDER_IDS } from '../providers.js?v=20261118_v184';
-import { api, qs } from '../api.js?v=20261118_v184';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderAccountKind, openAccountPlatformModal, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261118_v184';
-import { fetchAccounts } from '../accounts.js?v=20261118_v184';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261118_v184';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261118_v216';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable, isNativeShell, ACCOUNT_PROVIDER_IDS } from '../providers.js?v=20261118_v216';
+import { api, qs } from '../api.js?v=20261118_v216';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderAccountKind, openAccountPlatformModal, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, renderTitleCatalogKind } from './selection-kinds.js?v=20261118_v216';
+import { fetchAccounts } from '../accounts.js?v=20261118_v216';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261118_v216';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v216';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -14,7 +14,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261118_v184';
+} from '../store.js?v=20261118_v216';
 
 // Account platforms (Netflix, Disney+ …) can only be opened inside the Watchlivo app, where each
 // participant signs in with their own account. On the plain web site show the download explainer.
@@ -775,6 +775,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     try { for (const sc of [root.closest('.panel-body'), root.closest('.home'), root.closest('.home-scroll'), document.scrollingElement, document.documentElement, document.body]) { if (sc) sc.scrollTop = 0; } window.scrollTo(0, 0); } catch (e) { /* ignore */ }
     if (!providerUsable(p)) { body.append(desktopOnlyCard(p)); return; }
     if (p.kind === 'search') renderSearchKind(p, body, presetQuery, pickSafe);
+    else if (p.kind === 'catalog') renderTitleCatalogKind(body, presetQuery, pickSafe);
     else if (p.kind === 'music') renderMusicKind(p, body, presetQuery, pickSafe);
     else if (p.kind === 'drive') renderDriveKind(p, body, pickSafe);
     else if (p.kind === 'ravedj') renderRaveDjKind(p, body, pickSafe);

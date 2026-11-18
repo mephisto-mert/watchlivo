@@ -1,9 +1,9 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261118_v184';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261118_v184';
-import { renderHome, destroyHome } from './views/home.js?v=20261118_v184';
-import { api } from './api.js?v=20261118_v184';
-import { h, toast } from './ui.js?v=20261118_v184';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261118_v216';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261118_v216';
+import { renderHome, destroyHome } from './views/home.js?v=20261118_v216';
+import { api } from './api.js?v=20261118_v216';
+import { h, toast } from './ui.js?v=20261118_v216';
 
 const MODULE_VER = (() => {
   try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261118_v184')
+    _meshModPromise = import('./views/mesh.js?v=20261118_v216')
       .then((mod) => {
         _meshMod = mod;
         return mod;

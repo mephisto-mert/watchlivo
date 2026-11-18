@@ -1,17 +1,17 @@
 // Home (Rave Home: NavBar · Selection (provider grid + YouTube search) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261118_v184';
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261118_v216';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261118_v184';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261118_v184';
-import { api } from '../api.js?v=20261118_v184';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261118_v184';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261118_v184';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261118_v184';
+} from '../store.js?v=20261118_v216';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261118_v216';
+import { api } from '../api.js?v=20261118_v216';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261118_v216';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v216';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261118_v216';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261118_v216';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v184', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v216', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -190,11 +190,11 @@ export function renderHome(app) {
         id: 'nav-btn-apk',
         href: '/download/apk',
         download: 'Watchlivo.apk',
-        title: 'Watchlivo Native Android APK İndir (v2.0.2 Otomatik Güncellemeli)',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000),
+        title: 'Watchlivo Native Android APK İndir (v2.0.6 Otomatik Güncellemeli)',
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.6 indiriliyor...', 4000),
       },
       h('span', { html: icons.android, style: { display: 'flex' } }),
-      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0.2)')) : null,
+      h('span', { class: 'wl-btn-apk-text' }, 'APK İndir (v2.0.6)')) : null,
       h('button', { class: 'btn-create-room btn primary', id: 'btn-create-room', onclick: async (ev) => {
         const btnEl = ev?.currentTarget;
         if (btnEl?.dataset?.busy === '1') return;
@@ -275,7 +275,7 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-icon' }, h('span', { html: icons.android, style: { display: 'flex' } })),
     h('div', { class: 'wl-app-banner-text' },
       h('div', { class: 'wl-app-banner-title' },
-        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0.2'),
+        h('span', { class: 'wl-app-banner-badge' }, 'NATIVE v2.0.6'),
         h('b', {}, 'Watchlivo Android Uygulaması (Otomatik Güncellemeli)')),
       h('span', { class: 'wl-app-banner-sub' }, 'Gerçek donanım oynatıcı, otomatik PiP ve Rave.io tarzı otomatik güncellemeli yeni sürüm.')),
     h('div', { class: 'wl-app-banner-actions' },
@@ -283,7 +283,7 @@ export function renderHome(app) {
         class: 'btn primary sm wl-banner-apk-btn',
         href: '/download/apk',
         download: 'Watchlivo.apk',
-        onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
+        onclick: () => toast('📱 Watchlivo Native APK v2.0.6 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
         class: 'btn sm wl-banner-info-btn',

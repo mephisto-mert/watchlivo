@@ -1,16 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261118_v184';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261118_v184';
-import { resolveMusicItem } from './selection-kinds.js?v=20261118_v184';
-import { MeshConnection } from '../realtime.js?v=20261118_v184';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261118_v184';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261118_v184';
-import { buildLayout } from './mesh-layout.js?v=20261118_v184';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261118_v184';
-import { Voice } from '../voice.js?v=20261118_v184';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261118_v184';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261118_v184';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261118_v184';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261118_v216';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261118_v216';
+import { resolveMusicItem } from './selection-kinds.js?v=20261118_v216';
+import { MeshConnection } from '../realtime.js?v=20261118_v216';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261118_v216';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261118_v216';
+import { buildLayout } from './mesh-layout.js?v=20261118_v216';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261118_v216';
+import { Voice } from '../voice.js?v=20261118_v216';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261118_v216';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261118_v216';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261118_v216';
 
 let ctx = null;
 

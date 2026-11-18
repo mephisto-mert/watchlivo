@@ -113,6 +113,11 @@ export const LOGOS = {
     '<path d="M20 9l-9 5.8 9 5.8 9-5.8-9-5.8zm18 0l-9 5.8 9 5.8 9-5.8-9-5.8zM11 26.4l9 5.8 9-5.8-9-5.8-9 5.8zm27-5.8l-9 5.8 9 5.8 9-5.8-9-5.8z" fill="#0061ff"/>' +
     '<text x="92" y="28.5" text-anchor="middle" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="800" font-size="18.5" letter-spacing="-0.3">Dropbox</text>'
   ),
+  catalog: svgRaw(
+    '<rect x="9" y="7" width="29" height="30" rx="8" fill="rgba(56,189,248,0.16)" stroke="#38bdf8" stroke-width="2"/>' +
+    '<path d="M17 15h13M17 21h13M17 27h9" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>' +
+    '<text x="47" y="29" fill="#ffffff" font-family="Inter,system-ui,sans-serif" font-weight="900" font-size="20">Sinema+</text>'
+  ),
   youtube: svgRaw(
     '<rect x="6" y="8" width="38" height="28" rx="8" fill="#ff0033"/>' +
     '<path d="M21 15.5v13l11-6.5-11-6.5z" fill="#ffffff"/>' +
@@ -223,6 +228,7 @@ export const PROVIDER_CATEGORIES = [
 // app's in-app browser (Android / Windows / iOS); only play/pause/seek is synchronised.
 // On the plain web site these show a "download the app" explainer instead.
 export const PROVIDERS = [
+  { id: 'catalog', name: 'Sinema+', cat: 'direct', badge: 'TMDB katalog · Resmi izleme seçenekleri', logo: LOGOS.catalog, bg: '#10121a', accent: '#38bdf8', web: true, kind: 'catalog', homeUrl: 'https://www.themoviedb.org', placeholder: 'Film veya dizi ara...' },
   { id: 'youtube', name: 'YouTube', cat: 'direct', badge: 'Ara & Oynat · Herkes için senkron', logo: LOGOS.youtube, bg: '#10121a', accent: '#ff0033', web: true, kind: 'search',
     homeUrl: 'https://www.youtube.com', placeholder: "YouTube'da video, şarkı, kanal veya bağlantı ara...", defaultQuery: 'Türkçe Pop Rock Akustik Hit Klip',
     idParser: (u) => (!/music\.youtube\.com/i.test(u) && (u.match(/(?:youtube\.com\/(?:[^/\n\s]+\/\s*)?(?:v\/|u\/\w\/|live\/|embed\/|watch\?v=|&v=|shorts\/)|youtu\.be\/)([^"&?/\s]{11})/i) || [])[1]) || null },

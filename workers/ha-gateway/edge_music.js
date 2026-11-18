@@ -159,7 +159,65 @@ async function findYoutubeVideoId(query) {
   } catch { return ""; }
 }
 
+function collectYoutubeVideoRenderers(node, out, limit = 24) {
+  if (!node || typeof node !== "object" || out.length >= limit) return;
+  if (Array.isArray(node)) {
+    for (const item of node) collectYoutubeVideoRenderers(item, out, limit);
+    return;
+  }
+  if (node.videoRenderer && typeof node.videoRenderer === "object") {
+    const video = node.videoRenderer;
+    const videoId = String(video.videoId || "");
+    const title = (video.title?.runs || []).map((run) => run.text || "").join("").trim()
+      || video.title?.simpleText || "";
+    if (/^[\w-]{11}$/.test(videoId) && title) {
+      const ownerRuns = video.ownerText?.runs || video.longBylineText?.runs || [];
+      const channel = ownerRuns.map((run) => run.text || "").join("").trim() || "YouTube";
+      const channelId = ownerRuns[0]?.navigationEndpoint?.browseEndpoint?.browseId || "";
+      const thumbs = video.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails || [];
+      const live = (video.badges || []).some((badge) => /live|canl/i.test(JSON.stringify(badge)));
+      out.push({
+        videoId, title, channel, channelId,
+        channelAvatar: thumbs.at(-1)?.url || "",
+        views: video.shortViewCountText?.simpleText || video.viewCountText?.simpleText || "",
+        published: video.publishedTimeText?.simpleText || "",
+        duration: video.lengthText?.simpleText || "",
+        live,
+        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        url: `https://www.youtube.com/watch?v=${videoId}`,
+      });
+    }
+    if (out.length >= limit) return;
+  }
+  for (const value of Object.values(node)) collectYoutubeVideoRenderers(value, out, limit);
+}
+
+async function searchYoutubeVideos(query) {
+  const response = await fetch(`https://www.youtube.com/results?${new URLSearchParams({ search_query: query })}`, {
+    headers: { "User-Agent": MUSIC_UA, "Accept-Language": "tr-TR,tr;q=0.9" },
+    signal: AbortSignal.timeout(6500),
+  });
+  if (!response.ok) throw new Error(`youtube_http_${response.status}`);
+  const html = await response.text();
+  const match = html.match(/ytInitialData\s*=\s*(\{.*?\})\s*;\s*<\/script>/s);
+  if (!match) throw new Error("youtube_results_unavailable");
+  const data = JSON.parse(match[1]);
+  const items = [];
+  collectYoutubeVideoRenderers(data, items);
+  return items;
+}
+
 export async function handleEdgeMusicRoute(request, url, safePath) {
+  if (safePath === "/api/search/youtube" || safePath === "/api/rave/yt-search") {
+    const q = (url.searchParams.get("q") || "").trim().slice(0, 200);
+    if (!q) return musicJson({ items: [] }, 200, 30);
+    try {
+      return musicJson({ items: await searchYoutubeVideos(q) }, 200, 120);
+    } catch (error) {
+      return musicJson({ items: [], error: "YouTube araması şu anda kullanılamıyor." }, 502, 0);
+    }
+  }
+
   if (safePath === "/api/rave/music-catalog") {
     const category = (url.searchParams.get("category") || "all").trim().toLowerCase();
     const q = (url.searchParams.get("q") || "").trim().slice(0, 120);

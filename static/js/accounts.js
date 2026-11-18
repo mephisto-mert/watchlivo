@@ -3,8 +3,8 @@
 // Subscription platforms are opened in the Watchlivo app's in-app browser, where every participant
 // signs in to the platform directly with their OWN account. Watchlivo only syncs play / pause / seek.
 // Watchlivo's own login / register lives in profile.js and is unaffected.
-import { h, toast, popup } from './ui.js?v=20261118_v184';
-import { set, setView } from './store.js?v=20261118_v184';
+import { h, toast, popup } from './ui.js?v=20261118_v216';
+import { set, setView } from './store.js?v=20261118_v216';
 
 // Remove any third-party account metadata older builds may have left in localStorage.
 (function purgeLegacyPlatformAccounts() {

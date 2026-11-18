@@ -842,6 +842,8 @@ _TTS_CACHE = collections.OrderedDict()
 
 
 _SUPERSEARCH_CACHE: dict[str, tuple[float, dict]] = {}
+_TITLE_CATALOG_CACHE: dict[str, tuple[float, dict]] = {}
+_TITLE_WATCH_CACHE: dict[str, tuple[float, dict]] = {}
 
 
 def _tmdb_search_sync(q: str, limit: int = 20) -> list:
@@ -899,6 +901,142 @@ async def supersearch(request: Request):
         _SUPERSEARCH_CACHE.pop(next(iter(_SUPERSEARCH_CACHE)), None)
     _SUPERSEARCH_CACHE[qkey] = (time.time(), payload)
     return JSONResponse(payload, headers=cc_hdrs)
+
+
+def _catalog_title(item: dict, media_type: str) -> dict:
+    title = str(item.get("title") or item.get("name") or "").strip()
+    tmdb_id = str(item.get("id") or "").strip()
+    poster_path = str(item.get("poster_path") or "")
+    backdrop_path = str(item.get("backdrop_path") or "")
+    date = str(item.get("release_date") or item.get("first_air_date") or "")
+    return {
+        "id": tmdb_id,
+        "tmdbId": tmdb_id,
+        "mediaType": media_type,
+        "title": title,
+        "originalTitle": str(item.get("original_title") or item.get("original_name") or title),
+        "year": date[:4],
+        "rating": round(float(item.get("vote_average") or 0), 1),
+        "overview": str(item.get("overview") or "")[:700],
+        "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else "",
+        "backdrop": f"https://image.tmdb.org/t/p/w780{backdrop_path}" if backdrop_path else "",
+        "metadataUrl": f"https://www.themoviedb.org/{'movie' if media_type == 'movie' else 'tv'}/{tmdb_id}" if tmdb_id else "",
+    }
+
+
+def _tmdb_catalog_page_sync(query: str, media_type: str, page: int) -> dict:
+    if not TMDB_API_KEY:
+        raise RuntimeError("catalog_not_configured")
+    endpoint = "search" if query else "discover"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "language": "tr-TR",
+        "page": page,
+        "include_adult": "false",
+    }
+    if query:
+        params["query"] = query
+    elif media_type == "tv":
+        params["include_null_first_air_dates"] = "false"
+        params["sort_by"] = "popularity.desc"
+    else:
+        params["sort_by"] = "popularity.desc"
+    payload = _http_json(
+        f"https://api.themoviedb.org/3/{endpoint}/{media_type}?{urllib.parse.urlencode(params)}",
+        timeout=7.0,
+    ) or {}
+    return {
+        "items": [_catalog_title(row, media_type) for row in payload.get("results", []) if isinstance(row, dict)],
+        "total": max(0, int(payload.get("total_results") or 0)),
+        "pages": max(0, min(500, int(payload.get("total_pages") or 0))),
+    }
+
+
+async def title_catalog(request: Request):
+    query = _BIDI_CTRL_RE.sub("", request.query_params.get("q") or "").strip()[:120]
+    media_type = str(request.query_params.get("type") or "all").strip().lower()
+    if media_type not in ("all", "movie", "tv"):
+        return JSONResponse({"ok": False, "error": "type must be all, movie or tv"}, status_code=400)
+    try:
+        page = max(1, min(500, int(request.query_params.get("page") or 1)))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "error": "page must be a positive integer"}, status_code=400)
+    if not TMDB_API_KEY:
+        return JSONResponse({"ok": False, "error": "catalog_not_configured"}, status_code=503)
+
+    cache_key = f"{query.casefold()}|{media_type}|{page}"
+    cached = _TITLE_CATALOG_CACHE.get(cache_key)
+    if cached and time.time() - cached[0] < 300:
+        return JSONResponse(cached[1], headers={"Cache-Control": "public, max-age=60, s-maxage=300"})
+
+    types = ("movie", "tv") if media_type == "all" else (media_type,)
+    results = await asyncio.gather(
+        *(asyncio.to_thread(_tmdb_catalog_page_sync, query, kind, page) for kind in types),
+        return_exceptions=True,
+    )
+    if any(isinstance(result, Exception) for result in results):
+        return JSONResponse({"ok": False, "error": "catalog_upstream_unavailable"}, status_code=502)
+    valid = [result for result in results if isinstance(result, dict)]
+    items = [item for result in valid for item in result["items"]]
+    items.sort(key=lambda item: (item.get("rating", 0), item.get("year", "")), reverse=True)
+    total = sum(result["total"] for result in valid)
+    total_pages = max((result["pages"] for result in valid), default=0)
+    payload = {
+        "ok": True,
+        "source": "TMDB",
+        "metadataOnly": True,
+        "type": media_type,
+        "query": query,
+        "page": page,
+        "items": items,
+        "totalAvailable": total,
+        "totalPages": total_pages,
+        "hasMore": page < total_pages,
+    }
+    if len(_TITLE_CATALOG_CACHE) >= 250:
+        _TITLE_CATALOG_CACHE.pop(next(iter(_TITLE_CATALOG_CACHE)), None)
+    _TITLE_CATALOG_CACHE[cache_key] = (time.time(), payload)
+    return JSONResponse(payload, headers={"Cache-Control": "public, max-age=60, s-maxage=300"})
+
+
+def _tmdb_watch_options_sync(tmdb_id: str, media_type: str, region: str = "TR") -> dict:
+    if not TMDB_API_KEY:
+        raise RuntimeError("catalog_not_configured")
+    params = urllib.parse.urlencode({"api_key": TMDB_API_KEY})
+    payload = _http_json(
+        f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}/watch/providers?{params}",
+        timeout=6.0,
+    ) or {}
+    regional = (payload.get("results") or {}).get(region) or {}
+    provider_groups = []
+    seen = set()
+    for group in ("flatrate", "free", "ads", "rent", "buy"):
+        for provider in regional.get(group) or []:
+            name = str(provider.get("provider_name") or "").strip()
+            if name and name.casefold() not in seen:
+                seen.add(name.casefold())
+                provider_groups.append({"name": name, "type": group})
+    return {"region": region, "providers": provider_groups, "link": str(regional.get("link") or "")}
+
+
+async def title_watch_options(request: Request):
+    tmdb_id = str(request.query_params.get("id") or "").strip()
+    media_type = str(request.query_params.get("type") or "movie").strip().lower()
+    region = str(request.query_params.get("region") or "TR").strip().upper()
+    if not tmdb_id.isdigit() or media_type not in ("movie", "tv") or not re.fullmatch(r"[A-Z]{2}", region):
+        return JSONResponse({"ok": False, "error": "invalid_title"}, status_code=400)
+    key = f"{media_type}:{tmdb_id}:{region}"
+    cached = _TITLE_WATCH_CACHE.get(key)
+    if cached and time.time() - cached[0] < 3600:
+        return JSONResponse({"ok": True, **cached[1]}, headers={"Cache-Control": "public, max-age=300"})
+    try:
+        data = await asyncio.to_thread(_tmdb_watch_options_sync, tmdb_id, media_type, region)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "watch_options_unavailable"}, status_code=502)
+    if len(_TITLE_WATCH_CACHE) >= 1000:
+        _TITLE_WATCH_CACHE.pop(next(iter(_TITLE_WATCH_CACHE)), None)
+    _TITLE_WATCH_CACHE[key] = (time.time(), data)
+    return JSONResponse({"ok": True, **data}, headers={"Cache-Control": "public, max-age=300"})
 
 
 async def gifs(request: Request):
@@ -1656,15 +1794,15 @@ async def app_version_endpoint(request: Request):
     data = {
         "ok": True,
         "packageName": "online.watchlivo.app",
-        "versionCode": 22,
-        "versionName": "2.0.2",
+        "versionCode": 27,
+        "versionName": "2.0.6-v206",
         "apkUrl": "https://watchlivo.online/download/Watchlivo-v2.0.apk",
         "fallbackUrl": "https://watchlivo.online/static/Watchlivo-v2.0.apk",
         "sha256": "",
         "sizeBytes": 0,
         "mandatory": True,
         "autoInstall": True,
-        "changelog": "Watchlivo Native v2.0.2 — Sesli arama (mikrofon), oda içi sesli mesaj kaydı/dinleme, donanım oynatıcı ve Rave.io tarzı otomatik güncelleme.",
+        "changelog": "Watchlivo Native v2.0.6 — Rave tarzı birlikte izleme: oda senkronu, sohbet, sesli sohbet, YouTube ve müzik.",
     }
     if meta_file.exists():
         try:
@@ -2361,11 +2499,8 @@ async def sitemap_xml_endpoint(request: Request) -> Response:
     today = time.strftime("%Y-%m-%d", time.gmtime(time.time() + 10800))
     urls = [
         ("https://watchlivo.online/", "1.0", "daily"),
-        ("https://watchlivo.online/about", "0.8", "weekly"),
-        ("https://watchlivo.online/privacy", "0.8", "monthly"),
-        ("https://watchlivo.online/terms", "0.8", "monthly"),
-        ("https://watchlivo.online/dmca", "0.8", "monthly"),
-        ("https://watchlivo.online/contact", "0.8", "weekly"),
+        ("https://watchlivo.online/privacy", "0.3", "yearly"),
+        ("https://watchlivo.online/dmca", "0.3", "yearly"),
     ]
     xml_items = "\n".join(
         f"  <url>\n    <loc>{loc}</loc>\n    <lastmod>{today}</lastmod>\n    <changefreq>{freq}</changefreq>\n    <priority>{prio}</priority>\n  </url>"
@@ -3131,6 +3266,8 @@ app = Starlette(
         Route("/api/search/youtube", search_youtube),
         Route("/api/rave/yt-search", search_youtube),
         Route("/api/rave/supersearch", supersearch),
+        Route("/api/rave/catalog", title_catalog),
+        Route("/api/rave/catalog/watch-options", title_watch_options),
         Route("/api/rave/music-catalog", music_engine.music_catalog),
         Route("/api/rave/music-similar", music_engine.music_similar),
         Route("/api/rave/music-resolve", music_engine.music_resolve),
