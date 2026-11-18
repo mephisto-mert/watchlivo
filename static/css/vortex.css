@@ -4783,10 +4783,6 @@ header.navbar.top-nav-capsule {
 /* v71: Watchlivo Studio Dynamic Accent Synchronization & Theme Studio 8-Grid */
 .floating-dock .dock-btn.active,
 .provider-cat-pill.active,
-<<<<<<< HEAD
-=======
-.cat-tab-pill.active,
->>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
 .lobby-tab.on,
 .top-nav-capsule #btn-create-room,
 .btn.primary {
@@ -5683,16 +5679,7 @@ html.is-native-apk .wl-btn-apk-dl,
   scrollbar-width: thin;
 }
 .wl-continue-card {
-<<<<<<< HEAD
   flex: 0 0 218px;
-=======
-  flex: 0 0 236px;
-  width: 236px;
-  max-width: 236px;
-  min-width: 0;
-  overflow: hidden;
-  box-sizing: border-box;
->>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
   display: flex;
   align-items: center;
   gap: 10px;
@@ -5872,10 +5859,7 @@ html.is-native-apk .wl-btn-apk-dl,
 
 .trending-strip-row,
 .hero-showcase-row,
-<<<<<<< HEAD
 .wl-continue-strip,
-=======
->>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
 .wl-home-friends-row {
   -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 3.5%, #000 96.5%, transparent 100%) !important;
   mask-image: linear-gradient(90deg, transparent 0%, #000 3.5%, #000 96.5%, transparent 100%) !important;
@@ -7640,11 +7624,7 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     min-height: 0 !important;
     height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
     max-height: calc(var(--app-height, 100dvh) - 50px - var(--top-safe-offset, 0px)) !important;
-<<<<<<< HEAD
     padding-bottom: calc(64px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 8px))) !important;
-=======
-    padding-bottom: 0 !important;
->>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
     box-sizing: border-box !important;
     overflow: hidden !important;
   }
@@ -7836,212 +7816,9 @@ body:has(#popup-root:not(:empty)) .wl-cookie-banner,
     min-height: 84px !important;
   }
   .provider-tile.rave-icon-tile .provider-corner-tag {
-<<<<<<< HEAD
     max-width: 64px !important;
     font-size: 0.48rem !important;
     top: 6px !important;
     right: 6px !important;
-=======
-    display: none !important;
-  }
-  .provider-tile.rave-icon-tile .provider-logo-wrap {
-    max-width: 100% !important;
-    width: 100% !important;
-    overflow: visible !important;
-  }
-  .provider-tile.rave-icon-tile .provider-logo-wrap img {
-    max-width: 100% !important;
-    width: auto !important;
-    height: 22px !important;
-    object-fit: contain !important;
-  }
-}
-
-/* v193: Safari/WebKit Broken-Image Guard, Toast Safe Width, Badge Unclipping & Header Clearance */
-.provider-logo-wrap img,
-.poster-prov-badge img,
-.sel-provider-badge img,
-.wl-continue-prov img,
-img.vcard-prov {
-  color: transparent !important;
-  font-size: 0 !important;
-  border: 0 !important;
-  outline: none !important;
-}
-img:not([src]),
-img[src=""] {
-  display: none !important;
-}
-#toast-root {
-  max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)) !important;
-}
-#toast-root .toast {
-  max-width: calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)) !important;
-  white-space: normal !important;
-  word-break: break-word !important;
-}
-.wl-latest-ep-card .wl-continue-prov,
-.wl-latest-ep-card .wl-ep-badge,
-.wl-continue-thumb span {
-  max-width: calc(100% - 8px) !important;
-  white-space: nowrap !important;
-}
-.wl-continue-strip {
-  scroll-padding-left: 10px !important;
-  padding-left: 4px !important;
-  -webkit-mask-image: none !important;
-  mask-image: none !important;
-}
-
-@media (max-width: 360px) {
-  .top-nav-capsule .brand-title {
-    display: none !important;
-  }
-}
-
-/* ============================================================================
-   v195 — Top Dynamic-Island Toast Clearance, Room Dock Guard, WCAG Contrast,
-          390px Navbar/Card Fit & Vaul Contact Sheet Scroll Guard
-   ============================================================================ */
-#toast-root,
-.toast-root {
-  top: calc(var(--top-safe-offset, env(safe-area-inset-top, 0px)) + 58px) !important;
-  bottom: auto !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  pointer-events: none !important;
-  z-index: 225000 !important;
-}
-#toast-root .toast,
-.toast-root .toast {
-  pointer-events: auto !important;
-}
-
-body.in-room:not(.mesh-minimized) .floating-dock,
-body.in-room:not(.mesh-minimized) nav.floating-dock,
-#home-root.hidden .floating-dock {
-  display: none !important;
-  visibility: hidden !important;
-  pointer-events: none !important;
-}
-
-.cat-tab-pill.active .cat-count,
-.provider-cat-pill.active .cat-count {
-  background: rgba(4, 16, 20, 0.2) !important;
-  color: var(--accent-ink, #04080e) !important;
-}
-
-.tv-glass-card {
-  min-width: 0 !important;
-  max-width: 100% !important;
-  box-sizing: border-box !important;
-}
-
-@media (max-width: 900px) {
-  .home-scroll.glass-home-shell {
-    padding-bottom: calc(98px + var(--bottom-safe-offset, env(safe-area-inset-bottom, 12px))) !important;
-  }
-  .wl-contact-row2 {
-    display: grid !important;
-    grid-template-columns: 1fr !important;
-    gap: 8px !important;
-  }
-  .wl-contact-form-wrap {
-    max-height: min(62dvh, calc(var(--app-height, 100dvh) - 190px)) !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    padding-right: 2px !important;
-  }
-  .wl-contact-textarea {
-    min-height: 74px !important;
-    max-height: 120px !important;
-  }
-}
-
-@media (max-width: 420px) {
-  .top-nav-capsule .logo-wordmark,
-  .top-nav-capsule .brand-title {
-    display: none !important;
-  }
-  .top-nav-capsule #btn-create-room,
-  .top-nav-capsule .btn-create-room {
-    padding: 0 8px !important;
-    font-size: 0.7rem !important;
-    flex-shrink: 0 !important;
-    max-width: 126px !important;
-  }
-  .tv-channels-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
-  }
-}
-
-/* === UI/UX Audit Fixes (ISS-02, ISS-04, ISS-05, ISS-07, ISS-14, ISS-17, ISS-20, ISS-21, ISS-22) === */
-body:not(.in-room) {
-  overflow-y: auto !important;
-  overflow-x: clip !important;
-}
-.wl-continue-strip,
-.rave-top-bar .cat-row,
-.wl-theme-strip-pills {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
-}
-.wl-shelf-nav-btn {
-  min-width: 32px !important;
-  min-height: 32px !important;
-  font-size: 1.05rem !important;
-  font-weight: 800 !important;
-  line-height: 1 !important;
-}
-.meshthumb .dim,
-.wl-continue-card .dim,
-.wl-meta-sub {
-  color: #cbd5e1 !important;
-}
-@media (max-width: 768px) {
-  .top-nav-capsule .nav-icon,
-  .top-nav-capsule .icon-btn,
-  .floating-dock .dock-btn,
-  .super-close,
-  .wl-modal-close {
-    min-width: 44px !important;
-    min-height: 44px !important;
-  }
-  .floating-dock,
-  nav.floating-dock {
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
-  }
-  .wl-auth-tabs {
-    display: grid !important;
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-    gap: 4px !important;
-  }
-  .wl-auth-tabs > button {
-    font-size: 11px !important;
-    padding: 8px 4px !important;
-    white-space: nowrap !important;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-}
-@media (max-width: 600px) {
-  .brand-logo,
-  .top-nav-capsule .brand-logo {
-    display: inline-flex !important;
-    align-items: center !important;
-    gap: 6px !important;
-  }
-  .brand-wordmark,
-  .logo-wordmark {
-    display: inline-block !important;
-    font-size: 0.92rem !important;
-  }
-}
-@media (max-width: 520px) {
-  .super-results {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 10px !important;
->>>>>>> fd1b292b142958c2a521d474978d23e1dd493358
   }
 }
