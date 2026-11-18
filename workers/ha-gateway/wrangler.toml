@@ -15,7 +15,7 @@ run_worker_first = true
 
 [[kv_namespaces]]
 binding = "WATCHLIVO_KV"
-id = "c8d3386531db4195910a66cc5c630a3e"
+id = "1823a59b725f46879dc5b3bf19a4d93e"
 
 [[durable_objects.bindings]]
 name = "ROOM_DO"
