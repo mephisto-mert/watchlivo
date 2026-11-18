@@ -31,6 +31,17 @@ function _isSameOriginPath(path) {
   return false;
 }
 
+function _getEdgeToken() {
+  try {
+    if (typeof document !== 'undefined') {
+      const m = document.querySelector('meta[name="wl-edge-token"]');
+      const v = m ? String(m.getAttribute('content') || '').trim() : '';
+      if (v) return v;
+    }
+  } catch (_) {}
+  return '';
+}
+
 export async function api(path, { method = 'GET', body, headers: extraHeaders, timeout = 12000, signal: extSignal } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeout);
@@ -42,9 +53,14 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders, t
   try {
     const hdrs = { ...(extraHeaders || {}) };
     if (body) hdrs['Content-Type'] = 'application/json';
-    const tok = _isSameOriginPath(path) ? _getAuthToken() : '';
+    const sameOrig = _isSameOriginPath(path);
+    const tok = sameOrig ? _getAuthToken() : '';
     if (tok && !hdrs.Authorization && !hdrs.authorization) {
       hdrs.Authorization = `Bearer ${tok}`;
+    }
+    const edgeTok = sameOrig ? _getEdgeToken() : '';
+    if (edgeTok && !hdrs['X-Watchlivo-Token'] && !hdrs['x-watchlivo-token']) {
+      hdrs['X-Watchlivo-Token'] = edgeTok;
     }
     const res = await fetch(path, {
       method,
