@@ -1081,6 +1081,7 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
     let fbName = "";
     const fbApiKey = env?.FIREBASE_WEB_API_KEY || "AIzaSyAeyDRstvjN8c_D08U8CrqopcFT0_fz9fo";
     try {
+      const fbResp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(fbApiKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken }),
@@ -1103,22 +1104,12 @@ export async function handleAutonomousEdge(request, url, safePath, env) {
         }
       }
     } catch {}
-      try {
-        if (gResp.ok) {
-          const gInfo = await gResp.json().catch(() => ({}));
-          // Log for debugging
-          console.log("DEBUG: TokenInfo", JSON.stringify(gInfo));
-          fbEmail = String(gInfo.email || "").trim().toLowerCase();
-          fbName = String(gInfo.name || gInfo.given_name || "").trim().slice(0, 40);
-        }
-      } catch (e) {
-        console.error("DEBUG: TokenInfo Error", e);
-      }
-    }
     if (!fbEmail) {
+      return edgeJson({ ok: false, error: "Giriş doğrulanamadı." }, 401);
     }
     const expectedEmail = String(b.email || "").trim().toLowerCase();
     if (expectedEmail && expectedEmail.includes("@") && expectedEmail !== fbEmail) {
+      return edgeJson({ ok: false, error: "E-posta eşleşmiyor." }, 403);
     }
     let rec = await env.WATCHLIVO_KV.get(`acct:${fbEmail}`, "json").catch(() => null);
     let user = rec?.user || null;

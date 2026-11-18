@@ -144,7 +144,9 @@ function plainLyricsToVtt(plain) {
   return `WEBVTT\n\n${body}\n`;
 }
 
+async function resolveYoutubeVideoId(q) {
   try {
+    const r = await fetch(`https://www.youtube.com/results?${new URLSearchParams({ search_query: q })}`, {
       headers: { "User-Agent": MUSIC_UA, "Accept-Language": "tr-TR,tr;q=0.9" },
       signal: AbortSignal.timeout(2600),
     });
