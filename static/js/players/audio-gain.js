@@ -79,10 +79,7 @@ export function isCorsSafeMediaElement(el, rawOpts = {}) {
     try {
       const u = new URL(src, window.location.origin);
       if (u.origin === window.location.origin) {
-        if (el.tagName === 'VIDEO' && u.pathname.startsWith('/api/rave/') && el.crossOrigin !== 'anonymous') {
-          return false;
-        }
-        return u.pathname.startsWith('/api/rave/') || u.pathname.startsWith('/uploads/') || el.crossOrigin === 'anonymous';
+        return u.pathname.startsWith('/api/rave/') || u.pathname.startsWith('/uploads/') || Boolean(el.crossOrigin);
       }
     } catch (e) { /* ignore */ }
   }
@@ -110,15 +107,9 @@ function _attachElementGraph(el, opts = {}, initialGain = 1.0) {
   const ctx = getSharedAudioContext(true);
   if (!ctx) return null;
   if ((ctx.state === 'suspended' || ctx.state === 'interrupted') && !(typeof document !== 'undefined' && document.hidden)) {
-    try {
-      ctx.resume().then(() => {
-        if (ctx.state === 'running' && el.isConnected && !_mediaNodes.has(el) && !el.muted && initialGain > 1.01) {
-          applyElementVolume(el, Math.round(initialGain * 100), false, opts);
-        }
-      }).catch(() => {});
-    } catch (e) { /* ignore */ }
+    try { ctx.resume().catch(() => {}); } catch (e) { /* ignore */ }
   }
-  if (ctx.state !== 'running') return null;
+  if (ctx.state === 'closed' || (isIosWebKit() && ctx.state !== 'running')) return null;
   try {
     const source = ctx.createMediaElementSource(el);
     const eqLow = ctx.createBiquadFilter();
@@ -249,7 +240,6 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     if (_streamNodes.has(audioEl)) {
       releaseStreamBoost(audioEl);
     }
-    try { audioEl.muted = clamped <= 0; } catch (e) { /* ignore */ }
     try { audioEl.volume = Math.max(0, Math.min(1, clamped / 100)); } catch (e) { /* ignore */ }
     return;
   }
@@ -296,66 +286,3 @@ export function applyStreamBoost(audioEl, stream, pct = 100) {
     node.gain.gain.value = Math.max(0, Math.min(2.0, clamped / 100));
   }
 }
-
-let _bgRelayAudio = null;
-let _bgRelayUnlocked = false;
-const _SILENT_WAV_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-
-export function getBgRelayAudio() {
-  if (typeof document === 'undefined') return null;
-  if (!_bgRelayAudio) {
-    const a = document.createElement('audio');
-    a.className = 'wl-bg-audio-relay';
-    a.preload = 'none';
-    a.playsInline = true;
-    a.preservesPitch = true;
-    try {
-      a.setAttribute('playsinline', '');
-      a.setAttribute('webkit-playsinline', '');
-    } catch (_) {}
-    _bgRelayAudio = a;
-  }
-  return _bgRelayAudio;
-}
-
-export function primeBgRelayAudio() {
-  if (_bgRelayUnlocked || typeof document === 'undefined') return;
-  const a = getBgRelayAudio();
-  if (!a || a.dataset?.bgActive === '1') return;
-  try {
-    ensureIosPlaybackAudioSession();
-    a.muted = true;
-    a.volume = 0;
-    a.src = _SILENT_WAV_URI;
-    const p = a.play();
-    if (p && typeof p.then === 'function') {
-      p.then(() => {
-        _bgRelayUnlocked = true;
-        if (a.dataset?.bgActive !== '1') {
-          try {
-            a.pause();
-            a.removeAttribute('src');
-            a.load();
-          } catch (_) {}
-        }
-      }).catch(() => {});
-    } else {
-      _bgRelayUnlocked = true;
-    }
-  } catch (_) {}
-}
-
-if (typeof window !== 'undefined' && typeof document !== 'undefined') {
-  const _onceUnlockRelay = () => {
-    primeBgRelayAudio();
-    if (_bgRelayUnlocked) {
-      ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => {
-        window.removeEventListener(ev, _onceUnlockRelay, { capture: true });
-      });
-    }
-  };
-  ['pointerup', 'touchend', 'click', 'keydown'].forEach((ev) => {
-    window.addEventListener(ev, _onceUnlockRelay, { capture: true, passive: true });
-  });
-}
-

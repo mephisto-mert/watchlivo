@@ -1,17 +1,16 @@
-// Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
+// Embed adapter for official iframe players (YouTube, Vimeo, Dailymotion, Twitch, Kick, TikTok,
+// Google Drive preview, archive.org, VK / Rutube public videos). Only first-party players are allowed.
 const _TRUSTED_EMBED_DOMAINS = [
   'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
-  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org',
-  'ok.ru', 'vk.com', 'vkvideo.ru', 'rutube.ru', 'sibnet.ru', 'watchlivo.online',
+  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'vk.com', 'vkvideo.ru',
+  'rutube.ru',
 ];
-const _BLOCKED_EMBED_HOST_RE = /(?:^|\.)(?:1xbet|onebahis|melbet|mostbet|pinup|betwinner|casibom|grandpashabet|stake|meritking|jojobet|betway|bets10|mobilbahis|bahis|casino|popads|adsterra|propellerads|exoclick|juicyads|hilltopads|trafficjunky|onclickalgo|acscdn|vidlink|vidsrc|2embed|multiembed|autoembed|smashystream|flixer|vidfast|vidora|rivestream|pstream|cinejoy|vidbinge|superembed|streamtape|uqload|sendvid|dood|filemoon)\b|(?:^|\.)embed\.su$|(?:^|\.)vidy\.st$|(?:^|\.)nexa\.mov$|(?:^|\.)moviesapi\.club$|(?:^|\.)nontongo\.win$|(?:^|\.)voe\.sx$/i;
 
 export function isTrustedEmbedUrl(rawUrl) {
   try {
     const u = new URL(String(rawUrl || '').trim());
     if (u.protocol !== 'https:') return false;
     const h = u.hostname.toLowerCase().replace(/\.$/, '');
-    if (!h || _BLOCKED_EMBED_HOST_RE.test(h)) return false;
     return _TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
   } catch (_) {
     return false;
@@ -77,7 +76,10 @@ export class EmbedAdapter {
       const fallbackDrive = media.embedUrl || media.url || '';
       return _isTrustedEmbedUrl(fallbackDrive) ? fallbackDrive : 'about:blank';
     }
-    const u = media.embedUrl || media.url || '';
+    let u = media.embedUrl || media.url || '';
+    if (startAt > 5 && /vidlink\.pro/i.test(u) && !u.includes('startAt=')) {
+      u += `${u.includes('?') ? '&' : '?'}startAt=${Math.floor(startAt)}`;
+    }
     return _isTrustedEmbedUrl(u) ? u : 'about:blank';
   }
 
@@ -104,34 +106,21 @@ export class EmbedAdapter {
     this.paused = !shouldPlay;
     this.duration = Number(media.duration) || (media.mediaType === 'tv' ? 2700 : 7200);
     const src = this.buildSrc(media, this.baseTime, shouldPlay);
-    if (!src || src === 'about:blank') {
-      const firstValidAlt = (media.altUrls || []).find((u) => _isTrustedEmbedUrl(u));
-      if (!firstValidAlt) {
-        this.events.onBuffering?.(false);
-        this.events.onError?.('Akış yüklenemedi');
-        return;
-      }
-    }
-    const initialEmbedSrc = (!src || src === 'about:blank')
-      ? ((media.altUrls || []).find((u) => _isTrustedEmbedUrl(u)) || 'about:blank')
-      : src;
-    try { this._expectedOrigin = initialEmbedSrc.startsWith('http') ? new URL(initialEmbedSrc).origin : ''; } catch (_) { this._expectedOrigin = ''; }
+    try { this._expectedOrigin = src.startsWith('http') ? new URL(src).origin : ''; } catch (_) { this._expectedOrigin = ''; }
     const f = document.createElement('iframe');
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;
-    f.referrerPolicy = 'no-referrer';
-    f.style.background = '#050a14';
-    f.style.colorScheme = 'dark';
-    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-presentation');
-    f.setAttribute('referrerpolicy', 'no-referrer');
-    f.src = initialEmbedSrc;
+    f.referrerPolicy = 'origin';
+    // Not: Bazı resmi gömülü oynatıcılar "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
+    f.removeAttribute('sandbox');
+    f.src = src;
     this.frame = f;
     window.addEventListener('message', this._onMsg);
     this.container.replaceChildren(f);
-    const alts = (media.altUrls || []).filter((u) => _isTrustedEmbedUrl(u) && u !== initialEmbedSrc);
+    const alts = (media.altUrls || []).filter((u) => _isTrustedEmbedUrl(u));
     if (alts.length) {
       let idx = 0;
-      const allSrcs = [initialEmbedSrc, ...alts];
+      const allSrcs = [src, ...alts];
       const sw = document.createElement('button');
       sw.type = 'button';
       sw.textContent = '🔄 Kaynak Değiştir';
@@ -155,10 +144,7 @@ export class EmbedAdapter {
     if (shouldPlay) this.events.onPlay?.();
   }
 
-  _post(cmd) {
-    if (!this._expectedOrigin || !this._expectedOrigin.startsWith('https://')) return;
-    try { this.frame?.contentWindow?.postMessage(cmd, this._expectedOrigin); } catch (e) { /* ignore */ }
-  }
+  _post(cmd) { try { this.frame?.contentWindow?.postMessage(cmd, '*'); } catch (e) { /* ignore */ } }
   play() { this.wantPlaying = true; if (this.paused) { this.anchorPerf = performance.now(); this.paused = false; } this._post({ command: 'play' }); }
   pause() { this.wantPlaying = false; if (!this.paused) { this.baseTime = this.getTime(); this.paused = true; } this._post({ command: 'pause' }); }
   seek(t) { this.baseTime = Math.max(0, Number(t) || 0); this.anchorPerf = performance.now(); this._post({ command: 'seek', time: this.baseTime }); }

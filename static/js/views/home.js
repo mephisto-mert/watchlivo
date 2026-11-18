@@ -1,23 +1,21 @@
-// Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261114_v215';
+// Home (Rave Home: NavBar · Selection (provider grid + YouTube search) · Lobby sections).
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261118_v184';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261114_v215';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261114_v215';
-import { api } from '../api.js?v=20261114_v215';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261114_v215';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261114_v215';
-import { fetchRooms, buildFallbackCuratedRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261114_v215';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261114_v215';
+} from '../store.js?v=20261118_v184';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261118_v184';
+import { api } from '../api.js?v=20261118_v184';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261118_v184';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261118_v184';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261118_v184';
 
 let refreshTimer = null;
-let retryLoadTimer = null;
 let homeDrawTimer = null;
 let unsubHomeStore = null;
-let onHomeVisibility = null;
 let activeSelection = null;
 let tubelightCleanups = [];
 let rooms = [];
@@ -64,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261114_v215', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v184', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -74,85 +72,77 @@ export function openRoom(room) {
   window.vortexNavigate(`/mesh/${encodeURIComponent(room.id)}`);
 }
 
-let _creatingRoomPromise = null;
-
 export async function createRoomWithMedia(media) {
-  if (_creatingRoomPromise) return _creatingRoomPromise;
-  _creatingRoomPromise = (async () => {
-    const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
-    const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
-    const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
-    if (cleanMedia && document.body.classList.contains('mesh-minimized') && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
-      document.body.classList.remove('mesh-minimized');
-      window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
-      window.vortexActions.pickMedia(cleanMedia);
-      return;
-    }
-    let cid = '';
-    try {
-      cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
-      sessionStorage.setItem('vortex_cid', cid);
-    } catch (e) { /* ignore */ }
-    const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
-      ? String(cleanMedia.title).trim().slice(0, 80)
-      : `${self.name || 'İzleyici'} odası`;
-    const res = await api('/api/rooms/create', {
-      method: 'POST',
-      body: {
-        name: initialRoomName,
-        privacy: 'public',
-        playMode: 'leader',
-        creator: self.name || 'İzleyici',
-        creatorId: self.id || '',
-        clientId: cid,
-        color: self.color || '#27DCC8',
-        handle: self.handle || '',
-        avatarUrl: self.avatarUrl || self.avatar || '',
-        bio: self.bio || '',
-        statusText: self.statusText || '',
-        statusEmoji: self.statusEmoji || '🍿',
-        medal: self.medal || '',
-        watchMinutes: self.watchMinutes || 0,
-        hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
-        hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
-        hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
-        friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
-        device: (() => {
-          const ua = navigator.userAgent || '';
-          if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
-          if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'Tablet';
-          if (/iPad|Tablet/i.test(ua)) return 'Tablet';
-          return /Mobi|Android|iPhone/i.test(ua) ? 'Mobil' : 'Web';
-        })(),
-        media: cleanMedia,
-      },
-    });
-    if (!res.room?.id) throw new Error('Oda oluşturulamadı');
-    try {
-      const prevRecents = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]');
-      for (const oldId of prevRecents) {
-        if (oldId && oldId !== res.room.id && !String(oldId).startsWith('tv-') && !String(oldId).startsWith('radyo-')) {
-          forgetRoom(oldId);
-        }
-      }
-      if (res.clientId) {
-        sessionStorage.setItem('vortex_cid', res.clientId);
-        sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
-        localStorage.removeItem(`vortex_creator_flag_${res.room.id}`);
-        localStorage.removeItem(`vortex_creator_${res.room.id}`);
-      }
-      if (res.clientToken) {
-        sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
-        localStorage.removeItem(`vortex_ct_${res.room.id}`);
-      }
-      if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
-    } catch (e) { /* ignore */ }
-    rememberRoom(res.room);
-    window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
-  })().finally(() => {
-    _creatingRoomPromise = null;
+  const self = state.self || { id: 'guest_user', name: 'İzleyici', isGuest: true };
+  const resumePos = Number.isFinite(Number(media?.currentTime)) && Number(media.currentTime) > 5 ? Math.floor(Number(media.currentTime)) : 0;
+  const cleanMedia = media ? { ...media, currentTime: resumePos } : media;
+  if (cleanMedia && document.body.classList.contains('mesh-minimized') && state.mesh?.id && !state.mesh.curated && window.vortexActions?.pickMedia) {
+    document.body.classList.remove('mesh-minimized');
+    window.vortexNavigate(`/mesh/${encodeURIComponent(state.mesh.id)}`);
+    window.vortexActions.pickMedia(cleanMedia);
+    return;
+  }
+  let cid = '';
+  try {
+    cid = sessionStorage.getItem('vortex_cid') || ('h_' + Math.random().toString(36).slice(2, 10));
+    sessionStorage.setItem('vortex_cid', cid);
+  } catch (e) { /* ignore */ }
+  const initialRoomName = (cleanMedia?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(cleanMedia.title))
+    ? String(cleanMedia.title).trim().slice(0, 80)
+    : `${self.name || 'İzleyici'} odası`;
+  const res = await api('/api/rooms/create', {
+    method: 'POST',
+    body: {
+      name: initialRoomName,
+      privacy: 'public',
+      playMode: 'leader',
+      creator: self.name || 'İzleyici',
+      creatorId: self.id || '',
+      clientId: cid,
+      color: self.color || '#27DCC8',
+      handle: self.handle || '',
+      avatarUrl: self.avatarUrl || self.avatar || '',
+      bio: self.bio || '',
+      statusText: self.statusText || '',
+      statusEmoji: self.statusEmoji || '🍿',
+      medal: self.medal || '',
+      watchMinutes: self.watchMinutes || 0,
+      hideLocation: self.hideLocation === true || self.hideLocation === 1 || self.hideLocation === '1',
+      hideWatching: self.hideWatching === true || self.hideWatching === 1 || self.hideWatching === '1',
+      hideFriends: self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1',
+      friendsPreview: (self.hideFriends === true || self.hideFriends === 1 || self.hideFriends === '1') ? [] : (getFriends() || []).slice(0, 10),
+      device: (() => {
+        const ua = navigator.userAgent || '';
+        if (/WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua))) return 'Mobil Uygulama';
+        if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return 'Tablet';
+        if (/iPad|Tablet/i.test(ua)) return 'Tablet';
+        return /Mobi|Android|iPhone/i.test(ua) ? 'Mobil' : 'Web';
+      })(),
+      media: cleanMedia,
+    },
   });
-  return _creatingRoomPromise;
+  if (!res.room?.id) throw new Error('Oda oluşturulamadı');
+  try {
+    const prevRecents = JSON.parse(localStorage.getItem(getRecentRoomsKey()) || '[]');
+    for (const oldId of prevRecents) {
+      if (oldId && oldId !== res.room.id && !String(oldId).startsWith('tv-') && !String(oldId).startsWith('radyo-')) {
+        forgetRoom(oldId);
+      }
+    }
+    if (res.clientId) {
+      sessionStorage.setItem('vortex_cid', res.clientId);
+      sessionStorage.setItem(`vortex_creator_${res.room.id}`, res.clientId);
+      localStorage.removeItem(`vortex_creator_flag_${res.room.id}`);
+      localStorage.removeItem(`vortex_creator_${res.room.id}`);
+    }
+    if (res.clientToken) {
+      sessionStorage.setItem(`vortex_ct_${res.room.id}`, res.clientToken);
+      localStorage.removeItem(`vortex_ct_${res.room.id}`);
+    }
+    if (res.room.syncToken) sessionStorage.setItem(`vortex_st_${res.room.id}`, res.room.syncToken);
+  } catch (e) { /* ignore */ }
+  rememberRoom(res.room);
+  window.vortexNavigate(`/mesh/${encodeURIComponent(res.room.id)}?new=1&cid=${encodeURIComponent(res.clientId || cid)}`);
 }
 
 export function renderHome(app) {
@@ -198,8 +188,8 @@ export function renderHome(app) {
       !isNativeWatchlivoApp() ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         title: 'Watchlivo Native Android APK İndir (v2.0.2 Otomatik Güncellemeli)',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000),
       },
@@ -237,13 +227,7 @@ export function renderHome(app) {
   selection.id = 'home-selection';
   selection.render();
   syncCloudUserMedia().then((chg) => {
-    if ((chg?.historyChanged || chg?.favsChanged) && selection.isConnected) {
-      const activeInp = selection.querySelector('input');
-      const hasSearchBox = selection.querySelector('.super-results')?.children?.length > 0;
-      if ((!activeInp || (document.activeElement !== activeInp && !activeInp.value.trim())) && !hasSearchBox) {
-        selection.render();
-      }
-    }
+    if ((chg?.historyChanged || chg?.favsChanged) && selection.isConnected) selection.render();
   }).catch(() => {});
 
   let filter = 'all';
@@ -297,8 +281,8 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-actions' },
       h('a', {
         class: 'btn primary sm wl-banner-apk-btn',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
@@ -308,7 +292,7 @@ export function renderHome(app) {
 
   const makeDockLabel = (id) => ({
     home: 'Keşfet',
-    cinema: 'Sinema+',
+    platforms: 'Platformlar',
     rooms: 'Canlı Odalar',
     tv: '7/24 Canlı TV',
     profile: 'Profil',
@@ -321,11 +305,6 @@ export function renderHome(app) {
       'data-view': id,
       title,
       onclick: () => {
-        if (!document.body.classList.contains('mesh-minimized')) {
-          const mr = document.getElementById('mesh-root');
-          if (mr && !mr.classList.contains('hidden')) mr.classList.add('hidden');
-          document.body.classList.remove('in-room');
-        }
         if (id !== 'profile') {
           dockEl.querySelectorAll('.dock-btn').forEach((x) => x.classList.toggle('active', x === b));
           dockEl._syncTubelight?.();
@@ -344,9 +323,9 @@ export function renderHome(app) {
       selection.setProvider(null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
-    makeDockBtn('cinema', 'Sinema, Dizi & Anime Arşivi', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
-      selection.setProvider('cinema');
-      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    makeDockBtn('platforms', 'Platformlar · Kendi hesabınla', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
+      selection.setProvider(null);
+      setTimeout(() => document.querySelector('.rave-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
     }),
     makeDockBtn('rooms', 'Herkese Açık & Arkadaş Odaları', icons.rooms, false, () => {
       selection.setProvider(null);
@@ -376,26 +355,7 @@ export function renderHome(app) {
     h('div', { class: 'dock-studio-meta' },
       h('span', { class: 'dock-archive-pill' },
         h('span', { class: 'dock-pulse-dot' }),
-        'Sinema, Dizi & Anime · 4K TR Dublaj & Altyazı'),
-      h('button', {
-        type: 'button',
-        class: 'dock-quick-btn',
-        onclick: () => {
-          if (typeof selection.openTrending === 'function') selection.openTrending();
-          else {
-            selection.setProvider(null);
-            setTimeout(() => document.getElementById('btn-trending-toggle')?.click(), 30);
-          }
-        },
-      }, '🔥 Vitrin & Trendler'),
-      h('button', {
-        type: 'button',
-        class: 'dock-quick-btn random',
-        onclick: (e) => {
-          if (typeof selection.pickRandom === 'function') selection.pickRandom(e.currentTarget);
-          else document.getElementById('btn-random-movie')?.click();
-        },
-      }, '🎲 Rastgele Film'),
+        'Birlikte izle · Kendi hesabınla senkron'),
       h('button', {
         type: 'button',
         class: 'dock-quick-btn',
@@ -438,11 +398,11 @@ export function renderHome(app) {
     }, '✨ Ambiyans'));
 
   const friendsStripEl = renderHomeFriendsStrip(openRoom);
-  try { document.title = 'Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları'; } catch (_) {}
+  try { document.title = 'Watchlivo — Arkadaşlarınla Senkron Birlikte İzle'; } catch (_) {}
 
   const siteFooterEl = renderSiteFooterSection({
     onSelectCategory: (cat) => {
-      selection.setProvider(cat === 'series' ? 'series' : (cat === 'anime' ? 'anime' : (cat === 'movie' ? 'movies' : 'cinema')));
+      selection.setProvider(['youtube', 'drive', 'music', 'upload'].includes(cat) ? cat : null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     },
     onScrollToTv: () => {
@@ -455,10 +415,6 @@ export function renderHome(app) {
         const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 40);
-    },
-    onRandomMovie: () => {
-      if (typeof selection.pickRandom === 'function') selection.pickRandom();
-      else document.getElementById('btn-random-movie')?.click();
     },
   });
 
@@ -516,10 +472,16 @@ export function renderHome(app) {
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
     h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
-  const srTitle = h('h1', { class: 'sr-only' }, 'Watchlivo — Birlikte Sinema, Dizi, Anime ve Canlı TV İzleme Odaları');
+  const srTitle = h('h1', { class: 'sr-only' }, 'Watchlivo — Arkadaşlarınla Senkron Birlikte İzleme Odaları');
   const home = h('main', { class: 'home', id: 'home-main', tabindex: '-1' }, srTitle, homeScroll);
 
+  // DOM güncellemelerini `view transition` API veya daha kararlı bir yöntemle yönetin (Mevcut 'app.replaceChildren' çakışma yaratabilir)
+  // const transition = document.startViewTransition(() => {
+  //   app.replaceChildren(nav, home);
+  // });
+  // Şimdilik kararlı bir DOM güncellemesi:
   app.replaceChildren(nav, home);
+  if (app.classList.contains('hidden')) app.classList.remove('hidden');
   try {
     homeScroll.scrollTop = 0;
     window.scrollTo(0, 0);
@@ -531,17 +493,9 @@ export function renderHome(app) {
   updateMiniPip();
   initCookieConsentBanner();
   let emptyStreak = 0;
-  let failStreak = 0;
-  let loadInFlight = false;
-  const load = async (isAuto = false) => {
-    if (loadInFlight) return;
-    if (isAuto && typeof document !== 'undefined' && document.hidden) return;
-    loadInFlight = true;
+  const load = async () => {
     try {
       const next = await fetchRooms();
-      failStreak = 0;
-      clearTimeout(retryLoadTimer);
-      retryLoadTimer = null;
       if (next.length === 0 && rooms.length > 0 && emptyStreak < 2) {
         emptyStreak += 1;
         return;
@@ -550,46 +504,18 @@ export function renderHome(app) {
       rooms = next;
       draw();
       updateMiniPip();
-    } catch (e) {
-      failStreak = Math.min(8, failStreak + 1);
-      if (!rooms.length) {
-        rooms = buildFallbackCuratedRooms();
-        draw(true);
-      }
-      clearTimeout(retryLoadTimer);
-      const baseMs = (e && Number(e.retryAfter) > 0) ? (Number(e.retryAfter) * 1000) : 3500;
-      const delayMs = Math.min(30000, Math.round(baseMs * Math.pow(1.7, Math.max(0, failStreak - 1))));
-      retryLoadTimer = setTimeout(() => {
-        if (home.isConnected && !(typeof document !== 'undefined' && document.hidden)) load(false);
-      }, delayMs);
-    } finally {
-      loadInFlight = false;
-    }
+    } catch (e) { if (!rooms.length) lobbyBox.replaceChildren(h('div', { class: 'lobby-empty' }, 'Odalar yüklenemedi.')); }
   };
   lobbyBox.append(h('div', { style: { display: 'flex', justifyContent: 'center', padding: '1.5em' } }, h('div', { class: 'spinner' })));
-  load(false);
-  refreshTimer = setInterval(() => load(true), 10000);
-  onHomeVisibility = () => {
-    if (typeof document !== 'undefined' && !document.hidden && home.isConnected) {
-      load(false);
-    }
-  };
-  if (typeof document !== 'undefined') {
-    document.addEventListener('visibilitychange', onHomeVisibility);
-  }
+  load();
+  refreshTimer = setInterval(load, 8000);
 }
 
 export function destroyHome() {
   clearInterval(refreshTimer);
   refreshTimer = null;
-  clearTimeout(retryLoadTimer);
-  retryLoadTimer = null;
   clearTimeout(homeDrawTimer);
   homeDrawTimer = null;
-  if (onHomeVisibility && typeof document !== 'undefined') {
-    document.removeEventListener('visibilitychange', onHomeVisibility);
-    onHomeVisibility = null;
-  }
   if (activeSelection && typeof activeSelection.destroy === 'function') {
     try { activeSelection.destroy(); } catch (_) {}
   }
@@ -605,23 +531,23 @@ export function destroyHome() {
 }
 
 function joinByCode() {
-  const input = h('input', { class: 'input', value: '', autocomplete: 'off', placeholder: 'Örn: wl-a1b2c3 veya davet bağlantısı' });
+  const input = h('input', { class: 'input', placeholder: 'Oda kodu veya davet bağlantısı' });
   popup({ title: 'Odaya Katıl', content: input, options: [{ label: 'Katıl', primary: true, onClick: () => {
     const v = input.value.trim();
     const m = v.match(/\/(?:r|join)\/([^/?#]+)/i) || v.match(/mesh\/([^/?#]+)/i) || v.match(/[?&]room=([^&#]+)/i);
-    const id = m ? decodeURIComponent(m[1]).trim() : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
-    if (!id || id.length < 4 || !/^[a-z0-9-]+$/i.test(id)) {
-      toast('Lütfen geçerli bir oda kodu (en az 4 karakter) veya davet bağlantısı girin');
+    const id = m ? decodeURIComponent(m[1]) : v.replace(/[^a-z0-9-]/gi, '').toLowerCase();
+    if (!id) {
+      toast('Lütfen geçerli bir oda kodu veya davet bağlantısı girin');
       input.focus();
       return true;
     }
     openRoom({ id });
   } }, { label: 'Vazgeç' }] });
-  setTimeout(() => { input.value = ''; input.focus(); }, 30);
+  setTimeout(() => input.focus(), 30);
 }
 
 function openAppSettings() {
-  profileSetup({ current: state.self, initialTab: 'account' });
+  openThemeModal();
 }
 
 function updateMiniPip() {

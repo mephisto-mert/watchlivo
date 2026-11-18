@@ -240,73 +240,6 @@ def unsign_b64(key: bytes, token: str, *, max_age: float = 0.0) -> Optional[dict
 
 
 # ---------------------------------------------------------------------------
-# Upstash Redis circuit-breaker (zero-latency fallback when quota/network fails)
-# ---------------------------------------------------------------------------
-_UPSTASH_CB_LOCK = threading.Lock()
-_UPSTASH_DOWN_UNTIL: dict[str, float] = {}
-_CF_WORKER_EGRESS_NETS = (
-    ipaddress.ip_network("2a06:98c0::/29"),
-)
-_CF_EDGE_NETS = (
-    ipaddress.ip_network("173.245.48.0/20"),
-    ipaddress.ip_network("103.21.244.0/22"),
-    ipaddress.ip_network("103.22.200.0/22"),
-    ipaddress.ip_network("103.31.4.0/22"),
-    ipaddress.ip_network("141.101.64.0/18"),
-    ipaddress.ip_network("108.162.192.0/18"),
-    ipaddress.ip_network("190.93.240.0/20"),
-    ipaddress.ip_network("188.114.96.0/20"),
-    ipaddress.ip_network("197.234.240.0/22"),
-    ipaddress.ip_network("198.41.128.0/17"),
-    ipaddress.ip_network("162.158.0.0/15"),
-    ipaddress.ip_network("104.16.0.0/13"),
-    ipaddress.ip_network("104.24.0.0/14"),
-    ipaddress.ip_network("172.64.0.0/13"),
-    ipaddress.ip_network("131.0.72.0/22"),
-    ipaddress.ip_network("2400:cb00::/32"),
-    ipaddress.ip_network("2606:4700::/32"),
-    ipaddress.ip_network("2803:f800::/32"),
-    ipaddress.ip_network("2405:b500::/32"),
-    ipaddress.ip_network("2405:8100::/32"),
-    ipaddress.ip_network("2a06:98c0::/29"),
-    ipaddress.ip_network("2c0f:f248::/32"),
-)
-
-
-def is_upstash_down(url: Optional[str]) -> bool:
-    u = (url or "").strip().rstrip("/")
-    if not u:
-        return False
-    exp = _UPSTASH_DOWN_UNTIL.get(u, 0.0)
-    if exp <= 0.0:
-        return False
-    if time.time() < exp:
-        return True
-    with _UPSTASH_CB_LOCK:
-        if time.time() >= _UPSTASH_DOWN_UNTIL.get(u, 0.0):
-            _UPSTASH_DOWN_UNTIL.pop(u, None)
-            return False
-    return True
-
-
-def mark_upstash_down(url: Optional[str], cooldown_sec: float = 60.0) -> None:
-    u = (url or "").strip().rstrip("/")
-    if not u:
-        return
-    until = time.time() + max(5.0, float(cooldown_sec))
-    with _UPSTASH_CB_LOCK:
-        _UPSTASH_DOWN_UNTIL[u] = max(until, _UPSTASH_DOWN_UNTIL.get(u, 0.0))
-
-
-def mark_upstash_ok(url: Optional[str]) -> None:
-    u = (url or "").strip().rstrip("/")
-    if not u or u not in _UPSTASH_DOWN_UNTIL:
-        return
-    with _UPSTASH_CB_LOCK:
-        _UPSTASH_DOWN_UNTIL.pop(u, None)
-
-
-# ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
 class RateLimiter:
@@ -339,7 +272,7 @@ class RateLimiter:
 
     def _kv(self, *cmd) -> Optional[object]:
         url, tok = self._kv_cfg()
-        if not url or is_upstash_down(url):
+        if not url:
             return None
         try:
             req = urllib.request.Request(
@@ -347,22 +280,17 @@ class RateLimiter:
                 data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
                 headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=1.2) as r:
+            with urllib.request.urlopen(req, timeout=2.5) as r:
                 out = json.loads(r.read().decode("utf-8"))
-            if isinstance(out, dict) and out.get("error"):
-                mark_upstash_down(url, 60.0)
-                return None
-            mark_upstash_ok(url)
             return out.get("result") if isinstance(out, dict) else None
         except Exception:
-            mark_upstash_down(url, 60.0)
             return None
 
     def hit(self, key: str) -> Tuple[bool, float]:
         """Register one attempt. Returns (allowed, retry_after_seconds)."""
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url and not is_upstash_down(url):
+        if url:
             win_ms = max(1000, int(round(self.window * 1000)))
             eval_res = self._kv("EVAL", self._LUA_HIT, "1", key, str(win_ms))
             if isinstance(eval_res, list) and len(eval_res) >= 2:
@@ -377,47 +305,41 @@ class RateLimiter:
                         retry = (pttl_ms / 1000.0) if pttl_ms > 0 else self.window
                         return False, max(1.0, retry)
                     return True, 0.0
-            if not is_upstash_down(url):
-                win_sec = int(self.window) or 1
-                count = self._kv("INCR", key)
-                try:
-                    count_int = int(count)  # type: ignore[arg-type]
-                except (TypeError, ValueError):
-                    count_int = None
-                if count_int == 1:
-                    self._kv("EXPIRE", key, win_sec)
-                if count_int is not None:
-                    if count_int > self.limit:
-                        ttl = self._kv("TTL", key)
-                        try:
-                            retry = float(ttl)  # type: ignore[arg-type]
-                        except (TypeError, ValueError):
-                            retry = self.window
-                        if retry < 0:
-                            self._kv("EXPIRE", key, win_sec)
-                            retry = self.window
-                        return False, max(1.0, retry)
-                    return True, 0.0
+            win_sec = int(self.window) or 1
+            count = self._kv("INCR", key)
+            try:
+                count_int = int(count)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                count_int = None
+            if count_int == 1:
+                self._kv("EXPIRE", key, win_sec)
+            if count_int is not None:
+                if count_int > self.limit:
+                    ttl = self._kv("TTL", key)
+                    try:
+                        retry = float(ttl)  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        retry = self.window
+                    if retry < 0:
+                        self._kv("EXPIRE", key, win_sec)
+                        retry = self.window
+                    return False, max(1.0, retry)
+                return True, 0.0
         t = time.time()
         with self._lock:
             bucket = self._hits.get(key)
             if bucket is None:
                 bucket = []
                 self._hits[key] = bucket
-            else:
-                self._hits.move_to_end(key)
             cutoff = t - self.window
             while bucket and bucket[0] < cutoff:
                 bucket.pop(0)
             if len(self._hits) > 20000:
-                stale = [k for k, v in self._hits.items() if k != key and (not v or v[-1] < cutoff)]
-                for sk in stale:
-                    self._hits.pop(sk, None)
-                while len(self._hits) > 20000:
-                    old_k, _ = next(iter(self._hits.items()))
-                    if old_k == key:
-                        break
-                    self._hits.pop(old_k, None)
+                for stale in [k for k, v in list(self._hits.items())[:5000] if not v or v[-1] < cutoff]:
+                    self._hits.pop(stale, None)
+                if len(self._hits) > 20000:
+                    for old_k in list(self._hits.keys())[:4000]:
+                        self._hits.pop(old_k, None)
             if len(bucket) >= self.limit:
                 retry = max(1.0, self.window - (t - bucket[0]))
                 return False, retry
@@ -428,21 +350,20 @@ class RateLimiter:
         """Check whether key is currently rate-limited without consuming a token."""
         full_key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url and not is_upstash_down(url):
+        if url:
             raw_cnt = self._kv("GET", full_key)
-            if not is_upstash_down(url):
+            try:
+                cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                cnt_int = 0
+            if cnt_int >= self.limit:
+                ttl = self._kv("TTL", full_key)
                 try:
-                    cnt_int = int(raw_cnt) if raw_cnt is not None else 0  # type: ignore[arg-type]
+                    retry = max(1.0, float(ttl))  # type: ignore[arg-type]
                 except (TypeError, ValueError):
-                    cnt_int = 0
-                if cnt_int >= self.limit:
-                    ttl = self._kv("TTL", full_key)
-                    try:
-                        retry = max(1.0, float(ttl))  # type: ignore[arg-type]
-                    except (TypeError, ValueError):
-                        retry = self.window
-                    return False, retry
-                return True, 0.0
+                    retry = self.window
+                return False, retry
+            return True, 0.0
         t = time.time()
         with self._lock:
             bucket = self._hits.get(full_key) or []
@@ -455,7 +376,7 @@ class RateLimiter:
     def reset(self, key: str) -> None:
         key = f"{self.name}:{key}"[:200]
         url, _ = self._kv_cfg()
-        if url and not is_upstash_down(url):
+        if url:
             self._kv("DEL", key)
         with self._lock:
             self._hits.pop(key, None)
@@ -468,29 +389,7 @@ _DOC_TEST_NETS = (
 )
 
 
-def _is_cf_worker_egress_ip(raw_ip: str) -> bool:
-    s = (raw_ip or "").strip()
-    if not s:
-        return False
-    try:
-        ip = ipaddress.ip_address(s)
-        return any(ip in net for net in _CF_WORKER_EGRESS_NETS)
-    except Exception:
-        return False
-
-
-def _is_cf_edge_ip(raw_ip: str) -> bool:
-    s = (raw_ip or "").strip()
-    if not s:
-        return False
-    try:
-        ip = ipaddress.ip_address(s)
-        return any(ip in net for net in _CF_EDGE_NETS)
-    except Exception:
-        return False
-
-
-def _is_trusted_proxy_peer(peer: str, *, allow_cf_edge: bool = True) -> bool:
+def _is_trusted_proxy_peer(peer: str) -> bool:
     p = (peer or "").strip()
     if not p:
         return False
@@ -500,13 +399,7 @@ def _is_trusted_proxy_peer(peer: str, *, allow_cf_edge: bool = True) -> bool:
         ip = ipaddress.ip_address(p)
         if isinstance(ip, ipaddress.IPv4Address) and any(ip in net for net in _DOC_TEST_NETS):
             return False
-        if _is_cf_worker_egress_ip(p):
-            return False
-        if ip.is_private or ip.is_loopback:
-            return True
-        if allow_cf_edge and any(ip in net for net in _CF_EDGE_NETS):
-            return True
-        return False
+        return bool(ip.is_private or ip.is_loopback)
     except Exception:
         return False
 
@@ -536,11 +429,6 @@ def client_ip(scope_or_request) -> str:
                     return edge_ip[:64]
                 except Exception:
                     continue
-    cf_worker_zone = (headers.get("cf-worker") or "").strip().lower()
-    untrusted_foreign_worker = bool(
-        cf_worker_zone and cf_worker_zone not in ("watchlivo.online", "www.watchlivo.online")
-    )
-    allow_cf_edge = not untrusted_foreign_worker and not edge_secret
     peer = ""
     try:
         client = getattr(scope_or_request, "client", None)
@@ -560,11 +448,11 @@ def client_ip(scope_or_request) -> str:
     trust_proxy = (
         os.environ.get("WATCHLIVO_TRUST_PROXY") == "1"
         or bool(os.environ.get("RENDER"))
-        or _is_trusted_proxy_peer(peer, allow_cf_edge=allow_cf_edge)
+        or _is_trusted_proxy_peer(peer)
     )
     if trust_vercel and not trust_proxy:
         v_ip = (headers.get("x-vercel-forwarded-for") or headers.get("cf-connecting-ip") or headers.get("x-real-ip") or "").split(",")[0].strip()
-        if v_ip and not (not edge_secret and _is_cf_worker_egress_ip(v_ip)):
+        if v_ip:
             try:
                 ipaddress.ip_address(v_ip)
                 return v_ip[:64]
@@ -572,21 +460,12 @@ def client_ip(scope_or_request) -> str:
                 pass
     elif trust_proxy:
         cf_ip = (headers.get("cf-connecting-ip") or "").split(",")[0].strip()
-        if not untrusted_foreign_worker and cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer, allow_cf_edge=allow_cf_edge)):
-            if not edge_secret and cf_worker_zone in ("watchlivo.online", "www.watchlivo.online") and (_is_cf_worker_egress_ip(cf_ip) or _is_cf_edge_ip(cf_ip)):
-                wl_ip = (headers.get("x-watchlivo-client-ip") or headers.get("x-forwarded-for") or "").split(",")[0].strip()
-                if wl_ip and not _is_cf_worker_egress_ip(wl_ip) and not _is_cf_edge_ip(wl_ip):
-                    try:
-                        ipaddress.ip_address(wl_ip)
-                        return wl_ip[:64]
-                    except Exception:
-                        pass
-            if not _is_cf_worker_egress_ip(cf_ip):
-                try:
-                    ipaddress.ip_address(cf_ip)
-                    return cf_ip[:64]
-                except Exception:
-                    pass
+        if cf_ip and (headers.get("cf-ray") or _is_trusted_proxy_peer(peer)):
+            try:
+                ipaddress.ip_address(cf_ip)
+                return cf_ip[:64]
+            except Exception:
+                pass
         xff = headers.get("x-forwarded-for") or ""
         if xff:
             fallback_cand = ""
@@ -598,14 +477,14 @@ def client_ip(scope_or_request) -> str:
                     ipaddress.ip_address(cand)
                     if not fallback_cand:
                         fallback_cand = cand[:64]
-                    if not _is_trusted_proxy_peer(cand, allow_cf_edge=allow_cf_edge) and not (not edge_secret and not untrusted_foreign_worker and _is_cf_worker_egress_ip(cand)):
+                    if not _is_trusted_proxy_peer(cand):
                         return cand[:64]
                 except Exception:
                     continue
             if fallback_cand:
                 return fallback_cand
         real_ip = (headers.get("x-real-ip") or "").split(",")[0].strip()
-        if real_ip and not untrusted_foreign_worker:
+        if real_ip:
             try:
                 ipaddress.ip_address(real_ip)
                 return real_ip[:64]
@@ -617,16 +496,10 @@ def client_ip(scope_or_request) -> str:
 def too_many_response(retry_after: float):
     from starlette.responses import JSONResponse
 
-    retry_sec = int(max(1, round(float(retry_after or 1.0))))
     return JSONResponse(
-        {
-            "ok": False,
-            "error": "Çok fazla istek gönderildi, lütfen birkaç saniye bekleyip tekrar deneyin.",
-            "retryable": True,
-            "retryAfter": retry_sec,
-        },
+        {"ok": False, "error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."},
         status_code=429,
-        headers={"Retry-After": str(retry_sec), "Cache-Control": "no-store"},
+        headers={"Retry-After": str(int(max(1, retry_after)))},
     )
 
 
@@ -670,9 +543,6 @@ def is_ip_public_global(ip_obj: ipaddress._BaseAddress | str) -> bool:
     return True
 
 
-_DNS_PUBLIC_CACHE = BoundedTTLCache(maxsize=2048, default_ttl=60.0)
-
-
 def is_safe_public_url(url: str) -> bool:
     """Reject non-http(s) schemes and hosts resolving to private/loopback/link-local/CGNAT/NAT64 ranges."""
     import socket
@@ -682,14 +552,8 @@ def is_safe_public_url(url: str) -> bool:
         p = urllib.parse.urlparse(str(url or "").strip())
         if p.scheme not in ("http", "https") or not p.hostname:
             return False
-        if p.username or p.password:
-            return False
         host = p.hostname.lower().rstrip(".")
-        if (
-            not host
-            or host in ("localhost", "metadata.google.internal", "metadata", "watchlivo.online", "www.watchlivo.online", "watchlivo-origin-eu.onrender.com")
-            or host.endswith((".localhost", ".local", ".internal", ".home.arpa", ".watchlivo.online"))
-        ):
+        if not host or host in ("localhost", "metadata.google.internal", "metadata") or host.endswith((".localhost", ".local", ".internal", ".home.arpa")):
             return False
         try:
             lit_ip = ipaddress.ip_address(host)
@@ -697,20 +561,13 @@ def is_safe_public_url(url: str) -> bool:
         except ValueError:
             pass
         port = int(p.port or (443 if p.scheme == "https" else 80))
-        cache_key = f"{host}:{port}"
-        cached = _DNS_PUBLIC_CACHE.get(cache_key)
-        if cached is not None:
-            return bool(cached)
         infos = socket.getaddrinfo(host, port)
         if not infos:
-            _DNS_PUBLIC_CACHE.set(cache_key, False, ttl=15.0)
             return False
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
             if not is_ip_public_global(ip):
-                _DNS_PUBLIC_CACHE.set(cache_key, False, ttl=30.0)
                 return False
-        _DNS_PUBLIC_CACHE.set(cache_key, True, ttl=60.0)
         return True
     except Exception:
         return False

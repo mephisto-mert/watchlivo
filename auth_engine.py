@@ -29,28 +29,14 @@ from starlette.responses import JSONResponse
 
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
-_ENV_DB_PATH = (os.environ.get("WATCHLIVO_DB_PATH") or "").strip()
-AUTH_DB_PATH = (
-    pathlib.Path(_ENV_DB_PATH)
-    if _ENV_DB_PATH
-    else (pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db")
-)
+AUTH_DB_PATH = pathlib.Path("/tmp/watchlivo_auth.db") if IS_VERCEL else BASE_DIR / "rave_platform.db"
 
-from security import (
-    BoundedTTLCache,
-    RateLimiter,
-    client_ip,
-    constant_time_eq,
-    is_upstash_down,
-    mark_upstash_down,
-    mark_upstash_ok,
-    server_secret,
-    too_many_response,
-)
+from security import BoundedTTLCache, RateLimiter, client_ip, constant_time_eq, server_secret, too_many_response
 
-# Fail-closed: no public fallback secret. Without AUTH_SECRET the process uses an
-# unguessable per-instance value (or refuses to boot with WATCHLIVO_STRICT_SECRETS=1).
-AUTH_SECRET = server_secret("AUTH_SECRET") if len((os.environ.get("AUTH_SECRET") or "").strip()) >= 16 else server_secret("VORTEX_SECRET")
+# Fail-closed: no public fallback secret. Without AUTH_SECRET the process refuses to boot.
+AUTH_SECRET = server_secret("AUTH_SECRET", min_len=16)
+if not os.environ.get("AUTH_SECRET"):
+    raise RuntimeError("AUTH_SECRET ortam değişkeni zorunludur!")
 TOKEN_TTL = int(os.environ.get("AUTH_TOKEN_TTL") or 60 * 60 * 24 * 7)
 _LOGIN_LIMIT = RateLimiter(20, 300.0, name="login")
 _ACCT_LOGIN_LIMIT = RateLimiter(10, 300.0, name="login_acct")
@@ -61,7 +47,6 @@ _RESET_LIMIT = RateLimiter(5, 3600.0, name="reset")
 _PW_CHANGE_LIMIT = RateLimiter(10, 600.0, name="pw_change")
 _PASSWORD_RESET_PENDING = BoundedTTLCache(maxsize=1000, default_ttl=3600.0)
 _DELETED_UIDS = BoundedTTLCache(maxsize=4096, default_ttl=86400 * 30)
-_DELETED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=30.0)
 _USER_REVOKED_AFTER = BoundedTTLCache(maxsize=4096, default_ttl=TOKEN_TTL)
 
 HANDLE_RE = re.compile(r"^[a-z0-9_.\-]{2,24}$")
@@ -258,7 +243,7 @@ def _kv_cfg():
 
 def _kv(*cmd):
     url, tok = _kv_cfg()
-    if not url or not tok or is_upstash_down(url):
+    if not url or not tok:
         return None
     try:
         req = urllib.request.Request(
@@ -266,15 +251,12 @@ def _kv(*cmd):
             data=json.dumps([str(c) for c in cmd]).encode("utf-8"),
             headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=1.5) as r:
+        with urllib.request.urlopen(req, timeout=5) as r:
             out = json.loads(r.read().decode("utf-8"))
         if isinstance(out, dict) and out.get("error"):
-            mark_upstash_down(url, 60.0)
             return None
-        mark_upstash_ok(url)
         return out.get("result") if isinstance(out, dict) else None
     except (OSError, TimeoutError, ValueError, RuntimeError, urllib.error.URLError):
-        mark_upstash_down(url, 60.0)
         return None
 
 
@@ -283,13 +265,7 @@ def _kp() -> str:
 
 
 def store_backend() -> str:
-    url, _ = _kv_cfg()
-    return "redis" if (url and not is_upstash_down(url)) else "sqlite"
-
-
-def _can_self_heal_from_claims() -> bool:
-    url, _ = _kv_cfg()
-    return store_backend() == "sqlite" and (IS_VERCEL or bool(url and is_upstash_down(url)))
+    return "redis" if _kv_cfg()[0] else "sqlite"
 
 
 def _user_get(uid: str) -> Optional[Dict[str, Any]]:
@@ -348,14 +324,11 @@ def is_uid_deleted(uid: str) -> bool:
         return False
     if _DELETED_UIDS.get(uid):
         return True
-    if _DELETED_NEG_CACHE.get(uid):
-        return False
     if store_backend() == "redis":
         raw = _kv("GET", f"{_kp()}del_uid:{uid}")
         if raw:
             _DELETED_UIDS.set(uid, float(raw) if str(raw).replace(".", "", 1).isdigit() else time.time())
             return True
-        _DELETED_NEG_CACHE.set(uid, 1, ttl=30.0)
         return False
     try:
         conn = _get_db()
@@ -364,7 +337,6 @@ def is_uid_deleted(uid: str) -> bool:
             if row:
                 _DELETED_UIDS.set(uid, float(row["deleted_at"] or time.time()))
                 return True
-            _DELETED_NEG_CACHE.set(uid, 1, ttl=30.0)
         finally:
             conn.close()
     except Exception:
@@ -376,7 +348,6 @@ def clear_uid_deleted(uid: str) -> None:
     if not uid:
         return
     _DELETED_UIDS.delete(uid)
-    _DELETED_NEG_CACHE.delete(uid)
     _USER_REVOKED_AFTER.delete(uid)
     if store_backend() == "redis":
         _kv("DEL", f"{_kp()}del_uid:{uid}")
@@ -399,7 +370,6 @@ def _user_delete(uid: str) -> bool:
     now_ts = round(time.time(), 3)
     row = _user_get(uid)
     _DELETED_UIDS.set(uid, now_ts)
-    _DELETED_NEG_CACHE.delete(uid)
     _USER_REVOKED_AFTER.set(uid, now_ts)
     if store_backend() == "redis":
         if row:
@@ -653,7 +623,7 @@ def _candidate_auth_secrets() -> list[bytes]:
 
 
 _REVOKED_AUTH_SIGS = BoundedTTLCache(maxsize=5000, default_ttl=TOKEN_TTL)
-_REVOKED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=12.0)
+_REVOKED_NEG_CACHE = BoundedTTLCache(maxsize=5000, default_ttl=2.0)
 
 
 def revoke_auth_token(token: str) -> None:
@@ -665,7 +635,6 @@ def revoke_auth_token(token: str) -> None:
     exp_ts = time.time() + TOKEN_TTL
     _REVOKED_AUTH_SIGS.set(sig, exp_ts, ttl=TOKEN_TTL)
     _REVOKED_NEG_CACHE.delete(sig)
-    _purge_uid_cache(token=token)
     if store_backend() == "redis":
         _kv("SET", f"{_kp()}rev:{sig}", str(int(exp_ts)), "EX", TOKEN_TTL)
 
@@ -675,7 +644,6 @@ def revoke_all_user_tokens(uid: str) -> float:
         return 0.0
     rev_ts = round(time.time(), 3)
     _USER_REVOKED_AFTER.set(uid, rev_ts, ttl=TOKEN_TTL)
-    _purge_uid_cache(uid=uid)
     if store_backend() == "redis":
         _kv("SET", f"{_kp()}rev_uid:{uid}", str(rev_ts), "EX", TOKEN_TTL)
         try:
@@ -720,7 +688,7 @@ def get_user_revoked_after(uid: str) -> float:
                 conn.close()
         except Exception:
             val = 0.0
-    _USER_REVOKED_AFTER.set(uid, val, ttl=12.0 if val <= 0 else TOKEN_TTL)
+    _USER_REVOKED_AFTER.set(uid, val, ttl=5.0 if val <= 0 else TOKEN_TTL)
     return val
 
 
@@ -745,7 +713,7 @@ def verify_any_token(token: str) -> Optional[Dict[str, Any]]:
                         return None
                 except Exception:
                     pass
-            _REVOKED_NEG_CACHE.set(sig, now_ts + 12.0, ttl=12.0)
+            _REVOKED_NEG_CACHE.set(sig, now_ts + 2.0, ttl=2.0)
     try:
         b64_bytes = b64.encode("ascii")
     except Exception:
@@ -977,17 +945,9 @@ async def auth_login(request: Request) -> JSONResponse:
                     "updated_at": time.time(),
                 }
                 try:
-                    if not _user_create(row):
-                        ex_uid = _uid_for("email", row["email"])
-                        ex_row = _user_get(ex_uid) if ex_uid else None
-                        if ex_row and hmac.compare_digest(_hash_pw(password, str(ex_row.get("salt") or "")), str(ex_row.get("password_hash") or "")):
-                            row = ex_row
-                        else:
-                            row = None
-                            fb_verified = False
+                    _user_create(row)
                 except Exception:
-                    row = None
-                    fb_verified = False
+                    pass
     reset_allowed = bool(target_email and (float(_PASSWORD_RESET_PENDING.get(target_email) or 0.0) > time.time()))
     if not reset_allowed and target_email and store_backend() == "redis":
         try:
@@ -1036,9 +996,7 @@ async def auth_login(request: Request) -> JSONResponse:
                             "created_at": time.time(), "updated_at": time.time(),
                         }
                         try:
-                            if not _user_create(row):
-                                ex_uid = _uid_for("email", target_email)
-                                row = _user_get(ex_uid) if ex_uid else row
+                            _user_create(row)
                         except Exception:
                             pass
                 break
@@ -1063,14 +1021,9 @@ async def auth_login(request: Request) -> JSONResponse:
                 "auth_provider": "email", "verified": 1, "created_at": time.time(), "updated_at": time.time(),
             }
             try:
-                if not _user_create(row):
-                    ex_uid = _uid_for("email", identifier)
-                    row = _user_get(ex_uid) if ex_uid else None
-                    if not row:
-                        fb_verified = False
+                _user_create(row)
             except Exception:
-                row = None
-                fb_verified = False
+                pass
     if not row:
         return JSONResponse({"ok": False, "error": "Hesap bulunamadı veya bilgiler hatalı."}, status_code=401)
     expected = _hash_pw(password, row["salt"])
@@ -1118,7 +1071,7 @@ async def auth_oauth(request: Request) -> JSONResponse:
     users = (lk or {}).get("users") or []
     if users:
         u0 = users[0]
-        if u0.get("email") and u0.get("emailVerified") is True:
+        if u0.get("emailVerified") is not False:
             fb_email = str(u0.get("email") or "").strip().lower()
         fb_name = str(u0.get("displayName") or "").strip()[:24]
         fb_phone = re.sub(r"[^\d+]", "", str(u0.get("phoneNumber") or ""))
@@ -1156,39 +1109,17 @@ async def auth_oauth(request: Request) -> JSONResponse:
     if not raw_name:
         raw_name = (raw_email.split("@")[0] if raw_email else f"Watchlivo {provider.capitalize()}")[:24]
     handle = _norm_handle(str(body.get("handle") or ""), raw_name)
-    caller_verified_uid = str(request.scope.get("wl_uid") or "").strip().lower()
     if raw_email and EMAIL_RE.match(raw_email):
         uid = "u_wl_" + hashlib.sha256(raw_email.encode("utf-8")).hexdigest()[:12]
-        ex_email_uid = _uid_for("email", raw_email)
-        if ex_email_uid:
-            uid = ex_email_uid
         ex = _user_get(uid)
         if ex:
-            issued_ts: Optional[float] = None
-            pwh_claim = ""
-            if str(ex.get("auth_provider") or "email") == "email" and caller_verified_uid != uid.lower():
-                new_salt = _new_salt()
-                has_new_pw = bool(password and len(password) >= 6)
-                new_hash = _hash_pw(password if has_new_pw else _new_salt(), new_salt)
-                rev_ts = revoke_all_user_tokens(uid)
-                issued_ts = max(time.time(), rev_ts + 0.002)
-                ex = _user_update(uid, {
-                    "password_hash": new_hash,
-                    "salt": new_salt,
-                    "password_set": 1 if has_new_pw else 0,
-                    "auth_provider": provider,
-                    "verified": 1,
-                }) or ex
-                if has_new_pw:
-                    pwh_claim = _pw_verifier(uid, password)
-            elif password and len(password) >= 6 and not ex.get("password_set"):
+            if password and len(password) >= 6 and not ex.get("password_set"):
                 new_salt = _new_salt()
                 new_hash = _hash_pw(password, new_salt)
                 ex = _user_update(uid, {"password_hash": new_hash, "salt": new_salt, "password_set": 1}) or ex
-                pwh_claim = _pw_verifier(uid, password)
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=pwh_claim, issued_override=issued_ts)})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
     else:
         uid = "u_wl_" + hashlib.sha256(f"{provider}:{handle}".encode("utf-8")).hexdigest()[:12]
         raw_email = f"{handle}@{provider}.watchlivo.online"
@@ -1196,28 +1127,23 @@ async def auth_oauth(request: Request) -> JSONResponse:
         if ex:
             user = _row_to_user(ex)
             _sync_user_to_social(user)
-            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier="")})
+            return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(ex.get("password_hash") or ""), str(ex.get("salt") or "")))})
     salt = _new_salt()
-    has_init_pw = bool(password and len(password) >= 6)
-    pw_hash = _hash_pw(password if has_init_pw else _new_salt(), salt)
+    pw_hash = _hash_pw(password or _new_salt(), salt)
     now_ts = time.time()
     row = {
         "uid": uid, "email": raw_email, "handle": handle, "name": raw_name, "password_hash": pw_hash, "salt": salt,
-        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1 if has_init_pw else 0,
+        "color": color, "avatar": avatar, "auth_provider": provider, "verified": 1, "password_set": 1 if password else 0,
         "created_at": now_ts, "updated_at": now_ts,
     }
     try:
-        if not _user_create(row):
-            ex_uid = _uid_for("email", raw_email)
-            ex_row = _user_get(ex_uid) if ex_uid else None
-            if ex_row:
-                row = ex_row
-        clear_uid_deleted(str(row["uid"]))
+        _user_create(row)
+        clear_uid_deleted(uid)
     except Exception:
         pass
     user = _row_to_user(row)
     _sync_user_to_social(user)
-    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(user["uid"]), password) if has_init_pw else "")})
+    return JSONResponse({"ok": True, "user": user, "authToken": sign_auth_token(user, pw_verifier=_pw_verifier(str(row.get("password_hash") or ""), str(row.get("salt") or "")))})
 
 
 _PHONE_CODES = BoundedTTLCache(maxsize=1000, default_ttl=300.0)
@@ -1569,7 +1495,7 @@ async def auth_profile(request: Request) -> JSONResponse:
         row = None
         upd_failed = True
     if not row:
-        if not (_can_self_heal_from_claims() and not upd_failed and not is_uid_deleted(uid)):
+        if not (IS_VERCEL and store_backend() == "sqlite" and not upd_failed and not is_uid_deleted(uid)):
             return JSONResponse({"ok": False, "error": "Hesap bulunamadı. Lütfen tekrar giriş yapın."}, status_code=401)
         user = {
             "uid": uid,
@@ -1638,10 +1564,7 @@ def _purge_uid_cache(token: str = "", uid: str = "") -> None:
         if token:
             server._UID_CACHE.pop(token, None)
         if uid:
-            stale_keys = [
-                k for k, v in list(server._UID_CACHE.items())
-                if isinstance(v, tuple) and (v[0] == uid or (isinstance(v[0], dict) and str(v[0].get("uid") or "") == uid))
-            ]
+            stale_keys = [k for k, v in list(server._UID_CACHE.items()) if isinstance(v, tuple) and v[0] == uid]
             for k in stale_keys:
                 server._UID_CACHE.pop(k, None)
     except Exception:
@@ -1772,7 +1695,7 @@ async def auth_me(request: Request) -> JSONResponse:
         u_obj = _row_to_user(row)
         _sync_user_to_social(u_obj)
         return JSONResponse({"ok": True, "authenticated": True, "user": u_obj, "authToken": sign_auth_token(u_obj, pw_verifier=pwh_keep)}, headers=priv_hdrs)
-    if not (_can_self_heal_from_claims() and not lookup_failed and not is_uid_deleted(str(claims["uid"]))):
+    if not (IS_VERCEL and store_backend() == "sqlite" and not lookup_failed and not is_uid_deleted(str(claims["uid"]))):
         return JSONResponse({"ok": False, "authenticated": False}, status_code=401, headers=priv_hdrs)
     user = {
         "uid": claims["uid"],
@@ -1945,54 +1868,19 @@ def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> l
         else:
             uids = _kv("SMEMBERS", f"{_kp()}uids") or []
             if isinstance(uids, list):
-                cand_uids = [str(u_id) for u_id in uids[:160] if u_id and str(u_id) != exclude_uid and str(u_id) not in results]
-                if cand_uids:
-                    raw_rows = _kv("MGET", *[f"{_kp()}user:{u_id}" for u_id in cand_uids])
-                    rows_iter = raw_rows if isinstance(raw_rows, list) else []
-                    for u_id, raw_r in zip(cand_uids, rows_iter):
-                        if len(results) >= limit or not raw_r:
-                            continue
-                        try:
-                            row = json.loads(raw_r) if isinstance(raw_r, str) else (raw_r if isinstance(raw_r, dict) else None)
-                        except Exception:
-                            row = None
-                        if not row:
-                            continue
-                        card = public_user_card(row)
-                        h_f = _tr_fold(card["handle"].lstrip("@"))
-                        n_f = _tr_fold(card["name"])
-                        if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
-                            results[card["uid"]] = card
+                for u_id in uids[:200]:
+                    if len(results) >= limit or str(u_id) == exclude_uid:
+                        continue
+                    row = _user_get(str(u_id))
+                    if not row:
+                        continue
+                    card = public_user_card(row)
+                    h_f = _tr_fold(card["handle"].lstrip("@"))
+                    n_f = _tr_fold(card["name"])
+                    if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
+                        results[card["uid"]] = card
     except Exception:
         pass
     return list(results.values())[:limit]
-
-
-def has_active_max_connection(target: Any) -> Dict[str, Any]:
-    """Check whether a user, guest session token, or request has an active Max (HBO) account connection."""
-    try:
-        import server
-        return server.has_active_max_connection(target)
-    except Exception:
-        return {
-            "has_active_connection": False,
-            "provider": "max",
-            "user_id": "",
-            "reason": "unavailable",
-        }
-
-
-def check_user_provider_status(user_id: str, provider: str = "max") -> Dict[str, Any]:
-    """Check connection status for a provider (default: 'max') for a given user or guest session."""
-    try:
-        import server
-        return server.check_user_provider_status(user_id, provider)
-    except Exception:
-        return {
-            "has_active_connection": False,
-            "provider": str(provider or "max"),
-            "user_id": str(user_id or ""),
-            "reason": "unavailable",
-        }
 
 

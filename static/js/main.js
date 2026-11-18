@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261114_v215';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261114_v215';
-import { renderHome, destroyHome } from './views/home.js?v=20261114_v215';
-import { api } from './api.js?v=20261114_v215';
-import { h, toast } from './ui.js?v=20261114_v215';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261118_v184';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261118_v184';
+import { renderHome, destroyHome } from './views/home.js?v=20261118_v184';
+import { api } from './api.js?v=20261118_v184';
+import { h, toast } from './ui.js?v=20261118_v184';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261114_v215'; } catch (_) { return '20261114_v215'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261114_v215')
+    _meshModPromise = import('./views/mesh.js?v=20261118_v184')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -52,10 +52,6 @@ function parseRoute() {
     try { roomId = decodeURIComponent(parts[1]); } catch (_) {}
     return { name: 'mesh', params: { ...params, id: roomId } };
   }
-  const legalMatch = String(location.pathname || '').match(/^\/(about|privacy|terms|dmca|cookies|contact)\/?$/i);
-  if (!location.hash && legalMatch) {
-    return { name: 'home', params: { ...params, legalTab: legalMatch[1].toLowerCase() } };
-  }
   return { name: 'home', params };
 }
 
@@ -78,16 +74,6 @@ function ensureViewRoots(app) {
   return { homeRoot, meshRoot };
 }
 
-function cleanFloatingRoomOverlays() {
-  document.querySelectorAll('.settings-menu.is-body-portal, .ctl-menu.is-body-portal, .ctl-menu-backdrop.is-body-portal').forEach((m) => m.remove());
-  document.querySelectorAll('#mesh-root .ctl-menu:not(.hidden), #mesh-root .ctl-menu-backdrop:not(.hidden)').forEach((m) => m.classList.add('hidden'));
-  document.querySelectorAll('.video-frame.fullscreen, .video-frame.menu-open').forEach((f) => {
-    f.classList.remove('fullscreen', 'menu-open');
-    f.dataset.fsMode = '';
-  });
-  document.body.classList.remove('ctl-menu-open');
-}
-
 window.vortexMinimizeRoom = () => {
   if (!activeMeshRoomId) {
     navigate('/');
@@ -100,7 +86,7 @@ window.vortexMinimizeRoom = () => {
       window.__kinoxHost?.adapter?.pause?.();
     }
   } catch (_) {}
-  cleanFloatingRoomOverlays();
+  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.add('mesh-minimized');
   document.body.classList.remove('vortex-fs', 'theater-mode');
@@ -116,7 +102,7 @@ window.vortexRestoreRoom = () => {
 
 window.vortexCloseMinimizedRoom = () => {
   document.body.classList.remove('mesh-minimized', 'vortex-fs', 'theater-mode');
-  cleanFloatingRoomOverlays();
+  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
   activeMeshRoomId = null;
   leaveMeshSafe(true);
   const meshRoot = document.getElementById('mesh-root');
@@ -127,10 +113,7 @@ window.vortexCloseMinimizedRoom = () => {
   toast('Odadan ayrıldın');
 };
 
-let _routeSeq = 0;
-
 async function route() {
-  const mySeq = ++_routeSeq;
   const r = parseRoute();
   const app = document.getElementById('app');
   const { homeRoot, meshRoot } = ensureViewRoots(app);
@@ -160,16 +143,10 @@ async function route() {
       enteringMeshRoomId = r.params.id;
       try {
         const { enterMesh } = await loadMeshModule();
-        if (mySeq !== _routeSeq) return;
         await enterMesh(meshRoot, r.params);
-        if (mySeq !== _routeSeq) return;
       } catch (err) {
         console.error('[Route] enterMesh error:', err);
-        activeMeshRoomId = null;
-        meshRoot.classList.add('hidden');
-        homeRoot.classList.remove('hidden');
-        toast('Odaya bağlanırken hata oluştu, ana sayfaya dönüldü.');
-        try { navigate('/'); } catch (_) {}
+        toast('Odaya bağlanırken hata oluştu, tekrar deneniyor...');
       } finally {
         if (enteringMeshRoomId === r.params.id) enteringMeshRoomId = null;
       }
@@ -184,7 +161,6 @@ async function route() {
     }
   } else {
     closeNavPopups();
-    cleanFloatingRoomOverlays();
     if (activeMeshRoomId && state.mesh) {
       window.__vortexCancelChatVoiceRec?.();
       window.__activeSubsController?.stopDubAudio?.();
@@ -210,22 +186,6 @@ async function route() {
     homeRoot.classList.remove('hidden');
     renderHome(homeRoot);
     homeRoot.querySelectorAll('.wl-seo-article-box').forEach((el) => el.remove());
-    if (r.params?.legalTab) {
-      const legalTab = r.params.legalTab;
-      try { history.replaceState({}, '', `/#${location.search || ''}`); } catch (_) {}
-      import(`./views/site-footer.js?v=${encodeURIComponent(MODULE_VER)}`).then(({ openLegalModal, openContactModal }) => {
-        if (legalTab === 'contact') openContactModal('request');
-        else openLegalModal(legalTab);
-      }).catch(() => {});
-    }
-  }
-  if (mySeq !== _routeSeq) return;
-  const latestR = parseRoute();
-  if (latestR.name === 'mesh') {
-    homeRoot.classList.add('hidden');
-    meshRoot.classList.remove('hidden');
-  } else {
-    homeRoot.classList.remove('hidden');
   }
   current = r.name;
 }
@@ -416,8 +376,8 @@ async function boot() {
           initialProfile.guestToken = d.guestToken;
           if (state.self && (state.self.uid === initialProfile.uid || state.self.id === initialProfile.id)) {
             state.self.guestToken = d.guestToken;
-            try { localStorage.setItem('vortex_profile_v2', JSON.stringify(state.self)); } catch (_) {}
           }
+          try { localStorage.setItem('vortex_profile_v2', JSON.stringify(initialProfile)); } catch (_) {}
         }
       }).catch(() => {});
     }
@@ -801,47 +761,39 @@ function initRaveNotifications() {
     } catch (_) {}
   };
 
-  let notifPollBusy = false;
   setInterval(async () => {
-    if (notifPollBusy) return;
-    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     const uid = state.self?.uid || state.self?.id || state.clientId || '';
     if (!uid) return;
-    notifPollBusy = true;
-    try {
-      const name = state.self?.name || '';
-      const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
-      if (!res?.ok) return;
+    const name = state.self?.name || '';
+    const res = await api(`/api/rave/notifications/poll?uid=${encodeURIComponent(uid)}&name=${encodeURIComponent(name)}&since=${encodeURIComponent(lastNotifTs)}`).catch(() => null);
+    if (!res?.ok) return;
 
-      const prevReq = Number(state.social?.requestCount || 0);
-      const prevUnr = Number(state.social?.totalUnread || 0);
-      const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
-      const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
-      if (nextReq !== prevReq || nextUnr !== prevUnr) {
-        set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
-      }
-
-      if (Array.isArray(res.notifications) && res.notifications.length) {
-        let needSocialRefresh = false;
-        for (const item of res.notifications) {
-          if (!item?.id || seenNotifIds.has(item.id)) continue;
-          rememberSeen(item.id);
-          lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
-          if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
-            needSocialRefresh = true;
-          }
-          if (item.type === 'invite_cancelled') continue;
-          if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
-          if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
-          window.vortexShowNotificationCard?.({ ...item });
-        }
-        if (needSocialRefresh) syncSocialState(true).catch(() => {});
-      }
-      if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
-    } finally {
-      notifPollBusy = false;
+    const prevReq = Number(state.social?.requestCount || 0);
+    const prevUnr = Number(state.social?.totalUnread || 0);
+    const nextReq = Number.isFinite(Number(res.requestCount)) ? Number(res.requestCount) : prevReq;
+    const nextUnr = Number.isFinite(Number(res.totalUnread)) ? Number(res.totalUnread) : prevUnr;
+    if (nextReq !== prevReq || nextUnr !== prevUnr) {
+      set({ social: { ...(state.social || {}), requestCount: nextReq, totalUnread: nextUnr } });
     }
-  }, 8500);
+
+    if (Array.isArray(res.notifications) && res.notifications.length) {
+      let needSocialRefresh = false;
+      for (const item of res.notifications) {
+        if (!item?.id || seenNotifIds.has(item.id)) continue;
+        rememberSeen(item.id);
+        lastNotifTs = Math.max(lastNotifTs, Number(item.ts || 0));
+        if (['friend_request', 'friend_accepted', 'dm', 'room_invite', 'invite_cancelled'].includes(item.type)) {
+          needSocialRefresh = true;
+        }
+        if (item.type === 'invite_cancelled') continue;
+        if (item.type === 'dm' && document.querySelector('.wl-dm-root')) continue;
+        if (item.roomId && item.roomId === state.mesh?.id && item.type === 'room_invite') continue;
+        window.vortexShowNotificationCard?.({ ...item });
+      }
+      if (needSocialRefresh) syncSocialState(true).catch(() => {});
+    }
+    if (res.serverTs) lastNotifTs = Math.max(lastNotifTs, Number(res.serverTs) - 1);
+  }, 4500);
 
   initSpatialTvNavigation();
 }
@@ -1019,7 +971,7 @@ window.vortexSendAnalytics = sendWatchlivoAnalytics;
 bootstrapGoogleAnalytics4();
 setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);
 
-// Global unhandled error boundary
+// Global unhandled error boundary: log everything, surface only critical failures to the user.
 window.addEventListener('unhandledrejection', (event) => {
   console.error('[Unhandled Rejection]', event.reason);
   const msg = event?.reason?.message || String(event?.reason || '');

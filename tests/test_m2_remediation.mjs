@@ -48,11 +48,12 @@ test('M2: Controls keydown guards and aria attributes in controls.js', () => {
     'Redundant if (true) must be removed around line 1831'
   );
 
-  // Stream switching URL query string handles ? and &
-  assert.match(
+  // Server stream switching (/api/rave/stream + dub audio rewrite) was removed in the Rave model;
+  // the server never relays third-party streams, so no such URL rewriting may remain.
+  assert.doesNotMatch(
     controlsJs,
-    /const\s+delim\s*=\s*nextSrvUrl\.includes\('\?'\)\s*\?\s*'&'\s*:\s*'\?';/,
-    'Stream switching URL must dynamically pick ? or &'
+    /nextSrvUrl\.includes\('\/api\/rave\/stream'\)/,
+    'Server stream-proxy switching must not be reintroduced'
   );
 
   // Timeline slider aria-valuetext initialization

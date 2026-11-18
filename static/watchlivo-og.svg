@@ -24,6 +24,6 @@
     <circle cx="60" cy="31" r="5" fill="#00f5d4" />
   </g>
   <text x="600" y="346" text-anchor="middle" fill="#f8fafc" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" letter-spacing="14">WATCHLIVO</text>
-  <text x="600" y="402" text-anchor="middle" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="500" letter-spacing="2">Arkadaşlarınla aynı anda, tek kare gecikmesiz sinema, dizi ve müzik odaları.</text>
+  <text x="600" y="402" text-anchor="middle" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="500" letter-spacing="2">Arkadaşlarınla aynı anda, senkron birlikte izleme odaları.</text>
   <text x="600" y="455" text-anchor="middle" fill="#00f5d4" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="700" letter-spacing="4">WATCHLIVO.ONLINE</text>
 </svg>

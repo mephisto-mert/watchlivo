@@ -17,7 +17,7 @@
       "config": {
         "maxLambdaSize": "50mb",
         "maxDuration": 60,
-        "excludeFiles": "{tests/**,desktop/**,audit/**,rave_extracted/**,uploads/**,workers/**,static/Watchlivo*,static/js/**,static/css/**,*.db,*.bak}",
+        "excludeFiles": "{tests/**,desktop/**,audit/**,rave_extracted/**,uploads/**,workers/**,static/Watchlivo*,static/Watchlivo-v1*,static/js/**,static/css/**,*.db,*.bak}",
         "includeFiles": [
           "rooms.py",
           "auth_engine.py",
@@ -30,10 +30,7 @@
           "static/sw.js",
           "static/Watchlivo.mobileconfig",
           "app_version.json",
-          "ios_version.json",
-          "animecix_tau_map.json",
-          "hidden_titles.json",
-          "main_sites_vault.json"
+          "ios_version.json"
         ]
       }
     }
@@ -99,11 +96,16 @@
       }
     },
     {
-      "src": "/download/(apk|Watchlivo.*\\.apk|ipa|Watchlivo.*\\.ipa|ios|windows|exe)",
+      "src": "/download/(apk|Watchlivo-v2\\.0(?:\\.0)?\\.apk|ipa|Watchlivo(?:-v2\\.0)?\\.ipa|ios|windows|exe)",
       "dest": "server.py"
     },
     {
-      "src": "/static/(Watchlivo.*\\.apk)",
+      "src": "/static/Watchlivo-v1[^/]*\\.apk",
+      "status": 404,
+      "dest": "/static/__removed__"
+    },
+    {
+      "src": "/static/(Watchlivo-v2\\.0\\.apk)",
       "headers": {
         "Content-Type": "application/vnd.android.package-archive",
         "Content-Disposition": "attachment; filename=\"Watchlivo-v2.0.apk\"",
@@ -146,7 +148,7 @@
       "dest": "/static/$1"
     },
     {
-      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact|meshes|report|accounts|browser-proxy|bridge|site-data)(.*)",
+      "src": "/api/rave/(social|notifications|voice-note|voice-relay|analytics|ga-collect|contact|meshes|report|accounts)(.*)",
       "headers": {
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store, no-cache, must-revalidate"

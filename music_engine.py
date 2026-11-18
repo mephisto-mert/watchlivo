@@ -6,7 +6,6 @@ import concurrent.futures
 import json
 import re
 import struct
-import threading
 import time
 import urllib.parse
 import urllib.request
@@ -54,31 +53,13 @@ class _BoundedCache(OrderedDict):
     def __init__(self, maxsize: int = 512):
         super().__init__()
         self._maxsize = maxsize
-        self._lock = threading.RLock()
-
-    def __contains__(self, key):
-        with self._lock:
-            return super().__contains__(key)
-
-    def get(self, key, default=None):
-        with self._lock:
-            return super().get(key, default)
-
-    def __getitem__(self, key):
-        with self._lock:
-            return super().__getitem__(key)
-
-    def pop(self, key, *args):
-        with self._lock:
-            return super().pop(key, *args)
 
     def __setitem__(self, key, value):
-        with self._lock:
-            if super().__contains__(key):
-                self.move_to_end(key)
-            super().__setitem__(key, value)
-            while len(self) > self._maxsize:
-                self.popitem(last=False)
+        if key in self:
+            self.move_to_end(key)
+        super().__setitem__(key, value)
+        while len(self) > self._maxsize:
+            self.popitem(last=False)
 
 
 _TR_ASCII = str.maketrans("ıİöÖüÜşŞğĞçÇâÂîÎûÛ", "iioouussggccaaiiuu")
@@ -519,7 +500,7 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
     clean_artist = re.sub(r"\([^)]*\)|\[[^\]]*\]", " ", artist or "").strip()
     q = f"{clean_artist} {clean_title}".strip() or f"{artist} {song_title}".strip()
     if not q:
-        return "WEBVTT\n\n1\n00:00:01.000 --> 00:03:30.000\n🎵 [Enstrümantal / Sözsüz Parça]\n"
+        return "WEBVTT\n\n"
     ckey = q.lower()
     if ckey in _LYRICS_CACHE and time.time() - _LYRICS_CACHE[ckey][0] < 3600:
         return _LYRICS_CACHE[ckey][1]
@@ -555,11 +536,9 @@ def _fetch_lrc_vtt_sync(artist: str, song_title: str) -> str:
         for idx_l, ln in enumerate(lines[:60]):
             parsed.append((6.0 + idx_l * 3.8, ln))
     if not parsed:
-        desc_parts = [p.strip() for p in (artist, song_title) if p and p.strip()]
-        cue_text = f"🎵 {' — '.join(desc_parts)}" if desc_parts else "🎵 [Enstrümantal / Sözsüz Parça]"
-        vtt_fallback = f"WEBVTT\n\n1\n00:00:01.000 --> 00:03:30.000\n{cue_text}\n"
-        _LYRICS_CACHE[ckey] = (time.time(), vtt_fallback)
-        return vtt_fallback
+        vtt_empty = "WEBVTT\n\n"
+        _LYRICS_CACHE[ckey] = (time.time(), vtt_empty)
+        return vtt_empty
     cues = []
     for idx, (st, txt) in enumerate(parsed):
         et = parsed[idx + 1][0] - 0.08 if idx + 1 < len(parsed) else st + 4.5
@@ -787,67 +766,6 @@ UA_SAFARI_IOS = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_2 like Mac OS X) AppleWeb
 _YT_SIDX_CACHE: dict[str, tuple[float, list[tuple[int, int, float]]]] = _BoundedCache(512)
 
 
-def _parse_dash_rng(val) -> dict | None:
-    if isinstance(val, dict) and "start" in val and "end" in val:
-        return {"start": str(val["start"]), "end": str(val["end"])}
-    m = re.match(r"^(\d+)-(\d+)$", str(val or "").strip())
-    return {"start": m.group(1), "end": m.group(2)} if m else None
-
-
-def _yt_piped_fallback_sync(vid: str) -> dict | None:
-    for inv_host in ("https://yt.chocolatemoo53.com", "https://inv.nadeko.net", "https://invidious.nerdvpn.de"):
-        try:
-            req = urllib.request.Request(f"{inv_host}/api/v1/videos/{vid}?local=true", headers={"User-Agent": UA_MUSIC, "Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=5.0) as r:
-                d = json.loads(r.read(768 * 1024).decode("utf-8", errors="ignore"))
-            def _abs_u(raw_u: str) -> str:
-                u_s = str(raw_u or "").strip()
-                return (inv_host + u_s) if u_s.startswith("/") else u_s
-            mux_u = ""
-            for fs in (d.get("formatStreams") or []):
-                if str(fs.get("itag") or "") in ("22", "18") and fs.get("url"):
-                    mux_u = _abs_u(fs["url"])
-                    break
-            v_fmt, a_fmt, aud_u, vid_u = None, None, "", ""
-            af_list = d.get("adaptiveFormats") or []
-            for it_a in ("140", "139", "251", "250"):
-                cand_a = [f for f in af_list if str(f.get("itag") or "") == it_a and f.get("url")]
-                cand_a.sort(key=lambda x: (not bool((x.get("audioTrack") or {}).get("audioIsDefault", True)), str((x.get("audioTrack") or {}).get("id") or "")))
-                for f in cand_a:
-                    fu = _abs_u(f["url"])
-                    aud_u = aud_u or fu
-                    ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
-                    if it_a in ("140", "139") and ir and xr and not a_fmt:
-                        a_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "bandwidth": int(f.get("bitrate") or 132000), "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
-                    break
-                if aud_u:
-                    break
-            for it_v in ("137", "136", "135", "134"):
-                for f in af_list:
-                    if str(f.get("itag") or "") == it_v and f.get("url"):
-                        bw_v = int(f.get("bitrate") or 1200000)
-                        if it_v == "137" and bw_v > 4800000:
-                            continue
-                        fu = _abs_u(f["url"])
-                        vid_u = vid_u or fu
-                        ir, xr = _parse_dash_rng(f.get("init")), _parse_dash_rng(f.get("index"))
-                        if ir and xr and not v_fmt:
-                            res_m = re.match(r"(\d+)x(\d+)", str(f.get("size") or ""))
-                            def_w = 1920 if it_v == "137" else (1280 if it_v == "136" else (854 if it_v == "135" else 640))
-                            def_h = 1080 if it_v == "137" else (720 if it_v == "136" else (480 if it_v == "135" else 360))
-                            w = int(res_m.group(1)) if res_m else def_w
-                            h = int(res_m.group(2)) if res_m else def_h
-                            v_fmt = {"url": fu, "initRange": ir, "indexRange": xr, "width": w, "height": h, "bandwidth": bw_v, "codecs": str(f.get("type") or ""), "ua": UA_MUSIC}
-                        break
-                if v_fmt:
-                    break
-            hls_u = _abs_u(d.get("hlsUrl") or "")
-            if hls_u or (v_fmt and a_fmt) or mux_u or aud_u:
-                return {"hlsUrl": hls_u, "muxedUrl": mux_u, "audioUrl": aud_u or mux_u, "videoUrl": mux_u or vid_u, "videoFmt": v_fmt, "audioFmt": a_fmt, "duration": int(d.get("lengthSeconds") or 0), "external": True, "ua": UA_MUSIC}
-        except Exception:
-            continue
-    return None
-
 def _yt_mobile_live_hls_sync(vid: str) -> str:
     try:
         req = urllib.request.Request(
@@ -991,14 +909,25 @@ def _yt_ios_extract_sync(video_id: str, want_live: bool = False) -> dict | None:
                 return out
         except Exception:
             continue
-    ext_fb = _yt_piped_fallback_sync(vid)
-    if ext_fb:
-        _YT_IOS_STREAM_CACHE[vid] = (time.time(), ext_fb)
-        return ext_fb
     return None
 
 
+_YT_BRIDGE_HOST_SUFFIXES = ("googlevideo.com", "youtube.com", "itunes.apple.com", "mzstatic.com")
+
+
+def _is_yt_bridge_host(target_url: str) -> bool:
+    """The PiP/music bridge only relays YouTube's own media (or iTunes previews) for a picked video id."""
+    try:
+        sp = urllib.parse.urlsplit(target_url)
+    except Exception:
+        return False
+    host = (sp.hostname or "").lower().rstrip(".")
+    return sp.scheme == "https" and any(host == sfx or host.endswith("." + sfx) for sfx in _YT_BRIDGE_HOST_SUFFIXES)
+
+
 def _proxy_yt_range_sync(target_url: str, range_hdr: str, default_ct: str, is_head: bool = False, client_ua: str = ""):
+    if not _is_yt_bridge_host(target_url):
+        raise ValueError("unsupported media host")
     use_ua = client_ua or (UA_YT_IOS if "googlevideo.com" in target_url else UA_MUSIC)
     hdrs = {"User-Agent": use_ua, "Accept": "*/*"}
     open_chunk_sz = 2 * 1024 * 1024
@@ -1123,7 +1052,6 @@ async def yt_pip_hls_master(request: Request):
         return JSONResponse({"error": "PiP akışı bulunamadı"}, status_code=404, headers=cors_hdrs)
     v_fmt = info.get("videoFmt")
     a_fmt = info.get("audioFmt")
-    hls_u = str(info.get("hlsUrl") or "").strip()
     if not want_live and v_fmt and a_fmt:
         w = int(v_fmt.get("width") or 1280)
         h = int(v_fmt.get("height") or 720)
@@ -1138,15 +1066,6 @@ async def yt_pip_hls_master(request: Request):
             f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="Orijinal",DEFAULT=YES,AUTOSELECT=YES,URI="/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=audio"',
             f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="{v_codec},{a_codec}",RESOLUTION={w}x{h},AUDIO="aud"',
             f"/api/rave/yt-pip-track.m3u8?v={q_vid}&kind=video",
-        ]
-        return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
-    if hls_u:
-        prox = f"/api/rave/stream?u={urllib.parse.quote(hls_u, safe='')}&proxy_segs=1&ext=.m3u8"
-        lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:6",
-            "#EXT-X-STREAM-INF:BANDWIDTH=2200000,RESOLUTION=1280x720",
-            prox,
         ]
         return Response("\n".join(lines), media_type="application/vnd.apple.mpegurl", headers=cors_hdrs)
     return JSONResponse({"error": "Uyumlu HLS PiP katmanı yok"}, status_code=404, headers=cors_hdrs)
@@ -1232,20 +1151,10 @@ async def yt_music_stream(request: Request):
             _YT_IOS_STREAM_CACHE.pop(vid, None)
             if is_video_req:
                 raise
-            is_mid_stream_range = bool(rng and not rng.strip().lower().startswith("bytes=0-"))
-            fresh_info = await asyncio.wait_for(asyncio.to_thread(_yt_ios_extract_sync, vid), timeout=6.0)
-            fresh_target = (fresh_info or {}).get("audioUrl") or ""
-            fresh_ua = str((fresh_info or {}).get("ua") or "")
-            if fresh_target:
-                target, cli_ua = fresh_target, fresh_ua
-            elif not is_mid_stream_range:
-                target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
-                cli_ua = ""
-            else:
-                raise
+            target = await asyncio.wait_for(asyncio.to_thread(_yt_fallback_audio_url_sync, vid), timeout=5.0)
             if not target:
                 raise
-            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, cli_ua), timeout=11.0)
+            data, status, cr, ct = await asyncio.wait_for(asyncio.to_thread(_proxy_yt_range_sync, target, rng, def_ct, is_head, ""), timeout=11.0)
         hdrs = {
             "Content-Type": ct,
             "Content-Length": cr if (is_head and status == 200 and cr.isdigit()) else str(len(data)),
@@ -1564,8 +1473,11 @@ async def music_resolve(request: Request):
 async def music_lyrics_vtt(request: Request):
     artist = (request.query_params.get("artist") or "").strip()[:80]
     title = (request.query_params.get("title") or "").strip()[:100]
+    cache_ctl = "public, max-age=3600, s-maxage=86400"
     try:
         vtt = await asyncio.wait_for(asyncio.to_thread(_fetch_lrc_vtt_sync, artist, title), timeout=6.0)
     except Exception:
         vtt = "WEBVTT\n\n"
-    return Response(vtt.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=3600, s-maxage=86400"})
+        # Upstream failure/timeout: don't let CDNs pin the empty fallback for a day.
+        cache_ctl = "no-store"
+    return Response(vtt.encode("utf-8"), media_type="text/vtt; charset=utf-8", headers={"Access-Control-Allow-Origin": "*", "Cache-Control": cache_ctl})

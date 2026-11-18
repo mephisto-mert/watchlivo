@@ -1,17 +1,16 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261114_v215';
-import { api } from '../api.js?v=20261114_v215';
-import { state, set, isLeader, canControlPlayback, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261114_v215';
-import { resolveMusicItem } from './selection-kinds.js?v=20261114_v215';
-import { MeshConnection } from '../realtime.js?v=20261114_v215';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261114_v215';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261114_v215';
-import { buildLayout } from './mesh-layout.js?v=20261114_v215';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261114_v215';
-import { Voice } from '../voice.js?v=20261114_v215';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261114_v215';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261114_v215';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261114_v215';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261118_v184';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261118_v184';
+import { resolveMusicItem } from './selection-kinds.js?v=20261118_v184';
+import { MeshConnection } from '../realtime.js?v=20261118_v184';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261118_v184';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261118_v184';
+import { buildLayout } from './mesh-layout.js?v=20261118_v184';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261118_v184';
+import { Voice } from '../voice.js?v=20261118_v184';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261118_v184';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261118_v184';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261118_v184';
 
 let ctx = null;
 
@@ -162,47 +161,6 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
       ctx.lastLeaderActionAt = 0;
     }
   }
-  if (nextKey && nextKey === prevKey && curRoom?.media?.url && !String(curRoom.media.url).startsWith('/api/rave/resolve-catalog') && String(room.media?.url || '').startsWith('/api/rave/resolve-catalog')) {
-    const useLocalClock = Boolean(!fromInit && isTimeKeeper() && ctx?.host?.adapter && !ctx.host.loading);
-    const livePos = useLocalClock
-      ? (ctx.host.adapter.getTime?.() ?? expectedPosition(curRoom.media))
-      : Number(room.media.meshStatePosition ?? room.media.currentTime ?? 0);
-    const keepPaused = useLocalClock
-      ? Boolean(ctx?.userPaused || curRoom.media.meshStateStatus === 'PAUSED' || curRoom.media.playing === false)
-      : !isRoomMediaPlaying(room.media);
-    room = {
-      ...room,
-      media: {
-        ...room.media,
-        provider: curRoom.media.provider || room.media.provider,
-        streamType: curRoom.media.streamType || room.media.streamType,
-        url: curRoom.media.url,
-        altUrls: curRoom.media.altUrls || room.media.altUrls,
-        servers: (curRoom.media.servers && curRoom.media.servers.length) ? curRoom.media.servers : room.media.servers,
-        audioTracks: (curRoom.media.audioTracks && curRoom.media.audioTracks.length) ? curRoom.media.audioTracks : room.media.audioTracks,
-        subtitleTracks: (curRoom.media.subtitleTracks && curRoom.media.subtitleTracks.length) ? curRoom.media.subtitleTracks : room.media.subtitleTracks,
-        intro: curRoom.media.intro || room.media.intro,
-        duration: curRoom.media.duration || room.media.duration,
-        ...(useLocalClock ? {
-          playing: !keepPaused,
-          currentTime: livePos,
-          meshStateStatus: keepPaused ? 'PAUSED' : 'PLAYING',
-          meshStatePosition: livePos,
-          meshStateTime: clock.now(),
-        } : {}),
-      },
-    };
-    if (ctx && isTimeKeeper() && (!ctx.lastResolvePushAt || Date.now() - ctx.lastResolvePushAt > 4000)) {
-      ctx.lastResolvePushAt = Date.now();
-      const localCtx = ctx;
-      const pushMedia = room.media;
-      const pushPos = useLocalClock ? livePos : expectedPosition(room.media);
-      setTimeout(() => {
-        if (!localCtx || ctx !== localCtx) return;
-        localCtx.conn?.send('resolve_media', { ...pushMedia, currentTime: pushPos });
-      }, 60);
-    }
-  }
   if (nextKey && nextKey === prevKey && curRoom?.media?.similar?.length && !(room.media?.similar?.length)) {
     room = { ...room, media: { ...room.media, similar: curRoom.media.similar } };
   }
@@ -309,7 +267,7 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   if (curRoom?.media && room?.media && mediaKey(curRoom.media) === mediaKey(room.media)) {
     const prevMUrl = String(curRoom.media.url || '');
     const nextMUrl = String(room.media.url || '');
-    if ((!nextMUrl || nextMUrl.startsWith('/api/rave/resolve-catalog')) && prevMUrl && !prevMUrl.startsWith('/api/rave/resolve-catalog')) {
+    if (!nextMUrl && prevMUrl) {
       room = {
         ...room,
         media: {
@@ -323,39 +281,6 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
         },
       };
     }
-  }
-  if (!room?.media?.url && !room?.media?.videoId && (state.route?.params?.tmdbId || state.route?.params?.t)) {
-    const rp = state.route.params;
-    const isTvParam = rp.mt === 'tv' || Number(rp.s || 0) > 0 || Number(rp.e || 0) > 0;
-    const sNum = Math.max(1, Number(rp.s || 1));
-    const eNum = Math.max(1, Number(rp.e || 1));
-    const qStr = new URLSearchParams({
-      provider: 'cinema',
-      title: rp.t || '',
-      origTitle: rp.t || '',
-      tmdbId: rp.tmdbId || '',
-      mediaType: isTvParam ? 'tv' : 'movie',
-      season: isTvParam ? String(sNum) : '',
-      episode: isTvParam ? String(eNum) : '',
-    }).toString();
-    room = {
-      ...room,
-      media: {
-        provider: 'hls',
-        streamType: 'hls',
-        url: `/api/rave/resolve-catalog?${qStr}`,
-        title: rp.t || room.name || 'Sinema Odası',
-        tmdbId: rp.tmdbId || '',
-        mediaType: isTvParam ? 'tv' : 'movie',
-        season: isTvParam ? sNum : 0,
-        episode: isTvParam ? eNum : 0,
-        playing: true,
-        currentTime: 0,
-        meshStateStatus: 'PLAYING',
-        meshStatePosition: 0,
-        meshStateTime: clock.now(),
-      },
-    };
   }
   set({ mesh: room });
   try {
@@ -374,21 +299,18 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   const key = mediaKey(room.media);
   const prevUrl = String(curRoom?.media?.url || '');
   const nextUrl = String(room.media?.url || '');
-  const urlResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog') && (!prevUrl || prevUrl.startsWith('/api/rave/resolve-catalog') || !ctx?.host?.adapter));
+  const urlResolved = Boolean(nextUrl && (!prevUrl || !ctx?.host?.adapter));
   if (reload || key !== prevKey || urlResolved) {
     loadMedia(room.media);
   } else {
     if (!isTimeKeeper() && ctx?.host?.adapter && room.media) {
       const target = expectedPosition(room.media);
-      const isPaused = !isRoomMediaPlaying(room.media);
       if (ctx.host.loading) {
-        ctx.userPaused = isPaused;
-        if (isPaused) ctx.host.adapter.pause?.();
-        else if (!ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
         if (!room.curated && !room.media.live && target >= 0.8) {
           ctx.host.adapter.updateInitialSeek?.(target);
         }
       } else {
+        const isPaused = !isRoomMediaPlaying(room.media);
         if (isPaused) {
           ctx.userPaused = true;
           ctx.host.adapter.pause?.();
@@ -398,7 +320,7 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
         } else {
           ctx.userPaused = false;
           if (ctx.host.adapter.isPaused?.() && !ctx.host.adapter.autoplayHardBlocked) ctx.host.adapter.play?.();
-          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 3.5) {
+          if (!room.curated && !room.media.live && (fromInit || !ctx.sync?.didInitialSync) && target >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - target) > 1.5) {
             ctx.host.adapter.seek?.(target);
           }
         }
@@ -419,11 +341,8 @@ async function loadMedia(media) {
   const stripAudParam = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
   const alreadyLoadedResolved = Boolean(
     mKey && ctx.host?.key === mKey && ctx.host?.adapter
-    && ctx.host?.loadedUrl && !String(ctx.host.loadedUrl).startsWith('/api/rave/resolve-catalog')
-    && (
-      (String(media.url || '').startsWith('/api/rave/resolve-catalog') && !/[?&]aud=/i.test(String(media.url || '')))
-      || stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)
-    )
+    && ctx.host?.loadedUrl
+    && stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)
   );
   if (alreadyLoadedResolved) {
     ctx.loadingSig = sig;
@@ -433,7 +352,7 @@ async function loadMedia(media) {
     }
     if ((!isTimeKeeper() || !ctx.sync?.didInitialSync) && !state.mesh?.curated && !media?.live) {
       const liveExp = expectedPosition(state.mesh?.media || media);
-      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 3.5) {
+      if (liveExp >= 0.8 && Math.abs((ctx.host.adapter.getTime?.() || 0) - liveExp) > 1.5) {
         ctx.host.adapter.seek?.(liveExp);
       }
     }
@@ -453,83 +372,7 @@ async function loadMedia(media) {
     : ((wasNewCreatorRoom && initialPos < 3.0 && exp < 3.0) ? 0 : Math.max(initialPos, exp >= 0.8 ? exp : 0));
   ctx.isNew = false;
   const playing = isRoomMediaPlaying(media);
-  if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
-    ctx.layout?.playerEvent?.('loading');
-    if (!isTimeKeeper()) {
-      for (let w = 0; w < 2; w += 1) {
-        await new Promise((r) => setTimeout(r, 150));
-        if (!ctx || ctx.loadSeq !== mySeq) return;
-        const latest = state.mesh?.media;
-        if (latest?.url && !String(latest.url).startsWith('/api/rave/resolve-catalog') && mediaKey(latest) === mKey) {
-          media = latest;
-          break;
-        }
-      }
-    }
-    if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        if (attempt > 0) {
-          await new Promise((r) => setTimeout(r, 450 * attempt));
-          if (!ctx || ctx.loadSeq !== mySeq) return;
-          const latestAfterWait = state.mesh?.media;
-          if (latestAfterWait?.url && !String(latestAfterWait.url).startsWith('/api/rave/resolve-catalog') && mediaKey(latestAfterWait) === mKey) {
-            media = latestAfterWait;
-            break;
-          }
-        }
-        try {
-          const res = await api(media.url, { timeout: 22000 });
-          if (!ctx || ctx.loadSeq !== mySeq) return;
-          if (res && res.url) {
-              const refMedia = state.mesh?.media || media;
-              const roomStillUnresolved = String(refMedia?.url || '').startsWith('/api/rave/resolve-catalog');
-              const freshExp = expectedPosition(refMedia);
-              const resolvedStart = (wasNewCreatorRoom && initialPos < 3.0 && freshExp < 3.0)
-                ? 0
-                : Math.max(initialPos, freshExp >= 0.8 ? freshExp : 0);
-              const keepServerClockAnchor = !isTimeKeeper() && Number(refMedia?.meshStateTime || refMedia?.updatedAt || 0) > 1000000000;
-              media = {
-                ...media,
-                provider: res.provider || 'hls',
-                streamType: res.streamType || 'hls',
-                url: res.url,
-                videoId: res.videoId || media.videoId || '',
-                embedUrl: res.embedUrl || media.embedUrl || '',
-                title: res.title || media.title || '',
-                channel: res.channel || media.channel || '',
-                thumbnail: res.thumbnail || media.thumbnail || '',
-                altUrls: res.altUrls || [],
-                servers: (res.servers && res.servers.length) ? res.servers : (media.servers || []),
-                audioTracks: (res.audioTracks && res.audioTracks.length) ? res.audioTracks : media.audioTracks,
-                subtitleTracks: (res.subtitleTracks && res.subtitleTracks.length) ? res.subtitleTracks : (res.subtitles || media.subtitleTracks),
-                intro: res.intro || media.intro,
-                duration: res.duration || media.duration,
-                meshStatePosition: keepServerClockAnchor ? Number(refMedia.meshStatePosition ?? refMedia.currentTime ?? resolvedStart) : resolvedStart,
-                meshStateTime: keepServerClockAnchor ? Number(refMedia.meshStateTime ?? refMedia.updatedAt ?? clock.now()) : clock.now(),
-              };
-              if (state.mesh) {
-                const updatedMesh = { ...state.mesh, media };
-                set({ mesh: updatedMesh });
-                if (ctx?.conn) ctx.conn.lastRoom = updatedMesh;
-                rememberRoom(updatedMesh);
-              }
-              if (isTimeKeeper() || roomStillUnresolved) {
-                if (ctx) ctx.lastResolvePushAt = Date.now();
-                ctx.conn?.send('resolve_media', { ...media, currentTime: resolvedStart });
-              }
-              break;
-            }
-        } catch (e) { /* retry */ }
-      }
-    }
-  }
   if (!ctx || ctx.loadSeq !== mySeq) return;
-  if (String(media.url || '').startsWith('/api/rave/resolve-catalog')) {
-    ctx.host.loading = false;
-    ctx.loadingSig = '';
-    ctx.layout?.playerEvent?.('error', 'Yayın kaynağı şu an çözümlenemedi, lütfen yenileyin.');
-    return;
-  }
   ctx.loadingSig = `${mediaKey(media)}|${media.url || ''}`;
   const finalExp = expectedPosition(state.mesh?.media || media);
   const finalStart = media?.live
@@ -561,14 +404,15 @@ async function loadMedia(media) {
       if (!ctx || ctx.loadSeq !== mySeq || isTimeKeeper() || media?.live) return;
       const liveExp = expectedPosition(state.mesh?.media || media);
       const curPos = ad?.getTime?.() || 0;
-      if (liveExp >= 0.8 && Math.abs(liveExp - curPos) > 3.5 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+      if (liveExp >= 0.6 && Math.abs(liveExp - curPos) > 1.0 && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
         ad?.seek?.(liveExp);
       }
     };
-    if (vEl && vEl.readyState < 1) {
+    snapGuestToLive();
+    if (vEl) {
       vEl.addEventListener('loadedmetadata', snapGuestToLive, { once: true });
-    } else {
-      snapGuestToLive();
+      vEl.addEventListener('canplay', snapGuestToLive, { once: true });
+      vEl.addEventListener('playing', snapGuestToLive, { once: true });
     }
   } else {
     const k = mediaKey(media);
@@ -576,7 +420,6 @@ async function loadMedia(media) {
     const vEl = ad?.video;
     const fireLeaderAnchor = () => {
       if (!ctx || ctx.loadSeq !== mySeq || !isTimeKeeper() || ctx.anchoredKey === k) return;
-      if (ad?._suppressLeaderAnchorUntil && performance.now() < ad._suppressLeaderAnchorUntil) return;
       if (ad && !ad.isPaused?.() && (!vEl || (vEl.readyState >= 2 && !vEl.seeking))) {
         ctx.anchoredKey = k;
         actions.heartbeat(ad.getTime?.() ?? 0, true);
@@ -646,7 +489,7 @@ function onMessage(data) {
         const prevUrl = String(room.media?.url || '');
         const nextUrl = String(safeIncomingMedia?.url || '');
         const sameMediaTarget = !incomingKey || prevKey === incomingKey;
-        if ((!nextUrl || nextUrl.startsWith('/api/rave/resolve-catalog')) && prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog') && sameMediaTarget) {
+        if (!nextUrl && prevUrl && sameMediaTarget) {
           mergedMedia.url = prevUrl;
           if (!mergedMedia.altUrls?.length && room.media?.altUrls?.length) mergedMedia.altUrls = room.media.altUrls;
           if (!mergedMedia.subtitleTracks?.length && room.media?.subtitleTracks?.length) mergedMedia.subtitleTracks = room.media.subtitleTracks;
@@ -661,13 +504,9 @@ function onMessage(data) {
           if (!mergedMedia.videoId && room.media?.videoId) mergedMedia.videoId = room.media.videoId;
           if (!mergedMedia.title && room.media?.title) mergedMedia.title = room.media.title;
           if (!mergedMedia.provider && room.media?.provider) mergedMedia.provider = room.media.provider;
-          if (!mergedMedia.catalogProvider && room.media?.catalogProvider) mergedMedia.catalogProvider = room.media.catalogProvider;
-          if (!mergedMedia.seriesTitle && room.media?.seriesTitle) mergedMedia.seriesTitle = room.media.seriesTitle;
-          if (!mergedMedia.originalTitle && room.media?.originalTitle) mergedMedia.originalTitle = room.media.originalTitle;
-          if (!mergedMedia.sourceUrl && room.media?.sourceUrl) mergedMedia.sourceUrl = room.media.sourceUrl;
         }
         const nextKey = mediaKey(mergedMedia);
-        const urlResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog') && (!prevUrl || prevUrl.startsWith('/api/rave/resolve-catalog') || !ctx?.host?.adapter));
+        const urlResolved = Boolean(nextUrl && (!prevUrl || !ctx?.host?.adapter));
         const updatedRoom = { ...room, media: mergedMedia };
         set({ mesh: updatedRoom });
         if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
@@ -675,16 +514,18 @@ function onMessage(data) {
           loadMedia(mergedMedia);
           break;
         }
+        const isExplicitAction = ['play', 'pause', 'seek', 'rate'].includes(data.action);
+        // Anti-stutter: passive heartbeats/polls that do not change play/pause state must not
+        // force a sync cycle (which may hard-seek) unless the viewer has drifted far.
         const prevPlaying = isRoomMediaPlaying(room.media);
         const nextPlaying = isRoomMediaPlaying(mergedMedia);
         const statusChanged = prevPlaying !== nextPlaying;
-        const isExplicitAction = ['play', 'pause', 'seek', 'rate'].includes(data.action);
         const isPassiveSync = data.action === 'heartbeat' || data.action === 'poll_sync';
         if (!nextPlaying) {
           if (ctx) ctx.userPaused = true;
           ctx?.host?.adapter?.pause?.();
           const target = Number(mergedMedia.meshStatePosition || 0);
-          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.35) {
+          if (Math.abs((ctx?.host?.adapter?.getTime?.() || 0) - target) > 0.25) {
             if (ctx?.sync) {
               ctx.sync.lastSeekTarget = target;
               ctx.sync.lastSeekWallAt = performance.now();
@@ -730,11 +571,9 @@ function onMessage(data) {
       break;
     case 'chat':
       if (room && data.message) {
-        const msgCid = data.message.clientMsgId || '';
-        if ((data.message.id && ctx?.seenChatIds?.has(data.message.id)) || (msgCid && ctx?.seenChatIds?.has(msgCid))) break;
+        if (data.message.id && ctx?.seenChatIds?.has(data.message.id)) break;
         if (data.message.id) ctx?.seenChatIds?.add(data.message.id);
-        if (msgCid) ctx?.seenChatIds?.add(msgCid);
-        const updatedChat = [...(room.chat || []).filter((c) => c && c.id !== data.message.id && (!msgCid || (c.id !== msgCid && c.clientMsgId !== msgCid))), data.message].slice(-200);
+        const updatedChat = [...(room.chat || []).filter((c) => c && c.id !== data.message.id), data.message].slice(-200);
         const updatedRoom = { ...room, chat: updatedChat };
         set({ mesh: updatedRoom });
         if (ctx?.conn) ctx.conn.lastRoom = updatedRoom;
@@ -922,16 +761,13 @@ const actions = {
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
     const curM = state.mesh?.media;
-    const resolvedActive = (curM?.url && !String(curM.url).startsWith('/api/rave/resolve-catalog'))
+    const resolvedActive = curM?.url
       ? {
           url: curM.url,
           provider: curM.provider || 'hls',
-          catalogProvider: curM.catalogProvider || '',
           streamType: curM.streamType || 'hls',
           duration: curM.duration || ad.getDuration?.() || 0,
           title: curM.title || '',
-          seriesTitle: curM.seriesTitle || '',
-          originalTitle: curM.originalTitle || '',
           tmdbId: curM.tmdbId || '',
           imdbId: curM.imdbId || '',
           mediaType: curM.mediaType || '',
@@ -951,7 +787,7 @@ const actions = {
   },
   play() {
     if (!ctx) return;
-    if (!canControlPlayback()) {
+    if (!isLeader()) {
       ctx.host.adapter?.play?.();
       ctx.sync?.kick();
       return;
@@ -966,7 +802,7 @@ const actions = {
   },
   pause() {
     if (!ctx) return;
-    if (!canControlPlayback()) {
+    if (!isLeader()) {
       toast('Videoyu yalnızca oda lideri duraklatabilir');
       return;
     }
@@ -979,7 +815,7 @@ const actions = {
     ctx.conn.send('pause', { currentTime: t, atTime: clock.now() });
   },
   toggle() {
-    if (!canControlPlayback()) {
+    if (!isLeader()) {
       toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
       return;
     }
@@ -991,7 +827,7 @@ const actions = {
   seek(t) {
     if (!ctx) return;
     if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
-    if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+    if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
     const d = Number(ctx.host.adapter?.getDuration?.() || state.mesh?.media?.duration || 0);
     const target = d > 0 ? Math.max(0, Math.min(d - 0.5, Number(t) || 0)) : Math.max(0, Number(t) || 0);
     if (isActiveTimeKeeper()) ctx.lastLeaderActionAt = Date.now();
@@ -1009,7 +845,7 @@ const actions = {
   },
   setRate(r) {
     if (!ctx) return;
-    if (!canControlPlayback()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; }
+    if (!isLeader()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; }
     const t = ctx.host.adapter?.getTime() ?? 0;
     if (isActiveTimeKeeper()) ctx.lastLeaderActionAt = Date.now();
     ctx.host.adapter?.setRate?.(r);
@@ -1151,16 +987,18 @@ const actions = {
     if (!msgId || !emoji) return;
     const room = state.mesh;
     const myName = state.self?.name || 'Misafir';
-    const myCidTail = String(state.clientId || '').slice(-4);
-    const myTag = myCidTail ? `${myName}#${myCidTail}` : myName;
+    const myBaseName = String(myName).replace(/\s*#\d{3,6}$/, '').trim();
     if (room && Array.isArray(room.chat)) {
       const chatList = room.chat.map((m) => {
         if (m.id !== msgId) return m;
         const reacts = { ...(m.reactions || {}) };
         const users = Array.isArray(reacts[emoji]) ? [...reacts[emoji]] : [];
-        let idx = users.findIndex((u) => u === myTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
+        let idx = users.indexOf(myName);
+        if (idx < 0 && myBaseName) {
+          idx = users.findIndex((u) => String(u || '').replace(/\s*#\d{3,6}$/, '').trim() === myBaseName);
+        }
         if (idx >= 0) users.splice(idx, 1);
-        else users.push(myTag);
+        else users.push(myName);
         if (users.length) reacts[emoji] = users;
         else delete reacts[emoji];
         return { ...m, reactions: reacts };
@@ -1513,12 +1351,12 @@ function onPlayerEvent(ev, arg) {
         const liveExp = expectedPosition(m);
         const curTime = ctx.host?.adapter?.getTime?.() || 0;
         const vEl = ctx.host?.adapter?.video;
-        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 3.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
+        if (liveExp >= 0.8 && Math.abs(curTime - liveExp) > 1.5 && ctx.host?.adapter && (!vEl || (!vEl.seeking && vEl.readyState >= 1))) {
           ctx.host.adapter.seek?.(liveExp);
           if (ctx.sync) {
             ctx.sync.lastSeekTarget = liveExp;
             ctx.sync.lastSeekWallAt = performance.now();
-            ctx.sync.seekUntil = performance.now() + 3200;
+            ctx.sync.seekUntil = performance.now() + 1800;
             ctx.sync.deferStartedAt = 0;
           }
         }
@@ -1532,7 +1370,6 @@ function onPlayerEvent(ev, arg) {
       const k = mediaKey(m);
       const ad = ctx.host.adapter;
       const vEl = ad?.video;
-      if (ad?._suppressLeaderAnchorUntil && performance.now() < ad._suppressLeaderAnchorUntil) return;
       if (m && k && ad && !ad.isPaused() && (!vEl || (vEl.readyState >= 2 && !vEl.seeking)) && ctx.anchoredKey !== k) {
         ctx.anchoredKey = k;
         const t = ad.getTime?.() ?? 0;
@@ -1541,26 +1378,9 @@ function onPlayerEvent(ev, arg) {
     }
   }
   if (ev === 'pause' && arg?.userFullscreenPause && isLeader() && !ctx.host.loading && !ctx.userPaused) {
-    clearTimeout(ctx._fsPauseBroadcastTimer);
-    const pauseCtx = ctx;
-    ctx._fsPauseBroadcastTimer = setTimeout(() => {
-      if (!pauseCtx || ctx !== pauseCtx || pauseCtx.host?.loading || pauseCtx.userPaused) return;
-      const hiddenNow = typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden');
-      const ad = pauseCtx.host?.adapter;
-      if (hiddenNow || ad?.isPiP?.() || ad?._bgAudioActive) {
-        if (ad && !ad._userPausedViaMediaSession) {
-          ad.wantPlaying = true;
-          ad._visHandler?.();
-        }
-        return;
-      }
-      if (ad?.isPaused?.() && !ad?.wantPlaying) {
-        actions.pause();
-      }
-    }, 280);
+    actions.pause();
   }
   if (ev === 'play' && arg?.native && isLeader() && !ctx.host.loading && ctx.userPaused) {
-    clearTimeout(ctx._fsPauseBroadcastTimer);
     actions.play();
   }
   if (ev === 'ended') {
@@ -1623,7 +1443,6 @@ export function leaveMeshView(explicitLeave = false) {
     clearTimeout(ctx.initFallbackTimer);
     ctx.initFallbackTimer = null;
   }
-  clearTimeout(ctx._fsPauseBroadcastTimer);
   clearInterval(ctx.progressTimer);
   try { ctx.conn?.close(Boolean(explicitLeave), shouldClose); } catch (e) { /* ignore */ }
   try { ctx.sync?.stop?.(); } catch (_) {}

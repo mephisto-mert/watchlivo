@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261114_v215';
-import { api } from './api.js?v=20261114_v215';
-import { state } from './store.js?v=20261114_v215';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261114_v215';
+import { clock } from './sync.js?v=20261118_v184';
+import { api } from './api.js?v=20261118_v184';
+import { state } from './store.js?v=20261118_v184';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261118_v184';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -17,7 +17,6 @@ export class MeshConnection {
     this.clientToken = '';
     this.isCreator = false;
     this.needsMediaPush = false;
-    this._leaveBeaconSent = false;
     try {
       localStorage.removeItem(`vortex_st_${roomId}`);
       localStorage.removeItem(`vortex_ct_${roomId}`);
@@ -109,30 +108,14 @@ export class MeshConnection {
     if (pkt._id) this._addBounded(this.seenP2pIds, pkt._id);
     if (pkt.event) {
       const ev = pkt.event;
-      if (pkt._fromDc) {
-        const dcAllowed = ['sync', 'typing', 'reaction', 'soundfx', 'speaking', 'cam_state'];
-        if (!ev.type || !dcAllowed.includes(ev.type)) return;
-        if (ev.type === 'sync') {
-          const rmRef = this.lastRoom || state.mesh || {};
-          const coList = Array.isArray(rmRef.co_hosts) ? rmRef.co_hosts : (Array.isArray(rmRef.coHosts) ? rmRef.coHosts : []);
-          const senderCanControl = (rmRef.playMode === 'cohost')
-            || (rmRef.host_id && pkt.fromCid === rmRef.host_id)
-            || coList.includes(pkt.fromCid);
-          if (!senderCanControl) return;
-        }
-      }
       if (ev.targetId && ev.targetId !== this.clientId) return;
       if (ev.id) {
         if (['webrtc_offer', 'webrtc_answer', 'webrtc_ice'].includes(ev.type)) {
           if (this.seenSignalIds.has(ev.id)) return;
           this._addBounded(this.seenSignalIds, ev.id);
         } else {
-          if (!this.seenP2pEventIds) this.seenP2pEventIds = new Set();
-          if (this.seenEventIds.has(ev.id) || this.seenP2pEventIds.has(ev.id)) return;
-          this._addBounded(this.seenP2pEventIds, ev.id);
-          if (ev.type !== 'media_changed' && ev.action !== 'change_media' && ev.action !== 'resolve_media') {
-            this._addBounded(this.seenEventIds, ev.id);
-          }
+          if (this.seenEventIds.has(ev.id)) return;
+          this._addBounded(this.seenEventIds, ev.id);
         }
       }
       const safeEv = { ...ev, viaP2p: true };
@@ -157,18 +140,10 @@ export class MeshConnection {
     if (!this._visHandler) {
       this._visHandler = () => {
         if (this.closed || document.hidden) return;
-        const nowMs = Date.now();
-        if (nowMs - (this._lastVisSendAt || 0) < 2500) return;
-        this._lastVisSendAt = nowMs;
         this.retry = 0;
         this.httpFailCount = 0;
-        this._backoffUntil = 0;
         if (this.mode === 'http') {
-          if (this.lastRoom && this.lastRev > 0) {
-            if (!this.inFlight && !this.flushing) this.httpSend({ type: 'poll' }, false);
-          } else {
-            this.httpSend({ type: 'init' }, true);
-          }
+          this.httpSend({ type: 'init' }, true);
         } else if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
           this.startWs();
         }
@@ -178,13 +153,9 @@ export class MeshConnection {
       window.addEventListener('focus', this._visHandler);
     }
     if (!this._pageHideHandler && typeof window !== 'undefined') {
-      this._pageHideHandler = (ev) => {
-        if (this.closed || this._leaveBeaconSent || !this.clientId || ev?.persisted) return;
-        this._leaveBeaconSent = true;
+      this._pageHideHandler = () => {
+        if (this.closed || !this.clientId || this.mode !== 'http') return;
         try {
-          if (this.mode === 'ws' && this.ws?.readyState === 1) {
-            try { this.ws.send(JSON.stringify({ type: 'leave', clientId: this.clientId, gracefulClose: true })); } catch (_) {}
-          }
           const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
           const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
           if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
@@ -211,7 +182,6 @@ export class MeshConnection {
   nudgeIfDisconnected() {
     if (this.closed) return;
     const now = Date.now();
-    if (now < (this._backoffUntil || 0)) return;
     if (now - (this._lastBgNudgeAt || 0) < 3500) return;
     this._lastBgNudgeAt = now;
     if (this.mode === 'ws' && (!this.ws || this.ws.readyState > 1)) {
@@ -266,19 +236,16 @@ export class MeshConnection {
     }
     this.ws = ws;
     ws.onopen = () => {
-      if (this.ws !== ws || this.closed) return;
       opened = true;
       this.retry = 0;
       this.emitStatus('online');
       this.ping();
-      clearInterval(this.pingTimer);
       this.pingTimer = setInterval(() => this.ping(), 2500);
       while (this.outQueue.length && this.ws?.readyState === 1) {
         try { this.ws.send(JSON.stringify(this.outQueue.shift())); } catch (e) { break; }
       }
     };
     ws.onmessage = (ev) => {
-      if (this.ws !== ws || this.closed) return;
       let data; try { data = JSON.parse(ev.data); } catch (e) { return; }
       if (data.type === 'pong' && data.t0Epoch) clock.sample(Number(data.t0Epoch), Number(data.serverTime));
       if (data.type === 'init') {
@@ -296,7 +263,6 @@ export class MeshConnection {
       this.onMessage?.(data);
     };
     ws.onclose = () => {
-      if (this.ws !== ws) return;
       clearInterval(this.pingTimer);
       clearTimeout(this.wsRetryTimer);
       if (this.closed) return;
@@ -305,10 +271,7 @@ export class MeshConnection {
       this.retry += 1;
       this.wsRetryTimer = setTimeout(() => !this.closed && this.startWs(), Math.min(8000, 600 * this.retry));
     };
-    ws.onerror = () => {
-      if (this.ws !== ws) return;
-      /* onclose handles retry/fallback */
-    };
+    ws.onerror = () => { /* onclose handles retry/fallback */ };
   }
 
   ping() { this.sendRaw({ type: 'ping', t0: performance.now(), t0Epoch: Date.now() / 1000 }); }
@@ -338,10 +301,8 @@ export class MeshConnection {
       const pCnt = Math.max(this.participantCount || 1, this.lastRoom?.largeRoomMode ? 25 : 1);
       const rawBaseMs = pCnt > 400 ? 2700 : pCnt > 100 ? 2100 : pCnt >= 25 ? 1450 : 950;
       const baseMs = (typeof document !== 'undefined' && document.hidden) ? Math.round(rawBaseMs * 1.6) : rawBaseMs;
-      const failCnt = this.httpFailCount || 0;
-      const backoffMs = failCnt > 0 ? Math.min(12000, Math.round(700 * Math.pow(1.55, Math.min(failCnt, 7)))) : 0;
-      const cooldownWait = Math.max(0, (this._backoffUntil || 0) - Date.now());
-      const jitterMs = (pCnt >= 25 || failCnt > 0) ? Math.floor(Math.random() * 650) : Math.floor(Math.random() * 140);
+      const backoffMs = Math.min(4000, (this.httpFailCount || 0) * 650);
+      const jitterMs = pCnt >= 25 ? Math.floor(Math.random() * 550) : Math.floor(Math.random() * 140);
       this.pollTimer = setTimeout(async () => {
         if (this.closed) return;
         if (this.outQueue.length && !this.flushing) {
@@ -350,7 +311,7 @@ export class MeshConnection {
           await this.httpSend({ type: 'poll' });
         }
         scheduleNextPoll();
-      }, Math.max(baseMs + backoffMs, cooldownWait) + jitterMs);
+      }, baseMs + backoffMs + jitterMs);
     };
     scheduleNextPoll();
   }
@@ -408,9 +369,7 @@ export class MeshConnection {
             }
             if (dedupedRetry.length) {
               this.outQueue.unshift(...dedupedRetry);
-              const retryDelay = Math.max(900, Math.min(8000, (this._backoffUntil || 0) - Date.now(), (this.httpFailCount || 1) * 950));
-              await new Promise((r) => setTimeout(r, retryDelay));
-              break;
+              await new Promise((r) => setTimeout(r, 800));
             }
           }
         }
@@ -467,10 +426,9 @@ export class MeshConnection {
         } catch (e) { /* ignore */ }
       }
       const initialCreatorSeed = Boolean(isInit && this.isCreator && this.lastRev === 0);
-      let sentMediaPush = false;
       if ((initialCreatorSeed || this.needsMediaPush || (this.lastMediaPushAt && Date.now() - this.lastMediaPushAt < 10000)) && curMedia && (curMedia.url || curMedia.videoId)) {
         reqBody.activeMedia = curMedia;
-        sentMediaPush = true;
+        this.needsMediaPush = false;
       }
       if (isPoll && this.lastRev > 0) {
         reqBody.sinceRev = this.lastRev;
@@ -492,9 +450,6 @@ export class MeshConnection {
         this._inFlightAborts.delete(reqAbort);
       }
       if (this.closed) return false;
-      if (sentMediaPush && res && !res.error) {
-        this.needsMediaPush = false;
-      }
       this.httpFailCount = 0;
       if (res?.roomClosed) {
         this.close(false);
@@ -517,7 +472,7 @@ export class MeshConnection {
       }
       if (isPoll && (reqSeq !== this.actionSeq || this.outQueue.length > 0)) {
         this._dispatchHttpEvents(res.unchanged ? res : res.room, false);
-        return true;
+        return;
       }
       if (res.unchanged && this.lastRoom) {
         this.lastRoom = { ...this.lastRoom, media: { ...(this.lastRoom.media || {}) } };
@@ -552,24 +507,20 @@ export class MeshConnection {
           const prevMedia = this.lastRoom.media || {};
           const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
           const srvUrl = String(res.media.url || res.media.videoId || '');
-          const srvUnresolved = srvUrl.startsWith('/api/rave/resolve-catalog');
-          const prevResolved = prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog');
-          const sameIdentity = Boolean(
-            (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
-            (!res.media.tmdbId && !prevMedia.tmdbId && res.media.title && prevMedia.title && String(res.media.title) === String(prevMedia.title) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1))
-          );
-          if (prevUrl && (!srvUrl || (sameIdentity && prevResolved && srvUnresolved))) {
+          if (prevUrl && !srvUrl) {
             this.needsMediaPush = true;
             this.lastRev = 0;
-            if (stateMutated) this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
-            return true;
+            return;
           }
+          const sameIdentity = Boolean(
+            (res.media.tmdbId && prevMedia.tmdbId && String(res.media.tmdbId) === String(prevMedia.tmdbId) && Number(res.media.season || 1) === Number(prevMedia.season || 1) && Number(res.media.episode || 1) === Number(prevMedia.episode || 1)) ||
+            (res.media.title && prevMedia.title && String(res.media.title) === String(prevMedia.title))
+          );
           if (srvUrl && srvUrl !== prevUrl && !sameIdentity) {
             this.lastRev = 0;
             this.syncToken = '';
-            if (stateMutated) this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
             setTimeout(() => !this.closed && this.httpSend({ type: 'poll' }, false), 60);
-            return true;
+            return;
           }
           const urlChanged = Boolean(srvUrl && srvUrl !== prevUrl);
           const statusChanged = Boolean(res.media.meshStateStatus && res.media.meshStateStatus !== prevMedia.meshStateStatus);
@@ -585,6 +536,8 @@ export class MeshConnection {
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
+          // Anti-stutter: during playback, small server-time jitter (< 2.2s) between polls is
+          // absorbed by the SyncEngine's rate nudging instead of emitting a poll_sync re-seek.
           const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 2.2);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
@@ -605,25 +558,6 @@ export class MeshConnection {
             stateMutated = true;
           }
         }
-        if (Array.isArray(res.co_hosts) || Array.isArray(res.coHosts)) {
-          const nextCo = res.co_hosts || res.coHosts || [];
-          if (JSON.stringify(this.lastRoom.co_hosts || this.lastRoom.coHosts || []) !== JSON.stringify(nextCo)) {
-            this.lastRoom.co_hosts = nextCo;
-            this.lastRoom.coHosts = nextCo;
-            stateMutated = true;
-          }
-        }
-        if (Array.isArray(res.queue)) {
-          if (JSON.stringify(this.lastRoom.queue || []) !== JSON.stringify(res.queue)) {
-            this.lastRoom.queue = res.queue;
-            stateMutated = true;
-          }
-        }
-        if (typeof res.skip_votes === 'number' && res.skip_votes !== this.lastRoom.skip_votes) {
-          this.lastRoom.skip_votes = res.skip_votes;
-          if (typeof res.skipNeeded === 'number') this.lastRoom.skipNeeded = res.skipNeeded;
-          stateMutated = true;
-        }
         if (stateMutated || this.lastRoom.participantCount !== newCnt || (res.host_id && res.host_id !== this.lastRoom.host_id) || (res.privacy && res.privacy !== this.lastRoom.privacy) || (res.playMode && res.playMode !== this.lastRoom.playMode)) {
           this.lastRoom.participantCount = newCnt;
           this.lastRoom.count = newCnt;
@@ -634,7 +568,7 @@ export class MeshConnection {
           if (res.host_id) this.lastRoom.host_id = res.host_id;
           this.onMessage?.({ type: 'room_state', room: this.lastRoom, viaHttp: true });
         }
-        return true;
+        return;
       }
       if (res.room) {
         if ((isInit || payload.type === 'init') && reqSeq !== this.actionSeq && this.lastRoom?.media && (this.lastRoom.media.url || this.lastRoom.media.videoId)) {
@@ -643,7 +577,7 @@ export class MeshConnection {
         this.lastRoom = res.room;
         this.participantCount = Number(res.room.participantCount || res.room.count || (res.room.participants || []).length || 1);
         this._dispatchHttpEvents(res.room, isInit);
-        if (isPoll && reqSeq !== this.actionSeq) return true;
+        if (isPoll && reqSeq !== this.actionSeq) return;
         this.lastRev = Math.max(this.lastRev, Number(res.room.rev || 0));
         if (res.room.syncToken && res.room.syncToken !== this.syncToken) {
           this.syncToken = res.room.syncToken;
@@ -672,16 +606,8 @@ export class MeshConnection {
           this.onMessage?.({ type: 'password_required', roomId: this.roomId });
         }
       } else {
-        const st = Number(e.status || 0);
-        if (st === 429 || st === 502 || st === 503 || st === 504) {
-          this.httpFailCount = Math.min(10, (this.httpFailCount || 0) + 2);
-          const retrySec = Number(e.data?.retryAfter || e.data?.retry_after || 0);
-          const waitMs = retrySec > 0 ? Math.min(12000, retrySec * 1000) : Math.min(10000, 1500 * this.httpFailCount);
-          this._backoffUntil = Date.now() + waitMs + Math.floor(Math.random() * 500);
-        } else {
-          this.httpFailCount = (this.httpFailCount || 0) + 1;
-        }
-        if (st !== 429 && (!this.lastRoom || this.httpFailCount >= 5)) {
+        this.httpFailCount = (this.httpFailCount || 0) + 1;
+        if (e.status !== 429 && (!this.lastRoom || this.httpFailCount >= 5)) {
           this.emitStatus('connecting');
         }
       }
@@ -714,7 +640,7 @@ export class MeshConnection {
       this._addBounded(this.seenEventIds, actId);
       const m = { ...(this.lastRoom?.media || {}), ...obj, meshStateStatus: 'PLAYING', playing: true, meshStatePosition: Number(obj.currentTime || 0), meshStateTime: clock.now() };
       delete m.type;
-      this._emitP2p({ event: { id: `p2p_${actId}`, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
+      this._emitP2p({ event: { id: actId, type: 'sync', action: obj.type, cid: this.clientId, by: this.profile.name, media: m } });
     } else if (['play', 'pause', 'seek', 'rate', 'heartbeat'].includes(obj.type)) {
       const actId = obj.actionId || ('ev_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6));
       obj.actionId = actId;
@@ -759,11 +685,6 @@ export class MeshConnection {
       }
     } else if (this.mode === 'http') {
       this.actionSeq = (this.actionSeq || 0) + 1;
-      if (obj.type === 'heartbeat' || obj.type === 'typing') {
-        this.outQueue = this.outQueue.filter((q) => q && q.type !== obj.type);
-      } else if (['play', 'pause', 'seek', 'change_media', 'resolve_media'].includes(obj.type)) {
-        this.outQueue = this.outQueue.filter((q) => q && q.type !== 'heartbeat');
-      }
       this.outQueue.push(obj);
       this._flushOutQueue();
     }
@@ -794,35 +715,28 @@ export class MeshConnection {
           sessionStorage.removeItem(`vortex_creator_${this.roomId}`);
         }
       } catch (e) { /* ignore */ }
-      if (!this._leaveBeaconSent) {
-        this._leaveBeaconSent = true;
-        let sentWsLeave = false;
-        try {
-          if (this.ws && this.ws.readyState === 1) {
-            this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId, gracefulClose: true }));
-            sentWsLeave = true;
-          }
-        } catch (e) { /* ignore */ }
-        if (!sentWsLeave) {
-          try {
-            const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
-            const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
-            if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
-            fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
-              method: 'POST',
-              keepalive: true,
-              headers: leaveHeaders,
-              body: JSON.stringify({
-                type: shouldCloseRoom ? 'close_room' : 'leave',
-                clientId: this.clientId,
-                username: this.profile?.name || '',
-                clientToken: this.clientToken || undefined,
-                gracefulClose: true,
-              }),
-            }).catch(() => {});
-          } catch (e) { /* ignore */ }
+      try {
+        if (this.ws && this.ws.readyState === 1) {
+          this.ws.send(JSON.stringify({ type: shouldCloseRoom ? 'close_room' : 'leave', clientId: this.clientId, gracefulClose: true }));
         }
-      }
+      } catch (e) { /* ignore */ }
+      try {
+        const leaveAuthTok = this.profile?.authToken || this.profile?.guestToken || state.self?.authToken || state.self?.guestToken || '';
+        const leaveHeaders = { 'Content-Type': 'application/json', 'X-Watchlivo-Transport': 'http-poll' };
+        if (leaveAuthTok) leaveHeaders.Authorization = `Bearer ${leaveAuthTok}`;
+        fetch(`/api/rooms/${encodeURIComponent(this.roomId)}/sync`, {
+          method: 'POST',
+          keepalive: true,
+          headers: leaveHeaders,
+          body: JSON.stringify({
+            type: shouldCloseRoom ? 'close_room' : 'leave',
+            clientId: this.clientId,
+            username: this.profile?.name || '',
+            clientToken: this.clientToken || undefined,
+            gracefulClose: true,
+          }),
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
     }
     this.closed = true;
     this.outQueue = [];

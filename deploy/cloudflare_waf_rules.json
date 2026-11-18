@@ -1,26 +1,36 @@
 {
-  "description": "Watchlivo Cloudflare WAF & Anti-Crawler Armor Ruleset",
-  "version": "2026-11-10",
+  "description": "Watchlivo Cloudflare WAF - ordinary abuse protection (bad bots, auth brute force, API flooding)",
+  "version": "2026-11-18",
   "rules": [
     {
-      "name": "Block / Challenge Datacenter Bots & Copyright Scrapers",
+      "name": "Challenge Likely Automated Traffic On API",
       "action": "managed_challenge",
-      "expression": "(cf.bot_management.score lt 30) or (ip.geoip.asnum in {16509 14618 16276 24940 14061 51167 63949})",
-      "description": "Challenges requests from major datacenter ASNs (AWS, Hetzner, OVH, DigitalOcean) and requests with low bot scores."
+      "expression": "(http.request.uri.path starts_with \"/api/\") and (cf.bot_management.score lt 30) and not (cf.bot_management.verified_bot)",
+      "description": "Challenges low bot-score (likely automated) requests to the API. Verified bots are not affected."
     },
     {
-      "name": "Enforce No-Index & No-Archive on All HTTP Responses",
-      "action": "response_header_transform",
-      "headers": {
-        "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet, noimageindex, nocache"
-      },
-      "description": "Edge-level response header transformation to ensure zero search engine indexing."
-    },
-    {
-      "name": "Block Cross-Site Hotlinking on Stream & Catalog Endpoints",
+      "name": "Rate Limit Auth Endpoints",
       "action": "block",
-      "expression": "(http.request.uri.path contains \"/api/rave/resolve-catalog\" or http.request.uri.path contains \"/api/rave/stream\") and (http.request.headers[\"sec-fetch-site\"][0] eq \"cross-site\")",
-      "description": "Terminates cross-site unauthorized embedding and external API scraping before hitting the origin server."
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 60,
+        "requests_per_period": 20,
+        "mitigation_timeout": 120
+      },
+      "expression": "(http.request.uri.path starts_with \"/api/auth/\") and (http.request.method eq \"POST\")",
+      "description": "Limits login/register/oauth attempts per IP to slow down credential stuffing and brute force."
+    },
+    {
+      "name": "Rate Limit General API",
+      "action": "managed_challenge",
+      "ratelimit": {
+        "characteristics": ["ip.src"],
+        "period": 10,
+        "requests_per_period": 300,
+        "mitigation_timeout": 60
+      },
+      "expression": "(http.request.uri.path starts_with \"/api/\")",
+      "description": "Protects the origin from request floods."
     }
   ]
 }

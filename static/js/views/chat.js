@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261114_v215';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261114_v215';
-import { avatar } from '../profile.js?v=20261114_v215';
-import { api, qs } from '../api.js?v=20261114_v215';
-import { resolveMusicItem } from './selection-kinds.js?v=20261114_v215';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261114_v215';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261118_v184';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261118_v184';
+import { avatar } from '../profile.js?v=20261118_v184';
+import { api, qs } from '../api.js?v=20261118_v184';
+import { resolveMusicItem } from './selection-kinds.js?v=20261118_v184';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261118_v184';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -638,6 +638,8 @@ export function buildChat(ctx) {
   }
   let lastTyping = 0;
   input.addEventListener('keydown', (e) => {
+    // ArrowUp keeps its native caret behaviour; the player's global key handler already
+    // ignores keystrokes that originate in text inputs.
     if (e.key === 'Enter' || e.keyCode === 13) {
       e.preventDefault();
       send();
@@ -957,8 +959,8 @@ export function buildChat(ctx) {
       return;
     }
     const myName = state.self?.name || '';
+    const myBase = myName.split('#')[0];
     const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
-    const myBase = myCidTail && myName.endsWith(`#${myCidTail}`) ? myName.slice(0, -(myCidTail.length + 1)) : myName;
     const myVoteTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const sig = `${myVoteTag || myName}|${poll.question}|${(poll.options || []).map((o) => `${o.text}:${(o.votes || []).join(',')}`).join(';')}`;
     if (wrap.dataset.pollSig === sig) return;
@@ -969,7 +971,7 @@ export function buildChat(ctx) {
       h('div', { class: 'chat-poll-opts' }, ...(poll.options || []).map((opt, idx) => {
         const count = (opt.votes || []).length;
         const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-        const voted = (opt.votes || []).some((u) => u === myVoteTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
+        const voted = (opt.votes || []).some((u) => (myVoteTag ? (u === myVoteTag || (!String(u).includes('#') && u === myName)) : u === myName));
         return h('button', {
           type: 'button',
           class: `chat-poll-opt ${voted ? 'voted' : ''}`,
@@ -1071,8 +1073,8 @@ export function buildChat(ctx) {
     const msgObj = (state.mesh?.chat || []).find((x) => x.id === msgId);
     const reacts = msgObj?.reactions || {};
     const myName = state.self?.name || 'Misafir';
+    const myBase = myName.split('#')[0];
     const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
-    const myBase = myCidTail && myName.endsWith(`#${myCidTail}`) ? myName.slice(0, -(myCidTail.length + 1)) : myName;
     const myReactTag = myCidTail ? `${myBase}#${myCidTail}` : '';
     const entries = Object.entries(reacts).filter(([, u]) => Array.isArray(u) && u.length > 0);
     const sig = `${myReactTag || myName}|${entries.map(([em, u]) => `${em}:${u.join(',')}`).join(';')}`;
@@ -1085,7 +1087,7 @@ export function buildChat(ctx) {
     }
     wrap.classList.remove('empty');
     wrap.replaceChildren(...entries.map(([em, users]) => {
-      const mine = users.some((u) => u === myReactTag || u === myName || (myCidTail && String(u || '').endsWith(`#${myCidTail}`)));
+      const mine = users.some((u) => (myReactTag ? (u === myReactTag || (!String(u).includes('#') && u === myName)) : u === myName));
       return h('button', {
         type: 'button',
         class: `msg-react-pill ${mine ? 'mine' : ''}`,
@@ -1413,14 +1415,14 @@ export function buildChat(ctx) {
   }
 
   const recentSysMap = new Map();
-  function append(m, batchFrag = null) {
-    if (!m || !m.id || rendered.has(m.id)) return false;
+  function append(m) {
+    if (!m || !m.id || rendered.has(m.id)) return;
     const nowSec = Date.now() / 1000;
     const curTs = Number(m.ts || nowSec);
     if (m.system) {
       if (nowSec - curTs > 1800) {
         rendered.add(m.id);
-        return false;
+        return;
       }
       const txt = String(m.text || '');
       const isPresence = /katıldı|ayrıldı/i.test(txt);
@@ -1431,7 +1433,7 @@ export function buildChat(ctx) {
         const prevTs = recentSysMap.get(sysKey) || 0;
         if (prevTs && Math.abs(curTs - prevTs) < 3) {
           rendered.add(m.id);
-          return false;
+          return;
         }
         recentSysMap.set(sysKey, curTs);
         const remPresence = Array.from(list.querySelectorAll('.sysmsg[data-sys-kind="presence"]'));
@@ -1444,23 +1446,19 @@ export function buildChat(ctx) {
     }
     rendered.add(m.id);
     if (m.system) lastUser = null;
-    const refLast = (batchFrag && batchFrag.lastElementChild) ? batchFrag.lastElementChild : list.lastElementChild;
-    const lastTs = refLast ? Number(refLast.dataset?.ts || 0) : 0;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+    const node = msgNode(m);
+    const lastChild = list.lastElementChild;
+    const lastTs = lastChild ? Number(lastChild.dataset?.ts || 0) : 0;
     let insertBeforeNode = null;
     if (lastTs > 0 && curTs > 0 && curTs < lastTs - 1) {
       insertBeforeNode = Array.from(list.children).find((ch) => Number(ch.dataset?.ts || 0) > curTs) || null;
     }
-    const node = msgNode(m);
     if (!m.system) {
-      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : refLast?.dataset?.authorKey;
+      const prevAuthorKey = insertBeforeNode ? insertBeforeNode.previousElementSibling?.dataset?.authorKey : list.lastElementChild?.dataset?.authorKey;
       const isCont = Boolean(node.dataset?.authorKey && prevAuthorKey === node.dataset.authorKey && !m.pollId && !m.replyTo && !m.snapshot && !m.audioNote);
       node.classList.toggle('cont', isCont);
     }
-    if (batchFrag && !insertBeforeNode) {
-      batchFrag.append(node);
-      return true;
-    }
-    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
     if (insertBeforeNode) {
       list.insertBefore(node, insertBeforeNode);
     } else {
@@ -1471,7 +1469,6 @@ export function buildChat(ctx) {
       list.firstElementChild?.classList?.remove('cont');
     }
     if (atBottom) list.scrollTop = list.scrollHeight;
-    return true;
   }
 
   function quickRoomBar() {
@@ -1677,22 +1674,7 @@ export function buildChat(ctx) {
         if (ts > 0 && nowSec - ts > 1800) node.remove();
       });
       const chatArr = state.mesh?.chat || [];
-      if (chatArr.length) {
-        const frag = document.createDocumentFragment();
-        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-        let appendedAny = false;
-        for (const m of chatArr) {
-          if (append(m, frag)) appendedAny = true;
-        }
-        if (frag.childNodes.length) {
-          list.append(frag);
-          while (list.children.length > 150) {
-            list.firstElementChild?.remove();
-            list.firstElementChild?.classList?.remove('cont');
-          }
-        }
-        if (appendedAny && atBottom) list.scrollTop = list.scrollHeight;
-      }
+      for (const m of chatArr) append(m);
       renderPolls();
       renderReactions();
       if (!onboarding && state.mesh) {

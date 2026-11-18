@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261114_v215';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261114_v215';
-import { navIcon, logo } from './home.js?v=20261114_v215';
-import { createSelection } from './selection.js?v=20261114_v215';
-import { buildControls } from './controls.js?v=20261114_v215';
-import { buildChat } from './chat.js?v=20261114_v215';
-import { PANELS } from './panels.js?v=20261114_v215';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261118_v184';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261118_v184';
+import { navIcon, logo } from './home.js?v=20261118_v184';
+import { createSelection } from './selection.js?v=20261118_v184';
+import { buildControls } from './controls.js?v=20261118_v184';
+import { buildChat } from './chat.js?v=20261118_v184';
+import { PANELS } from './panels.js?v=20261118_v184';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -181,8 +181,6 @@ export function buildLayout(app, ctx) {
         theaterMode
           ? roomActionBtn('panelRightOpen', 'Sohbeti Aç', 'Sohbet Panelini Aç (T)', () => toggleTheaterMode(), { selected: true, id: 'nav-toggle-chat' })
           : roomActionBtn('panelRightClose', 'Sinema', 'Sohbeti Gizle / Sinema Modu (T)', () => toggleTheaterMode(), { selected: false, id: 'nav-toggle-chat' })));
-    const toggleBtn = nav.querySelector('#nav-toggle-chat');
-    if (toggleBtn) toggleBtn.setAttribute('aria-pressed', String(theaterMode));
   }
 
   function update() {
@@ -274,28 +272,25 @@ function initResize(handle, chatPanel) {
     window.addEventListener('pointercancel', up);
   });
 
+  // Keyboard resizing (mirrors drag direction: moving the handle left widens the chat).
+  const setChatW = (w) => {
+    const maxW = typeof window !== 'undefined' ? window.innerWidth * 0.55 : 640;
+    const nextW = Math.round(Math.max(250, Math.min(maxW, w)));
+    chatPanel.style.setProperty('--chat-w', `${nextW}px`);
+    try { localStorage.setItem('vortex_chat_w', String(nextW)); } catch (_) {}
+  };
   handle.addEventListener('keydown', (e) => {
+    const curW = chatPanel.getBoundingClientRect().width || 380;
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      const curW = chatPanel.getBoundingClientRect().width || 380;
-      const nextW = Math.max(240, curW - 25);
-      chatPanel.style.setProperty('--chat-w', `${nextW}px`);
-      localStorage.setItem('vortex_chat_w', String(Math.round(nextW)));
+      setChatW(curW + 25);
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
-      const maxW = typeof window !== 'undefined' ? window.innerWidth * 0.55 : 640;
-      const curW = chatPanel.getBoundingClientRect().width || 380;
-      const nextW = Math.min(maxW, curW + 25);
-      chatPanel.style.setProperty('--chat-w', `${nextW}px`);
-      localStorage.setItem('vortex_chat_w', String(Math.round(nextW)));
+      setChatW(curW - 25);
     } else if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      const curW = Math.round(chatPanel.getBoundingClientRect().width || 380);
-      const targetW = (Math.abs(curW - 380) < 15) ? 280 : 380;
-      chatPanel.style.setProperty('--chat-w', `${targetW}px`);
-      localStorage.setItem('vortex_chat_w', String(targetW));
+      setChatW(Math.abs(Math.round(curW) - 380) < 15 ? 280 : 380);
     }
   });
-
   return cleanupDragListeners;
 }

@@ -214,12 +214,10 @@ export const isCreatorSelf = () => {
   if (!state.mesh || state.mesh.curated) return false;
   const myCid = state.clientId;
   if (!myCid) return false;
-  const parts = Array.isArray(state.mesh.participants) ? state.mesh.participants : [];
-  const meP = parts.find((p) => p.id === myCid) || null;
+  const meP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === myCid) : null;
   if (meP?.isCreator) return true;
-  if (parts.some((p) => p.isCreator && p.id !== myCid)) return false;
   if (state.mesh.creatorCid && state.mesh.creatorCid !== myCid) {
-    const creatorAlive = parts.some((p) => p.id === state.mesh.creatorCid);
+    const creatorAlive = Array.isArray(state.mesh.participants) && state.mesh.participants.some((p) => p.id === state.mesh.creatorCid);
     if (creatorAlive) return false;
   }
   try {
@@ -248,15 +246,11 @@ export const isLeader = () => {
   if (state.mesh.curated) return false;
   if (isHostOnly()) return true;
   if (state.mesh.playMode === 'cohost') return true;
-  const coList = Array.isArray(state.mesh.co_hosts)
-    ? state.mesh.co_hosts
-    : (Array.isArray(state.mesh.coHosts) ? state.mesh.coHosts : null);
-  if (coList && state.clientId && coList.includes(state.clientId)) return true;
+  if (Array.isArray(state.mesh.co_hosts) && state.clientId && state.mesh.co_hosts.includes(state.clientId)) return true;
   const meCoP = Array.isArray(state.mesh.participants) ? state.mesh.participants.find((p) => p.id === state.clientId) : null;
   if (meCoP?.isCoHost) return true;
   return false;
 };
-export const canControlPlayback = isLeader;
 export function isRoomMediaPlaying(media) {
   if (!media) return false;
   if (media.meshStateStatus === 'PAUSED') return false;
@@ -460,8 +454,13 @@ export async function syncCloudUserMedia(force = false) {
       for (const loc of localList) {
         const k = _boundProgressKey(loc.historyId || loc.key || '');
         if (!k) continue;
+        if (!cloudKeys.has(k) && loc.cloudSynced) {
+          historyChanged = true;
+          continue;
+        }
         if (!cloudKeys.has(k) && !loc.cloudSynced) {
           toPush.push({ ...loc, key: k, historyId: k });
+          loc.cloudSynced = true;
           historyChanged = true;
         }
         byKey.set(k, loc);
@@ -493,8 +492,8 @@ export async function syncCloudUserMedia(force = false) {
             thumbnail: c.thumbnail || c.poster || c.backdrop || prev?.thumbnail || '',
             poster: c.poster || c.thumbnail || prev?.poster || prev?.thumbnail || '',
             backdrop: c.backdrop || prev?.backdrop || '',
-            provider: c.provider || prev?.provider || 'cinema',
-            catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || 'cinema',
+            provider: c.provider || prev?.provider || '',
+            catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || '',
             streamType: c.streamType || prev?.streamType || '',
             tmdbId: c.tmdbId || prev?.tmdbId || '',
             imdbId: c.imdbId || prev?.imdbId || '',
@@ -526,8 +525,8 @@ export async function syncCloudUserMedia(force = false) {
             tmdbId: String(item.tmdbId || ''),
             imdbId: String(item.imdbId || ''),
             mediaType: item.mediaType === 'tv' ? 'tv' : 'movie',
-            provider: item.catalogProvider || item.provider || 'cinema',
-            catalogProvider: item.catalogProvider || item.provider || 'cinema',
+            provider: item.catalogProvider || item.provider || '',
+            catalogProvider: item.catalogProvider || item.provider || '',
             streamType: item.streamType || '',
             videoId: String(item.videoId || ''),
             title: item.title || 'Video',
@@ -574,8 +573,13 @@ export async function syncCloudUserMedia(force = false) {
       for (const f of localFavs) {
         const fk = _boundProgressKey(f.key || (f.tmdbId ? `${f.mediaType || 'movie'}:${f.tmdbId}` : f.favId || ''));
         if (!fk) continue;
+        if (!cloudFavKeys.has(fk) && f.cloudSynced) {
+          favsChanged = true;
+          continue;
+        }
         if (!cloudFavKeys.has(fk) && !f.cloudSynced) {
           favsToPush.push({ ...f, key: fk });
+          f.cloudSynced = true;
           favsChanged = true;
         }
         byFav.set(fk, { ...f, key: fk });
@@ -606,7 +610,7 @@ export async function syncCloudUserMedia(force = false) {
             thumbnail: cw.thumbnail || cw.poster || '',
             poster: cw.poster || cw.thumbnail || '',
             backdrop: cw.backdrop || cw.poster || cw.thumbnail || '',
-            provider: cw.provider || 'cinema',
+            provider: cw.provider || '',
             cloudSynced: true,
             addedAt: _normTs(cw.addedAt) || now,
           });
@@ -638,7 +642,7 @@ export async function syncCloudUserMedia(force = false) {
             videoId: String(fav.videoId || ''),
             imdbId: String(fav.imdbId || ''),
             mediaType: fav.mediaType === 'tv' ? 'tv' : 'movie',
-            provider: fav.provider || 'cinema',
+            provider: fav.provider || '',
             title: fav.title || 'Yapım',
             channel: String(fav.channel || ''),
             channelId: String(fav.channelId || ''),
@@ -889,14 +893,11 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const savedPct = isSeries && epFinished ? 0 : pct;
   const origTitle = media.originalTitle || prev?.originalTitle || '';
   const serTitle = isSeries ? (media.seriesTitle || prev?.seriesTitle || String(media.title || prev?.title || '').split(' — ')[0].trim()) : '';
-  const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || 'cinema';
+  const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || '';
   const sType = media.streamType || prev?.streamType || '';
   const now = Date.now();
   const prevPush = _lastCloudProgPush.get(id) || 0;
   const shouldPushCloud = Boolean(typeof fetch === 'function' && isCloudAuthenticated() && (opts?.forceCloud || completed || epFinished || now - prevPush >= 12000));
-  const rawSaveUrl = String(media.url || prev?.url || '');
-  const isEphemeralProxyUrl = /\/api\/rave\/(?:stream\?|stream-proxy\?|stream-manifest|resolve-catalog)/i.test(rawSaveUrl);
-  const persistableUrl = isEphemeralProxyUrl ? '' : rawSaveUrl;
   try {
     const list = existingList.filter((item) => String(item.historyId || item.key || '') !== id);
     const effSavedPoster = media.poster || media.thumbnail || prev?.poster || prev?.thumbnail || (media.title ? `/api/rave/poster?tid=${encodeURIComponent(media.tmdbId || '')}&t=${encodeURIComponent(media.title || '')}&y=${encodeURIComponent(media.year || '')}&mt=${encodeURIComponent(mtype)}` : '');
@@ -922,7 +923,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       season: savedSeason,
       episode: savedEpisode,
       year: media.year || prev?.year || '',
-      url: persistableUrl,
+      url: media.url || prev?.url || '',
       officialUrl: media.officialUrl || prev?.officialUrl || '',
       videoId: media.videoId || prev?.videoId || '',
       currentTime: savedTime,
@@ -931,7 +932,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
       percent: savedPct,
       completed,
       epProgress: epMap,
-      cloudSynced: Boolean(prev?.cloudSynced),
+      cloudSynced: shouldPushCloud,
       updatedAt: now,
     });
     localStorage.setItem(_historyKey(), JSON.stringify(list.slice(0, 50)));
@@ -1036,7 +1037,7 @@ export function toggleFavoriteMedia(item) {
         videoId: String(item.videoId || ''),
         imdbId: String(item.imdbId || ''),
         mediaType: mtype,
-        provider: item.catalogProvider || item.provider || 'cinema',
+        provider: item.catalogProvider || item.provider || '',
         title: item.title || 'Yapım',
         channel: String(item.channel || ''),
         channelId: String(item.channelId || ''),
@@ -1204,7 +1205,7 @@ export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
       roomName: payload.roomName || m?.name || 'Watchlivo Odası',
       mediaTitle: payload.mediaTitle || m?.media?.title || '',
       mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.backdrop || m?.media?.thumbnail || '',
-      mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
+      mediaProvider: payload.mediaProvider || m?.media?.provider || '',
       password: pwd,
       syncToken: syncTok,
       ...payload,

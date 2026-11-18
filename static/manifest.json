@@ -1,7 +1,7 @@
 {
-  "name": "Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları",
+  "name": "Watchlivo — Arkadaşlarınla Senkron Birlikte İzle",
   "short_name": "Watchlivo",
-  "description": "Arkadaşlarınla senkronize film, dizi, anime ve müzik izle.",
+  "description": "Arkadaşlarınla senkron birlikte izle: YouTube, Google Drive, müzik ve kendi hesabınla abonelik platformları.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

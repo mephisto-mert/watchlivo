@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261114_v215';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261118_v184';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -85,18 +85,18 @@ export function parseVtt(vttText) {
         textLines.push(lines[i].trim());
         i += 1;
       }
-      const joinedBlock = textLines.join('\n')
-        .replace(/&lt;/gi, '<')
-        .replace(/&gt;/gi, '>')
-        .replace(/&amp;/gi, '&')
-        .replace(/&quot;/gi, '"')
-        .replace(/&#39;|&#x27;/gi, "'")
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-        .replace(/<[^>]*>/g, '');
+      const joinedBlock = textLines.join('\n').replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '');
       const rawLines = joinedBlock.split('\n')
         .filter((l) => !/\\p[1-9]\b/i.test(l))
         .map((l) => l
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;|&#x27;/gi, "'")
+          .replace(/&nbsp;/g, ' ')
+          .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+          .replace(/<[^>]*>/g, '')
           .replace(/[<>]/g, '')
           .replace(/\{\\[^}]*\}/g, '')
           .replace(/[♪♫♬♩]+/g, ' ')
@@ -308,24 +308,11 @@ export class SubtitleDubController {
       || t.audioLang === 'tr' || t.lang === 'tr' || t.targetLang === 'tr'
     );
     const studioTr = rawAudio.find((t) => isTrStudio(t) && (t.url || typeof t.hlsIndex === 'number' || typeof t.nativeIndex === 'number'));
-    if (pref === 'tr-dub' || pref === 'tr' || String(pref).startsWith('tr-dub-')) {
+    if (!pref || pref === 'tr-dub' || pref === 'tr' || String(pref).startsWith('tr-dub-')) {
       if (studioTr) {
         this.selectedAudioId = studioTr.id;
         return studioTr;
       }
-    }
-    const firstTrack = rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
-    const isStudioTr720 = studioTr && /720p/i.test(studioTr.label || '');
-    const isFirstTrackHd = firstTrack && /(?:1080p|4k|2160p|bluray)/i.test(firstTrack.label || '');
-    if (!pref && studioTr && isStudioTr720 && isFirstTrackHd && firstTrack.id !== studioTr.id) {
-      this.selectedAudioId = firstTrack.id || 'orig';
-      return firstTrack;
-    }
-    if (!pref && studioTr) {
-      this.selectedAudioId = studioTr.id;
-      return studioTr;
-    }
-    if (!pref) {
       const origFallback = rawAudio.find((t) => t.mode === 'stream' && (t.id === 'orig' || t.lang === 'orig')) || rawAudio.find((t) => t.mode === 'stream') || rawAudio[0];
       this.selectedAudioId = origFallback?.id || 'orig';
       return origFallback || null;
@@ -450,7 +437,6 @@ export class SubtitleDubController {
     if (this.media) this.media.subtitleTracks = this.subtitleTracks;
     const baseUrl = media.url || '';
     const rawAudio = Array.isArray(media.audioTracks) ? media.audioTracks.filter(Boolean) : [];
-    this._hadInitialAudioTracks = rawAudio.length > 0;
     this.audioTracks = rawAudio.length
       ? [...rawAudio]
       : [
@@ -563,7 +549,7 @@ export class SubtitleDubController {
             lang: 'tr',
             targetLang: 'tr',
             audioLang: 'tr',
-            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)',
+            label: '🇹🇷 Türkçe Ses',
             mode: 'hls',
           });
         }
@@ -619,7 +605,7 @@ export class SubtitleDubController {
         else {
           this.audioTracks.push({
             id: 'tr-dub', nativeIndex: idx, lang: 'tr', targetLang: 'tr', audioLang: 'tr',
-            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'native',
+            label: '🇹🇷 Türkçe Ses', mode: 'native',
           });
         }
       } else {
@@ -651,9 +637,8 @@ export class SubtitleDubController {
     this.adapter.events.onTracksChanged?.();
   }
 
-  _applyNativeAudioSelection(targetEl = null) {
-    const mediaEl = targetEl || this.adapter?.video;
-    const nativeTracks = mediaEl?.audioTracks;
+  _applyNativeAudioSelection() {
+    const nativeTracks = this.adapter?.video?.audioTracks;
     if (!nativeTracks || nativeTracks.length <= 1) return;
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
     let targetIdx = typeof track?.nativeIndex === 'number' ? track.nativeIndex : -1;
@@ -671,8 +656,8 @@ export class SubtitleDubController {
     }
   }
 
-  _applyHlsAudioSelection(targetHls = null) {
-    const hls = targetHls || this.adapter?.hls;
+  _applyHlsAudioSelection() {
+    const hls = this.adapter.hls;
     const hlsTracks = hls?.audioTracks;
     if (!hls || !Array.isArray(hlsTracks) || hlsTracks.length <= 1) return;
     const track = this.audioTracks.find((t) => t.id === this.selectedAudioId) || this.audioTracks[0];
@@ -708,11 +693,9 @@ export class SubtitleDubController {
     }
     if (targetIdx >= 0 && hls.audioTrack !== targetIdx) {
       hls.audioTrack = targetIdx;
-      const curSec = Number(this.adapter?.getTime?.() || 0);
-      if (targetHls === null && hls.bufferController && curSec > 0.5 && this._lastFlushedHlsTrack !== targetIdx) {
-        this._lastFlushedHlsTrack = targetIdx;
+      if (hls.bufferController) {
         try {
-          hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: curSec, endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
+          hls.trigger(window.Hls.Events.BUFFER_FLUSHING, { startOffset: this.adapter.getTime(), endOffset: Number.POSITIVE_INFINITY, type: 'audio' });
         } catch (_) {}
       }
     }
@@ -727,10 +710,41 @@ export class SubtitleDubController {
       this.cuesCache.delete(cacheKey);
     }
 
-    // Direct residential browser fetch: Upstream sources like hdfilmcehennemi.mobi and subs5.strem.io
-    // support CORS (Access-Control-Allow-Origin: *) but block datacenter IPs. The browser fetches them
-    // Route all remote subtitle fetches through first-party proxy (/api/rave/subtitle.vtt)
-    // to avoid CORS failures (e.g. subs.rapidvid.org) and preserve windows-1254 / ASS normalization.
+    // Prefer fetching a CORS-enabled subtitle file directly from the browser; fall back to the
+    // backend subtitle endpoint below.
+    const url = String(track.url || '');
+    let directUrl = track.rawUrl || '';
+    if (!directUrl && url && url.includes('/api/rave/subtitle.vtt')) {
+      try {
+        const uObj = new URL(url, location.origin);
+        directUrl = uObj.searchParams.get('url') || '';
+      } catch (_) {}
+    }
+
+    if (directUrl && /^https?:\/\//i.test(directUrl) && !/[?&]translate=/i.test(url)) {
+      try {
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 3500);
+        const dResp = await fetch(directUrl, { mode: 'cors', signal: ctrl.signal });
+        clearTimeout(tid);
+        if (dResp.ok) {
+          const buf = await dResp.arrayBuffer();
+          let dText = new TextDecoder('utf-8').decode(buf);
+          if (dText.includes('\uFFFD')) {
+            try { dText = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
+          }
+          const dCues = parseVtt(dText);
+          if (Array.isArray(dCues) && dCues.length >= 10) {
+            this.cuesCache.set(cacheKey, { vtt: dText, cues: dCues, failedAt: 0 });
+            return dCues;
+          }
+        }
+      } catch (_) {
+        // Direct fetch failed (CORS, network error, or timeout) - proceed to proxy fallback below
+      }
+    }
+
+    // Fallback: Backend proxy fetch (/api/rave/subtitle.vtt)
     if (track.url) {
       try {
         const r = await fetch(track.url);
@@ -738,11 +752,7 @@ export class SubtitleDubController {
           this.cuesCache.set(cacheKey, { vtt: '', cues: [], failedAt: Date.now() });
           return [];
         }
-        const buf = await r.arrayBuffer();
-        let vtt = new TextDecoder('utf-8').decode(buf);
-        if (vtt.includes('\uFFFD')) {
-          try { vtt = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
-        }
+        const vtt = await r.text();
         const cues = parseVtt(vtt);
         this.cuesCache.set(cacheKey, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
         return cues;
@@ -922,7 +932,7 @@ export class SubtitleDubController {
       let cues = await this._loadCuesForTrack(track);
       if (this._destroyed || this._mediaSeq !== seq) return null;
       const dur = Number(this.adapter?.getDuration?.() || this.media?.duration || 0);
-      const minEnd = dur > 120 ? (dur * 0.45) : 300;
+      const minEnd = dur > 600 ? (dur * 0.5) : 900;
       const getSpan = (arr) => (arr && arr.length ? arr[arr.length - 1].end : 0);
       if (track.source === 'youtube-native') {
         this.selectedSubId = track.id;
@@ -1028,20 +1038,12 @@ export class SubtitleDubController {
   }
 
   async _syncSecondaryDualTrack() {
-    if (this.dualSubEnabled && this.selectedDualSubId && this.selectedDualSubId !== 'off') {
-      const track = this.subtitleTracks.find((t) => t.id === this.selectedDualSubId)
-        || this.subtitleTracks.find((t) => t.lang === this.selectedDualSubId);
-      if (track) {
-        this.secondaryCues = (await this._loadCuesForTrack(track)) || [];
-        return;
-      }
-    }
     this.secondaryCues = [];
   }
 
   async setDualSubtitle(subId) {
     const cleanId = subId || 'off';
-    if (cleanId === 'off') {
+    const disableDual = () => {
       this.dualSubEnabled = false;
       this.selectedDualSubId = 'off';
       this.secondaryCues = [];
@@ -1049,19 +1051,12 @@ export class SubtitleDubController {
       this.onTimeUpdate(this.adapter.getTime(), true);
       this.adapter.events.onTracksChanged?.();
       return false;
-    }
+    };
+    if (cleanId === 'off') return disableDual();
     const track = this.subtitleTracks.find((t) => t.id === cleanId)
       || this.subtitleTracks.find((t) => t.lang === cleanId)
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId));
-    if (!track) {
-      this.dualSubEnabled = false;
-      this.selectedDualSubId = 'off';
-      this.secondaryCues = [];
-      this.activeSecondaryCueText = '';
-      this.onTimeUpdate(this.adapter.getTime(), true);
-      this.adapter.events.onTracksChanged?.();
-      return false;
-    }
+    if (!track) return disableDual();
     this.selectedDualSubId = track.id;
     try {
       const cues = await this._loadCuesForTrack(track);
@@ -1072,11 +1067,7 @@ export class SubtitleDubController {
       this.adapter.events.onTracksChanged?.();
       return true;
     } catch (e) {
-      this.dualSubEnabled = false;
-      this.secondaryCues = [];
-      this.onTimeUpdate(this.adapter.getTime(), true);
-      this.adapter.events.onTracksChanged?.();
-      return false;
+      return disableDual();
     }
   }
 
@@ -1161,17 +1152,13 @@ export class SubtitleDubController {
 
     const cleanUrl = (u) => String(u || '').replace(/&proxy_segs=1/g, '');
     const hlsHasMulti = Array.isArray(this.adapter?.hls?.audioTracks) && this.adapter.hls.audioTracks.length > 1;
-    const allowInitStreamSwitch = !isInit || !this._skipInitStreamSwitch || !this._hadInitialAudioTracks;
     if (typeof track.hlsIndex === 'number' && hlsHasMulti) {
       this._applyHlsAudioSelection();
-    } else if (allowInitStreamSwitch && track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
+    } else if (!(isInit && this._skipInitStreamSwitch) && track.mode === 'stream' && track.url && this.adapter.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
       await this.adapter.switchStreamSource(track.url);
     } else {
       if (isInit && this._skipInitStreamSwitch && track.mode === 'stream' && track.url) {
         this.adapter?._pushFallbackAlt?.(track.url);
-        if (this.adapter?.currentUrl && cleanUrl(track.url) !== cleanUrl(this.adapter.currentUrl)) {
-          this.onStreamFallbackUrl(this.adapter.currentUrl);
-        }
       }
       this._applyHlsAudioSelection();
       this._applyNativeAudioSelection();
@@ -1384,13 +1371,6 @@ export class SubtitleDubController {
       this.adapter.iosPipVideo.muted = this.adapter._iosPipActive
         ? Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0)
         : true;
-    }
-    if (this.adapter?._bgAudioEl && this.adapter._bgAudioActive) {
-      const bgMuted = Boolean(this.adapter?.userExplicitMuted || basePct <= 0);
-      this.adapter._bgAudioEl.muted = bgMuted;
-      try {
-        this.adapter._bgAudioEl.volume = bgMuted ? 0 : Math.max(0, Math.min(1, (basePct * duckFactor) / 100));
-      } catch (e) { /* ignore */ }
     }
     if (this._ttsAudio) {
       const isMuted = Boolean(v?.muted || this.adapter?.userExplicitMuted || basePct <= 0);

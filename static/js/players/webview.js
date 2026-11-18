@@ -1,8 +1,11 @@
-// Rave-parity Webview & DRM Provider Bridge adapter:
-// - In Desktop App (Electron): mounts provider page in persist:vortex-drm partition with Widevine CDM
-//   and synchronizes internal HTML5 <video> element via executeJavaScript.
-// - In Web Browser: provides official player window bridge with real-time timestamp synchronization,
-//   BroadcastChannel/postMessage protocol for companion extension/popup, and live playback controls.
+// Rave-model own-account platform adapter (Netflix, Disney+, Prime Video, Exxen, BluTV, …):
+// - In the Watchlivo desktop app: mounts the platform's own site in a persistent webview partition.
+//   Each participant signs in there with their OWN account; only play / pause / seek / rate of the
+//   page's <video> element is synchronised via executeJavaScript. Watchlivo never fetches the stream.
+// - Elsewhere: shows a room-clock bridge that opens the platform in the in-app browser / a separate
+//   window (own login) and explains that the Watchlivo app is needed for fully synced playback.
+
+import { getProvider } from '../providers.js?v=20261118_v184';
 
 const _DRM_WEBVIEW_HOSTS = [
   'netflix.com', 'disneyplus.com', 'primevideo.com', 'amazon.com', 'max.com', 'hbomax.com',
@@ -89,7 +92,8 @@ export class WebviewAdapter {
     clearInterval(this.timer);
     this.loadedAtMs = Date.now();
     this.wantPlaying = Boolean(shouldPlay);
-    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : 'https://play.max.com';
+    const homeUrl = getProvider(media?.provider)?.homeUrl;
+    this.mediaUrl = isAllowedWebviewUrl(media?.url) ? String(media.url).trim() : (isAllowedWebviewUrl(homeUrl) ? homeUrl : 'https://www.netflix.com/browse');
     this.baseTime = Math.max(0, Number(startAt) || 0);
     this.state.t = this.baseTime;
     this.duration = Number(media?.duration) || (media?.mediaType === 'tv' ? 2700 : 7200);
@@ -150,7 +154,8 @@ export class WebviewAdapter {
     const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const isNf = /netflix\.com/i.test(this.mediaUrl) || media?.provider === 'netflix';
     const isMax = /max\.com|hbomax\.com/i.test(this.mediaUrl) || media?.provider === 'max';
-    const provName = isNf ? 'Netflix' : (isMax ? 'Max (HBO)' : (media?.provider ? media.provider.toUpperCase() : 'DRM Oynatıcı'));
+    const _names = { netflix: 'Netflix', disney: 'Disney+', prime: 'Prime Video', max: 'Max', apple: 'Apple TV+', mubi: 'MUBI', hulu: 'Hulu', paramount: 'Paramount+', peacock: 'Peacock', plex: 'Plex', pluto: 'Pluto TV', tubi: 'Tubi', exxen: 'Exxen', blutv: 'BluTV', gain: 'GAİN', tod: 'TOD', tabii: 'tabii', tvplus: 'TV+', puhutv: 'puhutv', crunchyroll: 'Crunchyroll' };
+    const provName = _names[media?.provider] || (isNf ? 'Netflix' : (isMax ? 'Max' : 'Platform'));
     const safeProvName = esc(provName);
     const safeTitle = esc(media?.title || (isNf ? 'Netflix Yayını' : (isMax ? 'Max Yayını' : 'Resmi Oynatıcı')));
     const provBadgeColor = isNf ? '#f87171' : (isMax ? '#60a5fa' : '#38bdf8');
@@ -164,13 +169,13 @@ export class WebviewAdapter {
       <div style="max-width:540px;width:100%;background:rgba(16,18,26,0.92);backdrop-filter:blur(16px);border:1px solid ${isNf ? 'rgba(229,9,20,0.45)' : 'rgba(255,255,255,0.12)'};border-radius:18px;padding:28px 24px;box-shadow:0 20px 40px rgba(0,0,0,0.7), 0 0 30px ${isNf ? 'rgba(229,9,20,0.25)' : 'rgba(0,43,231,0.2)'};">
         <div style="display:inline-flex;align-items:center;gap:8px;padding:4px 12px;background:${provBadgeBg};border:1px solid ${provBadgeBorder};border-radius:99px;font-size:12px;font-weight:700;color:${provBadgeColor};margin-bottom:14px;">
           <span style="width:8px;height:8px;border-radius:50%;background:${provDotBg};box-shadow:0 0 8px ${provDotBg};animation:pulse 2s infinite;"></span>
-          ${safeProvName} Canlı Oda Köprüsü
+          ${safeProvName} · Kendi hesabınla
         </div>
         <h2 style="margin:0 0 8px;font-size:22px;font-weight:800;letter-spacing:-0.5px;color:#ffffff;">
           ${safeTitle}
         </h2>
         <p style="margin:0 0 20px;font-size:13px;line-height:1.5;color:#94a3b8;">
-          ${isNf ? 'Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle Netflix ayrı sekmede veya pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.' : `Web tarayıcılarında DRM güvenlik ilkeleri nedeniyle ${safeProvName} ayrı pencerede oynatılır. Odanızın zamanlaması bu ekranda milisaniyelik senkronize edilir.`}
+          ${safeProvName} ile birlikte izlemek için Watchlivo uygulamasını indir ve kendi ${safeProvName} hesabınla giriş yap. Watchlivo içeriği barındırmaz veya yayınlamaz; herkes kendi aboneliğiyle izler, oda yalnızca oynat / duraklat / sar komutlarını eşitler.
         </p>
         <div style="background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:14px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;">
           <div style="text-align:left;">
@@ -199,7 +204,7 @@ export class WebviewAdapter {
 
         <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-bottom:14px;">
           <button id="vortex-bridge-open-btn" type="button" style="flex:1;min-width:170px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 18px;border-radius:10px;background:${openBtnColor};color:#ffffff;font-size:13px;font-weight:700;border:none;cursor:pointer;transition:transform 0.15s, background 0.15s;">
-            🎬 ${safeProvName}'te Aç (Yan Yana İzle)
+            🔑 ${safeProvName}'i kendi hesabınla aç
           </button>
           <button id="vortex-bridge-sync-btn" type="button" style="display:inline-flex;align-items:center;gap:6px;padding:12px 16px;border-radius:10px;background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:13px;font-weight:700;cursor:pointer;">
             ⚡ Canlı Eşitle
@@ -209,9 +214,11 @@ export class WebviewAdapter {
           </button>
         </div>
 
-        <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;font-size:12px;color:#94a3b8;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <span>Tam gömülü ve otomatik izleme için:</span>
-          <a href="/download/windows" download="Watchlivo.exe" style="color:#38bdf8;text-decoration:none;font-weight:700;">Masaüstü Sürümünü İndir ↗</a>
+        <div class="wl-account-dl-row" style="border-top:1px solid rgba(255,255,255,0.08);padding-top:14px;font-size:12px;color:#94a3b8;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;">
+          <span>Watchlivo uygulaması:</span>
+          <a href="/download/apk" style="color:#38bdf8;text-decoration:none;font-weight:700;">Android ↗</a>
+          <a href="/download/windows" style="color:#38bdf8;text-decoration:none;font-weight:700;">Windows ↗</a>
+          <a href="/download/ios" style="color:#38bdf8;text-decoration:none;font-weight:700;">iPhone / iPad ↗</a>
         </div>
       </div>
     `;

@@ -30,7 +30,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 import auth_engine
-from security import BoundedTTLCache, RateLimiter, client_ip, is_safe_public_url, is_upstash_down, too_many_response
+from security import BoundedTTLCache, RateLimiter, client_ip, is_safe_public_url, too_many_response
 
 UA_CHROME = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -66,18 +66,11 @@ _PRIVATE_HEADERS = {"Cache-Control": "private, no-store, no-cache, must-revalida
 _SERVER_HEALTH: Dict[str, Dict[str, Any]] = {}
 
 
-_KV_MISS_SENTINEL = ("__wl_kv_empty__",)
-
-
 def _get_redis_store():
     try:
         import rooms
         st = getattr(rooms, "STORE", None)
-        if not getattr(st, "shared", False):
-            return None
-        if is_upstash_down(getattr(st, "url", "")):
-            return None
-        return st
+        return st if getattr(st, "shared", False) else None
     except Exception:
         return None
 
@@ -86,7 +79,7 @@ def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
     now_t = time.time()
     mem_val = _KV_MEM.get(key, None)
     if mem_val is not None and (now_t - float(_KV_READ_TS.get(key) or 0.0) < max_age):
-        return default if mem_val == _KV_MISS_SENTINEL else mem_val
+        return mem_val
     st = _get_redis_store()
     if st is not None:
         try:
@@ -97,15 +90,8 @@ def _kv_get(key: str, default: Any = None, max_age: float = 8.0) -> Any:
                 _KV_MEM.set(key, val, ttl=mem_ttl)
                 _KV_READ_TS.set(key, now_t, ttl=mem_ttl)
                 return val
-            if not is_upstash_down(getattr(st, "url", "")):
-                neg_ttl = min(15.0, max(0.2, float(max_age)))
-                _KV_MEM.set(key, _KV_MISS_SENTINEL, ttl=neg_ttl)
-                _KV_READ_TS.set(key, now_t, ttl=neg_ttl)
-                return default
         except Exception:
             pass
-    if mem_val == _KV_MISS_SENTINEL:
-        return default
     return mem_val if mem_val is not None else default
 
 
@@ -234,9 +220,6 @@ def _strip_soc_tag(s: Any) -> str:
     return re.sub(r"#[a-zA-Z0-9]{1,8}$", "", str(s or "").strip()).strip()
 
 
-_GUEST_BINDINGS = BoundedTTLCache(maxsize=4096, default_ttl=86400 * 14)
-
-
 def _guest_binding_sig(request: Request) -> str:
     ip_s = str(client_ip(request) or "anon")
     ua_s = str(request.headers.get("user-agent") or "")[:160]
@@ -254,31 +237,23 @@ def _caller_uid(request: Request, raw_uid: Any = "", fallback: str = "guest_defa
             return str(any_claims["uid"]).strip().lower()[:64]
     cand = _clean(raw_uid, 64).lower()
     req_sig = _guest_binding_sig(request)
-    is_ephemeral_cand = (
-        (cand.startswith("guest_") or (cand.startswith("u_") and not cand.startswith("u_wl_")))
-        and cand not in ("guest_default", "guest_local")
-        and bool(re.fullmatch(r"(?:guest_|u_(?!wl_))[a-z0-9_-]{3,48}", cand))
-    )
-    if is_ephemeral_cand:
+    valid_cand = False
+    if cand.startswith("guest_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"guest_[a-z0-9_-]{3,48}", cand):
+        valid_cand = True
+    elif cand and not cand.startswith("u_wl_") and cand not in ("guest_default", "guest_local") and re.fullmatch(r"[a-z0-9_-]{3,48}", cand):
+        if auth_engine.resolve_public_user(cand) is None:
+            valid_cand = True
+    if valid_cand:
         ex_u = _SOCIAL_USERS.get(cand) or _kv_get(f"wl:soc:u:{cand}", None, max_age=3.0)
-        saved_sig = ""
         if isinstance(ex_u, dict) and ex_u.get("uid"):
             saved_sig = str(ex_u.get("guestBindingSig") or "")
-        if not saved_sig:
-            saved_sig = str(_GUEST_BINDINGS.get(cand) or "")
-        if isinstance(ex_u, dict) and ex_u.get("uid"):
-            if saved_sig and hmac.compare_digest(saved_sig, req_sig):
-                _GUEST_BINDINGS.set(cand, req_sig)
+            if not saved_sig or hmac.compare_digest(saved_sig, req_sig):
                 return cand
         else:
-            if not saved_sig or hmac.compare_digest(saved_sig, req_sig):
-                _GUEST_BINDINGS.set(cand, req_sig)
-                return cand
+            return cand
     ip_seed = str(client_ip(request) or "anon")
     ua_seed = str(request.headers.get("user-agent") or "")[:80]
-    det_uid = "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{fallback}".encode("utf-8")).hexdigest()[:12]
-    _GUEST_BINDINGS.set(det_uid, req_sig)
-    return det_uid
+    return "guest_" + hashlib.sha256(f"{ip_seed}|{ua_seed}|{fallback}".encode("utf-8")).hexdigest()[:12]
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -324,14 +299,8 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
     uid_c = _clean(card.get("uid"), 64)
     if not uid_c or uid_c in _LEGACY_BOT_UIDS or uid_c in ("guest_default", "guest_local") or uid_c.startswith("unauth_"):
         return
-    now_t = _now()
-    fast_prev = _SOCIAL_DIR.get(uid_c) if isinstance(_SOCIAL_DIR.get(uid_c), dict) else None
-    if not persist and fast_prev and (now_t - float(fast_prev.get("updatedAt") or 0.0) < 60.0):
-        d = _SOCIAL_DIR
-        prev = fast_prev
-    else:
-        d = _load_social_dir()
-        prev = d.get(uid_c) if isinstance(d.get(uid_c), dict) else {}
+    d = _load_social_dir()
+    prev = d.get(uid_c) if isinstance(d.get(uid_c), dict) else {}
     raw_nm = _clean(card.get("name"), 32)
     prev_nm = _clean(prev.get("name"), 32)
     if prev_nm and prev_nm.lower() not in ("izleyici", "misafir") and raw_nm.lower() in ("", "izleyici", "misafir"):
@@ -354,13 +323,8 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
         "statusEmoji": _clean(card.get("statusEmoji") or prev.get("statusEmoji") or "🍿", 12),
         "statusText": _clean(card.get("statusText") if "statusText" in card else prev.get("statusText", ""), 80),
         "isGuest": bool(uid_c.startswith("guest_")),
-        "updatedAt": now_t,
+        "updatedAt": _now(),
     }
-    unchanged = bool(prev) and all(
-        merged.get(k) == prev.get(k)
-        for k in ("name", "handle", "color", "avatar", "avatarUrl", "bio", "statusEmoji", "statusText")
-    )
-    prev_upd = float(prev.get("updatedAt") or 0.0) if prev else 0.0
     d[uid_c] = merged
     if len(d) > 800:
         oldest = sorted(
@@ -369,7 +333,7 @@ def _register_social_dir(card: Dict[str, Any], persist: bool = True) -> None:
         )[:120]
         for ok, _ in oldest:
             d.pop(ok, None)
-    if persist and (not unchanged or (now_t - prev_upd >= 600.0)):
+    if persist:
         _kv_set("wl:soc:dir", d, ttl_sec=2592000)
 
 
@@ -429,10 +393,6 @@ def _ensure_user_social(
             "lastSeen": _now(),
         }
     u = _SOCIAL_USERS[uid_clean]
-    if uid_clean.startswith("guest_") and not u.get("guestBindingSig"):
-        mem_sig = _GUEST_BINDINGS.get(uid_clean)
-        if mem_sig:
-            u["guestBindingSig"] = str(mem_sig)
     # Purge legacy demo bot entries so only real mutual accounts appear
     u["friends"] = [f for f in (u.get("friends") or []) if isinstance(f, dict) and f.get("uid") not in _LEGACY_BOT_UIDS]
     u["requests"] = [r for r in (u.get("requests") or []) if isinstance(r, dict) and r.get("fromUid") not in _LEGACY_BOT_UIDS and r.get("id") != "req_emre_01"]
@@ -575,7 +535,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
     media_title = _clean(pres.get("mediaTitle") or pres.get("watchingTitle"), 140)
     room_name = _clean(pres.get("roomName"), 100)
     media_poster = _clean(pres.get("mediaPoster"), 800)
-    media_prov = _clean(pres.get("mediaProvider") or "cinema", 32)
+    media_prov = _clean(pres.get("mediaProvider") or "web", 32)
     room_locked = bool(pres.get("roomLocked") or pres.get("hasPassword"))
     try:
         import rooms as rooms_mod
@@ -591,7 +551,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
             if isinstance(rm_m, dict):
                 media_title = _clean(rm_m.get("title"), 140)
                 media_poster = _clean(rm_m.get("poster") or rm_m.get("thumbnail"), 800)
-                media_prov = _clean(rm_m.get("provider") or "cinema", 32)
+                media_prov = _clean(rm_m.get("provider") or "web", 32)
         if room_id:
             rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
             live_rm = rm_dict.get(room_id) or (active_room_hit if isinstance(active_room_hit, dict) and _clean(active_room_hit.get("id"), 80) == room_id else None)
@@ -917,81 +877,75 @@ async def social_user_search(request: Request) -> JSONResponse:
     q = request.query_params
     uid = _caller_uid(request, q.get("uid"), "guest_default")
     query = _strip_soc_tag(_clean(q.get("q") or q.get("query"), 64))
+    u = _ensure_user_social(uid, claims=request.scope.get("wl_claims"), persist=False)
     if not query:
         return JSONResponse({"ok": True, "users": []})
-    wl_claims = request.scope.get("wl_claims")
     is_authed_caller = bool(request.scope.get("wl_uid"))
-
-    def _run_search_sync() -> List[Dict[str, Any]]:
-        u = _ensure_user_social(uid, claims=wl_claims, persist=False)
-        found: Dict[str, Dict[str, Any]] = {}
-        try:
-            import auth_engine
-            for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
-                if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
-                    _register_social_dir(ac, persist=False)
-                    found[ac["uid"]] = ac
-        except Exception:
-            pass
-        q_fold = _tr_fold_soc(query.lstrip("@"))
-        q_norm = re.sub(r"[^a-z0-9_.\-]", "", q_fold)
-        for d_uid, card in _load_social_dir().items():
-            if d_uid == uid or d_uid in found or d_uid in _LEGACY_BOT_UIDS or d_uid in ("guest_default", "guest_local") or not isinstance(card, dict):
+    found: Dict[str, Dict[str, Any]] = {}
+    try:
+        import auth_engine
+        for ac in auth_engine.search_public_users(query, exclude_uid=uid, limit=20):
+            if ac.get("uid") and ac["uid"] not in _LEGACY_BOT_UIDS:
+                _register_social_dir(ac, persist=False)
+                found[ac["uid"]] = ac
+    except Exception:
+        pass
+    q_fold = _tr_fold_soc(query.lstrip("@"))
+    q_norm = re.sub(r"[^a-z0-9_.\-]", "", q_fold)
+    for d_uid, card in _load_social_dir().items():
+        if d_uid == uid or d_uid in found or d_uid in _LEGACY_BOT_UIDS or d_uid in ("guest_default", "guest_local") or not isinstance(card, dict):
+            continue
+        h_f = _tr_fold_soc(str(card.get("handle") or "").lstrip("@"))
+        n_f = _tr_fold_soc(str(card.get("name") or ""))
+        if str(d_uid).startswith("guest_") and not is_authed_caller and not (query.startswith("@") and q_fold and h_f == q_fold):
+            continue
+        if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
+            found[d_uid] = dict(card)
+    try:
+        import rooms as rooms_mod
+        rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
+        for r_obj in list(rm_dict.values()):
+            if not isinstance(r_obj, dict):
                 continue
-            h_f = _tr_fold_soc(str(card.get("handle") or "").lstrip("@"))
-            n_f = _tr_fold_soc(str(card.get("name") or ""))
-            if str(d_uid).startswith("guest_") and not is_authed_caller and not (query.startswith("@") and q_fold and h_f == q_fold):
-                continue
-            if (q_fold and (q_fold in h_f or q_fold in n_f)) or (q_norm and len(q_norm) >= 2 and (q_norm in h_f or q_norm in re.sub(r"[^a-z0-9_.\-]", "", n_f))):
-                found[d_uid] = dict(card)
-        try:
-            import rooms as rooms_mod
-            rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
-            for r_obj in list(rm_dict.values()):
-                if not isinstance(r_obj, dict):
+            for p_obj in (r_obj.get("participants") or {}).values():
+                if not isinstance(p_obj, dict) or p_obj.get("transport") == "bot":
                     continue
-                for p_obj in (r_obj.get("participants") or {}).values():
-                    if not isinstance(p_obj, dict) or p_obj.get("transport") == "bot":
-                        continue
-                    p_uid = _clean(p_obj.get("uid"), 64)
-                    if not p_uid or p_uid == uid or p_uid in found or p_uid in _LEGACY_BOT_UIDS:
-                        continue
-                    p_h = _tr_fold_soc(str(p_obj.get("handle") or "").lstrip("@"))
-                    p_n = _tr_fold_soc(str(p_obj.get("name") or ""))
-                    if (q_fold and ((p_h and q_fold in p_h) or q_fold in p_n)) or (q_norm and len(q_norm) >= 2 and ((p_h and q_norm in p_h) or q_norm in re.sub(r"[^a-z0-9_.\-]", "", p_n))):
-                        card_rm = {
-                            "uid": p_uid,
-                            "name": _clean(p_obj.get("name") or "İzleyici", 32),
-                            "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
-                            "color": _clean(p_obj.get("color") or "#27DCC8", 16),
-                            "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
-                        }
-                        _register_social_dir(card_rm, persist=False)
-                        found[p_uid] = card_rm
-        except Exception:
-            pass
-        out_users = []
-        blocked_by_me = {b.get("uid") for b in (u.get("blocked") or []) if isinstance(b, dict)}
-        for t_uid, card in list(found.items())[:20]:
-            fstate = _friendship_state(u, t_uid)
-            pres = _compute_live_presence(t_uid, uid, is_friend=(fstate == "FRIENDS"))
-            out_users.append({
-                "uid": t_uid,
-                "name": _clean(card.get("name") or "İzleyici", 32),
-                "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
-                "color": _clean(card.get("color") or "#27DCC8", 16),
-                "avatarUrl": _clean_avatar(card.get("avatarUrl")),
-                "bio": _clean(card.get("bio") or "", 160),
-                "isGuest": bool(str(t_uid).startswith("guest_")),
-                "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
-                "online": pres["online"],
-                "presenceState": pres["presenceState"],
-                "status": pres["status"],
-                "watchingRoom": pres["watchingRoom"],
-            })
-        return out_users
-
-    out_users = await asyncio.to_thread(_run_search_sync)
+                p_uid = _clean(p_obj.get("uid"), 64)
+                if not p_uid or p_uid == uid or p_uid in found or p_uid in _LEGACY_BOT_UIDS:
+                    continue
+                p_h = _tr_fold_soc(str(p_obj.get("handle") or "").lstrip("@"))
+                p_n = _tr_fold_soc(str(p_obj.get("name") or ""))
+                if (q_fold and ((p_h and q_fold in p_h) or q_fold in p_n)) or (q_norm and len(q_norm) >= 2 and ((p_h and q_norm in p_h) or q_norm in re.sub(r"[^a-z0-9_.\-]", "", p_n))):
+                    card_rm = {
+                        "uid": p_uid,
+                        "name": _clean(p_obj.get("name") or "İzleyici", 32),
+                        "handle": _norm_handle_tag(str(p_obj.get("handle") or ""), str(p_obj.get("name") or "")),
+                        "color": _clean(p_obj.get("color") or "#27DCC8", 16),
+                        "avatarUrl": _clean_avatar(p_obj.get("avatarUrl")),
+                    }
+                    _register_social_dir(card_rm, persist=False)
+                    found[p_uid] = card_rm
+    except Exception:
+        pass
+    out_users = []
+    blocked_by_me = {b.get("uid") for b in (u.get("blocked") or []) if isinstance(b, dict)}
+    for t_uid, card in list(found.items())[:20]:
+        fstate = _friendship_state(u, t_uid)
+        pres = _compute_live_presence(t_uid, uid, is_friend=(fstate == "FRIENDS"))
+        out_users.append({
+            "uid": t_uid,
+            "name": _clean(card.get("name") or "İzleyici", 32),
+            "handle": _norm_handle_tag(card.get("handle") or "", card.get("name") or ""),
+            "color": _clean(card.get("color") or "#27DCC8", 16),
+            "avatarUrl": _clean_avatar(card.get("avatarUrl")),
+            "bio": _clean(card.get("bio") or "", 160),
+            "isGuest": bool(str(t_uid).startswith("guest_")),
+            "friendshipState": "BLOCKED" if t_uid in blocked_by_me else fstate,
+            "online": pres["online"],
+            "presenceState": pres["presenceState"],
+            "status": pres["status"],
+            "watchingRoom": pres["watchingRoom"],
+        })
     return JSONResponse({"ok": True, "users": out_users})
 
 
@@ -1476,7 +1430,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
             "roomName": _clean((raw_card or {}).get("roomName") or "Watchlivo Odası", 100),
             "mediaTitle": _clean((raw_card or {}).get("mediaTitle") or "", 140),
             "mediaPoster": _clean((raw_card or {}).get("mediaPoster") or "", 800),
-            "mediaProvider": _clean((raw_card or {}).get("mediaProvider") or "cinema", 32),
+            "mediaProvider": _clean((raw_card or {}).get("mediaProvider") or "web", 32),
         }
         if safe_card_url:
             msg["roomInviteCard"]["url"] = safe_card_url
@@ -1581,7 +1535,7 @@ async def social_invite(request: Request) -> JSONResponse:
     room_name = _clean(body.get("roomName") or body.get("roomTitle") or "Watchlivo Odası", 100)
     media_title = _clean(body.get("mediaTitle"), 140)
     media_poster = _clean(body.get("mediaPoster"), 800)
-    media_provider = _clean(body.get("mediaProvider") or "cinema", 32)
+    media_provider = _clean(body.get("mediaProvider") or "web", 32)
     pwd_q = _clean(body.get("password"), 64)
     sync_tok = str(body.get("syncToken") or body.get("r_tok") or "").strip()[:32000]
     if not room_id:
@@ -1737,51 +1691,6 @@ async def link_preview(request: Request) -> JSONResponse:
 
     # Instant YouTube recognition
     yt_m = re.search(r"(?:v=|youtu\.be/|shorts/)([A-Za-z0-9_-]{11})", raw_url)
-    def _fetch_link_meta_sync() -> None:
-        if yt_m:
-            vid = yt_m.group(1)
-            try:
-                oembed_u = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
-                if is_safe_public_url(oembed_u):
-                    req = urllib.request.Request(oembed_u, headers={"User-Agent": UA_CHROME})
-                    with urllib.request.urlopen(req, timeout=2.5) as r:
-                        od = json.loads(r.read(65536).decode("utf-8", errors="ignore"))
-                        if od.get("title"):
-                            preview["title"] = _clean(od["title"], 140)
-                        if od.get("author_name"):
-                            preview["description"] = f"Kanal: {_clean(od['author_name'], 80)} · YouTube"
-            except Exception:
-                pass
-            return
-        if is_safe_public_url(raw_url):
-            try:
-                opener = urllib.request.build_opener(_SafeRedirectHandler())
-                req = urllib.request.Request(raw_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
-                with opener.open(req, timeout=2.8) as r:
-                    ctype = str(r.headers.get("Content-Type") or "").lower()
-                    if "html" in ctype or not ctype:
-                        html_str = r.read(96000).decode("utf-8", errors="ignore")
-                        og_t = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I) or re.search(r"<title[^>]*>([^<]+)</title>", html_str, re.I)
-                        og_d = re.search(r'<meta[^>]+(?:property=["\']og:description["\']|name=["\']description["\'])[^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                        og_i = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                        og_s = re.search(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
-                        if og_t:
-                            preview["title"] = _clean(html_mod.unescape(og_t.group(1)), 140)
-                        if og_d:
-                            preview["description"] = _clean(html_mod.unescape(og_d.group(1)), 200)
-                        if og_i:
-                            img_u = html_mod.unescape(og_i.group(1).strip())
-                            if img_u.startswith("//"):
-                                img_u = "https:" + img_u
-                            elif img_u.startswith("/"):
-                                img_u = f"{parsed.scheme}://{host}{img_u}"
-                            if img_u.startswith("https://"):
-                                preview["image"] = _clean(img_u, 600)
-                        if og_s:
-                            preview["site"] = _clean(html_mod.unescape(og_s.group(1)), 60)
-            except Exception:
-                pass
-
     if yt_m:
         vid = yt_m.group(1)
         preview.update({
@@ -1790,11 +1699,49 @@ async def link_preview(request: Request) -> JSONResponse:
             "description": "YouTube üzerinden Watchlivo odasında senkronize izlenebilir.",
             "image": f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg",
         })
-        await asyncio.to_thread(_fetch_link_meta_sync)
+        try:
+            oembed_u = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={vid}&format=json"
+            if is_safe_public_url(oembed_u):
+                req = urllib.request.Request(oembed_u, headers={"User-Agent": UA_CHROME})
+                with urllib.request.urlopen(req, timeout=2.5) as r:
+                    od = json.loads(r.read(65536).decode("utf-8", errors="ignore"))
+                    if od.get("title"):
+                        preview["title"] = _clean(od["title"], 140)
+                    if od.get("author_name"):
+                        preview["description"] = f"Kanal: {_clean(od['author_name'], 80)} · YouTube"
+        except Exception:
+            pass
         _LINK_PREVIEW_CACHE[raw_url] = preview
         return JSONResponse({"ok": True, "preview": preview})
 
-    await asyncio.to_thread(_fetch_link_meta_sync)
+    if is_safe_public_url(raw_url):
+        try:
+            opener = urllib.request.build_opener(_SafeRedirectHandler())
+            req = urllib.request.Request(raw_url, headers={"User-Agent": UA_CHROME, "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8"})
+            with opener.open(req, timeout=2.8) as r:
+                ctype = str(r.headers.get("Content-Type") or "").lower()
+                if "html" in ctype or not ctype:
+                    html_str = r.read(96000).decode("utf-8", errors="ignore")
+                    og_t = re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I) or re.search(r"<title[^>]*>([^<]+)</title>", html_str, re.I)
+                    og_d = re.search(r'<meta[^>]+(?:property=["\']og:description["\']|name=["\']description["\'])[^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                    og_i = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                    og_s = re.search(r'<meta[^>]+property=["\']og:site_name["\'][^>]+content=["\']([^"\']+)["\']', html_str, re.I)
+                    if og_t:
+                        preview["title"] = _clean(html_mod.unescape(og_t.group(1)), 140)
+                    if og_d:
+                        preview["description"] = _clean(html_mod.unescape(og_d.group(1)), 200)
+                    if og_i:
+                        img_u = html_mod.unescape(og_i.group(1).strip())
+                        if img_u.startswith("//"):
+                            img_u = "https:" + img_u
+                        elif img_u.startswith("/"):
+                            img_u = f"{parsed.scheme}://{host}{img_u}"
+                        if img_u.startswith("https://"):
+                            preview["image"] = _clean(img_u, 600)
+                    if og_s:
+                        preview["site"] = _clean(html_mod.unescape(og_s.group(1)), 60)
+        except Exception:
+            pass
 
     if len(_LINK_PREVIEW_CACHE) > 300:
         _LINK_PREVIEW_CACHE.clear()
@@ -1991,9 +1938,8 @@ async def ravedj_mashup(request: Request) -> JSONResponse:
     short_b = _clean(tr_b["title"].split("(")[0].split("|")[0].replace("🎵", "").strip(), 36)
     mashup_title = f"🎧 Watchlivo DJ: {short_a} × {short_b} ({target_bpm} BPM)"
     combined_alts = [u for u in [tr_a.get("audioPreviewUrl"), *(tr_a.get("altUrls") or []), tr_b.get("url"), tr_b.get("audioPreviewUrl"), *(tr_b.get("altUrls") or [])] if u and u != tr_a["url"]]
-    mashup_stype = "hls" if ".m3u8" in str(tr_a["url"]).lower() else "mp4"
     mashup_media = {
-        "id": "wldj_" + uuid.uuid4().hex[:8], "provider": "direct", "streamType": mashup_stype,
+        "id": "wldj_" + uuid.uuid4().hex[:8], "provider": "direct", "streamType": "direct",
         "videoId": tr_a.get("videoId") or "", "clipVideoId": tr_a.get("clipVideoId") or tr_b.get("clipVideoId") or "",
         "altVideoIds": [tr_b.get("videoId")] if tr_b.get("videoId") else [],
         "url": tr_a["url"], "altUrls": list(dict.fromkeys(combined_alts)),
@@ -2054,7 +2000,7 @@ def _fetch_ravedj_trending_sync() -> List[Dict[str, Any]]:
                     "trackB": parts[1] if len(parts) > 1 else t_raw,
                     "bpm": 124,
                     "provider": "direct",
-                    "streamType": "hls" if ".m3u8" in str(v_url).lower() else "mp4",
+                    "streamType": "mp4",
                     "url": v_url,
                     "audioPreviewUrl": str(urls.get("audio") or v_url),
                     "thumbnail": str(thumbs.get("max") or thumbs.get("720") or thumbs.get("default") or thumbs.get("480") or "/static/watchlivo-poster.svg"),
@@ -2263,18 +2209,26 @@ async def ai_image_history(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# 7. Google Drive Folder & Multi-Quality MKV/MP4 Browser (GoogleDriveSelection)
+# 7. Google Drive folder/file browser (user's own files, Google preview player)
 # ---------------------------------------------------------------------------
-def _sign_drive_proxy(dl_u: str) -> str:
-    try:
-        import server
-        return server._proxy_u(dl_u)
-    except Exception:
-        from security import server_secret
-        sec = server_secret("PROXY_SECRET")
-        exp = ((int(time.time()) // 3600) + 6) * 3600
-        sig = hmac.new(sec, f"{dl_u}||{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24] + f".{exp}"
-        return f"/api/rave/stream-proxy?url={urllib.parse.quote(dl_u, safe='')}&sig={sig}"
+def _drive_item(file_id: str, title: str, ext: str = "mp4") -> Dict[str, Any]:
+    """A user's own Google Drive file, played through Google's official preview player.
+
+    The server never downloads or relays the file; playback happens between the
+    viewer's browser and Google, subject to the file's own sharing settings.
+    """
+    fid_q = urllib.parse.quote(file_id, safe="")
+    preview_u = f"https://drive.google.com/file/d/{fid_q}/preview"
+    return {
+        "id": file_id,
+        "title": title,
+        "format": ext.upper(),
+        "provider": "drive",
+        "streamType": "embed",
+        "url": preview_u,
+        "embedUrl": preview_u,
+        "openUrl": f"https://drive.google.com/file/d/{fid_q}/view",
+    }
 
 
 _NON_VIDEO_DRIVE_RE = re.compile(r"\.(?:pdf|jpg|jpeg|png|gif|webp|zip|rar|7z|doc|docx|xls|xlsx|ppt|pptx|txt)$", re.I)
@@ -2304,23 +2258,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
                     continue
                 seen_ids.add(d_id)
                 ext = clean_t.rsplit(".", 1)[-1].lower() if "." in clean_t else "mp4"
-                dl_u = f"https://drive.usercontent.google.com/download?id={d_id}&export=download&confirm=t"
-                p_main = _sign_drive_proxy(dl_u)
-                p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
-                p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
-                items.append({
-                    "id": d_id,
-                    "title": clean_t,
-                    "format": ext.upper(),
-                    "mime": "video/x-matroska" if ext == "mkv" else ("video/webm" if ext == "webm" else "video/mp4"),
-                    "url": p_main,
-                    "directUrl": dl_u,
-                    "qualities": [
-                        {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": p_main},
-                        {"label": "720p HD Stream", "quality": "720p", "url": p_720},
-                        {"label": "480p SD Stream", "quality": "480p", "url": p_480},
-                    ],
-                })
+                items.append(_drive_item(d_id, clean_t, ext))
                 if len(items) >= 24:
                     break
         except Exception:
@@ -2333,23 +2271,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
     fid_single = (file_m.group(1) or file_m.group(2)) if file_m else (id_fallback_m.group(1) if id_fallback_m else "")
     if not fid_single:
         return JSONResponse({"ok": False, "error": "Geçerli bir Google Drive dosya veya klasör bağlantısı girin."}, status_code=400)
-    dl_u = f"https://drive.usercontent.google.com/download?id={urllib.parse.quote(fid_single)}&export=download&confirm=t"
-    proxied = _sign_drive_proxy(dl_u)
-    p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
-    p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
-    items.append({
-        "id": fid_single,
-        "title": f"Google Drive Video ({fid_single[:10]})",
-        "format": "MP4/MKV",
-        "mime": "video/mp4",
-        "url": proxied,
-        "directUrl": dl_u,
-        "qualities": [
-            {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": proxied},
-            {"label": "720p HD Stream", "quality": "720p", "url": p_720},
-            {"label": "480p SD Stream", "quality": "480p", "url": p_480},
-        ],
-    })
+    items.append(_drive_item(fid_single, f"Google Drive Video ({fid_single[:10]})", "mp4"))
     return JSONResponse({"ok": True, "type": "file", "fileId": fid_single, "items": items})
 
 
@@ -2609,8 +2531,8 @@ async def user_progress_save(request: Request) -> JSONResponse:
             "videoId": vid or _clean((prev_entry or {}).get("videoId"), 32),
             "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
             "mediaType": mtype,
-            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
-            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
+            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "web", 32),
+            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "web", 32),
             "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
             "title": title or "Sinema",
             "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
@@ -2682,7 +2604,7 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
             "videoId": _clean(src.get("videoId"), 32),
             "imdbId": _clean(src.get("imdbId"), 32),
             "mediaType": mtype,
-            "provider": _clean(src.get("provider") or "cinema", 32),
+            "provider": _clean(src.get("provider") or "web", 32),
             "title": title or "Sinema",
             "channel": _clean(src.get("channel"), 120),
             "channelId": _clean(src.get("channelId"), 48),
@@ -2755,182 +2677,6 @@ async def user_music_history_save(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items}, headers=_PRIVATE_HEADERS)
 
 
-# ---------------------------------------------------------------------------
-# 11. Automatic Stream Server Health Telemetry & Smart Ranking (v78)
-# ---------------------------------------------------------------------------
-def _extract_srv_bucket(url_or_host: str, label: str = "") -> str:
-    raw = str(url_or_host or "").strip()
-    if "u=" in raw or "sid=" in raw:
-        try:
-            qs_map = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query)
-            if qs_map.get("u"):
-                raw = urllib.parse.unquote(qs_map["u"][0])
-            elif qs_map.get("sid"):
-                import server
-                unpacked, _ = server._stream_sid_unpack(qs_map["sid"][0])
-                if unpacked:
-                    raw = unpacked
-        except Exception:
-            pass
-    host = (urllib.parse.urlparse(raw).hostname or "").lower()
-    if host and host not in ("127.0.0.1", "localhost", "watchlivo.online"):
-        parts = host.split(".")
-        return ".".join(parts[-2:]) if len(parts) >= 2 else host
-    slug = re.sub(r"[^a-z0-9]+", "-", str(label or "primary").lower()).strip("-")[:32]
-    return slug or "default"
-
-
-def _load_health_map() -> Dict[str, Dict[str, Any]]:
-    persisted = _kv_get("wl:srv:health:v1", None, max_age=20.0)
-    if isinstance(persisted, dict):
-        _SERVER_HEALTH.update(persisted)
-    return _SERVER_HEALTH
-
-
-def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not isinstance(res, dict):
-        return res
-    hmap = _load_health_map()
-    dead_buckets = {
-        bkt for bkt, rec in hmap.items()
-        if isinstance(rec, dict)
-        and int(rec.get("fail") or 0) >= 6
-        and int(rec.get("ok") or 0) == 0
-        and len(rec.get("failReporters") or []) >= 3
-    }
-    srvs = res.get("servers")
-    if not isinstance(srvs, list) or len(srvs) < 2:
-        if not dead_buckets:
-            return res
-        out_single = dict(res)
-        live_alts = [
-            u for u in (res.get("altUrls") or [])
-            if u and _extract_srv_bucket(str(u), "") not in dead_buckets
-        ]
-        if res.get("url") and _extract_srv_bucket(str(res.get("url")), "") in dead_buckets and live_alts:
-            out_single["url"] = live_alts[0]
-            out_single["altUrls"] = live_alts[1:7]
-        elif live_alts != (res.get("altUrls") or []):
-            out_single["altUrls"] = live_alts[:6]
-        return out_single
-    scored = []
-    score_by_bucket: Dict[str, float] = {}
-    for idx, srv in enumerate(srvs):
-        if not isinstance(srv, dict) or not srv.get("url"):
-            continue
-        lbl_low = str(srv.get("label") or "").lower()
-        bkt = _extract_srv_bucket(srv.get("url", ""), srv.get("label", ""))
-        rec = hmap.get(bkt) or {}
-        ok_n = int(rec.get("ok") or 0)
-        fail_n = int(rec.get("fail") or 0)
-        if fail_n >= 3 and ok_n == 0:
-            dead_buckets.add(bkt)
-        lat_ms = float(rec.get("avgMs") or 650.0)
-        total = ok_n + fail_n
-        rel_score = ((ok_n + 2.0) / (total + 3.0)) - (min(lat_ms, 4000.0) / 20000.0)
-        has_tr_lbl = any(k in lbl_low for k in ("tr dublaj", "türkçe dublaj", "dual"))
-        is_720_lbl = "720p" in lbl_low and "1080p" not in lbl_low and "4k" not in lbl_low
-        uhd_srv_bonus = 0.32 if any(k in lbl_low for k in ("4k", "2160p")) else (0.14 if "bluray" in lbl_low else (0.06 if "1080p" in lbl_low else (-0.14 if is_720_lbl else 0.0)))
-        tr_srv_bonus = (0.35 if not is_720_lbl else 0.16) if (has_tr_lbl and not (fail_n >= 3 and ok_n == 0)) else 0.0
-        tie_bonus = max(0.0, (10 - idx) * 0.025)
-        final_score = round(rel_score + tr_srv_bonus + uhd_srv_bonus + tie_bonus, 4)
-        score_by_bucket[bkt] = max(score_by_bucket.get(bkt, -999.0), final_score)
-        srv_copy = dict(srv)
-        srv_copy["healthBucket"] = bkt
-        srv_copy["healthScore"] = round(rel_score * 100, 1)
-        if ok_n >= 2 and fail_n == 0 and "⚡" not in str(srv_copy.get("label") or ""):
-            srv_copy["healthyVerified"] = True
-        scored.append((final_score, idx, srv_copy))
-    if len(scored) < 2:
-        return res
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    ordered = [x[2] for x in scored]
-    top_score = scored[0][0]
-    out = dict(res)
-    out["servers"] = ordered
-    aud_tracks = [t for t in (res.get("audioTracks") or []) if isinstance(t, dict) and t.get("mode") == "stream" and t.get("url")]
-    primary_tr_tracks = [
-        t for t in aud_tracks
-        if (t.get("id") == "tr-dub" or str(t.get("id") or "").startswith("tr-dub-") or t.get("audioLang") == "tr" or t.get("lang") == "tr")
-        and _extract_srv_bucket(t.get("url", ""), t.get("label", "")) not in dead_buckets
-    ]
-    aud0 = aud_tracks[0] if aud_tracks else None
-    aud0_lbl = str((aud0 or {}).get("label") or "").lower()
-    tr_all_720 = bool(primary_tr_tracks) and all("720p" in str(t.get("label") or "").lower() for t in primary_tr_tracks)
-    aud0_is_hd_orig = bool(aud0) and aud0 not in primary_tr_tracks and any(k in aud0_lbl for k in ("4k", "2160p", "bluray", "1080p"))
-    if primary_tr_tracks and not (tr_all_720 and aud0_is_hd_orig):
-        best_url = primary_tr_tracks[0]["url"]
-    elif aud_tracks:
-        aud0_bkt = _extract_srv_bucket(aud0["url"], aud0.get("label", ""))
-        if aud0_bkt not in dead_buckets and score_by_bucket.get(aud0_bkt, 0.0) >= (top_score - 0.08):
-            best_url = aud0["url"]
-        else:
-            best_url = ordered[0]["url"]
-    else:
-        best_url = ordered[0]["url"]
-    out["url"] = best_url
-    alt_candidates = [t["url"] for t in primary_tr_tracks[1:]] + [t["url"] for t in aud_tracks if t.get("url") and _extract_srv_bucket(t["url"], t.get("label", "")) not in dead_buckets] + [s["url"] for s in ordered if s.get("url") and s.get("healthBucket") not in dead_buckets]
-    dedup_alts = []
-    for cand_u in alt_candidates:
-        if cand_u and cand_u != best_url and cand_u not in dedup_alts:
-            dedup_alts.append(cand_u)
-    out["altUrls"] = dedup_alts[:6]
-    return out
-
-
-_SRV_HEALTH_RL = BoundedTTLCache(maxsize=4096, default_ttl=60.0)
-
-
-async def server_health_report(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-    url_raw = _clean(body.get("url") or body.get("host"), 1200)
-    label = _clean(body.get("label"), 80)
-    if not url_raw and not label:
-        return JSONResponse({"ok": False}, status_code=400)
-    ok = bool(body.get("ok", True)) and not bool(body.get("stalled", False))
-    lat_ms = _finite_float(body.get("latencyMs"), 550.0 if ok else 4500.0, lo=20.0, hi=15000.0)
-    bkt = _extract_srv_bucket(url_raw, label)
-    ip_hash = hashlib.sha256(str(client_ip(request) or "anon").encode("utf-8")).hexdigest()[:12]
-    rl_key = f"{ip_hash}:{bkt}:{'ok' if ok else 'fail'}"
-    if _SRV_HEALTH_RL.get(rl_key):
-        hmap_cur = _load_health_map()
-        return JSONResponse({"ok": True, "bucket": bkt, "stats": hmap_cur.get(bkt) or {}})
-    _SRV_HEALTH_RL.set(rl_key, 1, ttl=60.0)
-    hmap = _load_health_map()
-    rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0, "failReporters": []})
-    reporters = [str(x) for x in (rec.get("failReporters") or []) if x][:16]
-    if ok:
-        rec["ok"] = min(500, int(rec.get("ok") or 0) + 1)
-        if rec.get("fail", 0) > 0 and rec["ok"] % 2 == 0:
-            rec["fail"] = max(0, int(rec["fail"]) - 1)
-        if ip_hash in reporters:
-            reporters.remove(ip_hash)
-    else:
-        rec["fail"] = min(200, int(rec.get("fail") or 0) + 1)
-        if ip_hash not in reporters:
-            reporters.append(ip_hash)
-            reporters = reporters[-12:]
-    rec["failReporters"] = reporters
-    prev_ms = float(rec.get("avgMs") or lat_ms)
-    rec["avgMs"] = round(prev_ms * 0.65 + lat_ms * 0.35, 1)
-    rec["label"] = label or rec.get("label") or bkt
-    rec["updatedAt"] = _now()
-    hmap[bkt] = rec
-    if len(hmap) > 160:
-        oldest_k = min(hmap, key=lambda k: float(hmap[k].get("updatedAt") or 0))
-        hmap.pop(oldest_k, None)
-    _kv_set("wl:srv:health:v1", hmap, ttl_sec=604800)
-    return JSONResponse({"ok": True, "bucket": bkt, "stats": rec})
-
-
-async def server_health_get(request: Request) -> JSONResponse:
-    hmap = _load_health_map()
-    return JSONResponse({"ok": True, "servers": hmap, "count": len(hmap)})
 # ---------------------------------------------------------------------------
 # 12. Account-Bound YouTube Personalization Graph & OAuth Sync (v91)
 # ---------------------------------------------------------------------------
@@ -3265,36 +3011,10 @@ _VN_UPLOAD_LIMIT = RateLimiter(30, 60.0, name="vn_upload")
 _VR_POST_LIMIT = RateLimiter(25, 5.0, name="vr_post")
 _VR_GET_LIMIT = RateLimiter(90, 10.0, name="vr_get")
 _VR_AUTH_FAIL_LIMIT = RateLimiter(20, 60.0, name="vr_fail")
-_RELAY_HEADERS = dict(_PRIVATE_HEADERS)
-
-
-def _safe_cors_origin(request: Request) -> str:
-    orig = (request.headers.get("origin") or "").strip()
-    if orig in (
-        "https://watchlivo.online",
-        "https://www.watchlivo.online",
-        "https://localhost",
-        "capacitor://localhost",
-        "ionic://localhost",
-    ) or re.match(r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$", orig):
-        return orig
-    return ""
-
-
-def _get_voice_relay_lock(room_id: str) -> asyncio.Lock:
-    loop_id = id(asyncio.get_running_loop())
-    lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
-    if len(lock_map) > 160:
-        for lk_k in list(lock_map.keys()):
-            entry = lock_map.get(lk_k)
-            if not isinstance(entry, tuple) or not entry[1].locked():
-                lock_map.pop(lk_k, None)
-    cur_entry = lock_map.get(room_id)
-    if isinstance(cur_entry, tuple) and cur_entry[0] == loop_id:
-        return cur_entry[1]
-    new_lock = asyncio.Lock()
-    lock_map[room_id] = (loop_id, new_lock)
-    return new_lock
+_RELAY_HEADERS = {
+    **_PRIVATE_HEADERS,
+    "Access-Control-Allow-Origin": "*",
+}
 
 
 def _bound_voice_note_mem() -> None:
@@ -3424,17 +3144,16 @@ async def voice_note_upload(request: Request):
 
 
 async def voice_note_stream(request: Request):
-    cors_orig = _safe_cors_origin(request)
     if request.method == "OPTIONS":
-        opt_hdrs = {
-            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
-            "Access-Control-Allow-Headers": "Range, Content-Type, Authorization",
-            "Accept-Ranges": "bytes",
-        }
-        if cors_orig:
-            opt_hdrs["Access-Control-Allow-Origin"] = cors_orig
-            opt_hdrs["Vary"] = "Origin"
-        return _StarletteResponse(status_code=204, headers=opt_hdrs)
+        return _StarletteResponse(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+                "Access-Control-Allow-Headers": "Range, Content-Type",
+                "Accept-Ranges": "bytes",
+            },
+        )
     note_id = request.path_params.get("note_id") or ""
     entry = _load_voice_note_entry(note_id)
     if not entry or not entry.get("b64"):
@@ -3448,14 +3167,12 @@ async def voice_note_stream(request: Request):
     base_headers = {
         "Content-Type": mime,
         "Accept-Ranges": "bytes",
-        "Cache-Control": "private, no-store, max-age=0",
+        "Cache-Control": "public, max-age=86400",
+        "Access-Control-Allow-Origin": "*",
         "X-Content-Type-Options": "nosniff",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Content-Disposition": 'inline; filename="voice-note"',
     }
-    if cors_orig:
-        base_headers["Access-Control-Allow-Origin"] = cors_orig
-        base_headers["Vary"] = "Origin"
     if request.method == "HEAD":
         base_headers["Content-Length"] = str(total)
         return _StarletteResponse(status_code=200, headers=base_headers)
@@ -3492,20 +3209,18 @@ async def voice_note_stream(request: Request):
 
 
 async def voice_relay_endpoint(request: Request):
-    cors_orig = _safe_cors_origin(request)
-    relay_hdrs = {**_RELAY_HEADERS, **({"Access-Control-Allow-Origin": cors_orig, "Vary": "Origin"} if cors_orig else {})}
     if request.method == "OPTIONS":
-        opt_hdrs = {
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        }
-        if cors_orig:
-            opt_hdrs["Access-Control-Allow-Origin"] = cors_orig
-            opt_hdrs["Vary"] = "Origin"
-        return _StarletteResponse(status_code=204, headers=opt_hdrs)
+        return _StarletteResponse(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            },
+        )
     room_id = re.sub(r"[^a-z0-9_\-]", "", str(request.path_params.get("room_id") or request.query_params.get("roomId") or "").lower())[:48]
     if not room_id:
-        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Geçersiz oda"}, status_code=400, headers=_RELAY_HEADERS)
     kv_key = f"wl:vrelay:{room_id}"
     now_t = _now()
     if len(_VOICE_RELAY_MEM) > 80:
@@ -3559,7 +3274,15 @@ async def voice_relay_endpoint(request: Request):
         mime = _clean(body.get("mime") or "audio/wav", 32)
         if not mime.startswith("audio/"):
             mime = "audio/wav"
-        rlock = _get_voice_relay_lock(room_id)
+        lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
+        if len(lock_map) > 120:
+            for lk_k in list(lock_map.keys()):
+                if not lock_map[lk_k].locked():
+                    lock_map.pop(lk_k, None)
+        rlock = lock_map.get(room_id)
+        if rlock is None:
+            rlock = asyncio.Lock()
+            lock_map[room_id] = rlock
         async with rlock:
             now_t = time.time()
             cur = _kv_get(kv_key, None, max_age=0.12)
@@ -3570,40 +3293,44 @@ async def voice_relay_endpoint(request: Request):
             buf = buf[-64:]
             _VOICE_RELAY_MEM[room_id] = buf
             _kv_set(kv_key, buf, ttl_sec=20)
-        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=relay_hdrs)
+        return JSONResponse({"ok": True, "ts": pkt["ts"]}, headers=_RELAY_HEADERS)
     cid_q = re.sub(r"[^a-zA-Z0-9_]", "", str(request.query_params.get("clientId") or ""))[:24]
     ctok_q = str(request.query_params.get("clientToken") or "").strip()
     if not cid_q:
-        return JSONResponse({"ok": False, "error": "İstemci kimliği gerekli"}, status_code=400, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "İstemci kimliği gerekli"}, status_code=400, headers=_RELAY_HEADERS)
     try:
         import rooms as _rm
         rm_obj_g = await _rm.STORE.get(room_id)
         tok_ok_g = bool(ctok_q and _rm.verify_client_token(room_id, ctok_q) == cid_q)
     except Exception:
-        return JSONResponse({"ok": False, "error": "Oda doğrulaması yapılamadı"}, status_code=503, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Oda doğrulaması yapılamadı"}, status_code=503, headers=_RELAY_HEADERS)
     if rm_obj_g is None:
-        return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Oda bulunamadı"}, status_code=404, headers=_RELAY_HEADERS)
     if cid_q in (rm_obj_g.get("kicked") or rm_obj_g.get("kicked_cids") or []):
-        return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Odadan çıkarıldınız"}, status_code=403, headers=_RELAY_HEADERS)
     if not tok_ok_g:
         ok_fail, retry_fail = _VR_AUTH_FAIL_LIMIT.hit(client_ip(request))
         if not ok_fail:
             return too_many_response(retry_fail)
-        return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Yetkisiz istemci"}, status_code=403, headers=_RELAY_HEADERS)
     if cid_q not in (rm_obj_g.get("participants") or {}):
-        return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Oda katılımcısı değilsiniz"}, status_code=403, headers=_RELAY_HEADERS)
     ok_get, _ = _VR_GET_LIMIT.hit(f"{room_id}:{cid_q}")
     if not ok_get:
-        return JSONResponse({"ok": False, "error": "Hız sınırı"}, status_code=429, headers=relay_hdrs)
+        return JSONResponse({"ok": False, "error": "Hız sınırı"}, status_code=429, headers=_RELAY_HEADERS)
     if str(rm_obj_g.get("voipMode") or "all") == "off":
-        return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=relay_hdrs)
+        return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": []}, headers=_RELAY_HEADERS)
     try:
         since_ts = float(request.query_params.get("sinceTs") or 0.0)
         if not math.isfinite(since_ts):
             since_ts = 0.0
     except (TypeError, ValueError):
         since_ts = 0.0
-    rlock = _get_voice_relay_lock(room_id)
+    lock_map = globals().setdefault("_VOICE_RELAY_LOCKS", {})
+    rlock = lock_map.get(room_id)
+    if rlock is None:
+        rlock = asyncio.Lock()
+        lock_map[room_id] = rlock
     async with rlock:
         now_t = time.time()
         cur = _kv_get(kv_key, None, max_age=0.12)
@@ -3615,6 +3342,6 @@ async def voice_relay_endpoint(request: Request):
             and float(p.get("ts") or 0.0) > since_ts
             and (now_t - float(p.get("ts") or 0.0) < 10.0)
         ]
-    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=relay_hdrs)
+    return JSONResponse({"ok": True, "serverTime": round(now_t, 4), "packets": out_pkts}, headers=_RELAY_HEADERS)
 
 

@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261114_v215';
-import { Html5Adapter } from './html5.js?v=20261114_v215';
-import { VimeoAdapter } from './vimeo.js?v=20261114_v215';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261114_v216';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261114_v215';
-import { primeBgRelayAudio, resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261114_v215';
+import { YouTubeAdapter } from './youtube.js?v=20261118_v184';
+import { Html5Adapter } from './html5.js?v=20261118_v184';
+import { VimeoAdapter } from './vimeo.js?v=20261118_v184';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261118_v184';
+import { WebviewAdapter } from './webview.js?v=20261118_v184';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261118_v184';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -13,6 +13,11 @@ const DRM_PROVS = new Set([
 
 export function adapterFor(media) {
   if (!media) return EmbedAdapter;
+  // Own-account platforms (Rave model): always the in-app browser / companion bridge, never an embed
+  // or a raw stream: Watchlivo does not fetch platform video itself.
+  if (DRM_PROVS.has(media.provider)) {
+    return WebviewAdapter;
+  }
   const url = String(media.url || '');
   const vid = String(media.videoId || '');
   const isYtDirectStream = /\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8/i.test(url);
@@ -23,13 +28,10 @@ export function adapterFor(media) {
       media.streamType === 'hls' ||
       media.streamType === 'mp4' ||
       /\.(mp4|m4v|m4a|mp3|aac|webm|m3u8|mov|ogg|mkv|wav|flac|opus)(\?|$)/i.test(url) ||
-      /\/proxy\?data=|\/api\/rave\/stream|\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
+      /\/proxy\?data=|\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
     )
   ) {
     return Html5Adapter;
-  }
-  if (DRM_PROVS.has(media.provider) && url && isAllowedWebviewUrl(url)) {
-    return WebviewAdapter;
   }
   if (media.provider === 'vimeo') return VimeoAdapter;
   if (media.provider === 'youtube' || ((!media.provider || media.provider === 'web') && /^[A-Za-z0-9_-]{11}$/.test(vid)) || /youtube\.com|youtu\.be/i.test(url)) {
@@ -39,7 +41,7 @@ export function adapterFor(media) {
 }
 
 export const mediaKey = (m) => {
-  if (!m || (!m.url && !m.videoId && !m.embedUrl && !m.tmdbId && !m.imdbId && !m.id)) return '';
+  if (!m || (!m.url && !m.videoId && !m.tmdbId && !m.imdbId && !m.id)) return '';
   const epMatch = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
   const s = Math.max(1, Number(m.season || epMatch?.[1] || epMatch?.[3]) || 1);
   const e = Math.max(1, Number(m.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
@@ -47,10 +49,10 @@ export const mediaKey = (m) => {
   if (m.imdbId) return `imdb|${m.imdbId}|${m.mediaType || 'movie'}|${s}|${e}`;
   if (m.id && /^(cat|t24|fhd|hfnl|dbx|dl|dp|acx|anx|trd|krm|yt|tv|radyo)[-_]/i.test(String(m.id))) return `cat|${m.id}|${s}|${e}`;
   if (m.videoId) return `vid|${m.provider || 'ext'}|${m.videoId}|${s}|${e}`;
-  const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/') || m.season || m.episode);
+  const isCatalogStream = Boolean(m.seriesTitle || m.originalTitle || m.catalogProvider || String(m.url || '').includes('/api/rave/'));
   const rawTitle = String(m.seriesTitle || m.originalTitle || m.title || '').trim().toLowerCase();
   if (isCatalogStream && rawTitle && !['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitle)) {
-    const baseTitle = rawTitle.replace(/\s*(?:[—–\-·|]\s*)?(?:s\d+\s*:\s*b\d+|\d+\.\s*sezon(?:\s*\d+\.\s*bölüm)?|\d+\.\s*bölüm|episode\s*\d+).*$/i, '').split(' — ')[0].trim();
+    const baseTitle = rawTitle.replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').trim();
     if (baseTitle && !['video', 'medya', 'stream'].includes(baseTitle)) return `title|${baseTitle}|${m.mediaType || 'movie'}|${s}|${e}`;
   }
   return `${m.provider}|${m.videoId || ''}|${m.url || ''}|${s}|${e}`;
@@ -141,7 +143,6 @@ export class PlayerHost {
       this._gDown = { x: e.clientX ?? 0, y: e.clientY ?? 0, t: Date.now() };
     };
     this._gestureHandler = (e) => {
-      primeBgRelayAudio();
       if (e?.type === 'keydown') {
         if (e.ctrlKey || e.metaKey || e.altKey) return;
         const k = String(e.key || '').toLowerCase();
@@ -245,8 +246,8 @@ export class PlayerHost {
     this.media = media || null;
     const key = mediaKey(media);
     const nextUrl = String(media?.url || media?.videoId || '');
-    const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
-    const nextResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog'));
+    const prevResolved = Boolean(this.loadedUrl);
+    const nextResolved = Boolean(nextUrl);
     if (!this.error && key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) {
       if (this.loading) {
         this.loading = false;
@@ -262,7 +263,7 @@ export class PlayerHost {
     this.error = null;
     this.autoplayBlocked = false;
     if (!this.userMuted) this.muted = false;
-    if (!media || (!media.url && !media.videoId && !media.embedUrl)) { this.onEvent('empty'); return true; }
+    if (!media || (!media.url && !media.videoId)) { this.onEvent('empty'); return true; }
     const Cls = adapterFor(media);
     let ad = null;
     let settledReady = false;
@@ -540,9 +541,6 @@ export class PlayerHost {
       }
     }
     this.destroyAdapterOnly();
-    if (this.container && (!window.__kinoxHost || window.__kinoxHost === this)) {
-      try { this.container.replaceChildren(); } catch (e) { /* ignore */ }
-    }
     suspendSharedAudioContext();
   }
 }

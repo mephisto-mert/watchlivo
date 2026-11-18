@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261114_v215';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261118_v184';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -83,9 +83,8 @@ export const icons = {
 
 export function h(tag, attrs = {}, ...children) {
   const el = document.createElement(tag);
-  for (const [rawK, v] of Object.entries(attrs || {})) {
+  for (const [k, v] of Object.entries(attrs || {})) {
     if (v === undefined || v === null || v === false) continue;
-    const k = String(rawK).toLowerCase();
     if (k === 'class') el.className = v;
     else if (k === 'style' && typeof v === 'object') {
       for (const [sk, sv] of Object.entries(v)) {
@@ -105,17 +104,11 @@ export function h(tag, attrs = {}, ...children) {
         const isSafeSvgImg = (k === 'src' && String(tag).toLowerCase() === 'img' && /^data:image\/svg\+xml[,;]/i.test(cleanV));
         const isTrustedStaticSvg = (
           isSafeSvgImg &&
-          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:|;base64/i.test(cleanV)
+          !/(?:%3c|<)\s*(?:script|foreignobject|iframe|object|embed)|onload\s*=|onerror\s*=|javascript:/i.test(cleanV)
         );
-        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) {
-          if (k === 'src' && String(tag).toLowerCase() === 'img') {
-            el.hidden = true;
-            el.alt = '';
-          }
-          continue;
-        }
+        if (!isTrustedStaticSvg && (/^data:image\/svg/i.test(cleanV) || /^(?:javascript:|vbscript:|data:text\/html|data:application\/xhtml)/i.test(cleanV))) continue;
       }
-      el.setAttribute(rawK, v === true ? '' : v);
+      el.setAttribute(k, v === true ? '' : v);
     }
   }
   for (const c of children.flat(Infinity)) {
@@ -130,22 +123,9 @@ export const icon = (name) => h('span', { html: icons[name] || '', style: { disp
 // replaceChildren() stringifies null/false ("null" text); fill() drops them like h() does.
 export const fill = (el, ...kids) => el.replaceChildren(...kids.flat(Infinity).filter((k) => k !== null && k !== undefined && k !== false));
 
-let _lastRateToastAt = 0;
-
 export function toast(text, ms = 2800, opts = null) {
-  let cleanText = String(text ?? '').trim();
-  if (!cleanText) return;
-  const isRateMsg = /^(?:●\s*)?HTTP\s*429\b/i.test(cleanText) || /^too many requests$/i.test(cleanText) || /sunucu şu an yoğun/i.test(cleanText);
-  if (/^(?:●\s*)?HTTP\s*429\b/i.test(cleanText) || /^too many requests$/i.test(cleanText)) {
-    cleanText = 'Sunucu şu an yoğun, birkaç saniye içinde otomatik yenilenecek.';
-  }
-  if (isRateMsg) {
-    const now = Date.now();
-    if (now - _lastRateToastAt < 8000) return;
-    _lastRateToastAt = now;
-  }
   const orb = h('span', { class: 'wl-toast-orb', 'aria-hidden': 'true' });
-  const label = h('span', { class: 'wl-toast-text' }, cleanText);
+  const label = h('span', { class: 'wl-toast-text' }, text);
   const actionBtn = (opts && opts.actionLabel && typeof opts.onAction === 'function')
     ? h('button', {
         type: 'button',
@@ -432,10 +412,6 @@ export function setBackground(url) {
   img.dataset.src = url;
   img.classList.remove('on');
   img.onload = () => img.classList.add('on');
-  img.onerror = () => {
-    delete img.dataset.src;
-    img.classList.remove('on');
-  };
   img.src = url;
 }
 
@@ -592,8 +568,8 @@ export function openThemeModal() {
       }, '🍎 iPhone IPA İndir (v1.2)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
       }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.2)'),
       h('a', {
@@ -642,8 +618,8 @@ export function openDownloadModal() {
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/Watchlivo-v2.0.apk',
-          download: 'Watchlivo-v2.0.apk',
+          href: '/download/apk',
+          download: 'Watchlivo.apk',
           onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.2)')
       ) : null,

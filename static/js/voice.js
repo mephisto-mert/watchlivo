@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261114_v215';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261114_v215';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261114_v215';
+import { toast } from './ui.js?v=20261118_v184';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261118_v184';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261118_v184';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -23,7 +23,6 @@ export class Voice {
     this.onMicLevel = onMicLevel;
     this.onP2pData = onP2pData;
     this.peers = new Map();
-    this._peerLocks = new Map();
     this.stream = null;
     this.camStream = null;
     this.screenStream = null;
@@ -695,9 +694,8 @@ export class Voice {
           const pkt = JSON.parse(ev.data);
           if (!pkt || typeof pkt !== 'object') return;
           pkt.fromCid = id;
-          pkt._fromDc = true;
           const evType = pkt.event?.type;
-          if (!evType || !['sync', 'typing', 'reaction', 'soundfx', 'speaking', 'cam_state'].includes(evType)) return;
+          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync', 'room_state', 'room_closed'].includes(evType)) return;
           this.onP2pData?.(pkt);
         } catch (e) { /* ignore */ }
       };
@@ -770,21 +768,13 @@ export class Voice {
     if (this.destroyed) return;
     const from = data.fromId;
     if (!from || from === this.getSelfId()) return;
-    const prevLock = this._peerLocks.get(from) || Promise.resolve();
-    const nextLock = prevLock.then(() => this._handleSignalLocked(from, data)).catch(() => {});
-    this._peerLocks.set(from, nextLock);
-    return nextLock;
-  }
-
-  async _handleSignalLocked(from, data) {
-    if (this.destroyed) return;
     if (!this.peers.has(from) && this.peers.size >= 12) return;
     if (data.type === 'webrtc_offer' && this.peers.has(from)) {
-      // Karşı taraf sayfayı yenilediyse yeni SDP oturum kimliği (o=- <sessId>) gelir; ICE restart aynı sessId'yi korur.
+      // Karşı taraf sayfayı yenilediyse yeni ICE kimliği (ice-ufrag) gelir: eski bağlantıyı at, sıfırdan kur.
       const old = this.peers.get(from);
-      const newSess = /^o=\S+\s+(\S+)/m.exec(data.sdp?.sdp || '')?.[1];
-      const oldSess = /^o=\S+\s+(\S+)/m.exec(old.pc.remoteDescription?.sdp || '')?.[1];
-      if (old.pc.connectionState === 'closed' || (newSess && oldSess && newSess !== oldSess)) {
+      const newU = /a=ice-ufrag:(\S+)/.exec(data.sdp?.sdp || '')?.[1];
+      const oldU = /a=ice-ufrag:(\S+)/.exec(old.pc.remoteDescription?.sdp || '')?.[1];
+      if (old.pc.connectionState === 'closed' || (newU && oldU && newU !== oldU)) {
         try { old.pc.close(); } catch (e) { /* ignore */ }
         try { releaseStreamBoost(old.audio); old.audio.srcObject = null; old.audio.remove(); } catch (e) { /* ignore */ }
         this._removeVideoBubble(from);
@@ -881,7 +871,6 @@ export class Voice {
         const score = (x) => (x?.isHost ? 8 : 0) + (x?.isCoHost ? 4 : 0) + (x?.isStageSpeaker ? 4 : 0) + ((!x?.muted || x?.cam || x?.screen || x?.speaking) ? 2 : 0);
         return score(b) - score(a);
       });
-      let peerCapExhausted = false;
       for (const p of prioritizedList) {
         if (p.id && p.id !== selfId && p.transport !== 'bot') {
           if (!p.cam && !p.screen) {
@@ -898,7 +887,6 @@ export class Voice {
               peerBubble.style.setProperty('--voice-scale', p.speaking ? '1.08' : '1');
             }
           }
-          if (peerCapExhausted && !this.peers.has(p.id)) continue;
           const peerActive = Boolean(p.inCall || !p.muted || p.cam || p.screen || p.speaking);
           if (!iAmActive && !peerActive && !this.peers.has(p.id)) continue;
           if (!this.peers.has(p.id) && this.peers.size >= 12) {
@@ -915,11 +903,9 @@ export class Voice {
                 this._removeVideoBubble(evictId);
                 this.peers.delete(evictId);
               } else {
-                peerCapExhausted = true;
                 continue;
               }
             } else {
-              peerCapExhausted = true;
               continue;
             }
           }
@@ -1387,21 +1373,10 @@ export class Voice {
       window.__kinoxSyncDuckVolume?.();
     }
     this.onDuckChange?.(false);
-    for (const [peerId, st] of [...this.peers.entries()]) {
+    for (const st of this.peers.values()) {
       try { st.audioSender?.replaceTrack?.(null); } catch (_) {}
-      const peerMeta = (this.participants || []).find((x) => x && x.id === peerId);
-      const keepForRemoteVideo = Boolean(peerMeta && (peerMeta.cam || peerMeta.screen));
-      if (!keepForRemoteVideo) {
-        try { st.pc?.close?.(); } catch (_) {}
-        if (st?.audio) {
-          releaseStreamBoost(st.audio);
-          st.audio.srcObject = null;
-          try { st.audio.remove(); } catch (_) {}
-        }
-        this._removeVideoBubble(peerId);
-        this.peers.delete(peerId);
-      } else if (st?.audio) {
-        releaseStreamBoost(st.audio);
+      if (st?.audio) {
+        applyStreamBoost(st.audio, st.audio.srcObject, 0);
         st.audio.muted = true;
       }
     }

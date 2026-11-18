@@ -1,15 +1,13 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261114_v215';
-import { state, isLeader, canControlPlayback, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261114_v215';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261114_v215';
-import { getProvider } from '../providers.js?v=20261114_v215';
-import { expectedPosition } from '../sync.js?v=20261114_v215';
-import { thumbFor } from './lobby.js?v=20261114_v215';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261114_v215';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261114_v215';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261114_v215';
-import { avatar } from '../profile.js?v=20261114_v215';
-import { api } from '../api.js?v=20261114_v215';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261118_v184';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261118_v184';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261118_v184';
+import { getProvider } from '../providers.js?v=20261118_v184';
+import { expectedPosition } from '../sync.js?v=20261118_v184';
+import { thumbFor } from './lobby.js?v=20261118_v184';
+import { launchProviderWindow } from '../accounts.js?v=20261118_v184';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261118_v184';
+import { avatar } from '../profile.js?v=20261118_v184';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -225,7 +223,7 @@ export function buildControls(frame, ctx) {
         toast('7/24 canlı TV yayını duraklatılamaz');
         return;
       }
-      if (canControlPlayback()) {
+      if (isLeader()) {
         actions.pause?.();
         toast('☕ Mola verildi — video duraklatıldı');
         showOverlay('☕ Mola Zamanı — Video duraklatıldı', 3000);
@@ -267,7 +265,7 @@ export function buildControls(frame, ctx) {
   const isActuallyMuted = () => Boolean(host.isMuted?.() || host.adapter?.isMuted?.());
   const syncDot = h('span', { class: 'sync-dot', title: 'Senkron' });
   const syncText = h('span', { class: 'ctl-time', style: { opacity: .7 } });
-  const canSeekNow = () => Boolean(canControlPlayback() && !state.mesh?.curated && !timeline.classList.contains('locked') && (!host.adapter || host.adapter.caps?.seek));
+  const canSeekNow = () => Boolean(isLeader() && !state.mesh?.curated && !timeline.classList.contains('locked') && (!host.adapter || host.adapter.caps?.seek));
   const seekStep = (delta) => {
     if (state.mesh?.curated) { toast('7/24 canlı yayın akışı ileri/geri sarılamaz'); return; }
     if (!canSeekNow()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
@@ -289,7 +287,7 @@ export function buildControls(frame, ctx) {
     lastPlayToggleAt = now;
     const roomPlaying = isRoomMediaPlaying(state.mesh?.media);
     const adapterPaused = host.adapter ? Boolean(host.adapter.isPaused?.()) : !roomPlaying;
-    if (!canControlPlayback()) {
+    if (!isLeader()) {
       if (roomPlaying && adapterPaused) {
         if (isActuallyMuted() && !host.userMuted) doUnlockAudio();
         host.adapter?.play?.();
@@ -323,7 +321,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye geri',
     id: 'ctl-back10',
     ...tapProps(() => {
-      if (!canControlPlayback()) {
+      if (!isLeader()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
@@ -336,7 +334,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye ileri',
     id: 'ctl-fwd10',
     ...tapProps(() => {
-      if (!canControlPlayback()) {
+      if (!isLeader()) {
         toast('Videoyu yalnızca oda başkanı sarabilir');
         return;
       }
@@ -688,7 +686,7 @@ export function buildControls(frame, ctx) {
   window.vortexGetVideoPosition = () => Math.max(0, Math.round(position()));
   window.vortexSeekToTimestamp = (sec) => {
     const target = Math.max(0, Number(sec) || 0);
-    if (!canControlPlayback()) {
+    if (!isLeader()) {
       toast(`⏱️ ${fmtTime(target)} sahnesi (Videoyu yalnızca oda başkanı sarabilir)`);
       return;
     }
@@ -747,184 +745,16 @@ export function buildControls(frame, ctx) {
   };
 
   let nextEpBusy = false;
+  // Catalog episode auto-advance removed (Rave model): no stream is resolved for series.
   async function triggerPrevEpisode(manual = false) {
-    const m = state.mesh?.media;
-    if (!m) return;
-    const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
-    const curS = Number(m.season || parsedEp?.[1] || parsedEp?.[3] || 1);
-    const curE = Number(m.episode || parsedEp?.[2] || parsedEp?.[4] || 1);
-    const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
-    const isSeries = !isMovie && Boolean(m.mediaType === 'tv' || parsedEp);
-    if (!isSeries) return;
-    if (!isLeader() && !canSelectVideo()) {
-      if (manual) toast('Bölümü yalnızca oda başkanı değiştirebilir');
-      return;
-    }
-    if (curS <= 1 && curE <= 1) {
-      if (manual) toast('🏁 Dizinin ilk bölümündesiniz');
-      return;
-    }
-    if (nextEpBusy) return;
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
-    nextEpBusy = true;
-    nextEpBanner.classList.add('hidden');
-    let targetSeason = curE > 1 ? curS : Math.max(1, curS - 1);
-    let targetEp = curE > 1 ? curE - 1 : 1;
-    let epName = '';
-    try {
-      try {
-        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-        const r = await fetch(`/api/rave/seasons?tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1 } : {});
-        if (r.ok) {
-          const sData = await r.json();
-          const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
-          if (curE <= 1 && eps.length > 0) {
-            targetEp = Number(eps[eps.length - 1]?.episode || eps.length);
-          }
-          const foundEp = eps.find((x) => Number(x.episode) === targetEp);
-          if (foundEp) {
-            const rawName = String(foundEp.name || '').trim();
-            const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
-            epName = isRedundant ? '' : rawName;
-          }
-        }
-      } catch (e) { /* ignore */ }
-      showOverlay(`⏮️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4000);
-      if (manual) toast(`⏮️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
-      const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
-      const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
-      const rawSrcUrl = String(m.sourceUrl || '').trim();
-      const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
-      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
-      const prevMedia = await resolveCatalogItem(
-        { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
-        prov,
-        targetSeason,
-        targetEp,
-        epName,
-        { applySavedResume: false },
-      );
-      if (prevMedia) {
-        actions.pickMedia({
-          ...prevMedia,
-          id: prevMedia.id || m.id || '',
-          tmdbId: prevMedia.tmdbId || m.tmdbId || '',
-          imdbId: prevMedia.imdbId || m.imdbId || '',
-          catalogProvider: (prevMedia.catalogProvider && prevMedia.catalogProvider !== 'youtube') ? prevMedia.catalogProvider : safeProvId,
-          mediaType: 'tv',
-          season: targetSeason,
-          episode: targetEp,
-          seriesTitle: cleanTitle,
-          originalTitle: prevMedia.originalTitle || cleanOrigTitle,
-          sourceUrl: prevMedia.sourceUrl || safeSrcUrl || '',
-        });
-      } else {
-        toast('⚠️ Önceki bölüm kaynağı bulunamadı');
-      }
-    } finally {
-      nextEpBusy = false;
-    }
+    if (manual && state.mesh?.media) openEpisodeModal();
   }
+
+  // Catalog episode auto-advance removed (Rave model): no stream is resolved for series.
   async function triggerNextEpisode(manual = false) {
-    const m = state.mesh?.media;
-    if (!m) return;
-    const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
-    const curS = Number(m.season || parsedEp?.[1] || parsedEp?.[3] || 0);
-    const curE = Number(m.episode || parsedEp?.[2] || parsedEp?.[4] || 0);
-    const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
-    const isSeries = !isMovie && Boolean(m.mediaType === 'tv' || parsedEp);
-    if (!isSeries) return;
-    if (!isLeader() && !canSelectVideo()) {
-      if (manual) toast('Bölümü yalnızca oda başkanı değiştirebilir');
-      return;
-    }
-    if (!manual && (state.mesh?.queue || []).length > 0) return;
-    if (nextEpBusy) return;
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
-    const seriesIdKey = m.tmdbId || m.id || cleanTitle;
-    if (!seriesIdKey) return;
-    const curKey = `${seriesIdKey}:${curS || 1}:${curE || 1}`;
-    if (!manual && autoAdvancingKey === curKey) return;
-    autoAdvancingKey = curKey;
-    nextEpBusy = true;
-    nextEpBanner.classList.add('hidden');
-    let targetSeason = curS || 1;
-    let targetEp = (curE || 1) + 1;
-    let epName = '';
-    try {
-      showOverlay(`⏭️ S${targetSeason}:B${targetEp} hazırlanıyor…`, 4500);
-      if (manual) toast(`⏭️ S${targetSeason}:B${targetEp} bölümüne geçiliyor…`);
-      try {
-        const sig1 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-        const sData = await api(`/api/rave/seasons?id=${encodeURIComponent(m.id || '')}&tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig1 ? { signal: sig1, timeout: 6500 } : { timeout: 6500 });
-        if (sData && !sData.isFallback) {
-          const eps = Array.isArray(sData.episodes) ? sData.episodes : [];
-          const seasons = Array.isArray(sData.seasons) ? sData.seasons : [];
-          const foundEp = eps.find((x) => Number(x.episode) === targetEp);
-          if (foundEp) {
-            const rawName = String(foundEp.name || '').trim();
-            const isRedundant = new RegExp(`^(?:${targetEp}\\.\\s*bölüm|bölüm\\s*${targetEp}|episode\\s*${targetEp})(?:\\s*\\([^)]*\\))?$`, 'i').test(rawName);
-            epName = isRedundant ? '' : rawName;
-          } else if (eps.length > 0 && targetEp === eps.length + 1) {
-            const hasNextSeason = seasons.some((s) => Number(s.season) === targetSeason + 1);
-            if (hasNextSeason) {
-              targetSeason += 1;
-              targetEp = 1;
-              const sig2 = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(6500) : undefined;
-              const s2 = await api(`/api/rave/seasons?id=${encodeURIComponent(m.id || '')}&tmdbId=${encodeURIComponent(m.tmdbId || '')}&title=${encodeURIComponent(cleanTitle)}&mediaType=tv&season=${targetSeason}`, sig2 ? { signal: sig2, timeout: 6500 } : { timeout: 6500 }).catch(() => null);
-              if (s2 && !s2.isFallback) {
-                const ep1 = (s2.episodes || []).find((x) => Number(x.episode) === 1);
-                if (ep1?.name && !/^(?:1\.\s*bölüm|bölüm\s*1|episode\s*1)(?:\s*\([^)]*\))?$/i.test(ep1.name.trim())) {
-                  epName = ep1.name.trim();
-                }
-              }
-            } else {
-              toast('🏁 Dizinin son bölümüne ulaşıldı');
-              autoAdvancingKey = '';
-              return;
-            }
-          }
-        }
-      } catch (e) { /* fallback to +1 */ }
-      const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-      const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
-      const prov = getProvider(safeProvId) || { id: 'cinema', name: 'Sinema & Dizi' };
-      const rawSrcUrl = String(m.sourceUrl || '').trim();
-      const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
-      const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
-      showOverlay(`⏭️ ${targetSeason}. Sezon ${targetEp}. Bölüm yükleniyor…`, 4000);
-      const nextMedia = await resolveCatalogItem(
-        { id: m.id || '', tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '', imdbId: m.imdbId || '', title: cleanTitle, seriesTitle: cleanTitle, originalTitle: cleanOrigTitle, year: m.year || '', mediaType: 'tv', sourceUrl: safeSrcUrl, backdrop: m.thumbnail, poster: m.thumbnail },
-        prov,
-        targetSeason,
-        targetEp,
-        epName,
-        { applySavedResume: false },
-      );
-      if (nextMedia) {
-        actions.pickMedia({
-          ...nextMedia,
-          id: nextMedia.id || m.id || '',
-          tmdbId: nextMedia.tmdbId || m.tmdbId || '',
-          imdbId: nextMedia.imdbId || m.imdbId || '',
-          catalogProvider: (nextMedia.catalogProvider && nextMedia.catalogProvider !== 'youtube') ? nextMedia.catalogProvider : safeProvId,
-          mediaType: 'tv',
-          season: targetSeason,
-          episode: targetEp,
-          seriesTitle: cleanTitle,
-          originalTitle: nextMedia.originalTitle || cleanOrigTitle,
-          sourceUrl: nextMedia.sourceUrl || safeSrcUrl || '',
-        });
-      } else {
-        autoAdvancingKey = '';
-        toast('⚠️ Sonraki bölüm kaynağı bulunamadı');
-      }
-    } finally {
-      nextEpBusy = false;
-      setTimeout(() => { if (autoAdvancingKey === curKey) autoAdvancingKey = ''; }, 3000);
-    }
+    if (manual && state.mesh?.media) openEpisodeModal();
   }
+
   const closeMenu = () => {
     currentMenuView = '';
     delete menu.dataset.view;
@@ -1004,7 +834,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye geri',
     title: '10 saniye geri',
     ...tapProps(() => {
-      if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
       seekStep(-10);
     }),
   }, ico('rewind10'));
@@ -1026,7 +856,7 @@ export function buildControls(frame, ctx) {
     'aria-label': '10 saniye ileri',
     title: '10 saniye ileri',
     ...tapProps(() => {
-      if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+      if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
       seekStep(10);
     }),
   }, ico('forward10'));
@@ -1102,13 +932,13 @@ export function buildControls(frame, ctx) {
       clearTimeout(tapTimer);
       lastTapTime = 0;
       if (ratio < 0.38) {
-        if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
         accumulatedSeek = (accumulatedSeek <= 0 ? accumulatedSeek : 0) - 10;
         seekStep(-10);
         triggerSeekRipple('left', accumulatedSeek);
         revealControls(4500);
       } else if (ratio > 0.62) {
-        if (!canControlPlayback()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
+        if (!isLeader()) { toast('Videoyu yalnızca oda başkanı sarabilir'); return; }
         accumulatedSeek = (accumulatedSeek >= 0 ? accumulatedSeek : 0) + 10;
         seekStep(10);
         triggerSeekRipple('right', accumulatedSeek);
@@ -1295,7 +1125,7 @@ export function buildControls(frame, ctx) {
     if (e.key === ' ' && (tag === 'button' || tag === 'select' || tag === 'a')) return;
     if (e.key === ' ' || e.key === 'k') {
       e.preventDefault();
-      if (!canControlPlayback()) {
+      if (!isLeader()) {
         const roomPlaying = isRoomMediaPlaying(state.mesh?.media);
         if (roomPlaying && host.adapter?.isPaused?.()) {
           host.adapter.play();
@@ -1311,13 +1141,13 @@ export function buildControls(frame, ctx) {
     else if (e.key === 'ArrowLeft') {
       if (tag === 'button' || tag === 'select') return;
       e.preventDefault();
-      if (canControlPlayback()) seekStep(-10);
+      if (isLeader()) seekStep(-10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
     else if (e.key === 'ArrowRight') {
       if (tag === 'button' || tag === 'select') return;
       e.preventDefault();
-      if (canControlPlayback()) seekStep(10);
+      if (isLeader()) seekStep(10);
       else toast('Videoyu yalnızca oda başkanı sarabilir');
     }
     else if (e.key === 'ArrowUp') {
@@ -1428,19 +1258,10 @@ export function buildControls(frame, ctx) {
     scrubbing = false;
     lastScrubEndedAt = Date.now();
     try { timeline.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    seekPreview.classList.add('hidden');
     seekFromEvent(e, true);
   };
-  const cancelScrub = (e) => {
-    if (!scrubbing) return;
-    scrubbing = false;
-    lastScrubEndedAt = Date.now();
-    try { timeline.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
-    seekPreview.classList.add('hidden');
-    update();
-  };
   timeline.addEventListener('pointerup', endScrub);
-  timeline.addEventListener('pointercancel', cancelScrub);
+  timeline.addEventListener('pointercancel', endScrub);
   timeline.addEventListener('click', (e) => {
     e.stopPropagation();
     if (!canSeekNow()) {
@@ -1689,63 +1510,11 @@ export function buildControls(frame, ctx) {
   }
 
   function openEpisodeModal() {
-    if (!canSelectVideo()) {
-      toast("Oynatma ayarı 'Liderin Seçimi'. Yalnızca lider bölüm değiştirebilir.");
-      return;
-    }
     const m = state.mesh?.media;
-    if (!m) return;
-    const parsedEp = String(m.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm/i);
-    const curS = Number(m.season || parsedEp?.[1] || parsedEp?.[3] || 0);
-    const curE = Number(m.episode || parsedEp?.[2] || parsedEp?.[4] || 0);
-    const isMovie = m.mediaType === 'movie' || /Tam Film/i.test(String(m.channel || ''));
-    if (isMovie || (m.mediaType !== 'tv' && !parsedEp)) return;
-    const rawProvId = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-    const safeProvId = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawProvId) ? 'cinema' : rawProvId;
-    const prov = getProvider(safeProvId) || getProvider('cinema') || getProvider('netflix');
-    const cleanTitle = String(m.seriesTitle || m.title || 'Dizi').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || 'Dizi';
-    const cleanOrigTitle = String(m.originalTitle || cleanTitle).replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim() || cleanTitle;
-    const rawSrcUrl = String(m.sourceUrl || '').trim();
-    const safeSrcUrl = (/youtube\.com|youtu\.be|\/search\?|[-/]bolum|episode-|sezon-\d+/i.test(rawSrcUrl)) ? '' : rawSrcUrl;
-    const box = h('div', { style: { minHeight: '280px' } });
-    const epModal = popup({ title: `📺 ${cleanTitle} — Sezon & Bölüm Seç`, content: box, options: [{ label: 'Kapat' }] });
-    renderSeriesPicker(
-      {
-        id: m.id || '',
-        tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '',
-        imdbId: m.imdbId || '',
-        title: cleanTitle,
-        seriesTitle: cleanTitle,
-        originalTitle: cleanOrigTitle,
-        year: m.year || '',
-        season: curS || 1,
-        episode: curE || 1,
-        mediaType: 'tv',
-        sourceUrl: safeSrcUrl,
-        poster: m.thumbnail,
-      },
-      prov,
-      box,
-      () => epModal.close(),
-      async (nextMedia) => {
-        epModal.close();
-        const pickFn = actions?.pickMedia || ctx.actions?.pickMedia || ctx.pickMedia;
-        if (typeof pickFn === 'function') {
-          await pickFn({
-            ...nextMedia,
-            id: nextMedia.id || m.id || '',
-            tmdbId: nextMedia.tmdbId || m.tmdbId || '',
-            imdbId: nextMedia.imdbId || m.imdbId || '',
-            catalogProvider: (nextMedia.catalogProvider && nextMedia.catalogProvider !== 'youtube') ? nextMedia.catalogProvider : safeProvId,
-            mediaType: 'tv',
-            seriesTitle: cleanTitle,
-            originalTitle: nextMedia.originalTitle || cleanOrigTitle,
-            sourceUrl: nextMedia.sourceUrl || safeSrcUrl || '',
-          });
-        }
-      },
-      (it, pr, sNum, eNum, epTitle) => resolveCatalogItem(it, pr, sNum, eNum, epTitle, { applySavedResume: false }),
-    );
+    const prov = m ? getProvider(m.provider) : null;
+    toast(prov?.kind === 'account'
+      ? `Bölümü ${prov.name} oynatıcısının kendi menüsünden değiştir; oda zamanı otomatik eşitlenir.`
+      : 'Bu kaynakta sezon / bölüm seçimi yok.');
   }
 
   let currentMenuView = 'list';
@@ -1812,39 +1581,8 @@ export function buildControls(frame, ctx) {
     loading.classList.remove('hidden');
     showOverlay('🔄 Yayın kaynakları canlı yenileniyor…', 3500);
     const curPos = position();
-    const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
-    const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon(?:\s*\d+\.\s*Bölüm)?|\d+\.\s*Bölüm|Episode\s*\d+).*$/i, '').trim();
-    const rawRefreshProv = String(m.catalogProvider || m.provider || 'cinema').toLowerCase();
-    const safeRefreshProv = ['youtube', 'web', 'hls', 'mp4', 'direct', 'web-direct', 'embed'].includes(rawRefreshProv) ? 'cinema' : rawRefreshProv;
-    try {
-      const qs = new URLSearchParams({
-        provider: safeRefreshProv,
-        title: cleanOrigTitle || cleanSeriesTitle,
-        displayTitle: cleanSeriesTitle,
-        year: String(m.year || ''),
-        tmdbId: String(m.tmdbId || ''),
-        imdbId: String(m.imdbId || ''),
-        mediaType: String(m.mediaType || 'movie'),
-        season: String(m.season || 1),
-        episode: String(m.episode || 1),
-        refresh: '1',
-      });
-      const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`).catch(() => null);
-      if (fresh && fresh.url) {
-        m.url = fresh.url;
-        if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
-        if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
-        if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-        host.key = '';
-        host.loadedUrl = '';
-        await host.setMedia(m, curPos, true);
-        ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
-        loading.classList.add('hidden');
-        showOverlay('✅ Yayın kaynağı yenilendi', 2200);
-        update();
-        return;
-      }
-    } catch (e) { /* ignore */ }
+    const cleanSeriesTitle = String(m.seriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
+    const cleanOrigTitle = String(m.originalTitle || cleanSeriesTitle || m.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').trim();
     if (m.url || m.videoId) {
       host.key = '';
       host.loadedUrl = '';
@@ -1930,14 +1668,7 @@ export function buildControls(frame, ctx) {
           onclick: async (e) => {
             e.stopPropagation();
             if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
-            const prevAudUrl = host.adapter?.currentUrl || '';
             await host.adapter?.setAudioTrack?.(t.id);
-            const afterAudUrl = host.adapter?.currentUrl || '';
-            if (afterAudUrl && afterAudUrl !== prevAudUrl && state.mesh?.media) {
-              state.mesh.media.url = afterAudUrl;
-              if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = afterAudUrl;
-              if (isLeader()) ctx.conn?.send('resolve_media', { ...state.mesh.media, url: afterAudUrl, currentTime: position() });
-            }
             ctx.sync?.kick();
             showOverlay(`🎙️ Ses: ${t.label}`, 2000);
             closeMenu();
@@ -2050,14 +1781,7 @@ export function buildControls(frame, ctx) {
         onclick: async (e) => {
           e.stopPropagation();
           if (host.autoplayBlocked || (isActuallyMuted() && !host.userMuted)) doUnlockAudio();
-          const prevAudUrl = host.adapter?.currentUrl || '';
           await host.adapter?.setAudioTrack?.(t.id);
-          const afterAudUrl = host.adapter?.currentUrl || '';
-          if (afterAudUrl && afterAudUrl !== prevAudUrl && state.mesh?.media) {
-            state.mesh.media.url = afterAudUrl;
-            if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = afterAudUrl;
-            if (isLeader()) ctx.conn?.send('resolve_media', { ...state.mesh.media, url: afterAudUrl, currentTime: position() });
-          }
           ctx.sync?.kick();
           showOverlay(`🎙️ Ses: ${t.label}`, 2000);
           closeMenu();
@@ -2105,8 +1829,8 @@ export function buildControls(frame, ctx) {
     if (view === 'speed') {
       menu.replaceChildren(
         backHeader('Oynatma Hızı', 'list'),
-        h('div', { class: 'dim', style: { fontSize: '.75em', padding: '.3em .7em' } }, canControlPlayback() ? 'Oynatma hızı' : 'Oynatma hızını yalnızca lider değiştirebilir'),
-        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { if (!canControlPlayback()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; } closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
+        h('div', { class: 'dim', style: { fontSize: '.75em', padding: '.3em .7em' } }, isLeader() ? 'Oynatma hızı' : 'Oynatma hızını yalnızca lider değiştirebilir'),
+        ...[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => h('div', { class: `opt ${r === rate ? 'on' : ''}`, onclick: () => { if (!isLeader()) { toast('Oynatma hızını yalnızca oda lideri değiştirebilir'); return; } closeMenu(); actions.setRate(r); } }, h('span', {}, `${r}x`), r === rate ? h('span', {}, '✓') : null)),
       );
       return;
     }
@@ -2127,22 +1851,9 @@ export function buildControls(frame, ctx) {
               || stickyPref === 'tr'
               || String(stickyPref).startsWith('tr-dub-')
               || (!stickyPref && m?.origLang && m.origLang !== 'tr');
-            if (wantTrAud && nextSrvUrl.includes('/api/rave/stream') && !/[?&]aud=/.test(nextSrvUrl) && /dual|tr dublaj|türkçe dublaj|fullhd|ref=fhd/i.test(`${srv.label || ''} ${nextSrvUrl}`)) {
-              const delim = nextSrvUrl.includes('?') ? '&' : '?';
-              nextSrvUrl = nextSrvUrl.includes('&ext=.m3u8')
-                ? nextSrvUrl.replace('&ext=.m3u8', '&aud=tr&ext=.m3u8')
-                : (nextSrvUrl.includes('?ext=.m3u8')
-                  ? nextSrvUrl.replace('?ext=.m3u8', '?aud=tr&ext=.m3u8')
-                  : `${nextSrvUrl}${delim}aud=tr`);
-            }
             m.url = nextSrvUrl;
-            if (host.loadedUrl) host.loadedUrl = nextSrvUrl;
-            if (ctx?.conn?.lastRoom?.media) ctx.conn.lastRoom.media.url = nextSrvUrl;
             host.adapter?.switchStreamSource?.(nextSrvUrl);
             host.adapter?.subs?.onStreamFallbackUrl?.(nextSrvUrl);
-            if (canControlPlayback() || canSelectVideo()) {
-              ctx.conn?.send('resolve_media', { ...m, url: nextSrvUrl, currentTime: position() });
-            }
             showOverlay(srv.label, 2200);
             closeMenu();
             update();
@@ -2409,6 +2120,12 @@ export function buildControls(frame, ctx) {
         optIconLbl('audioWave', 'Ses & Dublaj (Audio)'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${curAudioObj ? curAudioObj.label.replace(/^[^\s]+\s/, '') : 'Orijinal'} ›`)));
     }
+    if (!m.isMusic && !m.isLive && (rawServers.length > 0 || m.tmdbId)) {
+      const srvIdx = curSrvObj ? (rawServers.indexOf(curSrvObj) + 1) : 1;
+      items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); } },
+        optIconLbl('globe', 'Yayın Sunucusu (Kaynak)'),
+        h('span', { class: 'dim', style: { fontSize: '.85em' } }, `Sunucu ${srvIdx} (${rawServers.length}) ›`)));
+    }
     if (host.adapter?.caps.rate) {
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('speed'); } },
         optIconLbl('speed', 'Oynatma Hızı'),
@@ -2539,8 +2256,6 @@ export function buildControls(frame, ctx) {
     syncVideoStageBounds(true);
     applySubPrefsStyle();
     host.adapter?.subs?.onTimeUpdate?.(position(), true);
-    viewportTimers.forEach(clearTimeout);
-    viewportTimers.clear();
     [50, 160, 420, 950].forEach((ms) => {
       const tid = setTimeout(() => {
         viewportTimers.delete(tid);
@@ -2577,7 +2292,6 @@ export function buildControls(frame, ctx) {
       document.body.classList.remove('vortex-fs');
       frame.dataset.fsMode = '';
       frame.querySelector('.fs-chat-stack')?.remove();
-      try { screen.orientation?.unlock?.(); } catch (_) {}
     }
     onViewportChange();
   }
@@ -2916,16 +2630,16 @@ export function buildControls(frame, ctx) {
         } else if (!cachedHyd) {
           window.__wlSeasonsHydrated[hydKey] = 'pending';
           const q = new URLSearchParams({
-            id: String(m.id || ''),
             tmdbId: /^\d+$/.test(String(m.tmdbId || '')) ? String(m.tmdbId) : '',
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261114_v215',
+            v: '20261118_v184',
           });
-          api(`/api/rave/seasons?${q.toString()}`)
+          fetch(`/api/rave/seasons?${q.toString()}`, { cache: 'no-store' })
+            .then((r) => (r.ok ? r.json() : null))
             .then((inf) => {
-              if (inf && !inf.isFallback && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
+              if (inf && (Array.isArray(inf.episodes) || Array.isArray(inf.seasons))) {
                 const payload = {
                   episodeCount: Array.isArray(inf.episodes) ? inf.episodes.length : 0,
                   totalSeasons: Array.isArray(inf.seasons) ? inf.seasons.length : 0,
@@ -2940,13 +2654,9 @@ export function buildControls(frame, ctx) {
                   state.mesh.media.seasonsMeta = payload.seasonsMeta.length ? payload.seasonsMeta : (state.mesh.media.seasonsMeta || []);
                   update();
                 }
-              } else {
-                delete window.__wlSeasonsHydrated[hydKey];
               }
             })
-            .catch(() => {
-              delete window.__wlSeasonsHydrated[hydKey];
-            });
+            .catch(() => {});
         }
       }
     }
@@ -2975,28 +2685,11 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    const lockedQ = String(host.adapter?._lockedQuality || localStorage.getItem('watchlivo_quality_lock') || '').toLowerCase();
-    const availRes = host.adapter?._knownAvailableResolutions;
-    if (vw > 0 && vh > 0) {
-      // Honest ground-truth badge: always reflect actual decoded video frame pixels
-      qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 2400 ? '2K' : effW >= 1700 ? '1080p' : effW >= 1100 ? '720p' : effW >= 750 ? '480p' : `${vh}p`;
-    } else if (lockedQ && lockedQ !== 'auto') {
-      if ((lockedQ === '2160' || lockedQ === '4k') && (!availRes || !availRes.has('2160'))) {
-        qualityBadge.textContent = '1080p';
-      } else if ((lockedQ === '1440' || lockedQ === '2k') && (!availRes || !availRes.has('1440'))) {
-        qualityBadge.textContent = '1080p';
-      } else {
-        qualityBadge.textContent = (lockedQ === '2160' || lockedQ === '4k') ? '4K' : ((lockedQ === '1440' || lockedQ === '2k') ? '2K' : `${lockedQ}p`);
-      }
-    } else {
-      qualityBadge.textContent = '1080p';
-    }
-    if (qualityBadge.textContent === '4K') {
-      artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|1080p HD|720p HD)/, '4K Ultra HD');
-    } else if (qualityBadge.textContent === '1080p') {
-      artist.textContent = artist.textContent.replace(/(?:4K Ultra HD|4K UHD|720p HD)/, '1080p HD');
-    } else if (qualityBadge.textContent === '720p' && artist.textContent.includes('1080p HD')) {
+    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
+    if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '720p') {
       artist.textContent = artist.textContent.replace('1080p HD', '720p HD');
+    } else if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '4K') {
+      artist.textContent = artist.textContent.replace('1080p HD', '4K UHD');
     }
     const curRate = Number(m.meshStatePlaybackSpeed || host.adapter?.getRate?.() || 1);
     speedBtn.querySelector('span').textContent = `${curRate}x`;

@@ -1,48 +1,49 @@
-// Watchlivo Institutional Footer, On-Page SEO Hub, FAQ Accordion, Legal Modals & Contact/DMCA Engine (v125)
-import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261114_v215';
-import { api } from '../api.js?v=20261114_v215';
-import { state } from '../store.js?v=20261114_v215';
+// Watchlivo footer: FAQ, legal pages (privacy / terms / copyright takedown) and contact form.
+import { h, popup, toast, openDownloadModal } from '../ui.js?v=20261118_v184';
+import { api } from '../api.js?v=20261118_v184';
+import { state } from '../store.js?v=20261118_v184';
 
-export const OFFICIAL_CONTACT_EMAIL = 'dmca@watchlivo.online';
+export const OFFICIAL_CONTACT_EMAIL = 'jokallame0@gmail.com';
 
 export const FAQ_ITEMS = [
   {
     q: 'Watchlivo nedir ve nasıl çalışır?',
-    a: 'Watchlivo, arkadaşlarınla veya sevgilinle mesafeleri ortadan kaldırarak aynı anda, saliselik senkronizasyonla film, dizi, anime, YouTube videoları ve 7/24 canlı TV kanalları izleyebileceğin yeni nesil bir birlikte izleme (watch party) platformudur. Oda kurduğunda veya bir odaya katıldığında video oynatma, duraklatma ve ileri/geri sarma işlemleri odadaki herkes için anında eşitlenir.',
+    a: 'Watchlivo, arkadaşlarınla uzaktan aynı anda video izleyip müzik dinleyebileceğin bir birlikte izleme (watch party) uygulamasıdır. Oda kurduğunda oynatma, duraklatma ve ileri/geri sarma işlemleri odadaki herkes için eşitlenir; sohbet ve sesli konuşma odanın içindedir.',
   },
   {
-    q: 'Watchlivo ücretli mi, izlemek için üyelik gerekiyor mu?',
-    a: 'Watchlivo tamamen ücretsizdir. Hiçbir ücret ödemeden veya zorunlu kayıt olmadan tek tıkla misafir olarak odalara katılabilir ve kendi sinema odanı kurabilirsin. Dilersen ücretsiz hesap oluşturarak arkadaş listeni, özel mesajlarını (DM) ve izleme geçmişini tüm cihazlarında senkronize tutabilirsin.',
+    q: 'Netflix, Disney+, Prime Video, Exxen veya BluTV ile nasıl birlikte izlerim?',
+    a: 'Abonelik platformları yalnızca Watchlivo uygulamasında (Android, Windows, iOS) ve herkesin KENDİ hesabıyla çalışır. Uygulamanın dahili tarayıcısında platform açılır, her katılımcı kendi aboneliğiyle giriş yapar ve Watchlivo sadece oynat / duraklat / sar komutlarını eşitler. Watchlivo bu platformların içeriğini barındırmaz, kopyalamaz veya şifrelerini istemez.',
   },
   {
-    q: 'Arkadaşlarımla aynı anda nasıl film, dizi veya anime izlerim?',
-    a: 'Ana sayfadaki arama çubuğundan veya Sinema+, Dizi ve Anime vitrininden istediğin yapımı seçip tıklaman yeterlidir; sistem otomatik olarak sana özel bir izleme odası açar. Sağ üstteki "Davet Et" butonundan oda bağlantısını kopyalayıp WhatsApp, Discord veya Telegram üzerinden arkadaşına gönderebilirsin.',
+    q: 'Tarayıcıda hangi kaynakları doğrudan izleyebilirim?',
+    a: 'YouTube araması ve bağlantıları, kendi Google Drive dosyaların, yüklediğin video dosyaları, Vimeo / Twitch / Kick / Dailymotion bağlantıları ve müzik (Spotify, YouTube Music, Deezer, Apple Music, SoundCloud) doğrudan tarayıcıda senkron oynatılır.',
   },
   {
-    q: 'Odada sesli sohbet (mikrofon) ve kamera nasıl açılır?',
-    a: 'İzleme odasına girdiğinde sağ paneldeki "Sesliye Katıl" butonuna tıklayarak düşük gecikmeli WebRTC sesli sohbete bağlanabilirsin. Film sesini kısmadan arkadaşlarınla net şekilde konuşabilir, yazılı sohbetten anlık emoji reaksiyonları ve sesli notlar gönderebilirsin.',
+    q: 'Watchlivo ücretli mi, üyelik gerekiyor mu?',
+    a: 'Watchlivo ücretsizdir; misafir olarak odalara katılabilirsin. Ücretsiz Watchlivo hesabı arkadaş listeni, özel mesajlarını ve izleme geçmişini cihazların arasında senkron tutar. Abonelik platformları için ilgili platformun kendi aboneliği gerekir.',
   },
   {
-    q: 'Telefonda (iPhone / Android) ve bilgisayarda uygulama olarak nasıl kullanılır?',
-    a: 'Watchlivo kurulum gerektirmeden tüm mobil ve masaüstü tarayıcılarda çalışır. Ayrıca üst menüdeki "APK İndir (v2.0.2)" butonuyla Android yerel uygulamasını indirebilir, iPhone (Safari) veya bilgisayarında "Ana Ekrana Ekle / Uygulamayı Yükle" seçeneğiyle tam ekran PWA olarak kullanabilirsin.',
+    q: 'Odada sesli sohbet (mikrofon) nasıl açılır?',
+    a: 'İzleme odasına girdiğinde sağ paneldeki "Sesliye Katıl" butonuna tıklayarak düşük gecikmeli WebRTC sesli sohbete bağlanabilir, yazılı sohbetten emoji tepkileri ve sesli notlar gönderebilirsin.',
   },
   {
-    q: 'Telif hakkı (DMCA), içerik kaldırma ve hata bildirimleri nereye yapılır?',
-    a: `Watchlivo kendi sunucularında hiçbir video veya medya dosyası barındırmaz (non-hosting player); içerikler üçüncü taraf açık kaynaklardan ve resmi embed servislerinden senkronize edilir. Telif hakkı bildirimleri, içerik kaldırma talepleri veya çalışmayan bölüm raporları için sayfanın altındaki "Film/Dizi İste & Hata Bildir" formunu kullanabilir ya da doğrudan ${OFFICIAL_CONTACT_EMAIL} adresine e-posta gönderebilirsiniz.`,
+    q: 'Telif hakkı bildirimleri nereye yapılır?',
+    a: `Watchlivo herhangi bir film veya dizi kataloğu sunmaz ve medya dosyası barındırmaz. Bir odada hak ihlali olduğunu düşünüyorsan sayfanın altındaki "Telif / İçerik Kaldırma Talebi" formunu kullanabilir ya da ${OFFICIAL_CONTACT_EMAIL} adresine yazabilirsin.`,
   },
 ];
 
 const LEGAL_SECTIONS = {
   about: {
-    title: 'ℹ️ Hakkımızda — Watchlivo Sinema & Medya Platformu',
+    title: 'ℹ️ Hakkımızda — Watchlivo Birlikte İzleme Uygulaması',
     url: '/about',
     html: `
-      <p><b>Watchlivo (watchlivo.online)</b>, insanların fiziksel olarak ayrı olsalar bile aynı koltukta oturuyormuş gibi birlikte sinema, dizi, anime, canlı televizyon ve müzik deneyimi yaşaması için geliştirilmiş gerçek zamanlı bir sosyal medya ve senkronize izleme platformudur.</p>
+      <p><b>Watchlivo (watchlivo.online)</b>, insanların fiziksel olarak ayrı olsalar bile aynı koltukta oturuyormuş gibi birlikte video izleyip müzik dinlemesi için geliştirilmiş gerçek zamanlı bir sosyal ve senkronize izleme uygulamasıdır. Abonelik platformlarında her katılımcı kendi hesabını kullanır; Watchlivo yalnızca oynatmayı eşitler.</p>
       <h4>🌟 Neden Watchlivo?</h4>
       <ul>
         <li><b>Milisaniyelik Senkronizasyon Motoru:</b> Odadaki herkes videonun tam olarak aynı saniyesini görür. Duraklatma, sarma ve bölüm geçişleri anında eşitlenir.</li>
         <li><b>Kristal Netliğinde WebRTC Sesli Sohbet:</b> Harici bir uygulamaya ihtiyaç duymadan oda içinde mikrofonla konuşabilir, sesli not ve canlı tepkiler gönderebilirsiniz.</li>
-        <li><b>Zengin Türkçe Dublaj & Altyazı Seçenekleri:</b> Binlerce film, dizi ve anime içeriğinde Türkçe dublaj, Türkçe altyazı ve orijinal dil alternatifleri tek tıkla değiştirilebilir.</li>
+        <li><b>Kendi Hesabınla Platformlar:</b> Netflix, Disney+, Prime Video, Max, Exxen, BluTV ve diğerleri Watchlivo uygulamasının dahili tarayıcısında, herkesin kendi aboneliğiyle açılır.</li>
+        <li><b>Doğrudan Kaynaklar:</b> YouTube, kendi Google Drive dosyaların, yüklediğin videolar ve müzik servisleri tarayıcıda senkron çalışır.</li>
         <li><b>Her Cihazda Kesintisiz Deneyim:</b> Web tarayıcısı, Android Native APK (v2.0.2), iOS Tam Ekran Web Uygulaması (PWA) ve Windows masaüstü desteğiyle her ekranda yanınızdadır.</li>
       </ul>
       <p>Resmi İletişim & İşbirliği: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
@@ -71,10 +72,10 @@ const LEGAL_SECTIONS = {
     html: `
       <p><b>watchlivo.online</b> platformuna erişerek ve izleme odalarını kullanarak aşağıdaki koşulları kabul etmiş sayılırsınız:</p>
       <h4>1. Hizmetin Niteliği</h4>
-      <p>Watchlivo, kullanıcıların internet üzerindeki açık medya akışlarını, video bağlantılarını ve gömülü (embed) oynatıcıları arkadaşlarıyla senkronize şekilde izlemesini sağlayan interaktif bir web uygulamasıdır.</p>
+      <p>Watchlivo, kullanıcıların YouTube gibi resmi oynatıcıları, kendi dosyalarını ve kendi hesaplarıyla eriştikleri abonelik platformlarını arkadaşlarıyla senkronize şekilde izlemesini sağlayan bir uygulamadır. Watchlivo içerik kataloğu sunmaz; kullanıcılar yalnızca erişim hakkına sahip oldukları içerikleri paylaşabilir.</p>
       <h4>2. Topluluk ve Oda Kuralları</h4>
       <ul>
-        <li>Herkese açık (Public) odalarda diğer izleyicilere yönelik hakaret, nefret söylemi, taciz, spam veya yasa dışı bağlantı paylaşımı kesinlikle yasaktır.</li>
+        <li>Herkese açık (Public) odalarda hakaret, nefret söylemi, taciz, spam, yasa dışı veya telif hakkını ihlal eden bağlantı paylaşımı kesinlikle yasaktır.</li>
         <li>Oda kurucuları (Host), kendi odalarındaki düzeni sağlamak adına katılımcıları sessize alma, odadan çıkarma veya odayı şifreli/gizli moda alma yetkisine sahiptir.</li>
         <li>Platformun güvenliğini tehlikeye atacak otomatik bot, saldırı veya tersine mühendislik girişimlerinde bulunan IP adresleri sistem tarafından otomatik olarak engellenir.</li>
       </ul>
@@ -86,17 +87,17 @@ const LEGAL_SECTIONS = {
     title: '⚖️ Telif Hakkı (DMCA) & İçerik Kaldırma Bildirimi',
     url: '/dmca',
     html: `
-      <p><b>Watchlivo (watchlivo.online)</b>, 5651 sayılı Kanun ve uluslararası Dijital Binyıl Telif Hakkı Yasası (DMCA - 17 U.S.C. § 512) kapsamında <b>"Yer Sağlayıcı / İçerik Barındırmayan Senkronize Oynatıcı (Non-Hosting Index & Watch-Party Tool)"</b> statüsünde hizmet vermektedir.</p>
-      <h4>1. Medya Barındırmama Beyanı</h4>
-      <p>Watchlivo sunucularında hiçbir film, dizi, video veya ses dosyası fiziksel olarak barındırılmamaktadır. Platformda görüntülenen tüm videolar YouTube, herkese açık harici video sunucuları ve üçüncü taraf embed servisleri üzerinden anlık olarak çağrılmaktadır.</p>
+      <p><b>Watchlivo (watchlivo.online)</b> bir birlikte izleme (watch party) aracıdır; film veya dizi kataloğu sunmaz, medya dosyası barındırmaz ve abonelik platformlarının içeriğini yeniden yayınlamaz.</p>
+      <h4>1. İçerik Kaynakları</h4>
+      <p>Odalarda oynatılan içerikler YouTube gibi resmi oynatıcılardan, kullanıcıların kendi yüklediği veya kendi Google Drive hesabından paylaştığı dosyalardan ya da her katılımcının kendi hesabıyla giriş yaptığı abonelik platformlarından gelir.</p>
       <h4>2. Uyar-Kaldır (Notice and Takedown) Prosedürü</h4>
-      <p>Telif hakkı kendisine ait olan bir yapımın indeksimizden veya katalog bağlantılarımızdan kaldırılmasını talep eden hak sahipleri ya da yetkili vekilleri, aşağıdaki bilgilerle birlikte resmi bildirimde bulunabilir:</p>
+      <p>Hak sahipleri veya yetkili vekilleri, ihlal içerdiğini düşündükleri bir oda veya kullanıcı yüklemesi için aşağıdaki bilgilerle bildirimde bulunabilir:</p>
       <ul>
         <li>Hak sahibi olunduğunu gösteren belge veya yetki beyanı,</li>
-        <li>İlgili içeriğin Watchlivo üzerindeki başlığı veya bağlantısı,</li>
+        <li>İlgili oda bağlantısı veya yüklenen dosyanın adı,</li>
         <li>İletişim kurulabilecek ad, soyad, telefon ve e-posta adresi.</li>
       </ul>
-      <p>Geçerli telif bildirimleri en geç <b>24 saat içerisinde</b> incelenerek ilgili bağlantı platform dizininden kalıcı olarak kaldırılır. Resmi DMCA Başvuru Adresi: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
+      <p>Geçerli telif bildirimleri en geç <b>24 saat içerisinde</b> incelenir; ilgili yükleme veya oda kaldırılır. Resmi DMCA Başvuru Adresi: <a href="mailto:${OFFICIAL_CONTACT_EMAIL}" style="color:#27dcc8;font-weight:700;">${OFFICIAL_CONTACT_EMAIL}</a></p>
     `,
   },
   cookies: {
@@ -180,7 +181,7 @@ export function openLegalModal(initialTab = 'about') {
 export function openContactModal(initialType = 'request') {
   const self = state.self || {};
   const typeSelect = h('select', { class: 'input wl-contact-select', id: 'wl-contact-type' },
-    h('option', { value: 'request', selected: initialType === 'request' }, '🎬 Film / Dizi / Anime İsteği'),
+    h('option', { value: 'request', selected: initialType === 'request' }, '💡 Özellik / Platform İsteği'),
     h('option', { value: 'bug', selected: initialType === 'bug' }, '🐞 Video / Altyazı / Ses Hatası Bildirimi'),
     h('option', { value: 'contact', selected: initialType === 'contact' }, '💡 Genel İletişim, Öneri & İşbirliği'),
     h('option', { value: 'dmca', selected: initialType === 'dmca' }, '⚖️ Telif Hakkı (DMCA) & İçerik Kaldırma Talebi')
@@ -201,12 +202,12 @@ export function openContactModal(initialType = 'request') {
   const subjectInput = h('input', {
     class: 'input',
     id: 'wl-contact-subject',
-    placeholder: initialType === 'dmca' ? 'İlgili içerik başlığı veya URL bağlantısı' : 'Film/Dizi adı veya konu başlığı (Örn: Interstellar 4K / 3. Bölüm Altyazı)',
+    placeholder: initialType === 'dmca' ? 'İlgili içerik başlığı veya URL bağlantısı' : 'Konu başlığı (Örn: Oda senkron sorunu / Platform önerisi)',
   });
   const msgInput = h('textarea', {
     class: 'input wl-contact-textarea',
     id: 'wl-contact-msg',
-    rows: '3',
+    rows: '4',
     placeholder: 'Detayları buraya yazabilirsiniz... Ekibimiz en kısa sürede inceleyip dönüş yapacaktır.',
   });
   const statusEl = h('div', { class: 'wl-contact-status', id: 'wl-contact-status' });
@@ -237,7 +238,7 @@ export function openContactModal(initialType = 'request') {
   );
 
   popup({
-    title: '✉️ Bize Ulaşın · Film/Dizi İste & Hata Bildir',
+    title: '✉️ Bize Ulaşın · Öneri & Hata Bildir',
     content: formWrap,
     options: [
       {
@@ -323,11 +324,11 @@ export function initCookieConsentBanner() {
   } catch (_) {}
 }
 
-export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRandomMovie } = {}) {
+export function renderSiteFooterSection({ onSelectCategory, onScrollToTv } = {}) {
   const trustCards = [
     ['⚡', 'Saliselik Senkronizasyon', 'Arkadaşlarınla aynı karede durdur, sar ve sıfır gecikmeyle birlikte izle.'],
     ['🎙️', 'Kristal Netliğinde Sesli Sohbet', 'Oda içi WebRTC düşük gecikmeli mikrofon, sesli not ve anlık emoji tepkileri.'],
-    ['🇹🇷', '4K Türkçe Dublaj & Altyazı', 'Vizyon filmleri, popüler diziler, animeler, 7/24 canlı TV ve YouTube akışları.'],
+    ['🔑', 'Kendi Hesabınla Platformlar', 'Netflix, Disney+, Exxen, BluTV ve diğerleri uygulamada, herkesin kendi aboneliğiyle senkron.'],
     ['📱', 'Kurulumsuz Web, iOS & Android', 'Tarayıcıdan anında katıl veya PWA / Native APK v2.0.2 ile tam ekran izle.'],
   ];
 
@@ -354,17 +355,17 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
     h('div', { class: 'wl-faq-section', id: 'wl-faq-section' },
       h('div', { class: 'wl-sec-header' },
         h('h2', { class: 'wl-sec-title' }, '❓ Sıkça Sorulan Sorular (SSS)'),
-        h('span', { class: 'wl-sec-sub' }, 'Watchlivo senkronize sinema odaları hakkında merak edilenler')),
+        h('span', { class: 'wl-sec-sub' }, 'Watchlivo birlikte izleme odaları hakkında merak edilenler')),
       faqBox),
 
     h('article', { class: 'wl-seo-article-box' },
-      h('h2', { class: 'wl-seo-title' }, 'Watchlivo — Arkadaşlarla Online Birlikte Film, Dizi, Anime ve YouTube İzleme Platformu'),
+      h('h2', { class: 'wl-seo-title' }, 'Watchlivo — Arkadaşlarınla Senkron Birlikte İzle'),
       h('p', { class: 'wl-seo-p' },
-        'Watchlivo (watchlivo.online); uzaktaki arkadaşlarınla, sevgilinle veya topluluğunla aynı anda tek kare gecikmesiz sinema keyfi yaşaman için tasarlanmış Türkiye\'nin yeni nesil birlikte izleme (Watch Party) platformudur. Üyelik zorunluluğu olmadan saniyeler içinde herkese açık veya şifreli özel sinema odası kurabilir; Türkçe dublaj ve Türkçe altyazılı binlerce film, popüler yabancı ve yerli dizi, güncel anime bölümleri, 7/24 kesintisiz canlı televizyon kanalları ve YouTube videolarını senkronize olarak izleyebilirsin.'),
+        'Watchlivo; uzaktaki arkadaşlarınla, sevgilinle veya topluluğunla aynı anda video izlemen ve müzik dinlemen için tasarlanmış bir birlikte izleme (watch party) uygulamasıdır. YouTube, kendi Google Drive dosyaların, yüklediğin videolar ve müzik servisleri tarayıcıda doğrudan senkron oynar.'),
       h('p', { class: 'wl-seo-p' },
-        'Rave, Teleparty ve Kosmi gibi uygulamalara kıyasla ekstra eklenti kurulumu gerektirmeyen Watchlivo; doğrudan Chrome, Brave, Safari, iOS, Android ve masaüstü tarayıcılarında çalışır. Oda içi düşük gecikmeli WebRTC sesli sohbet, sesli mesaj (voice note), gerçek zamanlı çeviri destekli yazılı sohbet ve akıllı TV kumanda navigasyonu ile sinema salonunu ekranına taşır.'),
+        'Netflix, Disney+, Prime Video, Max, Exxen, BluTV ve diğer abonelik platformları Rave modelinde olduğu gibi Watchlivo uygulamasının (Android, Windows, iOS) dahili tarayıcısında açılır: odadaki herkes kendi hesabıyla giriş yapar, Watchlivo yalnızca oynat / duraklat / sar komutlarını eşitler. Oda içinde WebRTC sesli sohbet, sesli not ve yazılı sohbet vardır.'),
       h('div', { class: 'wl-seo-tags' },
-        ...['#BirlikteFilmİzle', '#WatchPartyTürkiye', '#ArkadaşlarlaDiziİzle', '#SevgiliyleFilmİzlemeSitesi', '#OnlineSinemaOdası', '#TürkçeDublajFilm', '#AnimeWatchParty', '#RaveAlternatif', '#CanlıTVOdaları'].map((tag) =>
+        ...['#BirlikteIzle', '#WatchPartyTürkiye', '#YouTubeBirlikteIzle', '#KendiHesabınla', '#SesliSohbet'].map((tag) =>
           h('span', { class: 'wl-seo-tag' }, tag))),
       h('div', {
         class: 'wl-social-share-bar',
@@ -372,10 +373,10 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       },
         h('span', { style: { fontSize: '0.82rem', fontWeight: '700', color: '#e2e8f0', marginRight: '4px' } }, '🚀 Watchlivo\'yu Paylaş:'),
         ...[
-          ['💬 WhatsApp', 'https://api.whatsapp.com/send?text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte film, dizi, anime ve canlı TV izle! https://watchlivo.online')],
-          ['✈️ Telegram', 'https://t.me/share/url?url=' + encodeURIComponent('https://watchlivo.online') + '&text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla senkronize film, dizi, anime ve sesli sohbet odaları!')],
-          ['𝕏 X (Twitter)', 'https://twitter.com/intent/tweet?text=' + encodeURIComponent('🎬 Arkadaşlarla uzaktan aynı anda film, dizi, anime ve canlı TV izleme platformu: Watchlivo 🍿✨') + '&url=' + encodeURIComponent('https://watchlivo.online')],
-          ['🔥 Reddit', 'https://www.reddit.com/submit?url=' + encodeURIComponent('https://watchlivo.online') + '&title=' + encodeURIComponent('Watchlivo — Arkadaşlarla Senkronize Film, Dizi, Anime & Sesli Sohbet Odaları (Rave Alternatifi)')],
+          ['💬 WhatsApp', 'https://api.whatsapp.com/send?text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla aynı anda, senkron birlikte izle! https://watchlivo.online')],
+          ['✈️ Telegram', 'https://t.me/share/url?url=' + encodeURIComponent('https://watchlivo.online') + '&text=' + encodeURIComponent('🎬 Watchlivo — Arkadaşlarınla senkron izleme ve sesli sohbet odaları!')],
+          ['𝕏 X (Twitter)', 'https://twitter.com/intent/tweet?text=' + encodeURIComponent('🎬 Arkadaşlarla uzaktan aynı anda birlikte izleme uygulaması: Watchlivo 🍿✨') + '&url=' + encodeURIComponent('https://watchlivo.online')],
+          ['🔥 Reddit', 'https://www.reddit.com/submit?url=' + encodeURIComponent('https://watchlivo.online') + '&title=' + encodeURIComponent('Watchlivo — Arkadaşlarla Senkron Birlikte İzleme & Sesli Sohbet Odaları')],
         ].map(([lbl, href]) =>
           h('a', {
             href,
@@ -392,8 +393,8 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
           onclick: () => {
             if (navigator.share) {
               navigator.share({
-                title: 'Watchlivo — Birlikte Sinema, Dizi & Anime Odaları',
-                text: 'Arkadaşlarınla aynı anda, tek kare gecikmesiz film, dizi, anime ve canlı TV izle!',
+                title: 'Watchlivo — Senkron Birlikte İzleme Odaları',
+                text: 'Arkadaşlarınla aynı anda, senkron birlikte izle!',
                 url: 'https://watchlivo.online',
               }).catch(() => {});
             } else {
@@ -407,13 +408,13 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
       h('div', { class: 'wl-footer-cols' },
         h('div', { class: 'wl-footer-col brand-col' },
           h('div', { class: 'wl-footer-brand' },
-            h('img', { src: '/static/watchlivo-logo.svg?v=20261114_v215', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
+            h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v184', alt: 'Watchlivo', class: 'wl-footer-logo', width: '28', height: '28' }),
             h('span', { class: 'wl-footer-wordmark' }, 'WATCHLIVO')),
           h('p', { class: 'wl-footer-brand-desc' },
-            'Arkadaşlarınla aynı anda, tek kare gecikmesiz birlikte sinema, dizi, anime, canlı TV ve müzik odaları.'),
+            'Arkadaşlarınla aynı anda senkron izleme ve müzik odaları.'),
           h('div', { class: 'wl-footer-status-pill' },
             h('span', { class: 'wl-status-dot' }),
-            'Tüm Sunucular Aktif · 1080p/4K Senkron Motoru'),
+            'Tüm Sunucular Aktif · Senkron Motoru'),
           h('div', { class: 'wl-footer-mail-box' },
             h('span', { class: 'wl-footer-mail-lbl' }, '📩 Resmi İletişim & Destek E-Postası:'),
             h('div', { class: 'wl-footer-mail-row' },
@@ -422,24 +423,19 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
                 type: 'button',
                 class: 'wl-footer-copy-btn',
                 title: 'E-posta adresini kopyala',
-                onclick: (e) => {
-                  const btn = e.currentTarget;
+                onclick: () => {
                   navigator.clipboard?.writeText(OFFICIAL_CONTACT_EMAIL).catch(() => {});
                   toast(`📋 Kopyalandı: ${OFFICIAL_CONTACT_EMAIL}`);
-                  btn.textContent = '✓ Kopyalandı';
-                  setTimeout(() => { btn.textContent = 'Kopyala'; }, 1800);
                 },
               }, 'Kopyala')))),
 
         h('div', { class: 'wl-footer-col' },
           h('h4', { class: 'wl-footer-heading' }, 'Keşfet & Kategoriler'),
           h('ul', { class: 'wl-footer-links' },
-            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('movie') }, '🎬 Vizyon & Trend Filmler')),
-            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('series') }, '📺 Popüler Diziler & Yeni Bölümler')),
-            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('anime') }, '⛩️ Anime Arşivi & Odaları')),
-            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onScrollToTv?.() }, '📡 7/24 Canlı TV & Radyo')),
-            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onRandomMovie?.() }, '🎲 Rastgele Film Öner')),
-            h('li', {}, h('a', { href: '/r/cinema-club', class: 'wl-footer-link-btn' }, '🍿 7/24 Sinema Kulübü Odası')))),
+            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('youtube') }, '▶ YouTube ile Birlikte İzle')),
+            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('drive') }, '📁 Google Drive Dosyaların')),
+            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onSelectCategory?.('music') }, '🎵 Müzik Odaları')),
+            h('li', {}, h('button', { type: 'button', class: 'wl-footer-link-btn', onclick: () => onScrollToTv?.() }, '📡 Canlı Odalar')))),
 
         h('div', { class: 'wl-footer-col' },
           h('h4', { class: 'wl-footer-heading' }, 'Kurumsal & Yasal'),
@@ -459,7 +455,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
               class: 'btn sm primary wl-footer-cta-btn',
               id: 'wl-btn-contact-request',
               onclick: () => openContactModal('request'),
-            }, '🎬 Film/Dizi İste & Hata Bildir'),
+            }, '🐞 Öneri & Hata Bildir'),
             h('button', {
               type: 'button',
               class: 'btn sm wl-footer-cta-btn',
@@ -478,7 +474,7 @@ export function renderSiteFooterSection({ onSelectCategory, onScrollToTv, onRand
 
       h('div', { class: 'wl-footer-bottom' },
         h('div', { class: 'wl-footer-copy' },
-          '© 2026 Watchlivo (watchlivo.online) · Tüm hakları saklıdır. Watchlivo kendi sunucularında hiçbir medya dosyası barındırmaz (5651 & DMCA Uyumlu Yer Sağlayıcı / Senkronize Oynatıcı).'),
+          '© 2026 Watchlivo (watchlivo.online) · Tüm hakları saklıdır. Watchlivo içerik kataloğu sunmaz; abonelik platformları her kullanıcının kendi hesabıyla açılır.'),
         h('div', { class: 'wl-footer-bottom-links' },
           h('a', { href: '/about' }, 'Hakkımızda'),
           h('span', {}, '·'),

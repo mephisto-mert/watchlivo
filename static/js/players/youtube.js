@@ -1,9 +1,7 @@
 // YouTube Ad-Free Direct HTML5/HLS/fMP4 Engine + Music Vinyl Visualizer (with youtube-nocookie.com fallback).
-import { SubtitleDubController } from './subtitles.js?v=20261114_v215';
-import { applyElementVolume, ensureIosPlaybackAudioSession, getBgRelayAudio, isIosWebKit, primeBgRelayAudio, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261114_v215';
-import { ensureHlsJs } from './hls-loader.js?v=20261114_v215';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261114_v215';
-import { expectedPosition } from '../sync.js?v=20261114_v215';
+import { SubtitleDubController } from './subtitles.js?v=20261118_v184';
+import { applyElementVolume, ensureIosPlaybackAudioSession, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext } from './audio-gain.js?v=20261118_v184';
+import { ensureHlsJs } from './hls-loader.js?v=20261118_v184';
 
 let apiPromise = null;
 function loadYouTubeApi() {
@@ -215,42 +213,27 @@ export class YouTubeAdapter {
       if (!this._destroyed && this.video === v && this.wantPlaying) this.events.onBuffering?.(true);
     });
     v.addEventListener('pause', () => {
-      if (this._destroyed || this.video !== v || v.ended || this._bgAudioActive) return;
+      if (this._destroyed || this.video !== v || v.ended) return;
       if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
         this._suppressYtPauseOnce = false;
         return;
       }
-      const visRecent = Boolean(this._lastVisChangeAt && Date.now() - this._lastVisChangeAt < 1500);
-      const isHidden = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
-      if ((isHidden || visRecent) && this.wantPlaying && !this._userPausedViaMediaSession) {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && this.wantPlaying && !this._userPausedViaMediaSession) {
         let bgOk = true;
         try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
         if (bgOk) {
-          if (isHidden && !this.isPiP() && isIosWebKit()) {
-            if (this._startYtBgBridge()) return;
-          }
-          [140, 380].forEach((ms) => setTimeout(() => {
-            if (this._destroyed || this.video !== v || !this.wantPlaying || this._userPausedViaMediaSession) return;
-            const hidNow = typeof document !== 'undefined' && (document.visibilityState === 'hidden' || document.hidden);
-            if (hidNow && !this.isPiP() && ms >= 380 && v.paused && !v.ended) {
-              if (this._startYtBgBridge()) return;
-            }
-            if (v.paused && !v.ended) {
+          setTimeout(() => {
+            if (!this._destroyed && this.video === v && this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
               ensureIosPlaybackAudioSession();
               v.play().catch(() => {});
             }
-          }, ms));
+          }, 150);
         }
         return;
       }
       this._syncPipBridgeState(false);
       this.events.onBuffering?.(false);
       this.events.onPause?.();
-    });
-    v.addEventListener('timeupdate', () => {
-      if (typeof document !== 'undefined' && document.hidden && typeof window !== 'undefined' && !v.paused) {
-        window.__watchlivoBgSyncTick?.();
-      }
     });
     v.addEventListener('ended', () => {
       if (this._destroyed || this.video !== v) return;
@@ -263,7 +246,6 @@ export class YouTubeAdapter {
     });
     v.addEventListener('enterpictureinpicture', () => {
       this._pipActive = true;
-      this._stopYtBgBridge(true);
       this.subs?.syncNativeTrackToElement?.(v, true);
       this.events.onPipChange?.(true);
     });
@@ -277,7 +259,6 @@ export class YouTubeAdapter {
       if (this._destroyed || this.video !== v) return;
       const inPipNow = v.webkitPresentationMode === 'picture-in-picture';
       this._pipActive = inPipNow;
-      if (inPipNow) this._stopYtBgBridge(true);
       this.subs?.syncNativeTrackToElement?.(v, inPipNow);
       if (!inPipNow && this.wantPlaying && v.paused && !v.ended) v.play().catch(() => {});
       this.events.onPipChange?.(inPipNow);
@@ -285,44 +266,16 @@ export class YouTubeAdapter {
 
     this._visHandler = () => {
       if (this._destroyed || this.video !== v) return;
-      this._lastVisChangeAt = Date.now();
       if (document.visibilityState === 'visible') {
-        if (this._bgAudioActive) this._stopYtBgBridge(true);
-        const roomM = state.mesh?.media;
-        if (roomM && !roomM.live && isRoomMediaPlaying(roomM)) {
-          this._suppressLeaderAnchorUntil = performance.now() + 2600;
-          const exp = expectedPosition(roomM);
-          if (Number.isFinite(exp) && exp > 0.5 && Math.abs((v.currentTime || 0) - exp) > 1.4 && Math.abs((v.currentTime || 0) - exp) < 300) {
-            try { v.currentTime = exp; } catch (_) {}
-          }
-        }
-        if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended && !this.isPiP()) {
+        if (this.wantPlaying && !this._userPausedViaMediaSession && v.paused && !v.ended) {
           v.play().catch(() => {});
         }
       } else if (document.visibilityState === 'hidden' && this.wantPlaying && !v.ended && !this._userPausedViaMediaSession) {
         ensureIosPlaybackAudioSession();
-        resumeSharedAudioContext();
-        this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
         let bgOk = true;
         try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
-        if (bgOk && !this.isPiP()) {
-          if (!isIosWebKit() && v.paused) v.play().catch(() => {});
-          [140, 360].forEach((ms) => setTimeout(() => {
-            if (this._destroyed || this.video !== v || !this.wantPlaying || this._userPausedViaMediaSession) return;
-            if (typeof document === 'undefined' || document.visibilityState !== 'hidden' || this.isPiP()) return;
-            if (this._bgAudioActive) {
-              if (this._bgAudioEl?.paused && !this._bgAudioEl.ended) this._bgAudioEl.play().catch(() => {});
-              return;
-            }
-            if (v.paused && !v.ended) {
-              if (isIosWebKit() || ms >= 360) {
-                if (!this._startYtBgBridge()) v.play().catch(() => {});
-              } else {
-                v.play().catch(() => {});
-              }
-            }
-          }, ms));
-        }
+        if (bgOk && v.paused) v.play().catch(() => {});
+        this.enterAutoPiP?.('visibilitychange')?.catch?.(() => {});
       }
     };
     this._pageHideHandler = () => {
@@ -432,7 +385,7 @@ export class YouTubeAdapter {
     });
   }
 
-  async _loadNoCookieIframeFallback(mount, videoId, startAt = 0, autoplay = true, useStdHost = false) {
+  async _loadNoCookieIframeFallback(mount, videoId, startAt = 0, autoplay = true) {
     try {
       await loadYouTubeApi();
     } catch (err) {
@@ -447,13 +400,12 @@ export class YouTubeAdapter {
     await new Promise((resolve) => {
       let settled = false;
       const done = () => { if (!settled) { settled = true; resolve(); } };
-      const safeOrigin = (typeof location !== 'undefined' && /^https?:\/\//.test(location.origin)) ? location.origin : 'https://watchlivo.online';
       this.player = new window.YT.Player(mount, {
-        host: useStdHost ? 'https://www.youtube.com' : 'https://www.youtube-nocookie.com',
+        host: 'https://www.youtube-nocookie.com',
         width: '100%',
         height: '100%',
         videoId,
-        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: safeOrigin },
+        playerVars: { autoplay: autoplay ? 1 : 0, controls: 0, disablekb: 1, rel: 0, modestbranding: 1, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, fs: 0, start: Math.floor(startAt), origin: location.origin },
         events: {
           onReady: () => {
             if (this._destroyed) return;
@@ -472,10 +424,8 @@ export class YouTubeAdapter {
             done();
             this.events.onBuffering?.(false);
             this.events.onReady?.();
-            clearTimeout(this.autoplayTimer);
             if (autoplay) {
               this.autoplayTimer = setTimeout(() => {
-                if (this._destroyed || !this.wantPlaying || this.userExplicitMuted) return;
                 const st = this.player?.getPlayerState?.();
                 if (st === -1 || st === 5 || st === 2) {
                   this.player?.mute?.();
@@ -495,32 +445,17 @@ export class YouTubeAdapter {
               this.events.onBuffering?.(false);
               this.events.onPlay?.();
             } else if (e.data === S.PAUSED) {
-              clearTimeout(this.autoplayTimer);
-              if (this._suppressYtPauseOnce || this._pipActive || this._bgAudioActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
+              if (this._suppressYtPauseOnce || this._pipActive || (typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
                 this._suppressYtPauseOnce = false;
                 return;
-              }
-              if (typeof document !== 'undefined' && document.hidden && this.wantPlaying && !this._userPausedViaMediaSession) {
-                let bgOk = true;
-                try { bgOk = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
-                if (bgOk && this._startYtBgBridge()) return;
               }
               this._syncPipBridgeState(false);
               this.events.onBuffering?.(false);
               this.events.onPause?.();
             } else if (e.data === S.BUFFERING) this.events.onBuffering?.(true);
-            else if (e.data === S.ENDED) { clearTimeout(this.autoplayTimer); this.events.onBuffering?.(false); this.events.onEnded?.(); }
+            else if (e.data === S.ENDED) { this.events.onBuffering?.(false); this.events.onEnded?.(); }
           },
           onError: (e) => {
-            clearTimeout(this.autoplayTimer);
-            const errCode = Number(e?.data || 0);
-            if (!useStdHost && [101, 150, 153].includes(errCode) && !this._destroyed) {
-              try { this.player?.destroy?.(); } catch (_) {}
-              this.player = null;
-              mount.replaceChildren();
-              this._loadNoCookieIframeFallback(mount, videoId, Math.floor(this.getTime() || startAt), this.wantPlaying, true).then(done, done);
-              return;
-            }
             if (this.altQueue.length > 0 && this.player?.loadVideoById) {
               const nextVid = this.altQueue.shift();
               try { this.player.loadVideoById(nextVid, Math.floor(this.getTime() || startAt)); done(); return; } catch (_) {}
@@ -581,16 +516,14 @@ export class YouTubeAdapter {
 
   _mountVinylOverlay(media) {
     const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    const rawCover = media.poster || media.thumbnail || '/static/watchlivo-poster.svg';
-    const cover = esc(rawCover);
-    const safeCssCover = String(rawCover || '').replace(/['"()\\\r\n<>]/g, (c) => `%${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+    const cover = esc(media.poster || media.thumbnail || '/static/watchlivo-poster.svg');
     const title = esc((media.songTitle || media.title || 'Müzik & Klip').replace(/^🎵\s*/, ''));
     const artist = esc(media.artist || media.channel || 'Sanatçı');
     const wrap = document.createElement('div');
     wrap.className = 'music-vinyl-stage';
     wrap.style.display = 'none';
     wrap.innerHTML = `
-      <div class="music-vinyl-bg" style="background-image:url('${safeCssCover}')"></div>
+      <div class="music-vinyl-bg" style="background-image:url('${cover}')"></div>
       <div class="music-vinyl-card">
         <div class="music-vinyl-disc">
           <img src="${cover}" alt="" />
@@ -939,108 +872,9 @@ export class YouTubeAdapter {
     return false;
   }
 
-  _activeMediaEl() {
-    if (this._bgAudioActive && this._bgAudioEl) return this._bgAudioEl;
-    if (this._pipActive && this.pipVideo) return this.pipVideo;
-    return this.video || this.audioEl || null;
-  }
-
-  _startYtBgBridge() {
-    if (this._destroyed || this._bgAudioActive || this.isPiP() || !this.wantPlaying || this._userPausedViaMediaSession) return false;
-    const vid = String(this.media?.videoId || '').trim();
-    const directSrc = String(this.video?.currentSrc || this.video?.src || '');
-    const bgUrl = /^[A-Za-z0-9_-]{11}$/.test(vid)
-      ? (this.media?.live ? `/api/rave/yt-pip-hls.m3u8?v=${encodeURIComponent(vid)}&live=1` : `/api/rave/yt-music-stream?v=${encodeURIComponent(vid)}&kind=audio`)
-      : directSrc;
-    if (!bgUrl || bgUrl.startsWith('blob:')) return false;
-    const bg = getBgRelayAudio();
-    if (!bg) return false;
-    const resumeT = Math.max(0, Number(this.getTime() || 0));
-    const curRate = Number(this.getRate() || 1);
-    this._bgAudioActive = true;
-    this._bgAudioEl = bg;
-    bg.dataset.bgActive = '1';
-    this._suppressYtPauseOnce = true;
-    try { this.video?.pause?.(); } catch (_) {}
-    try { this.player?.pauseVideo?.(); } catch (_) {}
-    const bgMuted = Boolean(this._muted || this.baseVolume <= 0);
-    bg.muted = bgMuted;
-    try { bg.volume = bgMuted ? 0 : Math.max(0, Math.min(1, (this.baseVolume || 100) / 100)); } catch (_) {}
-    const onTime = () => {
-      if (this._bgAudioActive && this._bgAudioEl === bg && typeof window !== 'undefined') {
-        window.__watchlivoBgSyncTick?.();
-      }
-    };
-    const onEnd = () => {
-      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
-      this.wantPlaying = false;
-      this.events.onEnded?.();
-    };
-    const onMeta = () => {
-      if (!this._bgAudioActive || this._bgAudioEl !== bg) return;
-      if (!this.media?.live && resumeT >= 0.5 && Math.abs((bg.currentTime || 0) - resumeT) > 0.8) {
-        try { bg.currentTime = resumeT; } catch (_) {}
-      }
-      try { bg.playbackRate = curRate > 0 ? curRate : 1; } catch (_) {}
-      ensureIosPlaybackAudioSession();
-      bg.play?.().catch?.(() => {});
-    };
-    bg.addEventListener('timeupdate', onTime);
-    bg.addEventListener('ended', onEnd);
-    bg.addEventListener('loadedmetadata', onMeta);
-    this._ytBgListeners = { onTime, onEnd, onMeta };
-    ensureIosPlaybackAudioSession();
-    bg.removeAttribute('crossorigin');
-    bg.src = bgUrl;
-    try { bg.load(); } catch (_) {}
-    bg.play?.().catch?.(() => {});
-    return true;
-  }
-
-  _stopYtBgBridge(syncBack = true) {
-    if (!this._bgAudioActive) return;
-    const bg = this._bgAudioEl;
-    const exitT = bg ? Number(bg.currentTime || 0) : 0;
-    this._bgAudioActive = false;
-    this._bgAudioEl = null;
-    if (bg) {
-      if (this._ytBgListeners) {
-        bg.removeEventListener('timeupdate', this._ytBgListeners.onTime);
-        bg.removeEventListener('ended', this._ytBgListeners.onEnd);
-        bg.removeEventListener('loadedmetadata', this._ytBgListeners.onMeta);
-        this._ytBgListeners = null;
-      }
-      try { bg.pause(); } catch (_) {}
-      bg.dataset.bgActive = '';
-      try { bg.removeAttribute('src'); bg.load(); } catch (_) {}
-    }
-    if (syncBack && !this._destroyed) {
-      this._suppressLeaderAnchorUntil = performance.now() + 2600;
-      let targetT = exitT;
-      const roomM = state.mesh?.media;
-      if (roomM && !roomM.live && isRoomMediaPlaying(roomM)) {
-        const exp = expectedPosition(roomM);
-        if (Number.isFinite(exp) && exp > 0.5 && Math.abs(exp - targetT) > 1.4 && Math.abs(exp - targetT) < 300) {
-          targetT = exp;
-        }
-      }
-      if (!this.media?.live && targetT >= 0.5) {
-        if (this.video) { try { this.video.currentTime = targetT; } catch (_) {} }
-        else if (this.player) { try { this.player.seekTo?.(targetT, true); } catch (_) {} }
-      }
-      if (this.wantPlaying && !this._userPausedViaMediaSession) {
-        if (this.video) this._attemptDirectPlay(this.video);
-        else this.player?.playVideo?.();
-      }
-    }
-  }
-
   play() {
-    this._userPausedViaMediaSession = false;
     this.wantPlaying = true;
-    if (typeof navigator !== 'undefined' && navigator.userActivation?.isActive) primeBgRelayAudio();
     resumeSharedAudioContext();
-    if (this._bgAudioActive && this._bgAudioEl) { ensureIosPlaybackAudioSession(); this._bgAudioEl.play().catch(() => {}); return; }
     if (this.video) { this._attemptDirectPlay(this.video); return; }
     if (this._pipActive && this.pipVideo) { this.pipVideo.play().catch(() => {}); return; }
     if (this.audioEl) this.audioEl.play().catch(() => {});
@@ -1049,7 +883,6 @@ export class YouTubeAdapter {
 
   pause() {
     this.wantPlaying = false;
-    if (this._bgAudioActive && this._bgAudioEl) { try { this._bgAudioEl.pause(); } catch (_) {} }
     if (this.video) { try { this.video.pause(); } catch (_) {} return; }
     if (this._pipActive && this.pipVideo) { this.pipVideo.pause(); return; }
     if (this.audioEl) this.audioEl.pause();
@@ -1058,11 +891,6 @@ export class YouTubeAdapter {
 
   seek(t) {
     const target = Math.max(0, Number(t) || 0);
-    if (this._bgAudioActive && this._bgAudioEl) {
-      try { this._bgAudioEl.currentTime = target; } catch (_) {}
-      this.subs?.onTimeUpdate(target, true);
-      return;
-    }
     if (this.video) {
       if (this.video.readyState < 1) {
         this.initialSeekPending = target;
@@ -1086,16 +914,12 @@ export class YouTubeAdapter {
   }
 
   getTime() {
-    if (this._bgAudioActive && this._bgAudioEl) return Number(this._bgAudioEl.currentTime || 0);
     if (this.video) return Number(this.video.currentTime || 0);
     if (this._pipActive && this.pipVideo) return Number(this.pipVideo.currentTime || 0);
     return this.audioEl ? Number(this.audioEl.currentTime || 0) : Number(this.player?.getCurrentTime?.() || 0);
   }
 
   getDuration() {
-    if (this._bgAudioActive && this._bgAudioEl && Number.isFinite(this._bgAudioEl.duration) && this._bgAudioEl.duration > 0) {
-      return Number(this._bgAudioEl.duration);
-    }
     if (this.video) {
       const d = Number(this.video.duration);
       return (Number.isFinite(d) && d > 0) ? d : Number(this.media?.duration || 0);
@@ -1104,10 +928,6 @@ export class YouTubeAdapter {
   }
 
   getBuffered() {
-    if (this._bgAudioActive && this._bgAudioEl) {
-      const b = this._bgAudioEl.buffered;
-      return (b && b.length) ? b.end(b.length - 1) : 0;
-    }
     if (this.video) {
       const b = this.video.buffered;
       return (b && b.length) ? b.end(b.length - 1) : 0;
@@ -1116,7 +936,6 @@ export class YouTubeAdapter {
   }
 
   isPaused() {
-    if (this._bgAudioActive && this._bgAudioEl) return Boolean(this._bgAudioEl.paused);
     if (this.video) return Boolean(this.video.paused);
     if (this._pipActive && this.pipVideo) return this.pipVideo.paused;
     if (this.audioEl) return this.audioEl.paused;
@@ -1125,20 +944,11 @@ export class YouTubeAdapter {
   }
 
   isBuffering() {
-    if (this._bgAudioActive && this._bgAudioEl) return Boolean(this.wantPlaying && !this._bgAudioEl.paused && this._bgAudioEl.readyState < 2);
     if (this.video) return Boolean(this.wantPlaying && !this.video.paused && this.video.readyState < 3);
     return (this._pipActive || this.audioEl) ? false : this.player?.getPlayerState?.() === 3;
   }
 
   isBuffered(t) {
-    if (this._bgAudioActive && this._bgAudioEl) {
-      const b = this._bgAudioEl.buffered;
-      if (!b) return false;
-      for (let i = 0; i < b.length; i += 1) {
-        if (t >= b.start(i) - 0.5 && t <= b.end(i) + 0.25) return true;
-      }
-      return false;
-    }
     if (this.video) {
       const b = this.video.buffered;
       if (!b) return false;
@@ -1153,9 +963,6 @@ export class YouTubeAdapter {
 
   setRate(r) {
     const numR = Math.max(0.25, Math.min(2.0, Number(r) || 1));
-    if (this._bgAudioActive && this._bgAudioEl) {
-      try { this._bgAudioEl.playbackRate = numR; } catch (_) {}
-    }
     if (this.video) {
       if (Math.abs((this.video.playbackRate || 1) - numR) > 0.004) {
         try { this.video.playbackRate = numR; } catch (_) {}
@@ -1218,7 +1025,6 @@ export class YouTubeAdapter {
 
   destroy() {
     this._destroyed = true;
-    this._stopYtBgBridge(false);
     clearTimeout(this.autoplayTimer);
     clearInterval(this.subTimer);
     this.subs?.stopDubAudio?.();

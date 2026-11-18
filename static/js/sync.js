@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261114_v215';
+import { isRoomMediaPlaying } from './store.js?v=20261118_v184';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -21,11 +21,11 @@ export const clock = {
     const rtt = Math.max(0, t1 - t0);
     const est = serverTime + rtt / 2 - t1;
     if (this.samples > 6 && Number.isFinite(this.bestRtt)) {
-      this.bestRtt = Math.min(10.0, this.bestRtt * 1.04);
+      this.bestRtt = this.bestRtt * 1.04;
     }
     if (this.samples === 0 || rtt <= this.bestRtt * 1.65) {
       this.offset = this.samples === 0 ? est : this.offset * 0.65 + est * 0.35;
-      this.bestRtt = Math.min(10.0, Math.min(this.bestRtt, Math.max(0.015, rtt)));
+      this.bestRtt = Math.min(this.bestRtt, Math.max(0.015, rtt));
     }
     this.samples += 1;
   },
@@ -38,8 +38,7 @@ export function expectedPosition(media) {
   }
   const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
   const pos = Number(media.meshStatePosition ?? media.currentTime ?? 0);
-  const rawUrl = String(media.url || '');
-  if (status !== 'PLAYING' || (rawUrl.startsWith('/api/rave/resolve-catalog') && !media.playbackAnchored && pos <= 0.5)) {
+  if (status !== 'PLAYING') {
     return Math.max(0, pos);
   }
   const rawT0 = Number(media.meshStateTime ?? media.updatedAt ?? clock.now());
@@ -51,12 +50,12 @@ export function expectedPosition(media) {
 export class SyncEngine {
   constructor({ getMedia, getAdapter, isLeader, isSolo, onLeaderSync, onStatus, clock: syncClock }) {
     this.getMedia = getMedia;
+    this.clock = syncClock || clock;
     this.getAdapter = getAdapter;
     this.isLeader = isLeader || (() => false);
     this.isSolo = isSolo || (() => false);
     this.onLeaderSync = onLeaderSync || (() => {});
     this.onStatus = onStatus || (() => {});
-    this.clock = syncClock || clock;
     this.timer = null;
     this.lastDelta = 0; this.inSyncCount = 0; this.flipCount = 0;
     this.seekUntil = 0;
@@ -105,10 +104,8 @@ export class SyncEngine {
   }
 
   loop() {
-    if (!this.enabled) return;
     let next = CYCLE_MS;
     try { next = this.step(); } catch (e) { console.warn('[sync]', e); }
-    if (!this.enabled) return;
     this.timer = setTimeout(() => this.loop(), next);
   }
 
@@ -127,10 +124,6 @@ export class SyncEngine {
     const now = performance.now();
     const activeVideo = ad._activeMediaEl ? ad._activeMediaEl() : ad.video;
     if (activeVideo && activeVideo.readyState < 1 && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)) {
-      if (status === 'PLAYING' && ad.isPaused?.() && !ad.autoplayHardBlocked && now - (this.lastPlayAttempt || 0) > 1500) {
-        this.lastPlayAttempt = now;
-        ad.play?.();
-      }
       this.lastStepAt = now;
       this.lastExpected = expected;
       this.mode = 'buffering';
@@ -149,7 +142,7 @@ export class SyncEngine {
     const epMatch = String(media.title || '').match(/S(\d+)\s*:\s*B(\d+)|(\d+)\.\s*Sezon\s*(\d+)\.\s*Bölüm|(\d+)\.\s*Bölüm/i);
     const s = Math.max(1, Number(media.season || epMatch?.[1] || epMatch?.[3]) || 1);
     const e = Math.max(1, Number(media.episode || epMatch?.[2] || epMatch?.[4] || epMatch?.[5]) || 1);
-    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').replace(/\s*(?:[—–\-·|]\s*)?(?:s\d+\s*:\s*b\d+|\d+\.\s*sezon(?:\s*\d+\.\s*bölüm)?|\d+\.\s*bölüm|episode\s*\d+).*$/i, '').split(' — ')[0].trim().toLowerCase();
+    const rawTitleCandidate = String(media.seriesTitle || media.originalTitle || media.title || '').replace(/\s+[—–-]\s*\d+\.\s*sezon.*$/i, '').split(' — ')[0].trim().toLowerCase();
     const rawTitleSig = ['video', 'medya', 'stream', 'canlı yayın', 'medya yükleniyor…', 'medya seçilmedi'].includes(rawTitleCandidate)
       ? ''
       : rawTitleCandidate;
@@ -164,10 +157,7 @@ export class SyncEngine {
             : (rawTitleSig && !media.isMusic && media.mediaType !== 'music' && !media.live)
               ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${s}|${e}`
               : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${s}|${e}`;
-    const isUnresolvedUrl = String(media.url || '').startsWith('/api/rave/resolve-catalog');
-    const justResolvedUrl = Boolean(this.wasUnresolvedUrl && !isUnresolvedUrl);
-    this.wasUnresolvedUrl = isUnresolvedUrl;
-    if (mediaIdSig !== this.mediaIdSig || justResolvedUrl) {
+    if (mediaIdSig !== this.mediaIdSig) {
       this.mediaIdSig = mediaIdSig;
       this.loadedAt = now;
       const needsImmediateViewerSnap = !leader && expected >= 0.8 && Math.abs(curr - expected) > 1.5;
@@ -197,17 +187,16 @@ export class SyncEngine {
       this.reJumps = 0;
       const elapsedSinceSeek = this.lastSeekWallAt ? Math.max(0, (now - this.lastSeekWallAt) / 1000) * base : 0;
       const driftedTarget = Number.isFinite(this.lastSeekTarget) ? this.lastSeekTarget + elapsedSinceSeek : -999;
-      if (!leader && (statusChanged || (expectedJump && Math.abs(expected - driftedTarget) > JUMP_DELTA))) {
+      if (!leader && (statusChanged || (expectedJump && Math.abs(expected - driftedTarget) > JUMP_DELTA + 2.0))) {
         this.seekUntil = 0;
         this.deferStartedAt = 0;
       }
     }
     let timeout = CYCLE_MS;
 
-    const activeEl = ad._activeMediaEl?.() || ad.video;
     if (status !== 'PLAYING') {
       if (!ad.isPaused()) ad.pause();
-      if (!leader && !ad.isBuffering() && !activeEl?.seeking && abs > 0.25 && now > this.seekUntil) {
+      if (!leader && !ad.isBuffering() && !ad.video?.seeking && abs > 0.25 && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
         ad.seek(expected);
@@ -223,23 +212,16 @@ export class SyncEngine {
     if (leader && Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
 
     if (ad.isPaused()) {
-      if ((leader && ad.wantPlaying === false) || (leader && ad._userPausedViaMediaSession)) {
+      if (leader && ad.wantPlaying === false) {
         this.mode = 'paused';
         this.onStatus({ mode: 'paused', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return timeout;
       }
-      let bgAudioAllowed = true;
-      try { bgAudioAllowed = localStorage.getItem('vortex_bg_audio') !== 'off'; } catch (_) {}
-      const hiddenNonPip = typeof document !== 'undefined'
-        && document.visibilityState === 'hidden'
-        && !ad.isPiP?.()
-        && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive)
-        && !ad.isMusic
-        && !bgAudioAllowed;
-      if (hiddenNonPip || ad.autoplayHardBlocked || ad._userPausedViaMediaSession) {
+      const hiddenNonPip = typeof document !== 'undefined' && document.visibilityState === 'hidden' && !ad.isPiP?.() && !(typeof window !== 'undefined' && window.__kinoxHost?._nativeIosPipActive) && !ad.isMusic;
+      if (hiddenNonPip || ad.autoplayHardBlocked) {
         return timeout;
       }
-      if (!activeEl?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
+      if (!ad.video?.seeking && !ad.isBuffering?.() && now - (this.lastPlayAttempt || 0) > 1200) {
         this.lastPlayAttempt = now;
         ad.play();
       }
@@ -253,13 +235,13 @@ export class SyncEngine {
     if (this.wasBuffering && !ad.isBuffering()) {
       this.wasBuffering = false;
       this.deferStartedAt = 0;
-      if (!leader && abs > JUMP_DELTA && safeBuffered(expected, 3.0) && now > this.seekUntil) {
+      if (abs > 0.35 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
         this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
         ad.seek(expected);
-        this.seekUntil = now + 4200;
-      } else if (leader || this.didInitialSync) {
-        this.seekUntil = Math.max(this.seekUntil, now + 2200);
+        this.seekUntil = now + 2400;
+      } else {
+        this.seekUntil = Math.max(this.seekUntil, now + 1100);
       }
     }
     if (ad.isBuffering()) {
@@ -281,12 +263,12 @@ export class SyncEngine {
         this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: ad.getRate() });
         return CYCLE_MS;
       }
-      if (!(ad.initialSeekPending > 3) && !(ad._suppressLeaderAnchorUntil && now < ad._suppressLeaderAnchorUntil) && now > this.seekUntil && curr > 0.2 && !activeEl?.seeking && !ad.isBuffering?.()) {
-        let anchorEveryMs = 9000;
+      if (!(ad.initialSeekPending > 3) && now > this.seekUntil && curr > 0.2 && !ad.video?.seeking && !ad.isBuffering?.()) {
+        let anchorEveryMs = 5500;
         if (this.isSolo()) {
-          anchorEveryMs = 12000;
+          anchorEveryMs = 8000;
         }
-        const driftTrigger = abs > 2.2 && (now - this.lastLeaderBroadcast > 4500);
+        const driftTrigger = abs > 1.2 && (now - this.lastLeaderBroadcast > 3500);
         const periodicAnchor = !media.live && (now - this.lastLeaderBroadcast > anchorEveryMs);
         if (driftTrigger || periodicAnchor) {
           this.lastLeaderBroadcast = now;
@@ -301,36 +283,36 @@ export class SyncEngine {
     }
 
     if (!this.didInitialSync) {
-      if (abs <= 3.2 && curr >= Math.max(0, expected - 3.5)) {
+      if (abs <= 1.8 && curr >= Math.max(0, expected - 1.8)) {
         this.didInitialSync = true;
-      } else if (expected >= 0.8 && abs > 3.2 && now >= this.seekUntil) {
+      } else if (expected >= 0.8 && abs > 1.2 && now >= this.seekUntil) {
+        // Until the NTP-style clock has converged, small apparent drift is likely offset error:
+        // wait for more samples instead of seeking to a possibly wrong position.
         if (abs < 4.0 && (this.clock?.samples || 0) < 4) {
           return 600;
         }
         const inBufInit = buffered(expected);
-        const initLead = inBufInit ? 0 : Math.min(2.5, Number(this.bufferLatency || 0));
-        const initTarget = dur > 0 ? Math.min(Math.max(0, dur - 0.5), expected + initLead) : (expected + initLead);
         this.deferStartedAt = 0;
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
-        this.lastSeekTarget = initTarget;
+        this.lastSeekTarget = expected;
         this.lastSeekWallAt = now;
-        ad.seek(initTarget);
+        ad.seek(expected);
         this.pendingSeekAt = inBufInit ? 0 : now;
-        this.seekUntil = now + (inBufInit ? 4200 : 7500);
+        this.seekUntil = now + (inBufInit ? 2200 : 6500);
         this.lastJumpAt = now;
         this.reJumps = 0;
         this.inSyncCount = 0;
         this.mode = 'jumpSync';
-        this.onStatus({ mode: 'jumpSync', delta, curr, expected: initTarget, rate: base });
-        return 900;
+        this.onStatus({ mode: 'jumpSync', delta, curr, expected, rate: base });
+        return 700;
       }
     }
 
     const seekWallElapsed = this.lastSeekWallAt ? Math.max(0, (now - this.lastSeekWallAt) / 1000) * base : 0;
     const expectedSinceLastSeek = Number.isFinite(this.lastSeekTarget) ? this.lastSeekTarget + seekWallElapsed : -999;
     const activelySeekingToTarget = Boolean(
-      (activeEl?.seeking || (activeEl && activeEl.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 3.5))
+      (ad.video?.seeking || (ad.video && ad.video.readyState < 3 && Math.abs(curr - (this.lastSeekTarget || 0)) <= 2.5))
       && Math.abs(expected - expectedSinceLastSeek) < 12.0
       && this.lastSeekWallAt
       && (now - this.lastSeekWallAt < 12000)
@@ -346,8 +328,10 @@ export class SyncEngine {
       this.bufferLatency = Math.min(5, Math.max(0.2, (this.bufferLatency || 0.4) * 0.5 + lat * 0.5));
       this.pendingSeekAt = 0;
     }
+    // Native HLS (iOS/Safari) glitches audio on playbackRate changes, so it is never nudged.
+    const canRateNudge = !ad.useNativeHls && ad.caps?.rate !== false;
     const allowDriftJump = abs >= 4.0 || (this.clock?.samples || 0) >= 4;
-    if (allowDriftJump && ((stateChanged && abs > 2.8 && now > this.seekUntil) || abs > JUMP_DELTA)) {
+    if (allowDriftJump && ((stateChanged && abs > 2.5 && now > this.seekUntil) || abs > JUMP_DELTA)) {
       const inBuf = buffered(expected);
       const behindAct = (this.didInitialSync && delta > 0 && delta < 8.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
@@ -368,33 +352,45 @@ export class SyncEngine {
       this.deferStartedAt = 0;
       this.isRateNudging = false;
       if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
-      const leadComp = inBuf ? 0 : Math.min(2.5, Number(this.bufferLatency || 0));
-      const targetPos = dur > 0 ? Math.min(Math.max(0, dur - 0.5), expected + leadComp) : (expected + leadComp);
+      const targetPos = expected;
       this.lastSeekTarget = targetPos;
       this.lastSeekWallAt = now;
       ad.seek(targetPos);
       this.pendingSeekAt = inBuf ? 0 : now;
-      this.seekUntil = now + (inBuf ? 4500 : SEEK_SETTLE_MS);
+      this.seekUntil = now + (inBuf ? 4200 : SEEK_SETTLE_MS);
       this.lastJumpAt = now; this.reJumps = 0;
       this.inSyncCount = 0;
       this.mode = 'jumpSync';
+    } else if (!canRateNudge && abs > 1.5 && (this.clock?.samples || 0) >= 4 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
+      // Anti-stutter: sub-JUMP_DELTA drift is corrected by rate nudging, never by frequent
+      // micro-seeks. Only adapters that cannot nudge (native HLS, no rate control) fall back to
+      // an occasional buffered seek, and only once drift is clearly noticeable.
+      this.deferStartedAt = 0;
+      this.isRateNudging = false;
+      if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
+      this.lastSeekTarget = expected;
+      this.lastSeekWallAt = now;
+      ad.seek(expected);
+      this.seekUntil = now + 2600;
+      this.inSyncCount = 0;
+      this.mode = 'inSync';
     } else {
       this.deferStartedAt = 0;
       const fwdBuf = (Number(ad.getBuffered?.() || 0)) - curr;
-      const shouldNudge = !ad.useNativeHls
-        && (abs > 0.85 || (this.isRateNudging && abs > 0.35))
+      const shouldNudge = canRateNudge
+        && (abs > 0.085 || (this.isRateNudging && abs > 0.04))
         && abs <= JUMP_DELTA
         && buffered(expected)
-        && fwdBuf > 3.5
-        && ad.caps?.rate !== false;
+        && fwdBuf > 1.2;
       if (shouldNudge) {
         this.isRateNudging = true;
-        const nudge = Math.sign(delta) * (abs > 1.8 ? 0.05 : 0.03);
-        const targetRate = Number((base + nudge).toFixed(2));
-        if (Math.abs(ad.getRate() - targetRate) >= 0.015) {
+        const maxNudge = abs > 0.35 ? 0.14 : 0.08;
+        const nudge = Math.sign(delta) * Math.min(maxNudge, Math.max(0.025, abs * 0.28));
+        const targetRate = Number((base + nudge).toFixed(3));
+        if (Math.abs(ad.getRate() - targetRate) >= 0.01) {
           ad.setRate(targetRate);
         }
-        timeout = CYCLE_MS;
+        timeout = 380;
       } else {
         this.isRateNudging = false;
         if (Math.abs(ad.getRate() - base) >= 0.005) {

@@ -10,11 +10,16 @@ Watchlivo; arkadaşlarınızla gerçek zamanlı senkronize video izleme, müzik 
 
 ## 🚀 Özellikler
 
-- **44.000+ İçerik Kataloğu:** TMDB API ve çoklu yedek sunucu motoru ile kesintisiz akış.
-- **Ses & Görüntü Senkronizasyonu:** Hls.js PTS/Frame drift engelleme ve milisaniyelik oda senkronu.
-- **Anti-Dropout Koruması:** Ağ dalgalanmalarında izlenen videonun yarıda kesilmesini önleyen tampon kilidi.
-- **Çoklu Platform:** Web (PWA), Android APK (OTA güncellemeli WebView) ve Windows Masaüstü (WebView2).
-- **Kimlik Doğrulama:** Firebase Phone Auth (Twilio anahtarı varsa) ve Google OAuth.
+Watchlivo, Rave modelinde çalışan bir birlikte izleme platformudur: herkes içeriği **kendi hesabıyla ve kendi cihazında** oynatır, Watchlivo yalnızca oynat / duraklat / ileri-geri sar komutlarını oda üyeleri arasında senkronize eder.
+
+- **Kendi aboneliğinizle senkron izleme:** Netflix, Disney+, Prime Video, Max ve benzeri servisler uygulama içi tarayıcıda, her katılımcının kendi hesabıyla açılır. Watchlivo bu servislerin şifrelerini istemez, saklamaz ve video akışlarını hiçbir zaman proxy'lemez ya da yeniden yayınlamaz; yalnızca oynatma durumunu (konum, oynat/duraklat) eşitler. İçeriği izleyebilmek için her katılımcının ilgili servise kendi üyeliği olmalıdır.
+- **Doğrudan oynatma:** YouTube, Vimeo, Twitch, Google Drive bağlantıları ve kendi yüklediğiniz videolar resmi oynatıcılarla ya da doğrudan dosyadan oynatılır.
+- **Müzik & DJ:** Müzik arama ve keşif (iTunes/Deezer meta verisi), senkron şarkı sözleri, RaveDJ mashup ve ortak çalma listeleri.
+- **Odalar:** Herkese açık, gizli veya şifreli odalar; Lider / Co-Host / oylama modları, sıra (queue), liderlik devri ve kopma sonrası konumu koruyan yeniden bağlanma.
+- **Sohbet & ses:** Oda içi yazılı sohbet, emoji tepkileri, anketler, sesli notlar, canlı sesli sohbet, arkadaşlar, özel mesajlar ve oda davetleri.
+- **Hassas senkron:** Saat (NTP benzeri) ofset düzeltmesi ve drift telafisiyle milisaniye düzeyinde oda senkronu; WebSocket kopunca HTTP polling'e otomatik geçiş.
+- **Çoklu platform:** Web (PWA), Android APK (OTA güncellemeli), iOS ve Windows masaüstü istemcisi.
+- **Kimlik doğrulama:** E-posta/şifre, Google OAuth ve (Twilio anahtarı varsa) telefon ile giriş.
 
 ---
 
@@ -30,7 +35,7 @@ Watchlivo; arkadaşlarınızla gerçek zamanlı senkronize video izleme, müzik 
 1. Depoyu klonlayın:
 
    ```bash
-   cd watchlivo
+   git clone <depo-adresi> watchlivo
    cd watchlivo
    ```
 
@@ -70,11 +75,13 @@ Watchlivo; arkadaşlarınızla gerçek zamanlı senkronize video izleme, müzik 
   saklanır. Eski düz metin şifreler yalnızca okunur, yeniden yazılırsa hash'lenir.
 - Oturum jetonları HMAC ile imzalanır, `exp` ve `jti` taşır; jeton içinde şifre
   özeti bulunmaz.
-- Üçüncü taraf platform (Netflix, Disney+ vb.) şifreleri **doğrulanmaz ve
-  saklanmaz**. İlgili giriş uç noktası `501 unsupported` döner; oturumu platformun
-  kendi sayfasında açmanız gerekir.
+- Üçüncü taraf platform (Netflix, Disney+ vb.) şifreleri Watchlivo'ya **hiç
+  gönderilmez ve saklanmaz**. Giriş, uygulama içi tarayıcıda platformun kendi
+  sayfasında yapılır; sunucu yalnızca oda senkron komutlarını taşır.
 - Yükleme ve yapay zeka uç noktaları doğrulanmış hesap ve hız sınırı ister.
-- Proxy ve poster bağlantıları süreli HMAC imzası taşır; imzasız istek reddedilir.
+- Sunucu üçüncü taraf video akışlarını proxy'lemez, çözümlemez veya yeniden
+  yayınlamaz; keyfi URL çeken bir video vekili (SSRF yüzeyi) yoktur.
+- Telif hakkı bildirimleri için `/dmca` sayfasındaki iletişim kanalı kullanılabilir.
 - Telefon (SMS) ile giriş yalnızca `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
   `TWILIO_FROM_NUMBER` tanımlıysa çalışır. Aksi hâlde `501` döner.
 
@@ -82,9 +89,13 @@ Watchlivo; arkadaşlarınızla gerçek zamanlı senkronize video izleme, müzik 
 
 ## 📱 Android Derleme
 
-```powershell
-$env:WATCHLIVO_KEYSTORE_PASS = "<keystore-sifresi>"
-python build_apk.py
-```
+Android uygulaması bu depoda değil, ayrı bir projede derlenir. İmzalama
+parolası ortam değişkeninden (`WATCHLIVO_KEYSTORE_PASS`) okunur; kod içinde
+tutulmaz. Derlenen APK `static/Watchlivo-v2.0.apk` olarak yayınlanır.
 
-İmzalama parolası ortam değişkeninden okunur; kod içinde tutulmaz.
+---
+
+## ☁️ Cloudflare Kenar Ağ Geçidi
+
+`workers/ha-gateway/` altındaki Worker'ın dağıtımı için bkz.
+[`deploy/CLOUDFLARE.md`](deploy/CLOUDFLARE.md).
