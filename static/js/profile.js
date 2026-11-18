@@ -693,6 +693,7 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           type: 'button',
           id: 'wl-google-signin-btn',
           class: 'wl-social-btn wl-social-google',
+          style: { display: 'none' }, // Google login button disabled
           onclick: () => {
             const creds = typeof getFormCreds === 'function' ? (getFormCreds() || {}) : {};
             doSocialLogin('google', 'GmailÜyesi', creds);
