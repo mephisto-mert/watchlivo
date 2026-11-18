@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v183';
-import { expectedPosition } from '../sync.js?v=20261110_v183';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v183';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v183';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v183';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v217';
+import { expectedPosition } from '../sync.js?v=20261119_v217';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v217';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v217';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v217';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -726,7 +726,8 @@ export class Html5Adapter {
             episode: String(media.episode || 1),
             refresh: '1',
           });
-          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
+          const edgeTok = document.querySelector('meta[name="wl-edge-token"]')?.getAttribute('content') || '';
+          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`, edgeTok ? { headers: { 'X-Watchlivo-Token': edgeTok } } : undefined);
           if (resp.ok && this.video === v) {
             const fresh = await resp.json();
             if (fresh && fresh.url) {

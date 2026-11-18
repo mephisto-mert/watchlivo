@@ -31,7 +31,7 @@ function _isSameOriginPath(path) {
   return false;
 }
 
-function _getEdgeToken() {
+export function getEdgeToken() {
   try {
     if (typeof document !== 'undefined') {
       const m = document.querySelector('meta[name="wl-edge-token"]');
@@ -58,7 +58,7 @@ export async function api(path, { method = 'GET', body, headers: extraHeaders, t
     if (tok && !hdrs.Authorization && !hdrs.authorization) {
       hdrs.Authorization = `Bearer ${tok}`;
     }
-    const edgeTok = sameOrig ? _getEdgeToken() : '';
+    const edgeTok = sameOrig ? getEdgeToken() : '';
     if (edgeTok && !hdrs['X-Watchlivo-Token'] && !hdrs['x-watchlivo-token']) {
       hdrs['X-Watchlivo-Token'] = edgeTok;
     }

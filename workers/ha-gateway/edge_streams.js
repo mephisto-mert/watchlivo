@@ -61,6 +61,8 @@ export function inferStreamReferer(u) {
     if (u.includes("bloomberght")) return "https://www.bloomberght.com/";
     return "https://www.ercdn.net/";
   }
+  if (u.includes("sprintcdn") || u.includes("r66nv9ed") || u.includes("owphbf24") || u.includes("filemoon")) return "https://filemoon.sx/";
+  if (u.includes("vmeas.") || u.includes("vidmoly") || u.includes("vmnow") || u.includes("vmpx") || u.includes("vmbox") || u.includes("vmget")) return "https://vidmoly.biz/";
   if (u.includes("tmgrup.com.tr") || u.includes("atv.com.tr")) return "https://www.atv.com.tr/";
   if (u.includes("radyotvonline.")) return "https://www.radyotvonline.com/";
   if (u.includes("trt.com.tr") || u.includes("trtizle.") || u.includes("trthaber")) return "https://www.trtizle.com/";
@@ -189,7 +191,8 @@ async function fetchPublicWithRedirects(initialUrl, headers, maxHops = 4, timeou
 
 const OFFLOAD_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
 const OFFLOAD_BYPASS_HOSTS = [
-  "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget.",
+  "hakunaymatata.com", "vidmoly.", "vmbox.", "vmnow.", "vmpx.", "vmget.", "vmeas.",
+  "sprintcdn", "r66nv9ed", "owphbf24", "filemoon.",
   "webteizle.", "dizibox.", "sezonlukdizi.",
   "hdfilmcehennemi.", "fullhdfilmizlesene.", "rapidrame.", "rapidvid.",
   "ag2m5.cfd", "uk-traffic-", "fastplay.",
