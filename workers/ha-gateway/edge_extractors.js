@@ -679,7 +679,12 @@ async function postWebteizleForm(path, bodyStr, referer, timeoutMs = 4500) {
       r.body?.cancel?.();
       return "";
     }
-    return await r.text();
+    const buf = await r.arrayBuffer();
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    } catch {
+      return new TextDecoder("windows-1254").decode(buf);
+    }
   } catch {
     return "";
   }
