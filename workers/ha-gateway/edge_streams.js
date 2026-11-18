@@ -414,7 +414,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
   return null;
 }
 
-  const hitRaw = await lookupVaultStream(lookupKeys, env, mtype);
+  const hitRaw = bypassCache ? null : await lookupVaultStream(lookupKeys, env, mtype);
   const hitStreams = Array.isArray(hitRaw?.streams) ? hitRaw.streams : [];
   const isDeadShardPair = (pair) => {
     const u = String(Array.isArray(pair) ? pair[0] : pair?.url || "").toLowerCase();
@@ -428,6 +428,9 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
       u.includes("dplayer") ||
       u.includes("playmix.uno") ||
       (u.includes("cdnimages") && (u.includes("/hls/") || u.includes("/master.txt"))) ||
+      /^https?:\/\/s\d+\.[a-z0-9-]+\.shop\//i.test(u) ||
+      u.includes(".shop/mo/") ||
+      u.includes(".shop/mj/") ||
       u.includes("hdfilmcehennemi.mobi") ||
       u.includes("lightspeed.st") ||
       (u.includes("vmpx.") && (u.includes("asn=") || u.includes("&i=")))

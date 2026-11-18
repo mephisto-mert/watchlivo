@@ -633,26 +633,46 @@ function slugifyAscii(s) {
     .replace(/^-+|-+$/g, "");
 }
 
+function extractSequelTag(str) {
+  const s = String(str || "").replace(/\(\d{4}\)/g, "").toLowerCase();
+  const m = s.match(/(?:part\s*([2-9]|ii|iii|iv|v|vi)|bolum\s*([2-9])|\b([2-9]|ii|iii|iv|v|vi)\b)/i);
+  if (!m) return "";
+  const raw = (m[1] || m[2] || m[3] || "").toLowerCase();
+  const rom = { ii: "2", iii: "3", iv: "4", v: "5", vi: "6" };
+  return rom[raw] || raw;
+}
+
 function titlesMatchScore(candRaw, reqTitles, reqYear = "") {
   const candClean = String(candRaw || "").replace(/\s+\d+\.\s*Sezon.*$/i, "").trim();
-  const candToks = normTitleTokens(candClean);
+  const candYearM = candClean.match(/\((\d{4})\)/);
+  const candNoYear = candClean.replace(/\(\d{4}\)/g, "").trim();
+  const candToks = normTitleTokens(candNoYear);
   if (!candToks.length) return -1;
+  const candSeq = extractSequelTag(candNoYear);
   let best = -1;
   for (const rt of reqTitles) {
-    const rToks = normTitleTokens(String(rt || "").replace(/\(\d{4}\)/g, ""));
+    const rtNoYear = String(rt || "").replace(/\(\d{4}\)/g, "").trim();
+    const rToks = normTitleTokens(rtNoYear);
     if (!rToks.length) continue;
     const hits = rToks.filter((t) => candToks.includes(t)).length;
     if (hits === 0) continue;
-    const minLen = Math.min(rToks.length, candToks.length);
-    if (hits < Math.ceil(minLen * 0.65) || (rToks.length >= 2 && hits < 2 && rToks[0] !== candToks[0])) continue;
-    let score = (hits / Math.max(rToks.length, candToks.length)) * 100 - Math.abs(candToks.length - rToks.length) * 4;
-    if (/(?:part\s*2|part\s*two|bolum\s*2|\b2\b)/i.test(candClean) && !/(?:part\s*2|part\s*two|bolum\s*2|\b2\b)/i.test(String(rt || ""))) {
-      score -= 40;
-    }
-    const ym = candClean.match(/\((\d{4})\)/);
-    if (reqYear && ym) {
-      const diff = Math.abs(Number(reqYear) - Number(ym[1]));
+    if (reqYear && candYearM) {
+      const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
       if (diff > 2) continue;
+    }
+    const rSeq = extractSequelTag(rtNoYear);
+    if (candSeq && rSeq && candSeq !== rSeq) continue;
+    if (rToks.length >= 3 && hits < Math.ceil(rToks.length * 0.8)) continue;
+    if (rToks.length === 2 && hits < 2) continue;
+    if (rToks.length === 1 && candToks.length > 2) continue;
+    const missing = rToks.length - hits;
+    const extra = Math.max(0, candToks.length - hits);
+    let score = (hits / Math.max(rToks.length, candToks.length)) * 100 - missing * 35 - extra * 12;
+    if ((candSeq && !rSeq) || (!candSeq && rSeq)) {
+      score -= 30;
+    }
+    if (reqYear && candYearM) {
+      const diff = Math.abs(Number(reqYear) - Number(candYearM[1]));
       score += diff === 0 ? 15 : 5;
     }
     if (score > best) best = score;
@@ -721,15 +741,20 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
     for (const it of items) {
       const u = String(it?.url || "").trim();
       if (!u.startsWith("/hakkinda/")) continue;
-      const sc = titlesMatchScore(`${it?.title || ""} ${it?.description || ""}`, fullTitles, year);
+      const itTitle = String(it?.title || "").trim();
+      const itDesc = String(it?.description || "").trim();
+      const ym = itTitle.match(/\((\d{4})\)/);
+      const sc1 = titlesMatchScore(itTitle, fullTitles, year);
+      const sc2 = itDesc ? titlesMatchScore(ym ? `${itDesc} (${ym[1]})` : itDesc, fullTitles, year) : -1;
+      const sc = Math.max(sc1, sc2);
       if (sc > bestScore) {
         bestScore = sc;
         pickedPath = u;
       }
     }
-    if (bestScore >= 50) break;
+    if (bestScore >= 95) break;
   }
-  if (!pickedPath) return null;
+  if (!pickedPath || bestScore < 40) return null;
 
   const hakkindaHtml = await fetchTextSafe(
     `https://webteizle.info${pickedPath}`,
@@ -785,13 +810,13 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
       if (!embedTarget) continue;
       const res = await resolveEmbedHtmlToHls(embedTarget, fetchPublicFn);
       if (res?.url && !resolvedStreams.some((x) => x.url === res.url)) {
+        const srvTag = cand.kind === "filemoon" ? "FileMoon" : "VidMoly";
         resolvedStreams.push({
           url: res.url,
           referer: res.referer || (cand.kind === "vidmoly" ? "https://vidmoly.biz/" : "https://filemoon.sx/"),
-          label: isDub ? "📡 Webteizle · Türkçe Dublaj (HLS)" : "📡 Webteizle · Türkçe Altyazılı (HLS)",
+          label: isDub ? `📡 Webteizle · Türkçe Dublaj · ${srvTag}` : `📡 Webteizle · Türkçe Altyazılı · ${srvTag}`,
         });
         if (!primarySubs.length && res.subs?.length) primarySubs = res.subs;
-        break;
       }
     }
   }
