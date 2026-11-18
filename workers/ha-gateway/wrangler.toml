@@ -25,14 +25,9 @@ class_name = "WatchlivoRoomDO"
 tag = "v1"
 new_sqlite_classes = ["WatchlivoRoomDO"]
 
-[[services]]
-binding = "STREAM_PROXY"
-service = "watchlivo-stream-proxy"
-
 [triggers]
 crons = ["*/10 * * * *"]
 
 [vars]
 SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com"
-STREAM_PROXY_ORIGIN = "https://watchlivo.online"
 FORCE_SECONDARY = "1"

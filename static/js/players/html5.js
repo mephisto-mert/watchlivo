@@ -1,9 +1,9 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261110_v183';
-import { expectedPosition } from '../sync.js?v=20261110_v183';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261110_v183';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261110_v183';
-import { ensureHlsJs } from './hls-loader.js?v=20261110_v183';
+import { SubtitleDubController } from './subtitles.js?v=20261118_v184';
+import { expectedPosition } from '../sync.js?v=20261118_v184';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261118_v184';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261118_v184';
+import { ensureHlsJs } from './hls-loader.js?v=20261118_v184';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -613,11 +613,6 @@ export class Html5Adapter {
     const normDedupeKey = (u) => {
       const raw = String(u || '').trim();
       if (!raw) return '';
-      const mSid = raw.match(/[?&]sid=([^&#]+)/);
-      if (mSid && (raw.includes('/api/rave/stream') || raw.includes('/api/rave/stream_manifest') || raw.includes('/api/rave/stream_chunk'))) {
-        const mAud = raw.match(/[?&]aud=([^&#]+)/);
-        return `sid:${mSid[1]}${mAud ? `:aud:${mAud[1]}` : ''}`;
-      }
       return raw.replace(/&ext=\.m3u8\b/i, '');
     };
     const pushAlt = (u) => {
@@ -693,61 +688,16 @@ export class Html5Adapter {
     this._isApple = isApple;
     this._canAppleMseHls = false;
     this.useNativeHls = useNativeHls;
-    const withProxySegs = (u) => {
-      const s = String(u || '');
-      if (!/\/api\/rave\/stream(?:\?|_manifest\?|-proxy\/)/i.test(s) || s.includes('proxy_segs=1')) return u;
-      return s.includes('&ext=.m3u8')
-        ? s.replace('&ext=.m3u8', '&proxy_segs=1&ext=.m3u8')
-        : `${s}${s.includes('?') ? '&' : '?'}proxy_segs=1`;
-    };
+    // Segment-proxy fallback removed with the server-side stream proxy.
+    const withProxySegs = (u) => u;
     this._withProxySegs = withProxySegs;
 
-    let lastLiveRefreshAt = 0;
     const handleExhaustedCandidates = async (srcUrl, doneCb) => {
       const proxied = withProxySegs(srcUrl || this.currentUrl);
       if (!triedProxySegs && proxied && proxied !== (srcUrl || this.currentUrl)) {
         triedProxySegs = true;
         loadCandidateUrl(proxied, doneCb);
         return;
-      }
-      const nowRefreshMs = Date.now();
-      if ((nowRefreshMs - lastLiveRefreshAt > 60000) && !this.isMusic && !media?.live && (media?.tmdbId || media?.imdbId || media?.title)) {
-        lastLiveRefreshAt = nowRefreshMs;
-        try {
-          const qs = new URLSearchParams({
-            provider: String(media.catalogProvider || media.provider || 'cinema'),
-            title: String(media.originalTitle || media.seriesTitle || media.title || ''),
-            displayTitle: String(media.seriesTitle || media.title || ''),
-            year: String(media.year || ''),
-            tmdbId: String(media.tmdbId || ''),
-            imdbId: String(media.imdbId || ''),
-            mediaType: String(media.mediaType || 'movie'),
-            season: String(media.season || 1),
-            episode: String(media.episode || 1),
-            refresh: '1',
-          });
-          const resp = await fetch(`/api/rave/resolve-catalog?${qs.toString()}`);
-          if (resp.ok && this.video === v) {
-            const fresh = await resp.json();
-            if (fresh && fresh.url) {
-              if (Array.isArray(fresh.servers) && fresh.servers.length) media.servers = fresh.servers;
-              if (Array.isArray(fresh.altUrls) && fresh.altUrls.length) media.altUrls = fresh.altUrls;
-              const freshList = [fresh.url, ...(fresh.altUrls || []), ...((fresh.servers || []).map((s) => s?.url))].filter(Boolean);
-              seenUrls.clear();
-              const prevLen = alts.length;
-              for (const fu of freshList) {
-                if (fu !== this.currentUrl) pushAlt(fu);
-              }
-              if (fresh.url && fresh.url !== this.currentUrl && !alts.includes(fresh.url)) alts.push(fresh.url);
-              const addedAny = alts.length > prevLen;
-              if (addedAny && nativeAltIdx < alts.length) {
-                triedProxySegs = false;
-                loadCandidateUrl(alts[nativeAltIdx++], doneCb);
-                return;
-              }
-            }
-          }
-        } catch (err) { /* ignore and fall through */ }
       }
       clearBuf();
       this.events.onError?.('Akış yüklenemedi');
@@ -978,14 +928,6 @@ export class Html5Adapter {
         const errCode = Number(data?.response?.code || 0);
         const isHardUpstreamDead = [401, 403, 404, 410, 451, 502, 504].includes(errCode);
         if (!data?.fatal) {
-          if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut' || data?.details === 'levelLoadError') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
-            this._switchedToProxySegs = true;
-            const proxied = withProxySegs(srcUrl);
-            if (proxied && proxied !== srcUrl) {
-              loadCandidateUrl(proxied, doneCb);
-              return;
-            }
-          }
           if (isHardUpstreamDead && (data?.details === 'fragLoadError' || data?.details === 'levelLoadError' || data?.details === 'manifestLoadError') && nativeAltIdx < alts.length) {
             this._reportStreamHealth?.(srcUrl, false, { stalled: false, status: errCode });
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
@@ -1045,14 +987,6 @@ export class Html5Adapter {
             this.lastSeekAt = Date.now();
           }
           if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR) {
-            if ((data?.details === 'fragLoadError' || data?.details === 'fragLoadTimeOut') && String(srcUrl).includes('/api/rave/stream') && !String(srcUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
-              this._switchedToProxySegs = true;
-              const proxied = withProxySegs(srcUrl);
-              if (proxied && proxied !== srcUrl) {
-                loadCandidateUrl(proxied, doneCb);
-                return;
-              }
-            }
             netRetries += 1;
             if (!isHardUpstreamDead && netRetries <= (nativeAltIdx < alts.length ? 1 : 2)) {
               clearTimeout(this._hlsRetryTimer);
@@ -1130,14 +1064,6 @@ export class Html5Adapter {
         if (this.wantPlaying) this.tryPlay();
         return;
       }
-      if (this.useNativeHls && this.currentUrl && String(this.currentUrl).includes('/api/rave/stream') && !String(this.currentUrl).includes('proxy_segs=1') && !this._switchedToProxySegs) {
-        this._switchedToProxySegs = true;
-        const proxied = withProxySegs(this.currentUrl);
-        if (proxied && proxied !== this.currentUrl) {
-          loadCandidateUrl(proxied);
-          return;
-        }
-      }
       if (nativeAltIdx < alts.length) {
         this._reportStreamHealth?.(this.currentUrl, false, { stalled: false });
         loadCandidateUrl(alts[nativeAltIdx++]);
@@ -1190,15 +1116,35 @@ export class Html5Adapter {
       this.loadReadyTimer = setTimeout(done, 1800);
       if (validStart >= 0.5 && !v._wlInitSeekBound) {
         v._wlInitSeekBound = true;
+        // Anti-stutter: the initial resume seek is one-shot and time-bounded. Once it lands (or
+        // playback is already at/after the target, or 16s pass) the listeners are removed so a
+        // later 'playing'/'canplay' event can never yank the viewer back to the old start point.
+        const clearPrimaryInitSeek = (clearPending = true) => {
+          if (clearPending) this.initialSeekPending = 0;
+          if (v._wlInitSeekFn) {
+            ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {
+              v.removeEventListener(evName, v._wlInitSeekFn);
+            });
+            v._wlInitSeekFn = null;
+          }
+          v._wlInitSeekBound = false;
+        };
         const enforcePrimaryInitialSeek = () => {
-          if (this.video !== v || !(this.initialSeekPending >= 0.5) || v.seeking || v.readyState < 1) return;
+          if (this.video !== v || !(this.initialSeekPending >= 0.5) || Date.now() - (this.loadedAtMs || 0) > 16000) {
+            clearPrimaryInitSeek(true);
+            return;
+          }
+          if (v.seeking || v.readyState < 1) return;
           if (this.useNativeHls && v.seekable && v.seekable.length === 0) return;
           const targetPos = this.initialSeekPending;
-          if (Math.abs((v.currentTime || 0) - targetPos) > 1.5) {
-            try { v.currentTime = targetPos; } catch (_) {}
-          } else if (v.readyState >= 2) {
-            this.initialSeekPending = 0;
+          const curT = Number(v.currentTime || 0);
+          if (Math.abs(curT - targetPos) <= 1.5 || curT >= targetPos - 1.5) {
+            if (v.readyState >= 2) clearPrimaryInitSeek(true);
+            return;
           }
+          try {
+            v.currentTime = targetPos;
+          } catch (_) {}
         };
         v._wlInitSeekFn = enforcePrimaryInitialSeek;
         ['loadedmetadata', 'loadeddata', 'canplay', 'playing', 'durationchange'].forEach((evName) => {

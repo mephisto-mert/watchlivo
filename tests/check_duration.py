@@ -5,9 +5,8 @@ from playwright.async_api import async_playwright
 BASE = "https://watchlivo.online"
 
 async def test():
-    cat_url = f"{BASE}/api/rave/resolve-catalog?provider=netflix&title=Stranger+Things&mediaType=tv&season=1&episode=1"
-    req = urllib.request.Request(cat_url, headers={"User-Agent": "Mozilla/5.0"})
-    cat_res = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+    # Open-licensed public test stream (Sintel, Blender Foundation, CC-BY) played directly — no catalog resolving
+    cat_res = {"provider": "hls", "streamType": "hls", "title": "Sintel", "url": "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", "duration": 888, "mediaType": "movie"}
     print("Catalog Duration:", cat_res.get("duration"))
     
     body = json.dumps({"name": "DurTest", "creator": "Leader", "media": cat_res}).encode()

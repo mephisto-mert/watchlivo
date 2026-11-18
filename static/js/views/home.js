@@ -1,17 +1,17 @@
-// Home (Rave Home: NavBar · Selection (provider grid + SuperSearch) · Lobby sections).
-import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261110_v183';
+// Home (Rave Home: NavBar · Selection (provider grid + YouTube search) · Lobby sections).
+import { h, icons, popup, toast, setBackground, openThemeModal, openDownloadModal, isNativeWatchlivoApp } from '../ui.js?v=20261118_v184';
 import {
   state, set, subscribe, getFriends, getWatchHistory,
   THEME_SCHEMAS, setUiPref, transitionTheme,
   syncCloudUserMedia, syncSocialState,
   getRecentRoomsKey, getRoomSnapshotsKey,
-} from '../store.js?v=20261110_v183';
-import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261110_v183';
-import { api } from '../api.js?v=20261110_v183';
-import { createSelection, openWatchHistoryModal } from './selection.js?v=20261110_v183';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v183';
-import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261110_v183';
-import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261110_v183';
+} from '../store.js?v=20261118_v184';
+import { avatar, profileSetup, openDmModal } from '../profile.js?v=20261118_v184';
+import { api } from '../api.js?v=20261118_v184';
+import { createSelection, openWatchHistoryModal } from './selection.js?v=20261118_v184';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
+import { fetchRooms, renderLobbySections, thumbFor, rememberRoom, forgetRoom, openFriendsManagerModal, renderHomeFriendsStrip } from './lobby.js?v=20261118_v184';
+import { renderSiteFooterSection, initCookieConsentBanner, openLegalModal, openContactModal } from './site-footer.js?v=20261118_v184';
 
 let refreshTimer = null;
 let homeDrawTimer = null;
@@ -62,7 +62,7 @@ export function logo() {
       }
     },
   },
-    h('img', { src: '/static/watchlivo-logo.svg?v=20261110_v183', alt: 'Watchlivo', width: '28', height: '28' }),
+    h('img', { src: '/static/watchlivo-logo.svg?v=20261118_v184', alt: 'Watchlivo', width: '28', height: '28' }),
     h('span', { class: 'logo-wordmark' }, 'WATCHLIVO'));
 }
 
@@ -188,8 +188,8 @@ export function renderHome(app) {
       !isNativeWatchlivoApp() ? h('a', {
         class: 'apk-badge wl-btn-apk',
         id: 'nav-btn-apk',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         title: 'Watchlivo Native Android APK İndir (v2.0.2 Otomatik Güncellemeli)',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000),
       },
@@ -281,8 +281,8 @@ export function renderHome(app) {
     h('div', { class: 'wl-app-banner-actions' },
       h('a', {
         class: 'btn primary sm wl-banner-apk-btn',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
       }, h('span', { html: icons.download, style: { display: 'flex' } }), 'APK İndir'),
       h('button', {
@@ -292,7 +292,7 @@ export function renderHome(app) {
 
   const makeDockLabel = (id) => ({
     home: 'Keşfet',
-    cinema: 'Sinema+',
+    platforms: 'Platformlar',
     rooms: 'Canlı Odalar',
     tv: '7/24 Canlı TV',
     profile: 'Profil',
@@ -323,9 +323,9 @@ export function renderHome(app) {
       selection.setProvider(null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     }),
-    makeDockBtn('cinema', 'Sinema, Dizi & Anime Arşivi', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
-      selection.setProvider('cinema');
-      homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
+    makeDockBtn('platforms', 'Platformlar · Kendi hesabınla', '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4h-4z"/></svg>', false, () => {
+      selection.setProvider(null);
+      setTimeout(() => document.querySelector('.rave-providers-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 40);
     }),
     makeDockBtn('rooms', 'Herkese Açık & Arkadaş Odaları', icons.rooms, false, () => {
       selection.setProvider(null);
@@ -355,26 +355,7 @@ export function renderHome(app) {
     h('div', { class: 'dock-studio-meta' },
       h('span', { class: 'dock-archive-pill' },
         h('span', { class: 'dock-pulse-dot' }),
-        'Sinema, Dizi & Anime · 4K TR Dublaj & Altyazı'),
-      h('button', {
-        type: 'button',
-        class: 'dock-quick-btn',
-        onclick: () => {
-          if (typeof selection.openTrending === 'function') selection.openTrending();
-          else {
-            selection.setProvider(null);
-            setTimeout(() => document.getElementById('btn-trending-toggle')?.click(), 30);
-          }
-        },
-      }, '🔥 Vitrin & Trendler'),
-      h('button', {
-        type: 'button',
-        class: 'dock-quick-btn random',
-        onclick: (e) => {
-          if (typeof selection.pickRandom === 'function') selection.pickRandom(e.currentTarget);
-          else document.getElementById('btn-random-movie')?.click();
-        },
-      }, '🎲 Rastgele Film'),
+        'Birlikte izle · Kendi hesabınla senkron'),
       h('button', {
         type: 'button',
         class: 'dock-quick-btn',
@@ -417,11 +398,11 @@ export function renderHome(app) {
     }, '✨ Ambiyans'));
 
   const friendsStripEl = renderHomeFriendsStrip(openRoom);
-  try { document.title = 'Watchlivo — Birlikte Sinema, Dizi & Müzik Odaları'; } catch (_) {}
+  try { document.title = 'Watchlivo — Arkadaşlarınla Senkron Birlikte İzle'; } catch (_) {}
 
   const siteFooterEl = renderSiteFooterSection({
     onSelectCategory: (cat) => {
-      selection.setProvider(cat === 'series' ? 'series' : (cat === 'anime' ? 'anime' : (cat === 'movie' ? 'movies' : 'cinema')));
+      selection.setProvider(['youtube', 'drive', 'music', 'upload'].includes(cat) ? cat : null);
       homeScroll.scrollTo({ top: 0, behavior: 'smooth' });
     },
     onScrollToTv: () => {
@@ -434,10 +415,6 @@ export function renderHome(app) {
         const el = document.getElementById('lobby-sec-tv') || document.getElementById('lobby-anchor');
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 40);
-    },
-    onRandomMovie: () => {
-      if (typeof selection.pickRandom === 'function') selection.pickRandom();
-      else document.getElementById('btn-random-movie')?.click();
     },
   });
 
@@ -495,7 +472,7 @@ export function renderHome(app) {
   const homeScroll = h('div', { class: 'home-scroll glass-home-shell' },
     h('div', { class: 'app-layout' }, dockEl, themeStripEl, glassWindow));
   homeScroll.addEventListener('scroll', () => { lastScrollAt = Date.now(); }, { passive: true });
-  const srTitle = h('h1', { class: 'sr-only' }, 'Watchlivo — Birlikte Sinema, Dizi, Anime ve Canlı TV İzleme Odaları');
+  const srTitle = h('h1', { class: 'sr-only' }, 'Watchlivo — Arkadaşlarınla Senkron Birlikte İzleme Odaları');
   const home = h('main', { class: 'home', id: 'home-main', tabindex: '-1' }, srTitle, homeScroll);
 
   // DOM güncellemelerini `view transition` API veya daha kararlı bir yöntemle yönetin (Mevcut 'app.replaceChildren' çakışma yaratabilir)

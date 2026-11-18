@@ -24,9 +24,11 @@ from security import BoundedTTLCache, RateLimiter, client_ip, constant_time_eq, 
 
 # No hard-coded fallback: without VORTEX_SECRET the process gets an unguessable
 # per-instance secret (or refuses to boot when WATCHLIVO_STRICT_SECRETS=1).
+# Room tokens must validate on every serverless instance, so a real shared
+# secret is mandatory (no per-process fallback).
+if len((os.environ.get("SYNC_SECRET") or "").strip()) < 16:
+    raise RuntimeError("SYNC_SECRET ortam değişkeni zorunludur (en az 16 karakter)!")
 SYNC_SECRET = server_secret("SYNC_SECRET", min_len=16)
-if not os.environ.get("SYNC_SECRET"):
-    raise RuntimeError("SYNC_SECRET ortam değişkeni zorunludur!")
 
 VALID_PRIVACY = ("public", "nearby", "friends", "private")
 VALID_PLAY_MODES = ("leader", "cohost", "autoplay", "quickplay", "vote")
@@ -398,18 +400,20 @@ def _media_defaults(room: Dict[str, Any]) -> Dict[str, Any]:
 
 _TRUSTED_EMBED_HOSTS = (
     "youtube.com", "youtube-nocookie.com", "youtu.be", "googlevideo.com",
-    "vimeo.com", "dailymotion.com", "dai.ly", "twitch.tv",
-    "drive.google.com", "docs.google.com", "ok.ru", "odnoklassniki.ru",
-    "sibnet.ru", "rutube.ru", "my.mail.ru", "vk.com", "vkvideo.ru",
-    "vidmoly.to", "vidmoly.me", "vidmoly.net", "vidmoly.biz",
-    "vmbox.", "vmnow.", "vmpx.", "vidsrc.", "vidlink.", "2embed.",
-    "superembed.", "autoembed.", "multiembed.", "tau-video.xyz",
-    "aliez.me", "sendvid.com", "streamtape.com", "doodstream.com",
-    "filemoon.sx", "voe.sx", "mp4upload.com", "yourupload.com",
-    "gdriveplayer.to", "rapidvid.org", "closeload.",
+    "vimeo.com", "dailymotion.com", "dai.ly", "twitch.tv", "kick.com",
+    "drive.google.com", "docs.google.com",
     "itunes.apple.com", "mzstatic.com", "sndcdn.com", "dzcdn.net", "scdn.co",
 )
 _DIRECT_MEDIA_EXT_RE = re.compile(r"\.(?:mp4|m4v|m4s|m3u8|mpd|webm|mkv|mov|mp3|m4a|aac|ogg|opus|wav|flac|ts)(?:$|[?#])", re.I)
+
+
+def _is_unresolved_url(url: Any) -> bool:
+    """Placeholder check kept for the merge/sync logic.
+
+    Server-side catalog resolution was removed (Rave model: the server never
+    serves third-party video), so no room URL is ever a pending placeholder.
+    """
+    return False
 
 
 def _is_trusted_embed_host(host: str) -> bool:
@@ -519,8 +523,6 @@ def clean_media(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(st, dict) and st.get("url"):
             su = _clean_media_url(st.get("url"), 2000, allow_relative=True, embed_only=False)
             if not su:
-                continue
-            if "rapidvid.org/407eb1ed" in su or "1952401276" in su:
                 continue
             sub_tracks.append({
                 "id": clean_str(st.get("id"), 20),
@@ -1039,8 +1041,8 @@ def merge_sync_token(room: Optional[Dict[str, Any]], token: Any, room_id: str) -
         if not cur_h_alive or (snap.get("host_transferred") and s_rev > r_rev):
             room["host_id"] = snap_h_id
     same_m_key = bool(s_has_media and r_has_media and media_key(s_media) == media_key(r_media))
-    s_unresolved = str(s_media.get("url") or "").startswith("/api/rave/resolve-catalog")
-    r_unresolved = str(r_media.get("url") or "").startswith("/api/rave/resolve-catalog")
+    s_unresolved = _is_unresolved_url(s_media.get("url") or "")
+    r_unresolved = _is_unresolved_url(r_media.get("url") or "")
     r_live_pos = r_pos + (max(0.0, t - r_m_time) * float(r_media.get("rate") or 1.0) if (r_media.get("playing") and r_m_time > 0.0 and (not r_unresolved or r_media.get("playbackAnchored") or r_media.get("_playbackAnchored") or r_pos > 0.5)) else 0.0)
     s_live_pos = s_pos + (max(0.0, t - s_m_time) * float(s_media.get("rate") or 1.0) if (s_media.get("playing") and s_m_time > 0.0 and (not s_unresolved or s_media.get("playbackAnchored") or s_media.get("_playbackAnchored") or s_pos > 0.5)) else 0.0)
     stale_snap_regression = bool(
@@ -1165,7 +1167,7 @@ def serialize(room: Dict[str, Any], for_cid: Optional[str] = None) -> Dict[str, 
         m["currentTime"] = 0.0
         m["updatedAt"] = t
     is_unresolved_catalog = (
-        str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        _is_unresolved_url(m.get("url") or "")
         and float(m.get("currentTime") or 0.0) <= 0.5
         and not bool(room.get("media", {}).get("playbackAnchored") or room.get("media", {}).get("_playbackAnchored"))
     )
@@ -1256,7 +1258,7 @@ def lobby_entry(room: Dict[str, Any], mask_private: bool = False) -> Dict[str, A
     has_humans = any(p.get("transport") != "bot" for p in p_map.values())
     raw_m = _media_defaults(room)
     is_unresolved_cat = (
-        str(raw_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        _is_unresolved_url(raw_m.get("url") or "")
         and float(raw_m.get("currentTime") or 0.0) <= 0.5
         and not bool((room.get("media") or {}).get("playbackAnchored") or (room.get("media") or {}).get("_playbackAnchored"))
     )
@@ -1655,7 +1657,7 @@ def _freeze_empty_room_playback(room: Dict[str, Any], t_now: float) -> None:
     if not isinstance(m, dict) or (not m.get("url") and not m.get("videoId")):
         return
     is_unres = (
-        str(m.get("url") or "").startswith("/api/rave/resolve-catalog")
+        _is_unresolved_url(m.get("url") or "")
         and float(m.get("currentTime") or 0.0) <= 0.5
         and not bool(m.get("playbackAnchored") or m.get("_playbackAnchored"))
     )
@@ -1727,8 +1729,11 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
         return False
     p = p or {}
     data = data or {}
+    # ``_internalCreator`` is a server-only flag (set by the create-room API).
+    # Every client-facing entry point (HTTP sync, WS join/messages, batch
+    # sub-actions) strips underscore-prefixed keys, so clients cannot forge it.
     if data.get("_internalCreator"):
-        return False # Changed from True for security
+        return True
     t_now = now()
     rid_str = str(room.get("id") or "")
     live_ws = SOCKETS.get(rid_str, {})
@@ -1747,8 +1752,27 @@ def _is_creator_of_room(room: Dict[str, Any], cid: str, p: Optional[Dict[str, An
         if creator_cid_alive:
             return False
     creator_id = str(room.get("creatorId") or "").strip()
-    uid = str(p.get("uid") or data.get("uid") or data.get("userId") or "").strip()
-    # Removed uid comparison for password bypass
+    # Identity precedence: a participant record's uid (always server-sanitized on join) wins
+    # outright, even when empty; otherwise a caller-vouched "uid" (transports overwrite it with
+    # the verified id); a raw client "userId" is only consulted when neither is present.
+    if "uid" in p:
+        uid = str(p.get("uid") or "").strip()
+    elif "uid" in data:
+        uid = str(data.get("uid") or "").strip()
+    else:
+        uid = str(data.get("userId") or "").strip()
+    # The creator's account may reclaim the room (e.g. after a refresh/new cid)
+    # while the original creator cid is gone. Participant uids are always
+    # server-sanitized (_safe_participant_uid: a token-verified account id or a
+    # ``guest_`` id), and handle_action never forwards client-sent uid fields,
+    # so a self-chosen uid cannot match a registered creatorId. Guest ids are
+    # self-chosen, so they never grant creator rights this way.
+    if (
+        uid and creator_id and uid == creator_id
+        and not creator_id.startswith("guest_")
+        and not uid.startswith("guest_")
+    ):
+        return True
     if uid and creator_id and uid != creator_id and (creator_id.startswith(("u_", "uid_")) or uid.startswith(("u_", "uid_"))):
         return False
     cur_host_id = str(room.get("host_id") or "").strip()
@@ -1842,7 +1866,9 @@ def add_participant(room: Dict[str, Any], cid: str, data: Dict[str, Any], transp
         "color": clean_str(data.get("color"), 16) if re.match(r"^#[0-9a-fA-F]{3,8}$", str(data.get("color") or "")) else "",
         "device": clean_str(data.get("device"), 16),
         "country": "XX" if hide_loc else (raw_country or p.get("country") or "TR"),
-        "uid": clean_str(data.get("uid") or data.get("userId"), 64),
+        # Transports always set "uid" to the server-sanitized id; never fall back to a
+        # client-sent "userId" in that case (it would let a caller pick its own uid).
+        "uid": clean_str(data.get("uid") if "uid" in data else data.get("userId"), 64),
         "handle": clean_str(data.get("handle"), 24),
         "medal": clean_str(data.get("medal"), 32),
         "bio": clean_str(data.get("bio"), 160),
@@ -2025,6 +2051,8 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
     if mtype == "batch":
         for sub in (data.get("items") or [])[:25]:
             if isinstance(sub, dict) and sub.get("type") != "batch":
+                # Batch items are client data: drop server-only (underscore) keys.
+                sub = {k: v for k, v in sub.items() if not str(k).startswith("_")}
                 sub_out = handle_action(room, cid, sub)
                 out["broadcast"].extend(sub_out.get("broadcast", []))
                 out["reply"].extend(sub_out.get("reply", []))
@@ -2051,7 +2079,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         and (cur_host_id in live_ws or (t_now - float(cur_host.get("lastSeen") or 0.0) <= 45.0))
     )
     cur_host_is_creator = bool(cur_host and _is_creator_of_room(room, cur_host_id or "", cur_host))
-    is_creator = _is_creator_of_room(room, cid, me, data)
+    # Never let action payload fields vouch for identity: only the participant
+    # record (whose uid was server-verified on join) counts.
+    creator_check_data = {
+        k: v for k, v in data.items()
+        if k not in ("uid", "userId") and not str(k).startswith("_")
+    }
+    is_creator = _is_creator_of_room(room, cid, me, creator_check_data)
     me["isCreator"] = bool(is_creator)
     if is_creator:
         if not room.get("host_transferred"):
@@ -2104,15 +2138,15 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
             if cur_mk and inc_mk and cur_mk != inc_mk:
                 return out
             inc_hb_url = str(inc_hb_clean.get("url") or "")
-            if inc_hb_url and not inc_hb_url.startswith("/api/rave/resolve-catalog"):
+            if inc_hb_url and not _is_unresolved_url(inc_hb_url):
                 cur_hb_url = str(cur_m.get("url") or "")
-                if (not cur_hb_url or cur_hb_url.startswith("/api/rave/resolve-catalog")) and (not cur_mk or cur_mk == inc_mk):
+                if (not cur_hb_url or _is_unresolved_url(cur_hb_url)) and (not cur_mk or cur_mk == inc_mk):
                     for k in ("provider", "catalogProvider", "streamType", "url", "altUrls", "servers", "subtitleTracks", "audioTracks", "intro", "duration", "mediaType", "season", "episode", "tmdbId", "imdbId", "seriesTitle", "originalTitle", "videoId", "clipVideoId", "embedUrl", "poster", "thumbnail"):
                         if inc_hb_clean.get(k):
                             cur_m[k] = inc_hb_clean[k]
                     room["_tok_sig"] = ""
         cur_unres_hb = (
-            str(cur_m.get("url") or "").startswith("/api/rave/resolve-catalog")
+            _is_unresolved_url(cur_m.get("url") or "")
             and float(cur_m.get("currentTime") or 0.0) <= 0.5
             and not bool(cur_m.get("playbackAnchored"))
         )
@@ -2159,22 +2193,13 @@ def handle_action(room: Dict[str, Any], cid: str, data: Dict[str, Any]) -> Dict[
         cur_m = room.get("media") or {}
         incoming = clean_media(data)
         inc_url = str(incoming.get("url") or "")
-        if inc_url and not inc_url.startswith("/api/rave/resolve-catalog"):
+        if inc_url and not _is_unresolved_url(inc_url):
             cur_url = str(cur_m.get("url") or "")
-            cur_unresolved = not cur_url or cur_url.startswith("/api/rave/resolve-catalog")
+            cur_unresolved = not cur_url or _is_unresolved_url(cur_url)
             same_key = (not media_key(cur_m)) or (media_key(cur_m) == media_key(incoming))
             if not can_control:
-                # Non-controllers may only fulfill an unresolved catalog room using direct media streams (never iframes/embeds).
-                if not cur_url.startswith("/api/rave/resolve-catalog") or not same_key:
-                    return out
-                if not inc_url.startswith(("/api/rave/stream", "/api/rave/stream-proxy", "https://")):
-                    return out
-                if incoming.get("provider") in ("embed", "youtube"):
-                    return out
-                if incoming.get("provider") in ("", "web") and inc_url.startswith("https://"):
-                    incoming["provider"] = "hls" if ".m3u8" in inc_url.lower() else "mp4"
-                for unsafe_k in ("embedUrl", "mvUrl", "bgVideoUrl", "bgYoutubeId", "audioPreviewUrl", "providerUrl", "officialUrl", "sourceUrl", "videoId"):
-                    incoming.pop(unsafe_k, None)
+                # Only the host/co-hosts may change what the room plays.
+                return out
             allow_unresolved = can_control if not cur_url else (can_control or same_key)
             if (cur_unresolved and allow_unresolved) or (can_control and same_key and inc_url != cur_url):
                 raw_inc_ct = data.get("currentTime") if data.get("currentTime") is not None else incoming.get("currentTime")
@@ -2854,7 +2879,7 @@ def _handle_social(room, cid, data, out, name, is_host):
             out["reply"].append({"type": "error", "message": "7/24 canlı yayın odalarında oda ayarları değiştirilemez."})
             return out
         act = data.get("action") or ("set_privacy" if mtype == "update_room" else "")
-        is_creator_match = (not room.get("host_transferred")) and _is_creator_of_room(room, cid, me, {**data, "uid": me.get("uid", "")})
+        is_creator_match = (not room.get("host_transferred")) and _is_creator_of_room(room, cid, me, {**{k: v for k, v in data.items() if k != "userId"}, "uid": me.get("uid", "")})
         if not (is_host or cid in (room.get("co_hosts") or []) or is_creator_match):
             out["reply"].append({"type": "error", "message": "Bu ayarları yalnızca oda lideri değiştirebilir."})
             return out
@@ -3243,21 +3268,6 @@ from starlette.websockets import WebSocket, WebSocketDisconnect  # noqa: E402
 
 ROOM_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_\-]{1,47}$")
 
-_LIVE_TV = [
-    ("trt1", "TRT 1", "https://tv-trt1.medya.trt.com.tr/master.m3u8"),
-    ("atv", "ATV", "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/atv/atv_1080p.m3u8"),
-    ("now-tv", "NOW", "https://uycyyuuzyh.turknet.ercdn.net/nphindgytw/nowtv/nowtv.m3u8"),
-    ("star-tv", "Star TV", "https://dogus.daioncdn.net/startv/startv.m3u8?ce=3&app=a20ac41e-bdc3-4aa1-934d-26b484480ac9"),
-    ("trt-spor", "TRT Spor", "https://tv-trtspor1.medya.trt.com.tr/master.m3u8"),
-    ("a-spor", "A Spor", "https://rnttwmjcin.turknet.ercdn.net/lcpmvefbyo/aspor/aspor.m3u8"),
-    ("ntv", "NTV", "https://dogus.daioncdn.net/ntv/ntv.m3u8?ce=3&app=7c4bb802-0c41-409e-8cd2-799984995694"),
-    ("haberturk", "Habertürk TV", "https://tv.ensonhaber.com/haberturk/haberturk.m3u8"),
-    ("halk-tv", "Halk TV", "https://halktv-live.daioncdn.net/halktv/halktv.m3u8"),
-    ("trt-haber", "TRT Haber", "https://tv-trthaber.medya.trt.com.tr/master.m3u8"),
-    ("cnbc-e", "CNBC-e", "https://hnpsechtsc.turknet.ercdn.net/xpnvudnlsv/cnbc-e/cnbc-e.m3u8"),
-    ("trt-belgesel", "TRT Belgesel", "https://tv-trtbelgesel.medya.trt.com.tr/master.m3u8"),
-]
-
 _LIVE_RADIO = [
     ("radyo-power-turk", "Power Türk", "https://live.powerapp.com.tr/powerturk/abr/powerturk/128/playlist.m3u8", "hls"),
     ("radyo-kral-fm", "Kral FM", "https://dygedge2.radyotvonline.net/kralfm/playlist.m3u8", "hls"),
@@ -3271,26 +3281,10 @@ _LIVE_RADIO = [
 ]
 
 
-def _wrap_live_cors_url(u: str) -> str:
-    if any(d in u for d in ("ercdn.net", "daioncdn.net", "radyotvonline.")):
-        import urllib.parse
-        return f"/api/rave/stream?u={urllib.parse.quote(u, safe='')}&proxy_segs=1&ext=.m3u8"
-    return u
-
-
-def _tv_spec(rid: str, name: str, url: str) -> Dict[str, Any]:
-    play_u = _wrap_live_cors_url(url)
-    alt_u = [url] if (play_u != url and url.startswith("https://")) else []
-    return {
-        "id": f"tv-{rid}", "name": f"7/24 {name} Canlı Yayın", "creator": "Watchlivo Canlı TV", "privacy": "public", "playMode": "leader",
-        "media": {"provider": "hls", "streamType": "hls", "title": f"📺 {name} · Canlı Yayın", "url": play_u, "altUrls": alt_u, "channel": "Canlı TV · 7/24",
-                  "thumbnail": "/static/watchlivo-poster.svg", "live": True, "mediaType": "live", "duration": 0.0},
-    }
-
-
 def _radio_spec(rid: str, name: str, url: str, kind: str) -> Dict[str, Any]:
-    play_u = _wrap_live_cors_url(url) if kind == "hls" else url
-    alt_u = [url] if (play_u != url and url.startswith("https://")) else []
+    # Public station streams, played directly by each client (never relayed by the server).
+    play_u = url
+    alt_u: List[str] = []
     return {
         "id": rid, "name": f"7/24 {name} Canlı Radyo", "creator": "Watchlivo Canlı Radyo", "privacy": "public", "playMode": "leader",
         "media": {"provider": kind, "streamType": "hls" if kind == "hls" else "mp3", "title": f"📻 {name} · Canlı Radyo", "url": play_u, "altUrls": alt_u, "channel": "Canlı Radyo · 7/24",
@@ -3299,7 +3293,7 @@ def _radio_spec(rid: str, name: str, url: str, kind: str) -> Dict[str, Any]:
     }
 
 
-CURATED_LIVE_SPECS = [_tv_spec(*t) for t in _LIVE_TV] + [_radio_spec(*r) for r in _LIVE_RADIO]
+CURATED_LIVE_SPECS = [_radio_spec(*r) for r in _LIVE_RADIO]
 CURATED_ORDER = {s["id"]: idx for idx, s in enumerate(CURATED_LIVE_SPECS)}
 
 
@@ -3313,7 +3307,7 @@ def _build_curated_room(spec: Dict[str, Any]) -> Dict[str, Any]:
         "id": "kinox_bot",
         "name": creator_label,
         "color": "#00f5d4",
-        "device": "7/24 Sinema",
+        "device": "7/24 Canlı Radyo",
         "country": "TR",
         "uid": "u_watchlivo_live",
         "muted": True,
@@ -3723,6 +3717,7 @@ async def http_sync(request: Request):
             or (safe_http_uid and f"uid:{safe_http_uid}" in room["kicked"])
         ):
             return JSONResponse({"error": "kicked"}, status_code=410)
+        existing_p = (room.get("participants") or {}).get(cid)
         pw_trusted_member = bool(existing_p and (signed_cid and signed_cid == cid))
         if has_password(room) and not pw_trusted_member:
             http_rl_key = f"http:{room_id}:{client_ip(request)}"
@@ -3781,7 +3776,7 @@ async def http_sync(request: Request):
         restored_recent_chat = _merge_recent_chat(room, data.get("recentChat"), now(), caller_can_seed=caller_can_seed_chat)
         if stale_empty_wipe and not restored_recent_chat:
             room["_explicit_chat_clear"] = True
-        p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "http")
+        p, is_new = add_participant(room, cid, {**data, "uid": safe_http_uid, "userId": safe_http_uid, "_verifiedClientToken": bool(signed_cid and signed_cid == cid)}, "http")
         join_msg_http = None
         join_ev_http = None
         if is_new:
@@ -3810,8 +3805,8 @@ async def http_sync(request: Request):
                 or _is_creator_of_room(room, cid, p, data)
             )
             incoming_clean = clean_media(active_m)
-            cur_unresolved = str(room["media"].get("url") or "").startswith("/api/rave/resolve-catalog")
-            inc_resolved = bool(incoming_clean.get("url") and not str(incoming_clean.get("url")).startswith("/api/rave/resolve-catalog"))
+            cur_unresolved = _is_unresolved_url(room["media"].get("url") or "")
+            inc_resolved = bool(incoming_clean.get("url") and not _is_unresolved_url(incoming_clean.get("url")))
             should_sync_active = (room_empty_media and (caller_is_leader or room.get("playMode") in ("cohost", "quickplay"))) or (cur_unresolved and inc_resolved and media_key(room["media"]) == media_key(incoming_clean))
             if should_sync_active:
                 if cur_unresolved and inc_resolved and not room_empty_media and media_key(room["media"]) == media_key(incoming_clean):

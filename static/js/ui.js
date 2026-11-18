@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261110_v183';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261118_v184';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -568,8 +568,8 @@ export function openThemeModal() {
       }, '🍎 iPhone IPA İndir (v1.2)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
-        href: '/download/Watchlivo-v2.0.apk',
-        download: 'Watchlivo-v2.0.apk',
+        href: '/download/apk',
+        download: 'Watchlivo.apk',
         onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
       }, h('span', { html: icons.android, style: { display: 'flex' } }), 'Android Native APK İndir (v2.0.2)'),
       h('a', {
@@ -618,8 +618,8 @@ export function openDownloadModal() {
         ),
         h('a', {
           class: 'btn primary wl-download-action',
-          href: '/download/Watchlivo-v2.0.apk',
-          download: 'Watchlivo-v2.0.apk',
+          href: '/download/apk',
+          download: 'Watchlivo.apk',
           onclick: () => toast('📱 Watchlivo Native APK v2.0.2 indiriliyor...', 4000)
         }, h('span', { html: icons.download, style: { display: 'flex' } }), 'Native APK İndir (v2.0.2)')
       ) : null,

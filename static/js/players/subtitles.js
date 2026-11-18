@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261110_v183';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261118_v184';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -549,7 +549,7 @@ export class SubtitleDubController {
             lang: 'tr',
             targetLang: 'tr',
             audioLang: 'tr',
-            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)',
+            label: '🇹🇷 Türkçe Ses',
             mode: 'hls',
           });
         }
@@ -605,7 +605,7 @@ export class SubtitleDubController {
         else {
           this.audioTracks.push({
             id: 'tr-dub', nativeIndex: idx, lang: 'tr', targetLang: 'tr', audioLang: 'tr',
-            label: '🇹🇷 Türkçe (Stüdyo Dublaj · 1080p)', mode: 'native',
+            label: '🇹🇷 Türkçe Ses', mode: 'native',
           });
         }
       } else {
@@ -710,9 +710,8 @@ export class SubtitleDubController {
       this.cuesCache.delete(cacheKey);
     }
 
-    // Direct residential browser fetch: Upstream sources like hdfilmcehennemi.mobi and subs5.strem.io
-    // support CORS (Access-Control-Allow-Origin: *) but block datacenter IPs. The browser fetches them
-    // directly without 403 blocks!
+    // Prefer fetching a CORS-enabled subtitle file directly from the browser; fall back to the
+    // backend subtitle endpoint below.
     const url = String(track.url || '');
     let directUrl = track.rawUrl || '';
     if (!directUrl && url && url.includes('/api/rave/subtitle.vtt')) {
@@ -1042,12 +1041,34 @@ export class SubtitleDubController {
     this.secondaryCues = [];
   }
 
-  async setDualSubtitle() {
-    this.dualSubEnabled = false;
-    this.secondaryCues = [];
-    this.onTimeUpdate(this.adapter.getTime(), true);
-    this.adapter.events.onTracksChanged?.();
-    return false;
+  async setDualSubtitle(subId) {
+    const cleanId = subId || 'off';
+    const disableDual = () => {
+      this.dualSubEnabled = false;
+      this.selectedDualSubId = 'off';
+      this.secondaryCues = [];
+      this.activeSecondaryCueText = '';
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return false;
+    };
+    if (cleanId === 'off') return disableDual();
+    const track = this.subtitleTracks.find((t) => t.id === cleanId)
+      || this.subtitleTracks.find((t) => t.lang === cleanId)
+      || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId));
+    if (!track) return disableDual();
+    this.selectedDualSubId = track.id;
+    try {
+      const cues = await this._loadCuesForTrack(track);
+      if (this._destroyed) return false;
+      this.secondaryCues = cues || [];
+      this.dualSubEnabled = true;
+      this.onTimeUpdate(this.adapter.getTime(), true);
+      this.adapter.events.onTracksChanged?.();
+      return true;
+    } catch (e) {
+      return disableDual();
+    }
   }
 
   async setAudioTrack(id, isInit = false) {

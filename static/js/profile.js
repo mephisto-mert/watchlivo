@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261110_v183';
-import { api } from './api.js?v=20261110_v183';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261110_v183';
+import { h, icons, popup, toast } from './ui.js?v=20261118_v184';
+import { api } from './api.js?v=20261118_v184';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261118_v184';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261110_v183';
+} from './store.js?v=20261118_v184';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -2404,8 +2404,8 @@ export function openUserProfileModal(targetUser) {
 if (typeof window !== 'undefined') {
   window.vortexOpenUserProfile = openUserProfileModal;
 }
-export async function syncGoogleYoutubeOAuth(expectedPassword = '', expectedEmail = '') {
-  const cleanPw = String(expectedPassword || '').trim();
+export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '') {
+  const cleanPw = String(password || '').trim();
   const cleanEmail = String(expectedEmail || '').trim().toLowerCase();
   const fb = await getFirebaseAuth();
   if (!fb?.auth || !fb?.GoogleAuthProvider || !fb?.signInWithPopup) {

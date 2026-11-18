@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261110_v183';
-import { api } from './api.js?v=20261110_v183';
-import { state } from './store.js?v=20261110_v183';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261110_v183';
+import { clock } from './sync.js?v=20261118_v184';
+import { api } from './api.js?v=20261118_v184';
+import { state } from './store.js?v=20261118_v184';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261118_v184';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -507,9 +507,7 @@ export class MeshConnection {
           const prevMedia = this.lastRoom.media || {};
           const prevUrl = String(prevMedia.url || prevMedia.videoId || '');
           const srvUrl = String(res.media.url || res.media.videoId || '');
-          const srvUnresolved = srvUrl.startsWith('/api/rave/resolve-catalog');
-          const prevResolved = prevUrl && !prevUrl.startsWith('/api/rave/resolve-catalog');
-          if (prevUrl && (!srvUrl || (prevResolved && srvUnresolved))) {
+          if (prevUrl && !srvUrl) {
             this.needsMediaPush = true;
             this.lastRev = 0;
             return;
@@ -538,7 +536,9 @@ export class MeshConnection {
           const nextExp = Number(res.media.meshStatePosition ?? res.media.currentTime ?? 0) + (nextPlaying ? Math.max(0, nowSec - nextT0) * Number(res.media.meshStatePlaybackSpeed ?? res.media.rate ?? 1) : 0);
           const posDiff = Math.abs(nextExp - prevExp);
           const isPaused = !nextPlaying;
-          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 0.85);
+          // Anti-stutter: during playback, small server-time jitter (< 2.2s) between polls is
+          // absorbed by the SyncEngine's rate nudging instead of emitting a poll_sync re-seek.
+          const significantJump = isPaused ? (posDiff > 0.35) : (posDiff > 2.2);
           const speedChanged = Boolean(res.media.meshStatePlaybackSpeed && Math.abs(Number(res.media.meshStatePlaybackSpeed) - Number(prevMedia.meshStatePlaybackSpeed || prevMedia.rate || 1)) > 0.01);
           this.lastRoom.media = normalizeRoomMediaState(this.lastRoom.media, res.media);
           if (statusChanged || significantJump || speedChanged || urlChanged) {

@@ -289,7 +289,7 @@ body.in-room:not(.mesh-minimized) .bg-img { display: none !important; }
 .avatar .presence { position: absolute; right: -1px; bottom: -1px; width: 32%; height: 32%; border-radius: 50%; background: #6366f1; border: 2px solid #07080c; }
 .avatar.speaking { box-shadow: 0 0 0 2px #6366f1, 0 0 12px #6366f188; }
 
-/* Home layout (Rave Home: SuperSearch provider strip + Lobby immediately visible) */
+/* Home layout (Rave Home: search + provider strip + Lobby immediately visible) */
 .home { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .home-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: 2em; }
 .rave-top-bar {
@@ -325,7 +325,7 @@ body.in-room:not(.mesh-minimized) .bg-img { display: none !important; }
 .continue-chip .c-title { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
 .continue-chip .c-pct { font-size: .85em; color: var(--accent); font-weight: 800; }
 
-/* Provider Category Filter Pills + Provider Grid (Rave SuperSearch__provider-items 2-Row Compact Strip) */
+/* Provider Category Filter Pills + Provider Grid (2-Row Compact Strip) */
 .provider-cat-bar {
   display: flex; flex-wrap: nowrap; justify-content: flex-end; align-items: center; gap: 6px;
   padding: 0; overflow-x: auto; scrollbar-width: none; max-width: 100%;
@@ -915,16 +915,10 @@ body.in-room:not(.mesh-minimized) .bg-img { display: none !important; }
     color: #cbd5e1;
   }
 }
-.cat-tab[data-cat="free_tr"] {
-  border-color: rgba(99, 102, 241, .45);
-  background: linear-gradient(135deg, rgba(99, 102, 241, .18), rgba(245, 158, 11, .16));
-  color: #a7f3d0; font-weight: 800;
-}
-.cat-tab[data-cat="free_tr"].active {
-  background: linear-gradient(135deg, #6366f1, #059669);
-  color: #fff; border-color: #a5b4fc;
-  box-shadow: 0 4px 16px rgba(99, 102, 241, .4);
-}
+/* Own-account explainer (subscription platforms on the plain web site) */
+.wl-account-explainer { text-align: center; gap: .8em; }
+.wl-account-explainer img { max-height: 48px; }
+.wl-account-explainer-title { font-size: 1.02em; line-height: 1.45; }
 
 
 /* Watchlivo Auth, Sign Up / Log In & Account System (Rave Login + UserHeader parity) */

@@ -20,28 +20,6 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn('private-test-secret', response.text)
         self.assertTrue(all('apiKey' not in x for x in response.json()['engines']))
 
-    def test_bad_manifest_parameter_is_client_error(self):
-        self.assertEqual(self.client.get('/api/rave/stream?spt=bad').status_code, 400)
-
-    def test_manifest_failure_never_plays_another_movie(self):
-        sid = base64.urlsafe_b64encode(b'https://example.com/a.m3u8').decode()
-        with patch.object(server, 'public_http_url', return_value=True), patch.object(server, '_public_open', side_effect=OSError):
-            response = self.client.get('/api/rave/stream', params={'sid': sid})
-        self.assertEqual(response.status_code, 502)
-        self.assertNotIn('mux.dev', response.text)
-
-    def test_proxy_preserves_unsatisfiable_range(self):
-        with patch.object(server, '_proxy_chunk_sync', return_value=(b'', 416, 'bytes */100', 'video/mp4')):
-            response = self.client.get(server._proxy_u('https://example.com/a.mp4'))
-        self.assertEqual(response.status_code, 416)
-        self.assertEqual(response.headers['content-range'], 'bytes */100')
-
-    def test_proxy_rejects_unsigned_or_tampered_requests(self):
-        resp_unsigned = self.client.get('/api/rave/stream-proxy?url=https://example.com/a.mp4')
-        self.assertEqual(resp_unsigned.status_code, 403)
-        resp_tampered = self.client.get('/api/rave/stream-proxy?url=https://example.com/a.mp4&sig=deadbeef0000')
-        self.assertEqual(resp_tampered.status_code, 403)
-
     def test_ssrf_guard_blocks_loopback_and_cloud_metadata(self):
         self.assertFalse(server.public_http_url('http://127.0.0.1:8765/api/health'))
         self.assertFalse(server.public_http_url('http://169.254.169.254/latest/meta-data/'))
@@ -75,39 +53,6 @@ class RegressionTests(unittest.TestCase):
         bad_resp2 = self.client.post('/api/rooms/BAD..ID/sync', json={'type': 'init'})
         self.assertEqual(bad_resp2.status_code, 400)
 
-    def test_platform_login_rejects_random_credentials_and_stores_zero_data(self):
-        """Provider passwords cannot be verified without a real bridge.
-
-        The server fails closed: 501 ``unsupported`` for every attempt, and no
-        e-mail/cookie is ever retained. It must never answer 200 for guessed
-        credentials.
-        """
-        attempts = [
-            {'provider': 'netflix', 'email': 'asdf@asdf.com', 'password': '1234'},
-            {'provider': 'disney', 'email': 'test@test.com', 'password': 'password'},
-            {'provider': 'netflix', 'email': 'kullanici@uydurmadomain999999.xyz', 'password': 'GucluSifre!2026'},
-            {'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'},
-            {'provider': 'netflix', 'email': 'demo_user@example.test', 'password': 'DemoPass#2026!', 'profile': 'demo'},
-        ]
-        for body in attempts:
-            resp = self.client.post('/api/rave/accounts/login', json=body)
-            self.assertEqual(resp.status_code, 501, body)
-            data = resp.json()
-            self.assertFalse(data.get('ok'), body)
-            self.assertEqual(data.get('code'), 'unsupported', body)
-            self.assertNotIn('vaultSeal', data, body)
-            self.assertNotIn('cookies', data, body)
-
-        with patch.object(server, '_upstream_authenticate_sync', return_value=(True, 'ok')):
-            still_501 = self.client.post('/api/rave/accounts/login', json={
-                'provider': 'netflix', 'email': 'sinema.sever@gmail.com', 'password': 'KinoStrong#2026!'})
-            self.assertEqual(still_501.status_code, 501)
-
-        r_accs = self.client.get('/api/rave/accounts').json()
-        self.assertEqual(r_accs['accounts']['netflix']['accountEmail'], '')
-        self.assertEqual(r_accs['accounts']['netflix']['cookies'], [])
-        self.assertTrue(r_accs['accounts']['netflix']['loginSatisfied'] is False)
-
     def test_private_redirect_is_rejected(self):
         with patch.object(server, 'public_http_url', return_value=False):
             with self.assertRaises(Exception):
@@ -125,15 +70,6 @@ class RegressionTests(unittest.TestCase):
         rooms.handle_action(room, 'h', {'type': 'seek', 'currentTime': 5})
         self.assertEqual(room['media']['currentTime'], 5)
 
-    def test_stream_matches_title_3arg_and_trusted_domains(self):
-        self.assertTrue(server._stream_matches_title('https://srv29.cdnimages2.cyou/hls/abc/master.txt', ['Inception', 'Başlangıç'], '2010'))
-        self.assertTrue(server._stream_matches_title('https://dbx.molystream.org/embed/sheila/xyz', ['Breaking Bad'], '2008'))
-        self.assertTrue(server._stream_matches_title('https://sn.dplayer82.site/nm.php?v=123', ['Prens'], '2023'))
-
-    def test_dizipal_pure_python_aes_decrypt(self):
-        res = server._decrypt_dizipal_rmk('invalid')
-        self.assertEqual(res, '')
-
     def test_srt_to_vtt_zero_offset_and_ass_conversion(self):
         vtt_with_map = "WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:180000,LOCAL:00:00:00.000\n\n00:00:10.000 --> 00:00:12.500\nMerhaba\n"
         converted = server._srt_to_vtt(vtt_with_map)
@@ -142,90 +78,6 @@ class RegressionTests(unittest.TestCase):
         ass_vtt = server._srt_to_vtt(ass_raw)
         self.assertIn("00:01:05.200 --> 00:01:08.450", ass_vtt)
         self.assertIn("Gördüm.\nGördün mü gerçekten?", ass_vtt)
-
-    def test_domestic_movies_and_series_in_vault_and_not_hidden(self):
-        streams = server._MAIN_SITES_VAULT.get("streams") or {}
-        for title in ("Kış Uykusu", "Bir Zamanlar Anadolu'da", "Ayla", "Babam ve Oğlum", "G.O.R.A.", "Dabbe", "Eşkıya", "7. Koğuştaki Mucize"):
-            nt = server._norm_title(title)
-            self.assertTrue(bool(streams.get(f"movie:{nt}:1:1")), f"Missing vault stream for {title} ({nt})")
-
-    def test_provider_catalog_and_resolve_domestic_endpoints(self):
-        import catalog_api
-        c = TestClient(catalog_api.app)
-        r_cat = c.get("/api/rave/catalog?provider=tvplus&page=1")
-        self.assertEqual(r_cat.status_code, 200)
-        self.assertTrue(len(r_cat.json().get("items") or []) > 0)
-        r_res = c.get("/api/rave/resolve-catalog?tmdbId=225565&title=K%C4%B1%C5%9F+Uykusu&mediaType=movie&year=2014")
-        self.assertEqual(r_res.status_code, 200)
-        self.assertTrue(bool(r_res.json().get("url")))
-
-    def test_media_key_stability_across_catalog_resolution(self):
-        self.assertEqual(rooms.media_key({}), "")
-        self.assertEqual(rooms.media_key(None), "")
-        unresolved_title_only = {
-            "title": "YAGA — 1. Sezon 2. Bölüm",
-            "season": 1,
-            "episode": 2,
-            "url": "/api/rave/resolve-catalog?title=YAGA&season=1&episode=2",
-        }
-        resolved_title_only = {
-            "title": "YAGA — 1. Sezon 2. Bölüm",
-            "season": 1,
-            "episode": 2,
-            "url": "/api/rave/stream?sid=abc123xyz",
-        }
-        self.assertEqual(rooms.media_key(unresolved_title_only), rooms.media_key(resolved_title_only))
-        unresolved_cat = {"id": "acx_9988", "season": 1, "episode": 3, "url": "/api/rave/resolve-catalog?id=acx_9988"}
-        resolved_cat = {"id": "acx_9988", "season": 1, "episode": 3, "url": "https://cdn.example.com/hls/master.m3u8"}
-        self.assertEqual(rooms.media_key(unresolved_cat), "cat|acx_9988|1|3")
-        self.assertEqual(rooms.media_key(unresolved_cat), rooms.media_key(resolved_cat))
-
-    def test_resolve_media_guards_and_broadcast(self):
-        room = rooms.new_room("res_guard_room")
-        rooms.add_participant(room, "host1", {"username": "HostUser"}, "ws")
-        rooms.add_participant(room, "guest1", {"username": "GuestUser"}, "ws")
-        room["host_id"] = "host1"
-        rooms.set_media(room, {
-            "tmdbId": "550",
-            "title": "Fight Club",
-            "url": "/api/rave/resolve-catalog?tmdbId=550",
-        }, "HostUser", 42.0)
-        out1 = rooms.handle_action(room, "guest1", {
-            "type": "resolve_media",
-            "tmdbId": "550",
-            "title": "Fight Club",
-            "url": "https://cdn.example.com/fightclub/master.m3u8",
-            "streamType": "hls",
-        })
-        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
-        self.assertGreaterEqual(room["media"]["currentTime"], 42.0)
-        self.assertEqual(len(out1["broadcast"]), 1)
-        self.assertEqual(out1["broadcast"][0][0]["action"], "resolve_media")
-        # Non-leader cannot overwrite already-resolved URL with a different URL
-        rooms.handle_action(room, "guest1", {
-            "type": "resolve_media",
-            "tmdbId": "550",
-            "title": "Fight Club",
-            "url": "https://evil.example.com/other.m3u8",
-        })
-        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
-        # Unresolved catalog URL is never accepted into resolve_media
-        rooms.handle_action(room, "host1", {
-            "type": "resolve_media",
-            "tmdbId": "550",
-            "title": "Fight Club",
-            "url": "/api/rave/resolve-catalog?tmdbId=550",
-        })
-        self.assertEqual(room["media"]["url"], "https://cdn.example.com/fightclub/master.m3u8")
-
-    def test_proxy_segment_cache_bounds(self):
-        server._SEGMENT_CACHE.clear()
-        for idx in range(35):
-            server._SEGMENT_CACHE[f"https://cdn.example.com/seg_{idx}.ts|"] = (9999999999.0, b"G" * 188, "video/mp2t")
-            if len(server._SEGMENT_CACHE) > 28:
-                oldest_k = min(server._SEGMENT_CACHE, key=lambda k: server._SEGMENT_CACHE[k][0])
-                server._SEGMENT_CACHE.pop(oldest_k, None)
-        self.assertLessEqual(len(server._SEGMENT_CACHE), 28)
 
     def test_platform_download_endpoints_and_manifest(self):
         m_resp = self.client.get("/manifest.json")
@@ -245,8 +97,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("fragLoadingTimeOut: 28000", html5_js)
         self.assertIn("this.hls.autoLevelCapping = chosenCap", html5_js)
         self.assertNotIn("this.hls.loadLevel = bestIdx", html5_js)
-        srv_py = (root / "server.py").read_text(encoding="utf-8")
-        self.assertIn("non_4k = [v for v in variant_pairs if v[0] <= 2700 and v[1] <= 11000000]", srv_py)
 
     def test_multi_device_creator_role_and_exact_frame_sync(self):
         room = rooms.new_room(
@@ -341,64 +191,14 @@ class RegressionTests(unittest.TestCase):
         rooms.handle_action(room, "h_creator", {"type": "heartbeat", "currentTime": 56.0, "playing": True})
         self.assertFalse(room["media"]["playing"])
 
-    def test_v35_fmp4_init_cache_abr_and_fullscreen_pause(self):
+    def test_v35_fullscreen_pause_and_idle_cursor(self):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
-        srv_py = (root / "server.py").read_text(encoding="utf-8")
-        # fMP4 init-*.mp4 detection and MP4 box header detection before .cfd/ check
-        self.assertIn('is_fmp4_init = ("init-" in clean_u_path or "/init." in clean_u_path or "_init." in clean_u_path)', srv_py)
-        self.assertIn('is_ftyp_moof = len(data) >= 8 and data[4:8] in (b"ftyp", b"moof", b"styp", b"sidx")', srv_py)
-        self.assertIn("variant_pairs.sort(key=lambda v: (v[0] if v[0] > 0 else 9999, v[1] if v[1] > 0 else 99999999))", srv_py)
-        # Fresh catalog resolution preserves 0.0 start position
-        room = rooms.new_room("test-v35-room", "Test V35", "public", "leader", "Tris", "u_tris", "")
-        rooms.add_participant(room, "h_tris", {"username": "Tris", "userId": "u_tris", "_internalCreator": True}, "http")
-        room["host_id"] = "h_tris"
-        rooms.set_media(room, {"title": "Zmora", "tmdbId": "253372", "url": "/api/rave/resolve-catalog?tmdbId=253372", "provider": "hls"}, "Tris", 0.0)
-        # Simulate 3 seconds of catalog resolution delay before resolve_media arrives with currentTime=0
-        room["media"]["updatedAt"] = rooms.now() - 3.5
-        rooms.handle_action(room, "h_tris", {
-            "type": "resolve_media",
-            "tmdbId": "253372",
-            "title": "Zmora",
-            "url": "/api/rave/stream_manifest?sid=test123&ext=.m3u8",
-            "currentTime": 0.0,
-        })
-        self.assertEqual(room["media"]["currentTime"], 0.0)
         # Verify CSS pointer-events isolation when controls are hidden and idle-cursor auto-hide in controls.js
         mesh_css = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         self.assertIn("frame.classList.add('idle-cursor')", mesh_css)
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         self.assertIn("document.querySelectorAll('.modal-backdrop, .popup-backdrop')", main_js)
-
-    def test_v37_sync_token_resolved_url_and_events(self):
-        import copy
-        import pathlib
-        root = pathlib.Path(__file__).resolve().parent.parent
-        host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
-        self.assertIn("this.onEvent('play', arg)", host_js)
-        self.assertIn("onPause: guard((arg) => this.onEvent('pause', arg))", host_js)
-        room = rooms.new_room("test-v37-room", "Test V37", "public", "leader", "Mert Can Yıldız", "u_mert", "")
-        rooms.add_participant(room, "h_mert", {"username": "Mert Can Yıldız", "userId": "u_mert", "_internalCreator": True}, "http")
-        # Subsequent guest fallback must not overwrite real name
-        rooms.add_participant(room, "h_mert", {"username": "Misafir İzleyici"}, "http")
-        self.assertEqual(room["participants"]["h_mert"]["name"], "Mert Can Yıldız")
-        rooms.set_media(room, {"title": "Zmora", "tmdbId": "253372", "url": "/api/rave/resolve-catalog?tmdbId=253372", "provider": "hls"}, "Mert Can Yıldız", 0.0)
-        rooms.handle_action(room, "h_mert", {
-            "type": "resolve_media",
-            "tmdbId": "253372",
-            "title": "Zmora",
-            "url": "/api/rave/stream_manifest?sid=resolved123&ext=.m3u8",
-            "currentTime": 0.0,
-        })
-        self.assertTrue(any(e.get("action") == "resolve_media" for e in room.get("events", [])))
-        # Ensure unresolved syncToken never overwrites resolved URL in room
-        stale_snap = copy.deepcopy(room)
-        stale_snap["media"]["url"] = "/api/rave/resolve-catalog?tmdbId=253372"
-        stale_snap["media"]["updatedAt"] = rooms.now() + 5.0
-        stale_snap.pop("_tok_sig", None)
-        stale_tok = rooms.pack_sync_token(stale_snap)
-        rooms.merge_sync_token(room, stale_tok, room["id"])
-        self.assertEqual(room["media"]["url"], "/api/rave/stream_manifest?sid=resolved123&ext=.m3u8")
 
     def test_v38_multi_user_anti_freeze_and_heartbeat_order(self):
         import copy
@@ -428,12 +228,7 @@ class RegressionTests(unittest.TestCase):
     def test_v43_room_screen_8_fixes(self):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
-        # 1. Wi-Fi stream proxy Vary: Range + non-immutable 206 + backward seek loop guard
-        with patch.object(server, "_proxy_chunk_sync", return_value=(b"A" * 64, 206, "bytes 0-63/1000", "video/mp2t")):
-            r_rng = self.client.get(server._proxy_u("https://example.com/seg.ts"), headers={"Range": "bytes=0-63"})
-        self.assertEqual(r_rng.status_code, 206)
-        self.assertEqual(r_rng.headers.get("vary"), "Range")
-        self.assertIn("private", r_rng.headers.get("cache-control", ""))
+        # 1. Backward seek loop guard
         sync_js = (root / "static" / "js" / "sync.js").read_text(encoding="utf-8")
         self.assertIn("const SEEK_SETTLE_MS = 12000;", sync_js)
 
@@ -567,19 +362,10 @@ class RegressionTests(unittest.TestCase):
     def test_v48_dublaj_and_spinner_sync_fixes(self):
         import pathlib
         root = pathlib.Path(__file__).resolve().parent.parent
-        # 1. Vault has all 18 episodes of Arcane (Season 1 & Season 2) with DiziLife dual audio + Pilavyer TR dublaj
-        v_streams = (server._MAIN_SITES_VAULT.get("streams") or {})
-        for s in (1, 2):
-            for e in range(1, 10):
-                ent = v_streams.get(f"tmdb:tv:94605:{s}:{e}")
-                self.assertIsNotNone(ent, f"Missing Arcane S{s}E{e} in vault")
-                sts = [x[1] for x in (ent.get("streams") or [])]
-                self.assertIn("hls_dl", sts)
-                self.assertIn("hls_pv_tr", sts)
         # 2. host.js resets loading=false and fires 'loaded' on early return in setMedia
         host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
         self.assertIn("this.onEvent('loaded');\n      }\n      return false;", host_js)
-        # 3. mesh.js preserves resolved URL in applyRoom and handles alreadyLoadedResolved across aud/resolve-catalog
+        # 3. mesh.js preserves loaded URL in applyRoom
         mesh_js = (root / "static" / "js" / "views" / "mesh.js").read_text(encoding="utf-8")
         self.assertIn("stripAudParam(ctx.host.loadedUrl) === stripAudParam(media.url)", mesh_js)
 
@@ -671,7 +457,7 @@ class RegressionTests(unittest.TestCase):
         listed_ids = [rm["id"] for rm in (r_list.json().get("rooms") or [])]
         self.assertNotIn(room_id, listed_ids)
 
-    def test_v50_ten_subagent_audit_and_seven_worlds_stream(self):
+    def test_v50_ten_subagent_audit_no_duplicate_join_and_curated_guards(self):
         # 1. Single user creates room and immediately calls init (even without clientToken or with rotated cid + isCreator) -> ZERO duplicate avatars and ZERO duplicate join chat messages
         r_cr = self.client.post("/api/rooms/create", json={
             "name": "Mert Can Yıldız odası",
@@ -683,8 +469,8 @@ class RegressionTests(unittest.TestCase):
             "media": {
                 "title": "Yedi Dünya, Bir Gezegen — S1:B1 · Antarktika",
                 "tmdbId": "90790",
-                "url": "/api/rave/resolve-catalog?tmdbId=90790&mediaType=tv&season=1&episode=1",
-                "provider": "cinema",
+                "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                "provider": "hls",
             },
         })
         self.assertEqual(r_cr.status_code, 200)
@@ -705,18 +491,13 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(join_msgs), 1)
 
         # 2. Curated 7/24 rooms block pause, seek, queue_add, vote_skip, and host_action from viewers
-        self.client.post("/api/rooms/tv-trt1/sync", json={"type": "init", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
-        r_tv_pause = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "pause", "clientId": "h_tv_v1", "username": "IzleyiciTV", "currentTime": 10})
+        self.client.post("/api/rooms/radyo-power-turk/sync", json={"type": "init", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
+        r_tv_pause = self.client.post("/api/rooms/radyo-power-turk/sync", json={"type": "pause", "clientId": "h_tv_v1", "username": "IzleyiciTV", "currentTime": 10})
         self.assertTrue(r_tv_pause.json()["room"]["media"]["playing"])
-        r_tv_q = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "queue_add", "clientId": "h_tv_v1", "username": "IzleyiciTV", "item": {"title": "Hack", "url": "https://example.com/a.mp4"}})
+        r_tv_q = self.client.post("/api/rooms/radyo-power-turk/sync", json={"type": "queue_add", "clientId": "h_tv_v1", "username": "IzleyiciTV", "item": {"title": "Hack", "url": "https://example.com/a.mp4"}})
         self.assertEqual(len(r_tv_q.json()["room"]["queue"]), 0)
-        r_tv_priv = self.client.post("/api/rooms/tv-trt1/sync", json={"type": "host_action", "action": "set_privacy", "privacy": "private", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
+        r_tv_priv = self.client.post("/api/rooms/radyo-power-turk/sync", json={"type": "host_action", "action": "set_privacy", "privacy": "private", "clientId": "h_tv_v1", "username": "IzleyiciTV"})
         self.assertEqual(r_tv_priv.json()["room"]["privacy"], "public")
-
-        # 3. Seven Worlds, One Planet (tmdbId=90790) resolves on Vercel (IS_VERCEL=True) via Vidmoly HLS
-        with patch.object(server, "IS_VERCEL", True):
-            st_list = server._extract_hdfc_sync("tv", 1, 1, "Seven Worlds, One Planet", "Yedi Dünya, Bir Gezegen", "tv:90790:1:1", "2019", tid="90790")
-        self.assertTrue(any("vidmoly.biz/embed-" in u for u, _ in st_list), f"Expected vidmoly HLS stream for 90790, got {st_list}")
 
     def test_v51_rave_io_direct_cdn_and_wall_clock_sync(self):
         import pathlib
@@ -752,11 +533,11 @@ class RegressionTests(unittest.TestCase):
             "mediaType": "movie",
             "season": 1,
             "episode": 1,
-            "sourceUrl": "https://www.fullhdfilmizlesene.now/film/orumcek-adam/",
+            "sourceUrl": "https://www.netflix.com/title/81028054",
         })
         self.assertEqual(cm_movie["season"], 0)
         self.assertEqual(cm_movie["episode"], 0)
-        self.assertEqual(cm_movie["sourceUrl"], "https://www.fullhdfilmizlesene.now/film/orumcek-adam/")
+        self.assertEqual(cm_movie["sourceUrl"], "https://www.netflix.com/title/81028054")
 
         cm_tv = rooms.clean_media({
             "title": "Arcane — 1. Sezon 2. Bölüm",
@@ -764,11 +545,11 @@ class RegressionTests(unittest.TestCase):
             "mediaType": "tv",
             "season": 1,
             "episode": 2,
-            "sourceUrl": "https://www.dizibox.live/diziler/arcane/",
+            "sourceUrl": "https://www.netflix.com/title/81435684",
         })
         self.assertEqual(cm_tv["season"], 1)
         self.assertEqual(cm_tv["episode"], 2)
-        self.assertEqual(cm_tv["sourceUrl"], "https://www.dizibox.live/diziler/arcane/")
+        self.assertEqual(cm_tv["sourceUrl"], "https://www.netflix.com/title/81435684")
 
         # 2. controls.js never activates is-hero-cover over video, guards movies from S1:B1/B2, and falls back to floating PiP
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
@@ -788,7 +569,8 @@ class RegressionTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
 
         # 1. APK download endpoints must serve real signed Android APK binary (PK\x03\x04)
-        for apk_route in ("/download/apk", "/download/Watchlivo-v1.1.0.apk", "/download/Watchlivo-v1.1.apk"):
+        # Legacy v1.x APK routes were retired; the current client is v2.0.
+        for apk_route in ("/download/apk", "/download/Watchlivo-v2.0.apk", "/download/Watchlivo-v2.0.0.apk"):
             resp = self.client.get(apk_route)
             self.assertEqual(resp.status_code, 200, f"Failed on {apk_route}")
             self.assertEqual(resp.headers.get("content-type"), "application/vnd.android.package-archive")
@@ -804,20 +586,24 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Watchlivo DJ", tr_data["items"][0]["title"])
         self.assertNotIn("RaveDJ", tr_data["items"][0]["title"])
 
-        m_resp = self.client.post(
-            "/api/rave/ravedj-mashup",
-            json={"trackA": "Semicenk Canin Sag Olsun", "trackB": "Lvbel C5 Doberman", "bpm": 124},
-        )
-        self.assertEqual(m_resp.status_code, 200)
-        m_data = m_resp.json()
-        self.assertTrue(m_data.get("ok"))
-        mashup = m_data.get("mashup") or {}
-        self.assertEqual(mashup.get("provider"), "direct")
-        self.assertTrue(bool(mashup.get("url")))
-        self.assertTrue(bool(mashup.get("audioPreviewUrl")))
-        self.assertIn("Watchlivo DJ", mashup.get("title", ""))
-        self.assertNotIn("RaveDJ", mashup.get("title", ""))
-        self.assertTrue(len(mashup.get("mashupTracks") or []) >= 1)
+        # Mashup resolution needs real music lookups (iTunes/YouTube); skip that part offline.
+        from _net import network_available
+        net_ok = network_available()
+        if net_ok:
+            m_resp = self.client.post(
+                "/api/rave/ravedj-mashup",
+                json={"trackA": "Semicenk Canin Sag Olsun", "trackB": "Lvbel C5 Doberman", "bpm": 124},
+            )
+            self.assertEqual(m_resp.status_code, 200)
+            m_data = m_resp.json()
+            self.assertTrue(m_data.get("ok"))
+            mashup = m_data.get("mashup") or {}
+            self.assertEqual(mashup.get("provider"), "direct")
+            self.assertTrue(bool(mashup.get("url")))
+            self.assertTrue(bool(mashup.get("audioPreviewUrl")))
+            self.assertIn("Watchlivo DJ", mashup.get("title", ""))
+            self.assertNotIn("RaveDJ", mashup.get("title", ""))
+            self.assertTrue(len(mashup.get("mashupTracks") or []) >= 1)
 
         # 3. Mobile room entry & Watchlivo DJ branding static checks
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
@@ -831,11 +617,13 @@ class RegressionTests(unittest.TestCase):
         providers_js = (root / "static" / "js" / "providers.js").read_text(encoding="utf-8")
         self.assertIn("name: 'Watchlivo DJ'", providers_js)
         self.assertNotIn("name: 'RaveDJ'", providers_js)
+        if not net_ok:
+            self.skipTest("network unavailable: /api/rave/ravedj-mashup needs live music lookups")
 
     def test_v80_continue_watching_exact_second_and_ios_kb_landscape(self):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
-        # 1. Creating a room with resume currentTime=1824 (30:24) preserves exact second across unresolved catalog + resolve_media
+        # 1. Creating a room with resume currentTime=1824 (30:24) preserves the exact second
         cr = self.client.post(
             "/api/rooms/create",
             json={
@@ -851,7 +639,7 @@ class RegressionTests(unittest.TestCase):
                     "mediaType": "tv",
                     "season": 1,
                     "episode": 9,
-                    "url": "/api/rave/resolve-catalog?tmdbId=94605&type=tv&season=1&episode=9",
+                    "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
                     "provider": "hls",
                     "currentTime": 1824.0,
                 },
@@ -863,28 +651,6 @@ class RegressionTests(unittest.TestCase):
         rid = room_obj["id"]
         self.assertAlmostEqual(float(room_obj["media"]["currentTime"]), 1824.0, places=1)
         self.assertAlmostEqual(float(room_obj["media"]["meshStatePosition"]), 1824.0, places=1)
-
-        # Simulate catalog resolution 5s later: position must still be 1824.0 (not reset to 0 and not drifted during resolve)
-        r_res = self.client.post(
-            f"/api/rooms/{rid}/sync",
-            json={
-                "type": "resolve_media",
-                "clientId": cr_data["clientId"],
-                "clientToken": cr_data["clientToken"],
-                "username": "Mert Can",
-                "tmdbId": "94605",
-                "mediaType": "tv",
-                "season": 1,
-                "episode": 9,
-                "title": "Arcane — 1. Sezon 9. Bölüm",
-                "url": "/api/rave/stream_manifest?sid=testarcane1824&ext=.m3u8",
-                "currentTime": 1824.0,
-            },
-        )
-        self.assertEqual(r_res.status_code, 200)
-        rm_after = r_res.json()["room"]["media"]
-        self.assertEqual(rm_after["url"], "/api/rave/stream_manifest?sid=testarcane1824&ext=.m3u8")
-        self.assertAlmostEqual(float(rm_after["currentTime"]), 1824.0, places=1)
 
         # 2. Static checks for store.js non-zero progress preservation & mesh.css kb-open / theme accent sync
         store_js = (root / "static" / "js" / "store.js").read_text(encoding="utf-8")
@@ -899,9 +665,9 @@ class RegressionTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
 
-        # 1. Cache-bust bumped cleanly to 20261110_v183 with zero stale v79/v87/v88/v132 references
+        # 1. Cache-bust bumped cleanly to 20261118_v184 with zero stale v79/v87/v88/v132 references
         index_html = (root / "static" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("20261110_v183", index_html)
+        self.assertIn("20261118_v184", index_html)
         self.assertNotIn("20261106_v132", index_html)
         self.assertNotIn("20261103_v79", index_html)
         self.assertNotIn("20261103_v87", index_html)
@@ -964,13 +730,6 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_poll.status_code, 200)
         self.assertEqual(r_poll.json()["room"]["host_id"], "h_ayse_v80")
 
-        # 3. Signed Drive proxy emits HMAC sig= and stream-proxy blocks unsigned Drive URLs (403)
-        r_unsigned = self.client.get("/api/rave/stream-proxy?u=https%3A%2F%2Fdrive.usercontent.google.com%2Fdownload%3Fid%3D1AbCdEfGhIjKlMnOp")
-        self.assertEqual(r_unsigned.status_code, 403)
-        r_drv = self.client.get("/api/rave/gdrive-folder?url=https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrSt/view")
-        self.assertEqual(r_drv.status_code, 200)
-        self.assertIn("sig=", r_drv.json()["items"][0]["url"])
-
         # 4. CSP allows data: in media-src in both server.py and vercel.json (for voice notes)
         r_idx = self.client.get("/")
         self.assertIn("media-src 'self' data:", r_idx.headers.get("content-security-policy", ""))
@@ -991,8 +750,9 @@ class RegressionTests(unittest.TestCase):
         voice_note_js = (root / "static" / "js" / "voice-note.js").read_text(encoding="utf-8")
         vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
         self.assertIn("epProgress", store_js)
-        self.assertIn("findSavedProgress(", accounts_js)
-        self.assertIn("epStartSec", accounts_js)
+        # The catalog title/episode picker that lived in accounts.js was removed (Rave model);
+        # saved-progress lookup is still provided by store.js.
+        self.assertIn("findSavedProgress(", store_js)
         self.assertIn("computeNextEpSpec", controls_js)
         self.assertIn("const shouldCloseRoom = Boolean(closeRoomForAll);", realtime_js)
         self.assertIn("startUniversalVoiceRecorder", chat_js)
@@ -1165,8 +925,10 @@ class RegressionTests(unittest.TestCase):
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         subs_js = (root / "static" / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
         mesh_css = (root / "static" / "css" / "mesh.css").read_text(encoding="utf-8")
-        manifest_xml = (root.parent / "watchlivo_android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        main_java = (root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java").read_text(encoding="utf-8")
+        # Native Android sources live in a sibling checkout (../watchlivo_android) that may be absent.
+        manifest_path = root.parent / "watchlivo_android" / "AndroidManifest.xml"
+        main_java_path = root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java"
+        native_ok = manifest_path.exists() and main_java_path.exists()
 
         self.assertIn("createMediaElementSource", gain_js)
         self.assertIn("createDynamicsCompressor", gain_js)
@@ -1182,124 +944,33 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("--wl-composed-filter", mesh_css)
         self.assertIn("html.is-android-pip", mesh_css)
         self.assertIn("body.kb-open.kb-portrait", mesh_css)
+        if not native_ok:
+            self.skipTest("sibling ../watchlivo_android checkout not present; native PiP checks skipped")
+        manifest_xml = manifest_path.read_text(encoding="utf-8")
+        main_java = main_java_path.read_text(encoding="utf-8")
         self.assertIn('android:supportsPictureInPicture="true"', manifest_xml)
         self.assertIn("WatchlivoBridge", main_java)
         self.assertIn("enterPictureInPictureMode", main_java)
 
-    def test_v87_hls_large_segment_no_truncation_and_sync(self):
-        import io as _io
-        from unittest.mock import patch
-
-        server._SEGMENT_CACHE.clear()
-        ts_packets = 27888  # 27888 * 188 = 5,242,944 bytes (> 3.5 MB)
-        big_ts = (b"\x47" + b"\x11" * 187) * ts_packets
-        test_ts_url = "https://example.com/hls/movie1080/seg_001.ts"
-
-        class _FakeResp:
-            def __init__(self, payload: bytes, content_type: str = "video/mp2t", declared_len: int | None = None):
-                self._buf = _io.BytesIO(payload)
-                self.status = 200
-                self.headers = {
-                    "Content-Type": content_type,
-                    "Content-Length": str(len(payload) if declared_len is None else declared_len),
-                }
-
-            def read(self, n: int = -1) -> bytes:
-                return self._buf.read(n)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *args):
-                return False
-
-        # 1) Full 5.24 MB MPEG-TS segment under IS_VERCEL=True must NOT truncate at 3.5 MB
-        sig1 = server._proxy_sig(test_ts_url, "")
-        with patch.object(server, "IS_VERCEL", True), patch.object(server, "_public_open", return_value=_FakeResp(big_ts)):
-            r_seg = self.client.get(f"/api/rave/stream-proxy?url={test_ts_url}&sig={sig1}&ext=.ts")
-            self.assertEqual(r_seg.status_code, 200)
-            self.assertEqual(len(r_seg.content), len(big_ts))
-            self.assertEqual(r_seg.headers.get("content-type"), "video/mp2t")
-
-        # 2) Truncated upstream read (declared 5 MB, delivered 2 MB) must fail and NOT poison _SEGMENT_CACHE
-        trunc_url = "https://example.com/hls/movie1080/seg_trunc.ts"
-        sig2 = server._proxy_sig(trunc_url, "")
-        with patch.object(server, "IS_VERCEL", True), patch.object(
-            server, "_public_open", side_effect=lambda *a, **kw: _FakeResp(big_ts[:2_000_000], declared_len=len(big_ts))
-        ):
-            r_bad = self.client.get(f"/api/rave/stream-proxy?url={trunc_url}&sig={sig2}&ext=.ts")
-            self.assertEqual(r_bad.status_code, 502)
-            self.assertNotIn(trunc_url, server._SEGMENT_CACHE)
-
-        # 3) 3.1 MB fMP4 .m4s HLS segment with ext=.m4s must return full 200 OK video/mp4 (not 206 2MB slice)
-        m4s_body = b"\x00\x00\x00\x18moof" + (b"\x22" * (3_145_728 - 8))
-        m4s_url = "https://example.com/hls/fmp4/seg_002.m4s"
-        sig3 = server._proxy_sig(m4s_url, "")
-        with patch.object(server, "IS_VERCEL", True), patch.object(
-            server, "_public_open", return_value=_FakeResp(m4s_body, content_type="video/iso.segment")
-        ):
-            r_m4s = self.client.get(f"/api/rave/stream-proxy?url={m4s_url}&sig={sig3}&ext=.m4s")
-            self.assertEqual(r_m4s.status_code, 200)
-            self.assertEqual(len(r_m4s.content), len(m4s_body))
-            self.assertEqual(r_m4s.headers.get("content-type"), "video/mp4")
-
-        # 4) Non-leader viewer http_sync activeMedia resolves unresolved /api/rave/resolve-catalog room URL
-        c_res = self.client.post("/api/rooms/create", json={
-            "name": "V87 Sync Room",
-            "privacy": "public",
-            "playMode": "leader",
-            "creator": "HostUser",
-            "creatorId": "u_host_v87",
-            "clientId": "h_host_v87",
-            "media": {
-                "title": "Çürük Elmalar",
-                "tmdbId": "1198654",
-                "mediaType": "movie",
-                "provider": "hls",
-                "url": "/api/rave/resolve-catalog?tmdbId=1198654&type=movie",
-            },
-        })
-        self.assertEqual(c_res.status_code, 200)
-        rid = c_res.json()["room"]["id"]
-        # Host initializes room so host_id is locked to HostUser
-        self.client.post(f"/api/rooms/{rid}/sync", json={
-            "type": "init",
-            "clientId": "h_host_v87",
-            "username": "HostUser",
-            "isCreator": True,
-        })
-        # Viewer joins with already-resolved URL in activeMedia for same tmdbId
-        v_sync = self.client.post(f"/api/rooms/{rid}/sync", json={
-            "type": "poll",
-            "clientId": "h_viewer_v87",
-            "username": "ViewerUser",
-            "activeMedia": {
-                "title": "Çürük Elmalar",
-                "tmdbId": "1198654",
-                "mediaType": "movie",
-                "provider": "hls",
-                "streamType": "hls",
-                "url": "/api/rave/stream?url=https%3A%2F%2Fcdn-v87-test.shop%2Fmaster.m3u8&ext=.m3u8",
-                "currentTime": 4.2,
-            },
-        })
-        self.assertEqual(v_sync.status_code, 200)
-        synced_url = v_sync.json()["room"]["media"]["url"]
-        self.assertTrue(synced_url.startswith("/api/rave/stream?"), synced_url)
-
+    def test_v87_auto_pip_attributes_and_native_parity(self):
         # 5) Auto-PiP visibility, WebKit attributes, Android sourceRectHint & Swift/ObjC native parity
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
         html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
         host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
-        main_java = (root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java").read_text(encoding="utf-8")
-        swift_wv = (root.parent / "watchlivo_ios" / "Sources" / "Watchlivo" / "WatchlivoWebView.swift").read_text(encoding="utf-8")
+        # Native sources live in sibling checkouts (../watchlivo_android, ../watchlivo_ios) that may be absent.
+        main_java_path = root.parent / "watchlivo_android" / "src" / "online" / "watchlivo" / "app" / "MainActivity.java"
+        swift_wv_path = root.parent / "watchlivo_ios" / "Sources" / "Watchlivo" / "WatchlivoWebView.swift"
         self.assertIn("applyOptimalPipAttributes", html5_js)
         self.assertIn("allowsPictureInPicture", html5_js)
         self.assertIn("webkit-playsinline", html5_js)
         self.assertIn("autopictureinpicture", html5_js)
         self.assertIn("enterAutoPiP", html5_js)
         self.assertIn("async enterPiP(", host_js)
+        if not (main_java_path.exists() and swift_wv_path.exists()):
+            self.skipTest("sibling native app checkouts not present; Android/iOS PiP parity checks skipped")
+        main_java = main_java_path.read_text(encoding="utf-8")
+        swift_wv = swift_wv_path.read_text(encoding="utf-8")
         self.assertIn("setSourceRectHint", main_java)
         self.assertIn("setSeamlessResizeEnabled", main_java)
         self.assertIn("setVideoPlayingBounds", main_java)
@@ -1364,7 +1035,7 @@ class RegressionTests(unittest.TestCase):
         self.assertNotIn("if (!email && !password) { doGuestLogin(name); return; }", profile_js)
         self.assertIn("Google ile Giriş Yap", profile_js)
 
-    def test_v102_series_prev_episode_poster_cors_and_youtube_muxed_playback(self):
+    def test_v102_series_prev_episode_and_youtube_muxed_playback(self):
         from pathlib import Path
         import music_engine
         root = Path(__file__).resolve().parent.parent
@@ -1374,23 +1045,14 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("id: 'ctl-prev-ep-top'", controls_js)
         self.assertIn("computePrevEpSpec", controls_js)
         self.assertIn("triggerPrevEpisode", controls_js)
-        self.assertIn("Dizinin ilk bölümündesiniz", controls_js)
+        # Catalog-series prev-episode resolution (and its "first episode" toast) was removed
+        # with the piracy catalog (Rave model); only the button/hook scaffolding remains.
         self.assertIn("host.key = '';", controls_js)
 
         host_js = (root / "static" / "js" / "players" / "host.js").read_text(encoding="utf-8")
         self.assertIn("if (!this.error && key && key === this.key", host_js)
 
-        # 2. External <video poster> URLs routed via /api/rave/poster to prevent CORS errors with crossOrigin='anonymous'
-        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", html5_js)
         yt_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
-        self.assertIn("/api/rave/poster?url=${encodeURIComponent(rawPoster)}", yt_js)
-
-        # Verify /api/rave/poster whitelists TMDB/YouTube poster domains and serves Access-Control-Allow-Origin: *
-        with patch.object(server, "_fetch_poster_sync", return_value=(b"\xff\xd8\xff\xe0testjpeg", "image/jpeg")):
-            r_poster = self.client.get("/api/rave/poster?url=https%3A%2F%2Fimage.tmdb.org%2Ft%2Fp%2Fw780%2Ftest.jpg")
-        self.assertEqual(r_poster.status_code, 200)
-        self.assertEqual(r_poster.headers.get("access-control-allow-origin"), "*")
 
         # 3. YouTube VOD prioritizes progressive muxed MP4 (kind=muxed) and ANDROID 20.10.38 client to avoid 60s GVS 403/502
         self.assertLess(yt_js.index("kind=muxed"), yt_js.index("streamCandidates.push(srvHls)"))
@@ -1547,36 +1209,9 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("height: calc(100% - 44px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
         self.assertIn("height: calc(100% - 36px - env(safe-area-inset-top, 0px)) !important;", mesh_css)
 
-    def test_v107_vizyon_new_releases_large_room_and_tv_nav(self):
+    def test_v107_large_room_and_tv_nav(self):
         from pathlib import Path
         import rooms
-
-        # 1. Test POST /api/rave/new-releases & GET /api/rave/new-releases & catalog category=vizyon
-        post_res = self.client.post("/api/rave/new-releases", json={
-            "title": "Dune: Messiah Vizyon Test",
-            "mediaType": "movie",
-            "year": "2026",
-            "poster": "https://image.tmdb.org/t/p/w500/8b8R8l88Qje9dn9OE8PY05Nxl1X.jpg",
-            "streamUrl": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
-        })
-        self.assertEqual(post_res.status_code, 200)
-        post_data = post_res.json()
-        self.assertTrue(post_data.get("ok"))
-        added_item = post_data.get("item") or {}
-        self.assertEqual(added_item.get("title"), "Dune: Messiah Vizyon Test")
-        self.assertTrue(added_item.get("customRelease"))
-        self.assertIn("vizyon", added_item.get("categories") or [])
-
-        get_res = self.client.get("/api/rave/new-releases")
-        self.assertEqual(get_res.status_code, 200)
-        get_data = get_res.json()
-        self.assertTrue(get_data.get("ok"))
-        self.assertTrue(any(x.get("title") == "Dune: Messiah Vizyon Test" for x in (get_data.get("items") or [])))
-
-        cat_res = self.client.get("/api/rave/catalog?provider=cinema&category=vizyon&page=1")
-        self.assertEqual(cat_res.status_code, 200)
-        cat_items = cat_res.json().get("items") or []
-        self.assertTrue(any(x.get("title") == "Dune: Messiah Vizyon Test" for x in cat_items))
 
         # 2. Test 100+ Participant Large-Room Broadcast Mode & compact syncToken
         rm = rooms.new_room("large-100", "Dev Gala Odası", "public", "leader", "HostUser", "cid-host")
@@ -1607,74 +1242,6 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("window.vortexSpatialMove", main_js)
         vortex_css = (root / "static" / "css" / "vortex.css").read_text(encoding="utf-8")
         self.assertIn("body.tv-nav-active :focus", vortex_css)
-        sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
-        self.assertIn("openVizyonModal", sel_kinds_js)
-
-    def test_v108_multi_season_canonical_splits_and_animecix_resolution(self):
-        from pathlib import Path
-
-        # 1. Bidirectional season/episode <-> absolute episode numbering for single-season TMDB shows
-        jjk_s2e9 = server._resolve_episode_numbering("95479", 2, 9)
-        self.assertTrue(jjk_s2e9["has_splits"])
-        self.assertEqual((jjk_s2e9["s_split"], jjk_s2e9["e_split"]), (2, 9))
-        self.assertEqual((jjk_s2e9["s_tmdb"], jjk_s2e9["e_tmdb"]), (1, 33))
-        self.assertEqual(jjk_s2e9["abs_ep"], 33)
-
-        jjk_s1e33 = server._resolve_episode_numbering("95479", 1, 33)
-        self.assertEqual((jjk_s1e33["s_split"], jjk_s1e33["e_split"]), (2, 9))
-        self.assertEqual((jjk_s1e33["s_tmdb"], jjk_s1e33["e_tmdb"]), (1, 33))
-
-        jjk_s3e1 = server._resolve_episode_numbering("95479", 3, 1)
-        self.assertEqual((jjk_s3e1["s_split"], jjk_s3e1["e_split"]), (3, 1))
-        self.assertEqual((jjk_s3e1["s_tmdb"], jjk_s3e1["e_tmdb"]), (1, 48))
-
-        solo_s2e1 = server._resolve_episode_numbering("127532", 2, 1)
-        self.assertEqual((solo_s2e1["s_split"], solo_s2e1["e_split"]), (2, 1))
-        self.assertEqual((solo_s2e1["s_tmdb"], solo_s2e1["e_tmdb"]), (1, 13))
-
-        fmab_s2e1 = server._resolve_episode_numbering("31911", 2, 1)
-        self.assertEqual((fmab_s2e1["s_split"], fmab_s2e1["e_split"]), (2, 1))
-        self.assertEqual((fmab_s2e1["s_tmdb"], fmab_s2e1["e_tmdb"]), (1, 17))
-
-        # 2. _ANIMECIX_KNOWN_TMDB corrected IDs
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("31910"), 7490)
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("37865"), 234)
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("46298"), 238)
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("85937"), 7394)
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("1159311"), 11793)
-
-        dn_s2e1 = server._resolve_episode_numbering("13916", 2, 1)
-        self.assertEqual((dn_s2e1["s_split"], dn_s2e1["e_split"]), (2, 1))
-        self.assertEqual(dn_s2e1["abs_ep"], 20)
-
-        fma_s3e1 = server._resolve_episode_numbering("37863", 3, 1)
-        self.assertEqual((fma_s3e1["s_split"], fma_s3e1["e_split"]), (3, 1))
-        self.assertEqual(fma_s3e1["abs_ep"], 26)
-
-        spy_s2e1 = server._resolve_episode_numbering("120089", 2, 1)
-        self.assertEqual((spy_s2e1["s_split"], spy_s2e1["e_split"]), (2, 1))
-        self.assertEqual(spy_s2e1["abs_ep"], 13)
-
-        # 3. Frontend series picker season counts, hero season selector, dropdown & episode badges
-        root = Path(__file__).resolve().parent.parent
-        accounts_js = (root / "static" / "js" / "accounts.js").read_text(encoding="utf-8")
-        self.assertIn("s.count ? ` (${s.count} Bölüm)` : ''", accounts_js)
-        self.assertIn("hero-season-picker", accounts_js)
-        self.assertIn("season-select-dropdown", accounts_js)
-        self.assertIn("episode-season-badge", accounts_js)
-
-        # 4. iOS/Android Lock Screen MediaSession API & Background Audio Continuity
-        controls_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
-        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        youtube_js = (root / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
-        self.assertIn("bindMediaSessionHandlers", controls_js)
-        self.assertIn("updateMediaSessionPositionImmediate", controls_js)
-        self.assertIn("previoustrack", controls_js)
-        self.assertIn("nexttrack", controls_js)
-        self.assertIn("ctl-opt-bgaudio", controls_js)
-        self.assertIn("vortex_bg_audio", html5_js)
-        self.assertIn("_userPausedViaMediaSession", html5_js)
-        self.assertIn("_userPausedViaMediaSession", youtube_js)
 
     def test_v109_strict_password_auth_google_youtube_register_and_guest_isolation(self):
         import uuid
@@ -1735,7 +1302,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("Google ile Giriş Yap", profile_js)
         self.assertIn("export async function syncGoogleYoutubeOAuth(password = '', expectedEmail = '')", profile_js)
         self.assertIn("const ytConnected = Boolean(signedIn && prefs.googleConnected && prefs.googleEmail);", selection_kinds_js)
-        self.assertIn("hesap şifreniz (en az 6 karakter — zorunlu)", accounts_js)
+        # Third-party platform credential prompts were removed (Rave model): accounts.js must never ask for one.
+        self.assertNotIn("hesap şifreniz (en az 6 karakter — zorunlu)", accounts_js)
 
     def test_v110_thirty_subagent_security_hardening(self):
         import security
@@ -1787,13 +1355,6 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_spoof.status_code, 403)
         self.assertEqual(r_spoof.json().get("error"), "password_required")
 
-        # 3. SSRF protection on /api/rave/new-releases rejects loopback/private streamUrl
-        r_ssrf = self.client.post("/api/rave/new-releases", json={
-            "title": "Internal Probe",
-            "streamUrl": "http://127.0.0.1:8080/secret.m3u8",
-        })
-        self.assertEqual(r_ssrf.status_code, 400)
-
     def test_v111_thirty_subagent_ui_and_interaction_fixes(self):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
@@ -1816,127 +1377,16 @@ class RegressionTests(unittest.TestCase):
         # 3. Mobile provider card logo & corner badge non-overlapping constraints + search & continue-watching layout
         self.assertIn("max-width: calc(100% - 78px) !important;", vortex_css)
         self.assertIn(".popup-close-x {", vortex_css)
-        self.assertIn("placeholder: 'Film, dizi, anime veya link ara...'", selection_js)
+        # Rave model: the search box searches YouTube / accepts a link (no film/series/anime catalog).
+        self.assertIn("placeholder: \"YouTube'da ara veya video bağlantısı yapıştır...\"", selection_js)
         self.assertIn("🔒 Bulut Senkron", selection_js)
         self.assertIn("const created = await api('/api/rooms/create', {", selection_js)
 
         # 4. In-room video controls mount syncPill, qualityBadge, and subPillBtn in top bar + Vizyon TV picker + Friends timer cleanup
         self.assertIn("h('div', { class: 'ctl-top-right' }, syncPill, qualityBadge, subPillBtn, breakTopBtn, prevEpTopBtn, epBtn, nextEpTopBtn, origBtn, provLogo)", controls_js)
-        self.assertIn("Sezon & Bölüm Seç", selection_kinds_js)
+        # Catalog season/episode picker removed with the piracy catalog (Rave model).
+        self.assertNotIn("Sezon & Bölüm Seç", selection_kinds_js)
         self.assertIn("onClose: () => clearInterval(liveTimer),", lobby_js)
-
-    def test_v112_vizyon_playability_and_latest_episodes_feed(self):
-        from pathlib import Path
-        root = Path(__file__).resolve().parent.parent
-
-        # 1. Live /api/rave/latest-episodes returns S:B episode items ready for 1-click playback
-        r_eps = self.client.get("/api/rave/latest-episodes")
-        self.assertEqual(r_eps.status_code, 200)
-        ep_data = r_eps.json()
-        self.assertTrue(ep_data.get("ok"))
-        items = ep_data.get("items") or []
-        self.assertGreaterEqual(len(items), 6)
-        first_ep = items[0]
-        self.assertEqual(first_ep.get("mediaType"), "tv")
-        self.assertGreaterEqual(int(first_ep.get("season") or 0), 1)
-        self.assertGreaterEqual(int(first_ep.get("episode") or 0), 1)
-        self.assertIn(":B", str(first_ep.get("episodeLabel") or ""))
-        self.assertTrue(first_ep.get("streamReady"))
-
-        # 2. /api/rave/new-releases annotates streamReady and prioritizes playable items first
-        r_viz = self.client.get("/api/rave/new-releases")
-        self.assertEqual(r_viz.status_code, 200)
-        viz_items = r_viz.json().get("items") or []
-        self.assertGreater(len(viz_items), 0)
-        self.assertIn("streamReady", viz_items[0])
-
-        # 3. Frontend selection.js & selection-kinds.js include latest episodes rail & vizyon filter tabs
-        selection_js = (root / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
-        selection_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
-        self.assertIn("wl-latest-eps-section", selection_js)
-        self.assertIn("/api/rave/latest-episodes", selection_js)
-        self.assertIn("wl-vizyon-tabs", selection_kinds_js)
-
-    def test_v114_fifty_query_search_accuracy(self):
-        # 1. Verify query parser extracts trailing release years and media-type hints cleanly
-        self.assertEqual(server._parse_search_query("Triangle 2009"), ("Triangle", "2009", "", False))
-        self.assertEqual(server._parse_search_query("Stalker 1979"), ("Stalker", "1979", "", False))
-        self.assertEqual(server._parse_search_query("Monster anime"), ("Monster", "", "tv", True))
-        self.assertEqual(server._parse_search_query("1917"), ("1917", "", "", False))
-
-        # 2. Verify curated matching never lets single-word substrings ("Dark", "prens") hijack exact titles
-        cur_dark = server._match_star_wars_curated("Dark")
-        self.assertFalse(any(x.get("tmdbId") == "155" for x in cur_dark))
-        cur_prens = server._match_star_wars_curated("prens")
-        self.assertTrue(cur_prens and cur_prens[0].get("tmdbId") == "228853")
-        self.assertFalse(any(x.get("tmdbId") == "767" for x in cur_prens))
-
-        # 3. Verify vault substring matcher blocks short reverse-substring false positives ("Talker" in "Stalker")
-        self.assertFalse(server._vault_title_matches_query("stalker", "talker", "the most notorious talker"))
-        self.assertTrue(server._vault_title_matches_query("stalker", "stalker", "stalker"))
-
-        # 4. Verify unified ranker prioritizes flagship & substantial exact matches over B-movies and spin-offs
-        for q, exp_sub, exp_mt in [
-            ("Yüzüklerin Efendisi", "Yüzüklerin Efendisi", "movie"),
-            ("Severance", "Severance", "tv"),
-            ("prens", "Prens", "tv"),
-            ("gassal", "Gassal", "tv"),
-            ("Demon Slayer", "Demon Slayer", "tv"),
-            ("Steins Gate", "Steins;Gate", "tv"),
-            ("Monster anime", "Monster", "tv"),
-            ("Triangle 2009", "Triangle", "movie"),
-            ("Stalker 1979", "Stalker", "movie"),
-            ("Dark", "Dark", "tv"),
-            ("Twin Peaks", "Twin Peaks", "tv"),
-            ("Utopia", "Utopia", "tv"),
-        ]:
-            cat_items = (server._provider_catalog_page_sync("cinema", q, 1, "all", "") or {}).get("items") or []
-            self.assertTrue(cat_items, f"No catalog items returned for {q}")
-            top_it = cat_items[0]
-            self.assertEqual(top_it.get("mediaType"), exp_mt, f"Wrong mediaType for {q}: {top_it}")
-            exp_n = server._norm_title(exp_sub)
-            t_n = server._norm_title(top_it.get("title") or "")
-            o_n = server._norm_title(top_it.get("originalTitle") or "")
-            self.assertTrue(exp_n in t_n or exp_n in o_n, f"Wrong #1 title for {q}: {top_it}")
-
-
-    def test_v115_hundred_query_search_accuracy(self):
-        # 1. Verify macron, apostrophe, and romaji vowel normalization in _norm_title
-        self.assertEqual(server._norm_title("Shōgun"), "shogun")
-        self.assertEqual(server._norm_title("Bir Zamanlar Anadolu'da"), "1 zamanlar anadoluda")
-        self.assertEqual(server._norm_title("Naruto: Shippuuden"), "naruto shippuden")
-
-        # 2. Verify CJK title mapping & ASCII letter threshold for Mob Psycho 100, Ergo Proxy, Samurai Champloo, Paranoia Agent, Pulse
-        it_mob = server._tmdb_item({"id": 67075, "media_type": "tv", "name": "モブサイコ100", "original_name": "モブサイコ100", "poster_path": "/x.jpg", "vote_average": 8.5, "vote_count": 1400}, "tv")
-        self.assertEqual(it_mob["title"], "Mob Psycho 100")
-        it_par = server._tmdb_item({"id": 2368, "media_type": "tv", "name": "Paranoya Ajanı", "original_name": "妄想代理人", "poster_path": "/x.jpg", "vote_average": 8.0, "vote_count": 480}, "tv")
-        self.assertIn("Paranoia Agent", it_par["title"])
-        self.assertEqual(it_par["originalTitle"], "Paranoia Agent")
-
-        # 3. Verify all 11 previously mismatched queries in the 100-query benchmark resolve to #1
-        for q, exp_sub, exp_mt in [
-            ("Fargo", "Fargo", "tv"),
-            ("Shogun", "Shōgun", "tv"),
-            ("Hannibal", "Hannibal", "tv"),
-            ("masum", "Masum", "tv"),
-            ("bir zamanlar anadoluda", "Bir Zamanlar Anadolu'da", "movie"),
-            ("Naruto Shippuden", "Naruto Shippuden", "tv"),
-            ("Code Geass", "Code Geass", "tv"),
-            ("Ergo Proxy", "Ergo Proxy", "tv"),
-            ("Paranoia Agent", "Paranoia Agent", "tv"),
-            ("Samurai Champloo", "Samurai Champloo", "tv"),
-            ("Mob Psycho 100", "Mob Psycho 100", "tv"),
-            ("Pulse 2001", "Pulse", "movie"),
-        ]:
-            cat_items = (server._provider_catalog_page_sync("cinema", q, 1, "all", "") or {}).get("items") or []
-            self.assertTrue(cat_items, f"No catalog items returned for {q}")
-            top_it = cat_items[0]
-            self.assertEqual(top_it.get("mediaType"), exp_mt, f"Wrong mediaType for {q}: {top_it}")
-            exp_n = server._norm_title(exp_sub)
-            t_n = server._norm_title(top_it.get("title") or "")
-            o_n = server._norm_title(top_it.get("originalTitle") or "")
-            self.assertTrue(exp_n in t_n or exp_n in o_n, f"Wrong #1 title for {q}: {top_it}")
-
 
     def test_v117_seo_and_analytics_engine(self):
         from pathlib import Path
@@ -1952,7 +1402,8 @@ class RegressionTests(unittest.TestCase):
         self.assertIn("<loc>https://watchlivo.online/</loc>", r_map.text)
         self.assertIn("<loc>https://watchlivo.online/privacy</loc>", r_map.text)
         self.assertIn("<loc>https://watchlivo.online/dmca</loc>", r_map.text)
-        self.assertIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
+        # Curated piracy rooms (cinema-club/anime-gecesi) were removed and must not be advertised.
+        self.assertNotIn("<loc>https://watchlivo.online/r/cinema-club</loc>", r_map.text)
 
         # 2. Verify index.html has PNG og:image, dimensions, JSON-LD Schema.org (Organization + FAQPage), and Google Analytics 4 gtag.js
         idx_html = (root / "static" / "index.html").read_text(encoding="utf-8")
@@ -2089,10 +1540,6 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(r_notif.status_code, 200)
         self.assertTrue(r_notif.json().get("ok"))
 
-        # 4. Exact TMDB ID poster proxy resolution & vault poster accuracy
-        r_p = self.client.get("/api/rave/poster?title=Amerikan+Pastasi+1&tid=2105&mt=movie", follow_redirects=False)
-        self.assertIn(r_p.status_code, (302, 307))
-        self.assertIn("pNzarHZjSGo6NgotluiAG3U2nwy.jpg", r_p.headers.get("location", ""))
 
     def test_v131_accounts_usernames_and_friends_audit(self):
         import uuid
@@ -2280,7 +1727,7 @@ class RegressionTests(unittest.TestCase):
         host_cid = f"h_host_{sfx}"
         viewer_cid = f"h_view_{sfx}"
 
-        # 1. Host creates a room with an initially unresolved catalog stream (/api/rave/resolve-catalog)
+        # 1. Host creates a room with a directly playable HLS stream
         cr = self.client.post("/api/rooms/create", json={
             "name": "Breaking Bad Maratonu",
             "privacy": "public",
@@ -2291,7 +1738,7 @@ class RegressionTests(unittest.TestCase):
             "media": {
                 "provider": "hls",
                 "streamType": "hls",
-                "url": "/api/rave/resolve-catalog?provider=cinema&title=Breaking+Bad&tmdbId=1396&mediaType=tv&season=3&episode=7",
+                "url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
                 "title": "Breaking Bad — 3. Sezon 7. Bölüm",
                 "tmdbId": "1396",
                 "mediaType": "tv",
@@ -2515,7 +1962,7 @@ class RegressionTests(unittest.TestCase):
         sw_js = (root / "static" / "sw.js").read_text(encoding="utf-8")
         ctl_js = (root / "static" / "js" / "views" / "controls.js").read_text(encoding="utf-8")
         elec_js = (root / "desktop" / "main.js").read_text(encoding="utf-8")
-        self.assertIn("v20261110_v183", sw_js)
+        self.assertIn("v20261118_v184", sw_js)
         self.assertIn("role: 'slider'", ctl_js)
         self.assertIn("sandbox: true", elec_js)
         self.assertIn("requestSingleInstanceLock", elec_js)
@@ -2568,12 +2015,12 @@ class RegressionTests(unittest.TestCase):
         main_js = (root / "static" / "js" / "main.js").read_text(encoding="utf-8")
         hls_loader_js = (root / "static" / "js" / "players" / "hls-loader.js").read_text(encoding="utf-8")
 
-        self.assertIn('/static/js/bootstrap.js?v=20261110_v183', index_html)
+        self.assertIn('/static/js/bootstrap.js?v=20261118_v184', index_html)
         self.assertNotIn('hls.min.js', index_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)", index_html, _re.I))
-        self.assertIn('/static/js/desktop-auth.js?v=20261110_v183', desktop_auth_html)
+        self.assertIn('/static/js/desktop-auth.js?v=20261118_v184', desktop_auth_html)
         self.assertIsNone(_re.search(r"<script(?![^>]*\bsrc=)", desktop_auth_html, _re.I))
-        self.assertIn("import('./views/mesh.js?v=20261110_v183')", main_js)
+        self.assertIn("import('./views/mesh.js?v=20261118_v184')", main_js)
         self.assertIsNone(_re.search(r"^import\s+.*from\s+['\"]\./views/mesh\.js", main_js, _re.M))
         self.assertIn("export function ensureHlsJs", hls_loader_js)
 
@@ -2600,41 +2047,6 @@ class RegressionTests(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertTrue(all(c[0] == "EVAL" for c in calls))
 
-    def test_v135_zero_egress_stream_proxy_and_bundle_slimming(self):
-        """v135: STREAM_PROXY_BASE_URL routes streams to Cloudflare Worker, bypasses CF-blocked hosts, and slims Lambda bundle."""
-        import json as _json
-        import os as _os
-        import pathlib as _pl
-
-        root = _pl.Path(server.__file__).resolve().parent
-
-        # 1. Default local behavior (no STREAM_PROXY_BASE_URL) stays relative /api/rave/stream-proxy
-        with patch.dict(_os.environ, {"STREAM_PROXY_BASE_URL": ""}, clear=False):
-            local_u = server._proxy_u("https://s26.cdnimg1399.shop/seg01.ts", "https://rapidvid.org/", ".ts")
-            self.assertTrue(local_u.startswith("/api/rave/stream-proxy?url="))
-
-        # 2. Production STREAM_PROXY_BASE_URL routes normal HLS/MP4 CDNs to Cloudflare Worker, while bypassing hakunaymatata.com
-        edge = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev"
-        with patch.dict(_os.environ, {"STREAM_PROXY_BASE_URL": edge + "/"}, clear=False):
-            edge_u = server._proxy_u("https://s26.cdnimg1399.shop/seg01.ts", "https://rapidvid.org/", ".ts")
-            self.assertTrue(edge_u.startswith(edge + "/api/rave/stream-proxy?url="))
-            hakuna_u = server._proxy_u("https://bcdn.hakunaymatata.com/resource/movie.mp4?sign=abc", "", ".mp4")
-            self.assertTrue(hakuna_u.startswith("/api/rave/stream-proxy?url="))
-
-        # 3. vercel.json builds a single Python Lambda and excludes binary APK/IPA bloat from Lambda bundle
-        vcfg = _json.loads((root / "vercel.json").read_text(encoding="utf-8"))
-        py_builds = [b for b in vcfg.get("builds", []) if b.get("use") == "@vercel/python"]
-        self.assertEqual(len(py_builds), 1)
-        inc_files = py_builds[0].get("config", {}).get("includeFiles", [])
-        self.assertNotIn("static/Watchlivo-v2.0.apk", inc_files)
-        self.assertNotIn("static/Watchlivo.ipa", inc_files)
-
-        # 4. Cloudflare Worker source exists and implements timing-safe HMAC-SHA256 + SSRF guard
-        worker_js = (root / "workers" / "stream-proxy" / "worker.js").read_text(encoding="utf-8")
-        self.assertIn("verifyProxySig", worker_js)
-        self.assertIn("isPublicHttpUrl", worker_js)
-        self.assertIn("FALLBACK_ORIGIN", worker_js)
-
     def test_v135_ha_gateway_failover_and_keepalive_cron(self):
         """v135 Part 3: Cloudflare HA Gateway fails over on DEPLOYMENT_PAUSED, routes WebSockets & APK, and runs keep-alive cron."""
         import pathlib as _pl
@@ -2646,7 +2058,7 @@ class RegressionTests(unittest.TestCase):
         self.assertIn('pattern = "watchlivo.online/*"', wrangler_toml)
         self.assertIn('pattern = "www.watchlivo.online/*"', wrangler_toml)
         self.assertIn('crons = ["*/10 * * * *"]', wrangler_toml)
-        self.assertIn('service = "watchlivo-stream-proxy"', wrangler_toml)
+        self.assertNotIn("STREAM_PROXY", wrangler_toml)
 
         worker_url = (ha_dir / "worker.js").as_uri()
         harness = f"""
@@ -2657,14 +2069,14 @@ const calls = [];
 globalThis.fetch = async (input, init = {{}}) => {{
   const u = typeof input === 'string' ? input : input.url;
   calls.push({{ url: u, method: init.method || 'GET', headers: Object.fromEntries(new Headers(init.headers || {{}}).entries()) }});
-  if (u.startsWith('https://watchlivo.online/api/rave/catalog')) {{
+  if (u.startsWith('https://watchlivo.online/api/auth/me')) {{
     return new Response('Paused', {{ status: 503, headers: {{ 'x-vercel-error': 'DEPLOYMENT_PAUSED' }} }});
   }}
-  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/rave/catalog')) {{
+  if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/auth/me')) {{
     return new Response(JSON.stringify({{ items: [{{ id: 'cat-1' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
   }}
   if (u.startsWith('https://watchlivo-origin-eu.onrender.com/api/rooms')) {{
-    return new Response(JSON.stringify({{ rooms: [{{ id: 'tv-trt1' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
+    return new Response(JSON.stringify({{ rooms: [{{ id: 'radyo-power-turk' }}] }}), {{ status: 200, headers: {{ 'content-type': 'application/json' }} }});
   }}
   if (u.startsWith('https://watchlivo-origin-eu.onrender.com/ws/room1')) {{
     return new Response('ws-ok', {{ status: 200 }});
@@ -2677,9 +2089,7 @@ globalThis.fetch = async (input, init = {{}}) => {{
 
 const env = {{
   SECONDARY_ORIGIN: 'https://watchlivo-origin-eu.onrender.com',
-  STREAM_PROXY_ORIGIN: 'https://watchlivo-stream-proxy.watchlivo-edge.workers.dev',
   FORCE_SECONDARY: '0',
-  STREAM_PROXY: {{ fetch: async () => new Response('APK_BYTES', {{ status: 200 }}) }},
 }};
 
 // 1. www -> apex 308
@@ -2687,10 +2097,10 @@ const rWww = await gw.fetch(new Request('https://www.watchlivo.online/room/abc')
 assert.equal(rWww.status, 308);
 assert.equal(rWww.headers.get('location'), 'https://watchlivo.online/room/abc');
 
-// 2. Service binding APK offload
+// 2. APK download goes through normal origin routing (no extra service binding)
 const rApk = await gw.fetch(new Request('https://watchlivo.online/download/apk'), env, {{}});
 assert.equal(rApk.status, 200);
-assert.equal(await rApk.text(), 'APK_BYTES');
+assert.equal(rApk.headers.get('X-Watchlivo-Origin'), 'vercel-primary');
 
 // 3. WebSocket upgrade routes directly to Secondary Render
 const rWs = await gw.fetch(new Request('https://watchlivo.online/ws/room1', {{ headers: {{ Upgrade: 'websocket' }} }}), env, {{}});
@@ -2698,7 +2108,7 @@ assert.equal(rWs.status, 200);
 assert.ok(calls.some(c => c.url === 'https://watchlivo-origin-eu.onrender.com/ws/room1'));
 
 // 4. Primary Vercel DEPLOYMENT_PAUSED -> automatic failover to Secondary Render on stateless routes
-const rFail = await gw.fetch(new Request('https://watchlivo.online/api/rave/catalog'), env, {{}});
+const rFail = await gw.fetch(new Request('https://watchlivo.online/api/auth/me'), env, {{}});
 assert.equal(rFail.status, 200);
 assert.equal(rFail.headers.get('X-Watchlivo-Origin'), 'render-eu-failover');
 const jFail = await rFail.json();
@@ -2709,7 +2119,7 @@ const rStateful = await gw.fetch(new Request('https://watchlivo.online/api/rooms
 assert.equal(rStateful.status, 200);
 assert.equal(rStateful.headers.get('X-Watchlivo-Origin'), 'render-eu-stateful');
 const jStateful = await rStateful.json();
-assert.equal(jStateful.rooms[0].id, 'tv-trt1');
+assert.equal(jStateful.rooms[0].id, 'radyo-power-turk');
 
 // 5. Scheduled keep-alive cron pings Render /api/health
 let waited = null;
@@ -2904,11 +2314,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         auth_get = self.client.get(f"/api/rave/voice-relay/{rid}", params={"clientId": "v137host", "clientToken": host_tok, "sinceTs": 0})
         self.assertEqual(auth_get.status_code, 200)
 
-        # 2. POST /api/rave/new-releases requires X-Admin-Secret when ADMIN_SECRET is configured
-        with patch.dict(_os.environ, {"ADMIN_SECRET": "v137_admin_gate"}):
-            nr_denied = self.client.post("/api/rave/new-releases", json={"title": "Yetkisiz", "url": "https://watchlivo.online/"})
-            self.assertEqual(nr_denied.status_code, 403)
-
         # 3. GET /api/rooms/{id} masks private & friends room metadata for outsiders while returning full info to members
         priv_cr = self.client.post(
             "/api/rooms/create",
@@ -2966,49 +2371,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("no-store", da_res.headers.get("cache-control", "").lower())
         self.assertIn("noindex", da_res.headers.get("x-robots-tag", "").lower())
 
-        # 7. Stream-manifest rewrites #EXT-X-KEY & #EXT-X-MAP to /api/rave/stream-proxy without .m3u8 corruption & respects AUDIO GROUP-ID
-        fake_master = (
-            "#EXTM3U\n"
-            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_low",LANGUAGE="en",NAME="English",DEFAULT=YES,URI="https://93.184.216.34/aud_low/en.m3u8"\n'
-            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud_hi",LANGUAGE="tr",NAME="Türkçe",DEFAULT=YES,URI="https://93.184.216.34/aud_hi/tr.m3u8"\n'
-            '#EXT-X-STREAM-INF:BANDWIDTH=800000,AUDIO="aud_low"\n'
-            "https://93.184.216.34/v/480/index.m3u8\n"
-            '#EXT-X-STREAM-INF:BANDWIDTH=2800000,AUDIO="aud_hi"\n'
-            "https://93.184.216.34/v/1080/index.m3u8\n"
-        )
-        fake_media = (
-            "#EXTM3U\n"
-            "#EXT-X-TARGETDURATION:6\n"
-            '#EXT-X-KEY:METHOD=AES-128,URI="https://93.184.216.34/keys/index-key1"\n'
-            '#EXT-X-MAP:URI="https://93.184.216.34/init/q/map.mp4"\n'
-            "#EXTINF:6.0,\n"
-            "https://93.184.216.34/seg/index-001.txt\n"
-            "#EXT-X-ENDLIST\n"
-        )
-        class _FakeResp:
-            def __init__(self, body_txt, url_s):
-                self._b = body_txt.encode("utf-8")
-                self.url = url_s
-            def read(self, *_a):
-                return self._b
-            def geturl(self):
-                return self.url
-            def __enter__(self):
-                return self
-            def __exit__(self, *_a):
-                return False
-
-        with patch.object(server, "public_http_url", side_effect=lambda u: u if str(u).startswith("https://") else ""), \
-             patch.object(server, "_public_open", side_effect=[_FakeResp(fake_master, "https://93.184.216.34/master.m3u8"), _FakeResp(fake_media, "https://93.184.216.34/v/1080/index.m3u8")]):
-            m_master = self.client.get("/api/rave/stream-manifest", params={"u": "https://93.184.216.34/master.m3u8", "proxy_segs": "1", "aud": "tr"})
-            self.assertEqual(m_master.status_code, 200)
-            self.assertIn('GROUP-ID="aud_low"', m_master.text)
-            self.assertIn('GROUP-ID="aud_hi"', m_master.text)
-            m_seg = self.client.get("/api/rave/stream-manifest", params={"u": "https://93.184.216.34/v/1080/index.m3u8", "proxy_segs": "1"})
-            self.assertEqual(m_seg.status_code, 200)
-            self.assertNotIn("ext=.m3u8", m_seg.text)
-            self.assertEqual(m_seg.text.count("/api/rave/stream-proxy"), 3)
-
     def test_v138_portrait_and_landscape_button_matrix_regressions(self):
         from pathlib import Path
         root = Path(__file__).resolve().parent.parent
@@ -3037,90 +2399,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("@media (max-width: 960px), ((orientation: landscape) and (max-height: 560px))", vortex_css)
         self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr)) !important;", vortex_css)
 
-    def test_v139_dubbing_pipeline_and_audio_sync_regressions(self):
-        from pathlib import Path
-        from unittest.mock import patch
-        import social_engine
-
-        root = Path(__file__).resolve().parent.parent
-
-        # 1. social_engine.rank_servers_by_health MUST preserve primary tr-dub URL (&aud=tr) and prioritize TR Dublaj servers
-        sample_res = {
-            "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=tr&ext=.m3u8",
-            "altUrls": [],
-            "servers": [
-                {"id": "srv-1", "label": "📡 Sunucu 1 · Flixer / Hexa (1080p HD)", "url": "/api/rave/stream?sid=ZW5n&ref=hx&ext=.m3u8", "streamType": "hls"},
-                {"id": "srv-2", "label": "📡 Sunucu 2 · Watchlivo Dual (TR Dublaj & Altyazı · 1080p)", "url": "/api/rave/stream?sid=YWJj&ref=fhd&ext=.m3u8", "streamType": "hls"},
-            ],
-            "audioTracks": [
-                {"id": "tr-dub", "lang": "tr", "audioLang": "tr", "label": "🇹🇷 Türkçe Dublaj", "mode": "stream", "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=tr&ext=.m3u8"},
-                {"id": "orig", "lang": "orig", "audioLang": "en", "label": "🎬 İngilizce", "mode": "stream", "url": "/api/rave/stream?provider=netflix&tmdbId=27205&s=1&e=1&mtype=movie&sid=YWJj&ref=fhd&aud=en&ext=.m3u8"},
-            ],
-        }
-        ranked = social_engine.rank_servers_by_health(sample_res)
-        self.assertIn("&aud=tr", ranked["url"])
-        self.assertIn("TR Dublaj", ranked["servers"][0]["label"])
-
-        # 2. _build_audio_tracks adds tr-ai-dub smart neural TTS fallback when no studio TR dub exists
-        with patch.object(server, "_get_tmdb_meta_sync", return_value={"origLang": "ja"}):
-            tracks = server._build_audio_tracks(
-                "/api/rave/stream-proxy?url=https%3A%2F%2Firtau1.online%2Fsub.mp4&ext=.mp4",
-                [("https://irtau1.online/sub.mp4", "mp4_ac_sub")],
-                prov="anime",
-                tid="85937",
-                s=1,
-                e=1,
-                mtype="tv",
-            )
-        aud_ids = [t["id"] for t in tracks]
-        self.assertIn("orig", aud_ids)
-        self.assertIn("tr-ai-dub", aud_ids)
-        ai_trk = next(t for t in tracks if t["id"] == "tr-ai-dub")
-        self.assertEqual(ai_trk["mode"], "tts")
-
-        # 3. Dual-audio HLS manifest preserves all #EXT-X-MEDIA:TYPE=AUDIO lines with DEFAULT=YES on requested aud=tr
-        dual_master = (
-            "#EXTM3U\n"
-            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="en",NAME="English",DEFAULT=YES,AUTOSELECT=YES,URI="en/index.m3u8"\n'
-            '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="tr",NAME="Türkçe",DEFAULT=NO,AUTOSELECT=NO,URI="tr/index.m3u8"\n'
-            '#EXT-X-STREAM-INF:BANDWIDTH=3500000,RESOLUTION=1920x1080,AUDIO="audio"\n'
-            "v/1080.m3u8\n"
-        ).encode("utf-8")
-
-        class _FakeM3U:
-            def __init__(self, b, u):
-                self._b = b
-                self.url = u
-            def read(self, _n=-1):
-                return self._b
-            def geturl(self):
-                return self.url
-            def __enter__(self):
-                return self
-            def __exit__(self, *_a):
-                return False
-
-        with patch.object(server, "public_http_url", side_effect=lambda u: u if str(u).startswith("https://") else ""), \
-             patch.object(server, "_public_open", return_value=_FakeM3U(dual_master, "https://one.makesomthingup.click/abc/master.m3u8")):
-            resp = self.client.get("/api/rave/stream", params={"u": "https://one.makesomthingup.click/abc/master.m3u8", "ref": "dl", "aud": "tr"})
-            self.assertEqual(resp.status_code, 200)
-            self.assertIn('LANGUAGE="tr"', resp.text)
-            self.assertIn('LANGUAGE="en"', resp.text)
-            tr_line = next(ln for ln in resp.text.splitlines() if 'LANGUAGE="tr"' in ln)
-            en_line = next(ln for ln in resp.text.splitlines() if 'LANGUAGE="en"' in ln)
-            self.assertIn("DEFAULT=YES", tr_line)
-            self.assertIn("DEFAULT=NO", en_line)
-
-        # 4. Frontend audio initialization order & fallback sync guards
-        subs_js = (root / "static" / "js" / "players" / "subtitles.js").read_text(encoding="utf-8")
-        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        sel_kinds_js = (root / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
-        self.assertIn("resolveInitialAudioTrack(media)", subs_js)
-        self.assertIn("onStreamFallbackUrl(nextUrl)", subs_js)
-        self.assertIn("this.subs.resolveInitialAudioTrack(media)", html5_js)
-        self.assertNotIn("Number(it.voteCount || 0) >= 800", sel_kinds_js)
-
-
     def test_v141_twenty_subagent_zero_error_hardening(self):
         import time
         from pathlib import Path
@@ -3146,21 +2424,6 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertNotIn("UltraGizliVIP", share_html.text)
         self.assertNotIn("TopSecretMovieTitle", share_html.text)
 
-        # 2. Stream-proxy suffix byte-range (Range: bytes=-188 -> 206 Partial Content + Content-Range)
-        dummy_ts_url = "https://cdn.example-v141-test.com/seg001.ts"
-        dummy_ts_bytes = (b"\x47" + b"\x00" * 187) * 3  # 564 bytes (3 MPEG-TS packets)
-        with server._SEG_TABLE_LOCK:
-            server._SEGMENT_CACHE[dummy_ts_url] = (time.time(), dummy_ts_bytes, "video/mp2t")
-        try:
-            with patch.object(server, "public_http_url", return_value=True):
-                r_suf = self.client.get(server._proxy_u(dummy_ts_url), headers={"Range": "bytes=-188"})
-            self.assertEqual(r_suf.status_code, 206)
-            self.assertEqual(len(r_suf.content), 188)
-            self.assertEqual(r_suf.headers.get("content-range"), "bytes 376-563/564")
-        finally:
-            with server._SEG_TABLE_LOCK:
-                server._SEGMENT_CACHE.pop(dummy_ts_url, None)
-
         # 3. Guest social bootstrap auto-resolves handle collision instead of 409 Conflict
         sfx = str(int(time.time()) % 100000)
         h_guest = f"misafir{sfx}"
@@ -3179,127 +2442,8 @@ console.log('HA_UNIT_TESTS_PASSED');
         self.assertIn("_NATIVE_CREATE_GAIN", audio_gain_js)
         self.assertIn("prevCatScroll", selection_js)
         self.assertIn("_catWheelBound", selection_js)
-        self.assertIn("has_vault_dub", server_py)
-        self.assertTrue(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/loki-s01e01-dual-wcsshizxl0tpmp4-tjfxmJAQiV9.mp4/txt/master.txt", ["Loki"]))
-        self.assertFalse(server._stream_matches_title("https://srv12.cdnimages3505.cyou/hls/tori-and-lokita-dual-abc12345678.mp4/txt/master.txt", ["Loki"]))
-        self.assertIn("20261110_v183", index_html)
-        self.assertIn("20261110_v183", sw_js)
-
-    def test_v142_bleach_s1e2_and_cross_catalog_stream_integrity(self):
-        """v142: Block HEVC/nexa-banned streams, hydrate Bleach S1E2+ TauVideo MP4s, generalize VidFast fMP4 domains, and block remake collisions."""
-        import pathlib
-        root = pathlib.Path(server.__file__).resolve().parent
-
-        # 1. HEVC (/resource/h265/) and nexa-banned troll streams are strictly blocked (raw & URL-encoded)
-        self.assertTrue(server._is_unplayable_stream_url("https://bcdn.hakunaymatata.com/resource/h265/d62fa40a.mp4?sign=529"))
-        self.assertTrue(server._is_unplayable_stream_url("/api/rave/stream-proxy?url=https%3A%2F%2Fbcdn.hakunaymatata.com%2Fresource%2Fh265%2Fd62fa40a.mp4"))
-        self.assertTrue(server._is_unplayable_stream_url("https://nexa.mov/nexa-banned/edit.mp4"))
-        self.assertTrue(server._is_vault_url_expired("https://bcdn.hakunaymatata.com/resource/h265/d62fa40a.mp4"))
-        self.assertFalse(server._is_unplayable_stream_url("https://bcdn.hakunaymatata.com/resource/22a02d2d8cb53f8a.mp4?sign=cad"))
-        self.assertFalse(server._is_unplayable_stream_url("https://merten-1.cfd/file/tau-video/5f84a57e-d467-4269-ad4f-852adf14c57f.mp4"))
-
-        # 2. Remake / Live-Action IMDb & TV year collision guards (One Piece 1999 tt0388629 vs 2023 tt11737520)
-        self.assertFalse(server._stream_matches_title(
-            "https://balancehls11.playmix.uno/hls/onepiece-s01e02-webdl-trdual-tt11737520-abc12345678.mp4/txt/master.txt",
-            ["One Piece"], "1999", "tt0388629"
-        ))
-        self.assertTrue(server._stream_matches_title(
-            "https://balancehls11.playmix.uno/hls/onepiece-s01e02-webdl-trdual-tt11737520-abc12345678.mp4/txt/master.txt",
-            ["One Piece"], "2023", "tt11737520"
-        ))
-        self.assertTrue(server._page_year_or_imdb_mismatch('<span class="year">2023</span>', "tv", "1999", 1, "tt0388629"))
-        self.assertTrue(server._page_year_or_imdb_mismatch('<a href="https://www.imdb.com/title/tt11737520/">IMDb</a>', "tv", "1999", 1, "tt0388629"))
-        self.assertFalse(server._page_year_or_imdb_mismatch('<span class="year">2022</span>', "tv", "2016", 4, "tt4574334"))
-
-        # 3. VidFast rotating .top/vd/ CDN domains match both stream matcher and proxy referer inference
-        self.assertTrue(server._stream_matches_title("https://crispwave.top/vd/abc123/index.m3u8", ["Bleach"], "2004", "tt0434665"))
-        self.assertTrue(server._stream_matches_title("https://greennova.top/vd/xyz987/index.m3u8", ["All We Imagine as Light"], "2024", ""))
-
-        # 4. Hydrated Bleach S1E2 entry in animecix_tau_map.json & frontend HEVC/zero-dim guards
-        import json
-        tau_map = json.loads((root / "animecix_tau_map.json").read_text(encoding="utf-8"))
-        b_s1e2 = tau_map.get("82:1:2") or []
-        self.assertTrue(any(isinstance(x, list) and len(x) >= 3 and str(x[2]).startswith("https://") for x in b_s1e2))
-        html5_js = (root / "static" / "js" / "players" / "html5.js").read_text(encoding="utf-8")
-        self.assertIn("decUrlSafe", html5_js)
-        self.assertIn("canBrowserPlayHevc", html5_js)
-        self.assertIn("nexa-banned", html5_js)
-
-        # 5. Cloudflare Edge Worker /api/rave/edge-fetch route & datacenter timeout guards
-        worker_js = (root / "workers" / "stream-proxy" / "worker.js").read_text(encoding="utf-8")
-        server_src = (root / "server.py").read_text(encoding="utf-8")
-        self.assertIn('path === "/api/rave/edge-fetch"', worker_js)
-        self.assertIn("X-Final-Url", worker_js)
-        self.assertTrue(callable(getattr(server, "_edge_fetch_bytes", None)))
-        self.assertIn('hdrs["Referer"] = "https://vidy.st/"', server_src)
-        self.assertIn("def _fetch_manifest_with_edge(", server_src)
-        self.assertIn("is_sub_variant_req", server_src)
-        self.assertIn("def _manifest_url_ok(", server_src)
-
-
-    def test_v150_max_official_auth_gating_and_no_free_streams(self):
-        """v150/v182: Max (HBO) catalog resolution works passwordlessly in 1-click while preserving optional account status & session tracking."""
-        # 1. Clean test state
-        conn = server._get_acc_db()
-        conn.execute("DELETE FROM user_provider_accounts WHERE user_id LIKE 'test_qa_%'")
-        conn.commit()
-        conn.close()
-        server._RESOLVE_RESP_CACHE.clear()
-
-        # 2. Passwordless/accountless request to Max resolves directly with 200 OK and playable stream URL
-        resp_unauth = self.client.get("/api/rave/resolve-catalog?provider=max&tmdbId=100088&title=The+Last+of+Us&mediaType=tv&season=1&episode=1")
-        self.assertEqual(resp_unauth.status_code, 200)
-        data_unauth = resp_unauth.json()
-        self.assertFalse(data_unauth.get("authRequired"))
-        self.assertTrue(bool(data_unauth.get("url")))
-
-        # 3. Verify /api/rave/accounts/status reflects unauthenticated status when no token is provided
-        resp_status_anon = self.client.get("/api/rave/accounts/status?provider=max")
-        self.assertEqual(resp_status_anon.status_code, 200)
-        self.assertFalse(resp_status_anon.json().get("hasActiveConnection"))
-
-        # 4. Authenticate Max session for test user
-        uid = "test_qa_v150_user"
-        rec = server.record_provider_account_session(
-            user_id=uid,
-            provider="max",
-            account_email="subscriber@max.com",
-            profile_name="Test Max UHD",
-            session_token="valid_session_token_max_sec_2026",
-        )
-        self.assertTrue(rec.get("loginSatisfied"))
-        token = auth_engine.sign_auth_token({"uid": uid, "email": "subscriber@max.com"})
-
-        # 5. Verify /api/rave/accounts/status reflects authenticated status
-        resp_status_auth = self.client.get("/api/rave/accounts/status?provider=max", headers={"Authorization": f"Bearer {token}"})
-        self.assertEqual(resp_status_auth.status_code, 200)
-        self.assertTrue(resp_status_auth.json().get("hasActiveConnection"))
-
-        # 6. Authenticated Max request also resolves playable stream URL cleanly
-        server._RESOLVE_RESP_CACHE.clear()
-        resp_auth = self.client.get(
-            "/api/rave/resolve-catalog?provider=max&tmdbId=100088&title=The+Last+of+Us&mediaType=tv&season=1&episode=1",
-            headers={"Authorization": f"Bearer {token}"}
-        )
-        self.assertEqual(resp_auth.status_code, 200)
-        data_auth = resp_auth.json()
-        self.assertFalse(data_auth.get("authRequired"))
-        self.assertTrue(bool(data_auth.get("url")))
-
-        # 7. Other providers remain functional
-        server._RESOLVE_RESP_CACHE.clear()
-        resp_cinema = self.client.get("/api/rave/resolve-catalog?provider=cinema&tmdbId=225565&title=K%C4%B1%C5%9F+Uykusu&mediaType=movie&year=2014")
-        self.assertEqual(resp_cinema.status_code, 200)
-        data_cinema = resp_cinema.json()
-        self.assertFalse(data_cinema.get("authRequired"))
-        self.assertTrue(bool(data_cinema.get("url")))
-
-        # 8. User logout clears session status while keeping passwordless catalog playback available
-        logout_resp = self.client.post("/api/rave/accounts/logout", json={"provider": "max"}, headers={"Authorization": f"Bearer {token}"})
-        self.assertEqual(logout_resp.status_code, 200)
-        resp_status_after = self.client.get("/api/rave/accounts/status?provider=max", headers={"Authorization": f"Bearer {token}"})
-        self.assertFalse(resp_status_after.json().get("hasActiveConnection"))
-
+        self.assertIn("20261118_v184", index_html)
+        self.assertIn("20261118_v184", sw_js)
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261110_v183';
-import { Html5Adapter } from './html5.js?v=20261110_v183';
-import { VimeoAdapter } from './vimeo.js?v=20261110_v183';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261110_v183';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261110_v183';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261110_v183';
+import { YouTubeAdapter } from './youtube.js?v=20261118_v184';
+import { Html5Adapter } from './html5.js?v=20261118_v184';
+import { VimeoAdapter } from './vimeo.js?v=20261118_v184';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261118_v184';
+import { WebviewAdapter } from './webview.js?v=20261118_v184';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261118_v184';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -13,6 +13,11 @@ const DRM_PROVS = new Set([
 
 export function adapterFor(media) {
   if (!media) return EmbedAdapter;
+  // Own-account platforms (Rave model): always the in-app browser / companion bridge, never an embed
+  // or a raw stream: Watchlivo does not fetch platform video itself.
+  if (DRM_PROVS.has(media.provider)) {
+    return WebviewAdapter;
+  }
   const url = String(media.url || '');
   const vid = String(media.videoId || '');
   const isYtDirectStream = /\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8/i.test(url);
@@ -23,13 +28,10 @@ export function adapterFor(media) {
       media.streamType === 'hls' ||
       media.streamType === 'mp4' ||
       /\.(mp4|m4v|m4a|mp3|aac|webm|m3u8|mov|ogg|mkv|wav|flac|opus)(\?|$)/i.test(url) ||
-      /\/proxy\?data=|\/api\/rave\/stream|\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
+      /\/proxy\?data=|\/api\/rave\/yt-music-stream|\/api\/rave\/yt-pip-hls\.m3u8|itunes\.apple\.com|scdn\.co\/mp3-preview/i.test(url)
     )
   ) {
     return Html5Adapter;
-  }
-  if (DRM_PROVS.has(media.provider) && url && isAllowedWebviewUrl(url)) {
-    return WebviewAdapter;
   }
   if (media.provider === 'vimeo') return VimeoAdapter;
   if (media.provider === 'youtube' || ((!media.provider || media.provider === 'web') && /^[A-Za-z0-9_-]{11}$/.test(vid)) || /youtube\.com|youtu\.be/i.test(url)) {
@@ -244,8 +246,8 @@ export class PlayerHost {
     this.media = media || null;
     const key = mediaKey(media);
     const nextUrl = String(media?.url || media?.videoId || '');
-    const prevResolved = Boolean(this.loadedUrl && !this.loadedUrl.startsWith('/api/rave/resolve-catalog'));
-    const nextResolved = Boolean(nextUrl && !nextUrl.startsWith('/api/rave/resolve-catalog'));
+    const prevResolved = Boolean(this.loadedUrl);
+    const nextResolved = Boolean(nextUrl);
     if (!this.error && key && key === this.key && this.adapter && (this.loadedUrl === nextUrl || (prevResolved && nextResolved && this.requestedUrl === nextUrl))) {
       if (this.loading) {
         this.loading = false;

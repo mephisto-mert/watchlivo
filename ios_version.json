@@ -15,7 +15,7 @@
   "changelog": "Watchlivo Native iOS v2.0.0 — %100 Native UIKit & AVPlayerViewController, sistem PiP, sesli mesaj ve Rave.io tarzı otomatik güncelleme.",
   "remoteConfig": {
     "baseUrl": "https://watchlivo.online",
-    "posterProxyEnabled": true,
+    "posterProxyEnabled": false,
     "syncIntervalMs": 2000
   }
 }

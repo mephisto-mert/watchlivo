@@ -39,9 +39,9 @@ async def run_mobile_test():
 
     try:
         print("=== Step 1: Resolving Media & Creating Room ===", flush=True)
-        cat_url = f"{BASE}/api/rave/resolve-catalog?provider=netflix&title=Stranger+Things&mediaType=tv&season=1&episode=1"
-        cat_res = fetch_json(cat_url)
-        media_title = cat_res.get("title", "Stranger Things")
+        # Open-licensed public test stream (Sintel, Blender Foundation, CC-BY) played directly — no catalog resolving
+        cat_res = {"provider": "hls", "streamType": "hls", "title": "Sintel", "url": "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", "duration": 888, "mediaType": "movie"}
+        media_title = cat_res.get("title", "Sintel")
         duration = float(cat_res.get("duration", 2880))
         print(f"Media Resolved: {media_title}, duration={duration}s", flush=True)
         

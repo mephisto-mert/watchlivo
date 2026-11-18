@@ -1,7 +1,7 @@
 """
 Peer 4 Seek/Scrubbing Synchronization Verification Suite
 Target: https://watchlivo.online
-Media: Netflix Stream (Stranger Things — S01E01, HLS)
+Media: Sintel open-licensed HLS test stream (CC-BY, ~888s)
 Topology: 4 Concurrent Browser Peers (Leader + 3 Guests)
 """
 import asyncio
@@ -95,19 +95,19 @@ async def wait_video_metadata(page, timeout=35):
     return 0
 
 async def run_verification():
-    print("=== Step 1: Resolving Netflix Catalog Stream ===", flush=True)
-    cat_url = f"{BASE}/api/rave/resolve-catalog?provider=netflix&title=Stranger+Things&mediaType=tv&season=1&episode=1"
-    cat_res = fetch_json(cat_url)
+    print("=== Step 1: Preparing Direct Test Stream ===", flush=True)
+    # Open-licensed public test stream (Sintel, Blender Foundation, CC-BY) played directly — no catalog resolving
+    cat_res = {"provider": "hls", "streamType": "hls", "title": "Sintel", "url": "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", "duration": 888, "mediaType": "movie"}
     
-    media_title = cat_res.get("title", "Stranger Things")
+    media_title = cat_res.get("title", "Sintel")
     duration = float(cat_res.get("duration", 2880))
     stream_url = cat_res.get("url", "")
-    print(f"Resolved Netflix Media: '{media_title}', Duration: {duration}s, Stream URL: {stream_url[:60]}...", flush=True)
-    record("Netflix Stream Resolved via Catalog API", bool(stream_url and duration >= 600), f"title={media_title}, duration={duration}s")
+    print(f"Test Media: '{media_title}', Duration: {duration}s, Stream URL: {stream_url[:60]}...", flush=True)
+    record("Direct Test Stream Ready", bool(stream_url and duration >= 600), f"title={media_title}, duration={duration}s")
     
     print("\n=== Step 2: Creating Live Room on https://watchlivo.online ===", flush=True)
     create_payload = json.dumps({
-        "name": "Peer 4 Netflix Seek Suite",
+        "name": "Peer 4 Seek Suite",
         "creator": "Leader",
         "media": cat_res
     }).encode()
@@ -116,7 +116,7 @@ async def run_verification():
     creator_cid = create_res["clientId"]
     creator_token = create_res["clientToken"]
     print(f"Room Created: {room_id} (Host CID: {creator_cid})", flush=True)
-    record("Room Created With Netflix Stream", bool(room_id), f"roomId={room_id}")
+    record("Room Created With Test Stream", bool(room_id), f"roomId={room_id}")
 
     print("\n=== Step 3: Launching 4 Live Peers (Leader + 3 Guests) ===", flush=True)
     async with async_playwright() as p:
@@ -199,15 +199,15 @@ async def run_verification():
         record("All 4 Peers Active In Room", any(c >= 4 for c in p_counts), f"counts={p_counts}")
         record("Peer 1 is Leader & Peer 4 is Guest", bool(d1 and d1.get("isLeader") and d4 and not d4.get("isLeader")), f"d1.isLeader={d1.get('isLeader') if d1 else None}, d4.isLeader={d4.get('isLeader') if d4 else None}")
 
-        print("\n=== Step 5: Waiting for Netflix HLS Metadata & Player Readiness ===", flush=True)
+        print("\n=== Step 5: Waiting for HLS Metadata & Player Readiness ===", flush=True)
         durations = []
         for pg in all_peers:
             dur = await wait_video_metadata(pg, timeout=35)
             durations.append(dur)
         print(f"All 4 Video Durations Loaded: {[round(d, 1) for d in durations]}s", flush=True)
-        record("Netflix Video Duration Ready (>1000s)", durations[0] >= 1000.0 and durations[3] >= 1000.0, f"P1={durations[0]:.1f}s, P4={durations[3]:.1f}s")
+        record("Video Duration Ready (>800s)", durations[0] >= 800.0 and durations[3] >= 800.0, f"P1={durations[0]:.1f}s, P4={durations[3]:.1f}s")
 
-        print("\n=== Step 6: Testing Jump to 10m (600.0s) on Netflix Stream ===", flush=True)
+        print("\n=== Step 6: Testing Jump to 10m (600.0s) on Test Stream ===", flush=True)
         TARGET_SEEK = 600.0  # 10 minutes = 600.0 seconds
         print(f"Leader executing seek/jump to {TARGET_SEEK}s (10m00s)...", flush=True)
         

@@ -4,49 +4,13 @@
  * Routes: watchlivo.online/*, www.watchlivo.online/*
  * Primary Origin:   Vercel (via Cloudflare Zone DNS -> 216.198.79.1)
  * Secondary Origin: Render EU Frankfurt (https://watchlivo-origin-eu.onrender.com)
- * Stream Proxy:     Cloudflare Service Binding STREAM_PROXY (watchlivo-stream-proxy)
+ * Autonomous edge:  edge_autonomous.js (rooms via Durable Objects, KV auth) when both origins are down
  */
 
 import { handleAutonomousEdge } from "./edge_autonomous.js";
 export { WatchlivoRoomDO } from "./edge_rooms.js";
 
 const DEFAULT_SECONDARY_ORIGIN = "https://watchlivo-origin-eu.onrender.com";
-const DEFAULT_STREAM_PROXY_ORIGIN = "https://watchlivo-stream-proxy.watchlivo-edge.workers.dev";
-const BYPASS_WORKER_HOSTS = [
-  "hakunaymatata.com",
-  "vidmoly.",
-  "vmbox.",
-  "vmnow.",
-  "vmpx.",
-  "vmget.",
-  "webteizle.",
-  "dizibox.",
-  "sezonlukdizi.",
-  "hdfilmcehennemi.",
-  "fullhdfilmizlesene.",
-  "rapidrame.",
-  "rapidvid.",
-  "ag2m5.cfd",
-  "uk-traffic-",
-  "fastplay.",
-  "radyotvonline.com",
-  "radyotvonline.net",
-  "nexa.mov",
-  "dplayer",
-  "playmix.",
-  "makesomthingup.",
-  "cdnimages.",
-  "ercdn.net",
-  "daioncdn.net",
-  "dragonballzfans",
-  "molystream.org",
-  "irtau1.",
-  "lightspeed.st",
-  "bright67.",
-  "centralodsseyproud",
-  "5d06cffcf9563c",
-  "gamma.",
-];
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
 
 const EDGE_SECURITY_HEADERS = {
@@ -175,9 +139,7 @@ function buildForwardHeaders(originalHeaders, clientIp, originalHost, targetHost
 
 function originTimeoutMs(pathname) {
   if (
-    pathname.startsWith("/api/rave/resolve") ||
     pathname.startsWith("/api/rave/subtitles") ||
-    pathname.startsWith("/api/rave/stream") ||
     pathname === "/api/upload"
   ) {
     return 18_000;
@@ -471,7 +433,7 @@ async function safeFetchSecondary(
   if (env.FORCE_SECONDARY !== "1") {
     if (sawExplicitSuspension) {
       secondaryCircuitOpenUntil = Date.now() + 60_000;
-    } else if (!safePath.startsWith("/api/rave/resolve") && !safePath.startsWith("/api/rave/stream")) {
+    } else {
       secondaryCircuitOpenUntil = Date.now() + 15_000;
     }
   }
@@ -533,11 +495,9 @@ export default {
           gateway: "watchlivo-ha-gateway-v196",
           primaryCircuitOpen: Date.now() < primaryCircuitOpenUntil,
           secondaryCircuitOpen: Date.now() < secondaryCircuitOpenUntil,
-          hasStreamBinding: Boolean(env.STREAM_PROXY),
         };
         if (adminOk) {
           statusPayload.secondaryOrigin = env.SECONDARY_ORIGIN || DEFAULT_SECONDARY_ORIGIN;
-          statusPayload.streamProxyOrigin = env.STREAM_PROXY_ORIGIN || DEFAULT_STREAM_PROXY_ORIGIN;
         }
         return new Response(JSON.stringify(statusPayload), {
           status: 200,
@@ -563,63 +523,7 @@ export default {
         } catch {}
       }
 
-      // 3. Direct zero-egress offload via Service Binding (0ms RPC) for APK/IPA, stream-proxy, and edge-fetch
-      const isBinaryDownload =
-        safePath === "/download/apk" ||
-        safePath === "/download/ipa" ||
-        /^\/download\/Watchlivo.*\.(apk|ipa)$/i.test(safePath);
-      const isEdgeFetchPath = safePath === "/api/rave/edge-fetch";
-      const isStreamProxyPath =
-        safePath === "/api/rave/stream-proxy" ||
-        safePath === "/api/rave/stream_chunk" ||
-        isEdgeFetchPath;
-      if (isBinaryDownload || isStreamProxyPath) {
-        const hasSigParam = Boolean((url.searchParams.get("sig") || "").trim());
-        const cfFallback = url.searchParams.get("cf_fb") === "1" && (hasSigParam || isAdminEdge(request, env));
-        let bypassWorker = cfFallback;
-        if (!bypassWorker && isStreamProxyPath && !isEdgeFetchPath) {
-          const rawTarget = (url.searchParams.get("url") || url.searchParams.get("u") || "").trim();
-          let rawHost = "";
-          try {
-            rawHost = new URL(rawTarget).hostname.toLowerCase();
-          } catch {}
-          if (rawHost) {
-            bypassWorker = BYPASS_WORKER_HOSTS.some((h) => {
-              const pat = String(h || "").toLowerCase();
-              if (!pat) return false;
-              return pat.endsWith(".") ? rawHost.includes(pat) : (rawHost === pat || rawHost.endsWith(`.${pat}`) || rawHost.includes(pat));
-            });
-          }
-        }
-        if (!bypassWorker) {
-          if (env.STREAM_PROXY) {
-            try {
-              return await env.STREAM_PROXY.fetch(request);
-            } catch {
-              if (isEdgeFetchPath) {
-                return new Response(JSON.stringify({ ok: false, error: "Kenar servisi geçici olarak meşgul." }), {
-                  status: 502,
-                  headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...EDGE_SECURITY_HEADERS },
-                });
-              }
-              if (hasAutonomousEdge(env)) {
-                return await runAutonomousFallback(request, url, safePath, null, env);
-              }
-              return await safeFetchSecondary(request, url, null, env, "render-eu-stream-fallback", ctx, false);
-            }
-          }
-          if (hasAutonomousEdge(env)) {
-            return await runAutonomousFallback(request, url, safePath, null, env);
-          }
-          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
-        }
-        if (bypassWorker) {
-          if (hasAutonomousEdge(env) && (Date.now() < tunnelOfflineUntil || env.FORCE_SECONDARY === "1")) {
-            return await runAutonomousFallback(request, url, safePath, null, env);
-          }
-          return await safeFetchSecondary(request, url, null, env, "tunnel-stream-proxy", ctx, false);
-        }
-      }
+      // 3. APK/IPA downloads and all other HTTP traffic use the normal origin routing below.
 
       // 4. Native WebSockets (/ws/*) -> route directly to stateful ASGI Secondary Origin (Render)
       const upgrade = (request.headers.get("Upgrade") || "").toLowerCase();
@@ -759,17 +663,7 @@ export default {
         }
       }
 
-      // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads, stream/catalog caches) -> Render EU primary with instant Vercel fallback
-      const isStreamOrResolveRoute =
-        safePath === "/api/rave/resolve-catalog" ||
-        safePath === "/api/rave/resolve-stream" ||
-        safePath === "/api/rave/stream" ||
-        safePath === "/api/rave/stream-manifest" ||
-        safePath === "/api/rave/stream_manifest" ||
-        safePath === "/api/rave/stream-proxy" ||
-        safePath === "/api/rave/stream_chunk" ||
-        safePath === "/api/rave/hls-proxy";
-
+      // 6b. Stateful Origin Affinity (rooms, voice-relay, uploads) -> Render EU primary with instant Vercel fallback
       const prefersStatefulOrigin =
         safePath === "/api/rooms" ||
         safePath.startsWith("/api/rooms/") ||
@@ -780,7 +674,6 @@ export default {
         safePath.startsWith("/api/rave/social/voice-relay") ||
         safePath.startsWith("/r/") ||
         safePath.startsWith("/join/") ||
-        isStreamOrResolveRoute ||
         safePath === "/api/upload" ||
         safePath.startsWith("/uploads/");
 
@@ -809,7 +702,7 @@ export default {
           if (env.FORCE_SECONDARY !== "1") {
             if (isExplicitlyDown) {
               secondaryCircuitOpenUntil = Date.now() + 60_000;
-            } else if (!isStreamOrResolveRoute) {
+            } else {
               secondaryCircuitOpenUntil = Date.now() + 15_000;
             }
           }

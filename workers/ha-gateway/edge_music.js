@@ -144,7 +144,11 @@ function plainLyricsToVtt(plain) {
   return `WEBVTT\n\n${body}\n`;
 }
 
+async function findYoutubeVideoId(query) {
+  const q = String(query || "").trim();
+  if (!q) return "";
   try {
+    const r = await fetch(`https://www.youtube.com/results?${new URLSearchParams({ search_query: q })}`, {
       headers: { "User-Agent": MUSIC_UA, "Accept-Language": "tr-TR,tr;q=0.9" },
       signal: AbortSignal.timeout(2600),
     });
@@ -241,11 +245,13 @@ export async function handleEdgeMusicRoute(request, url, safePath) {
     const cleanQ = `${artist} ${songTitle}`.trim();
     let vid = /^[\w-]{11}$/.test(vidParam) ? vidParam : "";
     if (!vid && cleanQ) {
+      vid = await findYoutubeVideoId(cleanQ);
     }
     const dispTitle = artist && songTitle ? `${artist} — ${songTitle}` : (songTitle || artist || "Müzik");
     const lyricsUrl = `/api/rave/music-lyrics.vtt?${new URLSearchParams({ artist, title: songTitle })}`;
     if (vid) {
       return musicJson({
+        isMusic: true, mediaType: "music", musicMode: mode, provider: "youtube", videoId: vid, url: `https://www.youtube.com/watch?v=${vid}`,
         title: `🎵 ${dispTitle}`, artist, songTitle, poster, duration: 210, lyricsUrl, audioPreviewUrl: prev,
       }, 200, 60);
     }

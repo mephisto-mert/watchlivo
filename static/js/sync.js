@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261110_v183';
+import { isRoomMediaPlaying } from './store.js?v=20261118_v184';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 3.5;
@@ -38,8 +38,7 @@ export function expectedPosition(media) {
   }
   const status = isRoomMediaPlaying(media) ? 'PLAYING' : 'PAUSED';
   const pos = Number(media.meshStatePosition ?? media.currentTime ?? 0);
-  const rawUrl = String(media.url || '');
-  if (status !== 'PLAYING' || (rawUrl.startsWith('/api/rave/resolve-catalog') && !media.playbackAnchored && pos <= 0.5)) {
+  if (status !== 'PLAYING') {
     return Math.max(0, pos);
   }
   const rawT0 = Number(media.meshStateTime ?? media.updatedAt ?? clock.now());
@@ -49,8 +48,9 @@ export function expectedPosition(media) {
 }
 
 export class SyncEngine {
-  constructor({ getMedia, getAdapter, isLeader, isSolo, onLeaderSync, onStatus }) {
+  constructor({ getMedia, getAdapter, isLeader, isSolo, onLeaderSync, onStatus, clock: syncClock }) {
     this.getMedia = getMedia;
+    this.clock = syncClock || clock;
     this.getAdapter = getAdapter;
     this.isLeader = isLeader || (() => false);
     this.isSolo = isSolo || (() => false);
@@ -157,10 +157,7 @@ export class SyncEngine {
             : (rawTitleSig && !media.isMusic && media.mediaType !== 'music' && !media.live)
               ? `title|${rawTitleSig}|${media.mediaType || 'movie'}|${s}|${e}`
               : `${media.provider}|${media.videoId || ''}|${media.url || ''}|${s}|${e}`;
-    const isUnresolvedUrl = String(media.url || '').startsWith('/api/rave/resolve-catalog');
-    const justResolvedUrl = Boolean(this.wasUnresolvedUrl && !isUnresolvedUrl);
-    this.wasUnresolvedUrl = isUnresolvedUrl;
-    if (mediaIdSig !== this.mediaIdSig || justResolvedUrl) {
+    if (mediaIdSig !== this.mediaIdSig) {
       this.mediaIdSig = mediaIdSig;
       this.loadedAt = now;
       const needsImmediateViewerSnap = !leader && expected >= 0.8 && Math.abs(curr - expected) > 1.5;
@@ -289,6 +286,11 @@ export class SyncEngine {
       if (abs <= 1.8 && curr >= Math.max(0, expected - 1.8)) {
         this.didInitialSync = true;
       } else if (expected >= 0.8 && abs > 1.2 && now >= this.seekUntil) {
+        // Until the NTP-style clock has converged, small apparent drift is likely offset error:
+        // wait for more samples instead of seeking to a possibly wrong position.
+        if (abs < 4.0 && (this.clock?.samples || 0) < 4) {
+          return 600;
+        }
         const inBufInit = buffered(expected);
         this.deferStartedAt = 0;
         this.isRateNudging = false;
@@ -326,7 +328,10 @@ export class SyncEngine {
       this.bufferLatency = Math.min(5, Math.max(0.2, (this.bufferLatency || 0.4) * 0.5 + lat * 0.5));
       this.pendingSeekAt = 0;
     }
-    if ((stateChanged && abs > 2.5 && now > this.seekUntil) || abs > JUMP_DELTA) {
+    // Native HLS (iOS/Safari) glitches audio on playbackRate changes, so it is never nudged.
+    const canRateNudge = !ad.useNativeHls && ad.caps?.rate !== false;
+    const allowDriftJump = abs >= 4.0 || (this.clock?.samples || 0) >= 4;
+    if (allowDriftJump && ((stateChanged && abs > 2.5 && now > this.seekUntil) || abs > JUMP_DELTA)) {
       const inBuf = buffered(expected);
       const behindAct = (this.didInitialSync && delta > 0 && delta < 8.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)
@@ -356,7 +361,10 @@ export class SyncEngine {
       this.lastJumpAt = now; this.reJumps = 0;
       this.inSyncCount = 0;
       this.mode = 'jumpSync';
-    } else if (abs > 0.75 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
+    } else if (!canRateNudge && abs > 1.5 && (this.clock?.samples || 0) >= 4 && safeBuffered(expected, 2.8) && now > this.seekUntil) {
+      // Anti-stutter: sub-JUMP_DELTA drift is corrected by rate nudging, never by frequent
+      // micro-seeks. Only adapters that cannot nudge (native HLS, no rate control) fall back to
+      // an occasional buffered seek, and only once drift is clearly noticeable.
       this.deferStartedAt = 0;
       this.isRateNudging = false;
       if (Math.abs(ad.getRate() - base) >= 0.005) ad.setRate(base);
@@ -369,11 +377,11 @@ export class SyncEngine {
     } else {
       this.deferStartedAt = 0;
       const fwdBuf = (Number(ad.getBuffered?.() || 0)) - curr;
-      const shouldNudge = (abs > 0.085 || (this.isRateNudging && abs > 0.04))
+      const shouldNudge = canRateNudge
+        && (abs > 0.085 || (this.isRateNudging && abs > 0.04))
         && abs <= JUMP_DELTA
         && buffered(expected)
-        && fwdBuf > 1.2
-        && ad.caps?.rate !== false;
+        && fwdBuf > 1.2;
       if (shouldNudge) {
         this.isRateNudging = true;
         const maxNudge = abs > 0.35 ? 0.14 : 0.08;

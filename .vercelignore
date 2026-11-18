@@ -16,3 +16,4 @@ workers/
 *.bak
 *.log
 *.zip
+static/Watchlivo-v1*.apk

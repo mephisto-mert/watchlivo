@@ -13,6 +13,10 @@ _SESSION_TMP = tempfile.TemporaryDirectory(prefix="watchlivo_pytest_")
 atexit.register(_SESSION_TMP.cleanup)
 _ISOLATED_DB = pathlib.Path(_SESSION_TMP.name) / "pytest_rave_platform.db"
 os.environ["WATCHLIVO_DB_PATH"] = str(_ISOLATED_DB)
+# rooms.MemoryStore persists rooms under tempfile.gettempdir()/vortex_rooms; point
+# it at the per-session dir so rooms from earlier runs never leak into the lobby
+# (e.g. pushing freshly created rooms past the 60-entry lobby cap).
+tempfile.tempdir = _SESSION_TMP.name
 
 _ORIG_SQLITE_CONNECT = sqlite3.connect
 

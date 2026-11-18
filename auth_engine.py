@@ -1884,31 +1884,3 @@ def search_public_users(query: str, exclude_uid: str = "", limit: int = 20) -> l
     return list(results.values())[:limit]
 
 
-def has_active_max_connection(target: Any) -> Dict[str, Any]:
-    """Check whether a user, guest session token, or request has an active Max (HBO) account connection."""
-    try:
-        import server
-        return server.has_active_max_connection(target)
-    except Exception:
-        return {
-            "has_active_connection": False,
-            "provider": "max",
-            "user_id": "",
-            "reason": "unavailable",
-        }
-
-
-def check_user_provider_status(user_id: str, provider: str = "max") -> Dict[str, Any]:
-    """Check connection status for a provider (default: 'max') for a given user or guest session."""
-    try:
-        import server
-        return server.check_user_provider_status(user_id, provider)
-    except Exception:
-        return {
-            "has_active_connection": False,
-            "provider": str(provider or "max"),
-            "user_id": str(user_id or ""),
-            "reason": "unavailable",
-        }
-
-

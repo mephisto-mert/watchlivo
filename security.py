@@ -17,7 +17,7 @@ import threading
 import time
 import urllib.request
 from collections import OrderedDict
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # Secrets

@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261110_v183';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261110_v183';
-import { navIcon, logo } from './home.js?v=20261110_v183';
-import { createSelection } from './selection.js?v=20261110_v183';
-import { buildControls } from './controls.js?v=20261110_v183';
-import { buildChat } from './chat.js?v=20261110_v183';
-import { PANELS } from './panels.js?v=20261110_v183';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261118_v184';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261118_v184';
+import { navIcon, logo } from './home.js?v=20261118_v184';
+import { createSelection } from './selection.js?v=20261118_v184';
+import { buildControls } from './controls.js?v=20261118_v184';
+import { buildChat } from './chat.js?v=20261118_v184';
+import { PANELS } from './panels.js?v=20261118_v184';
 
 const PRIVACY_LABEL = { public: '🌐 Herkese Açık', friends: '👥 Sadece Arkadaşlar', private: '🔒 Gizli Oda', hidden: '🔒 Gizli Oda' };
 const PANEL_TITLE = { Search: 'Video Ara', MeshList: 'Odalar', Settings: 'Oda Ayarları', Vote: 'Oylama ve Sıra', Friends: 'Davet & Arkadaşlar', Globe: 'Harita', Participants: 'Katılımcılar' };
@@ -21,7 +21,14 @@ export function buildLayout(app, ctx) {
   let theaterMode = false;
   let controls = null;
   let chat = null;
-  const handle = h('div', { class: 'resize-handle', title: 'Sürükleyerek boyutlandır' });
+  const handle = h('div', {
+    class: 'resize-handle',
+    title: 'Sürükleyerek boyutlandır',
+    role: 'separator',
+    tabindex: '0',
+    'aria-orientation': 'vertical',
+    'aria-label': 'Sohbet paneli boyutlandırıcı',
+  });
   const chatPanel = h('div', { class: 'panel-chat' });
   const videoChat = h('div', { class: 'video-chat' }, h('div', { class: 'panel-video' }, frame), handle, chatPanel);
   const layout = h('div', { class: 'mesh-layout' }, leftPanel, h('div'), videoChat, h('div'), rightPanel);
@@ -263,6 +270,27 @@ function initResize(handle, chatPanel) {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
     window.addEventListener('pointercancel', up);
+  });
+
+  // Keyboard resizing (mirrors drag direction: moving the handle left widens the chat).
+  const setChatW = (w) => {
+    const maxW = typeof window !== 'undefined' ? window.innerWidth * 0.55 : 640;
+    const nextW = Math.round(Math.max(250, Math.min(maxW, w)));
+    chatPanel.style.setProperty('--chat-w', `${nextW}px`);
+    try { localStorage.setItem('vortex_chat_w', String(nextW)); } catch (_) {}
+  };
+  handle.addEventListener('keydown', (e) => {
+    const curW = chatPanel.getBoundingClientRect().width || 380;
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      setChatW(curW + 25);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      setChatW(curW - 25);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setChatW(Math.abs(Math.round(curW) - 380) < 15 ? 280 : 380);
+    }
   });
   return cleanupDragListeners;
 }

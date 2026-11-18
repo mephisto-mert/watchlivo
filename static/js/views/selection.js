@@ -1,11 +1,12 @@
-// Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261110_v183';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261110_v183';
-import { api, qs } from '../api.js?v=20261110_v183';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261110_v183';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261110_v183';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261110_v183';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261110_v183';
+// Rave Selection parity: provider grid + YouTube search → provider selection view → onPick(media).
+// Subscription platforms (kind 'account') always use each participant's own account in the app.
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261118_v184';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable, isNativeShell, ACCOUNT_PROVIDER_IDS } from '../providers.js?v=20261118_v184';
+import { api, qs } from '../api.js?v=20261118_v184';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderAccountKind, openAccountPlatformModal, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind } from './selection-kinds.js?v=20261118_v184';
+import { fetchAccounts } from '../accounts.js?v=20261118_v184';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261118_v184';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261118_v184';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,10 +14,42 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261110_v183';
+} from '../store.js?v=20261118_v184';
 
-function checkProviderAuthGate(itemOrProv, defaultProv) {
-  return true;
+// Account platforms (Netflix, Disney+ …) can only be opened inside the Watchlivo app, where each
+// participant signs in with their own account. On the plain web site show the download explainer.
+function accountGate(providerId) {
+  if (!ACCOUNT_PROVIDER_IDS.has(providerId) || isNativeShell()) return true;
+  openAccountPlatformModal(getProvider(providerId));
+  return false;
+}
+
+// Re-open a history / watch-list entry. Only sources that still exist in the Rave model are
+// replayed (YouTube, Drive, uploads, links, music, own-account platforms); old catalog entries
+// that pointed at removed endpoints are skipped.
+async function replayHistoryItem(item, resumeSec, pickFn) {
+  if (!item || !pickFn) return;
+  if (item.provider === 'youtube' || (item.videoId && !item.tmdbId && !item.url)) {
+    const ytVid = item.videoId || item.id;
+    await pickFn({
+      provider: 'youtube',
+      videoId: ytVid,
+      url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
+      title: item.title,
+      thumbnail: item.poster || item.thumbnail,
+      duration: item.duration || 0,
+      currentTime: resumeSec,
+      meshStatePosition: resumeSec,
+    });
+    return;
+  }
+  const url = String(item.url || '');
+  if (!url || url.startsWith('/api/rave/')) {
+    toast('Bu kayıt artık açılamıyor. Kaynağı yeniden seçerek odada başlatabilirsin.');
+    return;
+  }
+  if (!accountGate(item.provider)) return;
+  await pickFn({ ...item, url, currentTime: resumeSec, meshStatePosition: resumeSec });
 }
 
 let _activeHomePick = null;
@@ -48,80 +81,31 @@ export const ytToMedia = (it) => ({
   live: !!it.live,
 });
 
-// JustWatch package names → registry ids (Rave SuperSearch offerUrls → videoProvider)
-const OFFER_MAP = [
-  [/netflix/i, 'netflix'], [/disney/i, 'disney'], [/amazon|prime/i, 'prime'], [/\bmax\b|hbo/i, 'max'],
-  [/apple/i, 'apple'], [/mubi/i, 'mubi'], [/hulu/i, 'hulu'], [/paramount/i, 'paramount'], [/peacock/i, 'peacock'],
-  [/plex/i, 'plex'], [/pluto/i, 'pluto'], [/exxen/i, 'exxen'], [/blutv/i, 'blutv'], [/gain/i, 'gain'],
-  [/\btod\b|bein/i, 'tod'], [/tabii|trt/i, 'tabii'], [/tv\+|tvplus|turkcell/i, 'tvplus'], [/puhu/i, 'puhutv'],
-  [/crunchyroll/i, 'crunchyroll'], [/youtube/i, 'youtube'], [/tubi/i, 'tubi'], [/vimeo/i, 'vimeo'],
-];
-const offerProvider = (name) => (OFFER_MAP.find(([re]) => re.test(name)) || [])[1] || null;
-
 export function attachTilt(card) {
   return card;
 }
 
 const PROVIDER_SUBTITLES = {
-  cinema: 'Film · Dizi · Anime · 4K HDR',
-  youtube: 'Video, Müzik & Canlı Yayın',
+  youtube: 'Ara & oynat · Herkes için senkron',
   ravedj: 'AI Mashup & Ortak DJ Mix',
-  drive: 'Bulut 1080p MKV & MP4',
-  netflix: '4K HDR · TR Dublaj & Altyazı',
-  disney: 'Star Wars · Marvel · Pixar 4K',
-  prime: 'Amazon Originals · 4K UHD',
-  max: 'HBO · Harry Potter · LOTR 4K',
-  apple: 'Apple Originals · 4K Dolby',
-  exxen: 'Gibi · Konuşanlar · Yerli Şov',
-  blutv: 'Behzat Ç. · İlk ve Son · HBO',
-  gain: 'Ayak İşleri · 10 Bin Adım',
-  tod: 'beIN Originals · Yerli & Global',
-  tabii: 'Gassal · TRT Orijinal Yapımlar',
-  tvplus: 'Yerli Sinema & Vizyon 4K',
-  puhutv: 'Şahsiyet · Yeşilçam Klasikleri',
-  mubi: 'Festival & Bağımsız Sinema',
-  crunchyroll: '4K Anime · Fansub & Dublaj',
-  hulu: 'FX Originals & Yabancı Dizi',
-  paramount: 'Showtime & Gişe Filmleri',
-  peacock: 'NBC Universal & Sitcom 4K',
-  vk: 'HD Sinema & Dizi Akışı',
-  rutube: 'HD Video & Sinema',
-  pluto: 'Ücretsiz Sinema & TV',
-  tubi: 'Ücretsiz Gişe & Klasikler',
+  drive: 'Kendi Drive dosyaların',
+  music: 'Spotify · YouTube Music · Deezer',
+  upload: 'Kendi video dosyan',
 };
 
 const PROVIDER_CORNER_TAGS = {
-  cinema: '4K ARŞİV',
-  youtube: 'CANLI & 4K',
+  youtube: 'DOĞRUDAN',
   ravedj: 'AI MASHUP',
-  drive: 'DIRECT HD',
-  netflix: '4K DUBLAJ',
-  disney: '4K IMAX',
-  prime: '4K UHD',
-  max: 'HBO 4K',
-  apple: '4K HDR',
-  exxen: 'YERLİ HD',
-  blutv: 'YERLİ 4K',
-  gain: 'ORİJİNAL',
-  tod: 'YERLİ & FİLM',
-  tabii: 'TRT ORİJİNAL',
-  tvplus: 'VİZYON HD',
-  puhutv: 'YEŞİLÇAM & DİZİ',
-  mubi: 'KÜLT SİNEMA',
-  crunchyroll: 'ANİME 4K',
-  hulu: 'FX & DİZİ',
-  paramount: 'SİNEMA 4K',
-  peacock: 'STÜDYO HD',
-  vk: 'HD AKIŞ',
-  pluto: '7/24 FİLM',
-  tubi: 'ÜCRETSİZ',
+  drive: 'DOĞRUDAN',
+  music: 'MÜZİK',
+  upload: 'DOSYA',
 };
 
 export function providerTile(p, onClick) {
-  const isHero = p.id === 'cinema';
-  const shortName = p.id === 'cinema' ? 'Sinema+' : (p.id === 'ravedj' ? 'Watchlivo DJ' : p.name);
-  const subText = PROVIDER_SUBTITLES[p.id] || p.badge || '4K Senkron İzle';
-  const cornerTag = PROVIDER_CORNER_TAGS[p.id] || (p.cat === 'tr' ? 'YERLİ' : '4K HD');
+  const isHero = false;
+  const shortName = p.id === 'ravedj' ? 'Watchlivo DJ' : p.name;
+  const subText = PROVIDER_SUBTITLES[p.id] || p.badge || 'Senkron izle';
+  const cornerTag = PROVIDER_CORNER_TAGS[p.id] || (p.kind === 'account' ? 'KENDİ HESABIN' : 'SENKRON');
   let cachedRect = null;
   let rafId = 0;
   let lastX = 0;
@@ -134,7 +118,7 @@ export function providerTile(p, onClick) {
     'data-brand': p.id,
     'data-category': p.cat || 'global',
     title: `${p.name} — ${subText}`,
-    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--brand': p.id === 'cinema' ? '#f59e0b' : (p.accent || '#27DCC8'), '--spot-alpha': '0' },
+    style: { '--tile-bg': p.bg || '#10121a', '--tile-accent': p.accent || '#27DCC8', '--brand': p.accent || '#27DCC8', '--spot-alpha': '0' },
     onmouseenter: (e) => {
       cachedRect = e.currentTarget.getBoundingClientRect();
       e.currentTarget.style.setProperty('--spot-alpha', '1');
@@ -323,29 +307,6 @@ export function desktopOnlyCard(p) {
     h('a', { class: 'btn primary', href: '/download/windows', download: 'Watchlivo.exe', style: { textDecoration: 'none' } }, h('span', { html: icons.desktop }), 'Windows Masaüstü İndir (.exe)'));
 }
 
-const HERO_DEFAULT_POOL = [
-  { id: '27205', tmdbId: '27205', mediaType: 'movie', title: 'Başlangıç', originalTitle: 'Inception', year: '2010', rating: '8.4', overview: 'Hedeflerinin bilinçaltına sızarak kurumsal casusluk yapan yetenekli bir hırsız olan Cobb\'a, imkansız olduğu düşünülen bir görev karşılığında eski hayatını geri kazanma şansı sunulur.', backdrop: 'https://image.tmdb.org/t/p/w780/8ZTVqvKDQ8emSGUEMjsS4yHAwrp.jpg', poster: 'https://image.tmdb.org/t/p/w500/oYuLEt3zVCKq57qu2F8dT7NIa6f.jpg' },
-  { id: '550', tmdbId: '550', mediaType: 'movie', title: 'Dövüş Kulübü', originalTitle: 'Fight Club', year: '1999', rating: '8.4', overview: 'Uykusuzluk çeken bir ofis çalışanı ile umursamaz bir sabun satıcısı, yeraltında gizli bir dövüş kulübü kurar.', backdrop: 'https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg', poster: 'https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg' },
-  { id: '438631', tmdbId: '438631', mediaType: 'movie', title: 'Dune: Çöl Gezegeni', originalTitle: 'Dune', year: '2021', rating: '8.0', overview: 'Uzak bir gelecekte ailesi çöl gezegeni Arrakis\'in yönetimini devralan Paul Atreides, galaksinin en değerli kaynağını korumak için destansı bir mücadeleye girer.', backdrop: 'https://image.tmdb.org/t/p/w780/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg', poster: 'https://image.tmdb.org/t/p/w500/d5NXSklXo0qyIYkgV94XAgMIckC.jpg' },
-  { id: '157336', tmdbId: '157336', mediaType: 'movie', title: 'Yıldızlararası', originalTitle: 'Interstellar', year: '2014', rating: '8.4', overview: 'İnsanlığın geleceğini kurtarmak için bir solucan deliğinden geçerek yıldızlararası yolculuğa çıkan kaşiflerin hikayesi.', backdrop: 'https://image.tmdb.org/t/p/w780/xJHokMbljvjADYdit5fK5VQsXEG.jpg', poster: 'https://image.tmdb.org/t/p/w500/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg' },
-  { id: '155', tmdbId: '155', mediaType: 'movie', title: 'Kara Şövalye', originalTitle: 'The Dark Knight', year: '2008', rating: '8.5', overview: 'Batman, Teğmen Gordon ve Savcı Harvey Dent, Gotham sokaklarını kaosa sürükleyen Joker\'e karşı amansız bir mücadeleye girişir.', backdrop: 'https://image.tmdb.org/t/p/w780/nMKdUUepR0i5zn0y1T4CsSB5chy.jpg', poster: 'https://image.tmdb.org/t/p/w500/qJ2tW6WMUDux911r6m7haRef0WH.jpg' },
-  { id: '872585', tmdbId: '872585', mediaType: 'movie', title: 'Oppenheimer', originalTitle: 'Oppenheimer', year: '2023', rating: '8.1', overview: 'Amerikalı bilim insanı J. Robert Oppenheimer\'ın Manhattan Projesi ve atom bombasının geliştirilmesindeki rolünü konu alır.', backdrop: 'https://image.tmdb.org/t/p/w780/fm6KqXpk3M2HVveHwCrBSSBaO0V.jpg', poster: 'https://image.tmdb.org/t/p/w500/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg' },
-  { id: '68718', tmdbId: '68718', mediaType: 'movie', title: 'Zincirsiz', originalTitle: 'Django Unchained', year: '2012', rating: '8.2', overview: 'Alman bir ödül avcısının yardımıyla özgürlüğüne kavuşan Django, eşini acımasız bir çiftlik sahibinden kurtarmak için yola çıkar.', backdrop: 'https://image.tmdb.org/t/p/w780/2oZklIzUbvZXXzIFzv7Hi68d6xf.jpg', poster: 'https://image.tmdb.org/t/p/w500/7oWY8VDWW7thTzWh3OKYRkWUlD5.jpg' },
-  { id: '475557', tmdbId: '475557', mediaType: 'movie', title: 'Joker', originalTitle: 'Joker', year: '2019', rating: '8.1', overview: 'Toplum tarafından dışlanan başarısız komedyen Arthur Fleck, Gotham şehrinde adım adım suç ve kaosun sembolüne dönüşür.', backdrop: 'https://image.tmdb.org/t/p/w780/n6bUvigpRFqSwmPp1m2YADdbRBc.jpg', poster: 'https://image.tmdb.org/t/p/w500/udDclJoHjfjb8Ekgsd4FDteOkCU.jpg' },
-  { id: '634649', tmdbId: '634649', mediaType: 'movie', title: 'Örümcek-Adam: Eve Dönüş Yok', originalTitle: 'Spider-Man: No Way Home', year: '2021', rating: '8.0', overview: 'Kimliği açığa çıkan Peter Parker, Doktor Strange\'den yardım ister ancak büyü ters gidince çoklu evrenden düşmanlar ortaya çıkar.', backdrop: 'https://image.tmdb.org/t/p/w780/14QbnygCuTO0vl7CAFmPf1fgZfV.jpg', poster: 'https://image.tmdb.org/t/p/w500/1g0dhYtq4irTY1GPXvft6k4YLjm.jpg' },
-  { id: '66732', tmdbId: '66732', mediaType: 'tv', title: 'Stranger Things', originalTitle: 'Stranger Things', year: '2016', rating: '8.6', overview: 'Küçük bir kasabada küçük bir çocuğun gizemli şekilde kaybolması, doğaüstü güçleri ve gizli deneyleri gün yüzüne çıkarır.', backdrop: 'https://image.tmdb.org/t/p/w780/56v2KjBlU4XaOv9rVYEQypROD7P.jpg', poster: 'https://image.tmdb.org/t/p/w500/uOOtwVbSr4QDjAGIifLDwpb2Pdl.jpg' },
-];
-
-function shuffleArray(arr) {
-  const copy = [...arr];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-
 const QUICK_TR_CHANNELS = [
   'Barış Özcan', 'Evrim Ağacı', 'Socrates Dergi',
   'netd müzik', 'Filmler ve Filimler', 'Ruhi Çenet',
@@ -423,7 +384,7 @@ export function openYtPersonalizeModal(onUpdated) {
             btn.disabled = true;
             btn.textContent = '⏳ Google OAuth Açılıyor & YouTube Eşitleniyor...';
             try {
-              const res = await syncGoogleYoutubeOAuth(expectedEmail, '');
+              const res = await syncGoogleYoutubeOAuth('', expectedEmail);
               toast(`🔴 Google YouTube hesabı eşitlendi! (${res.importedSubs} abonelik, ${res.importedLikes} beğeni aktarıldı)`);
               renderSubsList();
               onUpdated?.();
@@ -470,27 +431,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   })();
   let catFilter = 'all';
   let showAllProviders = true;
-  let showTrending = false;
-  let trendingItems = shuffleArray(HERO_DEFAULT_POOL);
-  let trendingFetched = false;
-  let trendingLoading = false;
-  let latestEpsItems = [
-    { id: 'ep-95479-s2e23', tmdbId: '95479', mediaType: 'tv', title: 'Jujutsu Kaisen', originalTitle: 'Jujutsu Kaisen', season: 2, episode: 23, episodeLabel: 'S2:B23', episodeTitle: 'Shibuya Incident', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/fHpKWq9ayzSk8nSwqRuaAUemRKh.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/gmECX1DvFgdUPjtio2zaL8BPYPu.jpg', year: '2024', rating: 8.6 },
-    { id: 'ep-127532-s2e12', tmdbId: '127532', mediaType: 'tv', title: 'Solo Leveling', originalTitle: 'Ore dake Level Up na Ken', season: 2, episode: 12, episodeLabel: 'S2:B12', episodeTitle: 'Arise from the Shadow', sourceBadge: '⛩️ Yeni Anime Bölümü', provider: 'cinema', poster: 'https://image.tmdb.org/t/p/w500/geCRueV3ElhRTr0xtJuEWJt6dJ1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/od5S7r2v306B2eR0E5t6vP8K2wG.jpg', year: '2025', rating: 8.7 },
-    { id: 'ep-228853-s3e1', tmdbId: '228853', mediaType: 'tv', title: 'Prens', originalTitle: 'Prens', season: 3, episode: 1, episodeLabel: 'S3:B1', episodeTitle: 'Yeni Sezon Bölümü', sourceBadge: '🇹🇷 Yeni Yerli Bölüm', provider: 'blutv', poster: 'https://image.tmdb.org/t/p/w500/oDtYdl5i8rRLmB9xAU6VOwHKjMQ.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/88DMFlyPDuyUeFrUDswbWSV2CQg.jpg', year: '2025', rating: 8.6 },
-    { id: 'ep-115678-s5e13', tmdbId: '115678', mediaType: 'tv', title: 'Gibi', originalTitle: 'Gibi', season: 5, episode: 13, episodeLabel: 'S5:B13', episodeTitle: 'Sezon Finali', sourceBadge: '🇹🇷 Exxen Yeni Bölüm', provider: 'exxen', poster: 'https://image.tmdb.org/t/p/w500/sOzTUfTc1djfZM46PgsjuOjs5U1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/p7VgbdDN2LK41JTavzJ9x3i4ktE.jpg', year: '2025', rating: 8.9 },
-    { id: 'ep-280030-s1e10', tmdbId: '280030', mediaType: 'tv', title: 'Gassal', originalTitle: 'Gassal', season: 1, episode: 10, episodeLabel: 'S1:B10', episodeTitle: '1. Sezon 10. Bölüm', sourceBadge: '🇹🇷 tabii Yeni Bölüm', provider: 'tabii', poster: 'https://image.tmdb.org/t/p/w500/dvTFLhkIlCJaaDi32MxG7ke4vv1.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/6YMuWmlXKQkhQ0FiwDo9zmIsnEb.jpg', year: '2025', rating: 8.7 },
-    { id: 'ep-100088-s2e1', tmdbId: '100088', mediaType: 'tv', title: 'The Last of Us', originalTitle: 'The Last of Us', season: 2, episode: 1, episodeLabel: 'S2:B1', episodeTitle: 'Future Days', sourceBadge: '🔥 Yeni Sezon Bölümü', provider: 'max', poster: 'https://image.tmdb.org/t/p/w500/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg', year: '2025', rating: 8.8 },
-    { id: 'ep-95396-s2e10', tmdbId: '95396', mediaType: 'tv', title: 'Severance', originalTitle: 'Severance', season: 2, episode: 10, episodeLabel: 'S2:B10', episodeTitle: 'Cold Harbor', sourceBadge: '🔥 Yeni Bölüm · 4K', provider: 'apple', poster: 'https://image.tmdb.org/t/p/w500/pPHpeI2X1qEd1CS1SeyrdhZ4qnT.jpg', backdrop: 'https://image.tmdb.org/t/p/w780/ixgFmf1X59PUZam2qbAfskx2gQr.jpg', year: '2025', rating: 8.7 },
-  ];
-  let latestEpsFetched = false;
-  let latestEpsLoading = false;
-  let heroIndex = 0;
-  let autoRotateEnabled = true;
-  let heroHovered = false;
-  let autoRotateTicks = 0;
-  let autoRotateTimer = null;
-  let superSearchSeq = 0;
+  let searchSeq = 0;
 
   let _lastAuthWatchSig = `${Boolean(state.self && !state.self.isGuest)}|${getAccountStorageScope()}|${state.cloudSyncedAt || 0}`;
   const _unsubHomeYt = subscribe((st) => {
@@ -520,77 +461,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     }
   });
 
-  function updateHeroBannerInPlace() {
-    const heroEl = root.querySelector('.gazestream-hero');
-    if (!heroEl) return;
-    const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
-    if (!heroPool.length) return;
-    const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
-    const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
-    const trendTag = heroEl.querySelector('.hero-trending-tag span:last-child');
-    if (trendTag) trendTag.textContent = `Şimdi Trend (${safeHeroIdx + 1}/${heroPool.length}) — 4K Senkron Sinema Vitrini`;
-    const catTags = heroEl.querySelectorAll('.hero-category-tags .tag-badge');
-    if (catTags[0]) catTags[0].textContent = heroItem.mediaType === 'tv' ? '📺 Popüler Dizi' : '🎬 Sinema Filmi';
-    if (catTags[1]) catTags[1].textContent = `⭐ IMDb ${heroItem.rating || '8.3'}`;
-    const mainTitle = heroEl.querySelector('.hero-main-title');
-    if (mainTitle) {
-      mainTitle.textContent = `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`;
-    }
-    const synopsis = heroEl.querySelector('.hero-synopsis');
-    if (synopsis) {
-      synopsis.textContent = heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.';
-    }
-    const watchBtnSpans = heroEl.querySelectorAll('.btn-watch-cyan span');
-    if (watchBtnSpans[0]) watchBtnSpans[0].textContent = heroItem.mediaType === 'tv' ? '📺' : '▶';
-    if (watchBtnSpans[1]) watchBtnSpans[1].textContent = heroItem.mediaType === 'tv' ? 'Sezon & Bölüm Seç' : 'Odaya Katıl & Şimdi İzle';
-    const artImg = heroEl.querySelector('.hero-main-img');
-    if (artImg) {
-      const nextSrc = heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop';
-      if (artImg.src !== nextSrc) {
-        artImg.style.opacity = '0.35';
-        artImg.src = nextSrc;
-        artImg.alt = heroItem.title;
-        setTimeout(() => { artImg.style.opacity = '1'; }, 120);
-      }
-    }
-    const rowEl = heroEl.querySelector('.hero-showcase-row');
-    const cards = heroEl.querySelectorAll('.hero-mini-card');
-    cards.forEach((c, idx) => {
-      const isAct = idx === safeHeroIdx;
-      c.classList.toggle('active', isAct);
-      if (isAct && rowEl) {
-        const targetLeft = Math.max(0, c.offsetLeft - (rowEl.clientWidth / 2) + (c.clientWidth / 2));
-        rowEl.scrollTo({ left: targetLeft, behavior: 'smooth' });
-      }
-    });
-  }
-
-  function startShowcaseAutoRotation() {
-    if (autoRotateTimer || compact) return;
-    autoRotateTimer = setInterval(async () => {
-      if (!root.isConnected) {
-        clearInterval(autoRotateTimer);
-        autoRotateTimer = null;
-        return;
-      }
-      if (compact || provider || superQuery || !showTrending || heroHovered || !autoRotateEnabled) return;
-      const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
-      if (!heroPool.length) return;
-      heroIndex = (heroIndex + 1) % heroPool.length;
-      autoRotateTicks += 1;
-      if (autoRotateTicks % 10 === 0 && !trendingLoading) {
-        await ensureTrending(false);
-        if (!provider && !superQuery && root.isConnected) renderGrid();
-        return;
-      }
-      updateHeroBannerInPlace();
-    }, 5500);
-  }
-  if (!compact) startShowcaseAutoRotation();
-
   const pickSafe = async (media) => {
     const p = getProvider(media.provider);
     if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return; }
+    if (!accountGate(media.provider)) return;
     await onPick(media);
   };
   let _unsubCloudMedia = null;
@@ -609,82 +483,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     });
   }
 
-  async function ensureTrending(forceShuffle = false) {
-    if (trendingLoading) return trendingItems;
-    trendingLoading = true;
-    try {
-      const res = await api(`/api/rave/catalog?provider=cinema&shuffle=1&limit=36&_t=${Date.now()}`, { timeout: 10000 });
-      const fetched = (res.items || []).filter((x) => x && x.title && (x.poster || x.backdrop));
-      if (fetched.length) {
-        const seenIds = new Set(fetched.map((x) => String(x.tmdbId || x.id || x.title)));
-        const merged = [
-          ...shuffleArray(fetched),
-          ...shuffleArray(HERO_DEFAULT_POOL).filter((d) => !seenIds.has(String(d.tmdbId || d.id || d.title))),
-        ];
-        trendingItems = merged.slice(0, 36);
-        trendingFetched = true;
-        if (forceShuffle) heroIndex = 0;
-      } else if (forceShuffle) {
-        trendingItems = shuffleArray(trendingItems.length ? trendingItems : HERO_DEFAULT_POOL);
-        heroIndex = 0;
-      }
-    } catch (e) {
-      trendingItems = shuffleArray(trendingItems.length ? trendingItems : HERO_DEFAULT_POOL);
-      trendingFetched = true;
-      if (forceShuffle) heroIndex = 0;
-    } finally {
-      trendingLoading = false;
-    }
-    return trendingItems;
-  }
-
-  async function shuffleShowcaseUI(btnEl) {
-    const prevTxt = btnEl ? btnEl.textContent : '';
-    if (btnEl) {
-      btnEl.disabled = true;
-      btnEl.textContent = '🎲 Karıştırılıyor...';
-    }
-    try {
-      await ensureTrending(true);
-      if (!provider && root.isConnected) renderGrid();
-      toast('🎲 Arşivden yeni vitrin önerileri getirildi!');
-    } finally {
-      if (btnEl && btnEl.isConnected) {
-        btnEl.disabled = false;
-        btnEl.textContent = prevTxt || '🎲 Vitrini Karıştır';
-      }
-    }
-  }
-
-  async function pickRandomMovie(btnEl) {
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = '🎲 Seçiliyor...'; }
-    try {
-      let items = [];
-      try {
-        const provId = (provider && provider.kind === 'catalog') ? provider.id : 'cinema';
-        const res = await api(`/api/rave/catalog?${qs({ provider: provId, shuffle: 1, limit: 36, _t: Date.now() })}`, { timeout: 10000 });
-        items = res.items || [];
-      } catch (e) { /* fallback to trending */ }
-      if (!items.length) items = await ensureTrending(true);
-      const movies = items.filter((it) => it.mediaType !== 'tv');
-      const pool = movies.length ? movies : items;
-      if (!pool.length) { toast('Katalog yüklenemedi, lütfen tekrar dene'); return; }
-      const chosen = pool[Math.floor(Math.random() * pool.length)];
-      const defProv = provider || getProvider(chosen.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-      if (!checkProviderAuthGate(chosen, defProv)) return;
-      toast(`🎲 Rastgele Seçim: ${chosen.title} hazırlanıyor...`);
-      const media = await resolveCatalogItem(chosen, defProv, 1, 1);
-      if (media) await pickSafe(media);
-    } finally {
-      if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🎲 Rastgele Film'; }
-    }
-  }
-
   const RAVE_TOP_IDS = [
-    'cinema', 'youtube', 'ravedj', 'drive',
+    'youtube', 'drive', 'upload', 'music', 'ravedj',
     'netflix', 'disney', 'prime', 'max', 'apple', 'exxen', 'blutv', 'gain',
-    'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'hulu', 'paramount', 'peacock', 'ytmusic',
-    'vk', 'rutube', 'pluto', 'tubi',
+    'tod', 'tabii', 'tvplus', 'puhutv', 'mubi', 'crunchyroll', 'hulu', 'paramount', 'peacock',
+    'pluto', 'tubi', 'plex',
   ];
 
   function buildShimmerGrid(cnt = 6) {
@@ -695,177 +498,22 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         h('div', { class: 'wl-shimmer-line sm' }))));
   }
 
-  function openMoviePreviewModal(t, defProv, onAction) {
-    const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
-    const banner = String(t.backdrop || t.poster || '/static/watchlivo-poster.svg').replace(/["'()\\\r\n]/g, '');
-    const poster = t.poster || t.backdrop || '/static/watchlivo-poster.svg';
-    let modalRef = null;
-    const body = h('div', { class: 'wl-preview-modal' },
-      h('div', { class: 'wl-preview-backdrop', style: { backgroundImage: `url("${banner}")` } },
-        h('div', { class: 'wl-preview-blur-mask' })),
-      h('div', { class: 'wl-preview-content' },
-        h('img', { class: 'wl-preview-poster', src: poster, alt: t.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
-        h('div', { class: 'wl-preview-info' },
-          h('div', { class: 'wl-preview-badges' },
-            h('span', { class: 'wl-preview-tag type' }, isTv ? '📺 DİZİ / ANİME' : '🎬 SİNEMA FİLMİ'),
-            t.year ? h('span', { class: 'wl-preview-tag' }, String(t.year)) : null,
-            h('span', { class: 'wl-preview-tag rating' }, `⭐ IMDb ${t.rating || '8.2'}`),
-            h('span', { class: 'wl-preview-tag tr' }, '🇹🇷 Dublaj & Altyazı')),
-          h('h3', { class: 'wl-preview-title' }, t.title),
-          h('p', { class: 'wl-preview-desc' }, t.overview || 'Watchlivo arşivinde 1080p/4K kalitesinde Türkçe dublaj ve altyazı seçenekleriyle arkadaşlarınla senkronize izle.'),
-          h('div', { class: 'wl-preview-actions' },
-            h('button', {
-              type: 'button',
-              class: 'btn primary wl-preview-play-btn',
-              onclick: async () => {
-                if (!checkProviderAuthGate(t, defProv)) return;
-                modalRef?.close?.();
-                if (onAction) await onAction();
-              },
-            }, isTv ? '📺 Sezon & Bölüm Seç' : '▶ Şimdi Odada Başlat'),
-            h('button', {
-              type: 'button',
-              class: `btn wl-preview-fav-btn ${isFavoriteMedia(t) ? 'primary' : 'ghost'}`,
-              onclick: (ev) => {
-                const added = toggleFavoriteMedia({ ...t, provider: defProv?.id || t.provider || 'cinema' });
-                ev.currentTarget.className = `btn wl-preview-fav-btn ${added ? 'primary' : 'ghost'}`;
-                ev.currentTarget.textContent = added ? '✓ İzleme Listemde' : '🔖 Listeme Ekle';
-                const pillCnt = root.querySelector('#btn-watchlist-pill .cat-count');
-                if (pillCnt) pillCnt.textContent = String(getFavorites().length);
-                toast(added ? `🔖 ${t.title} İzleme Listene eklendi` : `${t.title} listeden çıkarıldı`);
-              },
-            }, isFavoriteMedia(t) ? '✓ İzleme Listemde' : '🔖 Listeme Ekle'),
-            h('button', {
-              type: 'button',
-              class: 'btn ghost',
-              onclick: () => modalRef?.close?.(),
-            }, 'Kapat')))));
-    modalRef = popup({ title: '', content: body, options: [] });
-  }
-
   function renderGrid() {
     const prevCatScroll = root.querySelector('.provider-cat-bar')?.scrollLeft || 0;
-    const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { placeholder: "YouTube'da ara veya video bağlantısı yapıştır...", value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results' });
-    const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
-    let cmdkTimer = null;
-    let cmdkSeq = 0;
-    let cmdkSelectedIdx = -1;
-    let cmdkTriggers = [];
-    const hideCmdk = () => { cmdkDropdown.style.display = 'none'; cmdkSelectedIdx = -1; cmdkTriggers = []; };
-    const syncCmdkSelection = () => {
-      const rows = cmdkDropdown.querySelectorAll('.wl-cmdk-item');
-      rows.forEach((r, idx) => r.classList.toggle('is-selected', idx === cmdkSelectedIdx));
-      if (cmdkSelectedIdx >= 0 && rows[cmdkSelectedIdx]) {
-        rows[cmdkSelectedIdx].scrollIntoView({ block: 'nearest' });
-      }
-    };
-    const run = () => { hideCmdk(); superQuery = input.value.trim(); if (superQuery) runSuperSearch(superQuery, results); else results.replaceChildren(); };
-    input.addEventListener('keydown', (e) => {
-      if (cmdkDropdown.style.display !== 'none' && cmdkTriggers.length) {
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          cmdkSelectedIdx = (cmdkSelectedIdx + 1) % cmdkTriggers.length;
-          syncCmdkSelection();
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          cmdkSelectedIdx = (cmdkSelectedIdx - 1 + cmdkTriggers.length) % cmdkTriggers.length;
-          syncCmdkSelection();
-          return;
-        }
-        if (e.key === 'Enter' && cmdkSelectedIdx >= 0 && cmdkTriggers[cmdkSelectedIdx]) {
-          e.preventDefault();
-          cmdkTriggers[cmdkSelectedIdx]();
-          return;
-        }
-      }
-      if (e.key === 'Enter') run();
-      else if (e.key === 'Escape') hideCmdk();
-    });
+    const run = () => { superQuery = input.value.trim(); if (superQuery) runYoutubeSearch(superQuery, results); else results.replaceChildren(); };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
     input.addEventListener('focus', () => {
       if (window.innerHeight <= 520) {
         setTimeout(() => { try { searchEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch (_) {} }, 120);
       }
     });
     input.addEventListener('input', () => {
-      clearTimeout(cmdkTimer);
-      const q = input.value.trim();
-      if (!q && superQuery) {
+      if (!input.value.trim() && superQuery) {
         superQuery = '';
         results.replaceChildren();
       }
-      if (compact || q.length < 2 || parseVideoUrl(q)) {
-        hideCmdk();
-        return;
-      }
-      const myCmdk = ++cmdkSeq;
-      cmdkDropdown.style.display = 'block';
-      cmdkDropdown.replaceChildren(
-        h('div', { class: 'wl-cmdk-head' }, h('span', {}, `⚡ "${q}" aranıyor...`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
-        h('div', { class: 'wl-cmdk-skeleton-list' },
-          ...Array.from({ length: 4 }, () => h('div', { class: 'wl-cmdk-skel-row' },
-            h('div', { class: 'wl-cmdk-skel-poster' }),
-            h('div', { class: 'wl-cmdk-skel-lines' }, h('span', {}), h('span', {})))))
-      );
-      cmdkTimer = setTimeout(async () => {
-        try {
-          const data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 10000 });
-          if (myCmdk !== cmdkSeq || input.value.trim() !== q) return;
-          const items = [...(data.tmdb || []), ...(data.justwatch || [])].filter((x) => x && x.title).slice(0, 7);
-          if (!items.length) {
-            cmdkDropdown.replaceChildren(
-              h('div', { class: 'wl-cmdk-head' }, h('span', {}, `Sonuç bulunamadı: "${q}"`), h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×'))
-            );
-            return;
-          }
-          cmdkSelectedIdx = -1;
-          cmdkTriggers = [];
-          cmdkDropdown.replaceChildren(
-            h('div', { class: 'wl-cmdk-head' },
-              h('span', {}, `⚡ Hızlı Sonuçlar (${items.length}) · ↑↓ Seç`),
-              h('button', { type: 'button', class: 'wl-cmdk-all-btn', onclick: run }, 'Tüm Sonuçları Gör →'),
-              h('span', { class: 'wl-cmdk-esc', onclick: hideCmdk }, 'ESC ×')),
-            h('div', { class: 'wl-cmdk-list' },
-              ...items.map((it, rowIdx) => {
-                const isTv = it.mediaType === 'tv' || it.type === 'SHOW';
-                const defProv = getProvider(it.provider || 'cinema') || getProvider('cinema');
-                const normalized = { ...it, tmdbId: String(it.tmdbId || it.id || '') };
-                const triggerPlay = async () => {
-                  hideCmdk();
-                  if (!checkProviderAuthGate(normalized, defProv)) return;
-                  if (isTv) {
-                    openTvSeriesModal(normalized, defProv);
-                  } else {
-                    toast(`🎬 ${it.title} hazırlanıyor...`);
-                    const media = await resolveCatalogItem(normalized, defProv, 1, 1);
-                    if (media) await pickSafe(media);
-                  }
-                };
-                cmdkTriggers.push(triggerPlay);
-                return h('div', {
-                  class: 'wl-cmdk-item',
-                  onmouseenter: () => { cmdkSelectedIdx = rowIdx; syncCmdkSelection(); },
-                  onclick: triggerPlay,
-                },
-                  h('img', { class: 'wl-cmdk-poster', src: it.poster || '/static/watchlivo-poster.svg', alt: it.title, onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
-                  h('div', { class: 'wl-cmdk-meta wl-cmdk-info' },
-                    h('div', { class: 'wl-cmdk-title' }, it.title),
-                    h('div', { class: 'wl-cmdk-sub' }, `${it.year || '2025'} · ${isTv ? '📺 Dizi / Anime' : '🎬 Sinema Filmi'} · 🇹🇷 TR Dublaj & Altyazı`)),
-                  h('button', {
-                    type: 'button',
-                    class: 'wl-cmdk-preview-btn',
-                    title: 'Sinematik Önizleme',
-                    onclick: (ev) => { ev.stopPropagation(); hideCmdk(); openMoviePreviewModal(normalized, defProv, triggerPlay); },
-                  }, '✨ Detay'),
-                  h('span', { class: 'wl-cmdk-action' }, isTv ? '📺 Bölüm Seç' : '▶ Başlat'));
-              }))
-          );
-        } catch (err) {
-          hideCmdk();
-        }
-      }, 240);
     });
     const filteredProviders = catFilter === 'all' ? PROVIDERS : PROVIDERS.filter((p) => p.cat === catFilter);
     const orderedAll = catFilter === 'all'
@@ -901,31 +549,9 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         id: 'btn-watchlist-pill',
         class: 'provider-cat-pill wl-watchlist-pill',
         title: 'Bulut Senkron İzleme Listem',
-        onclick: () => root.openFavorites(),
+        onclick: () => openWatchHistoryModal('watchlist', pickSafe),
       }, h('span', {}, '🔖 İzleme Listem'), h('span', { class: 'cat-count' }, String(getFavorites().length))) : null,
-      !compact ? h('button', {
-        type: 'button',
-        id: 'btn-vizyon-modal-pill',
-        class: 'provider-cat-pill trend-pill',
-        title: 'Vizyondaki Yeni Filmleri Gör veya Yeni Film / Dizi Ekle',
-        onclick: () => openVizyonModal(pickSafe),
-      }, '🍿 Vizyon & Yeni Ekle') : null,
-      !compact ? h('button', {
-        type: 'button',
-        id: 'btn-trending-toggle',
-        class: `provider-cat-pill trend-pill ${showTrending ? 'active' : ''}`,
-        onclick: async () => {
-          showTrending = !showTrending;
-          if (showTrending && !trendingItems.length) await ensureTrending();
-          renderGrid();
-        },
-      }, '🔥 Ne İzlesek?') : null,
-      !compact ? h('button', {
-        type: 'button',
-        id: 'btn-random-movie',
-        class: 'provider-cat-pill random-pill',
-        onclick: (e) => pickRandomMovie(e.currentTarget),
-      }, '🎲 Rastgele Film') : null);
+      null);
     if (!root._catWheelBound) {
       root._catWheelBound = true;
       root.addEventListener('wheel', (e) => {
@@ -936,61 +562,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
         }
       }, { passive: false });
     }
-
-    const openTvSeriesModal = (tvItem, tvProv) => {
-      const box = h('div', { style: { minHeight: '340px' } });
-      const modalRef = popup({
-        title: `📺 ${tvItem.title} — Sezon & Bölüm Seç`,
-        content: box,
-        wide: true,
-        options: [{ label: 'Kapat' }],
-      });
-      renderSeriesPicker(
-        tvItem,
-        tvProv || getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' },
-        box,
-        () => modalRef?.close?.(),
-        async (media) => { modalRef?.close?.(); await pickSafe(media); },
-        resolveCatalogItem
-      );
-    };
-
-    const trendingRail = !compact && showTrending && trendingItems.length ? h('div', { class: 'trending-strip' },
-      h('div', { class: 'trending-strip-head' },
-        h('span', { class: 'trending-strip-title' }, '🔥 Arşivden Karışık Öneriler (Tek Tıkla Odaya Aç)'),
-        h('div', { style: { display: 'flex', gap: '6px', alignItems: 'center' } },
-          h('button', { type: 'button', class: 'btn sm', onclick: (e) => shuffleShowcaseUI(e.currentTarget) }, '🎲 Yenile & Karıştır'),
-          h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { showTrending = false; renderGrid(); } }, 'Kapat ×'))),
-      h('div', { class: 'trending-strip-row' },
-        ...trendingItems.map((item) => {
-          const prov = getProvider(item.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-          return h('div', {
-            class: 'trending-mini-card',
-            role: 'button',
-            tabindex: '0',
-            onclick: async (e) => {
-              if (!checkProviderAuthGate(item, prov)) return;
-              if (item.mediaType === 'tv') {
-                openTvSeriesModal(item, prov);
-                return;
-              }
-              const cardEl = e.currentTarget;
-              if (cardEl.classList.contains('busy')) return;
-              cardEl.classList.add('busy');
-              toast(`🎬 ${item.title} hazırlanıyor...`);
-              try {
-                const media = await resolveCatalogItem(item, prov, 1, 1);
-                if (media) await pickSafe(media);
-              } finally {
-                cardEl.classList.remove('busy');
-              }
-            },
-          },
-            h('img', { src: item.poster || item.backdrop || '/static/watchlivo-poster.svg', alt: item.title, loading: 'lazy', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
-            h('div', { class: 'trending-mini-info' },
-              h('div', { class: 't-title' }, item.title),
-              h('div', { class: 't-sub' }, `${item.year || '2025'} · ⭐ ${item.rating || '8.4'} · 🇹🇷 TR`)));
-        }))) : null;
 
     const fullHistory = (!compact && !state.mesh) ? getWatchHistory() : [];
     const continueOnly = (!compact && !state.mesh) ? getContinueWatching() : [];
@@ -1018,7 +589,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
           }, 'Temizle ×'))),
       h('div', { class: 'wl-continue-strip' },
         ...historyList.map((item) => {
-          const prov = getProvider(item.catalogProvider || item.provider || 'cinema');
+          const prov = getProvider(item.provider);
           const rawSavedSec = Number(item.currentTime ?? item.position ?? 0);
           const resumeSec = Number.isFinite(rawSavedSec) && rawSavedSec > 3 ? Math.floor(rawSavedSec) : 0;
           const durSec = Math.max(0, Math.floor(Number(item.duration || 0)));
@@ -1040,60 +611,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: async (ev) => {
               const cardEl = ev.currentTarget;
               if (cardEl.classList.contains('busy')) return;
-              if (!checkProviderAuthGate(item, prov)) return;
               cardEl.classList.add('busy');
               if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
-              else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
               try {
-                if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
-                  const ytVid = item.videoId || item.id;
-                  await pickSafe({
-                    provider: 'youtube',
-                    videoId: ytVid,
-                    url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
-                    title: item.title,
-                    thumbnail: item.poster || item.thumbnail,
-                    duration: item.duration || 0,
-                    currentTime: resumeSec,
-                    meshStatePosition: resumeSec,
-                  });
-                  return;
-                }
-                const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
-                const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
-                const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
-                const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
-                const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-
-                let resolved = null;
-                if (!item.isMusic) {
-                  const resolvePayload = {
-                    tmdbId: item.tmdbId || '',
-                    imdbId: item.imdbId || '',
-                    mediaType: resolvedMediaType,
-                    title: cleanHistTitle,
-                    originalTitle: item.originalTitle || cleanHistTitle,
-                    backdrop: item.backdrop || item.thumbnail || item.poster || '',
-                    poster: item.poster || item.thumbnail || '',
-                    year: histYear,
-                  };
-                  try {
-                    resolved = await Promise.race([
-                      resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-                      new Promise((r) => setTimeout(() => r(null), 12000)),
-                    ]);
-                  } catch (e) {
-                    console.warn('Continue resolve error:', e);
-                  }
-                }
-                if (resolved) {
-                  resolved.currentTime = resumeSec;
-                  resolved.meshStatePosition = resumeSec;
-                  await pickSafe(resolved);
-                  return;
-                }
-                toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
-                return;
+                await replayHistoryItem(item, resumeSec, pickSafe);
               } finally {
                 cardEl.classList.remove('busy');
               }
@@ -1133,95 +654,10 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
                 },
               }, '✕')),
             h('div', { class: 'wl-continue-body' },
-              h('div', { class: 'wl-continue-title' }, item.title || 'Sinema'),
+              h('div', { class: 'wl-continue-title' }, item.title || 'Video'),
               h('div', { class: 'wl-continue-sub' }, subTxt),
               h('div', { class: 'wl-continue-prog' },
                 h('div', { class: 'wl-continue-prog-fill', style: { width: `${pct}%` } }))));
-        }))) : null;
-
-    if (!latestEpsFetched && !latestEpsLoading && !compact) {
-      latestEpsLoading = true;
-      api('/api/rave/latest-episodes', { timeout: 8000 }).then((res) => {
-        if (Array.isArray(res?.items) && res.items.length) {
-          latestEpsItems = res.items;
-          latestEpsFetched = true;
-          if (!provider && root.isConnected && !superQuery) {
-            const activeInp = root.querySelector('input');
-            if (!activeInp || (document.activeElement !== activeInp && !activeInp.value.trim())) {
-              renderGrid();
-            }
-          }
-        }
-      }).catch(() => {}).finally(() => {
-        latestEpsLoading = false;
-        latestEpsFetched = true;
-      });
-    }
-
-    const latestEpsRail = (!compact && !state.mesh && latestEpsItems.length) ? h('section', { class: 'wl-continue-section wl-latest-eps-section', id: 'wl-latest-eps-section' },
-      h('div', { class: 'wl-continue-head' },
-        h('div', { class: 'wl-continue-title-group' },
-          h('span', { class: 'wl-continue-heading' }, '🆕 Son Eklenen Yeni Bölümler'),
-          h('span', { class: 'wl-continue-cloud-pill' }, '⚡ Canlı Otomatik Takip')),
-        h('div', { class: 'wl-continue-actions', style: { display: 'flex', gap: '6px', alignItems: 'center' } },
-          h('button', {
-            type: 'button',
-            class: 'btn sm ghost',
-            onclick: () => openVizyonModal(pickSafe),
-          }, '🍿 Tüm Vizyon & Yeni Bölümler'))),
-      h('div', { class: 'wl-continue-strip' },
-        ...latestEpsItems.slice(0, 14).map((epItem) => {
-          const sNum = Number(epItem.season || 1);
-          const eNum = Number(epItem.episode || 1);
-          const epBadge = epItem.episodeLabel || `S${sNum}:B${eNum}`;
-          const subLabel = `${sNum}. Sezon ${eNum}. Bölüm · ${epItem.episodeTitle || epItem.sourceBadge || 'Yeni Bölüm'}`;
-          const prov = getProvider(epItem.provider || 'cinema') || { id: 'cinema', name: 'Sinema+' };
-          return h('div', {
-            class: 'wl-continue-card wl-latest-ep-card',
-            role: 'button',
-            tabindex: '0',
-            onkeydown: (ev) => {
-              if (ev.target === ev.currentTarget && (ev.key === 'Enter' || ev.key === ' ')) {
-                ev.preventDefault();
-                ev.currentTarget.click();
-              }
-            },
-            onclick: async (ev) => {
-              const cardEl = ev.currentTarget;
-              if (cardEl.classList.contains('busy')) return;
-              if (!checkProviderAuthGate(epItem, prov)) return;
-              cardEl.classList.add('busy');
-              toast(`🆕 ${epItem.title} · ${sNum}. Sezon ${eNum}. Bölüm odada hazırlanıyor...`);
-              try {
-                const resolved = await resolveCatalogItem(epItem, prov, sNum, eNum);
-                if (resolved) await pickSafe(resolved);
-              } finally {
-                cardEl.classList.remove('busy');
-              }
-            },
-          },
-            h('div', { class: 'wl-continue-thumb' },
-              h('img', {
-                src: (epItem.still && !epItem.still.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
-                  ? epItem.still
-                  : ((epItem.backdrop && !epItem.backdrop.includes('4Mt7WHox67uJ1yErwTBFcV8KWgG'))
-                    ? epItem.backdrop
-                    : (epItem.poster || `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`)),
-                alt: epItem.title || '',
-                loading: 'lazy',
-                onerror: (e) => {
-                  if (!e.target.src.includes('/api/rave/poster') && epItem.title) {
-                    e.target.src = `/api/rave/poster?${qs({ tid: epItem.tmdbId || '', t: epItem.title || '', mt: 'tv' })}`;
-                  } else {
-                    e.target.src = '/static/watchlivo-poster.svg';
-                  }
-                },
-              }),
-              h('span', { class: 'wl-ep-badge' }, epBadge),
-              h('span', { class: 'wl-continue-play-ico' }, '▶')),
-            h('div', { class: 'wl-continue-body' },
-              h('div', { class: 'wl-continue-title' }, epItem.title || 'Dizi'),
-              h('div', { class: 'wl-continue-sub' }, subLabel)));
         }))) : null;
 
     const voiceSearchBtn = createVoiceSearchButton({
@@ -1262,222 +698,14 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('div', { class: 'extend-plus' }, `+${hiddenCount}`),
       h('div', { class: 'provider-meta' },
         h('span', { class: 'ptitle' }, 'Tümü'),
-        h('span', { class: 'psub' }, `${orderedAll.length} Stüdyo & Arşiv`))) : null;
-
-    const heroPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
-    const safeHeroIdx = ((heroIndex % heroPool.length) + heroPool.length) % heroPool.length;
-    const heroItem = heroPool[safeHeroIdx] || HERO_DEFAULT_POOL[0];
-    if (!trendingFetched && !trendingLoading && !compact) {
-      ensureTrending().then(() => {
-        if (!provider && root.isConnected && !superQuery) {
-          if (!showTrending) {
-            updateHeroBannerInPlace();
-            return;
-          }
-          const activeInp = root.querySelector('input');
-          if (activeInp && (document.activeElement === activeInp || activeInp.value.trim())) {
-            updateHeroBannerInPlace();
-            return;
-          }
-          renderGrid();
-        }
-      });
-    }
-
-    const heroStripRow = h('div', { class: 'hero-showcase-row' },
-      ...heroPool.map((item, idx) => {
-        const isActive = idx === safeHeroIdx;
-        const isTvItem = item.mediaType === 'tv';
-        const prov = getProvider(item.provider || 'cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-        const ctaLabel = isTvItem ? '📺 Bölüm Seç' : '▶ Odada Başlat';
-        return h('div', {
-          class: `hero-mini-card ${isActive ? 'active' : ''}`,
-          role: 'button',
-          tabindex: '0',
-          onclick: () => {
-            heroIndex = idx;
-            updateHeroBannerInPlace();
-          },
-          onkeydown: (e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              heroIndex = idx;
-              updateHeroBannerInPlace();
-            }
-          },
-        },
-          h('img', {
-            src: item.poster || item.backdrop || '/static/watchlivo-poster.svg',
-            alt: item.title,
-            loading: 'lazy',
-            onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; },
-          }),
-          h('div', { class: 'hero-mini-body' },
-            h('div', { class: 'hero-mini-title' }, item.title),
-            h('div', { class: 'hero-mini-meta' }, `${item.year || '2024'} · ⭐ ${item.rating || '8.2'}`),
-            h('button', {
-              type: 'button',
-              class: 'hero-mini-play',
-              onclick: async (e) => {
-                e.stopPropagation();
-                if (!checkProviderAuthGate(item, prov)) return;
-                if (isTvItem) {
-                  openTvSeriesModal(item, prov);
-                  return;
-                }
-                const btnEl = e.currentTarget;
-                if (btnEl.disabled) return;
-                btnEl.disabled = true;
-                btnEl.textContent = '⏳ Açılıyor...';
-                toast(`🎬 ${item.title} odası hazırlanıyor...`);
-                try {
-                  const media = await resolveCatalogItem(item, prov, 1, 1);
-                  if (media) await pickSafe(media);
-                } finally {
-                  btnEl.disabled = false;
-                  btnEl.textContent = ctaLabel;
-                }
-              },
-            }, ctaLabel)));
-      }));
-
-    const heroBanner = (!compact && !superQuery && showTrending) ? h('div', {
-      class: 'gazestream-hero hero-with-rail',
-      onmouseenter: () => { heroHovered = true; },
-      onmouseleave: () => { heroHovered = false; },
-    },
-      h('div', { class: 'hero-stage-top' },
-        h('div', { class: 'hero-left-info' },
-          h('div', { class: 'hero-trending-tag' },
-            h('span', {}, '🔥'),
-            h('span', {}, `Şimdi Trend (${safeHeroIdx + 1}/${heroPool.length}) — 4K Senkron Sinema Vitrini`)),
-          h('div', { class: 'hero-category-tags' },
-            h('span', { class: 'tag-badge' }, heroItem.mediaType === 'tv' ? '📺 Popüler Dizi' : '🎬 Sinema Filmi'),
-            h('span', { class: 'tag-badge' }, `⭐ IMDb ${heroItem.rating || '8.3'}`),
-            h('span', { class: 'tag-badge' }, '4K HDR'),
-            h('span', { class: 'tag-badge' }, '🇹🇷 Türkçe Dublaj & Altyazı')),
-          h('h1', { class: 'hero-main-title' }, `${heroItem.title}${heroItem.year && !String(heroItem.title).includes(heroItem.year) ? ` (${heroItem.year})` : ''}`),
-          h('p', { class: 'hero-synopsis' }, heroItem.overview || 'Arkadaşlarınızla aynı anda, tek kare gecikmesiz 1080p/4K film, dizi ve anime izleyin.'),
-          h('div', { class: 'hero-btn-row' },
-            h('button', {
-              type: 'button',
-              class: 'btn-watch-cyan',
-              onclick: async (e) => {
-                const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-                const curPool = trendingItems.length ? trendingItems : HERO_DEFAULT_POOL;
-                const curIdx = ((heroIndex % curPool.length) + curPool.length) % curPool.length;
-                const activeHero = curPool[curIdx] || heroItem;
-                const heroProv = getProvider(activeHero.provider || 'cinema') || defProv;
-                if (!checkProviderAuthGate(activeHero, heroProv)) return;
-                if (activeHero.mediaType === 'tv') {
-                  openTvSeriesModal(activeHero, heroProv);
-                  return;
-                }
-                const btn = e.currentTarget;
-                btn.disabled = true;
-                toast(`🎬 ${activeHero.title} odası hazırlanıyor...`);
-                try {
-                  const media = await resolveCatalogItem(activeHero, heroProv, 1, 1);
-                  if (media) await pickSafe(media);
-                } finally {
-                  btn.disabled = false;
-                }
-              },
-            },
-              h('span', {}, heroItem.mediaType === 'tv' ? '📺' : '▶'),
-              h('span', {}, heroItem.mediaType === 'tv' ? 'Sezon & Bölüm Seç' : 'Odaya Katıl & Şimdi İzle')),
-            h('button', {
-              type: 'button',
-              class: 'btn-download-glass',
-              onclick: () => {
-                provider = getProvider('cinema');
-                render();
-              },
-            }, '🎬 Sinema+ Kataloğu Aç'),
-            h('button', {
-              type: 'button',
-              id: 'btn-shuffle-hero',
-              class: 'btn-download-glass hero-shuffle-btn',
-              title: 'Arşivden vitrini rastgele karıştır',
-              onclick: (e) => shuffleShowcaseUI(e.currentTarget),
-            }, '🎲 Vitrini Karıştır'),
-            h('button', {
-              type: 'button',
-              class: 'btn-download-glass hero-nav-btn',
-              title: 'Önceki',
-              onclick: () => {
-                heroIndex = (heroIndex - 1 + heroPool.length) % heroPool.length;
-                updateHeroBannerInPlace();
-                setTimeout(() => {
-                  const row = root.querySelector('.hero-showcase-row');
-                  const card = root.querySelector('.hero-mini-card.active');
-                  if (row && card) row.scrollTo({ left: card.offsetLeft - row.clientWidth / 2 + card.clientWidth / 2, behavior: 'smooth' });
-                }, 20);
-              },
-            }, '‹ Önceki'),
-            h('button', {
-              type: 'button',
-              class: 'btn-download-glass hero-nav-btn',
-              title: 'Sonraki',
-              onclick: () => {
-                heroIndex = (heroIndex + 1) % heroPool.length;
-                updateHeroBannerInPlace();
-                setTimeout(() => {
-                  const row = root.querySelector('.hero-showcase-row');
-                  const card = root.querySelector('.hero-mini-card.active');
-                  if (row && card) row.scrollTo({ left: card.offsetLeft - row.clientWidth / 2 + card.clientWidth / 2, behavior: 'smooth' });
-                }, 20);
-              },
-            }, 'Sonraki ›'))),
-        h('div', { class: 'hero-art-stage' },
-          h('img', {
-            class: 'hero-main-img',
-            src: heroItem.backdrop || heroItem.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
-            alt: heroItem.title,
-            width: '780',
-            height: '439',
-            fetchpriority: 'high',
-            decoding: 'async',
-            onerror: (e) => { e.target.src = 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop'; },
-          }))),
-      h('div', { class: 'hero-showcase-strip' },
-        h('div', { class: 'hero-showcase-head' },
-          h('span', { class: 'hero-showcase-title' }, `🎬 Vitrin Önerileri (${heroPool.length} Karışık Film, Dizi & Anime)`),
-          h('div', { class: 'hero-showcase-arrows' },
-            h('button', {
-              type: 'button',
-              id: 'btn-auto-showcase',
-              class: `btn sm ${autoRotateEnabled ? 'primary' : 'ghost'}`,
-              title: 'Vitrini otomatik döndür / duraklat',
-              onclick: (e) => {
-                autoRotateEnabled = !autoRotateEnabled;
-                e.currentTarget.className = `btn sm ${autoRotateEnabled ? 'primary' : 'ghost'}`;
-                e.currentTarget.textContent = autoRotateEnabled ? '⏱ Otomatik: Açık' : '⏸ Otomatik: Durdu';
-              },
-            }, autoRotateEnabled ? '⏱ Otomatik: Açık' : '⏸ Otomatik: Durdu'),
-            h('button', {
-              type: 'button',
-              id: 'btn-shuffle-showcase',
-              class: 'btn sm primary',
-              title: 'Arşivden yeni rastgele vitrin önerileri getir',
-              onclick: (e) => shuffleShowcaseUI(e.currentTarget),
-            }, '🎲 Karıştır'),
-            h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Önceki vitrin kartları', onclick: () => { heroStripRow.scrollBy({ left: -420, behavior: 'smooth' }); } }, '◀'),
-            h('button', { type: 'button', class: 'btn sm ghost', 'aria-label': 'Sonraki vitrin kartları', onclick: () => { heroStripRow.scrollBy({ left: 420, behavior: 'smooth' }); } }, '▶'),
-            h('button', { type: 'button', class: 'btn sm', onclick: () => { provider = getProvider('cinema'); render(); } }, 'Tümünü Gör →'))),
-        heroStripRow)) : null;
+        h('span', { class: 'psub' }, `${orderedAll.length} kaynak`))) : null;
 
     const gridSection = h('div', { class: 'section-row rave-providers-section' },
       !compact ? h('div', { class: 'rave-providers-head' },
         h('div', { class: 'rave-providers-title-group' },
-          h('span', { class: 'rave-providers-title' }, '🎬 Yayın Platformları & Stüdyolar'),
-          h('span', { class: 'rave-providers-badge' }, `${PROVIDERS.length} Platform · Film, Dizi & Anime`)),
+          h('span', { class: 'rave-providers-title' }, '🎬 Birlikte ne izlemek istersin?'),
+          h('span', { class: 'rave-providers-badge' }, 'Platformlar kendi hesabınla · YouTube, Drive & müzik doğrudan')),
         h('div', { class: 'rave-providers-actions' },
-          h('button', {
-            type: 'button',
-            class: 'provider-head-btn primary',
-            onclick: () => { provider = getProvider('cinema'); render(); },
-          }, '🍿 Sinema+ Ana Arşivi Aç'),
           catFilter === 'all' ? h('button', {
             type: 'button',
             id: 'provider-expand-btn',
@@ -1485,108 +713,34 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
             onclick: () => { showAllProviders = !showAllProviders; renderGrid(); },
           }, showAllProviders ? '▲ Kompakt Görünüm (12)' : `▼ Tüm Platformları Göster (${orderedAll.length})`) : null)) : null,
       h('div', { class: compact ? 'provider-grid compact' : 'provider-grid rave-home-provider-grid' },
-        ...visibleProviders.map((p) => providerTile(p, (pp) => { provider = pp; render(); })),
+        ...visibleProviders.map((p) => providerTile(p, (pp) => {
+          if (pp.kind === 'account' && !isNativeShell()) { openAccountPlatformModal(pp); return; }
+          provider = pp;
+          render();
+        })),
         ...(moreTile ? [moreTile] : [])));
 
     root.replaceChildren(
       topBar,
-      ...(!compact ? [cmdkDropdown] : []),
       results,
-      ...(heroBanner ? [heroBanner] : []),
-      ...(trendingRail ? [trendingRail] : []),
       ...(historyRail ? [historyRail] : []),
-      ...(latestEpsRail ? [latestEpsRail] : []),
       gridSection);
     if (prevCatScroll > 0) catBar.scrollLeft = prevCatScroll;
-    if (superQuery) runSuperSearch(superQuery, results);
+    if (superQuery) runYoutubeSearch(superQuery, results);
   }
 
-  async function runSuperSearch(q, box) {
-    const mySearch = ++superSearchSeq;
+  async function runYoutubeSearch(q, box) {
+    const mySearch = ++searchSeq;
     box.replaceChildren(buildShimmerGrid(6));
     const pasted = parseVideoUrl(q);
     if (pasted) { box.replaceChildren(); await pickFromUrl(q); return; }
     let data = {};
-    try { data = await api(`/api/rave/supersearch?${qs({ q })}`, { timeout: 15000 }); } catch (e) { if (mySearch === superSearchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
-    if (mySearch !== superSearchSeq) return;
-    const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9ğüşıöç]+/gi, '').trim();
-    const jwList = (data.justwatch || []).filter((t) => t && t.title);
-    const jwByTitle = new Map();
-    for (const jw of jwList) {
-      const k = normTitle(jw.title);
-      if (k && !jwByTitle.has(k)) jwByTitle.set(k, jw);
-    }
-    const matchedJwKeys = new Set();
-    const tmdb = (data.tmdb || []).slice(0, 40).map((t) => {
-      const k1 = normTitle(t.title);
-      const k2 = normTitle(t.originalTitle);
-      const matchedJw = (k1 && jwByTitle.get(k1)) || (k2 && jwByTitle.get(k2)) || null;
-      if (matchedJw) {
-        if (k1) matchedJwKeys.add(k1);
-        if (k2) matchedJwKeys.add(k2);
-      }
-      const mergedOffers = (Array.isArray(t.offers) && t.offers.length)
-        ? t.offers
-        : (matchedJw?.offers || []);
-      return { ...t, tmdbId: String(t.tmdbId || t.id || ''), offers: mergedOffers };
-    });
-    const titles = jwList.filter((jw) => {
-      const k = normTitle(jw.title);
-      return k && !matchedJwKeys.has(k);
-    }).slice(0, 24);
-    const yt = (data.youtube || []).slice(0, 12).map(ytToMedia);
-    const hasAny = Boolean(tmdb.length || titles.length || yt.length);
+    try { data = await api(`/api/search/youtube?${qs({ q })}`, { timeout: 12000 }); } catch (e) { if (mySearch === searchSeq) box.replaceChildren(h('div', { class: 'lobby-empty' }, 'Arama başarısız oldu, tekrar dene.')); return; }
+    if (mySearch !== searchSeq) return;
+    const yt = (data.items || []).slice(0, 24).map(ytToMedia);
     fill(box,
-      tmdb.length || titles.length ? h('div', { class: 'section-head' }, h('h2', {}, 'Film ve Diziler'), h('span', { class: 'dim' }, 'Sezon / Bölüm veya Tam Film seç')) : null,
-      tmdb.length || titles.length ? h('div', { class: 'poster-grid' }, [...tmdb.map((t) => posterCard(t, box)), ...titles.map((t) => posterCard(t, box))]) : null,
       yt.length ? h('div', { class: 'section-head' }, h('h2', {}, 'YouTube'), h('span', { class: 'dim' }, `${yt.length} video`)) : null,
-      yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : (!hasAny ? h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen içerik bulunamadı.') : null));
-  }
-
-  function posterCard(t, box) {
-    const offers = t.offers || [];
-    const provs = [...new Set(offers.map((o) => offerProvider(o.provider)).filter(Boolean))];
-    const defProv = getProvider(t.provider || provs[0] || 'cinema') || getProvider('cinema');
-    const isTv = t.mediaType === 'tv' || t.type === 'SHOW';
-    const card = h('div', { class: 'poster catalog-card', role: 'button', tabindex: '0' },
-      h('div', { class: 'poster-thumb-wrap' },
-        h('img', {
-          src: t.poster || (t.title ? `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}` : '/static/watchlivo-poster.svg'),
-          alt: t.title || '',
-          loading: 'lazy',
-          onerror: (e) => {
-            const el = e.currentTarget || e.target;
-            if (!el.dataset.healed && (t.title || t.tmdbId)) {
-              el.dataset.healed = '1';
-              el.src = `/api/rave/poster?${qs({ tid: t.tmdbId || t.id || '', t: t.title || '', ot: t.originalTitle || '', y: t.year || '', mt: isTv ? 'tv' : 'movie' })}`;
-            } else {
-              el.src = '/static/watchlivo-poster.svg';
-            }
-          },
-        }),
-        defProv?.logo ? h('span', { class: 'poster-prov-badge' }, h('img', { src: defProv.logo, alt: defProv.name })) : null),
-      h('div', { class: 'pt' }, `${t.title}${t.year ? ` (${t.year})` : ''}`),
-      h('div', { class: 'offers' },
-        h('span', {}, isTv ? '📺 DİZİ' : '🎬 FİLM'),
-        ...(provs.length ? provs.slice(0, 2) : [defProv?.id || 'cinema']).map((id) => h('span', {}, getProvider(id)?.name || id))),
-      h('button', { class: 'btn primary poster-cta' }, isTv ? '📺 Bölüm Seç' : '▶ Tam Film'));
-    const go = async () => {
-      if (!checkProviderAuthGate(t, defProv)) return;
-      if (isTv && box) {
-        renderSeriesPicker(t, defProv, box, () => runSuperSearch(superQuery, box), pickSafe, resolveCatalogItem);
-        return;
-      }
-      if (card.querySelector('.loading')) return;
-      const l = h('div', { class: 'loading' }, h('div', { class: 'spinner' }));
-      card.append(l);
-      try {
-        const media = await resolveCatalogItem(t, defProv, 1, 1);
-        if (media) await pickSafe(media);
-      } finally { l.remove(); }
-    };
-    card.addEventListener('click', go);
-    card.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
-    return card;
+      yt.length ? h('div', { class: 'card-grid' }, yt.map((m) => videoCard(m, pickSafe))) : h('div', { class: 'lobby-empty' }, 'Aramanızla eşleşen video bulunamadı.'));
   }
 
   async function pickFromUrl(rawUrl, fallbackTitle = '') {
@@ -1596,6 +750,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     if (!parsed) { toast('Bu bağlantı tanınmadı'); return; }
     const p = getProvider(parsed.provider);
     if (p && !providerUsable(p)) { popup({ content: desktopOnlyCard(p), options: [{ label: 'Kapat' }] }); return; }
+    if (!accountGate(parsed.provider)) return;
     const media = await resolveMedia(parsed, fallbackTitle);
     if (media) await onPick(media);
   }
@@ -1614,14 +769,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       h('div', { class: 'sel-provider-badge', style: { '--prov-accent': p.accent || '#6366f1' } },
         p.logo ? h('img', { src: p.logo, alt: p.name }) : null,
         h('h3', {}, p.name),
-        p.badge ? h('span', { class: 'sel-provider-tag' }, p.badge) : null),
-      !compact ? h('button', {
-        type: 'button',
-        id: 'btn-random-movie',
-        class: 'provider-cat-pill random-pill',
-        style: { marginLeft: 'auto' },
-        onclick: (e) => pickRandomMovie(e.currentTarget),
-      }, '🎲 Rastgele Film') : null);
+        p.badge ? h('span', { class: 'sel-provider-tag' }, p.badge) : null));
     const body = h('div', { class: 'sel-body' });
     root.replaceChildren(head, body);
     try { for (const sc of [root.closest('.panel-body'), root.closest('.home'), root.closest('.home-scroll'), document.scrollingElement, document.documentElement, document.body]) { if (sc) sc.scrollTop = 0; } window.scrollTo(0, 0); } catch (e) { /* ignore */ }
@@ -1632,7 +780,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
     else if (p.kind === 'ravedj') renderRaveDjKind(p, body, pickSafe);
     else if (p.kind === 'link') renderLinkKind(p, body, pickFromUrl);
     else if (p.kind === 'upload') renderUploadKind(body, pickSafe);
-    else if (p.kind === 'catalog') renderCatalogKind(p, body, presetQuery, pickSafe, pickFromUrl);
+    else if (p.kind === 'account') renderAccountKind(p, body, pickSafe);
     else if (p.kind === 'desktop') renderDesktopKind(p, body, pickSafe);
   }
 
@@ -1644,40 +792,11 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
       render();
       return;
     }
-    const catAliases = { series: 'series', movies: 'movies', anime: 'anime', vizyon: 'vizyon', favs: 'favs' };
-    if (catAliases[cleanId]) {
-      provider = getProvider('cinema');
-      if (provider) provider._initialCat = catAliases[cleanId];
-      render();
-      setTimeout(() => {
-        const tab = root.querySelector(`.cat-tab-pill[data-cat="${catAliases[cleanId]}"]`);
-        if (tab) tab.click();
-      }, 60);
-      return;
-    }
     provider = getProvider(cleanId) || getProvider(id) || null;
     render();
   };
-  root.openTrending = async () => {
-    provider = null;
-    showTrending = true;
-    if (!trendingItems.length) await ensureTrending();
-    renderGrid();
-  };
-  root.pickRandom = (btnEl) => {
-    pickRandomMovie(btnEl || root.querySelector('#btn-random-movie'));
-  };
-  root.openFavorites = () => {
-    provider = getProvider('cinema');
-    if (provider) provider._initialCat = 'favs';
-    render();
-    setTimeout(() => {
-      const favTab = root.querySelector('.cat-tab-pill[data-cat="favs"]');
-      if (favTab) favTab.click();
-    }, 60);
-  };
+  root.openFavorites = () => openWatchHistoryModal('watchlist', pickSafe);
   root.destroy = () => {
-    if (autoRotateTimer) { clearInterval(autoRotateTimer); autoRotateTimer = null; }
     try { _unsubHomeYt?.(); } catch (_) {}
     try { _unsubCloudMedia?.(); } catch (_) {}
     document.removeEventListener('pointerdown', _onDocPointerDown, true);
@@ -1685,11 +804,6 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
   return root;
 }
 
-const CATALOG_IDS = new Set([
-  'cinema', 'hdfilmcehennemi', 'dizibox', 'dizilife', 'fullhdfilm', 'yabancidizi',
-  'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
-  'plex', 'pluto', 'exxen', 'blutv', 'gain', 'tod', 'tabii', 'tvplus', 'puhutv', 'crunchyroll', 'tubi',
-]);
 const MUSIC_PROV_IDS = new Set(['music', 'ytmusic', 'spotify', 'deezer', 'applemusic', 'soundcloud']);
 
 export async function resolveMedia(parsed, fallbackTitle = '') {
@@ -1710,35 +824,11 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     const directUrl = String(url || '').replace(/^https?:\/\/(www\.)?dropbox\.com\//i, 'https://dl.dropboxusercontent.com/').replace(/[?&]dl=[01]/g, '');
     return { provider: 'direct', videoId: id, url: directUrl, streamType: 'mp4', title: fallbackTitle || 'Dropbox Videosu', channel: 'Dropbox' };
   }
-  if (provider === 'max') {
-    const p = getProvider('max');
-    const directMedia = {
-      provider: 'max',
-      catalogProvider: 'max',
-      url: url || 'https://play.max.com',
-      sourceUrl: url || 'https://play.max.com',
-      officialUrl: url || 'https://play.max.com',
-      streamType: 'official',
-      title: fallbackTitle || 'Max (HBO) Canlı Yayını',
-      channel: 'Max (HBO) · Canlı Oda Köprüsü',
-      authenticated: true,
-      duration: 3600,
-    };
-    if (window.vortexDesktop?.isElectron) return directMedia;
-    try {
-      const res = await resolveCatalogItem({ sourceUrl: url, title: fallbackTitle || id || 'Max' }, p);
-      if (res) return res;
-    } catch (_) {}
-    return directMedia;
-  }
-  if (CATALOG_IDS.has(provider)) {
+  if (ACCOUNT_PROVIDER_IDS.has(provider)) {
+    // Own-account platform: the room only carries the platform URL; every participant opens it in
+    // the Watchlivo app's in-app browser with their own login. Watchlivo never fetches the stream.
     const p = getProvider(provider);
-    if (window.vortexDesktop?.isElectron) return { provider, videoId: id, url, title: fallbackTitle || p?.name || provider, channel: p?.name || provider };
-    try {
-      const extracted = await api(`/api/rave/extract-video?${qs({ url, title: fallbackTitle })}`, { timeout: 18000 });
-      if (extracted && (extracted.url || extracted.videoId)) return extracted;
-    } catch (e) { /* fallback below */ }
-    return resolveCatalogItem({ title: fallbackTitle || id || p?.name || provider }, p);
+    return { provider, videoId: id, url, title: fallbackTitle || p?.name || provider, channel: `${p?.name || provider} · Kendi hesabınla`, streamType: 'official', ownAccount: true };
   }
   if (provider === 'vimeo') {
     let meta = {};
@@ -1746,14 +836,11 @@ export async function resolveMedia(parsed, fallbackTitle = '') {
     return { provider, videoId: id, url, title: meta.title || fallbackTitle || 'Vimeo videosu', thumbnail: meta.thumbnail_url || '', channel: meta.author_name || 'Vimeo', duration: meta.duration || 0 };
   }
   if (provider === 'web') {
-    try {
-      const r = await api(`/api/rave/extract-video?${qs({ url, title: fallbackTitle })}`, { timeout: 15000 });
-      if (r.provider === 'youtube') return { ...r, channel: 'YouTube' };
-      if (r.url) return { provider: r.provider === 'hls' ? 'hls' : 'direct', url: r.url, title: r.title || fallbackTitle || 'Web videosu', thumbnail: r.thumbnail || '', channel: new URL(url).hostname };
-    } catch (e) {
-      toast(e.data?.error || 'Bu sayfada oynatılabilir video bulunamadı');
-      return null;
-    }
+    // Only direct media files are played; arbitrary pages are not scraped.
+    if (/\.m3u8(\?|$)/i.test(url)) return { provider: 'hls', url, streamType: 'hls', title: fallbackTitle || 'Web videosu', channel: (() => { try { return new URL(url).hostname; } catch (_) { return 'Web'; } })() };
+    if (/\.(mp4|m4v|webm|mov|ogg|mp3|m4a)(\?|$)/i.test(url)) return { provider: 'direct', url, streamType: 'mp4', title: fallbackTitle || 'Web videosu', channel: (() => { try { return new URL(url).hostname; } catch (_) { return 'Web'; } })() };
+    toast('Doğrudan bir .mp4 / .m3u8 video bağlantısı yapıştır (sayfa bağlantıları desteklenmez).');
+    return null;
   }
   return null;
 }
@@ -1772,7 +859,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
       const created = await api('/api/rooms/create', {
         method: 'POST',
         body: {
-          name: media?.title || 'Sinema Odası',
+          name: media?.title || 'İzleme Odası',
           privacy: 'friends',
           voipMode: 'all',
           playMode: 'all',
@@ -1800,67 +887,14 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
 
   const root = h('div', { class: 'HistorySelection wl-history-hub' });
   let modalRef = null;
-  const defProv = getProvider('cinema') || { id: 'cinema', name: 'Sinema, Dizi & Anime+' };
-  const openTvSeriesModal = (tvItem, tvProv) => {
-    modalRef?.close?.();
-    openCatalogTvSeriesModal(tvItem, tvProv || defProv, pickFn);
-  };
 
   const playHistoryItem = async (item) => {
-    const prov = getProvider(item.catalogProvider || item.provider || 'cinema') || getProvider('cinema');
     const isDone = Boolean(item.completed || Number(item.percent || 0) >= 95);
     const rawSavedSec = isDone ? 0 : Number(item.currentTime ?? item.position ?? 0);
     const resumeSec = Number.isFinite(rawSavedSec) && rawSavedSec > 3 ? Math.floor(rawSavedSec) : 0;
     modalRef?.close?.();
     if (resumeSec > 3) toast(`⏩ ${item.title || 'Yapım'} · ${fmtDur(resumeSec)} anından devam ediliyor...`);
-    else toast(`🎬 ${item.title || 'Yapım'} odada başlatılıyor...`);
-    if (item.provider === 'youtube' || (item.videoId && !item.tmdbId)) {
-      const ytVid = item.videoId || item.id;
-      await pickFn({
-        provider: 'youtube',
-        videoId: ytVid,
-        url: item.url || ('https://www.youtube.com/watch?v=' + ytVid),
-        title: item.title,
-        thumbnail: item.poster || item.thumbnail,
-        duration: item.duration || 0,
-        currentTime: resumeSec,
-        meshStatePosition: resumeSec,
-      });
-      return;
-    }
-    const rawHistTitle = String(item.seriesTitle || item.title || '').replace(/\s*(?:[—–-]\s*)?(?:S\d+\s*:\s*B\d+|\d+\.\s*Sezon\s*\d+\.\s*Bölüm).*$/i, '').split(' — ')[0].trim();
-    const cleanHistTitle = rawHistTitle.replace(/\s*\(\s*(?:19|20)\d{2}\s*\)\s*$/, '').trim() || rawHistTitle;
-    const histYear = item.year || (rawHistTitle.match(/\((19\d{2}|20\d{2})\)/) || [])[1] || '';
-    const resolvedMediaType = item.mediaType || (/sezon|bölüm|s\d+:b\d+/i.test(String(item.title || '')) ? 'tv' : 'movie');
-    const targetProv = (prov && prov.id !== 'youtube' && prov.id !== 'web') ? prov : { id: 'cinema', name: 'Sinema+' };
-    let resolved = null;
-    if (!item.isMusic) {
-      try {
-        const resolvePayload = {
-          tmdbId: item.tmdbId || '',
-          imdbId: item.imdbId || '',
-          mediaType: resolvedMediaType,
-          title: cleanHistTitle,
-          originalTitle: item.originalTitle || cleanHistTitle,
-          backdrop: item.backdrop || item.thumbnail || item.poster || '',
-          poster: item.poster || item.thumbnail || '',
-          year: histYear,
-        };
-        resolved = await Promise.race([
-          resolveCatalogItem(resolvePayload, targetProv, item.season || 1, item.episode || 1),
-          new Promise((r) => setTimeout(() => r(null), 12000)),
-        ]);
-      } catch (err) {
-        console.warn('History modal resolve error:', err);
-      }
-    }
-    if (resolved) {
-      resolved.currentTime = resumeSec;
-      resolved.meshStatePosition = resumeSec;
-      await pickFn(resolved);
-      return;
-    }
-    toast('Yayın kaynağı şu an yanıt vermiyor, lütfen tekrar deneyin');
+    await replayHistoryItem(item, resumeSec, pickFn);
   };
 
   const renderHub = () => {
@@ -1952,7 +986,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
         body.append(h('div', { class: 'wl-dm-empty-placeholder' },
           h('div', { style: { fontSize: '2rem' } }, '🔖'),
           h('strong', {}, 'İzleme listen henüz boş'),
-          h('span', {}, 'Beğendiğin film ve dizilerde 🔖 butonuna basarak kişisel listene ekleyebilirsin.')));
+          h('span', {}, 'Beğendiğin videolarda 🔖 butonuna basarak kişisel listene ekleyebilirsin.')));
       } else {
         body.append(...favList.map((fav) => h('div', { class: 'wl-history-row' },
           h('img', { class: 'wl-history-poster', src: fav.poster || fav.backdrop || '/static/watchlivo-poster.svg', alt: fav.title || '', onerror: (e) => { e.target.src = '/static/watchlivo-poster.svg'; } }),
@@ -1963,13 +997,7 @@ export function openWatchHistoryModal(initialTab = 'all', customOnPick = null) {
             h('button', {
               type: 'button',
               class: 'btn primary sm',
-              onclick: () => {
-                if (fav.mediaType === 'tv' && !Number(fav.currentTime ?? fav.position ?? 0)) {
-                  openTvSeriesModal(fav, getProvider(fav.provider || 'cinema') || defProv);
-                  return;
-                }
-                playHistoryItem(fav);
-              },
+              onclick: () => playHistoryItem(fav),
             }, '▶ Başlat'),
             h('button', { type: 'button', class: 'btn sm ghost', onclick: () => { toggleFavoriteMedia(fav); renderHub(); } }, '✕')))));
       }

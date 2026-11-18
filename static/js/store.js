@@ -492,8 +492,8 @@ export async function syncCloudUserMedia(force = false) {
             thumbnail: c.thumbnail || c.poster || c.backdrop || prev?.thumbnail || '',
             poster: c.poster || c.thumbnail || prev?.poster || prev?.thumbnail || '',
             backdrop: c.backdrop || prev?.backdrop || '',
-            provider: c.provider || prev?.provider || 'cinema',
-            catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || 'cinema',
+            provider: c.provider || prev?.provider || '',
+            catalogProvider: c.catalogProvider || c.provider || prev?.catalogProvider || '',
             streamType: c.streamType || prev?.streamType || '',
             tmdbId: c.tmdbId || prev?.tmdbId || '',
             imdbId: c.imdbId || prev?.imdbId || '',
@@ -525,8 +525,8 @@ export async function syncCloudUserMedia(force = false) {
             tmdbId: String(item.tmdbId || ''),
             imdbId: String(item.imdbId || ''),
             mediaType: item.mediaType === 'tv' ? 'tv' : 'movie',
-            provider: item.catalogProvider || item.provider || 'cinema',
-            catalogProvider: item.catalogProvider || item.provider || 'cinema',
+            provider: item.catalogProvider || item.provider || '',
+            catalogProvider: item.catalogProvider || item.provider || '',
             streamType: item.streamType || '',
             videoId: String(item.videoId || ''),
             title: item.title || 'Video',
@@ -610,7 +610,7 @@ export async function syncCloudUserMedia(force = false) {
             thumbnail: cw.thumbnail || cw.poster || '',
             poster: cw.poster || cw.thumbnail || '',
             backdrop: cw.backdrop || cw.poster || cw.thumbnail || '',
-            provider: cw.provider || 'cinema',
+            provider: cw.provider || '',
             cloudSynced: true,
             addedAt: _normTs(cw.addedAt) || now,
           });
@@ -642,7 +642,7 @@ export async function syncCloudUserMedia(force = false) {
             videoId: String(fav.videoId || ''),
             imdbId: String(fav.imdbId || ''),
             mediaType: fav.mediaType === 'tv' ? 'tv' : 'movie',
-            provider: fav.provider || 'cinema',
+            provider: fav.provider || '',
             title: fav.title || 'Yapım',
             channel: String(fav.channel || ''),
             channelId: String(fav.channelId || ''),
@@ -893,7 +893,7 @@ export function saveWatchProgress(media, currentTime, duration, opts = {}) {
   const savedPct = isSeries && epFinished ? 0 : pct;
   const origTitle = media.originalTitle || prev?.originalTitle || '';
   const serTitle = isSeries ? (media.seriesTitle || prev?.seriesTitle || String(media.title || prev?.title || '').split(' — ')[0].trim()) : '';
-  const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || 'cinema';
+  const catProv = media.catalogProvider || media.provider || prev?.catalogProvider || '';
   const sType = media.streamType || prev?.streamType || '';
   const now = Date.now();
   const prevPush = _lastCloudProgPush.get(id) || 0;
@@ -1037,7 +1037,7 @@ export function toggleFavoriteMedia(item) {
         videoId: String(item.videoId || ''),
         imdbId: String(item.imdbId || ''),
         mediaType: mtype,
-        provider: item.catalogProvider || item.provider || 'cinema',
+        provider: item.catalogProvider || item.provider || '',
         title: item.title || 'Yapım',
         channel: String(item.channel || ''),
         channelId: String(item.channelId || ''),
@@ -1205,7 +1205,7 @@ export async function sendRoomInvite(targetOrPayload = {}, actionArg = 'send') {
       roomName: payload.roomName || m?.name || 'Watchlivo Odası',
       mediaTitle: payload.mediaTitle || m?.media?.title || '',
       mediaPoster: payload.mediaPoster || m?.media?.poster || m?.media?.backdrop || m?.media?.thumbnail || '',
-      mediaProvider: payload.mediaProvider || m?.media?.provider || 'cinema',
+      mediaProvider: payload.mediaProvider || m?.media?.provider || '',
       password: pwd,
       syncToken: syncTok,
       ...payload,

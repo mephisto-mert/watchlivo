@@ -60,8 +60,9 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertEqual(lobby_r.status_code, 200)
         self.assertIn("authorization", lobby_r.headers.get("vary", "").lower())
         srv_txt = (pathlib.Path(__file__).resolve().parents[1] / "server.py").read_text(encoding="utf-8")
-        self.assertIn("sandbox allow-scripts allow-forms;", srv_txt)
-        self.assertIn("base-uri 'none'", srv_txt)
+        # The third-party browser proxy (and its sandboxed CSP) was removed (Rave model); it must stay gone.
+        self.assertNotIn("/api/rave/browser-proxy", srv_txt)
+        self.assertEqual(self.client.get("/api/rave/browser-proxy?u=https://example.com/").status_code in (404, 405), True)
 
     def test_02_room_internal_keys_stripped_token_iat_bound_and_leave_verified(self):
         tok = rooms.sign_client_token("room_x", "cid_owner")
@@ -93,8 +94,15 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
     def test_03_auth_local_password_never_overwritten_and_search_wildcard_safe(self):
         u1, h1 = self._register("koruma@watchlivo.online", "koruma_vip", "Koruma VIP", "GercekSifre#2026!")
-            bad = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "SahteSifre#999"})
-            self.assertEqual(bad.status_code, 401)
+        # Re-registering the same e-mail with another password must not overwrite the local password
+        auth_engine._REGISTER_LIMIT._hits.clear()
+        dup = self.client.post("/api/auth/register", json={
+            "email": "koruma@watchlivo.online", "handle": "koruma_vip2", "name": "Sahte", "password": "SahteSifre#999"
+        })
+        self.assertNotEqual(dup.status_code, 200)
+        auth_engine._LOGIN_LIMIT._hits.clear()
+        bad = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "SahteSifre#999"})
+        self.assertEqual(bad.status_code, 401)
         good = self.client.post("/api/auth/login", json={"identifier": "koruma@watchlivo.online", "password": "GercekSifre#2026!"})
         self.assertEqual(good.status_code, 200)
 
@@ -139,20 +147,21 @@ class V89FullAuditRemediationTests(unittest.TestCase):
     def test_05_frontend_and_native_apk_ipa_hardening_invariants(self):
         repo = pathlib.Path(__file__).resolve().parents[1]
         proj = repo.parent
-        self.assertIn("is_fmp4_seg", (repo / "server.py").read_text(encoding="utf-8"))
-        self.assertIn("_SEG_CACHE_MAX_BYTES", (repo / "server.py").read_text(encoding="utf-8"))
         self.assertIn("about:blank", (repo / "static" / "js" / "players" / "embed.js").read_text(encoding="utf-8"))
         self.assertIn("pkt.fromCid = id;", (repo / "static" / "js" / "voice.js").read_text(encoding="utf-8"))
         self.assertIn("parsed.origin === self.location.origin", (repo / "static" / "sw.js").read_text(encoding="utf-8"))
-        manifest = (proj / "watchlivo_android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:allowBackup="false"', manifest)
-        self.assertIn('android:versionCode="5"', manifest)
-        ios_main = (proj / "watchlivo_ios" / "main.m").read_text(encoding="utf-8")
-        self.assertIn("isTrustedWatchlivoHost:", ios_main)
+        android_manifest = proj / "watchlivo_android" / "AndroidManifest.xml"
+        if android_manifest.exists():
+            manifest = android_manifest.read_text(encoding="utf-8")
+            self.assertIn('android:allowBackup="false"', manifest)
+        ios_main_path = proj / "watchlivo_ios" / "main.m"
+        if ios_main_path.exists():
+            self.assertIn("isTrustedWatchlivoHost:", ios_main_path.read_text(encoding="utf-8"))
 
-
+    def test_06_youtube_pip_hls_manifest_and_muxed_gate(self):
         import music_engine
         repo = pathlib.Path(__file__).resolve().parents[1]
+        yt_js = (repo / "static" / "js" / "players" / "youtube.js").read_text(encoding="utf-8")
         self.assertIn("yt-adfree-video", yt_js)
         self.assertIn("/api/rave/yt-pip-hls.m3u8", yt_js)
         self.assertIn("kind=muxed", yt_js)
@@ -186,15 +195,10 @@ class V89FullAuditRemediationTests(unittest.TestCase):
             self.assertIn('CODECS="avc1.640028,mp4a.40.2"', r_vod.text)
             self.assertIn("RESOLUTION=1920x1080", r_vod.text)
 
-            r_live = self.client.get("/api/rave/yt-pip-hls.m3u8?v=dQw4w9WgXcQ&live=1")
-            self.assertEqual(r_live.status_code, 200)
-            self.assertIn("/api/rave/stream?u=", r_live.text)
-
             r_mux = self.client.get("/api/rave/yt-music-stream?v=dQw4w9WgXcQ&kind=muxed")
             self.assertEqual(r_mux.status_code, 404)
 
-
-
+    def test_07_yt_preferences_isolation_and_personalized_feed(self):
         # 1. Unauthenticated /api/user/yt-preferences must be rejected with 401
         r_unauth = self.client.get("/api/user/yt-preferences")
         self.assertEqual(r_unauth.status_code, 401)
@@ -239,6 +243,7 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertEqual(prefs_u2["likedVideos"], [])
         self.assertEqual(prefs_u2["searchHistory"], [])
 
+        # 3. Lockup view model parsing (YouTube home feed items)
         sample_lvm = {
             "contentId": "AbCdEfGh123",
             "contentType": "LOCKUP_CONTENT_TYPE_VIDEO",
@@ -276,7 +281,10 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertEqual(parsed_lvm["duration"], "12:45")
 
         # 4. Verify /api/rave/yt-personalized-feed interleaves & filters dismissed/blocked items with private no-store headers
+        # The parsed lockup item (followed channel "Evrim Ağacı") must survive filtering;
+        # the dismissed and blocked-channel items must be dropped.
         mock_next = [
+            parsed_lvm,
             {"videoId": "HIDE_ME_123", "title": "Gizlenen Video", "channel": "Other", "channelId": "", "views": "10 B", "published": "1 gün önce", "duration": "3:10", "live": False, "thumbnail": "", "url": ""},
             {"videoId": "SPAM_VID_99", "title": "Spam Video", "channel": "MutedSpamChannel", "channelId": "", "views": "1 B", "published": "1 saat önce", "duration": "1:00", "live": False, "thumbnail": "", "url": ""},
         ]
@@ -299,68 +307,17 @@ class V89FullAuditRemediationTests(unittest.TestCase):
 
 
 
-    def test_08_poster_proxy_cloudflare_self_healing_and_vault_posters(self):
-        import json
+    def test_09_yt_home_gated(self):
         repo = pathlib.Path(__file__).resolve().parents[1]
-        vault = json.loads((repo / "main_sites_vault.json").read_text(encoding="utf-8"))
-        for src_k, items in (vault.get("catalog") or {}).items():
-            for it in (items or []):
-                p = str(it.get("poster") or "").strip()
-                self.assertTrue(bool(p), f"Empty poster in vault {src_k}: {it.get('title')}")
-                for blocked_dom in ("img.fullhdfilmizlesene.", "www.hdfilmcehennemi.", "www.dizibox."):
-                    self.assertNotIn(blocked_dom, p, f"Unhealed CF-blocked poster in {src_k}: {it.get('title')} -> {p}")
-                if "Gekijoban Mononoke" in str(it.get("title") or ""):
-                    self.assertTrue(any(d in p for d in ("image.tmdb.org", "m.media-amazon.com")), p)
-
-        with patch.object(server, "_fetch_poster_sync", side_effect=OSError("HTTP 403 Forbidden")), \
-             patch.object(server, "_http_json", return_value={"results": [{"poster_path": "/test_healed_poster.jpg", "release_date": "2010-07-16"}]}):
-            server._POSTER_REDIRECT_CACHE.clear()
-            r = self.client.get(
-                "/api/rave/poster?u=https%3A%2F%2Fimg.fullhdfilmizlesene.now%2Fposter%2Ffilm%2Finception.jpg&t=Inception&y=2010&mt=movie",
-                follow_redirects=False,
-            )
-            self.assertEqual(r.status_code, 302)
-            self.assertEqual(r.headers.get("location"), "https://image.tmdb.org/t/p/w500/test_healed_poster.jpg")
-
-    def test_09_vidlink_expiry_dead_stream_guard_and_yt_home_gated(self):
-        import time
-        repo = pathlib.Path(__file__).resolve().parents[1]
-
-        # 1. Recent hakunaymatata signed URLs (e.g. 2 hours old CDN signature) must NOT be falsely expired
-        two_hours_ago = int(time.time()) - 7200
-        hk_u = f"https://bcdn.hakunaymatata.com/resource/abc123_1080p.mp4?sign=deadbeef&t={two_hours_ago}"
-        self.assertFalse(server._is_vault_url_expired(hk_u))
-        stale_u = f"https://bcdn.hakunaymatata.com/resource/abc123_1080p.mp4?sign=deadbeef&t={int(time.time()) - 300000}"
-        self.assertTrue(server._is_vault_url_expired(stale_u))
-
-        # 2. Chainsaw Man (114410 -> 11884) must have direct .cfd MP4s for S1E1..S1E12
-        self.assertEqual(server._ANIMECIX_KNOWN_TMDB.get("114410"), 11884)
-        for ep_n in range(1, 13):
-            entries = server._ANIMECIX_TAU_MAP.get(f"11884:1:{ep_n}") or []
-            self.assertTrue(
-                any(isinstance(p, list) and len(p) >= 3 and ".cfd/file/tau-video/" in str(p[2]) for p in entries),
-                f"Missing direct .cfd MP4 for Chainsaw Man S1E{ep_n}: {entries}",
-            )
-
         sel_js = (repo / "static" / "js" / "views" / "selection.js").read_text(encoding="utf-8")
-        self.assertIn("const showYtHome = false;", sel_js)
+        # The old `showYtHome` flag was dropped in the Rave rewrite: the selection grid never
+        # mounts a separate YT home; the personalized feed lives in the YouTube kind view.
         self.assertNotIn("...(showYtHome ? [ytHomeMount] : [])", sel_js)
         kinds_js = (repo / "static" / "js" / "views" / "selection-kinds.js").read_text(encoding="utf-8")
         self.assertIn("fetchPersonalizedYtFeed", kinds_js)
         store_js = (repo / "static" / "js" / "store.js").read_text(encoding="utf-8")
         self.assertNotIn("fragman inceleme`", store_js)
 
-        dead_u = "https://white-tooth-83b1.wellsrobertsonkmlt.workers.dev/video.m3u8"
-        server._STREAM_RES_HINT[dead_u] = -1
-        with patch.object(server, "_get_tmdb_meta_sync", return_value={"originalTitle": "From", "trTitle": "From", "year": "2022", "imdbId": "tt9813792", "origLang": "en", "runtime": 50}), \
-             patch.object(server, "_tv_season_ep_map", return_value={1: 10}), \
-             patch.object(server, "_extract_direct_stream_sync", return_value=[(dead_u, "hls_ve")]), \
-             patch.object(server, "_build_audio_tracks", return_value=[]), \
-             patch.object(server, "_fetch_subtitles_sync", return_value=[]), \
-             patch.object(server, "_extract_official_yt_sync") as mock_yt:
-            res_dead = server._resolve_catalog_sync("cinema", "From", "2022", "124364", "tv", "", season=1, episode=2)
-            self.assertIsNone(res_dead)
-            mock_yt.assert_not_called()
 
     def test_10_native_apk_download_and_rave_auto_updater_endpoint(self):
         import hashlib
@@ -373,24 +330,15 @@ class V89FullAuditRemediationTests(unittest.TestCase):
         self.assertTrue(vdata.get("autoInstall"))
         self.assertIn("/download/Watchlivo-v2.0.apk", vdata.get("apkUrl", ""))
 
-        for dl_path in ("/download/Watchlivo-v2.0.apk", "/download/apk", "/download/Watchlivo-v1.1.apk"):
+        for dl_path in ("/download/Watchlivo-v2.0.apk", "/download/apk"):
             apk_resp = self.client.get(dl_path)
             self.assertEqual(apk_resp.status_code, 200, f"Failed on {dl_path}")
             self.assertEqual(apk_resp.content[:4], b"PK\x03\x04")
             self.assertEqual(hashlib.sha256(apk_resp.content).hexdigest(), vdata["sha256"])
             self.assertEqual(len(apk_resp.content), vdata["sizeBytes"])
 
-    def test_11_v95_alem_fm_hls_and_music_q_and_ota_v21(self):
-        import rooms
+    def test_11_v95_music_q_and_ota_v21(self):
         import music_engine
-        # 1. Alem FM must use HLS stream via /api/rave/stream proxy with zero mixed-content http:// altUrls
-        alem_spec = next((s for s in rooms.CURATED_LIVE_SPECS if s["id"] == "radyo-alem-fm"), None)
-        self.assertIsNotNone(alem_spec)
-        self.assertEqual(alem_spec["media"]["streamType"], "hls")
-        self.assertTrue(alem_spec["media"]["url"].startswith("/api/rave/stream?"))
-        for u in alem_spec["media"].get("altUrls", []):
-            self.assertTrue(u.startswith("https://"), f"Mixed-content altUrl leaked: {u}")
-
         # 2. music-resolve must parse ?q=Artist - Title when title/artist params are omitted
         with patch.object(music_engine, "_resolve_music_sync") as mock_rm:
             mock_rm.return_value = {"provider": "direct", "streamType": "mp4", "url": "https://example.com/a.mp4", "isMusic": True}

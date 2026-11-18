@@ -16,9 +16,8 @@ async def wait_ready(page, timeout=30):
     return await page.evaluate("() => window.vortexDebug ? window.vortexDebug() : null")
 
 async def test():
-    cat_url = f"{BASE}/api/rave/resolve-catalog?provider=netflix&title=Stranger+Things&mediaType=tv&season=1&episode=1"
-    req = urllib.request.Request(cat_url, headers={"User-Agent": "Mozilla/5.0"})
-    cat_res = json.loads(urllib.request.urlopen(req, timeout=15).read().decode())
+    # Open-licensed public test stream (Sintel, Blender Foundation, CC-BY) played directly — no catalog resolving
+    cat_res = {"provider": "hls", "streamType": "hls", "title": "Sintel", "url": "https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8", "duration": 888, "mediaType": "movie"}
     
     body = json.dumps({"name": "SeekProbe", "creator": "Leader", "media": cat_res}).encode()
     req = urllib.request.Request(f"{BASE}/api/rooms/create", data=body, headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"})

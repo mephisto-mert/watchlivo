@@ -1,9 +1,9 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261110_v183';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261110_v183';
-import { renderHome, destroyHome } from './views/home.js?v=20261110_v183';
-import { api } from './api.js?v=20261110_v183';
-import { h, toast } from './ui.js?v=20261110_v183';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261118_v184';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261118_v184';
+import { renderHome, destroyHome } from './views/home.js?v=20261118_v184';
+import { api } from './api.js?v=20261118_v184';
+import { h, toast } from './ui.js?v=20261118_v184';
 
 const MODULE_VER = (() => {
   try { return new URL(import.meta.url).searchParams.get('v') || '20261110_v181'; } catch (_) { return '20261110_v181'; }
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261110_v183')
+    _meshModPromise = import('./views/mesh.js?v=20261118_v184')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -887,8 +887,9 @@ function initSpatialTvNavigation() {
     const dir = map[e.key];
     const active = document.activeElement;
     const isTextInput = active && (
-      (active.tagName === 'INPUT' && !['button', 'checkbox', 'radio', 'range'].includes(active.type)) ||
+      (active.tagName === 'INPUT' && !['button', 'checkbox', 'radio'].includes(active.type)) ||
       active.tagName === 'TEXTAREA' ||
+      active.tagName === 'SELECT' ||
       active.isContentEditable
     );
     if (isTextInput) return;
@@ -969,3 +970,21 @@ function bootstrapGoogleAnalytics4() {
 window.vortexSendAnalytics = sendWatchlivoAnalytics;
 bootstrapGoogleAnalytics4();
 setTimeout(() => sendWatchlivoAnalytics('pageview'), 600);
+
+// Global unhandled error boundary: log everything, surface only critical failures to the user.
+window.addEventListener('unhandledrejection', (event) => {
+  console.error('[Unhandled Rejection]', event.reason);
+  const msg = event?.reason?.message || String(event?.reason || '');
+  if (/fatal|crash|critical/i.test(msg)) {
+    toast(`⚠️ Beklenmeyen bir hata oluştu: ${msg.slice(0, 80)}`, 4000);
+  }
+});
+
+window.onerror = (message, source, lineno, colno, error) => {
+  console.error('[Window Error]', { message, source, lineno, colno, error });
+  const msg = error?.message || String(message || '');
+  if (/fatal|crash|critical/i.test(msg)) {
+    toast(`⚠️ Kritik sistem hatası: ${msg.slice(0, 80)}`, 4000);
+  }
+  return false;
+};

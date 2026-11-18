@@ -535,7 +535,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
     media_title = _clean(pres.get("mediaTitle") or pres.get("watchingTitle"), 140)
     room_name = _clean(pres.get("roomName"), 100)
     media_poster = _clean(pres.get("mediaPoster"), 800)
-    media_prov = _clean(pres.get("mediaProvider") or "cinema", 32)
+    media_prov = _clean(pres.get("mediaProvider") or "web", 32)
     room_locked = bool(pres.get("roomLocked") or pres.get("hasPassword"))
     try:
         import rooms as rooms_mod
@@ -551,7 +551,7 @@ def _compute_live_presence(target_uid: str, viewer_uid: str = "", is_friend: boo
             if isinstance(rm_m, dict):
                 media_title = _clean(rm_m.get("title"), 140)
                 media_poster = _clean(rm_m.get("poster") or rm_m.get("thumbnail"), 800)
-                media_prov = _clean(rm_m.get("provider") or "cinema", 32)
+                media_prov = _clean(rm_m.get("provider") or "web", 32)
         if room_id:
             rm_dict = getattr(rooms_mod.STORE, "l1_rooms", None) or getattr(rooms_mod.STORE, "rooms", {}) or {}
             live_rm = rm_dict.get(room_id) or (active_room_hit if isinstance(active_room_hit, dict) and _clean(active_room_hit.get("id"), 80) == room_id else None)
@@ -1430,7 +1430,7 @@ async def social_dm_send(request: Request) -> JSONResponse:
             "roomName": _clean((raw_card or {}).get("roomName") or "Watchlivo Odası", 100),
             "mediaTitle": _clean((raw_card or {}).get("mediaTitle") or "", 140),
             "mediaPoster": _clean((raw_card or {}).get("mediaPoster") or "", 800),
-            "mediaProvider": _clean((raw_card or {}).get("mediaProvider") or "cinema", 32),
+            "mediaProvider": _clean((raw_card or {}).get("mediaProvider") or "web", 32),
         }
         if safe_card_url:
             msg["roomInviteCard"]["url"] = safe_card_url
@@ -1535,7 +1535,7 @@ async def social_invite(request: Request) -> JSONResponse:
     room_name = _clean(body.get("roomName") or body.get("roomTitle") or "Watchlivo Odası", 100)
     media_title = _clean(body.get("mediaTitle"), 140)
     media_poster = _clean(body.get("mediaPoster"), 800)
-    media_provider = _clean(body.get("mediaProvider") or "cinema", 32)
+    media_provider = _clean(body.get("mediaProvider") or "web", 32)
     pwd_q = _clean(body.get("password"), 64)
     sync_tok = str(body.get("syncToken") or body.get("r_tok") or "").strip()[:32000]
     if not room_id:
@@ -2209,18 +2209,26 @@ async def ai_image_history(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
-# 7. Google Drive Folder & Multi-Quality MKV/MP4 Browser (GoogleDriveSelection)
+# 7. Google Drive folder/file browser (user's own files, Google preview player)
 # ---------------------------------------------------------------------------
-def _sign_drive_proxy(dl_u: str) -> str:
-    try:
-        import server
-        return server._proxy_u(dl_u)
-    except Exception:
-        from security import server_secret
-        sec = server_secret("PROXY_SECRET")
-        exp = ((int(time.time()) // 3600) + 6) * 3600
-        sig = hmac.new(sec, f"{dl_u}||{exp}".encode("utf-8"), hashlib.sha256).hexdigest()[:24] + f".{exp}"
-        return f"/api/rave/stream-proxy?url={urllib.parse.quote(dl_u, safe='')}&sig={sig}"
+def _drive_item(file_id: str, title: str, ext: str = "mp4") -> Dict[str, Any]:
+    """A user's own Google Drive file, played through Google's official preview player.
+
+    The server never downloads or relays the file; playback happens between the
+    viewer's browser and Google, subject to the file's own sharing settings.
+    """
+    fid_q = urllib.parse.quote(file_id, safe="")
+    preview_u = f"https://drive.google.com/file/d/{fid_q}/preview"
+    return {
+        "id": file_id,
+        "title": title,
+        "format": ext.upper(),
+        "provider": "drive",
+        "streamType": "embed",
+        "url": preview_u,
+        "embedUrl": preview_u,
+        "openUrl": f"https://drive.google.com/file/d/{fid_q}/view",
+    }
 
 
 _NON_VIDEO_DRIVE_RE = re.compile(r"\.(?:pdf|jpg|jpeg|png|gif|webp|zip|rar|7z|doc|docx|xls|xlsx|ppt|pptx|txt)$", re.I)
@@ -2250,23 +2258,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
                     continue
                 seen_ids.add(d_id)
                 ext = clean_t.rsplit(".", 1)[-1].lower() if "." in clean_t else "mp4"
-                dl_u = f"https://drive.usercontent.google.com/download?id={d_id}&export=download&confirm=t"
-                p_main = _sign_drive_proxy(dl_u)
-                p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
-                p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
-                items.append({
-                    "id": d_id,
-                    "title": clean_t,
-                    "format": ext.upper(),
-                    "mime": "video/x-matroska" if ext == "mkv" else ("video/webm" if ext == "webm" else "video/mp4"),
-                    "url": p_main,
-                    "directUrl": dl_u,
-                    "qualities": [
-                        {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": p_main},
-                        {"label": "720p HD Stream", "quality": "720p", "url": p_720},
-                        {"label": "480p SD Stream", "quality": "480p", "url": p_480},
-                    ],
-                })
+                items.append(_drive_item(d_id, clean_t, ext))
                 if len(items) >= 24:
                     break
         except Exception:
@@ -2279,23 +2271,7 @@ async def gdrive_folder_browse(request: Request) -> JSONResponse:
     fid_single = (file_m.group(1) or file_m.group(2)) if file_m else (id_fallback_m.group(1) if id_fallback_m else "")
     if not fid_single:
         return JSONResponse({"ok": False, "error": "Geçerli bir Google Drive dosya veya klasör bağlantısı girin."}, status_code=400)
-    dl_u = f"https://drive.usercontent.google.com/download?id={urllib.parse.quote(fid_single)}&export=download&confirm=t"
-    proxied = _sign_drive_proxy(dl_u)
-    p_720 = _sign_drive_proxy(dl_u + "&vq=hd720")
-    p_480 = _sign_drive_proxy(dl_u + "&vq=medium")
-    items.append({
-        "id": fid_single,
-        "title": f"Google Drive Video ({fid_single[:10]})",
-        "format": "MP4/MKV",
-        "mime": "video/mp4",
-        "url": proxied,
-        "directUrl": dl_u,
-        "qualities": [
-            {"label": "1080p Orijinal (Direct)", "quality": "1080p", "url": proxied},
-            {"label": "720p HD Stream", "quality": "720p", "url": p_720},
-            {"label": "480p SD Stream", "quality": "480p", "url": p_480},
-        ],
-    })
+    items.append(_drive_item(fid_single, f"Google Drive Video ({fid_single[:10]})", "mp4"))
     return JSONResponse({"ok": True, "type": "file", "fileId": fid_single, "items": items})
 
 
@@ -2555,8 +2531,8 @@ async def user_progress_save(request: Request) -> JSONResponse:
             "videoId": vid or _clean((prev_entry or {}).get("videoId"), 32),
             "imdbId": _clean(body.get("imdbId") or (prev_entry or {}).get("imdbId"), 32),
             "mediaType": mtype,
-            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "cinema", 32),
-            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "cinema", 32),
+            "provider": _clean(body.get("provider") or (prev_entry or {}).get("provider") or "web", 32),
+            "catalogProvider": _clean(body.get("catalogProvider") or body.get("provider") or (prev_entry or {}).get("catalogProvider") or "web", 32),
             "streamType": _clean(body.get("streamType") or (prev_entry or {}).get("streamType"), 24),
             "title": title or "Sinema",
             "originalTitle": _clean(body.get("originalTitle") or (prev_entry or {}).get("originalTitle"), 160),
@@ -2628,7 +2604,7 @@ async def user_watchlist_toggle(request: Request) -> JSONResponse:
             "videoId": _clean(src.get("videoId"), 32),
             "imdbId": _clean(src.get("imdbId"), 32),
             "mediaType": mtype,
-            "provider": _clean(src.get("provider") or "cinema", 32),
+            "provider": _clean(src.get("provider") or "web", 32),
             "title": title or "Sinema",
             "channel": _clean(src.get("channel"), 120),
             "channelId": _clean(src.get("channelId"), 48),
@@ -2701,159 +2677,6 @@ async def user_music_history_save(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "authenticated": True, "uid": ukey, "items": items}, headers=_PRIVATE_HEADERS)
 
 
-# ---------------------------------------------------------------------------
-# 11. Automatic Stream Server Health Telemetry & Smart Ranking (v78)
-# ---------------------------------------------------------------------------
-def _extract_srv_bucket(url_or_host: str, label: str = "") -> str:
-    raw = str(url_or_host or "").strip()
-    if "u=" in raw or "sid=" in raw:
-        try:
-            qs_map = urllib.parse.parse_qs(urllib.parse.urlparse(raw).query)
-            if qs_map.get("u"):
-                raw = urllib.parse.unquote(qs_map["u"][0])
-            elif qs_map.get("sid"):
-                import server
-                unpacked, _ = server._stream_sid_unpack(qs_map["sid"][0])
-                if unpacked:
-                    raw = unpacked
-        except Exception:
-            pass
-    host = (urllib.parse.urlparse(raw).hostname or "").lower()
-    if host and host not in ("127.0.0.1", "localhost", "watchlivo.online"):
-        parts = host.split(".")
-        return ".".join(parts[-2:]) if len(parts) >= 2 else host
-    slug = re.sub(r"[^a-z0-9]+", "-", str(label or "primary").lower()).strip("-")[:32]
-    return slug or "default"
-
-
-def _load_health_map() -> Dict[str, Dict[str, Any]]:
-    persisted = _kv_get("wl:srv:health:v1", None, max_age=20.0)
-    if isinstance(persisted, dict):
-        _SERVER_HEALTH.update(persisted)
-    return _SERVER_HEALTH
-
-
-def rank_servers_by_health(res: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    if not isinstance(res, dict):
-        return res
-    hmap = _load_health_map()
-    dead_buckets = {
-        bkt for bkt, rec in hmap.items()
-        if isinstance(rec, dict) and int(rec.get("fail") or 0) >= 3 and int(rec.get("ok") or 0) == 0
-    }
-    srvs = res.get("servers")
-    if not isinstance(srvs, list) or len(srvs) < 2:
-        if not dead_buckets:
-            return res
-        out_single = dict(res)
-        live_alts = [
-            u for u in (res.get("altUrls") or [])
-            if u and _extract_srv_bucket(str(u), "") not in dead_buckets
-        ]
-        if res.get("url") and _extract_srv_bucket(str(res.get("url")), "") in dead_buckets and live_alts:
-            out_single["url"] = live_alts[0]
-            out_single["altUrls"] = live_alts[1:7]
-        elif live_alts != (res.get("altUrls") or []):
-            out_single["altUrls"] = live_alts[:6]
-        return out_single
-    scored = []
-    score_by_bucket: Dict[str, float] = {}
-    for idx, srv in enumerate(srvs):
-        if not isinstance(srv, dict) or not srv.get("url"):
-            continue
-        lbl_low = str(srv.get("label") or "").lower()
-        bkt = _extract_srv_bucket(srv.get("url", ""), srv.get("label", ""))
-        rec = hmap.get(bkt) or {}
-        ok_n = int(rec.get("ok") or 0)
-        fail_n = int(rec.get("fail") or 0)
-        if fail_n >= 3 and ok_n == 0:
-            dead_buckets.add(bkt)
-        lat_ms = float(rec.get("avgMs") or 650.0)
-        total = ok_n + fail_n
-        rel_score = ((ok_n + 2.0) / (total + 3.0)) - (min(lat_ms, 4000.0) / 20000.0)
-        has_tr_lbl = any(k in lbl_low for k in ("tr dublaj", "türkçe dublaj", "dual"))
-        tr_srv_bonus = 0.35 if (has_tr_lbl and not (fail_n >= 3 and ok_n == 0)) else 0.0
-        tie_bonus = max(0.0, (10 - idx) * 0.025)
-        final_score = round(rel_score + tr_srv_bonus + tie_bonus, 4)
-        score_by_bucket[bkt] = max(score_by_bucket.get(bkt, -999.0), final_score)
-        srv_copy = dict(srv)
-        srv_copy["healthBucket"] = bkt
-        srv_copy["healthScore"] = round(rel_score * 100, 1)
-        if ok_n >= 2 and fail_n == 0 and "⚡" not in str(srv_copy.get("label") or ""):
-            srv_copy["healthyVerified"] = True
-        scored.append((final_score, idx, srv_copy))
-    if len(scored) < 2:
-        return res
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    ordered = [x[2] for x in scored]
-    top_score = scored[0][0]
-    out = dict(res)
-    out["servers"] = ordered
-    aud_tracks = [t for t in (res.get("audioTracks") or []) if isinstance(t, dict) and t.get("mode") == "stream" and t.get("url")]
-    primary_tr_tracks = [
-        t for t in aud_tracks
-        if (t.get("id") == "tr-dub" or str(t.get("id") or "").startswith("tr-dub-") or t.get("audioLang") == "tr" or t.get("lang") == "tr")
-        and _extract_srv_bucket(t.get("url", ""), t.get("label", "")) not in dead_buckets
-    ]
-    if primary_tr_tracks:
-        best_url = primary_tr_tracks[0]["url"]
-    elif aud_tracks:
-        aud0 = aud_tracks[0]
-        aud0_bkt = _extract_srv_bucket(aud0["url"], aud0.get("label", ""))
-        if aud0_bkt not in dead_buckets and score_by_bucket.get(aud0_bkt, 0.0) >= (top_score - 0.08):
-            best_url = aud0["url"]
-        else:
-            best_url = ordered[0]["url"]
-    else:
-        best_url = ordered[0]["url"]
-    out["url"] = best_url
-    alt_candidates = [t["url"] for t in primary_tr_tracks[1:]] + [t["url"] for t in aud_tracks if t.get("url") and _extract_srv_bucket(t["url"], t.get("label", "")) not in dead_buckets] + [s["url"] for s in ordered if s.get("url") and s.get("healthBucket") not in dead_buckets]
-    dedup_alts = []
-    for cand_u in alt_candidates:
-        if cand_u and cand_u != best_url and cand_u not in dedup_alts:
-            dedup_alts.append(cand_u)
-    out["altUrls"] = dedup_alts[:6]
-    return out
-
-
-async def server_health_report(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-    url_raw = _clean(body.get("url") or body.get("host"), 1200)
-    label = _clean(body.get("label"), 80)
-    if not url_raw and not label:
-        return JSONResponse({"ok": False}, status_code=400)
-    ok = bool(body.get("ok", True)) and not bool(body.get("stalled", False))
-    lat_ms = _finite_float(body.get("latencyMs"), 550.0 if ok else 4500.0, lo=20.0, hi=15000.0)
-    bkt = _extract_srv_bucket(url_raw, label)
-    hmap = _load_health_map()
-    rec = dict(hmap.get(bkt) or {"ok": 0, "fail": 0, "avgMs": lat_ms, "updatedAt": 0.0})
-    if ok:
-        rec["ok"] = min(500, int(rec.get("ok") or 0) + 1)
-        # Decay old failures gradually on fresh recovery
-        if rec.get("fail", 0) > 0 and rec["ok"] % 2 == 0:
-            rec["fail"] = max(0, int(rec["fail"]) - 1)
-    else:
-        rec["fail"] = min(200, int(rec.get("fail") or 0) + 2)
-    prev_ms = float(rec.get("avgMs") or lat_ms)
-    rec["avgMs"] = round(prev_ms * 0.65 + lat_ms * 0.35, 1)
-    rec["label"] = label or rec.get("label") or bkt
-    rec["updatedAt"] = _now()
-    hmap[bkt] = rec
-    if len(hmap) > 160:
-        oldest_k = min(hmap, key=lambda k: float(hmap[k].get("updatedAt") or 0))
-        hmap.pop(oldest_k, None)
-    _kv_set("wl:srv:health:v1", hmap, ttl_sec=604800)
-    return JSONResponse({"ok": True, "bucket": bkt, "stats": rec})
-
-
-async def server_health_get(request: Request) -> JSONResponse:
-    hmap = _load_health_map()
-    return JSONResponse({"ok": True, "servers": hmap, "count": len(hmap)})
 # ---------------------------------------------------------------------------
 # 12. Account-Bound YouTube Personalization Graph & OAuth Sync (v91)
 # ---------------------------------------------------------------------------

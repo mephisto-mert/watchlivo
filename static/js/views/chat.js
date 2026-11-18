@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261110_v183';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261110_v183';
-import { avatar } from '../profile.js?v=20261110_v183';
-import { api, qs } from '../api.js?v=20261110_v183';
-import { resolveMusicItem } from './selection-kinds.js?v=20261110_v183';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261110_v183';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261118_v184';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261118_v184';
+import { avatar } from '../profile.js?v=20261118_v184';
+import { api, qs } from '../api.js?v=20261118_v184';
+import { resolveMusicItem } from './selection-kinds.js?v=20261118_v184';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261118_v184';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -638,11 +638,8 @@ export function buildChat(ctx) {
   }
   let lastTyping = 0;
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowUp' && input.value.length > 0) {
-      e.preventDefault();
-      e.stopPropagation();
-      return;
-    }
+    // ArrowUp keeps its native caret behaviour; the player's global key handler already
+    // ignores keystrokes that originate in text inputs.
     if (e.key === 'Enter' || e.keyCode === 13) {
       e.preventDefault();
       send();

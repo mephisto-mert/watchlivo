@@ -1,18 +1,17 @@
-// Embed adapter for iframe-based sources (Cinema full movie/episode embeds, Twitch live/VOD, Google Drive preview).
+// Embed adapter for official iframe players (YouTube, Vimeo, Dailymotion, Twitch, Kick, TikTok,
+// Google Drive preview, archive.org, VK / Rutube public videos). Only first-party players are allowed.
 const _TRUSTED_EMBED_DOMAINS = [
   'youtube.com', 'youtube-nocookie.com', 'youtu.be', 'vimeo.com', 'dailymotion.com', 'dai.ly',
-  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'ok.ru', 'vk.com', 'vkvideo.ru',
-  'rutube.ru', 'sibnet.ru', 'streamtape.com', 'voe.sx', 'vidlink.pro', 'flixer.su', 'cinejoy.pk', 'vidy.st', 'molystream.org',
+  'twitch.tv', 'kick.com', 'tiktok.com', 'drive.google.com', 'docs.google.com', 'archive.org', 'vk.com', 'vkvideo.ru',
+  'rutube.ru',
 ];
-const _TRUSTED_EMBED_PREFIX_RE = /(?:^|\.)(?:vidsrc|2embed|multiembed|autoembed|smashystream|vidmoly|fastplay|tau-video|dood|filemoon|pilavyer|hdfilmcehennemi|fullhdfilmizlesene|rapidvid)\.[a-z0-9-]+$/i;
 
 export function isTrustedEmbedUrl(rawUrl) {
   try {
     const u = new URL(String(rawUrl || '').trim());
     if (u.protocol !== 'https:') return false;
     const h = u.hostname.toLowerCase().replace(/\.$/, '');
-    if (_TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d))) return true;
-    return _TRUSTED_EMBED_PREFIX_RE.test(h);
+    return _TRUSTED_EMBED_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
   } catch (_) {
     return false;
   }
@@ -112,7 +111,7 @@ export class EmbedAdapter {
     f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture';
     f.allowFullscreen = true;
     f.referrerPolicy = 'origin';
-    // Not: Gömülü oynatıcılar (vidlink, vidsrc…) "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
+    // Not: Bazı resmi gömülü oynatıcılar "sandbox" özniteliğini algılayıp "Disable sandbox" hatası verir; bu yüzden sandbox kullanılmıyor.
     f.removeAttribute('sandbox');
     f.src = src;
     this.frame = f;
