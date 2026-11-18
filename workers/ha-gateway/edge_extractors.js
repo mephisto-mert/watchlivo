@@ -734,10 +734,13 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
   );
   if (!hakkindaHtml) return null;
 
-  const watchLinks = [];
+  const slug = pickedPath.split("/").pop() || "";
+  const allWatchLinks = [];
   for (const m of hakkindaHtml.matchAll(/href="(\/izle\/(?:altyazi|dublaj)\/[a-z0-9-]+)"/gi)) {
-    if (!watchLinks.includes(m[1])) watchLinks.push(m[1]);
+    if (!allWatchLinks.includes(m[1])) allWatchLinks.push(m[1]);
   }
+  const ownLinks = slug ? allWatchLinks.filter((u) => u.endsWith(`/${slug}`) || u.includes(`/${slug}-`)) : [];
+  const watchLinks = ownLinks.length ? ownLinks : allWatchLinks;
   if (!watchLinks.length) return null;
 
   const resolvedStreams = [];
@@ -755,22 +758,36 @@ async function extractWebteizleMovie({ title, displayTitle, originalTitle, year 
     } catch {
       continue;
     }
-    const vmAlt = alts.find((a) => /vidmoly/i.test(String(a?.baslik || "")));
-    if (!vmAlt?.id) continue;
-    const embRaw = await postWebteizleForm("/ajax/dataEmbed.asp", `id=${vmAlt.id}`, izUrl);
-    const vmId =
-      embRaw.match(/vidmoly\(\s*['"]([a-z0-9_-]+)['"]/i)?.[1] ||
-      embRaw.match(/(?:vidmoly|vmbox|vmnow|vmpx|vmget)\.[a-z]+\/(?:embed-|w\/)([a-z0-9_-]+)/i)?.[1];
-    if (!vmId) continue;
-    const vmRes = await resolveEmbedHtmlToHls(`https://vidmoly.biz/embed-${vmId}.html`, fetchPublicFn);
-    if (vmRes?.url && !resolvedStreams.some((x) => x.url === vmRes.url)) {
-      const isDub = wl.includes("/dublaj/");
-      resolvedStreams.push({
-        url: vmRes.url,
-        referer: vmRes.referer || "https://vidmoly.biz/",
-        label: isDub ? "📡 Webteizle · Türkçe Dublaj (HLS)" : "📡 Webteizle · Türkçe Altyazılı (HLS)",
-      });
-      if (!primarySubs.length && vmRes.subs?.length) primarySubs = vmRes.subs;
+    const isDub = wl.includes("/dublaj/");
+    const candidates = [
+      { alt: alts.find((a) => /vidmoly/i.test(String(a?.baslik || ""))), kind: "vidmoly" },
+      { alt: alts.find((a) => /filemoon/i.test(String(a?.baslik || ""))), kind: "filemoon" },
+    ].filter((c) => c.alt?.id);
+    for (const cand of candidates) {
+      const embRaw = await postWebteizleForm("/ajax/dataEmbed.asp", `id=${cand.alt.id}`, izUrl);
+      let embedTarget = "";
+      if (cand.kind === "vidmoly") {
+        const vmId =
+          embRaw.match(/vidmoly\(\s*['"]([a-z0-9_-]+)['"]/i)?.[1] ||
+          embRaw.match(/(?:vidmoly|vmbox|vmnow|vmpx|vmget)\.[a-z]+\/(?:embed-|w\/)([a-z0-9_-]+)/i)?.[1];
+        if (vmId) embedTarget = `https://vidmoly.biz/embed-${vmId}.html`;
+      } else {
+        const fmId =
+          embRaw.match(/filemoon\(\s*['"]([a-z0-9_-]+)['"]/i)?.[1] ||
+          embRaw.match(/(?:filemoon|byse)\.[a-z0-9-]+\/(?:e|d)\/([a-z0-9_-]+)/i)?.[1];
+        if (fmId) embedTarget = `https://filemoon.sx/e/${fmId}`;
+      }
+      if (!embedTarget) continue;
+      const res = await resolveEmbedHtmlToHls(embedTarget, fetchPublicFn);
+      if (res?.url && !resolvedStreams.some((x) => x.url === res.url)) {
+        resolvedStreams.push({
+          url: res.url,
+          referer: res.referer || (cand.kind === "vidmoly" ? "https://vidmoly.biz/" : "https://filemoon.sx/"),
+          label: isDub ? "📡 Webteizle · Türkçe Dublaj (HLS)" : "📡 Webteizle · Türkçe Altyazılı (HLS)",
+        });
+        if (!primarySubs.length && res.subs?.length) primarySubs = res.subs;
+        break;
+      }
     }
   }
   if (!resolvedStreams.length) return null;

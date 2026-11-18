@@ -3,39 +3,38 @@
 Serves the SPA, content search APIs and the mesh (room) engine from rooms.py.
 Secrets come from environment variables (.env locally, Vercel env in production).
 """
-import ssl
-import pathlib
-import os
-import urllib.parse
-import re
+import asyncio
+import base64
 import collections
+import concurrent.futures
+import hashlib
+import hmac
+import html as html_mod
+import ipaddress
+import json
+import os
+import pathlib
+import re
+import secrets
+import socket
+import sqlite3
+import ssl
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+from typing import Any, Dict, Optional, Tuple, Union
+
 from starlette.applications import Starlette
-from starlette.routing import Route, WebSocketRoute, Mount
-from starlette.staticfiles import StaticFiles
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
-from security import server_secret, BoundedTTLCache, RateLimiter
+from starlette.requests import Request
+from starlette.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from starlette.routing import Mount, Route, WebSocketRoute
+from starlette.staticfiles import StaticFiles
 
-# ... (inside Starlette application setup)
-# (Add the following if it wasn't there, or if I need to strictly enforce HTTPS)
-# SSL/TLS is handled at the load-balancer/gateway layer (e.g. Vercel/Nginx).
-# We ensure the application redirects to HTTPS if running on a standard http proxy:
-class HttpsRedirectMiddleware:
-    def __init__(self, app):
-        self.app = app
-    async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers", []))
-            if headers.get(b"x-forwarded-proto", b"http") == b"http":
-                url = f"https://{headers.get(b'host', b'').decode('utf-8')}{scope.get('path', '')}"
-                response = RedirectResponse(url)
-                await response(scope, receive, send)
-                return
-        await self.app(scope, receive, send)
-
-# Add middleware to app
-# middleware = [Middleware(GZipMiddleware), Middleware(CrawlerShieldMiddleware), Middleware(HttpsRedirectMiddleware)]
-# app = Starlette(..., middleware=middleware)
+from security import BoundedTTLCache, RateLimiter, client_ip, is_ip_public_global, is_safe_public_url, server_secret, too_many_response
 
 
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
