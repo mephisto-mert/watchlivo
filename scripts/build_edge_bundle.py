@@ -43,7 +43,7 @@ def main() -> None:
         skipped = set()
         dp = Path(dirpath)
         for nm in names:
-            if nm.startswith("js_backup"):
+            if nm.startswith("js_backup") or (nm.startswith("Watchlivo-v1") and nm.endswith(".apk")) or nm.endswith((".idsig", ".exe")):
                 skipped.add(nm)
                 continue
             fp = dp / nm
