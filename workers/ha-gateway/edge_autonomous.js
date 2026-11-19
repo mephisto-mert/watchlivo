@@ -690,7 +690,7 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
   const cat = (url.searchParams.get("category") || url.searchParams.get("genre") || "all").trim().toLowerCase();
   const mtFlt = (url.searchParams.get("mediaType") || url.searchParams.get("type") || "").trim().toLowerCase();
   const pg = Math.max(1, Math.min(500, Number(url.searchParams.get("page") || 1) || 1));
-  const cacheKey = `catdisc:v1:${provider}:${cat}:${mtFlt}:${pg}`;
+  const cacheKey = `catdisc:v3:${provider}:${cat}:${mtFlt}:${pg}`;
   const now = Date.now();
   const mem = _discoverMemCache.get(cacheKey);
   if (mem && now - mem.ts < 600_000) return mem.payload;
@@ -704,9 +704,14 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
 
   const apiKey = encodeURIComponent(String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim());
   const today = new Date().toISOString().slice(0, 10);
-  let tvQ = "&without_genres=10763,10764,10766,10767&vote_count.gte=5";
-  let mvQ = `&primary_release_date.lte=${today}&vote_count.gte=10`;
-  if (cat === "tr" || cat === "dublaj" || cat === "yerli") {
+  const mvCut = new Date(Date.now() - 21 * 86400_000).toISOString().slice(0, 10);
+  const isTrCat = cat === "tr" || cat === "dublaj" || cat === "yerli";
+  const tvMinVotes = isTrCat ? 5 : (cat === "anime" ? 20 : 5);
+  const mvMinVotes = isTrCat ? 10 : 25;
+  const tvWithoutGenres = cat === "anime" ? "10762,10763,10764,10766,10767" : "10763,10764,10766,10767";
+  let tvQ = `&without_genres=${tvWithoutGenres}&first_air_date.lte=${today}&vote_count.gte=${tvMinVotes}`;
+  let mvQ = `&primary_release_date.lte=${mvCut}&vote_count.gte=${mvMinVotes}`;
+  if (isTrCat) {
     tvQ += "&with_original_language=tr";
     mvQ += "&with_original_language=tr";
   } else if (cat === "anime") {
@@ -735,12 +740,12 @@ async function handleEdgeTmdbDiscoverCatalog(boot, url, env) {
     const p1 = (pg - 1) * 2 + 1;
     const p2 = p1 + 1;
     if (wantTv) {
-      eps.push([`${baseTv}&sort_by=popularity.desc&page=${p1}`, "tv"]);
-      eps.push([`${baseTv}&sort_by=vote_count.desc&page=${p2}`, "tv"]);
+      eps.push([`${baseTv}&sort_by=vote_count.desc&page=${p1}`, "tv"]);
+      eps.push([`${baseTv}&sort_by=popularity.desc&page=${p2}`, "tv"]);
     }
     if (wantMv) {
-      eps.push([`${baseMv}&sort_by=popularity.desc&page=${p1}`, "movie"]);
-      eps.push([`${baseMv}&sort_by=vote_count.desc&page=${p2}`, "movie"]);
+      eps.push([`${baseMv}&sort_by=vote_count.desc&page=${p1}`, "movie"]);
+      eps.push([`${baseMv}&sort_by=popularity.desc&page=${p2}`, "movie"]);
     }
   }
   const results = await Promise.all(eps.map(([u, t]) => fetchTmdbDiscoverPage(u, t)));

@@ -1829,7 +1829,26 @@ async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, 
   return null;
 }
 
-async function extractAnimecix({ title, displayTitle, originalTitle, year, mtype, s, e }, fetchPublicFn) {
+const ANIMECIX_KNOWN_TMDB = {
+  "35935": 7791, "66053": 7792,
+  "46260": 80, "31910": 7490, "70881": 52, "37854": 66, "1429": 25, "30984": 82,
+  "12971": 84, "65930": 90, "61374": 17, "63926": 8, "60863": 29, "45782": 60,
+  "46261": 58, "37863": 23, "57041": 23, "31911": 235, "37865": 234, "46298": 238, "73223": 258,
+  "13916": 7585, "95479": 7352, "85937": 7394, "127532": 10995,
+  "114410": 11884, "240411": 11737, "209867": 11130, "120089": 9383,
+  "131041": 9851, "207468": 11289, "105248": 10535, "88803": 7809,
+  "94664": 7350, "203737": 11014, "45790": 7696, "129600": 9770, "138357": 10799,
+  "810693": 8718, "916224": 9940, "635302": 7457, "1159311": 11793, "1311031": 12251,
+  "42988": 8103, "1293": 7771, "100565": 8609, "61459": 7697, "116716": 8602, "91990": 11212,
+  "30981": 8175, "83100": 7541, "72636": 225, "220542": 11131, "31724": 7257, "30991": 8177,
+  "890": 8106, "67075": 6817, "75214": 7756, "200875": 10906, "136400": 9271, "43865": 7997,
+  "34904": 8522, "94624": 7607, "112613": 7356, "114138": 9266, "80564": 7539, "83097": 7501,
+  "31562": 7762, "32315": 8074, "42823": 7822, "60809": 198, "61223": 46, "59141": 7921,
+  "31926": 8331, "65942": 7325, "63613": 70, "86031": 7258, "88046": 7259, "61663": 21,
+  "85249": 7544, "206559": 11266, "138502": 8092,
+};
+
+async function extractAnimecix({ title, displayTitle, originalTitle, tmdbId = "", year, mtype, s, e }, fetchPublicFn) {
   const AC_HDRS = {
     "User-Agent": UA_EDGE,
     Referer: "https://animecix.tv/",
@@ -1839,10 +1858,30 @@ async function extractAnimecix({ title, displayTitle, originalTitle, year, mtype
   const reqTitles = [originalTitle, title, displayTitle]
     .map((x) => String(x || "").replace(/\(\d{4}\)/g, "").trim())
     .filter(Boolean);
-  if (!reqTitles.length) return null;
+  const tidClean = String(tmdbId || "").trim();
+  let acId = ANIMECIX_KNOWN_TMDB[tidClean] || 0;
+  if (!acId && !reqTitles.length) return null;
 
-  let acId = 0;
-  for (const q of reqTitles.slice(0, 2)) {
+  // If all titles contain non-Latin scripts (e.g. Japanese Kanji/Kana), fetch English title from TMDB once.
+  const hasLatinTitle = reqTitles.some((t) => /[a-zA-Z]{3,}/.test(t));
+  if (!acId && !hasLatinTitle && /^\d+$/.test(tidClean)) {
+    const tmdbKind = mtype === "tv" ? "tv" : "movie";
+    const enRaw = await fetchTextSafe(
+      `https://api.themoviedb.org/3/${tmdbKind}/${tidClean}?api_key=4f042878f22ef63cb94f25e60cb4ec6e&language=en-US`,
+      { "User-Agent": UA_EDGE, Accept: "application/json" },
+      fetchPublicFn,
+      2800
+    );
+    if (enRaw) {
+      try {
+        const enObj = JSON.parse(enRaw);
+        const enTitle = String(enObj?.name || enObj?.title || "").trim();
+        if (enTitle && !reqTitles.includes(enTitle)) reqTitles.unshift(enTitle);
+      } catch {}
+    }
+  }
+
+  for (const q of (acId ? [] : reqTitles.slice(0, 2))) {
     const raw = await fetchTextSafe(
       `https://animecix.tv/secure/search/${encodeURIComponent(q)}?limit=6`,
       AC_HDRS,
@@ -1926,12 +1965,22 @@ async function extractAnimecix({ title, displayTitle, originalTitle, year, mtype
 
   const streams = [];
   for (const cand of tauCands.slice(0, 2)) {
-    const tRaw = await fetchTextSafe(
-      `https://tau-video.xyz/api/video/${cand.id}`,
-      { "User-Agent": UA_EDGE, Referer: `https://tau-video.xyz/embed/${cand.id}`, Accept: "application/json" },
-      fetchPublicFn,
-      3800
-    );
+    let tRaw = "";
+    const tauUrl = `https://tau-video.xyz/api/video/${cand.id}`;
+    const tauHdrs = { "User-Agent": UA_EDGE, Referer: `https://tau-video.xyz/embed/${cand.id}`, Accept: "application/json" };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const { resp } = await fetchPublicFn(tauUrl, tauHdrs, 3, 3800);
+        if (resp?.status === 429 && attempt === 0) {
+          resp.body?.cancel?.();
+          await new Promise((r) => setTimeout(r, 550));
+          continue;
+        }
+        if (resp?.ok) tRaw = await resp.text();
+        else resp?.body?.cancel?.();
+      } catch {}
+      break;
+    }
     if (!tRaw) continue;
     let tObj;
     try {
@@ -1994,7 +2043,7 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
 
       const [dmRes, acRes] = await Promise.allSettled([
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "movie", s, e }, fetchPublicFn),
-        extractAnimecix({ title, displayTitle, originalTitle, year, mtype: "movie", s, e }, fetchPublicFn),
+        extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "movie", s, e }, fetchPublicFn),
       ]);
       const secondMerged = mergeResolvedResults([
         firstMerged,
@@ -2017,7 +2066,7 @@ export async function resolveTurkishCatalogStream({ title, displayTitle, origina
 
       const [dmRes, acRes] = await Promise.allSettled([
         extractDdizimag({ title, displayTitle, originalTitle, sourceUrl: src, year, mtype: "tv", s, e }, fetchPublicFn),
-        extractAnimecix({ title, displayTitle, originalTitle, year, mtype: "tv", s, e }, fetchPublicFn),
+        extractAnimecix({ title, displayTitle, originalTitle, tmdbId, year, mtype: "tv", s, e }, fetchPublicFn),
       ]);
       const secondMerged = mergeResolvedResults([
         firstMerged,
