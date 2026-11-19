@@ -1,10 +1,21 @@
-// Watchlivo Desktop OAuth Loopback Handoff (externalized for strict script-src CSP).
+// Watchlivo Desktop & Native iOS OAuth Handoff (externalized for strict script-src CSP).
 const params = new URLSearchParams(location.search);
+const authMode = (params.get('mode') || '').trim().toLowerCase();
+const isIosMode = authMode === 'ios';
 const rawPort = Number(params.get('port') || '49223');
 const port = (Number.isInteger(rawPort) && rawPort >= 1024 && rawPort <= 65535) ? String(rawPort) : '';
 const state = (params.get('state') || '').trim();
+const loginHint = (params.get('login_hint') || '').trim().toLowerCase();
 const statusEl = document.getElementById('status');
 const btn = document.getElementById('google-btn');
+
+if (isIosMode) {
+  document.title = 'Watchlivo — iOS Uygulama Girişi';
+  const h1 = document.querySelector('h1');
+  if (h1) h1.textContent = 'Watchlivo iOS Uygulamasına Giriş';
+  const desc = document.querySelector('p.desc');
+  if (desc) desc.textContent = 'Google veya e-posta hesabınla giriş yap; Watchlivo uygulamasına güvenli şekilde otomatik dönülecek.';
+}
 
 function setStatus(text, type = '', spinning = false) {
   statusEl.className = 'status-box ' + (type ? 'status-' + type : '');
@@ -25,6 +36,17 @@ const FIREBASE_CONFIG = {
 };
 
 async function sendToDesktop(user, authToken) {
+  if (isIosMode) {
+    if (!state || !authToken) {
+      setStatus('Geçersiz iOS oturum parametresi. Lütfen uygulamadan tekrar başlatın.', 'err');
+      return;
+    }
+    setStatus('✓ Giriş Başarılı! Watchlivo iOS uygulamasına dönülüyor...', 'ok');
+    if (btn) btn.style.display = 'none';
+    const cbUrl = `watchlivo://auth?state=${encodeURIComponent(state)}&token=${encodeURIComponent(String(authToken))}`;
+    window.location.href = cbUrl;
+    return;
+  }
   if (!port || !state) {
     setStatus('Geçersiz masaüstü oturum parametresi. Lütfen uygulamadan tekrar başlatın.', 'err');
     return;
@@ -71,12 +93,15 @@ async function verifySessionToken(token) {
 
 try {
   const saved = JSON.parse(localStorage.getItem('vortex_profile_v2') || 'null');
-  if (port && state && saved && saved.authToken && saved.name && !saved.isGuest) {
+  const hasSessionTarget = isIosMode ? Boolean(state) : Boolean(port && state);
+  if (hasSessionTarget && saved && saved.authToken && saved.name && !saved.isGuest) {
     const confirmBtn = document.createElement('button');
     confirmBtn.type = 'button';
     confirmBtn.className = 'btn-google';
     confirmBtn.style.cssText = 'margin-bottom:12px;background:#00f5d4;color:#041014;font-weight:800;';
-    confirmBtn.textContent = `${saved.name} (@${saved.handle || 'uye'}) olarak Masaüstüne Bağlan`;
+    confirmBtn.textContent = isIosMode
+      ? `${saved.name} (@${saved.handle || 'uye'}) olarak Watchlivo iOS'a Bağlan`
+      : `${saved.name} (@${saved.handle || 'uye'}) olarak Masaüstüne Bağlan`;
     confirmBtn.addEventListener('click', async () => {
       confirmBtn.disabled = true;
       const verified = await verifySessionToken(saved.authToken);
@@ -133,10 +158,10 @@ const preloadDesktopFb = () => {
   _desktopFbPromise = Promise.all([
     import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
     import('https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js'),
-  ]).then(([{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup }]) => {
+  ]).then(([{ initializeApp, getApps }, { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult }]) => {
     const app = getApps().length ? getApps()[0] : initializeApp(FIREBASE_CONFIG);
     const auth = getAuth(app);
-    _desktopFbReady = { auth, GoogleAuthProvider, signInWithPopup };
+    _desktopFbReady = { auth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult };
     if (typeof auth.authStateReady === 'function') auth.authStateReady().catch(() => {});
     return _desktopFbReady;
   }).catch(() => {
@@ -146,6 +171,52 @@ const preloadDesktopFb = () => {
   return _desktopFbPromise;
 };
 preloadDesktopFb();
+
+async function exchangeFirebaseUser(fbUser, pw) {
+  setStatus('Hesap doğrulanıyor...', '', true);
+  const idToken = await fbUser.getIdToken(true);
+  const apiRes = await fetch('/api/auth/oauth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      provider: 'google',
+      idToken,
+      email: fbUser.email || '',
+      name: fbUser.displayName || 'Google Üyesi',
+      password: pw,
+    }),
+  });
+  const data = await apiRes.json();
+  if (!data.ok || !data.user) throw new Error(data.error || 'Sunucu doğrulaması başarısız.');
+  localStorage.setItem('vortex_profile_v2', JSON.stringify({ ...data.user, authToken: data.authToken, isGuest: false, verified: true }));
+  await sendToDesktop(data.user, data.authToken);
+}
+
+(async () => {
+  if (!isIosMode) return;
+  let pending = null;
+  try { pending = JSON.parse(sessionStorage.getItem('wl_ios_auth_pending') || 'null'); } catch (_) {}
+  if (!pending || !pending.ts || (Date.now() - Number(pending.ts) > 5 * 60 * 1000)) {
+    try { sessionStorage.removeItem('wl_ios_auth_pending'); } catch (_) {}
+    return;
+  }
+  try {
+    setStatus('Google girişi tamamlanıyor...', '', true);
+    const fb = await preloadDesktopFb();
+    if (!fb?.auth || !fb.getRedirectResult) return;
+    const cred = await fb.getRedirectResult(fb.auth).catch(() => null);
+    const fbUser = cred?.user || fb.auth.currentUser;
+    try { sessionStorage.removeItem('wl_ios_auth_pending'); } catch (_) {}
+    if (fbUser) {
+      await exchangeFirebaseUser(fbUser, String(pending.pw || ''));
+    } else {
+      setStatus('Google oturumu alınamadı. Tekrar deneyin.', 'err');
+    }
+  } catch (err) {
+    try { sessionStorage.removeItem('wl_ios_auth_pending'); } catch (_) {}
+    setStatus(err?.message || 'Google girişi doğrulanamadı.', 'err');
+  }
+})();
 
 formEl?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -161,28 +232,24 @@ formEl?.addEventListener('submit', async (ev) => {
     const fb = _desktopFbReady?.auth ? _desktopFbReady : await preloadDesktopFb();
     if (!fb?.auth) throw new Error('Google giriş servisi yüklenemedi.');
     const provider = new fb.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    const cred = await fb.signInWithPopup(fb.auth, provider);
+    const customParams = { prompt: 'select_account' };
+    if (loginHint) customParams.login_hint = loginHint;
+    provider.setCustomParameters(customParams);
+    let cred = null;
+    try {
+      cred = await fb.signInWithPopup(fb.auth, provider);
+    } catch (popErr) {
+      const code = String(popErr?.code || popErr?.message || '');
+      if (isIosMode && fb.signInWithRedirect && /popup-blocked|operation-not-supported|cancelled-popup-request/i.test(code)) {
+        try { sessionStorage.setItem('wl_ios_auth_pending', JSON.stringify({ state, pw, ts: Date.now() })); } catch (_) {}
+        setStatus('Google giriş sayfasına yönlendiriliyor...', '', true);
+        await fb.signInWithRedirect(fb.auth, provider);
+        return;
+      }
+      throw popErr;
+    }
     if (!cred?.user) throw new Error('Google girişi tamamlanmadı.');
-
-    setStatus('Hesap doğrulanıyor...', '', true);
-    const idToken = await cred.user.getIdToken();
-    const apiRes = await fetch('/api/auth/oauth', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: 'google',
-        idToken,
-        email: cred.user.email || '',
-        name: cred.user.displayName || 'Google Üyesi',
-        password: pw,
-      }),
-    });
-    const data = await apiRes.json();
-    if (!data.ok || !data.user) throw new Error(data.error || 'Sunucu doğrulaması başarısız.');
-
-    localStorage.setItem('vortex_profile_v2', JSON.stringify({ ...data.user, authToken: data.authToken, isGuest: false, verified: true }));
-    await sendToDesktop(data.user, data.authToken);
+    await exchangeFirebaseUser(cred.user, pw);
   } catch (err) {
     btn.disabled = false;
     setStatus(err.message || 'Giriş yapılamadı.', 'err');

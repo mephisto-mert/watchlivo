@@ -1,16 +1,16 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261120_v227';
-import { api, qs as buildQs } from '../api.js?v=20261120_v227';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261120_v227';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261120_v227';
-import { getProvider } from '../providers.js?v=20261120_v227';
-import { expectedPosition } from '../sync.js?v=20261120_v227';
-import { thumbFor } from './lobby.js?v=20261120_v227';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261120_v227';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261120_v227';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261120_v227';
-import { avatar } from '../profile.js?v=20261120_v227';
-import { unlockSfxAudio } from './chat.js?v=20261120_v227';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261120_v228';
+import { api, qs as buildQs } from '../api.js?v=20261120_v228';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261120_v228';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261120_v228';
+import { getProvider } from '../providers.js?v=20261120_v228';
+import { expectedPosition } from '../sync.js?v=20261120_v228';
+import { thumbFor } from './lobby.js?v=20261120_v228';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261120_v228';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261120_v228';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261120_v228';
+import { avatar } from '../profile.js?v=20261120_v228';
+import { unlockSfxAudio } from './chat.js?v=20261120_v228';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -82,6 +82,7 @@ export function buildControls(frame, ctx) {
   let lastMouseY = -1;
   let lastLayoutShiftAt = 0;
   let lastRevealedMediaKey = '';
+  let lastAutoQualityOverlayAt = 0;
   let lastPlayToggleAt = 0;
   let lastAnyTouchAt = 0;
   let localPauseSince = 0;
@@ -2165,8 +2166,25 @@ export function buildControls(frame, ctx) {
 
     if (view === 'quality') {
       const qLevels = host.adapter?.getQualityLevels?.() || [{ id: 0, label: '✨ Otomatik Akış', active: true }];
+      const hasLowBwApi = typeof host.adapter?.setLowBandwidthPref === 'function';
+      const lowBwOn = hasLowBwApi ? Boolean(host.adapter.isLowBandwidthPref?.()) : false;
+      const lowBwToggleRow = hasLowBwApi ? h('div', {
+        class: `opt ${lowBwOn ? 'on' : ''}`,
+        id: 'ctl-opt-lowbw',
+        onclick: (e) => {
+          e.stopPropagation();
+          const next = host.adapter.setLowBandwidthPref(!lowBwOn);
+          showOverlay(next
+            ? '📶 Düşük İnternet Modu Açık · Otomatik maks 480p'
+            : '📶 Normal Otomatik Kalite · Bağlantıya göre 1080p', 2400);
+          renderMenuView('quality');
+          update();
+        },
+      },
+      h('span', {}, '📶 Düşük İnternet Modu (Maks 480p)'),
+      h('span', { class: 'dim', style: { fontSize: '.85em' } }, lowBwOn ? 'Açık ✓' : 'Kapalı')) : null;
       menu.replaceChildren(
-        backHeader('Görüntü Kalitesi', 'list'),
+        backHeader('Görüntü Kalitesi (YouTube Oto)', 'list'),
         ...qLevels.map((q) => h('div', {
           class: `opt ${q.active ? 'on' : ''}`,
           onclick: (e) => {
@@ -2177,6 +2195,7 @@ export function buildControls(frame, ctx) {
             update();
           },
         }, h('span', {}, q.label), q.active ? h('span', {}, '✓') : null)),
+        lowBwToggleRow,
       );
       return;
     }
@@ -2937,7 +2956,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261120_v227',
+            v: '20261120_v228',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
@@ -2994,7 +3013,10 @@ export function buildControls(frame, ctx) {
     const vw = vEl?.videoWidth || 0;
     const vh = vEl?.videoHeight || 0;
     const effW = Math.max(vw, Math.round(vh * 16 / 9));
-    qualityBadge.textContent = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
+    const fallbackBadge = effW >= 3200 ? '4K' : effW >= 1800 ? '1080p' : effW >= 1200 ? '720p' : (vh > 0 ? `${vh}p` : 'HD');
+    qualityBadge.textContent = (typeof host.adapter?.getQualityBadgeText === 'function')
+      ? (host.adapter.getQualityBadgeText() || fallbackBadge)
+      : fallbackBadge;
     if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '720p') {
       artist.textContent = artist.textContent.replace('1080p HD', '720p HD');
     } else if (artist.textContent.includes('1080p HD') && qualityBadge.textContent === '4K') {
@@ -3284,6 +3306,21 @@ export function buildControls(frame, ctx) {
       }
       if (ev === 'tracks-changed') {
         if (!menu.classList.contains('hidden')) renderMenuView(currentMenuView);
+        update();
+        return;
+      }
+      if (ev === 'quality-auto' && arg) {
+        const nowQ = Date.now();
+        if (!lastAutoQualityOverlayAt || nowQ - lastAutoQualityOverlayAt > 9000) {
+          lastAutoQualityOverlayAt = nowQ;
+          const qTag = arg.tag || (arg.height ? `${arg.height}p` : 'HD');
+          if (arg.direction === 'down') {
+            showOverlay(`📶 İnternet yavaşladı · Kalite otomatik ${qTag} yapıldı`, 2800);
+          } else if (arg.direction === 'up') {
+            showOverlay(`📶 Bağlantı hızlandı · Kalite otomatik ${qTag} yükseltildi`, 2400);
+          }
+        }
+        if (!menu.classList.contains('hidden') && currentMenuView === 'quality') renderMenuView('quality');
         update();
         return;
       }

@@ -1,0 +1,51 @@
+name: Build Watchlivo iOS (.IPA)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ legacy-sinema, main, master ]
+    paths:
+      - 'ios_app/**'
+      - '.github/workflows/build_ios_ipa.yml'
+
+jobs:
+  build-ipa:
+    runs-on: macos-15
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Generate Xcode Project via XcodeGen
+        working-directory: ios_app
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Compile Unsigned iOS ARM64 Release App
+        working-directory: ios_app
+        run: |
+          xcodebuild -project Watchlivo.xcodeproj \
+            -scheme Watchlivo \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Package Payload into Watchlivo.ipa
+        working-directory: ios_app
+        run: |
+          rm -rf Payload Watchlivo.ipa
+          mkdir -p Payload
+          cp -r build/Build/Products/Release-iphoneos/Watchlivo.app Payload/Watchlivo.app
+          zip -r9 Watchlivo.ipa Payload
+          ls -lh Watchlivo.ipa
+          file Payload/Watchlivo.app/Watchlivo
+          shasum -a 256 Watchlivo.ipa
+
+      - name: Upload Watchlivo.ipa Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Watchlivo_Native_iOS_IPA
+          path: ios_app/Watchlivo.ipa

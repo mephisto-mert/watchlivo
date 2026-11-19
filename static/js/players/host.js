@@ -1,10 +1,10 @@
 // PlayerHost: chooses an adapter per media (Rave VideoPlayerFC techOrder parity) and exposes it to SyncEngine.
-import { YouTubeAdapter } from './youtube.js?v=20261120_v227';
-import { Html5Adapter } from './html5.js?v=20261120_v227';
-import { VimeoAdapter } from './vimeo.js?v=20261120_v227';
-import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261120_v227';
-import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261120_v227';
-import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261120_v227';
+import { YouTubeAdapter } from './youtube.js?v=20261120_v228';
+import { Html5Adapter } from './html5.js?v=20261120_v228';
+import { VimeoAdapter } from './vimeo.js?v=20261120_v228';
+import { EmbedAdapter, isTrustedEmbedUrl } from './embed.js?v=20261120_v228';
+import { WebviewAdapter, isAllowedWebviewUrl } from './webview.js?v=20261120_v228';
+import { resumeSharedAudioContext, suspendSharedAudioContext, canControlElementVolume, isIosWebKit } from './audio-gain.js?v=20261120_v228';
 
 const DRM_PROVS = new Set([
   'netflix', 'disney', 'prime', 'max', 'apple', 'mubi', 'hulu', 'paramount', 'peacock',
@@ -275,6 +275,7 @@ export class PlayerHost {
       onBuffering: guard((b) => this.onEvent('buffering', b)),
       onSubtitleCue: guard((txt, secTxt = '') => this.onEvent('subtitle-cue', { primary: txt || '', secondary: secTxt || '' })),
       onTracksChanged: guard(() => this.onEvent('tracks-changed')),
+      onQualityAutoChanged: guard((info) => this.onEvent('quality-auto', info)),
       onPipChange: guard((active) => this.onEvent('pip-change', active)),
       onError: guard((msg) => { settledReady = true; this.loading = false; this.error = msg; this.onEvent('error', msg); }),
       onUnmuted: guard(() => {

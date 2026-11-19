@@ -1,10 +1,11 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261120_v227';
-import { api } from '../api.js?v=20261120_v227';
-import { expectedPosition } from '../sync.js?v=20261120_v227';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261120_v227';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261120_v227';
-import { ensureHlsJs } from './hls-loader.js?v=20261120_v227';
+import { SubtitleDubController } from './subtitles.js?v=20261120_v228';
+import { api } from '../api.js?v=20261120_v228';
+import { expectedPosition } from '../sync.js?v=20261120_v228';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261120_v228';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261120_v228';
+import { ensureHlsJs } from './hls-loader.js?v=20261120_v228';
+import { AdaptiveQualityController, buildHlsAbrConfig, formatHeightTag, getNetworkSnapshot, isLowBandwidthMode, setLowBandwidthMode, withEdgeAbrParams } from './abr.js?v=20261120_v228';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;
@@ -55,6 +56,16 @@ export class Html5Adapter {
     this.readyReported = false;
     this.baseVolume = isIosWebKit() ? 100 : 80;
     this.currentUrl = '';
+    this.abr = null;
+    this.abrGraceUntil = 0;
+    this._abrTickTimer = null;
+    this._abrRestoreAutoTimer = null;
+    this._netChangeHandler = null;
+    this._nativeAbrCapHeight = 0;
+    this._nativeAbrManualHeight = 0;
+    this._nativeAbrStalls = [];
+    this._nativeAbrSmoothSince = 0;
+    this._nativeAbrLastSwitchAt = 0;
     this.subs = new SubtitleDubController(this);
     this.caps = { seek: true, rate: true, overlayClicks: true, subtitles: true, audioTracks: true };
   }
@@ -78,6 +89,15 @@ export class Html5Adapter {
     this.readyReported = false;
     clearTimeout(this.watchdogTimer);
     clearTimeout(this._hlsRetryTimer);
+    clearInterval(this._abrTickTimer);
+    clearTimeout(this._abrRestoreAutoTimer);
+    this.abr = null;
+    this.abrGraceUntil = 0;
+    this._nativeAbrCapHeight = isLowBandwidthMode() ? 480 : 0;
+    this._nativeAbrManualHeight = 0;
+    this._nativeAbrStalls = [];
+    this._nativeAbrSmoothSince = Date.now();
+    this._nativeAbrLastSwitchAt = 0;
     const v = document.createElement('video');
     try { v.referrerPolicy = 'no-referrer'; } catch (_) {}
     v.setAttribute('referrerpolicy', 'no-referrer');
@@ -580,7 +600,20 @@ export class Html5Adapter {
           this.bufferingReported = true;
           this.events.onBuffering?.(true);
         }
-      }, 1300);
+        // Trigger YouTube-style ABR downshift when playback stalls >1.8s outside a fresh user seek
+        const recentSeek = Boolean(this.lastSeekAt && Date.now() - this.lastSeekAt < 5000);
+        if (this.video === v && this.wantPlaying && !v.paused && !v.seeking && !recentSeek && v.readyState < 3) {
+          const bufAhead = this._getBufferAheadSec();
+          if (bufAhead < 2.2) {
+            if (this.hls && this.abr) {
+              const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.loadLevel ?? -1);
+              this._applyAbrDecision(this.abr.handleStall({ reason: 'waiting', bufAheadSec: bufAhead, currentHlsLevel: curLvl }));
+            } else if (this.useNativeHls) {
+              this._handleNativeHlsStall('waiting');
+            }
+          }
+        }
+      }, 1500);
     });
     v.addEventListener('ended', fireEndedOnce);
     const is30sPreviewUrl = (u) => /AudioPreview|Video211|mzaf_|mzvf_|p\.scdn\.co\/mp3-preview/i.test(String(u || ''));
@@ -850,7 +883,12 @@ export class Html5Adapter {
         syncVideoCors(nextUrl, true);
         try { this.hls?.destroy(); } catch (err) { /* ignore */ }
         this.hls = null;
-        v.src = nextUrl;
+        const netNow = getNetworkSnapshot();
+        const wantNativeCap = this._nativeAbrManualHeight > 0 ? this._nativeAbrManualHeight : this._nativeAbrCapHeight;
+        const wantNativeLowStart = Boolean(wantNativeCap > 0 || netNow.isSlow || netNow.isVerySlow || isIosWebKit());
+        const nativeUrl = withEdgeAbrParams(nextUrl, { maxHeight: wantNativeCap, lowStart: wantNativeLowStart });
+        this.currentUrl = nativeUrl;
+        v.src = nativeUrl;
         v.load();
         v.addEventListener('loadedmetadata', () => {
           this.subs.mergeNativeAudioTracks?.(v.audioTracks);
@@ -890,60 +928,28 @@ export class Html5Adapter {
       const isTouchDev = Boolean(navigator.maxTouchPoints > 0 || (typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)')?.matches));
       const isIpadDesktop = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
       const isMobileScreen = isAndroid || isIpadDesktop || /iPhone|iPad|iPod|Mobile/i.test(uaStr) || (isTouchDev && typeof window !== 'undefined' && window.innerWidth <= 900);
-      this.hls = new window.Hls({
-        enableWorker: typeof Worker === 'function' && !isAndroidWebView,
-        lowLatencyMode: false,
-        subtitleDisplay: false,
-        enableWebVTT: false,
-        startFragPrefetch: true,
-        startLevel: isMobileScreen ? 0 : -1,
-        startPosition: effStart >= 0.5 ? effStart : -1,
-        abrEwmaDefaultEstimate: isMobileScreen ? 950000 : 2200000,
-        abrBandWidthFactor: isMobileScreen ? 0.82 : 0.88,
-        abrBandWidthUpFactor: isMobileScreen ? 0.65 : 0.72,
-        autoLevelCapping: -1,
-        maxBufferLength: isMobileScreen ? 24 : 50,
-        maxMaxBufferLength: isMobileScreen ? 48 : 110,
-        backBufferLength: isMobileScreen ? 14 : 45,
-        maxBufferSize: (isMobileScreen ? 28 : 60) * 1000 * 1000,
-        maxBufferHole: 0.5,
-        maxAudioFramesDrift: 2,
-        stretchShortVideoTrack: true,
-        forceKeyFrameOnDiscontinuity: true,
-        progressive: false,
-        highBufferWatchdogPeriod: 2,
-        maxFragLookUpTolerance: 0.35,
-        nudgeOffset: 0.25,
-        nudgeMaxRetry: 10,
-        fragLoadingTimeOut: 28000,
-        fragLoadingMaxRetry: 3,
-        fragLoadingRetryDelay: 350,
-        manifestLoadingTimeOut: 7500,
-        manifestLoadingMaxRetry: 2,
-        levelLoadingTimeOut: 7500,
-        levelLoadingMaxRetry: 2,
-      });
+      const prevManualLocked = Boolean(this.abr?.manualLocked);
+      const prevManualIdx = prevManualLocked ? this.abr.manualHlsIndex : -1;
+      const netSnap = getNetworkSnapshot();
+      this.abr = new AdaptiveQualityController({ isMobileScreen, netSnap });
+      if (prevManualLocked && prevManualIdx >= 0) {
+        this.abr.setManualLevel(prevManualIdx);
+      }
+      this.hls = new window.Hls(buildHlsAbrConfig({
+        isMobileScreen,
+        isAndroidWebView,
+        startPosition: effStart,
+        netSnap,
+      }));
       v._hls = this.hls;
       this.hls.on(window.Hls.Events.MANIFEST_PARSED, (_e, data) => {
+        const initCap = this.abr?.setLevels(data?.levels || [], { now: Date.now(), netSnap }) ?? -1;
         if (data?.levels?.length > 1) {
-          let maxAllowedIdx = -1;
-          let maxMobileHdIdx = -1;
-          data.levels.forEach((l, idx) => {
-            const w = l.width || 0;
-            const h = l.height || 0;
-            const bw = l.bitrate || 0;
-            const isOver1080p = w > 2650 || h > 1200 || bw > 10500000;
-            if (!isOver1080p) {
-              maxAllowedIdx = idx;
-            }
-            const isMobileSafeHd = (w <= 1440 && h <= 820 && bw <= 4200000) || (w === 0 && h === 0 && bw <= 3400000);
-            if (isMobileSafeHd) {
-              maxMobileHdIdx = idx;
-            }
-          });
-          const chosenCap = (isMobileScreen && maxMobileHdIdx >= 0) ? maxMobileHdIdx : maxAllowedIdx;
-          if (chosenCap >= 0 && chosenCap < data.levels.length - 1) {
-            this.hls.autoLevelCapping = chosenCap;
+          if (this.abr?.manualLocked && this.abr.manualHlsIndex >= 0 && this.abr.manualHlsIndex < data.levels.length) {
+            this.hls.autoLevelCapping = -1;
+            this.hls.currentLevel = this.abr.manualHlsIndex;
+          } else if (initCap >= 0 && initCap < data.levels.length) {
+            this.hls.autoLevelCapping = initCap;
           }
         }
         this.events.onTracksChanged?.();
@@ -958,6 +964,20 @@ export class Html5Adapter {
           this.events.onReady?.();
           fireDoneOnce();
         }
+      });
+      this.hls.on(window.Hls.Events.FRAG_LOADED, (_e, data) => {
+        if (!this.abr || data?.frag?.type === 'audio') return;
+        const st = data?.frag?.stats || data?.stats || {};
+        const bytes = Number(st.loaded || st.total || 0);
+        const durMs = (st.loading?.end && st.loading?.start)
+          ? (st.loading.end - st.loading.start)
+          : ((st.tload && st.trequest) ? (st.tload - st.trequest) : 0);
+        if (bytes > 0 && durMs > 0) {
+          this.abr.recordFragmentLoad({ bytes, durationMs: durMs });
+        }
+      });
+      this.hls.on(window.Hls.Events.LEVEL_SWITCHED, () => {
+        this.events.onTracksChanged?.();
       });
       this.hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, (_e, data) => {
         this.subs.mergeHlsAudioTracks((data?.audioTracks?.length ? data.audioTracks : this.hls?.audioTracks) || []);
@@ -1023,6 +1043,10 @@ export class Html5Adapter {
             loadCandidateUrl(alts[nativeAltIdx++], doneCb);
             return;
           }
+          if (data?.details === 'fragLoadTimeOut' && this.hls?.levels?.length > 1 && this.abr) {
+            const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.loadLevel ?? -1);
+            this._applyAbrDecision(this.abr.handleStall({ reason: 'timeout', bufAheadSec: this._getBufferAheadSec(), currentHlsLevel: curLvl }));
+          }
           if (data?.details === 'bufferStalledError' && this.wantPlaying) {
             if (v.paused) {
               this.tryPlay();
@@ -1045,7 +1069,9 @@ export class Html5Adapter {
             try {
               const lvlCount = this.hls.levels?.length || 0;
               const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
-              if (lvlCount > 1 && curLvl > 0) {
+              if (lvlCount > 1 && this.abr) {
+                this._applyAbrDecision(this.abr.handleStall({ reason: 'stall', bufAheadSec: this._getBufferAheadSec(), currentHlsLevel: curLvl }));
+              } else if (lvlCount > 1 && curLvl > 0) {
                 this.hls.nextAutoLevel = Math.max(0, curLvl - 1);
               } else if (lvlCount <= 1 && nativeAltIdx < alts.length) {
                 const nowMs = Date.now();
@@ -1230,7 +1256,15 @@ export class Html5Adapter {
       if (isHls && canHlsJsNow() && !useNativeHls) {
         attachHlsJs(url, onFrameReady);
       } else {
-        v.src = url;
+        let initialSrc = url;
+        if (isHls && useNativeHls) {
+          const netNow = getNetworkSnapshot();
+          const wantCap = this._nativeAbrManualHeight > 0 ? this._nativeAbrManualHeight : this._nativeAbrCapHeight;
+          const wantLow = Boolean(wantCap > 0 || netNow.isSlow || netNow.isVerySlow || isIosWebKit());
+          initialSrc = withEdgeAbrParams(url, { maxHeight: wantCap, lowStart: wantLow });
+          this.currentUrl = initialSrc;
+        }
+        v.src = initialSrc;
         if (autoplay) this.tryPlay();
       }
     });
@@ -1403,10 +1437,21 @@ export class Html5Adapter {
             }
           } catch (err) { /* ignore */ }
         }
-        if (consecutiveMidStalls === 3 && this.hls) {
+        if (consecutiveMidStalls === 2 && (this.hls || this.useNativeHls)) {
+          try {
+            if (this.hls && this.abr && this.hls.levels?.length > 1) {
+              const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
+              this._applyAbrDecision(this.abr.handleStall({ reason: 'stall', bufAheadSec: this._getBufferAheadSec(), currentHlsLevel: curLvl }));
+            } else if (this.useNativeHls) {
+              this._handleNativeHlsStall('stall');
+            }
+          } catch (err) { /* ignore */ }
+        } else if (consecutiveMidStalls === 3 && this.hls) {
           try {
             const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.nextAutoLevel ?? this.hls.loadLevel ?? 0);
-            if (this.hls.levels?.length > 1 && curLvl > 0) {
+            if (this.hls.levels?.length > 1 && this.abr) {
+              this._applyAbrDecision(this.abr.handleStall({ reason: 'timeout', bufAheadSec: this._getBufferAheadSec(), currentHlsLevel: curLvl }));
+            } else if (this.hls.levels?.length > 1 && curLvl > 0) {
               this.hls.nextAutoLevel = 0;
             }
           } catch (err) { /* ignore */ }
@@ -1446,6 +1491,49 @@ export class Html5Adapter {
         lastWatchdogPos = curT;
       }
     }, 2500);
+
+    // YouTube-style periodic ABR evaluator (proactive buffer-low downshift + smooth bandwidth-recovery upshift)
+    clearInterval(this._abrTickTimer);
+    this._abrTickTimer = setInterval(() => {
+      if (this._destroyed || this.video !== v || this.hasEnded || v.ended) return;
+      if (typeof document !== 'undefined' && document.hidden && !this.isPiP()) return;
+      const isPlayingNow = Boolean(!v.paused && !v.seeking && v.readyState >= 2);
+      const bufAhead = this._getBufferAheadSec();
+      if (this.hls && this.abr && this.hls.levels?.length > 1) {
+        const curLvl = this.hls.currentLevel >= 0 ? this.hls.currentLevel : (this.hls.loadLevel ?? -1);
+        const decision = this.abr.evaluateTick({
+          playing: isPlayingNow,
+          bufAheadSec: bufAhead,
+          currentHlsLevel: curLvl,
+          hlsBwEstimate: Number(this.hls.bandwidthEstimate || 0),
+        });
+        if (decision?.changed) this._applyAbrDecision(decision);
+      } else if (this.useNativeHls && isPlayingNow) {
+        this._maybeRecoverNativeHls(bufAhead);
+      }
+    }, 2000);
+
+    const connObj = typeof navigator !== 'undefined'
+      ? (navigator.connection || navigator.mozConnection || navigator.webkitConnection || null)
+      : null;
+    if (this._netChangeHandler && connObj?.removeEventListener) {
+      try { connObj.removeEventListener('change', this._netChangeHandler); } catch (_) {}
+    }
+    this._netChangeHandler = () => {
+      if (this._destroyed || this.video !== v) return;
+      const snap = getNetworkSnapshot();
+      if (this.hls && this.abr && this.hls.levels?.length > 1) {
+        const dec = this.abr.handleNetworkChange(snap);
+        if (dec?.changed) this._applyAbrDecision(dec);
+      } else if (this.useNativeHls && !this._nativeAbrManualHeight) {
+        if ((snap.isVerySlow || snap.saveData) && (!this._nativeAbrCapHeight || this._nativeAbrCapHeight > 480)) {
+          this._switchNativeAbrHeight(480, 'down', 'network-change');
+        }
+      }
+    };
+    if (connObj?.addEventListener) {
+      try { connObj.addEventListener('change', this._netChangeHandler); } catch (_) {}
+    }
   }
 
   async tryPlay() {
@@ -1832,31 +1920,205 @@ export class Html5Adapter {
       });
     }
   }
+  _getBufferAheadSec() {
+    const v = this._activeMediaEl();
+    if (!v || !v.buffered || !v.buffered.length) return 0;
+    const ct = Number(v.currentTime || 0);
+    for (let i = 0; i < v.buffered.length; i += 1) {
+      const s = v.buffered.start(i);
+      const e = v.buffered.end(i);
+      if (ct >= s - 0.5 && ct <= e + 0.5) return Math.max(0, e - ct);
+    }
+    return 0;
+  }
+  _applyAbrDecision(decision) {
+    if (!decision?.changed || !this.hls) return;
+    try {
+      this.hls.autoLevelCapping = decision.targetHlsIndex;
+      if (decision.direction === 'down') {
+        this.abrGraceUntil = performance.now() + 9000;
+        clearTimeout(this._abrRestoreAutoTimer);
+        if (decision.abortCurrent) {
+          // Immediately abort stuck high-bitrate fragment and switch to lower tier
+          this.hls.currentLevel = decision.targetHlsIndex;
+        } else {
+          this.hls.nextLevel = decision.targetHlsIndex;
+          this.hls.nextAutoLevel = decision.targetHlsIndex;
+        }
+        this._abrRestoreAutoTimer = setTimeout(() => {
+          if (this._destroyed || !this.hls || this.abr?.manualLocked) return;
+          try { this.hls.nextLevel = -1; } catch (_) {}
+        }, 180);
+      } else if (decision.direction === 'up') {
+        this.hls.nextLevel = -1;
+      }
+    } catch (_) {}
+    this.events.onQualityAutoChanged?.(decision);
+    this.events.onTracksChanged?.();
+  }
+  _switchNativeAbrHeight(nextMaxH, direction = 'down', reason = 'slow-network') {
+    const curU = String(this.currentUrl || '');
+    if (!this.useNativeHls || !/\/api\/rave\/stream(?:\?|_manifest\?)/i.test(curU) || typeof this._loadCandidateUrl !== 'function') return false;
+    const targetUrl = withEdgeAbrParams(curU, { maxHeight: nextMaxH, lowStart: true });
+    if (targetUrl === curU) return false;
+    this._nativeAbrCapHeight = nextMaxH;
+    this._nativeAbrLastSwitchAt = Date.now();
+    this._nativeAbrSmoothSince = Date.now();
+    if (direction === 'down') this.abrGraceUntil = performance.now() + 10000;
+    this._loadCandidateUrl(targetUrl);
+    const tag = nextMaxH > 0 ? `${nextMaxH}p` : 'HD';
+    this.events.onQualityAutoChanged?.({ changed: true, direction, reason, height: nextMaxH, tag });
+    this.events.onTracksChanged?.();
+    return true;
+  }
+  _handleNativeHlsStall(reason = 'stall') {
+    if (!this.useNativeHls || this._nativeAbrManualHeight > 0) return;
+    if (!/\/api\/rave\/stream(?:\?|_manifest\?)/i.test(String(this.currentUrl || ''))) return;
+    const now = Date.now();
+    this._nativeAbrSmoothSince = now;
+    if (now - (this._nativeAbrLastSwitchAt || 0) < 12000) return;
+    this._nativeAbrStalls = (this._nativeAbrStalls || []).filter((t) => now - t < 45000);
+    this._nativeAbrStalls.push(now);
+    if (this._nativeAbrStalls.length < 2) return;
+    this._nativeAbrStalls = [];
+    const curCap = this._nativeAbrCapHeight || 0;
+    const nextCap = curCap === 0 ? 480 : (curCap > 360 ? 360 : 0);
+    if (nextCap > 0) {
+      this._switchNativeAbrHeight(nextCap, 'down', reason);
+    }
+  }
+  _maybeRecoverNativeHls(bufAheadSec = 0) {
+    if (!this.useNativeHls || this._nativeAbrManualHeight > 0 || !this._nativeAbrCapHeight) return;
+    if (isLowBandwidthMode()) return;
+    const snap = getNetworkSnapshot();
+    if (snap.isVerySlow || snap.saveData) return;
+    const now = Date.now();
+    const smoothMs = now - (this._nativeAbrSmoothSince || now);
+    if (smoothMs < 65000 || bufAheadSec < 12 || now - (this._nativeAbrLastSwitchAt || 0) < 60000) return;
+    const nextCap = this._nativeAbrCapHeight <= 360 ? 480 : 0;
+    this._switchNativeAbrHeight(nextCap, 'up', 'recovered');
+  }
+  isAutoQuality() {
+    if (this.hls) return !this.abr?.manualLocked;
+    if (this.useNativeHls) return !this._nativeAbrManualHeight;
+    return true;
+  }
+  isLowBandwidthPref() {
+    return isLowBandwidthMode();
+  }
+  setLowBandwidthPref(enabled) {
+    const nextOn = setLowBandwidthMode(enabled);
+    if (this.hls && this.abr) {
+      const cap = this.abr.setLowBwMode(nextOn);
+      if (!this.abr.manualLocked) {
+        try {
+          this.hls.autoLevelCapping = cap;
+          if (nextOn && cap >= 0) {
+            this.hls.nextLevel = cap;
+            clearTimeout(this._abrRestoreAutoTimer);
+            this._abrRestoreAutoTimer = setTimeout(() => {
+              if (!this._destroyed && this.hls && !this.abr?.manualLocked) {
+                try { this.hls.nextLevel = -1; } catch (_) {}
+              }
+            }, 180);
+          } else {
+            this.hls.nextLevel = -1;
+          }
+        } catch (_) {}
+      }
+      this.events.onTracksChanged?.();
+      return nextOn;
+    }
+    if (this.useNativeHls && !this._nativeAbrManualHeight) {
+      this._switchNativeAbrHeight(nextOn ? 480 : 0, nextOn ? 'down' : 'up', 'low-bw-toggle');
+    }
+    this.events.onTracksChanged?.();
+    return nextOn;
+  }
+  getQualityBadgeText() {
+    const vw = this.video?.videoWidth || 0;
+    const vh = this.video?.videoHeight || 0;
+    if (this.hls && this.hls.levels?.length) {
+      const st = this.abr?.getStatus(this.hls.currentLevel, vh, Number(this.hls.bandwidthEstimate || 0));
+      const tag = st?.tag || formatHeightTag(vh, vw);
+      return st?.isAuto ? `Oto ${tag}` : tag;
+    }
+    const baseTag = formatHeightTag(vh, vw);
+    if (this.useNativeHls && /\/api\/rave\/stream/i.test(String(this.currentUrl || ''))) {
+      if (this._nativeAbrManualHeight > 0) return `${this._nativeAbrManualHeight}p`;
+      return `Oto ${baseTag}`;
+    }
+    return baseTag;
+  }
   getQualityLevels() {
     const levels = this.hls?.levels || [];
     if (!levels.length) {
+      const isNativeEdge = Boolean(this.useNativeHls && /\/api\/rave\/stream(?:\?|_manifest\?)/i.test(String(this.currentUrl || '')));
+      if (isNativeEdge) {
+        const curCap = this._nativeAbrManualHeight || 0;
+        const activeTag = formatHeightTag(this.video?.videoHeight || 0, this.video?.videoWidth || 0);
+        return [
+          { id: -1, label: `⚡ Otomatik (${activeTag})${this._nativeAbrCapHeight ? ' · Ağa Göre' : ''}`, active: curCap === 0 },
+          { id: -1080, label: '🎬 1080p Full HD', active: curCap === 1080 },
+          { id: -720, label: '🎬 720p HD', active: curCap === 720 },
+          { id: -480, label: '📶 480p (Düşük Veri)', active: curCap === 480 },
+          { id: -360, label: '📶 360p (En Hızlı)', active: curCap === 360 },
+        ];
+      }
       const vw = this.video?.videoWidth || 0;
       const vh = this.video?.videoHeight || 0;
       const lbl = (vw >= 3200 || vh >= 2000) ? '4K UHD (2160p)' : (vw >= 1800 || vh >= 1000) ? '1080p Full HD' : (vw >= 1200 || vh >= 680) ? '720p HD' : (vh > 0 ? `${vh}p` : 'Otomatik Akış');
       return [{ id: 0, label: `✨ ${lbl} (Doğrudan Akış)`, active: true }];
     }
-    const isAuto = Boolean(this.hls.autoLevelEnabled);
+    const isAuto = !this.abr?.manualLocked;
     const cur = this.hls.currentLevel;
-    const items = levels.map((l, idx) => {
-      const w = l.width || 0, h = l.height || 0;
-      const effW = Math.max(w, Math.round(h * 16 / 9));
-      const tag = effW >= 3200 ? '4K UHD (2160p)' : effW >= 1800 ? '1080p Full HD' : effW >= 1200 ? '720p HD' : `${h || 720}p`;
-      return { id: idx, label: `🎬 ${tag}${w && h ? ` (${w}×${h})` : ''}`, active: !isAuto && cur === idx };
-    });
-    items.push({ id: -1, label: '⚡ Otomatik (En Yüksek HD)', active: isAuto });
-    return items;
+    const st = this.abr?.getStatus(cur, this.video?.videoHeight || 0, Number(this.hls.bandwidthEstimate || 0));
+    const autoDetail = st?.tag ? ` (${st.tag}${st.estMbps > 0 ? ` · ${st.estMbps} Mbps` : ''})` : '';
+    const autoItem = { id: -1, label: `⚡ Otomatik${autoDetail}`, active: isAuto };
+    const sortedItems = levels
+      .map((l, idx) => {
+        const w = l.width || 0, h = l.height || 0, bw = l.bitrate || 0;
+        const effW = Math.max(w, Math.round(h * 16 / 9));
+        const tag = effW >= 3200 ? '4K UHD (2160p)' : effW >= 1800 ? '1080p Full HD' : effW >= 1200 ? '720p HD' : `${h || 480}p`;
+        const mbps = bw > 100000 ? ` · ${(bw / 1000000).toFixed(1)} Mbps` : '';
+        return {
+          id: idx,
+          _sort: (h || Math.round(bw / 4500)),
+          label: `🎬 ${tag}${mbps}`,
+          active: !isAuto && cur === idx,
+        };
+      })
+      .sort((a, b) => b._sort - a._sort)
+      .map(({ _sort, ...rest }) => rest);
+    return [autoItem, ...sortedItems];
   }
   setQualityLevel(idx) {
-    if (!this.hls) return;
     const n = Number(idx);
-    if (n >= 0) this.hls.autoLevelCapping = -1;
-    this.hls.currentLevel = n;
-    this.events.onTracksChanged?.();
+    if (this.hls) {
+      clearTimeout(this._abrRestoreAutoTimer);
+      if (n < 0) {
+        const res = this.abr?.setAutoMode();
+        this.hls.autoLevelCapping = res?.capHlsIndex ?? -1;
+        this.hls.currentLevel = -1;
+        this.hls.nextLevel = -1;
+      } else {
+        this.abr?.setManualLevel(n);
+        this.hls.autoLevelCapping = -1;
+        this.hls.currentLevel = n;
+      }
+      this.events.onTracksChanged?.();
+      return;
+    }
+    if (this.useNativeHls && /\/api\/rave\/stream(?:\?|_manifest\?)/i.test(String(this.currentUrl || ''))) {
+      const targetH = n === -1 ? 0 : Math.abs(n);
+      this._nativeAbrManualHeight = targetH;
+      this._nativeAbrCapHeight = targetH || (isLowBandwidthMode() ? 480 : 0);
+      const nextUrl = withEdgeAbrParams(this.currentUrl, { maxHeight: this._nativeAbrCapHeight, lowStart: targetH === 0 });
+      if (nextUrl !== this.currentUrl && typeof this._loadCandidateUrl === 'function') {
+        this._loadCandidateUrl(nextUrl);
+      }
+      this.events.onTracksChanged?.();
+    }
   }
   _reportStreamHealth(rawUrl, ok, extra = {}) {
     try {
@@ -2230,6 +2492,15 @@ export class Html5Adapter {
     clearTimeout(this._pipPauseTimer);
     clearTimeout(this.watchdogTimer);
     clearTimeout(this._hlsRetryTimer);
+    clearInterval(this._abrTickTimer);
+    clearTimeout(this._abrRestoreAutoTimer);
+    if (this._netChangeHandler && typeof navigator !== 'undefined') {
+      const c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+      try { c?.removeEventListener?.('change', this._netChangeHandler); } catch (_) {}
+      this._netChangeHandler = null;
+    }
+    this.abr = null;
+    this.abrGraceUntil = 0;
     this._syncAndroidPipState(false);
     if (typeof window !== 'undefined' && window.isWatchlivoNativeIOS && !window.__kinoxHost?._nativeIosPipActive) {
       try { window.watchlivoNativePiP?.('stop', {}); } catch (_) {}

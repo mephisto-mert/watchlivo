@@ -180,7 +180,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261120_v227", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261120_v228", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {

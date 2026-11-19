@@ -796,6 +796,8 @@ export async function handleEdgeHlsManifest(url, env) {
   }
   const cleanText = filterM3u8AdDiscontinuities(text);
   const isMaster = cleanText.includes("#EXT-X-STREAM-INF");
+  const maxHeightParam = Math.max(0, Math.min(2160, Number(url.searchParams.get("max_h") || 0) || 0));
+  const abrLowStart = url.searchParams.get("abr_low") === "1";
   const lines = cleanText.split(/\r?\n/);
   const out = await Promise.all(lines.map(async (line) => {
     const trimmed = line.trim();
@@ -816,15 +818,98 @@ export async function handleEdgeHlsManifest(url, env) {
     const ext = /\.m4s(\?|$)/i.test(abs) ? ".m4s" : /\.mp4(\?|$)/i.test(abs) ? ".mp4" : /\.vtt(\?|$)/i.test(abs) ? ".vtt" : ".ts";
     return await buildSignedProxyPath(abs, ref, ext, env);
   }));
-  return new Response(out.join("\n"), {
+  let finalBody = out.join("\n");
+  let variantHeader = "";
+  if (isMaster) {
+    const adapted = adaptMasterM3u8Variants(out, { maxHeight: maxHeightParam, lowStart: abrLowStart });
+    finalBody = adapted.body;
+    variantHeader = adapted.heights.join(",");
+  }
+  const respHeaders = {
+    "Content-Type": "application/vnd.apple.mpegurl",
+    "Access-Control-Allow-Origin": "*",
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (variantHeader) {
+    respHeaders["X-Watchlivo-Variants"] = variantHeader;
+    respHeaders["Access-Control-Expose-Headers"] = "X-Watchlivo-Variants";
+  }
+  return new Response(finalBody, {
     status: 200,
-    headers: {
-      "Content-Type": "application/vnd.apple.mpegurl",
-      "Access-Control-Allow-Origin": "*",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-    },
+    headers: respHeaders,
   });
+}
+
+export function adaptMasterM3u8Variants(rewrittenLines, { maxHeight = 0, lowStart = false } = {}) {
+  const lines = Array.isArray(rewrittenLines) ? rewrittenLines : String(rewrittenLines || "").split(/\r?\n/);
+  const prefix = [];
+  const variants = [];
+  const tail = [];
+  let seenFirstVariant = false;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const ln = lines[i];
+    const trimmed = String(ln || "").trim();
+    if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
+      seenFirstVariant = true;
+      const block = [ln];
+      let j = i + 1;
+      while (j < lines.length) {
+        const nxt = String(lines[j] || "").trim();
+        block.push(lines[j]);
+        if (nxt && !nxt.startsWith("#")) {
+          break;
+        }
+        j += 1;
+      }
+      const resM = trimmed.match(/RESOLUTION=\d+x(\d+)/i);
+      const bwM = trimmed.match(/BANDWIDTH=(\d+)/i);
+      const height = resM ? Number(resM[1]) : 0;
+      const bandwidth = bwM ? Number(bwM[1]) : 0;
+      variants.push({ lines: block, height, bandwidth, order: variants.length });
+      i = j;
+      continue;
+    }
+    if (!seenFirstVariant) prefix.push(ln);
+    else tail.push(ln);
+  }
+
+  const heights = [...new Set(variants.map((v) => v.height).filter((h) => h > 0))].sort((a, b) => a - b);
+  if (variants.length <= 1 || (!maxHeight && !lowStart)) {
+    return { body: lines.join("\n"), heights };
+  }
+
+  const sortAsc = (arr) => [...arr].sort((a, b) => {
+    const ha = a.height || Math.round(a.bandwidth / 4500);
+    const hb = b.height || Math.round(b.bandwidth / 4500);
+    return (ha - hb) || (a.bandwidth - b.bandwidth) || (a.order - b.order);
+  });
+
+  let selected = variants;
+  if (maxHeight > 0) {
+    const maxBwFallback = maxHeight <= 360 ? 1_100_000 : maxHeight <= 480 ? 1_900_000 : maxHeight <= 720 ? 3_800_000 : 7_500_000;
+    const filtered = variants.filter((v) => (v.height > 0 ? v.height <= maxHeight + 40 : (v.bandwidth > 0 && v.bandwidth <= maxBwFallback)));
+    if (filtered.length > 0) {
+      selected = filtered;
+    } else {
+      // Never empty the master playlist: fall back to the single lowest variant available.
+      selected = [sortAsc(variants)[0]];
+    }
+  }
+
+  if (lowStart && selected.length > 1) {
+    // Put lowest variant FIRST so Apple AVPlayer (iOS Safari / IPA) starts instantly with zero stall
+    // and naturally scales up to higher variants listed right below when bandwidth allows.
+    selected = sortAsc(selected);
+  }
+
+  const rebuilt = [
+    ...prefix,
+    ...selected.flatMap((v) => v.lines),
+    ...tail,
+  ];
+  return { body: rebuilt.join("\n"), heights };
 }
 
 async function replaceAsyncUri(line, base, ref, env, isMediaPlaylist) {

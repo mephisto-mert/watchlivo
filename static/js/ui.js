@@ -1,5 +1,5 @@
 // VORTEX UI core: element helper, icons, popups (Rave PopUp parity), toasts, and Dark Theme/Schema studio.
-import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261120_v227';
+import { state, setUiPref, transitionTheme, THEME_SCHEMAS } from './store.js?v=20261120_v228';
 
 const SVG = (d, extra = '') => `<svg class="icon" aria-hidden="true" focusable="false" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 
@@ -611,7 +611,7 @@ export function openThemeModal() {
         href: '/download/ipa',
         download: 'Watchlivo.ipa',
         onclick: () => toast('🍎 iPhone IPA indiriliyor...', 4000)
-      }, '🍎 iPhone IPA İndir (v1.2)'),
+      }, '🍎 iPhone IPA İndir (v2.2.8)'),
       h('a', {
         class: 'btn wl-btn-apk-dl',
         href: '/download/Watchlivo-v2.0.apk',
@@ -638,8 +638,8 @@ export function openDownloadModal() {
         h('div', { class: 'wl-download-icon' }, h('span', { style: { fontSize: '1.45rem' } }, '🍎')),
         h('div', { class: 'wl-download-info' },
           h('b', {}, 'iPhone & iPad (iOS IPA)'),
-          h('small', {}, 'v1.2.0 • iOS 15+ Arka Plan PiP & AltStore / TrollStore'),
-          h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi ve arka plan ses desteği.')
+          h('small', {}, 'v2.2.8 • iOS 16+ Native SwiftUI • PiP, Google Giriş & AltStore / SideStore / TrollStore'),
+          h('p', {}, 'Uygulamadan çıkınca tam sistem PiP penceresi, kamera/mikrofon ve arka plan ses desteği.')
         ),
         h('div', { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
           h('a', {

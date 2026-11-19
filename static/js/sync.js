@@ -1,6 +1,6 @@
 // Port of Rave's VideoPlayerSync (common.deobf.js @587800/@730900), adapter-agnostic.
 // Mesh state is authoritative: {meshStateStatus, meshStatePosition, meshStateTime, meshStatePlaybackSpeed}.
-import { isRoomMediaPlaying } from './store.js?v=20261120_v227';
+import { isRoomMediaPlaying } from './store.js?v=20261120_v228';
 
 const CYCLE_MS = 1000;
 const JUMP_DELTA = 4.2;
@@ -374,6 +374,11 @@ export class SyncEngine {
       this.pendingSeekAt = 0;
     }
     if ((stateChanged && abs > 2.5 && now > this.seekUntil) || abs > JUMP_DELTA) {
+      if (!stateChanged && ad.abrGraceUntil && now < ad.abrGraceUntil && abs < 14.0) {
+        this.mode = 'inSync';
+        this.onStatus({ mode: 'inSync', delta: 0, curr, expected: curr, rate: base });
+        return 1200;
+      }
       const inBuf = buffered(expected);
       const behindAct = (this.didInitialSync && delta > 0 && delta < 10.0 && !stateChanged)
         ? this.decideBehindAction(ad, curr, expected, delta)

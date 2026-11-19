@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261120_v227';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext, ensureIosPlaybackAudioSession } from './players/audio-gain.js?v=20261120_v227';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261120_v227';
+import { toast } from './ui.js?v=20261120_v228';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext, ensureIosPlaybackAudioSession } from './players/audio-gain.js?v=20261120_v228';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261120_v228';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -1274,6 +1274,7 @@ export class Voice {
         this.stream?.getAudioTracks?.().forEach((t) => { try { t.stop(); } catch (_) {} });
         this.stream = null;
         try { if (navigator.audioSession && !window.isWatchlivoNativeIOS) navigator.audioSession.type = 'playback'; } catch (_) {}
+        try { if (window.isWatchlivoNativeIOS) window.watchlivoNativeAudioSession?.('playback'); } catch (_) {}
       } else {
         this.stream?.getTracks().forEach((t) => { t.enabled = false; });
       }
@@ -1353,6 +1354,7 @@ export class Voice {
       }
       this.micOn = true;
       this.inCall = true;
+      try { if (window.isWatchlivoNativeIOS) window.watchlivoNativeAudioSession?.('playAndRecord'); } catch (_) {}
       this._activateCallAudio();
       const aTrack = this.stream?.getAudioTracks?.()[0];
       if (aTrack) {

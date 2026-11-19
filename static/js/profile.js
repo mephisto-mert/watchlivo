@@ -1,12 +1,12 @@
 // Watchlivo Auth, Account & Profile System (Supabase Auth + Watchlivo Cloud — Zero Guest Mode).
-import { h, icons, popup, toast } from './ui.js?v=20261120_v227';
-import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261120_v227';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261120_v227';
+import { h, icons, popup, toast } from './ui.js?v=20261120_v228';
+import { api, getEdgeToken, isEdgeUnavailable, humanApiError } from './api.js?v=20261120_v228';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from './voice-note.js?v=20261120_v228';
 import {
   state, set, getFriends, isFriend, getWatchHistory,
   syncCloudUserMedia, resetCloudSyncState, pushYtPrefsAction, invalidateYtFeedCache,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite, pushPresenceHeartbeat,
-} from './store.js?v=20261120_v227';
+} from './store.js?v=20261120_v228';
 
 const KEY = 'vortex_profile_v2';
 const VAULT_KEY = 'watchlivo_accounts_vault';
@@ -712,6 +712,30 @@ export function profileSetup({ current = null, initialTab = null, dismissable = 
           }
         } catch (e) {
           console.warn('Desktop login api error:', e);
+        }
+        return;
+      }
+
+      if (window.isWatchlivoNativeIOS && typeof window.watchlivoNativeGoogleAuth === 'function') {
+        toast('Google ile güvenli oturum penceresi açılıyor...');
+        try {
+          const authRes = await window.watchlivoNativeGoogleAuth({ loginHint });
+          if (authRes?.ok && authRes.token) {
+            const meRes = await api('/api/auth/me', {
+              headers: { Authorization: `Bearer ${authRes.token}` },
+            });
+            if (meRes?.authenticated === true && meRes.user) {
+              const prof = saveProfile({ ...meRes.user, authToken: authRes.token, isGuest: false, verified: true });
+              finish(prof, `✓ ${prof.name} (@${prof.handle}) olarak Google ile giriş yapıldı`);
+              return;
+            }
+            showErr('Google oturumu doğrulanamadı. Lütfen tekrar deneyin.');
+          } else if (authRes?.error && !authRes.cancelled && !/iptal|zaman aşımı/i.test(String(authRes.error))) {
+            showErr('Giriş tamamlanamadı: ' + authRes.error);
+          }
+        } catch (e) {
+          console.warn('Native iOS Google auth error:', e);
+          showErr('Google giriş penceresi açılamadı. E-posta ile giriş yapabilirsiniz.');
         }
         return;
       }
