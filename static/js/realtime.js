@@ -1,8 +1,8 @@
 // Realtime transport: WebSocket first (Rave mesh socket parity), HTTP polling fallback + P2P DataChannel/BroadcastChannel bridge.
-import { clock } from './sync.js?v=20261119_v224';
-import { api } from './api.js?v=20261119_v224';
-import { state } from './store.js?v=20261119_v224';
-import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v224';
+import { clock } from './sync.js?v=20261119_v225';
+import { api } from './api.js?v=20261119_v225';
+import { state } from './store.js?v=20261119_v225';
+import { isRoomMediaPlaying, normalizeRoomMediaState } from './store.js?v=20261119_v225';
 
 const COUNTRY = ((navigator.language || '').split('-')[1] || '').toUpperCase().slice(0, 2);
 
@@ -331,7 +331,7 @@ export class MeshConnection {
 
   _dispatchHttpEvents(room, isInit) {
     if (!room) return;
-    const selfAllowedTypes = new Set(['chat', 'break_request', 'media_changed', 'poll_updated', 'msg_reacted', 'chat_cleared', 'skip_votes', 'hand_raised', 'queue_updated']);
+    const selfAllowedTypes = new Set(['chat', 'break_request', 'media_changed', 'poll_updated', 'msg_reacted', 'chat_cleared', 'skip_votes', 'hand_raised', 'queue_updated', 'vote_updated']);
     for (const ev of room.events || []) {
       if (!ev.id || this.seenEventIds.has(ev.id)) continue;
       this._addBounded(this.seenEventIds, ev.id);
@@ -604,7 +604,6 @@ export class MeshConnection {
         if (res.room.syncToken && res.room.syncToken !== this.syncToken) {
           this.syncToken = res.room.syncToken;
           try { sessionStorage.setItem(`vortex_st_${this.roomId}`, this.syncToken); } catch (e) { /* ignore */ }
-          if (!isPoll) this._emitP2p({ event: { type: 'room_state', room: res.room } });
         }
         const srvLastChatId = Array.isArray(res.room.chat) && res.room.chat.length ? String(res.room.chat[res.room.chat.length - 1]?.id || '') : '';
         const pVoiceSig = (res.room.participants || []).map((p) => `${p.id}:${p.muted}:${p.cam}:${p.screen}:${p.inCall}:${p.speaking}:${p.handRaised}:${p.isStageSpeaker}`).join(',');
@@ -633,6 +632,9 @@ export class MeshConnection {
           this.emitStatus('denied');
           this.close(false);
           this.onMessage?.({ type: 'password_required', roomId: this.roomId });
+        } else {
+          this.onMessage?.({ type: 'error', message: String(e.data.message || e.data.error) });
+          return true;
         }
       } else {
         this.httpFailCount = (this.httpFailCount || 0) + 1;

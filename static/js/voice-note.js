@@ -126,7 +126,8 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
   try {
     stream = await acquireMicStreamSafe();
   } catch (err) {
-    onError?.(err?.name === 'NO_GUM' ? 'Tarayıcınız mikrofon erişimini desteklemiyor' : 'Mikrofon izni verilmedi — tarayıcı adres çubuğundan mikrofon iznini açın');
+    const noGum = err?.name === 'NO_GUM' || err?.message === 'NO_GUM';
+    onError?.(noGum ? 'Tarayıcınız mikrofon erişimini desteklemiyor' : 'Mikrofon izni verilmedi — tarayıcı adres çubuğundan mikrofon iznini açın');
     return null;
   }
   if (typeof window !== 'undefined') window.vortexSetVoiceNotePlaying?.(true);
@@ -249,7 +250,11 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
   };
   rec.onstop = () => {
     cleanupStreams();
-    if (!wantSend || !chunks.length) return;
+    if (!wantSend) return;
+    if (!chunks.length) {
+      onError?.('Ses kaydı alınamadı — lütfen tekrar deneyin');
+      return;
+    }
     const elapsedMs = Date.now() - startedAt;
     const rawMime = (rec.mimeType || mimeType || 'audio/mp4').replace(/^video\/mp4/i, 'audio/mp4');
     const blob = new Blob(chunks, { type: rawMime });
@@ -261,7 +266,10 @@ export async function startUniversalVoiceRecorder({ maxSeconds = 24, apiFn = nul
     const reader = new FileReader();
     reader.onloadend = async () => {
       let dataUrl = String(reader.result || '').replace(/^data:video\/mp4/i, 'data:audio/mp4');
-      if (!dataUrl.includes(';base64,')) return;
+      if (!dataUrl.includes(';base64,')) {
+        onError?.('Ses kaydı işlenemedi');
+        return;
+      }
       const normPeaks = peaks.length >= 4 ? peaks.slice(-24) : [0.3, 0.65, 0.85, 0.5, 0.75, 0.55];
       let payload = { dataUrl, mime: rawMime, duration: Number(durSec.toFixed(1)), peaks: normPeaks };
       if (typeof apiFn === 'function') {
@@ -436,10 +444,16 @@ export function buildUniversalAudioNotePlayer(an, { h, toast } = {}) {
           activeBlobUrl = dataUrlToBlobUrl(an.dataUrl);
           if (activeBlobUrl) {
             el.src = activeBlobUrl;
-            el.play().catch(() => { playBtn.textContent = '▶'; window.vortexSetVoiceNotePlaying?.(false); revokeBlob(true); });
+            el.play().catch(() => {
+              if (activeGlobalVoiceAudio === el) activeGlobalVoiceAudio = null;
+              playBtn.textContent = '▶';
+              window.vortexSetVoiceNotePlaying?.(false);
+              revokeBlob(true);
+            });
             return;
           }
         }
+        if (activeGlobalVoiceAudio === el) activeGlobalVoiceAudio = null;
         playBtn.textContent = '▶';
         window.vortexSetVoiceNotePlaying?.(false);
         revokeBlob(true);

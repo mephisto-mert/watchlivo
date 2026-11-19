@@ -1,17 +1,17 @@
 // Mesh controller: connection, server messages, playback actions, play-mode rules (Rave Mesh parity).
-import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v224';
-import { api } from '../api.js?v=20261119_v224';
-import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v224';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v224';
-import { MeshConnection } from '../realtime.js?v=20261119_v224';
-import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v224';
-import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v224';
-import { buildLayout } from './mesh-layout.js?v=20261119_v224';
-import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v224';
-import { Voice } from '../voice.js?v=20261119_v224';
-import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v224';
-import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v224';
-import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v224';
+import { h, popup, toast, setBackground } from '../ui.js?v=20261119_v225';
+import { api } from '../api.js?v=20261119_v225';
+import { state, set, isLeader, isHostOnly, isCreatorSelf, isActiveTimeKeeper, isRoomMediaPlaying, normalizeRoomMediaState, saveWatchProgress, saveMusicHistory, getMusicHistory, pushPresenceHeartbeat } from '../store.js?v=20261119_v225';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v225';
+import { MeshConnection } from '../realtime.js?v=20261119_v225';
+import { PlayerHost, mediaKey } from '../players/host.js?v=20261119_v225';
+import { SyncEngine, clock, expectedPosition } from '../sync.js?v=20261119_v225';
+import { buildLayout } from './mesh-layout.js?v=20261119_v225';
+import { thumbFor, rememberRoom, getRememberedRoom, forgetRoom } from './lobby.js?v=20261119_v225';
+import { Voice } from '../voice.js?v=20261119_v225';
+import { playRoomSfx, playEmojiSfx } from './chat.js?v=20261119_v225';
+import { ensureHlsJs } from '../players/hls-loader.js?v=20261119_v225';
+import { closeSharedAudioContext } from '../players/audio-gain.js?v=20261119_v225';
 
 let ctx = null;
 
@@ -132,7 +132,8 @@ const deviceLabel = () => {
 
 function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } = {}) {
   if (!room) return;
-  if (!room.curated && room.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(room.media.title))) {
+  const hasCustomRoomName = Boolean(room.customName && room.name && !/^Watchlivo (Sinema )?Odası$/i.test(String(room.name).trim()));
+  if (!room.curated && !hasCustomRoomName && room.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(room.media.title))) {
     room = { ...room, name: String(room.media.title).trim().slice(0, 80) };
   }
   const curRoom = state.mesh;
@@ -164,8 +165,8 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
     }
   }
   if (ctx && curRoom) {
-    const prevHost = curRoom.hostId || curRoom.host_id || '';
-    const nextHost = room.hostId || room.host_id || '';
+    const prevHost = (curRoom.participants || []).find((p) => p?.isHost)?.id || curRoom.hostId || curRoom.host_id || '';
+    const nextHost = (room.participants || []).find((p) => p?.isHost)?.id || room.hostId || room.host_id || '';
     if (prevHost && nextHost && prevHost !== nextHost) {
       ctx.lastLeaderActionAt = 0;
     }
@@ -217,7 +218,14 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
   if (curRoom && isTimeKeeper() && nextKey && nextKey === prevKey) {
     const curMedia = curRoom.media || {};
     const nextMedia = room.media || {};
-    if ((ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 6500) || ctx?.userPaused) {
+    const otherPeerActed = Boolean(
+      room.playMode === 'cohost' &&
+      nextMedia.lastActionBy &&
+      state.self?.name &&
+      nextMedia.lastActionBy !== state.self.name &&
+      Number(nextMedia.updatedAt || 0) > (Number(ctx?.lastLeaderActionAt || 0) / 1000)
+    );
+    if (!otherPeerActed && ((ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 4500) || (ctx?.userPaused && room.playMode !== 'cohost'))) {
       const inSeekGrace = Boolean(ctx?.lastSeekAt && Date.now() - ctx.lastSeekAt < 4500 && Number.isFinite(ctx.lastSeekTarget));
       const pos = inSeekGrace ? expectedPosition(curMedia) : (ctx?.host.adapter?.getTime?.() ?? curMedia.meshStatePosition);
       const isPausedNow = Boolean(ctx?.userPaused || curMedia.meshStateStatus === 'PAUSED' || curMedia.playing === false);
@@ -239,7 +247,7 @@ function applyRoom(room, { reload = false, viaPoll = false, fromInit = false } =
       room = { ...room, privacy: ctx.lastPrivacy };
     }
   }
-  if (ctx && isLeader()) {
+  if (ctx && isHostOnly()) {
     let savedPriv = ctx.lastPrivacy || '';
     if (!savedPriv && room.id) {
       try { savedPriv = sessionStorage.getItem(`vortex_priv_${room.id}`) || ''; } catch (e) { /* ignore */ }
@@ -613,10 +621,25 @@ function onMessage(data) {
         if (isTimeKeeper()) actions.heartbeat(undefined, true);
       }
       break;
-    case 'sync':
+    case 'sync': {
       if (data.cid && data.cid === state.clientId) break;
-      if (data.viaP2p && room && ['leader', 'vote', 'autoplay'].includes(room.playMode || 'leader') && data.cid && data.cid !== (room.hostId || room.host_id) && !(room.coHosts || room.co_hosts || []).includes(data.cid)) break;
-      if (isTimeKeeper() && (data.action === 'poll_sync' || data.action === 'heartbeat') && (ctx?.userPaused || (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 6500))) break;
+      if (data.viaP2p && room && ['leader', 'vote', 'autoplay'].includes(room.playMode || 'leader') && data.cid) {
+        const senderP = (room.participants || []).find((p) => p && p.id === data.cid);
+        const senderPriv = Boolean(
+          senderP?.isHost || senderP?.isCoHost || senderP?.isCreator ||
+          data.cid === (room.hostId || room.host_id) ||
+          (room.coHosts || room.co_hosts || []).includes(data.cid)
+        );
+        if (!senderPriv) break;
+      }
+      const isCohostOverride = Boolean(
+        room?.playMode === 'cohost' &&
+        data.media?.lastActionBy &&
+        state.self?.name &&
+        data.media.lastActionBy !== state.self.name &&
+        Number(data.media.updatedAt || 0) > (Number(ctx?.lastLeaderActionAt || 0) / 1000)
+      );
+      if (isTimeKeeper() && !isCohostOverride && (data.action === 'poll_sync' || data.action === 'heartbeat') && ((ctx?.userPaused && room?.playMode !== 'cohost') || (ctx?.lastLeaderActionAt && Date.now() - ctx.lastLeaderActionAt < 4500))) break;
       if (room && data.media) {
         const incTime = Number(data.media.meshStateTime || data.media.updatedAt || 0);
         const curTime = Number(room.media?.meshStateTime || room.media?.updatedAt || 0);
@@ -705,6 +728,7 @@ function onMessage(data) {
         ctx.layout.update();
       }
       break;
+    }
     case 'chat':
       if (room && data.message) {
         if (data.message.id && ctx?.seenChatIds?.has(data.message.id)) break;
@@ -775,7 +799,16 @@ function onMessage(data) {
     case 'queue_updated': case 'vote_updated': if (room) { set({ mesh: { ...room, queue: data.queue, voteEndsAt: data.voteEndsAt ?? room.voteEndsAt } }); ctx.layout.update(); } break;
     case 'skip_votes': if (room) { set({ mesh: { ...room, skip_votes: data.votes, skipNeeded: data.needed } }); ctx.layout.update(); } break;
     case 'hand_raised': {
-      if (data.cid && data.cid !== state.clientId && isLeader()) {
+      const isRaised = Boolean(data.raised);
+      if (room && data.cid) {
+        const nextParts = (room.participants || []).map((p) => (p && p.id === data.cid ? { ...p, handRaised: isRaised } : p));
+        const nextRoom = { ...room, participants: nextParts };
+        set({ mesh: nextRoom });
+        if (ctx?.conn) ctx.conn.lastRoom = nextRoom;
+        ctx.layout.update();
+      }
+      const canGrant = isHostOnly() || (room?.co_hosts || []).includes(state.clientId) || Boolean((room?.participants || []).find((p) => p && p.id === state.clientId)?.isCoHost);
+      if (isRaised && data.cid && data.cid !== state.clientId && canGrant) {
         const uName = data.user || 'Bir izleyici';
         toast(`✋ ${uName} konuşmak için söz istiyor!`, 6000, {
           actionLabel: '🎤 Söz Ver',
@@ -860,7 +893,7 @@ function onMessage(data) {
       break;
     }
     case 'webrtc_offer': case 'webrtc_answer': case 'webrtc_ice': ctx?.voice?.onSignal(data); break;
-    case 'error': toast(data.message || 'İşlem reddedildi'); break;
+    case 'error': toast(data.message || data.error || 'İşlem reddedildi'); break;
     default: break;
   }
 }
@@ -937,7 +970,6 @@ const actions = {
     const expNow = expectedPosition(state.mesh?.media);
     if ((!forceAnchor && t < 0.15) || (expNow > 30 && t < 2 && ad.initialSeekPending > 5)) return;
     const playing = !ctx.userPaused;
-    if (isActiveTimeKeeper()) ctx.lastLeaderActionAt = Date.now();
     if (ctx.sync) ctx.sync.lastLeaderBroadcast = performance.now();
     localState({ meshStateStatus: playing ? 'PLAYING' : 'PAUSED', meshStatePosition: t });
     const curM = state.mesh?.media;
@@ -1124,7 +1156,8 @@ const actions = {
   clearChat() {
     if (!ctx) return;
     const coHosts = state.mesh?.co_hosts || state.mesh?.coHosts || [];
-    if (!isHostOnly() && !coHosts.includes(state.clientId)) {
+    const meP = (state.mesh?.participants || []).find((p) => p && p.id === state.clientId);
+    if (!isHostOnly() && !coHosts.includes(state.clientId) && !meP?.isCoHost) {
       toast('Sohbeti yalnızca oda lideri temizleyebilir');
       return;
     }
@@ -1167,18 +1200,24 @@ const actions = {
     if (!msgId || !emoji) return;
     const room = state.mesh;
     const myName = state.self?.name || 'Misafir';
-    const myBaseName = String(myName).replace(/\s*#\d{3,6}$/, '').trim();
+    const myBaseName = String(myName).replace(/\s*#[a-z0-9_-]{3,8}$/i, '').trim();
+    const myCidTail = state.clientId ? String(state.clientId).slice(-4) : '';
+    const myReactTag = myCidTail ? `${myBaseName || myName}#${myCidTail}` : myName;
     if (room && Array.isArray(room.chat)) {
       const chatList = room.chat.map((m) => {
         if (m.id !== msgId) return m;
         const reacts = { ...(m.reactions || {}) };
         const users = Array.isArray(reacts[emoji]) ? [...reacts[emoji]] : [];
-        let idx = users.indexOf(myName);
+        let idx = users.indexOf(myReactTag);
+        if (idx < 0) idx = users.indexOf(myName);
         if (idx < 0 && myBaseName) {
-          idx = users.findIndex((u) => String(u || '').replace(/\s*#\d{3,6}$/, '').trim() === myBaseName);
+          idx = users.findIndex((u) => {
+            const s = String(u || '');
+            return s === state.clientId || (!s.includes('#') && s.trim() === myBaseName);
+          });
         }
         if (idx >= 0) users.splice(idx, 1);
-        else users.push(myName);
+        else users.push(myReactTag);
         if (users.length) reacts[emoji] = users;
         else delete reacts[emoji];
         return { ...m, reactions: reacts };
@@ -1215,23 +1254,40 @@ const actions = {
     ctx.conn.send('break_request', { actionId: actId, videoTime: curPos });
   },
   hostAction(action, extra = {}) {
+    const cleanExtra = { ...extra };
     if (action === 'set_privacy' && state.mesh) {
+      if (!isHostOnly()) {
+        toast('Bu ayarları yalnızca oda lideri değiştirebilir');
+        return;
+      }
       const patch = {};
-      if (extra.privacy) {
-        patch.privacy = extra.privacy;
-        if (ctx) { ctx.lastPrivacy = extra.privacy; ctx.lastPrivacyAt = Date.now(); }
-        try { sessionStorage.setItem(`vortex_priv_${state.mesh.id}`, extra.privacy); } catch (e) { /* ignore */ }
+      if (cleanExtra.privacy) {
+        patch.privacy = cleanExtra.privacy;
+        if (ctx) { ctx.lastPrivacy = cleanExtra.privacy; ctx.lastPrivacyAt = Date.now(); }
+        try { sessionStorage.setItem(`vortex_priv_${state.mesh.id}`, cleanExtra.privacy); } catch (e) { /* ignore */ }
         const privNotice = {
           public: '🌐 Oda gizliliği "Herkese Açık" olarak ayarlandı',
           friends: '👥 Oda gizliliği "Sadece Arkadaşlar" olarak ayarlandı',
           private: '🔒 Oda gizliliği "Gizli Oda (Sadece Davet)" olarak ayarlandı',
-        }[extra.privacy];
+        }[cleanExtra.privacy];
         if (privNotice) toast(privNotice);
       }
-      if (extra.playMode) patch.playMode = extra.playMode;
-      if (extra.voipMode) patch.voipMode = extra.voipMode;
-      if (typeof extra.name === 'string' && extra.name.trim()) patch.name = extra.name.trim();
-      if (typeof extra.password === 'string') patch.hasPassword = Boolean(extra.password.trim());
+      if (cleanExtra.playMode) patch.playMode = cleanExtra.playMode;
+      if (cleanExtra.voipMode) patch.voipMode = cleanExtra.voipMode;
+      if (typeof cleanExtra.name === 'string' && cleanExtra.name.trim()) {
+        patch.name = cleanExtra.name.trim();
+        patch.customName = true;
+      }
+      if (typeof cleanExtra.password === 'string') {
+        const cleanPwd = cleanExtra.password.trim();
+        cleanExtra.password = cleanPwd;
+        patch.hasPassword = Boolean(cleanPwd);
+        if (ctx?.conn) ctx.conn.password = cleanPwd;
+        try {
+          if (cleanPwd) sessionStorage.setItem(`vortex_pwd_${state.mesh.id}`, cleanPwd);
+          else sessionStorage.removeItem(`vortex_pwd_${state.mesh.id}`);
+        } catch (_) {}
+      }
       if (Object.keys(patch).length) {
         const updatedRoom = { ...state.mesh, ...patch };
         set({ mesh: updatedRoom });
@@ -1239,11 +1295,13 @@ const actions = {
         ctx?.layout.update();
       }
     }
-    ctx.conn.send('host_action', { action, ...extra });
+    ctx.conn.send('host_action', { action, ...cleanExtra });
   },
   toggleStageMode() {
-    if (!isLeader() && !isHostOnly()) {
-      toast('Sahne Modunu yalnızca oda lideri açıp kapatabilir');
+    const meP = (state.mesh?.participants || []).find((p) => p && p.id === state.clientId);
+    const canStage = isHostOnly() || (state.mesh?.co_hosts || []).includes(state.clientId) || Boolean(meP?.isCoHost);
+    if (!canStage) {
+      toast('Sahne Modunu yalnızca oda lideri veya ortak lider açıp kapatabilir');
       return;
     }
     const nextMode = state.mesh?.voipMode === 'stage' ? 'all' : 'stage';
@@ -1268,7 +1326,9 @@ const actions = {
     toast(nextRaised ? '✋ Söz isteğin oda liderine gönderildi!' : '✋ Söz isteğin geri çekildi');
   },
   toggleStageSpeaker(targetId) {
-    if (!targetId || (!isLeader() && !isHostOnly())) return;
+    const meP = (state.mesh?.participants || []).find((p) => p && p.id === state.clientId);
+    const canStage = isHostOnly() || (state.mesh?.co_hosts || []).includes(state.clientId) || Boolean(meP?.isCoHost);
+    if (!targetId || !canStage) return;
     ctx?.conn?.send('host_action', { action: 'toggle_stage_speaker', targetId });
   },
   async ended() {
@@ -1287,7 +1347,7 @@ const actions = {
       ctx.conn.send('video_ended', { key: mediaKey(m) });
       return;
     }
-    if (m.isMusic || m.mediaType === 'music') {
+    if ((m.isMusic || m.mediaType === 'music') && (isTimeKeeper() || (state.mesh?.participants || []).length <= 1)) {
       let simPool = (Array.isArray(m.similar) && m.similar.length)
         ? m.similar
         : (Array.isArray(window.__kinoxCachedSimilar) && window.__kinoxCachedSimilar.length ? window.__kinoxCachedSimilar : []);

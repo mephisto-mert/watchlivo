@@ -1,15 +1,15 @@
 // Player overlay (Rave VideoPlayerControlsFC + MeshVideoPlayer pre-message/error states).
-import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v224';
-import { api, qs as buildQs } from '../api.js?v=20261119_v224';
-import { state, isLeader, isHostOnly, canSelectVideo, setView, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v224';
-import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v224';
-import { getProvider } from '../providers.js?v=20261119_v224';
-import { expectedPosition } from '../sync.js?v=20261119_v224';
-import { thumbFor } from './lobby.js?v=20261119_v224';
-import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v224';
-import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v224';
-import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v224';
-import { avatar } from '../profile.js?v=20261119_v224';
+import { h, icons, fmtTime, fill, popup, toast } from '../ui.js?v=20261119_v225';
+import { api, qs as buildQs } from '../api.js?v=20261119_v225';
+import { state, isLeader, isHostOnly, canSelectVideo, setView, setUiPref, saveWatchProgress, isRoomMediaPlaying } from '../store.js?v=20261119_v225';
+import { resumeSharedAudioContext, ensureIosPlaybackAudioSession } from '../players/audio-gain.js?v=20261119_v225';
+import { getProvider } from '../providers.js?v=20261119_v225';
+import { expectedPosition } from '../sync.js?v=20261119_v225';
+import { thumbFor } from './lobby.js?v=20261119_v225';
+import { renderSeriesPicker, launchProviderWindow } from '../accounts.js?v=20261119_v225';
+import { resolveCatalogItem } from './selection-kinds.js?v=20261119_v225';
+import { getSubPrefs, setSubPrefs } from '../players/subtitles.js?v=20261119_v225';
+import { avatar } from '../profile.js?v=20261119_v225';
 
 const VIDEO_FILTERS = {
   normal: { label: '🎬 Standart (Orijinal)', css: 'none' },
@@ -692,7 +692,7 @@ export function buildControls(frame, ctx) {
       window.__lastSnapshotDataUrl = dataUrl;
       const a = document.createElement('a');
       a.href = dataUrl;
-      const stamp = fmtTime(curSec).replace(':', 'm') + 's';
+      const stamp = fmtTime(curSec).replace(/:/g, '-');
       a.download = `watchlivo-sahne-${stamp}.png`;
       a.click();
       showOverlay(`📸 Sahne yakalandı (${fmtTime(curSec)})`, 2200);
@@ -966,6 +966,9 @@ export function buildControls(frame, ctx) {
   if (typeof document !== 'undefined') {
     document.addEventListener('pointerdown', onDocMenuOutside, { passive: true });
     document.addEventListener('focusin', onDocMenuOutside, { passive: true });
+  }
+  if (typeof window !== 'undefined') {
+    window.__vortexCloseControlsMenu = closeMenu;
   }
 
   const rippleLeft = h('div', { class: 'ctl-seek-ripple left hidden' },
@@ -1311,17 +1314,7 @@ export function buildControls(frame, ctx) {
     if (e.key === ' ' && (tag === 'button' || tag === 'select' || tag === 'a')) return;
     if (e.key === ' ' || e.key === 'k') {
       e.preventDefault();
-      if (!isLeader()) {
-        const roomPlaying = isRoomMediaPlaying(state.mesh?.media);
-        if (roomPlaying && host.adapter?.isPaused?.()) {
-          host.adapter.play();
-          ctx.sync?.kick();
-        } else {
-          toast('Videoyu yalnızca oda başkanı duraklatabilir veya başlatabilir');
-        }
-      } else {
-        actions.toggle();
-      }
+      togglePlayPause();
       revealControls();
     }
     else if (e.key === 'ArrowLeft') {
@@ -1567,7 +1560,8 @@ export function buildControls(frame, ctx) {
     skipIntroBtn.classList.toggle('hidden', !(activeIntro && p >= Number(activeIntro.start || 0) && p <= Number(activeIntro.end || 0) - 2));
     const rem = d > 300 ? d - p : 9999;
     const curEpKey = m ? `${m.tmdbId || m.id || m.title}_${m.season || 1}_${m.episode || 1}` : '';
-    const nextSpecBanner = (m?.mediaType === 'tv' && m?.tmdbId) ? computeNextEpSpec(m, Number(m.season || 1), Number(m.episode || 1)) : null;
+    const queueEmpty = (state.mesh?.queue || []).length === 0;
+    const nextSpecBanner = (m?.mediaType === 'tv' && (m?.tmdbId || m?.seriesTitle || m?.title) && queueEmpty) ? computeNextEpSpec(m, Number(m.season || 1), Number(m.episode || 1)) : null;
     if (nextSpecBanner && !nextSpecBanner.isFinale && rem <= 35 && rem > 0 && cancelledNextEpKey !== curEpKey) {
       const nextEp = nextSpecBanner.episode;
       const curSeason = nextSpecBanner.season;
@@ -1612,7 +1606,7 @@ export function buildControls(frame, ctx) {
         const progEl = nextEpBanner.querySelector('.next-ep-progress-bar');
         if (progEl) progEl.style.width = `${pctCountdown.toFixed(1)}%`;
       }
-      if (rem <= 1.2 && isLeader()) triggerNextEpisode();
+      if (rem <= 1.2 && isLeader() && queueEmpty) triggerNextEpisode();
     } else {
       nextEpBanner.classList.add('hidden');
     }
@@ -1836,26 +1830,32 @@ export function buildControls(frame, ctx) {
         episode: String(m.episode || 1),
         refresh: '1',
       });
-      const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`, { timeout: 12000 });
-      if (fresh && fresh.url) {
-        m.url = fresh.url;
-        if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
-        if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
-        if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
-        host.key = '';
-        host.loadedUrl = '';
-        await host.setMedia(m, curPos, true);
-        ctx.conn?.send('resolve_media', { ...m, currentTime: curPos });
-        loading.classList.add('hidden');
-        showOverlay('✅ Yayın kaynağı yenilendi', 2200);
-        update();
-        return;
+      const wasPlaying = Boolean(!host.adapter?.isPaused?.() && isRoomMediaPlaying(m));
+      if (!state.mesh?.curated && !m.live) {
+        const fresh = await api(`/api/rave/resolve-catalog?${qs.toString()}`, { timeout: 12000 });
+        if (fresh && fresh.url) {
+          m.url = fresh.url;
+          if (Array.isArray(fresh.altUrls)) m.altUrls = fresh.altUrls;
+          if (Array.isArray(fresh.servers)) m.servers = fresh.servers;
+          if (Array.isArray(fresh.audioTracks) && fresh.audioTracks.length) m.audioTracks = fresh.audioTracks;
+          host.key = '';
+          host.loadedUrl = '';
+          await host.setMedia(m, curPos, wasPlaying);
+          if (isLeader()) {
+            ctx.conn?.send('resolve_media', { ...m, currentTime: curPos, playing: wasPlaying });
+          }
+          loading.classList.add('hidden');
+          showOverlay('✅ Yayın kaynağı yenilendi', 2200);
+          update();
+          return;
+        }
       }
     } catch (e) { /* ignore */ }
     if (m.url || m.videoId) {
+      const wasPlaying = Boolean(!host.adapter?.isPaused?.() && isRoomMediaPlaying(m));
       host.key = '';
       host.loadedUrl = '';
-      await host.setMedia(m, curPos, true);
+      await host.setMedia(m, curPos, wasPlaying);
       loading.classList.add('hidden');
       showOverlay('✅ Yayın kaynağı yeniden başlatıldı', 2200);
       update();
@@ -1885,7 +1885,7 @@ export function buildControls(frame, ctx) {
     const isAnimeMedia = (cm) => Boolean(cm && (cm.provider === 'anime' || cm.origLang === 'ja' || cm.type === 'anime' || cm.catalogProvider === 'anime' || /anime/i.test(String(cm.category || cm.genre || ''))));
     const audioTracks = rawAudioTracks.length
       ? rawAudioTracks
-      : (m.isMusic || m.isLive || !isAnimeMedia(m)
+      : (m.isMusic || m.live || state.mesh?.curated || !isAnimeMedia(m)
           ? [{ id: 'orig', label: '🎬 Orijinal Ses (HD)' }]
           : [
               { id: 'orig', label: '🎬 Orijinal Ses' },
@@ -2126,8 +2126,14 @@ export function buildControls(frame, ctx) {
                 : `${nextSrvUrl}&aud=tr`;
             }
             m.url = nextSrvUrl;
+            host.loadedUrl = nextSrvUrl;
             host.adapter?.switchStreamSource?.(nextSrvUrl);
             host.adapter?.subs?.onStreamFallbackUrl?.(nextSrvUrl);
+            if (isLeader() && !state.mesh?.curated) {
+              const curPos = Number(position() || m.currentTime || 0);
+              const playingNow = Boolean(!host.adapter?.isPaused?.() && isRoomMediaPlaying(m));
+              ctx.conn?.send('resolve_media', { ...m, url: nextSrvUrl, currentTime: curPos, playing: playingNow });
+            }
             showOverlay(srv.label, 2200);
             closeMenu();
             update();
@@ -2262,7 +2268,7 @@ export function buildControls(frame, ctx) {
     };
 
     if (view === 'effects') {
-      const duckOn = !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
+      const duckOn = state.uiPrefs?.voiceDucking !== false && !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
       menu.replaceChildren(
         backHeader('Sinema Efektleri & Araçlar', 'list'),
         buildSlidersPanel(),
@@ -2301,7 +2307,8 @@ export function buildControls(frame, ctx) {
             e.stopPropagation();
             const next = !duckOn;
             if (typeof host.setAutoDuckEnabled === 'function') host.setAutoDuckEnabled(next);
-            else { try { localStorage.setItem('vortex_voice_duck', next ? 'on' : 'off'); } catch (_) {} }
+            try { localStorage.setItem('vortex_voice_duck', next ? '1' : '0'); } catch (_) {}
+            setUiPref({ voiceDucking: next });
             renderMenuView('effects');
           },
         }, h('span', {}, '🎙️ Konuşurken Film Sesini Kıs'), h('span', {}, duckOn ? 'Açık' : 'Kapalı')),
@@ -2394,7 +2401,7 @@ export function buildControls(frame, ctx) {
         optIconLbl('audioWave', 'Ses & Dublaj (Audio)'),
         h('span', { class: 'dim', style: { fontSize: '.85em' } }, `${curAudioObj ? curAudioObj.label.replace(/^[^\s]+\s/, '') : 'Orijinal'} ›`)));
     }
-    if (!m.isMusic && !m.isLive && (rawServers.length > 0 || m.tmdbId)) {
+    if (!m.isMusic && !m.live && !state.mesh?.curated && (rawServers.length > 0 || m.tmdbId)) {
       const srvIdx = curSrvObj ? (rawServers.indexOf(curSrvObj) + 1) : 1;
       items.push(h('div', { class: 'opt', onclick: (e) => { e.stopPropagation(); renderMenuView('servers'); } },
         optIconLbl('globe', 'Yayın Sunucusu (Kaynak)'),
@@ -2425,7 +2432,7 @@ export function buildControls(frame, ctx) {
     },
       optIconLbl('volume', '📱 Kilit Ekranı & Arka Plan Oynatma'),
       h('span', { class: 'dim', style: { fontSize: '.85em' } }, bgAudioOn ? 'Açık ✓' : 'Kapalı')));
-    const autoDuckOn = localStorage.getItem('vortex_voice_duck') !== 'off';
+    const autoDuckOn = state.uiPrefs?.voiceDucking !== false && !['off', '0', 'false'].includes(String(localStorage.getItem('vortex_voice_duck') || '').toLowerCase());
     items.push(h('div', {
       class: `opt ${autoDuckOn ? 'on' : ''}`,
       id: 'ctl-opt-autoduck',
@@ -2433,7 +2440,8 @@ export function buildControls(frame, ctx) {
         e.stopPropagation();
         const nextDuck = !autoDuckOn;
         if (typeof host.setAutoDuckEnabled === 'function') host.setAutoDuckEnabled(nextDuck);
-        else { try { localStorage.setItem('vortex_voice_duck', nextDuck ? 'on' : 'off'); } catch (_) {} }
+        try { localStorage.setItem('vortex_voice_duck', nextDuck ? '1' : '0'); } catch (_) {}
+        setUiPref({ voiceDucking: nextDuck });
         showOverlay(nextDuck ? '🔉 Akıllı Ses Kısma: Açık' : '🔉 Akıllı Ses Kısma: Kapalı', 1800);
         renderMenuView('list');
       },
@@ -2918,7 +2926,7 @@ export function buildControls(frame, ctx) {
             title: String(m.seriesTitle || m.originalTitle || m.title || '').replace(/\s*[—–-]\s*\d+\.\s*Sezon.*$/i, '').trim(),
             mediaType: 'tv',
             season: String(sNum),
-            v: '20261119_v224',
+            v: '20261119_v225',
           });
           api(`/api/rave/seasons?${q.toString()}`, { timeout: 8000 })
             .then((inf) => {
@@ -2951,8 +2959,9 @@ export function buildControls(frame, ctx) {
     }
     const prevSpecTop = isSeries ? computePrevEpSpec(m, sNum, eNum) : null;
     const nextSpecTop = isSeries ? computeNextEpSpec(m, sNum, eNum) : null;
-    prevEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(prevSpecTop?.isPremiere) || (!isLeader() && !canSelectVideo()));
-    nextEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(nextSpecTop?.isFinale) || (!isLeader() && !canSelectVideo()));
+    const canSwitchEpNow = isLeader() || ['cohost', 'quickplay'].includes(state.mesh?.playMode || '');
+    prevEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(prevSpecTop?.isPremiere) || !canSwitchEpNow);
+    nextEpTopBtn.classList.toggle('hidden', !isSeries || Boolean(nextSpecTop?.isFinale) || !canSwitchEpNow);
     if (isSeries) {
       const prevSig = prevSpecTop?.shortSig || (eNum > 1 ? `B${eNum - 1}` : `S${Math.max(1, sNum - 1)}`);
       if (prevEpTopBtn.dataset.sig !== prevSig) {
@@ -3000,16 +3009,18 @@ export function buildControls(frame, ctx) {
     if (hasSubsOrDub) {
       const rawSId = host.adapter?.getSelectedSubtitleId?.() || 'off';
       const sId = availSubs.length ? rawSId : 'off';
+      const curSubObj = availSubs.find((t) => t.id === sId) || null;
+      const subLangBadge = String(curSubObj?.lang || sId || '').toUpperCase().replace(/^YT-/, '').replace(/^STREAM-/, '').replace(/^OS-/, '').split('-')[0].slice(0, 2);
       const aId = host.adapter?.getSelectedAudioId?.() || 'orig';
-      const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? sId.toUpperCase().replace(/^YT-/, '').split('-')[0] : 'Kapalı');
+      const subTag = !availSubs.length ? 'Altyazı' : (sId !== 'off' ? subLangBadge : 'Kapalı');
       let subSig = 'Altyazı & Ses';
       const curAudTrack = host.adapter?.getAudioTracks?.()?.find?.((t) => t.id === aId);
       const isTrDubId = aId === 'tr' || aId === 'tr-dub' || String(aId || '').startsWith('tr-dub') || aId === 'tr-orig'
         || (curAudTrack && (curAudTrack.targetLang === 'tr' || curAudTrack.audioLang === 'tr' || curAudTrack.lang === 'tr'));
       if (isTrDubId) {
-        subSig = (sId && sId !== 'off') ? `🇹🇷 TR Dublaj · ${sId.toUpperCase().slice(0, 2)} Alt` : '🇹🇷 TR Dublaj';
+        subSig = (sId && sId !== 'off') ? `🇹🇷 TR Dublaj · ${subLangBadge} Alt` : '🇹🇷 TR Dublaj';
       } else if (aId === 'orig' || String(aId || '').startsWith('orig') || aId === 'en' || aId === 'en-orig') {
-        subSig = (sId && sId !== 'off') ? `🎬 Orijinal · ${sId.toUpperCase().slice(0, 2)} Alt` : '🎬 Orijinal Ses';
+        subSig = (sId && sId !== 'off') ? `🎬 Orijinal · ${subLangBadge} Alt` : '🎬 Orijinal Ses';
       } else {
         const dubTag = (aId === 'tr-ai-dub' || aId === 'ai-tr') ? '🤖 AI Ses' : (aId === 'en-dub' ? 'EN Dublaj' : ((aId === 'en-ai-dub' || aId === 'ai-en') ? '🤖 EN AI' : 'Orijinal'));
         subSig = `${subTag} · ${dubTag}`;
@@ -3196,7 +3207,10 @@ export function buildControls(frame, ctx) {
       window.removeEventListener('resize', onViewportChange);
       window.removeEventListener('orientationchange', onViewportChange);
       document.body.classList.remove('vortex-fs');
-      if (typeof window !== 'undefined') window.__wlSyncViewport?.();
+      if (typeof window !== 'undefined') {
+        if (window.__vortexCloseControlsMenu === closeMenu) window.__vortexCloseControlsMenu = null;
+        window.__wlSyncViewport?.();
+      }
     },
     danmaku: (msg) => {
       if (!msg || msg.system || (!msg.text && !msg.gif)) return;
@@ -3281,7 +3295,7 @@ export function buildControls(frame, ctx) {
           revealControls(3000);
         }
       }
-      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isLeader()) {
+      if (ev === 'ended' && state.mesh?.media?.mediaType === 'tv' && isLeader() && (state.mesh?.queue || []).length === 0) {
         const m = state.mesh.media;
         const curS = Number(m.season || 1);
         const curE = Number(m.episode || 1);
@@ -3293,13 +3307,15 @@ export function buildControls(frame, ctx) {
       if (ev === 'autoplay-blocked') unmute.classList.remove('hidden');
       if (ev === 'error') {
         const mErr = state.mesh?.media;
-        const canRefresh = Boolean(mErr && !mErr.isMusic && !mErr.live && (mErr.tmdbId || mErr.imdbId || mErr.title));
+        const canRefresh = Boolean(mErr && !mErr.isMusic && !mErr.live && !state.mesh?.curated && (mErr.tmdbId || mErr.imdbId || mErr.title));
+        const hasAltServers = Boolean(mErr && !mErr.isMusic && !mErr.live && !state.mesh?.curated && ((mErr.servers?.length || 0) > 1 || (mErr.altUrls?.length || 0) > 0));
         fill(
           errorBox,
           h('b', {}, 'Oynatıcı hatası'),
           h('div', { class: 'dim' }, arg || ''),
           h('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center', marginTop: '6px' } },
-            canRefresh ? h('button', { class: 'btn primary', onclick: () => refreshCurrentStreamSources() }, '🔄 Yayını Yenile') : null,
+            hasAltServers ? h('button', { class: 'btn primary', onclick: (e) => { e.stopPropagation(); toggleMenu('servers'); } }, '📡 Sunucu Değiştir') : null,
+            canRefresh ? h('button', { class: hasAltServers ? 'btn' : 'btn primary', onclick: () => refreshCurrentStreamSources() }, '🔄 Yayını Yenile') : null,
             canSelectVideo() ? h('button', { class: 'btn', onclick: () => { if (isFullscreenActive()) toggleFullscreen(); setView('left', 'Search'); ctx.layout.update(); } }, 'Başka video seç') : null,
             isFullscreenActive() ? h('button', { class: 'btn', onclick: () => toggleFullscreen() }, '⛶ Tam Ekrandan Çık') : null,
           ),

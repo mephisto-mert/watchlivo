@@ -1,10 +1,10 @@
 // HTML5 <video> adapter for direct files (.mp4/.webm), uploads and HLS (.m3u8 via hls.js / native iOS AVPlayer).
-import { SubtitleDubController } from './subtitles.js?v=20261119_v224';
-import { api } from '../api.js?v=20261119_v224';
-import { expectedPosition } from '../sync.js?v=20261119_v224';
-import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v224';
-import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v224';
-import { ensureHlsJs } from './hls-loader.js?v=20261119_v224';
+import { SubtitleDubController } from './subtitles.js?v=20261119_v225';
+import { api } from '../api.js?v=20261119_v225';
+import { expectedPosition } from '../sync.js?v=20261119_v225';
+import { state, isRoomMediaPlaying } from '../store.js?v=20261119_v225';
+import { applyElementVolume, canControlElementVolume, ensureIosPlaybackAudioSession, hasWebAudioGraph, isIosWebKit, releaseMediaBoost, resumeSharedAudioContext, setElementBassCutDb } from './audio-gain.js?v=20261119_v225';
+import { ensureHlsJs } from './hls-loader.js?v=20261119_v225';
 
 function applyOptimalPipAttributes(v, autoPipOn = true) {
   if (!v) return;

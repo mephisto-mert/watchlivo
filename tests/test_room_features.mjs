@@ -414,3 +414,153 @@ test("queue, voting, skip_votes, break_request, stage mode, hand_raise, WebRTC 6
   assert.equal(vrData.packets.length, 1);
   assert.equal(vrData.packets[0].fromId, hostCid);
 });
+
+function createFakeWsPairClass() {
+  return class FakeWebSocketPair {
+    constructor() {
+      const makeEnd = () => {
+        const listeners = new Map();
+        return {
+          accepted: false,
+          closed: false,
+          closeCode: 0,
+          closeReason: "",
+          peer: null,
+          accept() { this.accepted = true; },
+          addEventListener(ev, fn) {
+            if (!listeners.has(ev)) listeners.set(ev, new Set());
+            listeners.get(ev).add(fn);
+          },
+          _emit(ev, payload) {
+            for (const fn of listeners.get(ev) || []) fn(payload);
+          },
+          send(data) {
+            if (this.closed || !this.peer || this.peer.closed) return;
+            this.peer._emit("message", { data });
+          },
+          close(code = 1000, reason = "") {
+            if (this.closed) return;
+            this.closed = true;
+            this.closeCode = code;
+            this.closeReason = reason;
+            this._emit("close", { code, reason });
+          },
+        };
+      };
+      const client = makeEnd();
+      const server = makeEnd();
+      client.peer = server;
+      server.peer = client;
+      this[0] = client;
+      this[1] = server;
+    }
+  };
+}
+
+test("v225 audit fixes: friends privacy, customName rename, voteEndsAt countdown, WS kick eject, transferred WS close_room, scoped attachRoom", async () => {
+  const origWsPair = globalThis.WebSocketPair;
+  const OrigResponse = globalThis.Response;
+  globalThis.WebSocketPair = createFakeWsPairClass();
+  globalThis.Response = class extends OrigResponse {
+    constructor(body, init) {
+      if (init && init.status === 101 && init.webSocket) {
+        return { status: 101, ok: true, webSocket: init.webSocket, headers: new Headers(init.headers || {}) };
+      }
+      super(body, init);
+    }
+  };
+  try {
+    const env = makeMemEnv();
+    // 1. friends privacy preserved on create
+    const cr = await (await handleEdgeRoomCreate(
+      new Request("https://watchlivo.online/api/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Arkadas Sinema", username: "HostA", clientId: "h_hostA", privacy: "friends" }),
+      }),
+      env,
+      jsonResp
+    )).json();
+    assert.equal(cr.room.privacy, "friends", "friends privacy must not downgrade to public");
+    const roomId = cr.room.id;
+    const hostCid = cr.clientId;
+    const hostTok = cr.clientToken;
+
+    // 2. Rename sets customName=true, whitespace-only password clears password cleanly
+    const ren = await syncPost(env, roomId, {
+      type: "host_action",
+      action: "set_privacy",
+      name: "Özel Film Gecesi",
+      password: "   ",
+      playMode: "vote",
+      clientId: hostCid,
+      clientToken: hostTok,
+    });
+    assert.equal(ren.data.room.name, "Özel Film Gecesi");
+    assert.equal(ren.data.room.customName, true);
+    assert.equal(ren.data.room.hasPassword, false, "whitespace-only password must not set password");
+    assert.equal(ren.data.room.playMode, "vote");
+
+    // 3. vote playMode video_ended triggers 8-second voteEndsAt countdown
+    await syncPost(env, roomId, {
+      type: "queue_add",
+      clientId: hostCid,
+      clientToken: hostTok,
+      item: { title: "Aday Film 1", url: "https://example.com/1.m3u8", provider: "hls" },
+    });
+    const endedRes = await syncPost(env, roomId, {
+      type: "video_ended",
+      clientId: hostCid,
+      clientToken: hostTok,
+    });
+    assert.ok(endedRes.data.room.voteEndsAt > Date.now() / 1000, "vote mode video_ended must set voteEndsAt countdown");
+    assert.ok(endedRes.data.room.events.some((e) => e.type === "vote_updated"));
+
+    // 4. WS connections: host + guest1 (no pre-existing token) + guest2 (to be kicked)
+    const stub = env.ROOM_DO.get(env.ROOM_DO.idFromName(roomId));
+    const wsHostRes = await stub.fetch(`https://do.local/ws?roomId=${roomId}&clientId=${hostCid}&clientToken=${encodeURIComponent(hostTok)}&username=HostA`, { headers: { Upgrade: "websocket" } });
+    const wsGuest1Res = await stub.fetch(`https://do.local/ws?roomId=${roomId}&clientId=h_guest1&username=Guest1`, { headers: { Upgrade: "websocket" } });
+    const wsGuest2Res = await stub.fetch(`https://do.local/ws?roomId=${roomId}&clientId=h_guest2&username=Guest2`, { headers: { Upgrade: "websocket" } });
+    const hostSock = wsHostRes.webSocket;
+    const g1Sock = wsGuest1Res.webSocket;
+    const g2Sock = wsGuest2Res.webSocket;
+
+    const hostInbox = [];
+    const g1Inbox = [];
+    const g2Inbox = [];
+    hostSock.addEventListener("message", (e) => hostInbox.push(JSON.parse(e.data)));
+    g1Sock.addEventListener("message", (e) => g1Inbox.push(JSON.parse(e.data)));
+    g2Sock.addEventListener("message", (e) => g2Inbox.push(JSON.parse(e.data)));
+
+    // Promote guest2 to co-host then kick guest2 -> guest2 receives kicked + socket closes + cannot re-insert!
+    hostSock.send(JSON.stringify({ type: "host_action", action: "promote", targetId: "h_guest2" }));
+    await new Promise((r) => setTimeout(r, 15));
+    // Verify attachRoom broadcast kept hostSock's viewer-scoped isHost=true!
+    const hostPromoteEvt = hostInbox.find((m) => m.type === "host_action" && m.subAction === "promote");
+    assert.equal(hostPromoteEvt?.room?.isHost, true, "attachRoom WS broadcast must preserve viewer-scoped isHost for host");
+
+    hostSock.send(JSON.stringify({ type: "host_action", action: "kick", targetId: "h_guest2" }));
+    await new Promise((r) => setTimeout(r, 15));
+    assert.ok(g2Inbox.some((m) => m.type === "kicked"), "kicked WS user must receive kicked event");
+    // Attempt to send message on kicked socket -> must NOT re-add to participants
+    g2Sock.send(JSON.stringify({ type: "chat", text: "I should be blocked" }));
+    await new Promise((r) => setTimeout(r, 15));
+    const afterKickPoll = await syncPost(env, roomId, { type: "poll", clientId: hostCid, clientToken: hostTok });
+    assert.ok(!afterKickPoll.data.room.participants.some((p) => p.id === "h_guest2"), "kicked user must stay ejected");
+
+    // 5. Transfer host to guest1 (who joined WS without pre-existing token) -> guest1 CAN close_room over WS!
+    hostSock.send(JSON.stringify({ type: "host_action", action: "transfer_host", targetId: "h_guest1" }));
+    await new Promise((r) => setTimeout(r, 15));
+    const g1TransferEvt = g1Inbox.find((m) => m.type === "host_action" && m.subAction === "transfer_host");
+    assert.equal(g1TransferEvt?.room?.isHost, true, "new host must see isHost=true on transfer_host broadcast");
+
+    g1Sock.send(JSON.stringify({ type: "close_room" }));
+    await new Promise((r) => setTimeout(r, 20));
+    const afterClose = await syncPost(env, roomId, { type: "poll", clientId: hostCid, clientToken: hostTok });
+    assert.equal(afterClose.status, 410, "transferred WS host must be able to close_room cleanly");
+  } finally {
+    if (origWsPair === undefined) delete globalThis.WebSocketPair;
+    else globalThis.WebSocketPair = origWsPair;
+    globalThis.Response = OrigResponse;
+  }
+});

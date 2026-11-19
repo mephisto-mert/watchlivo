@@ -1,10 +1,10 @@
 // Chat panel (Rave Chat/Message/ChatBar + onboarding chat cards: invite, quick search, select privacy).
-import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v224';
-import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v224';
-import { avatar } from '../profile.js?v=20261119_v224';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v224';
-import { resolveMusicItem } from './selection-kinds.js?v=20261119_v224';
-import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v224';
+import { h, icons, fmtTime, toast, popup } from '../ui.js?v=20261119_v225';
+import { state, isLeader, isHostOnly, setView, getMusicHistory, sendFriendRequest, updateFriendAction } from '../store.js?v=20261119_v225';
+import { avatar } from '../profile.js?v=20261119_v225';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v225';
+import { resolveMusicItem } from './selection-kinds.js?v=20261119_v225';
+import { startUniversalVoiceRecorder, buildUniversalAudioNotePlayer, stopActiveVoiceNoteGlobal } from '../voice-note.js?v=20261119_v225';
 
 const REACTIONS = ['❤️', '😂', '😮', '😢', '🔥', '👏', '🍿'];
 const SOUNDBOARD = [
@@ -512,6 +512,7 @@ export function buildChat(ctx) {
   const replyDraftBar = h('div', { class: 'reply-draft-bar hidden', id: 'chat-reply-draft' });
   const quickAccessZone = h('div', { class: 'chat-access-zone hidden', id: 'chat-access-zone' });
   let voiceRecState = null;
+  let voiceRecStarting = false;
   const voiceRecOverlay = h('div', { class: 'voice-rec-overlay hidden', id: 'chat-voice-rec-overlay' });
   const voiceRecBtn = h('button', {
     type: 'button',
@@ -562,6 +563,8 @@ export function buildChat(ctx) {
       stopVoiceRecorder(true);
       return;
     }
+    if (voiceRecStarting) return;
+    voiceRecStarting = true;
     if (ctx.voice?.micOn) {
       mutedLiveCallForVoiceNote = true;
       ctx.voice.stream?.getAudioTracks().forEach((t) => { t.enabled = false; });
@@ -569,33 +572,43 @@ export function buildChat(ctx) {
     const timerLbl = h('span', { class: 'voice-rec-timer' }, '🔴 0:00');
     const cancelBtn = h('button', { type: 'button', class: 'voice-rec-cancel', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(false); } }, 'İptal');
     const doneBtn = h('button', { type: 'button', class: 'voice-rec-send', onclick: (e) => { e.stopPropagation(); stopVoiceRecorder(true); } }, 'Gönder ➤');
-    const handle = await startUniversalVoiceRecorder({
-      maxSeconds: 24,
-      apiFn: api,
-      onTick: (elapsed) => {
-        timerLbl.textContent = `🔴 0:${String(elapsed).padStart(2, '0')}`;
-      },
-      onFinish: (audioNote) => {
-        voiceRecState = null;
-        restoreLiveCallMicAfterVoiceNote();
-        voiceRecBtn.classList.remove('recording');
-        voiceRecOverlay.classList.add('hidden');
-        input.classList.remove('hidden');
-        const extra = { audioNote };
-        if (activeReply) extra.replyTo = activeReply;
-        actions.sendChat('', extra);
-        clearReply();
-      },
-      onError: (msg) => {
-        voiceRecState = null;
-        restoreLiveCallMicAfterVoiceNote();
-        voiceRecBtn.classList.remove('recording');
-        voiceRecOverlay.classList.add('hidden');
-        input.classList.remove('hidden');
-        toast(msg || 'Sesli mesaj için mikrofon izni gerekli');
-      },
-    });
+    let handle = null;
+    try {
+      handle = await startUniversalVoiceRecorder({
+        maxSeconds: 24,
+        apiFn: api,
+        onTick: (elapsed) => {
+          timerLbl.textContent = `🔴 0:${String(elapsed).padStart(2, '0')}`;
+        },
+        onFinish: (audioNote) => {
+          voiceRecState = null;
+          restoreLiveCallMicAfterVoiceNote();
+          voiceRecBtn.classList.remove('recording');
+          voiceRecOverlay.classList.add('hidden');
+          input.classList.remove('hidden');
+          const extra = { audioNote };
+          if (activeReply) extra.replyTo = activeReply;
+          actions.sendChat('', extra);
+          clearReply();
+        },
+        onError: (msg) => {
+          voiceRecState = null;
+          restoreLiveCallMicAfterVoiceNote();
+          voiceRecBtn.classList.remove('recording');
+          voiceRecOverlay.classList.add('hidden');
+          input.classList.remove('hidden');
+          toast(msg || 'Sesli mesaj için mikrofon izni gerekli');
+        },
+      });
+    } finally {
+      voiceRecStarting = false;
+    }
     if (!handle) {
+      restoreLiveCallMicAfterVoiceNote();
+      return;
+    }
+    if (destroyed) {
+      handle.stop?.(false);
       restoreLiveCallMicAfterVoiceNote();
       return;
     }
@@ -817,10 +830,12 @@ export function buildChat(ctx) {
           title: p.screen ? `${labelText} ekran paylaşıyor — sahnede büyütmek için tıkla` : `${labelText}`,
           onclick: () => {
             const targetCamId = p.id === selfId ? (screenOn ? 'self-screen' : 'self') : p.id;
-            const bubble = document.querySelector(`#vortex-cam-dock [data-cam-id="${targetCamId}"]`);
+            const escCamId = (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(String(targetCamId || '')) : String(targetCamId || '').replace(/["\\]/g, '\\$&');
+            const dock = document.getElementById('vortex-cam-dock');
+            const bubble = escCamId ? dock?.querySelector(`[data-cam-id="${escCamId}"]`) : null;
             if (bubble) {
               bubble.classList.toggle('spotlight');
-              document.getElementById('vortex-cam-dock')?.classList.toggle('has-spotlight', bubble.classList.contains('spotlight'));
+              dock?.classList.toggle('has-spotlight', Boolean(dock.querySelector('.cam-bubble.spotlight')));
             } else if (p.id === selfId && !inCall) {
               toggleCallJoin();
             }
@@ -1519,7 +1534,7 @@ export function buildChat(ctx) {
           title: desc,
           'data-privacy': k,
           onclick: () => {
-            if (!isLeader()) { toast('Bu ayarı yalnızca oda lideri değiştirebilir'); return; }
+            if (!isHostOnly()) { toast('Bu ayarı yalnızca oda lideri değiştirebilir'); return; }
             actions.hostAction('set_privacy', { privacy: k });
           },
         }, h('span', { html: icons[ic], style: { display: 'flex', width: '12px', height: '12px' } }), h('span', { class: 'priv-opt-lbl' }, cur === k && k === 'friends' ? 'Sadece Arkadaşlar' : label)))),

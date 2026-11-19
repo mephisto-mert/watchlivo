@@ -6,6 +6,10 @@ import {
   handleEdgePoster,
   isPublicHttpUrl,
   signProxySig,
+  normalizeSubLang,
+  formatSubLabel,
+  detectSubtitleTextLang,
+  decodeSubtitleBytes,
 } from "./edge_streams.js";
 import {
   DEFAULT_CURATED_LIVE_ROOMS,
@@ -176,7 +180,7 @@ async function getBootstrap(env) {
     } catch {}
   }
   _curatedMap = new Map(DEFAULT_CURATED_LIVE_ROOMS.map((rm) => [rm.id, rm]));
-  return { version: "20261119_v224", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
+  return { version: "20261119_v225", catalog: [], curatedRooms: DEFAULT_CURATED_LIVE_ROOMS, newReleases: [], latestEpisodes: [] };
 }
 
 function makeNonce() {
@@ -2363,28 +2367,39 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
     const mtype = mtypeRaw === "tv" || mtypeRaw === "series" ? "tv" : "movie";
     const s = Math.max(1, Number(url.searchParams.get("season") || url.searchParams.get("s") || 1) || 1);
     const e = Math.max(1, Number(url.searchParams.get("episode") || url.searchParams.get("e") || 1) || 1);
-    const subKey = `subs:v1:${mtype}:${tid || imdbId}:${s}:${e}`;
-    if ((/^\d+$/.test(tid) || imdbId) && env?.WATCHLIVO_KV) {
+    const bypassSubCache = url.searchParams.get("refresh") === "1" || url.searchParams.get("nocache") === "1";
+    const subKey = `subs:v2:${mtype}:${tid || imdbId}:${s}:${e}`;
+    if (!bypassSubCache && (/^\d+$/.test(tid) || imdbId) && env?.WATCHLIVO_KV) {
       const cachedSubs = await env.WATCHLIVO_KV.get(subKey, "json").catch(() => null);
       if (cachedSubs && Array.isArray(cachedSubs.subtitleTracks)) {
         return edgeJson(cachedSubs);
       }
     }
-    const tracks = [];
-    const seenSubU = new Set();
-    const pushTrack = (langCode, label, rawSubUrl, srcName) => {
-      const u = String(rawSubUrl || "").trim();
-      if (!u || !isPublicHttpUrl(u) || seenSubU.has(u)) return;
-      seenSubU.add(u);
-      const lc = String(langCode || "tr").toLowerCase().slice(0, 6);
-      const normLang = lc === "tur" ? "tr" : (lc === "eng" ? "en" : lc);
-      tracks.push({
-        lang: normLang,
-        label: String(label || (normLang === "tr" ? "Türkçe" : normLang.toUpperCase())).slice(0, 64),
-        url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(u)}`,
-        source: srcName,
-      });
+    const SECONDARY_LANGS = ["de", "fr", "es", "it", "ru", "ar", "pt", "nl", "ja", "ko", "az"];
+    const scoreSubItem = (it) => {
+      let sc = 0;
+      const fn = String(it.subtitleFileName || it.movieReleaseName || "").toLowerCase();
+      const fmt = String(it.releaseFormat || "").toLowerCase();
+      const fps = Number(it.fpsMilli || 0);
+      if (/\b(?:forced|foreign[\s._-]*only|signs[\s._&-]*songs?)\b/i.test(fn)) sc -= 60;
+      if (/(?:bluray|bdrip|brrip|web[-.]?dl|webrip|\bweb\b|amzn|nf\b|dsnp|hmax)/i.test(`${fmt} ${fn}`)) sc += 30;
+      else if (/(?:hdtv|dvdrip|\bdvd\b)/i.test(`${fmt} ${fn}`)) sc += 15;
+      if (/(?:telesync|\bts\b|\bcam\b|hdcam|\btc\b|hdts)/i.test(`${fmt} ${fn}`)) sc -= 28;
+      if (fps === 23976 || fps === 23980 || fps === 24000) sc += 10;
+      if (/utf-?8/i.test(String(it.SubEncoding || ""))) sc += 4;
+      return sc;
     };
+    const extractFormatTag = (it) => {
+      const sTxt = `${it.releaseFormat || ""} ${it.subtitleFileName || it.movieReleaseName || ""}`;
+      if (/bluray|bdrip|brrip/i.test(sTxt)) return "BluRay";
+      if (/web[-.]?dl|webrip|\bweb\b|netflix|amzn|disney/i.test(sTxt)) return "WEB";
+      if (/hdtv/i.test(sTxt)) return "HDTV";
+      if (/dvd/i.test(sTxt)) return "DVD";
+      return "";
+    };
+
+    const byLang = new Map();
+    const seenSubU = new Set();
     try {
       const apiKey = String(env?.TMDB_API_KEY || DEFAULT_TMDB_KEY).trim();
       if (/^\d+$/.test(tid) && !imdbId) {
@@ -2396,41 +2411,132 @@ export async function handleAutonomousEdge(request, url, safePath, env, ctx = nu
           if (extJ?.imdb_id) imdbId = String(extJ.imdb_id).trim();
         }
       }
-      const lookupId = imdbId || tid;
-      if (lookupId) {
-        const wyzieUrl = mtype === "tv"
-          ? `https://sub.wyzie.ru/search?id=${encodeURIComponent(lookupId)}&season=${s}&episode=${e}`
-          : `https://sub.wyzie.ru/search?id=${encodeURIComponent(lookupId)}`;
-        const stremioUrl = imdbId
-          ? (mtype === "tv"
-              ? `https://opensubtitles-v3.strem.io/subtitles/series/${encodeURIComponent(imdbId)}:${s}:${e}.json`
-              : `https://opensubtitles-v3.strem.io/subtitles/movie/${encodeURIComponent(imdbId)}.json`)
-          : "";
-        const [wzRes, stRes] = await Promise.allSettled([
-          fetch(wyzieUrl, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2600) }).then((r) => (r.ok ? r.json() : [])).catch(() => []),
-          stremioUrl
-            ? fetch(stremioUrl, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(2600) }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
-            : Promise.resolve(null),
-        ]);
-        if (wzRes.status === "fulfilled" && Array.isArray(wzRes.value)) {
-          for (const it of wzRes.value.slice(0, 20)) {
-            if (!it?.url) continue;
-            pushTrack(it.language || it.lang, it.display || it.languageName || it.language, it.url, "wyzie");
-          }
-        }
-        if (stRes.status === "fulfilled" && Array.isArray(stRes.value?.subtitles)) {
-          for (const it of stRes.value.subtitles.slice(0, 20)) {
-            if (!it?.url) continue;
-            pushTrack(it.lang, it.lang === "tur" ? "Türkçe (OpenSubtitles)" : it.lang, it.url, "opensubtitles");
+      if (imdbId) {
+        const stremioUrl = mtype === "tv"
+          ? `https://opensubtitles-v3.strem.io/subtitles/series/${encodeURIComponent(imdbId)}:${s}:${e}.json`
+          : `https://opensubtitles-v3.strem.io/subtitles/movie/${encodeURIComponent(imdbId)}.json`;
+        const stJ = await fetch(stremioUrl, {
+          headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+          signal: AbortSignal.timeout(3200),
+        }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (Array.isArray(stJ?.subtitles)) {
+          for (const it of stJ.subtitles) {
+            const rawU = String(it?.url || "").trim();
+            if (!rawU || !isPublicHttpUrl(rawU) || seenSubU.has(rawU)) continue;
+            seenSubU.add(rawU);
+            const fn = String(it.subtitleFileName || it.movieReleaseName || "");
+            const normLang = normalizeSubLang(it.lang || "", fn, rawU);
+            if (!normLang) continue;
+            const score = scoreSubItem(it);
+            if (!byLang.has(normLang)) byLang.set(normLang, []);
+            byLang.get(normLang).push({
+              lang: normLang,
+              rawUrl: rawU,
+              score,
+              fmtTag: extractFormatTag(it),
+              source: "opensubtitles",
+            });
           }
         }
       }
     } catch {}
-    tracks.sort((a, b) => {
-      const rank = (l) => (l === "tr" ? 0 : (l === "en" ? 1 : 2));
-      return rank(a.lang) - rank(b.lang);
+
+    // Sort each language's candidates by quality score descending
+    for (const arr of byLang.values()) arr.sort((a, b) => b.score - a.score);
+
+    const selected = [];
+    const trList = (byLang.get("tr") || []).slice(0, 4);
+    const enList = (byLang.get("en") || []).slice(0, 3);
+    selected.push(...trList, ...enList);
+    let secAdded = 0;
+    for (const sl of SECONDARY_LANGS) {
+      if (secAdded >= 5) break;
+      const arr = byLang.get(sl);
+      if (arr && arr.length) {
+        selected.push(arr[0]);
+        secAdded += 1;
+      }
+    }
+    // If neither TR nor EN nor major secondary languages exist, include up to 4 best available languages (1 per lang)
+    if (!selected.length) {
+      for (const arr of byLang.values()) {
+        if (selected.length >= 4) break;
+        if (arr && arr.length) selected.push(arr[0]);
+      }
+    }
+
+    // Fast parallel language verification probe on top 2 TR + top 2 EN tracks to catch dead/mislabeled OpenSubtitles uploads
+    const probeTargets = [
+      ...trList.slice(0, 2),
+      ...enList.slice(0, 2),
+    ];
+    if (probeTargets.length) {
+      await Promise.allSettled(probeTargets.map(async (cand) => {
+        try {
+          const r = await fetch(cand.rawUrl, {
+            headers: { "User-Agent": "Mozilla/5.0", Range: "bytes=0-12287" },
+            redirect: "follow",
+            signal: AbortSignal.timeout(1500),
+          });
+          if (r.status === 404 || r.status === 410 || r.status >= 500) {
+            r.body?.cancel?.();
+            cand.dead = true;
+            return;
+          }
+          if (!r.ok) {
+            r.body?.cancel?.();
+            return;
+          }
+          const buf = await r.arrayBuffer();
+          const txt = decodeSubtitleBytes(buf);
+          if (/^(?:<!doctype|<html|<script|<svg)/i.test(txt.trimStart())) {
+            cand.dead = true;
+            return;
+          }
+          const detected = detectSubtitleTextLang(txt);
+          if (detected && (detected === "tr" || detected === "en") && detected !== cand.lang) {
+            cand.lang = detected;
+            cand.reclassified = true;
+          }
+        } catch {}
+      }));
+    }
+
+    const liveSelected = selected.filter((c) => !c.dead);
+    const rankLang = (l) => (l === "tr" ? 0 : (l === "en" ? 1 : 2));
+    liveSelected.sort((a, b) => (rankLang(a.lang) - rankLang(b.lang)) || (b.score - a.score));
+
+    // Final per-language cap & clean Turkish UI labels
+    const capped = [];
+    const langCapCount = {};
+    for (const c of liveSelected) {
+      const cap = c.lang === "tr" ? 4 : (c.lang === "en" ? 3 : 1);
+      langCapCount[c.lang] = (langCapCount[c.lang] || 0) + 1;
+      if (langCapCount[c.lang] > cap) continue;
+      capped.push(c);
+    }
+    const finalCounts = {};
+    for (const c of capped) finalCounts[c.lang] = (finalCounts[c.lang] || 0) + 1;
+    const seenIdx = {};
+    const outSubs = capped.map((c) => {
+      seenIdx[c.lang] = (seenIdx[c.lang] || 0) + 1;
+      const n = seenIdx[c.lang];
+      const total = finalCounts[c.lang];
+      let suffix = "";
+      if (total > 1) {
+        suffix = c.fmtTag ? `Seçenek ${n} · ${c.fmtTag}` : `Seçenek ${n}`;
+      } else if (c.lang === "tr" || c.lang === "en") {
+        suffix = c.fmtTag || "OpenSubtitles";
+      }
+      return {
+        id: total > 1 ? `os-${c.lang}-${n}` : `os-${c.lang}`,
+        lang: c.lang,
+        label: formatSubLabel(c.lang, suffix),
+        url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(c.rawUrl)}`,
+        source: c.source,
+      };
     });
-    const outSubs = tracks.slice(0, 24);
+
     const payload = { ok: true, subtitleTracks: outSubs, subtitles: outSubs, audioTracks: [], intro: null, mode: "cf-autonomous-edge" };
     if (outSubs.length && env?.WATCHLIVO_KV) {
       await env.WATCHLIVO_KV.put(subKey, JSON.stringify(payload), { expirationTtl: 1800 }).catch(() => {});

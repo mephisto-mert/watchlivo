@@ -287,7 +287,8 @@ function makeRoomSkeleton(roomId, opts = {}) {
     id: roomId,
     name: rmName,
     rawName: String(opts.rawName || rmName).slice(0, 64),
-    privacy: isCur ? "public" : (opts.privacy === "private" ? "private" : "public"),
+    customName: Boolean(opts.customName),
+    privacy: isCur ? "public" : (["public", "friends", "private"].includes(opts.privacy) ? opts.privacy : "public"),
     pwdSalt: "",
     passwordHash: "",
     playMode: isCur ? (opts.playMode || "leader") : (opts.playMode === "cohost" ? "cohost" : "leader"),
@@ -450,6 +451,7 @@ async function serializeEdgeRoom(rm, viewerCid = "", env = null) {
     id: rm.id,
     name: rm.name,
     rawName: rm.rawName || rm.name,
+    customName: Boolean(rm.customName),
     privacy: rm.privacy || "public",
     playMode: rm.playMode || "leader",
     voipMode: rm.voipMode || "all",
@@ -669,6 +671,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
   const act = String(body.type || "poll");
   const pushedEvents = [];
   const privateSignals = [];
+  const kickedTargets = [];
   let dirty = Boolean(opts.initialDirty);
   let roomClosed = false;
   let forbiddenError = "";
@@ -701,11 +704,12 @@ function applyRoomAction(rm, cid, body, opts = {}) {
       dirty = dirty || sub.dirty;
       pushedEvents.push(...sub.pushedEvents);
       privateSignals.push(...sub.privateSignals);
+      if (sub.kickedTargets?.length) kickedTargets.push(...sub.kickedTargets);
       if (sub.roomClosed) roomClosed = true;
       if (sub.forbiddenError) forbiddenError = sub.forbiddenError;
       if (sub.pendingPassword !== undefined) pendingPassword = sub.pendingPassword;
     }
-    return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError, pendingPassword };
+    return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, pendingPassword };
   }
 
   const tokenVerified = Boolean(opts.tokenVerified);
@@ -851,7 +855,18 @@ function applyRoomAction(rm, cid, body, opts = {}) {
 
   if (act === "play" || act === "pause" || act === "seek" || act === "rate" || act === "video_ended") {
     if (act === "video_ended" && !rm.curated && Array.isArray(rm.queue) && rm.queue.length > 0 && ["autoplay", "vote", "quickplay", "cohost"].includes(rm.playMode || "")) {
-      advanceQueueItem(-1, "");
+      if (rm.playMode === "vote") {
+        if (!rm.voteEndsAt || Number(rm.voteEndsAt) <= 0) {
+          rm.media.playing = false;
+          rm.media.updatedAt = t;
+          rm.voteEndsAt = t + 8;
+          pushEv({ type: "vote_updated", queue: rm.queue, voteEndsAt: rm.voteEndsAt });
+        } else if (t >= Number(rm.voteEndsAt) - 0.5) {
+          advanceQueueItem(-1, "");
+        }
+      } else {
+        advanceQueueItem(-1, "");
+      }
     } else {
       if (rm.playMode === "leader" && !isPrivilegedInRoom(rm, cid)) {
         return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError: "Lider modunda oynatma kontrolü yalnızca oda yöneticisine aittir." };
@@ -1151,10 +1166,11 @@ function applyRoomAction(rm, cid, body, opts = {}) {
         const cleanName = body.name.trim().slice(0, 64);
         rm.name = cleanName;
         rm.rawName = cleanName;
+        rm.customName = true;
         changed = true;
       }
       if (body.password !== undefined) {
-        pendingPassword = String(body.password || "");
+        pendingPassword = String(body.password || "").trim();
         changed = true;
       }
       if (changed) {
@@ -1189,7 +1205,9 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     } else if (subAct === "kick" && targetCid && targetCid !== rm.creatorCid) {
       rm.kicked = Array.from(new Set([...(rm.kicked || []), targetCid])).slice(-100);
       delete rm.participants[targetCid];
+      rm.co_hosts = (rm.co_hosts || []).filter((x) => x !== targetCid);
       rm.stage_speakers = (rm.stage_speakers || []).filter((x) => x !== targetCid);
+      kickedTargets.push(targetCid);
       pushEv({ type: "host_action", subAction: "kick", targetCid }, { attachRoom: true });
     } else if (subAct === "promote" && targetCid) {
       rm.co_hosts = Array.from(new Set([...(rm.co_hosts || []), targetCid]));
@@ -1241,7 +1259,7 @@ function applyRoomAction(rm, cid, body, opts = {}) {
     dirty = true;
   }
   if (dirty) rm.updatedAt = t;
-  return { dirty, pushedEvents, privateSignals, roomClosed, forbiddenError, pendingPassword };
+  return { dirty, pushedEvents, privateSignals, kickedTargets, roomClosed, forbiddenError, pendingPassword };
 }
 
 function serializeRoomInfo(rm, tokenVerified = false) {
@@ -1267,6 +1285,7 @@ function serializeRoomInfo(rm, tokenVerified = false) {
     id: rm.id,
     name: rm.name,
     rawName: rm.rawName || rm.name,
+    customName: Boolean(rm.customName),
     privacy: rm.privacy || "public",
     playMode: rm.playMode || "leader",
     voipMode: rm.voipMode || "all",
@@ -1332,6 +1351,34 @@ export class WatchlivoRoomDO {
     for (const [ws, meta] of this.sockets.entries()) {
       if (meta?.cid !== targetCid) continue;
       try { ws.send(str); } catch { this.sockets.delete(ws); }
+    }
+  }
+
+  async _broadcastRoomEvent(rm, item, excludeWs = null) {
+    if (!item?.attachRoom) {
+      this._broadcast(item.ev, excludeWs);
+      return;
+    }
+    for (const [ws, meta] of this.sockets.entries()) {
+      if (ws === excludeWs) continue;
+      try {
+        const scopedRoom = await serializeEdgeRoom(rm, meta?.cid || "", this.env);
+        ws.send(JSON.stringify({ ...item.ev, room: scopedRoom }));
+      } catch {
+        this.sockets.delete(ws);
+      }
+    }
+  }
+
+  _ejectKickedSockets(roomId, targetCids) {
+    if (!Array.isArray(targetCids) || !targetCids.length) return;
+    const kickSet = new Set(targetCids);
+    const payload = JSON.stringify({ type: "kicked", roomId });
+    for (const [ws, meta] of this.sockets.entries()) {
+      if (!kickSet.has(meta?.cid)) continue;
+      try { ws.send(payload); } catch {}
+      try { ws.close(4008, "kicked"); } catch {}
+      this.sockets.delete(ws);
     }
   }
 
@@ -1481,10 +1528,17 @@ export class WatchlivoRoomDO {
       server.accept();
       this.sockets.set(server, { cid, uname });
       const initTok = tokVerified ? suppliedTok : await signRoomClientToken(roomId, cid, this.env);
+      tokVerified = true;
       const roomPayload = await serializeEdgeRoom(rm, cid, this.env);
       server.send(JSON.stringify({ type: "init", clientId: cid, clientToken: initTok, serverTime: nowSec(), room: roomPayload }));
 
       server.addEventListener("message", async (ev) => {
+        if ((rm.kicked || []).includes(cid)) {
+          try { server.send(JSON.stringify({ type: "kicked", roomId })); } catch {}
+          try { server.close(4008, "kicked"); } catch {}
+          this.sockets.delete(server);
+          return;
+        }
         let msg; try { msg = JSON.parse(ev.data); } catch { return; }
         if (msg.type === "ping") {
           const tNow = nowSec();
@@ -1500,7 +1554,8 @@ export class WatchlivoRoomDO {
         }
         if (msg.type === "close_room") {
           if (curatedSeed || rm.curated || !tokVerified || !isHostOrCreator(rm, cid)) {
-            server.send(JSON.stringify({ type: "error", error: "Sadece oda kurucusu odayı kapatabilir." }));
+            const errTxt = "Sadece oda kurucusu odayı kapatabilir.";
+            server.send(JSON.stringify({ type: "error", error: errTxt, message: errTxt }));
             return;
           }
           await this._closeRoom(roomId);
@@ -1508,23 +1563,23 @@ export class WatchlivoRoomDO {
         }
         const pr = pruneStaleParticipants(rm, this._activeWsCids());
         const res = applyRoomAction(rm, cid, msg, { tokenVerified: true });
-        if (res.forbiddenError) {
-          server.send(JSON.stringify({ type: "error", error: res.forbiddenError }));
-          return;
-        }
         if (res.pendingPassword !== undefined) {
           await setRoomPassword(rm, res.pendingPassword);
         }
         if (res.dirty || pr || res.pendingPassword !== undefined) await this._save();
+        if (res.kickedTargets?.length) {
+          this._ejectKickedSockets(roomId, res.kickedTargets);
+        }
+        if (res.forbiddenError) {
+          server.send(JSON.stringify({ type: "error", error: res.forbiddenError, message: res.forbiddenError }));
+          return;
+        }
         if (msg.type === "leave" || msg.type === "host_action" || pr) {
           await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         }
         for (const item of res.pushedEvents) {
-          const pkt = item.attachRoom
-            ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
-            : item.ev;
-          const echoToSender = ["chat", "chat_cleared", "poll_updated", "msg_reacted", "queue_updated", "skip_votes", "hand_raised", "host_action", "media_changed"].includes(item.ev.type);
-          this._broadcast(pkt, echoToSender ? null : server);
+          const echoToSender = ["chat", "chat_cleared", "poll_updated", "msg_reacted", "queue_updated", "vote_updated", "skip_votes", "hand_raised", "host_action", "media_changed"].includes(item.ev.type);
+          await this._broadcastRoomEvent(rm, item, echoToSender ? null : server);
         }
         for (const sig of res.privateSignals) {
           this._unicast(sig.targetId, sig);
@@ -1538,10 +1593,7 @@ export class WatchlivoRoomDO {
         await this._save();
         await syncPublicRoomIndex(roomId, await serializeEdgeRoom(rm, "", this.env), this.env);
         for (const item of res?.pushedEvents || []) {
-          const pkt = item.attachRoom
-            ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
-            : item.ev;
-          this._broadcast(pkt, null);
+          await this._broadcastRoomEvent(rm, item, null);
         }
       });
       return new Response(null, { status: 101, webSocket: client });
@@ -1555,7 +1607,7 @@ export class WatchlivoRoomDO {
     if (u.pathname === "/create") {
       await this.state.storage.delete("closed");
       this.room = makeRoomSkeleton(roomId, { ...body, curated: false });
-      await setRoomPassword(this.room, body.password || "");
+      await setRoomPassword(this.room, String(body.password || "").trim());
       applyRoomAction(this.room, this.room.creatorCid, { type: "init", username: this.room.creator, color: body.color || "#27DCC8" }, { initialDirty: true, tokenVerified: true });
       await this._save();
       const cid = this.room.creatorCid;
@@ -1597,18 +1649,18 @@ export class WatchlivoRoomDO {
 
     const pruned = pruneStaleParticipants(rm, this._activeWsCids());
     const res = applyRoomAction(rm, cid, body, { tokenVerified });
-    if (res.forbiddenError) {
-      return Response.json({ ok: false, error: res.forbiddenError }, { status: 403 });
-    }
     if (res.pendingPassword !== undefined) {
       await setRoomPassword(rm, res.pendingPassword);
     }
     if (res.dirty || pruned || res.pendingPassword !== undefined) await this._save();
+    if (res.kickedTargets?.length) {
+      this._ejectKickedSockets(roomId, res.kickedTargets);
+    }
+    if (res.forbiddenError) {
+      return Response.json({ ok: false, error: res.forbiddenError, message: res.forbiddenError }, { status: 403 });
+    }
     for (const item of res.pushedEvents) {
-      const pkt = item.attachRoom
-        ? { ...item.ev, room: await serializeEdgeRoom(rm, "", this.env) }
-        : item.ev;
-      this._broadcast(pkt, null);
+      await this._broadcastRoomEvent(rm, item, null);
     }
     for (const sig of res.privateSignals) {
       this._unicast(sig.targetId, sig);

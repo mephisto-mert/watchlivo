@@ -1,12 +1,12 @@
 // Watchlivo entry: profile bootstrap + hash router (#/ home, #/mesh/:id) — Rave home ⇄ mesh navigation parity.
-import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v224';
-import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v224';
-import { renderHome, destroyHome } from './views/home.js?v=20261119_v224';
-import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v224';
-import { h, toast } from './ui.js?v=20261119_v224';
+import { state, set, syncSocialState, updateFriendAction, pushPresenceHeartbeat } from './store.js?v=20261119_v225';
+import { loadProfile, saveProfile, avatar, profileSetup, openDmModal, checkRedirectAuth, verifyAndRefreshSession } from './profile.js?v=20261119_v225';
+import { renderHome, destroyHome } from './views/home.js?v=20261119_v225';
+import { api, getEdgeToken, humanApiError } from './api.js?v=20261119_v225';
+import { h, toast } from './ui.js?v=20261119_v225';
 
 const MODULE_VER = (() => {
-  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v224'; } catch (_) { return '20261119_v224'; }
+  try { return new URL(import.meta.url).searchParams.get('v') || '20261119_v225'; } catch (_) { return '20261119_v225'; }
 })();
 
 let _meshMod = null;
@@ -15,7 +15,7 @@ let _meshModPromise = null;
 function loadMeshModule() {
   if (_meshMod) return Promise.resolve(_meshMod);
   if (!_meshModPromise) {
-    _meshModPromise = import('./views/mesh.js?v=20261119_v224')
+    _meshModPromise = import('./views/mesh.js?v=20261119_v225')
       .then((mod) => {
         _meshMod = mod;
         return mod;
@@ -86,7 +86,8 @@ window.vortexMinimizeRoom = () => {
       window.__kinoxHost?.adapter?.pause?.();
     }
   } catch (_) {}
-  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
+  window.__vortexCloseControlsMenu?.();
+  document.querySelectorAll('.settings-menu.is-body-portal, .ctl-menu.is-body-portal, .ctl-menu-backdrop.is-body-portal').forEach((m) => m.remove());
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   document.body.classList.add('mesh-minimized');
   document.body.classList.remove('vortex-fs', 'theater-mode');
@@ -102,7 +103,8 @@ window.vortexRestoreRoom = () => {
 
 window.vortexCloseMinimizedRoom = () => {
   document.body.classList.remove('mesh-minimized', 'vortex-fs', 'theater-mode');
-  document.querySelectorAll('.settings-menu.is-body-portal').forEach((m) => m.remove());
+  window.__vortexCloseControlsMenu?.();
+  document.querySelectorAll('.settings-menu.is-body-portal, .ctl-menu.is-body-portal, .ctl-menu-backdrop.is-body-portal').forEach((m) => m.remove());
   activeMeshRoomId = null;
   leaveMeshSafe(true);
   const meshRoot = document.getElementById('mesh-root');
@@ -752,7 +754,7 @@ function initRaveNotifications() {
       if (!rtok) rtok = sessionStorage.getItem('vortex_st_' + rid) || '';
     } catch (_) {}
     const hasValidRtok = Boolean(rtok && rtok.length < 6000);
-    if (pwd && !hasValidRtok) qp.set('pwd', pwd);
+    if (pwd) qp.set('pwd', pwd);
     if (rTitle) qp.set('t', rTitle);
     if (hasValidRtok) qp.set('r_tok', rtok);
     const qs = qp.toString();

@@ -146,8 +146,8 @@ body.vortex-fs .panel-video {
 .stage-empty { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .9em; text-align: center; padding: 1.5em; background: radial-gradient(circle at 50% 40%, var(--bg-nebula-1, rgba(255,255,255,.05)), transparent 65%), #040508; }
 .stage-empty h2 { margin: 0; font-size: 1.25em; }
 .stage-empty p { margin: 0; opacity: .7; max-width: 30em; line-height: 1.45; }
-.stage-overlay-msg { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 6; padding: .4em .9em; border-radius: 99px; font-size: .82em; font-weight: 700; background: rgba(0,0,0,.6); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
-.stage-error { position: absolute; inset: 0; z-index: 48 !important; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: .7em; background: rgba(0,0,0,.86); text-align: center; padding: 1.5em; }
+.stage-overlay-msg { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 36; padding: .42em .95em; border-radius: 99px; font-size: .82em; font-weight: 700; background: rgba(0,0,0,.72); border: 1px solid rgba(255,255,255,.14); pointer-events: none; -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.stage-error { position: absolute; inset: 0; z-index: 26; display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: .7em; background: rgba(0,0,0,.86); text-align: center; padding: 56px 1.5em 70px; }
 .unmute-pill { position: absolute; left: 50%; top: calc(50% + 56px); transform: translate(-50%, -50%); z-index: 38; pointer-events: auto !important; cursor: pointer; box-shadow: 0 8px 28px rgba(0,0,0,.65); }
 .unmute-pill:active { transform: translate(-50%, -50%) scale(.95); }
 
@@ -283,9 +283,7 @@ body.vortex-fs .panel-video {
 .video-frame.menu-open .rave-subtitle-overlay,
 .video-frame.menu-open .stage-overlay-msg,
 .video-frame:has(.ctl-menu:not(.hidden)) .rave-subtitle-overlay,
-.video-frame:has(.ctl-menu:not(.hidden)) .stage-overlay-msg,
-.video-frame:has(.controls.show) .stage-overlay-msg,
-.video-frame:has(.controls.ui-active) .stage-overlay-msg {
+.video-frame:has(.ctl-menu:not(.hidden)) .stage-overlay-msg {
   opacity: 0 !important;
   pointer-events: none !important;
 }
@@ -6203,6 +6201,9 @@ html.is-android-pip .rave-subtitle-cue {
 /* Hide center play HUD when stage-error overlay is active + scroll safety on short mobile player */
 .video-frame:has(.stage-error:not(.hidden)) .ctl-center-hud {
   opacity: 0 !important;
+  pointer-events: none !important;
+}
+.video-frame:has(.stage-error:not(.hidden)) .ctl-mid {
   pointer-events: none !important;
 }
 .stage-error {

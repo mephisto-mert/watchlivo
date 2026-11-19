@@ -1,16 +1,17 @@
 // Side panels for Rave mesh/view: MeshList · Settings · Vote · Friends(Invite) · Globe · Participants.
-import { h, icons, toast, confirmPopup, fill, openThemeModal } from '../ui.js?v=20261119_v224';
+import { h, icons, toast, confirmPopup, fill, openThemeModal, handleWindowsAppDownload } from '../ui.js?v=20261119_v225';
 import {
-  state, setUiPref, isLeader, isHostOnly, isFriend,
+  state, setUiPref, subscribe, isLeader, isHostOnly, isFriend,
   getWatchHistory, getMusicHistory,
   syncSocialState, sendFriendRequest, updateFriendAction, sendRoomInvite,
-} from '../store.js?v=20261119_v224';
-import { avatar } from '../profile.js?v=20261119_v224';
-import { clock } from '../sync.js?v=20261119_v224';
-import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261119_v224';
-import { copyInvite, inviteUrl } from './chat.js?v=20261119_v224';
-import { parseVideoUrl } from '../providers.js?v=20261119_v224';
-import { resolveMedia } from './selection.js?v=20261119_v224';
+} from '../store.js?v=20261119_v225';
+import { avatar } from '../profile.js?v=20261119_v225';
+import { clock } from '../sync.js?v=20261119_v225';
+import { fetchRooms, meshThumb, thumbFor, openFriendsManagerModal, openRoomInviteModal } from './lobby.js?v=20261119_v225';
+import { copyInvite, inviteUrl } from './chat.js?v=20261119_v225';
+import { parseVideoUrl, getProvider } from '../providers.js?v=20261119_v225';
+import { resolveMedia } from './selection.js?v=20261119_v225';
+import { resolveMusicItem, resolveCatalogItem } from './selection-kinds.js?v=20261119_v225';
 
 const seg = (options, current, onPick, disabled) => h('div', { class: 'seg' }, options.map(([k, label, desc]) =>
   h('button', { class: current === k ? 'on' : '', disabled: disabled ? true : null, 'data-value': k, onclick: () => onPick(k) }, label, desc ? h('small', {}, desc) : null)));
@@ -31,67 +32,149 @@ function MeshList() {
 function Settings(ctx) {
   const el = h('div');
   let lastSig = '';
+  const act = (action, extra) => (isHostOnly() ? ctx.actions.hostAction(action, extra) : toast('Bu ayarları yalnızca oda lideri değiştirebilir.'));
+  const leadNote = h('div', { class: 'sel-note', style: { display: 'none' } }, 'Oda ayarlarını yalnızca oda lideri değiştirebilir.');
+  const nameInput = h('input', {
+    class: 'input',
+    'aria-label': 'Oda adı',
+    maxlength: '45',
+    onchange: (e) => {
+      const next = String(e.target.value || '').trim();
+      if (!next || next === state.mesh?.name) return;
+      act('set_privacy', { name: next });
+    },
+    onkeydown: (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.target.blur();
+      }
+    },
+  });
+  const pwInput = h('input', {
+    class: 'input',
+    type: 'password',
+    'aria-label': 'Oda şifresi',
+    placeholder: 'Şifre yok',
+    onchange: (e) => {
+      const clean = String(e.target.value || '').trim();
+      if (!clean) return;
+      e.target.value = '';
+      e.target.blur();
+      act('set_privacy', { password: clean });
+      toast('🔒 Oda şifresi güncellendi');
+    },
+    onkeydown: (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.target.dispatchEvent(new Event('change'));
+      }
+    },
+  });
+  const clearPwBtn = h('button', {
+    type: 'button',
+    class: 'btn sm ghost',
+    style: { marginTop: '6px', display: 'none' },
+    onclick: () => act('set_privacy', { password: '' }),
+  }, '🔓 Şifreyi Kaldır');
+  const privacySeg = seg([
+    ['public', 'Herkese Açık', 'Herkes odaya katılabilir'],
+    ['friends', 'Arkadaşlar', 'Arkadaşlar odaya katılabilir'],
+    ['private', 'Gizli', 'Yalnızca bağlantısı olanlar katılır'],
+  ], '', (k) => act('set_privacy', { privacy: k }), false);
+  const playModeSeg = seg([
+    ['leader', 'Liderin Seçimi', 'Yalnızca lider video seçebilir'],
+    ['cohost', 'Ortak Kontrol (Çift Modu)', 'Herkes oynatıp sarabilir ve seçebilir'],
+    ['autoplay', 'Otomatik Oynat', 'Sıradaki videolar otomatik oynar'],
+    ['quickplay', 'Hemen Oynat', 'Tek seçimle video oynar'],
+    ['vote', 'Oylayalım', 'Video sırası oylamayla belirlenir'],
+  ], '', (k) => act('set_privacy', { playMode: k }), false);
+  const voipModeSeg = seg([
+    ['off', 'Kapalı', 'Sesli sohbet yok'],
+    ['leader', 'Yalnızca Lider', 'Yalnızca lider konuşabilir'],
+    ['stage', 'Sahne Modu (20+ Kişi)', 'Dinleyiciler ✋ Söz İste ile mikrofon alır'],
+    ['all', 'Herkes', 'Herkes sesli sohbet yapabilir'],
+  ], '', (k) => act('set_privacy', { voipMode: k }), false);
+  const closeRoomGroup = h('div', { class: 'settings-group', style: { display: 'none' } },
+    h('h4', {}, 'Oda Yönetimi'),
+    h('button', {
+      type: 'button',
+      class: 'btn danger',
+      id: 'btn-close-room-all',
+      style: { width: '100%', justifyContent: 'center', fontWeight: '800', background: 'rgba(239, 68, 68, 0.18)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#fca5a5' },
+      onclick: async () => {
+        if (await confirmPopup('Odayı herkes için tamamen kapatmak istediğinize emin misiniz?', 'Odayı Kapat', 'Vazgeç')) {
+          ctx.actions.leave(true);
+        }
+      },
+    }, '🚪 Odayı Kapat ve Herkesi Çıkar'));
+  const appsGroup = (() => {
+    const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
+    const inApk = /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
+    if (inApk) return null;
+    const safeBinaryDownload = async (ev, dlUrl, filename, label) => {
+      ev.preventDefault();
+      try {
+        const head = await fetch(dlUrl, { method: 'HEAD', cache: 'no-store' });
+        const ct = String(head.headers.get('content-type') || '').toLowerCase();
+        if (!head.ok || ct.includes('text/html')) {
+          toast(`ℹ️ ${label} paketi bu sunucuda geçici olarak mevcut değil — tarayıcıdan PWA olarak kurabilirsin.`);
+          return;
+        }
+        toast(`⬇️ ${label} indiriliyor...`, 3500);
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        a.download = filename;
+        a.click();
+      } catch (_) {
+        toast(`ℹ️ ${label} indirme bağlantısına şu an ulaşılamıyor.`);
+      }
+    };
+    return h('div', { class: 'settings-group' },
+      h('h4', {}, 'Watchlivo Uygulamaları'),
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+        h('a', { href: '/download/ipa', onclick: (ev) => safeBinaryDownload(ev, '/download/ipa', 'Watchlivo.ipa', 'iOS IPA'), class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(244,63,94,.18), rgba(251,146,60,.18))', border: '1px solid rgba(244,63,94,.4)', color: '#fda4af', fontWeight: '700' } }, '🍎 iPhone / iOS IPA İndir (.ipa)'),
+        h('a', { href: '/download/Watchlivo-v2.0.apk', onclick: (ev) => safeBinaryDownload(ev, '/download/Watchlivo-v2.0.apk', 'Watchlivo-v2.0.apk', 'Android APK'), class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android Native APK İndir (v2.0.2)'),
+        h('a', { href: '/download/windows', onclick: handleWindowsAppDownload, class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü Kur')
+      )
+    );
+  })();
+  fill(el,
+    leadNote,
+    h('div', { class: 'settings-group' }, h('h4', {}, 'Oda adı'), nameInput),
+    h('div', { class: 'settings-group' }, h('h4', {}, 'Gizlilik'), privacySeg),
+    h('div', { class: 'settings-group' }, h('h4', {}, 'Oynatma'), playModeSeg),
+    h('div', { class: 'settings-group' }, h('h4', {}, 'Ses'), voipModeSeg),
+    h('div', { class: 'settings-group' }, h('h4', {}, 'Oda şifresi'), pwInput, clearPwBtn),
+    h('div', { class: 'settings-group' },
+      h('h4', {}, 'Görünüm & Tema'),
+      h('button', { type: 'button', class: 'btn primary', style: { width: '100%' }, onclick: () => openThemeModal() }, '🎨 Görünüm & Tema Ayarları')),
+    closeRoomGroup,
+    appsGroup
+  );
+  const syncSeg = (container, current, disabled) => {
+    container.querySelectorAll('button[data-value]').forEach((btn) => {
+      btn.classList.toggle('on', btn.dataset.value === current);
+      btn.disabled = Boolean(disabled);
+    });
+  };
   const update = () => {
     const m = state.mesh;
-    const activeTag = document.activeElement?.tagName;
-    if (!m || (el.contains(document.activeElement) && (activeTag === 'INPUT' || activeTag === 'TEXTAREA'))) return;
+    if (!m) return;
     const lead = isHostOnly();
-    const sig = `${m.name}|${m.privacy}|${m.playMode}|${m.voipMode}|${m.hasPassword}|${lead}`;
+    const voipVal = m.voipMode === 'on' ? 'all' : m.voipMode;
+    const sig = `${m.name}|${m.privacy}|${m.playMode}|${voipVal}|${Boolean(m.hasPassword)}|${lead}|${Boolean(m.curated)}`;
     if (sig === lastSig) return;
     lastSig = sig;
-    const act = (action, extra) => (lead ? ctx.actions.hostAction(action, extra) : toast('Bu ayarları yalnızca oda lideri değiştirebilir.'));
-    const nameInput = h('input', { class: 'input', 'aria-label': 'Oda adı', value: m.name, maxlength: '45', disabled: lead ? null : true, onchange: (e) => act('set_privacy', { name: e.target.value }) });
-    const pwInput = h('input', { class: 'input', type: 'password', 'aria-label': 'Oda şifresi', placeholder: m.hasPassword ? 'Şifre ayarlı (değiştirmek için yaz)' : 'Şifre yok', disabled: lead ? null : true, onchange: (e) => { act('set_privacy', { password: e.target.value }); e.target.value = ''; e.target.blur(); } });
-    fill(el,
-      lead ? null : h('div', { class: 'sel-note' }, 'Oda ayarlarını yalnızca oda lideri değiştirebilir.'),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Oda adı'), nameInput),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Gizlilik'), seg([
-        ['public', 'Herkese Açık', 'Herkes odaya katılabilir'],
-        ['friends', 'Arkadaşlar', 'Arkadaşlar odaya katılabilir'], ['private', 'Gizli', 'Yalnızca bağlantısı olanlar katılır']], m.privacy, (k) => act('set_privacy', { privacy: k }), !lead)),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Oynatma'), seg([
-        ['leader', 'Liderin Seçimi', 'Yalnızca lider video seçebilir'],
-        ['cohost', 'Ortak Kontrol (Çift Modu)', 'Herkes oynatıp sarabilir ve seçebilir'],
-        ['autoplay', 'Otomatik Oynat', 'Sıradaki videolar otomatik oynar'],
-        ['quickplay', 'Hemen Oynat', 'Tek seçimle video oynar'],
-        ['vote', 'Oylayalım', 'Video sırası oylamayla belirlenir']], m.playMode, (k) => act('set_privacy', { playMode: k }), !lead)),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Ses'), seg([
-        ['off', 'Kapalı', 'Sesli sohbet yok'],
-        ['leader', 'Yalnızca Lider', 'Yalnızca lider konuşabilir'],
-        ['stage', 'Sahne Modu (20+ Kişi)', 'Dinleyiciler ✋ Söz İste ile mikrofon alır'],
-        ['all', 'Herkes', 'Herkes sesli sohbet yapabilir']],
-        m.voipMode === 'on' ? 'all' : m.voipMode, (k) => act('set_privacy', { voipMode: k }), !lead)),
-      h('div', { class: 'settings-group' }, h('h4', {}, 'Oda şifresi'), pwInput,
-        (m.hasPassword && lead) ? h('button', { type: 'button', class: 'btn sm ghost', style: { marginTop: '6px' }, onclick: () => act('set_privacy', { password: '' }) }, '🔓 Şifreyi Kaldır') : null),
-      h('div', { class: 'settings-group' },
-        h('h4', {}, 'Görünüm & Tema'),
-        h('button', { type: 'button', class: 'btn primary', style: { width: '100%' }, onclick: () => openThemeModal() }, '🎨 Görünüm & Tema Ayarları')),
-      (lead && !m.curated) ? h('div', { class: 'settings-group' },
-        h('h4', {}, 'Oda Yönetimi'),
-        h('button', {
-          type: 'button',
-          class: 'btn danger',
-          id: 'btn-close-room-all',
-          style: { width: '100%', justifyContent: 'center', fontWeight: '800', background: 'rgba(239, 68, 68, 0.18)', border: '1px solid rgba(239, 68, 68, 0.5)', color: '#fca5a5' },
-          onclick: async () => {
-            if (await confirmPopup('Odayı herkes için tamamen kapatmak istediğinize emin misiniz?', 'Odayı Kapat', 'Vazgeç')) {
-              ctx.actions.leave(true);
-            }
-          },
-        }, '🚪 Odayı Kapat ve Herkesi Çıkar')) : null,
-      (() => {
-        const ua = typeof navigator !== 'undefined' ? (navigator.userAgent || '') : '';
-        const inApk = /WatchlivoApp/i.test(ua) || (/Android/i.test(ua) && /;\s*wv\b/i.test(ua));
-        if (inApk) return null;
-        return h('div', { class: 'settings-group' },
-          h('h4', {}, 'Watchlivo Uygulamaları'),
-          h('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-            h('a', { href: '/download/ipa', download: 'Watchlivo.ipa', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(244,63,94,.18), rgba(251,146,60,.18))', border: '1px solid rgba(244,63,94,.4)', color: '#fda4af', fontWeight: '700' } }, '🍎 iPhone / iOS IPA İndir (.ipa)'),
-            h('a', { href: '/download/Watchlivo-v2.0.apk', download: 'Watchlivo-v2.0.apk', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(99, 102, 241,.18), rgba(56,189,248,.18))', border: '1px solid rgba(99, 102, 241,.4)', color: '#6366f1', fontWeight: '700' } }, '📱 Android Native APK İndir (v2.0.2)'),
-            h('a', { href: '/download/windows', download: 'Watchlivo.exe', class: 'btn', style: { width: '100%', textDecoration: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: 'linear-gradient(135deg, rgba(168,85,247,.18), rgba(59,130,246,.18))', border: '1px solid rgba(168,85,247,.4)', color: '#c084fc', fontWeight: '700' } }, '💻 Windows Masaüstü İndir (.exe)')
-          )
-        );
-      })()
-    );
+    leadNote.style.display = lead ? 'none' : '';
+    nameInput.disabled = !lead;
+    if (document.activeElement !== nameInput) nameInput.value = m.name || '';
+    pwInput.disabled = !lead;
+    pwInput.placeholder = m.hasPassword ? 'Şifre ayarlı (değiştirmek için yaz)' : 'Şifre yok';
+    clearPwBtn.style.display = (m.hasPassword && lead) ? '' : 'none';
+    syncSeg(privacySeg, m.privacy, !lead);
+    syncSeg(playModeSeg, m.playMode, !lead);
+    syncSeg(voipModeSeg, voipVal, !lead);
+    closeRoomGroup.style.display = (lead && !m.curated) ? '' : 'none';
   };
   update();
   return { el, update };
@@ -122,7 +205,7 @@ function Vote(ctx) {
       urlInput.value = '';
       ctx?.layout?.openSearch?.();
       setTimeout(() => {
-        const sInp = document.querySelector('#mesh-root .panel-side input.input, #mesh-root .panel input.input');
+        const sInp = document.querySelector('#mesh-root .panel-left input.wl-search-input, #mesh-root .panel-left input[aria-label="Ara"], #mesh-root .panel-left input');
         if (sInp) {
           sInp.value = raw;
           sInp.dispatchEvent(new Event('input', { bubbles: true }));
@@ -182,6 +265,21 @@ function Vote(ctx) {
         pie.textContent = Math.ceil(rem / 1000);
       }, 200);
     }
+    const resolveHistoryEntry = async (item) => {
+      if (!item) return null;
+      const isMus = Boolean(item.isMusic || item.mediaType === 'music' || item.provider === 'music' || item.artist);
+      if (isMus) {
+        const resolved = await resolveMusicItem(item).catch(() => null);
+        return resolved || (item.videoId ? { ...item, provider: 'youtube', isMusic: true } : null);
+      }
+      if (item.provider === 'youtube' && item.videoId) return item;
+      if (item.tmdbId || item.catalogProvider || /cinema|anime|turkish/i.test(String(item.provider || ''))) {
+        const prov = getProvider(item.catalogProvider || item.provider || 'cinema') || { id: 'cinema', name: 'Sinema & Dizi' };
+        const resolved = await resolveCatalogItem(item, prov, Number(item.season || 1), Number(item.episode || 1), '', { applySavedResume: false }).catch(() => null);
+        if (resolved) return resolved;
+      }
+      return (item.url || item.videoId || item.embedUrl) ? item : null;
+    };
     const recentHistory = [...getWatchHistory().slice(0, 4), ...getMusicHistory().slice(0, 3)].slice(0, 5);
     const historyBox = recentHistory.length ? h('div', { style: { padding: '8px 10px', borderTop: '1px solid rgba(255,255,255,0.06)', marginTop: '6px' } },
       h('div', { style: { fontSize: '.74rem', fontWeight: '700', color: '#A0A9B8', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '.04em' } }, '🕘 Oda & İzleme Geçmişi'),
@@ -190,8 +288,28 @@ function Vote(ctx) {
         h('div', { class: 'vi' },
           h('div', { class: 'vt' }, item.songTitle || item.title || 'Video'),
           h('div', { style: { display: 'flex', gap: '4px', marginTop: '4px' } },
-            h('button', { type: 'button', class: 'btn sm', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.queueMusic(item) }, '+ Sıraya'),
-            lead ? h('button', { type: 'button', class: 'btn sm primary', style: { padding: '2px 7px', fontSize: '.7rem' }, onclick: () => ctx.actions.pickMedia(item) }, '▶ Oynat') : null)))))) : null;
+            h('button', {
+              type: 'button',
+              class: 'btn sm',
+              style: { padding: '2px 7px', fontSize: '.7rem' },
+              onclick: async () => {
+                toast('⏳ İçerik hazırlanıyor...');
+                const ready = await resolveHistoryEntry(item);
+                if (ready) ctx.actions.queueMusic(ready);
+                else toast('⚠️ Bu geçmiş öğesi şu an çözümlenemedi');
+              },
+            }, '+ Sıraya'),
+            lead ? h('button', {
+              type: 'button',
+              class: 'btn sm primary',
+              style: { padding: '2px 7px', fontSize: '.7rem' },
+              onclick: async () => {
+                toast('⏳ İçerik hazırlanıyor...');
+                const ready = await resolveHistoryEntry(item);
+                if (ready) ctx.actions.pickMedia(ready);
+                else toast('⚠️ Bu geçmiş öğesi şu an açılamadı');
+              },
+            }, '▶ Oynat') : null)))))) : null;
 
     const humanCount = (state.mesh?.participants || []).filter((p) => p && p.transport !== 'bot').length || 1;
     const skipNeeded = state.mesh?.skipNeeded || Math.max(1, Math.floor(humanCount / 2) + 1);
@@ -204,12 +322,14 @@ function Vote(ctx) {
       q.length ? h('div', { class: 'vote-list' }, q.map((it, i) => {
         const votes = (it.votes || []).length;
         const voted = (it.votes || []).includes(state.clientId) || (it.votes || []).includes(state.self?.uid) || (it.votes || []).includes(state.self?.id) || (it.votes || []).includes(state.self?.name);
+        const canPlayItem = lead || ['quickplay', 'free', 'cohost'].includes(mode || '');
+        const canRemoveItem = lead || Boolean(it.addedByCid && state.clientId && it.addedByCid === state.clientId);
         return h('div', { class: `vote-card ${votes && votes === maxVotes ? 'winning' : ''} ${voted ? 'voted' : ''}`, onclick: () => voteVideo(i, it.id) },
           h('img', { src: thumbFor(it) || '/static/watchlivo-logo.svg', alt: '', onerror: (e) => { e.target.onerror = null; e.target.src = '/static/watchlivo-poster.svg'; } }),
           h('div', { class: 'vi' }, h('div', { class: 'vt' }, it.title || 'Video'), h('div', { class: 'vs' }, `${it.addedBy || ''} ekledi`),
-            lead ? h('div', { style: { display: 'flex', gap: '.3em', marginTop: '.35em' } },
-              h('button', { class: 'btn', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); playQueueIndex(i, it.id); } }, 'Şimdi Oynat'),
-              h('button', { class: 'btn danger', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); removeQueueItem(i, it.id); } }, 'Kaldır')) : null),
+            (canPlayItem || canRemoveItem) ? h('div', { style: { display: 'flex', gap: '.3em', marginTop: '.35em' } },
+              canPlayItem ? h('button', { class: 'btn', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); playQueueIndex(i, it.id); } }, 'Şimdi Oynat') : null,
+              canRemoveItem ? h('button', { class: 'btn danger', style: { padding: '.3em .7em', fontSize: '.75em' }, onclick: (e) => { e.stopPropagation(); removeQueueItem(i, it.id); } }, 'Kaldır') : null) : null),
           votes ? h('span', { class: 'vote-counter' }, votes) : null);
       })) : h('div', { class: 'lobby-empty', style: { padding: '14px 10px' } }, 'Sıra boş. Yukarıdan bağlantı yapıştırabilir veya Katalogdan video ekleyebilirsin.'),
       skipVotes.length ? h('div', { class: 'sel-note' }, `⚡ Geç (${skipVotes.length}/${skipNeeded})`) : null,
@@ -505,6 +625,8 @@ function Participants(ctx) {
                   const r = await updateFriendAction('remove', { targetUid: resolvedTargetUid });
                   if (!r?.ok) { toast(r?.error || 'Arkadaş çıkarılamadı.'); return; }
                   toast(`${p.name} arkadaş listesinden çıkarıldı`);
+                } else if (isMut && !resolvedTargetUid) {
+                  toast('Bu misafir kullanıcının kayıtlı hesabı bulunmuyor');
                 } else if (isPend && resolvedTargetUid) {
                   const r = await updateFriendAction('cancel', { targetUid: resolvedTargetUid });
                   if (!r?.ok) { toast(r?.error || 'İstek geri çekilemedi.'); return; }
@@ -517,17 +639,32 @@ function Participants(ctx) {
               },
             }, isMut ? '✓ Arkadaş' : (isPend ? '⏳ İstekli' : '+ Arkadaş'));
           })() : null,
-          hostOnly && !isMe && !isBot ? h('div', { class: 'raver-actions' },
-            !p.muted ? h('button', { class: 'btn sm', title: 'Mikrofonu Kapat (Sustur)', onclick: (e) => { e.stopPropagation(); ctx.actions.hostAction('mute', { targetId: p.id }); } }, '🔇') : null,
-            m?.voipMode === 'stage' ? h('button', { type: 'button', 'aria-label': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al', 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
-            h('button', { type: 'button', 'aria-label': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider yap', 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝'),
-            h('button', { type: 'button', 'aria-label': `${p.name} kişisini lider yap`, 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }),
-            h('button', { type: 'button', 'aria-label': `${p.name} kişisini odadan çıkar`, 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick })) : null);
+          (() => {
+            const mePart = allParts.find((x) => x && x.id === state.clientId);
+            const canStageCtrl = hostOnly || (m?.co_hosts || []).includes(state.clientId) || Boolean(mePart?.isCoHost);
+            if (!isMe && !isBot && (hostOnly || (canStageCtrl && m?.voipMode === 'stage'))) {
+              return h('div', { class: 'raver-actions' },
+                hostOnly && !p.muted ? h('button', { class: 'btn sm', title: 'Mikrofonu Kapat (Sustur)', onclick: (e) => { e.stopPropagation(); ctx.actions.hostAction('mute', { targetId: p.id }); } }, '🔇') : null,
+                canStageCtrl && m?.voipMode === 'stage' ? h('button', { type: 'button', 'aria-label': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al', 'data-tip': p.isStageSpeaker ? 'Sahneden dinleyiciye al' : 'Sahneye konuşmacı al (Söz Ver)', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isStageSpeaker ? 'rgba(39, 220, 200,.24)' : '' }, onclick: () => ctx.actions.toggleStageSpeaker?.(p.id) }, p.isStageSpeaker ? '🎤✓' : '✋🎤') : null,
+                hostOnly ? h('button', { type: 'button', 'aria-label': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider yap', 'data-tip': p.isCoHost ? 'Ortak liderliği kaldır' : 'Ortak lider (Co-Host) yap', style: { fontSize: '.85em', padding: '.2em .4em', background: p.isCoHost ? 'rgba(99, 102, 241,.22)' : '' }, onclick: () => ctx.actions.hostAction('toggle_cohost', { targetId: p.id }) }, '🤝') : null,
+                hostOnly ? h('button', { type: 'button', 'aria-label': `${p.name} kişisini lider yap`, 'data-tip': 'Lider yap', onclick: () => ctx.actions.hostAction('transfer_host', { targetId: p.id }), html: icons.crown }) : null,
+                hostOnly ? h('button', { type: 'button', 'aria-label': `${p.name} kişisini odadan çıkar`, 'data-tip': 'Odadan çıkar', onclick: async () => { if (await confirmPopup(`${p.name} odadan çıkarılsın mı?`, 'Çıkar', 'Vazgeç')) ctx.actions.hostAction('kick', { targetId: p.id }); }, html: icons.kick }) : null);
+            }
+            return null;
+          })());
       }),
       overflowCount > 0 ? h('div', { class: 'dim', style: { padding: '10px 12px', textAlign: 'center', fontSize: '.82rem' } }, `+${overflowCount} diğer izleyici odada aktif (Toplam ${totalCount} kişi)`) : null);
   };
   update();
-  return { el, update };
+  let lastDuckPref = state.uiPrefs?.voiceDucking !== false;
+  const unsub = subscribe((st) => {
+    const nextDuckPref = st.uiPrefs?.voiceDucking !== false;
+    if (nextDuckPref !== lastDuckPref) {
+      lastDuckPref = nextDuckPref;
+      update();
+    }
+  });
+  return { el, update, destroy: () => unsub() };
 }
 
 export const PANELS = { MeshList, Settings, Vote, Friends, Globe, Participants };

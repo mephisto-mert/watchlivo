@@ -1,11 +1,11 @@
 // Rave Selection parity: provider grid + SuperSearch → provider selection view → onPick(media).
-import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v224';
-import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v224';
-import { api, qs, humanApiError } from '../api.js?v=20261119_v224';
-import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v224';
-import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v224';
-import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v224';
-import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v224';
+import { h, icons, popup, toast, fill } from '../ui.js?v=20261119_v225';
+import { PROVIDERS, PROVIDER_CATEGORIES, getProvider, parseVideoUrl, providerUsable } from '../providers.js?v=20261119_v225';
+import { api, qs, humanApiError } from '../api.js?v=20261119_v225';
+import { renderSearchKind, renderLinkKind, renderUploadKind, renderDesktopKind, renderCatalogKind, resolveCatalogItem, renderMusicKind, resolveMusicItem, renderDriveKind, renderRaveDjKind, openVizyonModal, openTvSeriesModal as openCatalogTvSeriesModal } from './selection-kinds.js?v=20261119_v225';
+import { fetchAccounts, getAccount, openProviderLoginModal, openNetflixLoginModal, renderSeriesPicker } from '../accounts.js?v=20261119_v225';
+import { profileSetup, syncGoogleYoutubeOAuth } from '../profile.js?v=20261119_v225';
+import { createVoiceSearchButton } from '../voice-note.js?v=20261119_v225';
 import {
   state, subscribe, isCloudAuthenticated, syncCloudUserMedia,
   getWatchHistory, getContinueWatching, clearWatchHistory, removeWatchProgress, saveWatchProgress,
@@ -13,7 +13,7 @@ import {
   getMusicHistory, clearMusicHistory, getAccountStorageScope,
   getYtPrefs, isYtChannelFollowed, toggleYtChannelFollow, isYtVideoLiked, toggleYtVideoLike,
   dismissYtVideo, undoDismissYtVideo, blockYtChannel, fetchPersonalizedYtFeed, invalidateYtFeedCache,
-} from '../store.js?v=20261119_v224';
+} from '../store.js?v=20261119_v225';
 
 function checkProviderAuthGate(itemOrProv, defaultProv) {
   return true;
@@ -789,7 +789,7 @@ export function createSelection({ onPick, compact = false, initialProvider = nul
 
   function renderGrid() {
     const prevCatScroll = root.querySelector('.provider-cat-bar')?.scrollLeft || 0;
-    const input = h('input', { placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
+    const input = h('input', { class: 'wl-search-input', placeholder: 'Film, dizi, anime veya link ara...', value: superQuery, 'aria-label': 'Ara' });
     const results = h('div', { class: 'super-results hidden' });
     const cmdkDropdown = h('div', { class: 'wl-cmdk-dropdown', id: 'wl-cmdk-dropdown', style: { display: 'none' } });
     let cmdkTimer = null;

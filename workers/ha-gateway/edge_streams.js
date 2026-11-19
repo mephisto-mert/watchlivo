@@ -41,7 +41,7 @@ export function inferStreamReferer(u) {
   if (!u || u.includes("hakunaymatata.com") || u.includes("twimg.com")) return "";
   if (u.includes("diziyou.love")) return "https://www.diziyou.love/";
   if (u.includes("ksdpictures.")) return "https://ksdpictures.site/";
-  if (u.includes("filmizle.in") || u.includes("monacesfofestom")) return "https://player.filmizle.in/";
+  if (u.includes("filmizle.in") || u.includes("monacesfofestom") || /newmoviescenas\d*\.shop/i.test(u)) return "https://player.filmizle.in/";
   if (u.includes("vixsrc.") || u.includes("vix-content.") || u.includes("blackpuma")) return "https://vixsrc.to/";
   if (u.includes("pilavyer")) return "https://pilavyerplay.top/";
   if (u.includes("ddizimag.")) return "https://ddizimag.icu/";
@@ -613,17 +613,13 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
         }
       }
       if (trUrls.length) {
-        const trSubs = (trLive.subs || []).filter((t) => t?.url).map((t, idx) => ({
-          id: `sub-${idx}`,
-          lang: t.lang || "tr",
-          label: t.lang === "tr" ? "🇹🇷 Türkçe" : (t.lang === "en" ? "🇬🇧 İngilizce" : String(t.lang || "Altyazı").toUpperCase()),
-          url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}${t.referer ? `&ref=${b64UrlEncode(t.referer)}` : ""}`,
-        }));
+        const trSubs = formatStreamSubTracks(trLive.subs || []);
         return jsonResp({
           id: tmdbId || id,
           provider: "netflix",
           catalogProvider: "cinema",
           tmdbId,
+          imdbId: (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || "").trim(),
           mediaType: mtype,
           season: mtype === "tv" ? s : 0,
           episode: mtype === "tv" ? e : 0,
@@ -694,12 +690,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     servers.push({ id: `srv-${i + 1}`, label: `📡 Sunucu ${i + 1} · Cloudflare 7/24 (${isMp4 ? "MP4 HD" : "1080p HLS"})`, url: proxied, streamType: isMp4 ? "mp4" : "hls" });
   }
 
-  const subs = (hit.subs || []).filter((t) => t?.url).map((t, idx) => ({
-    id: `sub-${idx}`,
-    lang: t.lang || "tr",
-    label: t.lang === "tr" ? "🇹🇷 Türkçe" : (t.lang === "en" ? "🇬🇧 İngilizce" : String(t.lang || "Altyazı").toUpperCase()),
-    url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(t.url)}`,
-  }));
+  const subs = formatStreamSubTracks(hit.subs || []);
 
   if (!urls.length) {
     return jsonResp({ ok: false, error: "Bu içerik için güvenli doğrudan akış kaynağı bulunamadı." }, 404);
@@ -712,6 +703,7 @@ async function resolveAnimecixLive(id, mtype, s, e, env, reqTitle = "", reqOrigT
     provider: primary.streamType === "embed" ? "embed" : "netflix",
     catalogProvider: "netflix",
     tmdbId: tmdbId || hit.tmdbId || "",
+    imdbId: (url.searchParams.get("imdbId") || url.searchParams.get("imdb_id") || hit.imdbId || "").trim(),
     mediaType: hit.mediaType || mtype,
     season: mtype === "tv" ? s : 0,
     episode: mtype === "tv" ? e : 0,
@@ -1050,11 +1042,227 @@ function assTimeToVtt(t) {
   return `${m[1].padStart(2, "0")}:${m[2]}:${m[3]}.${m[4]}0`;
 }
 
+const SUB_LANG_ALIASES = {
+  tr: "tr", tur: "tr", turkish: "tr", turkce: "tr", "türkçe": "tr", "tr-tr": "tr",
+  en: "en", eng: "en", english: "en", ingilizce: "en", "en-us": "en", "en-gb": "en",
+  de: "de", deu: "de", ger: "de", german: "de", almanca: "de", deutsch: "de",
+  fr: "fr", fra: "fr", fre: "fr", french: "fr", "fransızca": "fr", francais: "fr",
+  es: "es", spa: "es", spanish: "es", ispanyolca: "es", espanol: "es", "español": "es",
+  pt: "pt", por: "pt", pob: "pt", "pt-br": "pt", "pt-pt": "pt", portuguese: "pt", portekizce: "pt",
+  it: "it", ita: "it", italian: "it", italyanca: "it", italiano: "it",
+  ru: "ru", rus: "ru", russian: "ru", "rusça": "ru", rusca: "ru",
+  ar: "ar", ara: "ar", arabic: "ar", "arapça": "ar", arapca: "ar",
+  nl: "nl", nld: "nl", dut: "nl", dutch: "nl", "felemenkçe": "nl", nederlands: "nl",
+  pl: "pl", pol: "pl", polish: "pl", "lehçe": "pl",
+  ja: "ja", jpn: "ja", japanese: "ja", japonca: "ja",
+  ko: "ko", kor: "ko", korean: "ko", korece: "ko",
+  zh: "zh", zho: "zh", chi: "zh", zht: "zh", zhe: "zh", chinese: "zh", "çince": "zh",
+  az: "az", aze: "az", azerbaijani: "az", azerice: "az",
+  sv: "sv", swe: "sv", swedish: "sv",
+  no: "no", nor: "no", nob: "no", norwegian: "no",
+  da: "da", dan: "da", danish: "da",
+  fi: "fi", fin: "fi", finnish: "fi",
+  el: "el", ell: "el", gre: "el", greek: "el",
+  cs: "cs", cze: "cs", ces: "cs", czech: "cs",
+  ro: "ro", ron: "ro", rum: "ro", romanian: "ro",
+  hu: "hu", hun: "hu", hungarian: "hu",
+  bg: "bg", bul: "bg", bulgarian: "bg",
+  hr: "hr", hrv: "hr", croatian: "hr",
+  sr: "sr", srp: "sr", scc: "sr", serbian: "sr",
+  uk: "uk", ukr: "uk", ukrainian: "uk",
+  fa: "fa", per: "fa", fas: "fa", persian: "fa",
+  hi: "hi", hin: "hi", hindi: "hi",
+  he: "he", heb: "he", hebrew: "he",
+  id: "id", ind: "id", indonesian: "id",
+  vi: "vi", vie: "vi", vietnamese: "vi",
+};
+
+const SUB_LANG_DISPLAY = {
+  tr: "🇹🇷 Türkçe",
+  en: "🇬🇧 İngilizce",
+  de: "🇩🇪 Almanca",
+  fr: "🇫🇷 Fransızca",
+  es: "🇪🇸 İspanyolca",
+  pt: "🇵🇹 Portekizce",
+  it: "🇮🇹 İtalyanca",
+  ru: "🇷🇺 Rusça",
+  ar: "🇸🇦 Arapça",
+  nl: "🇳🇱 Felemenkçe",
+  pl: "🇵🇱 Lehçe",
+  ja: "🇯🇵 Japonca",
+  ko: "🇰🇷 Korece",
+  zh: "🇨🇳 Çince",
+  az: "🇦🇿 Azerice",
+  sv: "🇸🇪 İsveççe",
+  no: "🇳🇴 Norveççe",
+  da: "🇩🇰 Danca",
+  fi: "🇫🇮 Fince",
+  el: "🇬🇷 Yunanca",
+  cs: "🇨🇿 Çekçe",
+  ro: "🇷🇴 Rumence",
+  hu: "🇭🇺 Macarca",
+  bg: "🇧🇬 Bulgarca",
+  hr: "🇭🇷 Hırvatça",
+  sr: "🇷🇸 Sırpça",
+  uk: "🇺🇦 Ukraynaca",
+  fa: "🇮🇷 Farsça",
+  hi: "🇮🇳 Hintçe",
+  he: "🇮🇱 İbranice",
+  id: "🇮🇩 Endonezce",
+  vi: "🇻🇳 Vietnamca",
+};
+
+export function normalizeSubLang(rawLang, rawLabel = "", rawUrl = "") {
+  const cleanToken = (v) => String(v || "").replace(/İ/g, "i").replace(/I/g, "i").trim().toLowerCase();
+  const l = cleanToken(rawLang);
+  const lbl = cleanToken(rawLabel);
+  const u = cleanToken(rawUrl);
+
+  // Explicit Turkish filename/label override (catches mislabeled OpenSubtitles/player uploads)
+  if (/(?:^|[._\s\-[/(])(?:türkçe|turkce|turkish)(?:$|[._\s\-\])])/i.test(lbl) || /(?:sub_turkish|sub_tur|\/tr\.vtt|\/turkish\.vtt|\.tur\.vtt)/i.test(u)) {
+    return "tr";
+  }
+  if (SUB_LANG_ALIASES[l]) return SUB_LANG_ALIASES[l];
+  const baseL = l.split(/[-_\s]/)[0];
+  if (SUB_LANG_ALIASES[baseL]) return SUB_LANG_ALIASES[baseL];
+  if (lbl) {
+    if (/(?:türk|turk)/i.test(lbl)) return "tr";
+    if (/(?:ingiliz|english|\beng\b)/i.test(lbl)) return "en";
+    for (const [k, v] of Object.entries(SUB_LANG_ALIASES)) {
+      if (k.length >= 4 && lbl.includes(k)) return v;
+    }
+  }
+  if (/(?:sub_english|sub_eng|\/en\.vtt|\/english\.vtt|\.eng\.vtt)/i.test(u)) return "en";
+  return baseL ? baseL.slice(0, 6) : "tr";
+}
+
+export function formatSubLabel(lang, suffix = "") {
+  const code = normalizeSubLang(lang);
+  const base = SUB_LANG_DISPLAY[code] || `🌐 ${code.toUpperCase()}`;
+  return suffix ? `${base} (${suffix})` : base;
+}
+
+const _SUB_TR_WORDS = new Set([
+  "bir", "bu", "ve", "de", "da", "ne", "ben", "sen", "biz", "ama", "için", "değil", "var", "yok",
+  "evet", "hayır", "gibi", "daha", "çok", "neden", "burada", "şimdi", "tamam", "şey", "beni",
+  "seni", "onu", "bana", "sana", "olan", "olarak", "nasıl", "kadar", "sonra", "önce", "bunu",
+  "onun", "benim", "senin", "bizim", "lütfen", "hadi", "sadece", "her", "hiç", "bile", "öyle",
+]);
+const _SUB_EN_WORDS = new Set([
+  "the", "and", "you", "that", "this", "with", "what", "have", "they", "from", "are", "was",
+  "for", "not", "but", "your", "just", "know", "here", "there", "she", "him", "her", "about",
+  "don", "can", "will", "all", "one", "out", "get", "who", "how", "why", "now", "come", "back",
+  "been", "were", "would", "could", "should", "their", "them", "into", "then", "when", "where",
+]);
+
+export function detectSubtitleTextLang(vttOrSrt) {
+  let body = String(vttOrSrt || "").replace(/^WEBVTT[^\n]*\n/i, "");
+  body = body.replace(/(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}[^\n]*/g, " ");
+  body = body.replace(/<[^>]+>/g, " ").replace(/\{\\[^}]*\}/g, " ").slice(0, 7000);
+  const words = body.toLowerCase().match(/[a-zçğıöşü]+/gi) || [];
+  if (words.length < 18) return "";
+  let trW = 0;
+  let enW = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i].toLowerCase();
+    if (_SUB_TR_WORDS.has(w)) trW += 1;
+    if (_SUB_EN_WORDS.has(w)) enW += 1;
+  }
+  const trChars = (body.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length;
+  const nonTrExtChars = (body.match(/[ñáéíóúãõäëïßàèìòùčřžšěůłńśźżåæø]/gi) || []).length;
+  const cyrOrAra = (body.match(/[\u0400-\u04FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/g) || []).length;
+  if (cyrOrAra > 20 || nonTrExtChars > trChars * 1.5 + 12) return "";
+  if (trW >= 8 && trChars >= 10 && trW >= enW * 2) return "tr";
+  if (enW >= 14 && trChars <= 3 && enW >= trW * 2.5) return "en";
+  return "";
+}
+
+export function decodeSubtitleBytes(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) {
+    return new TextDecoder("utf-16le", { fatal: false }).decode(u8);
+  }
+  if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) {
+    return new TextDecoder("utf-16be", { fatal: false }).decode(u8);
+  }
+  const utf8Str = new TextDecoder("utf-8", { fatal: false }).decode(u8);
+  const replCount = (utf8Str.match(/\uFFFD/g) || []).length;
+  if (replCount === 0) return utf8Str;
+  // Valid UTF-8 Turkish files occasionally have 1-2 stray corrupt bytes; don't turn the whole file into Win-1254 mojibake!
+  let winStr = "";
+  try {
+    winStr = new TextDecoder("windows-1254", { fatal: false }).decode(u8);
+  } catch {
+    const trMap = { 0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f" };
+    for (let i = 0; i < u8.length; i++) winStr += trMap[u8[i]] || String.fromCharCode(u8[i]);
+  }
+  const utf8TrChars = (utf8Str.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length;
+  const winMojibake = (winStr.match(/Ä±|Ä°|ÄŸ|Äž|Ã§|Ã‡|Ã¶|Ã–|Ã¼|Ãœ|ÅŸ|Åž/g) || []).length;
+  if (utf8TrChars >= 6 && winMojibake >= Math.max(4, replCount * 2)) {
+    return utf8Str.replace(/\uFFFD/g, "");
+  }
+  return winStr;
+}
+
+const STREAM_SOURCE_NAMES = {
+  dl_embed: "Dizilife",
+  sinemacc: "SinemaCC",
+  fhd_embed: "FullHD",
+  hfnl_embed: "HDFC",
+  diziyou_net: "DiziyouNet",
+  dylove: "Diziyou",
+  filmmodu: "FilmModu",
+  ddizimag: "DiziMag",
+  hls_filemoon: "FileMoon",
+};
+
+export function formatStreamSubTracks(rawList) {
+  const seen = new Set();
+  const norm = [];
+  for (const t of (Array.isArray(rawList) ? rawList : [])) {
+    const rawU = String(t?.url || "").trim();
+    if (!rawU || !isPublicHttpUrl(rawU) || seen.has(rawU)) continue;
+    seen.add(rawU);
+    const lang = normalizeSubLang(t.lang, t.label, rawU);
+    const src = String(t.source || "stream").trim();
+    norm.push({
+      lang,
+      source: src,
+      referer: String(t.referer || "").trim(),
+      rawUrl: rawU,
+    });
+  }
+  const rankLang = (l) => (l === "tr" ? 0 : (l === "en" ? 1 : 2));
+  norm.sort((a, b) => rankLang(a.lang) - rankLang(b.lang));
+  const countsByLang = {};
+  for (const item of norm) countsByLang[item.lang] = (countsByLang[item.lang] || 0) + 1;
+  const idxByLang = {};
+  return norm.map((item) => {
+    idxByLang[item.lang] = (idxByLang[item.lang] || 0) + 1;
+    const n = idxByLang[item.lang];
+    const total = countsByLang[item.lang];
+    const srcNice = STREAM_SOURCE_NAMES[item.source] || "";
+    const suffix = total > 1 ? (srcNice ? `${srcNice} · ${n}` : `Kaynak ${n}`) : srcNice;
+    return {
+      id: n === 1 ? `stream-${item.lang}` : `stream-${item.lang}-${n}`,
+      lang: item.lang,
+      label: formatSubLabel(item.lang, suffix),
+      url: `/api/rave/subtitle.vtt?url=${encodeURIComponent(item.rawUrl)}${item.referer ? `&ref=${b64UrlEncode(item.referer)}` : ""}`,
+      source: item.source || "stream",
+      synced: true,
+    };
+  });
+}
+
 function normalizeSubtitleToVtt(raw) {
-  let txt = String(raw || "").replace(/^\uFEFF/, "").trimStart();
+  let txt = String(raw || "").replace(/\uFEFF/g, "").trimStart();
   if (!txt) return "WEBVTT\n\n";
-  if (/^(?:<!doctype|<html|<script|<svg)/i.test(txt)) return "";
-  if (txt.startsWith("WEBVTT")) return txt;
+  if (/^(?:<!doctype|<html|<script|<svg|<\?xml)/i.test(txt)) return "";
+  if (txt.startsWith("WEBVTT")) {
+    // Reject stub/error documents with WEBVTT header or no timestamps
+    if (!/-->/.test(txt) && txt.length > 20) return "";
+    return txt;
+  }
   if (/^\[Script Info\]/im.test(txt) || /^Dialogue:/im.test(txt)) {
     const cues = [];
     for (const line of txt.split(/\r?\n/)) {
@@ -1068,11 +1276,16 @@ function normalizeSubtitleToVtt(raw) {
       const body = rawBody.replace(/\{\\[^}]*\}/g, "").replace(/\\N/gi, "\n").replace(/\\n/gi, "\n").replace(/\\h/gi, " ").trim();
       if (start && end && body) cues.push(`${start} --> ${end}\n${body}`);
     }
-    return "WEBVTT\n\n" + cues.join("\n\n");
+    return cues.length ? ("WEBVTT\n\n" + cues.join("\n\n")) : "";
   }
-  return "WEBVTT\n\n" + txt.replace(/(\d{1,2}):(\d{2}):(\d{2}),(\d{1,3})/g, (_, h, m, s, ms) => {
+  const converted = txt.replace(/(\d{1,2}):(\d{2}):(\d{2}),(\d{1,3})/g, (_, h, m, s, ms) => {
     return `${h.padStart(2, "0")}:${m}:${s}.${ms.padEnd(3, "0")}`;
   });
+  // Reject non-subtitle error strings like "Invalid or unsafe link" or JSON error bodies
+  if (!/(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}\s*-->\s*(?:\d{1,2}:)?\d{2}:\d{2}[.,]\d{1,3}/.test(converted)) {
+    return "";
+  }
+  return "WEBVTT\n\n" + converted;
 }
 
 export async function handleEdgeSubtitle(url, env) {
@@ -1111,42 +1324,21 @@ export async function handleEdgeSubtitle(url, env) {
       return new Response("Upstream subtitle error", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
     }
     const buf = await r.arrayBuffer();
-    const u8 = new Uint8Array(buf);
-    let raw = "";
-    if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) {
-      raw = new TextDecoder("utf-16le", { fatal: false }).decode(buf);
-    } else if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) {
-      raw = new TextDecoder("utf-16be", { fatal: false }).decode(buf);
-    } else {
-      try {
-        raw = new TextDecoder("utf-8", { fatal: true }).decode(buf);
-      } catch {
-        try {
-          raw = new TextDecoder("windows-1254", { fatal: false }).decode(buf);
-        } catch {
-          const trMap = { 0xd0: "\u011e", 0xdd: "\u0130", 0xde: "\u015e", 0xf0: "\u011f", 0xfd: "\u0131", 0xfe: "\u015f" };
-          let s = "";
-          for (let i = 0; i < u8.length; i++) {
-            const b = u8[i];
-            s += trMap[b] || String.fromCharCode(b);
-          }
-          raw = s;
-        }
-      }
-    }
+    const raw = decodeSubtitleBytes(buf);
     const vtt = normalizeSubtitleToVtt(raw);
     if (!vtt) {
       return new Response("Invalid subtitle document", { status: 502, headers: { "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" } });
     }
-    return new Response(vtt, {
-      status: 200,
-      headers: {
-        "Content-Type": "text/vtt; charset=utf-8",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "public, max-age=3600",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
+    const detectedLang = detectSubtitleTextLang(vtt);
+    const respHdrs = {
+      "Content-Type": "text/vtt; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Expose-Headers": "X-Watchlivo-Sub-Lang",
+      "Cache-Control": "public, max-age=3600",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (detectedLang) respHdrs["X-Watchlivo-Sub-Lang"] = detectedLang;
+    return new Response(vtt, { status: 200, headers: respHdrs });
   } catch (err) {
     const blocked = String(err?.message || "").includes("Blocked");
     return new Response(blocked ? "Blocked subtitle URL" : "Subtitle fetch timeout", {

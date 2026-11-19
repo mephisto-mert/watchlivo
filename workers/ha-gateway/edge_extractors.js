@@ -258,6 +258,25 @@ export function decodeHdfcEmbedHtml(rawHtml) {
   return "";
 }
 
+function inferExtractorSubLang(rawLang, rawLabel = "", rawUrl = "") {
+  const norm = (s) => String(s || "").replace(/İ/g, "i").replace(/I/g, "i").trim().toLowerCase();
+  const l = norm(rawLang);
+  const lbl = norm(rawLabel);
+  const u = norm(rawUrl);
+  const combo = `${l} ${lbl}`.trim();
+  if (!combo && !u) return "";
+  if (/(?:forced|foreign\s*only|signs)/i.test(combo) || /forced/i.test(u)) return "";
+  if (/(?:^|[\s_\-[/(])(?:tr|tur|türk|turk|turkish|türkçe|turkce)(?:$|[\s_\-\])])/i.test(combo) || /(?:sub_tur|turkish|\.tur\.|\/tr\.vtt)/i.test(u)) return "tr";
+  if (/(?:^|[\s_\-[/(])(?:en|eng|ing|english|ingilizce)(?:$|[\s_\-\])])/i.test(combo) || /(?:sub_eng|english|\.eng\.|\/en\.vtt)/i.test(u)) return "en";
+  const map3 = { ger: "de", deu: "de", fre: "fr", fra: "fr", spa: "es", por: "pt", pob: "pt", ita: "it", rus: "ru", ara: "ar", nld: "nl", dut: "nl", pol: "pl", jpn: "ja", kor: "ko", zho: "zh", chi: "zh", aze: "az" };
+  const tok = (l || lbl).split(/[-_\s]/)[0];
+  if (map3[tok]) return map3[tok];
+  if (/^[a-z]{2}$/.test(tok)) return tok;
+  if (/\/1\.vtt(?:\?|$)/i.test(u) && !lbl) return "tr";
+  if (/\/2\.vtt(?:\?|$)/i.test(u) && !lbl) return "en";
+  return "";
+}
+
 function parseEmbedVttTracks(rhtml, sourceTag = "fhd_embed") {
   const subs = [];
   const seen = new Set();
@@ -267,12 +286,8 @@ function parseEmbedVttTracks(rhtml, sourceTag = "fhd_embed") {
     const u = m[1].trim();
     if (!u || seen.has(u) || /forced/i.test(u)) continue;
     const lm = blk.match(/"label"\s*:\s*"([^"]+)"/i);
-    const lbl = (lm ? lm[1] : "").replace(/İ/g, "i").replace(/I/g, "i").toLowerCase();
-    if (lbl.includes("forced")) continue;
-    let lang = "";
-    if (lbl.includes("turk") || lbl.includes("türk") || /\.tur\./i.test(u) || /\/1\.vtt/i.test(u)) lang = "tr";
-    else if (lbl.includes("ing") || lbl.includes("eng") || /\.eng\./i.test(u) || /\/2\.vtt/i.test(u)) lang = "en";
-    else if (lbl.length >= 2) lang = lbl.slice(0, 2);
+    const lbl = lm ? lm[1] : "";
+    const lang = inferExtractorSubLang("", lbl, u);
     if (lang) {
       seen.add(u);
       subs.push({ url: u, lang, source: sourceTag });
@@ -413,7 +428,11 @@ async function extractFilemoonStream(embedUrl, u, _fetchPublicFn) {
   }
   const subs = (Array.isArray(decoded?.tracks) ? decoded.tracks : Array.isArray(data?.tracks) ? data.tracks : [])
     .filter((t) => t?.url && (!t.kind || t.kind === "captions" || t.kind === "subtitles"))
-    .map((t) => ({ lang: String(t.lang || t.language || "tr").slice(0, 2).toLowerCase(), url: t.url }));
+    .map((t) => {
+      const lang = inferExtractorSubLang(t.lang || t.language || "", t.label || "", t.url);
+      return lang ? { lang, url: t.url, source: "hls_filemoon" } : null;
+    })
+    .filter(Boolean);
   return { url: hlsSrc.url, referer: `${u.origin}/`, subs, tag: "hls_filemoon" };
 }
 
@@ -1354,6 +1373,15 @@ async function extractDizilife({ title, displayTitle, originalTitle, sourceUrl, 
             .replace(/\s*(?:Dizisi|Filmi|Full|HD|1080p|Türkçe|Dublaj|Altyazılı|İzle|Izle|Dizi\.life).*$/gi, "")
             .trim()
         : "";
+      const reqYrNum = /^\d{4}/.test(String(year || "")) ? Number(String(year).slice(0, 4)) : 0;
+      if (mtype === "movie" && reqYrNum) {
+        const pageYrM = epRes.html.match(/(?:datePublished|releaseYear|Yapım\s*Yılı|Yıl)[^0-9]{0,40}((?:19|20)\d{2})/i)
+          || epRes.html.match(/<meta[^>]+name=["']keywords["'][^>]+content=["'][^"']*\b((?:19|20)\d{2})\s+izle\b/i);
+        const pageYr = pageYrM?.[1] ? Number(pageYrM[1]) : 0;
+        if (pageYr && Math.abs(pageYr - reqYrNum) > 2) {
+          continue;
+        }
+      }
       if (cleanPt && titlesMatchScore(cleanPt, validTitles, mtype === "movie" ? year : "") < 40) {
         continue;
       }
@@ -1886,8 +1914,8 @@ async function extractDdizimag({ title, displayTitle, originalTitle, sourceUrl, 
         const su = String(sub.src || "").trim();
         const sl = String(sub.lang || "").toLowerCase().trim();
         const slbl = String(sub.label || "").toLowerCase();
-        if (su.startsWith("https://") && ["tr", "tur", "en", "eng"].includes(sl) && !slbl.includes("forced")) {
-          const normL = sl.startsWith("tr") || sl === "tur" ? "tr" : "en";
+        const normL = inferExtractorSubLang(sl, slbl, su);
+        if (su.startsWith("https://") && (normL === "tr" || normL === "en") && !slbl.includes("forced")) {
           if (!subs.some((x) => x.url === su)) subs.push({ lang: normL, url: su, source: "ddizimag" });
         }
       }
@@ -2143,8 +2171,10 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
     }
   }
 
+  const reqYrNum = /^\d{4}/.test(String(year || "")) ? Number(String(year).slice(0, 4)) : 0;
   let bestUrl = "";
   let bestScore = 0;
+  let bestSlugYear = "";
   for (const q of qList.slice(0, 2)) {
     const html = await fetchTextSafe(
       `${SC_ORIGIN}/arama/?s=${encodeURIComponent(q)}`,
@@ -2163,17 +2193,22 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
       const rawTitleAttr = decodeHtmlEntitiesBasic(m[3] || "").replace(/\s*(?:İzle|izle|HD|Full)\s*$/i, "").trim();
       const yrM = slug.match(/(?:^|-)((?:19|20)\d{2})$/);
       const slugYear = yrM ? yrM[1] : "";
+      if (slugYear && reqYrNum && Math.abs(Number(slugYear) - reqYrNum) > 2) continue;
       const slugClean = slug.replace(/-(?:19|20)\d{2}$/, "").replace(/-/g, " ").trim();
       const cands = [rawTitleAttr, slugClean].filter(Boolean);
+      const yrBonus = (slugYear && reqYrNum && Math.abs(Number(slugYear) - reqYrNum) <= 1) ? 35 : 0;
       for (const ct of cands) {
-        const sc = titlesMatchScore(slugYear ? `${ct} (${slugYear})` : ct, reqTitles, year);
+        const baseSc = titlesMatchScore(slugYear ? `${ct} (${slugYear})` : ct, reqTitles, year);
+        if (baseSc < 45) continue;
+        const sc = baseSc + yrBonus;
         if (sc > bestScore) {
           bestScore = sc;
           bestUrl = href;
+          bestSlugYear = slugYear;
         }
       }
     }
-    if (bestScore >= 90) break;
+    if (bestScore >= 120) break;
   }
   if (!bestUrl || bestScore < 45) return null;
 
@@ -2184,6 +2219,13 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
     4000
   );
   if (!pageHtml) return null;
+  if (!bestSlugYear && reqYrNum) {
+    const pYrM = pageHtml.match(/<title>[^<]*\((\d{4})\)[^<]*<\/title>/i)
+      || pageHtml.match(/\/yil\/((?:19|20)\d{2})\//i)
+      || pageHtml.match(/(?:datePublished|Yapım\s*Yılı|Vizyon\s*Tarihi)[^0-9]{0,40}((?:19|20)\d{2})/i);
+    const pYr = pYrM?.[1] ? Number(pYrM[1]) : 0;
+    if (pYr && Math.abs(pYr - reqYrNum) > 2) return null;
+  }
 
   const playerCands = [];
   const seenHashes = new Set();
@@ -2258,16 +2300,42 @@ export async function extractSinemaccMovie({ title, displayTitle, originalTitle,
 
     const subs = [];
     const subRef = `${cand.origin}/`;
+    const pushSinemaSub = (lang, rawU) => {
+      const su = String(rawU || "").trim();
+      if (!su || !su.startsWith("https://") || subs.some((x) => x.url === su)) return;
+      subs.push({ lang, url: su, referer: subRef, source: "sinemacc" });
+    };
     if (playerHtml) {
-      const mJsSub = playerHtml.match(/playerjsSubtitle\s*=\s*["'](?:\[[^\]]*\])?(https?:\/\/[^"']+)["']/i);
-      if (mJsSub?.[1]) {
-        subs.push({ lang: "tr", url: mJsSub[1].trim(), referer: subRef, source: "sinemacc" });
-      } else {
-        const unp = unpackDeanEdwards(playerHtml);
-        const mTrack = unp.replace(/\\\//g, "/").match(/"kind"\s*:\s*"captions"[^}]*"file"\s*:\s*"(https?:\/\/[^"]+)"/i)
-          || unp.replace(/\\\//g, "/").match(/"file"\s*:\s*"(https?:\/\/[^"]+)"[^}]*"label"\s*:\s*"Turkish"/i);
-        if (mTrack?.[1]) {
-          subs.push({ lang: "tr", url: mTrack[1].trim(), referer: subRef, source: "sinemacc" });
+      const mJsSub = playerHtml.match(/playerjsSubtitle\s*=\s*(["'])([\s\S]*?)\1/i);
+      if (mJsSub?.[2]) {
+        const rawSubStr = mJsSub[2].replace(/\\\//g, "/").trim();
+        const rawParts = rawSubStr.split(/,(?=\s*(?:\[[^\]]+\])?\s*https?:\/\/)/i).map((p) => p.trim()).filter(Boolean);
+        const parsedParts = [];
+        for (const part of rawParts) {
+          const pm = part.match(/^(?:\[([^\]]+)\])?\s*(https?:\/\/\S+)$/i);
+          if (!pm) continue;
+          const tagLbl = String(pm[1] || "").trim();
+          const su = pm[2].trim();
+          if (/forced/i.test(tagLbl) || /forced/i.test(su)) continue;
+          const detected = inferExtractorSubLang("", tagLbl, su);
+          parsedParts.push({ tagLbl, url: su, lang: detected });
+        }
+        const hasTaggedTr = parsedParts.some((p) => p.lang === "tr");
+        const hasTaggedEn = parsedParts.some((p) => p.lang === "en");
+        for (const p of parsedParts) {
+          const finalLang = p.lang || (parsedParts.length === 1 ? "tr" : (hasTaggedTr && !hasTaggedEn ? "en" : (!hasTaggedTr ? "tr" : "")));
+          if (finalLang) pushSinemaSub(finalLang, p.url);
+        }
+      }
+      if (!subs.length) {
+        const unp = unpackDeanEdwards(playerHtml).replace(/\\\//g, "/");
+        for (const tm of unp.matchAll(/\{[^{}]*"file"\s*:\s*"(https?:\/\/[^"]+)"[^{}]*\}/gi)) {
+          const blk = tm[0];
+          if (!/"kind"\s*:\s*"(?:captions|subtitles)"/i.test(blk) && !/"label"\s*:\s*"(?:Turkish|Türkçe|English|İngilizce)/i.test(blk)) continue;
+          const su = tm[1].trim();
+          const lm = blk.match(/"label"\s*:\s*"([^"]+)"/i);
+          const lang = inferExtractorSubLang("", lm?.[1] || "", su) || "tr";
+          pushSinemaSub(lang, su);
         }
       }
     }

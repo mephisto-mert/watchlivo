@@ -1,11 +1,11 @@
 // Mesh layout: NavBar (Taverns/Hyperbeam Studio Header) + MeshLayout grid + side-panel switching.
-import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261119_v224';
-import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261119_v224';
-import { navIcon, logo } from './home.js?v=20261119_v224';
-import { createSelection } from './selection.js?v=20261119_v224';
-import { buildControls } from './controls.js?v=20261119_v224';
-import { buildChat } from './chat.js?v=20261119_v224';
-import { PANELS } from './panels.js?v=20261119_v224';
+import { h, icons, popup, confirmPopup, openThemeModal } from '../ui.js?v=20261119_v225';
+import { state, setView, canSelectVideo, isHostOnly } from '../store.js?v=20261119_v225';
+import { navIcon, logo } from './home.js?v=20261119_v225';
+import { createSelection } from './selection.js?v=20261119_v225';
+import { buildControls } from './controls.js?v=20261119_v225';
+import { buildChat } from './chat.js?v=20261119_v225';
+import { PANELS } from './panels.js?v=20261119_v225';
 
 const PRIVACY_META = {
   public: ['🌐', 'Herkese Açık'],
@@ -155,7 +155,8 @@ export function buildLayout(app, ctx) {
           logo(),
           h('span', { class: 'room-header-sep' }),
           m ? (() => {
-            const activeRoomTitle = (!m.curated && m.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(m.media.title)))
+            const hasCustomRoomName = Boolean(m.customName && m.name && !/^Watchlivo (Sinema )?Odası$/i.test(String(m.name).trim()));
+            const activeRoomTitle = (!m.curated && !hasCustomRoomName && m.media?.title && !/içerik seçilmedi|medya seçilmedi|hazır/i.test(String(m.media.title)))
               ? String(m.media.title).trim()
               : (m.name || 'Watchlivo Odası');
             return h('span', { class: 'mesh-title', id: 'room-header-title', title: `${activeRoomTitle} (#${String(m.id || '').split('-').pop()})` },
@@ -229,7 +230,15 @@ export function buildLayout(app, ctx) {
       try { rightInst?.destroy?.(); } catch (_) {}
       try { selection?.destroy?.(); } catch (_) {}
     },
-    openSearch: () => { if (state.view.left !== 'Search') { setView('left', 'Search'); update(); } },
+    openSearch: () => {
+      if (typeof window !== 'undefined' && window.innerWidth <= 1180 && state.view.right !== 'Collapsed') {
+        setView('right', state.view.right);
+      }
+      if (state.view.left !== 'Search') {
+        setView('left', 'Search');
+      }
+      update();
+    },
   };
 }
 

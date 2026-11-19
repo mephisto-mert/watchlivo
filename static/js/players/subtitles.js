@@ -1,5 +1,5 @@
 // Rave VideoPlayerControlsFC Subtitle (selectTextTrack / VTTCue) & Studio Multi-Audio HLS (audioTracks) Engine.
-import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261119_v224';
+import { applyElementVolume, isIosWebKit, releaseMediaBoost } from './audio-gain.js?v=20261119_v225';
 
 const DEFAULT_PREFS = {
   color: 'white',       // 'white' | 'yellow' | 'cyan' | 'green' | 'pink'
@@ -143,6 +143,139 @@ export function parseVtt(vttText) {
     cues.push({ idx: cues.length, start: c.start, end: c.end, maxEnd: runningMaxEnd, text: c.text, norm: c.norm });
   }
   return cues;
+}
+
+const CLIENT_SUB_LANG_MAP = {
+  tr: 'tr', tur: 'tr', turkish: 'tr', turkce: 'tr', 'türkçe': 'tr', 'tr-tr': 'tr',
+  en: 'en', eng: 'en', english: 'en', ingilizce: 'en', 'en-us': 'en', 'en-gb': 'en',
+  de: 'de', deu: 'de', ger: 'de', german: 'de', almanca: 'de',
+  fr: 'fr', fra: 'fr', fre: 'fr', french: 'fr', 'fransızca': 'fr',
+  es: 'es', spa: 'es', spanish: 'es', ispanyolca: 'es',
+  pt: 'pt', por: 'pt', pob: 'pt', 'pt-br': 'pt', portuguese: 'pt', portekizce: 'pt',
+  it: 'it', ita: 'it', italian: 'it', italyanca: 'it',
+  ru: 'ru', rus: 'ru', russian: 'ru', 'rusça': 'ru',
+  ar: 'ar', ara: 'ar', arabic: 'ar', 'arapça': 'ar',
+  nl: 'nl', nld: 'nl', dut: 'nl', dutch: 'nl', 'felemenkçe': 'nl',
+  pl: 'pl', pol: 'pl', polish: 'pl', 'lehçe': 'pl',
+  ja: 'ja', jpn: 'ja', japanese: 'ja', japonca: 'ja',
+  ko: 'ko', kor: 'ko', korean: 'ko', korece: 'ko',
+  zh: 'zh', zho: 'zh', chi: 'zh', chinese: 'zh', 'çince': 'zh',
+  az: 'az', aze: 'az', azerice: 'az',
+  sv: 'sv', swe: 'sv', no: 'no', nor: 'no', da: 'da', dan: 'da', fi: 'fi', fin: 'fi',
+  el: 'el', ell: 'el', gre: 'el', cs: 'cs', cze: 'cs', ro: 'ro', ron: 'ro', hu: 'hu', hun: 'hu',
+  bg: 'bg', bul: 'bg', hr: 'hr', hrv: 'hr', sr: 'sr', srp: 'sr', uk: 'uk', ukr: 'uk',
+  fa: 'fa', per: 'fa', hi: 'hi', hin: 'hi', he: 'he', heb: 'he', id: 'id', ind: 'id', vi: 'vi', vie: 'vi',
+};
+
+const CLIENT_SUB_LABELS = {
+  tr: '🇹🇷 Türkçe', en: '🇬🇧 İngilizce', de: '🇩🇪 Almanca', fr: '🇫🇷 Fransızca',
+  es: '🇪🇸 İspanyolca', pt: '🇵🇹 Portekizce', it: '🇮🇹 İtalyanca', ru: '🇷🇺 Rusça',
+  ar: '🇸🇦 Arapça', nl: '🇳🇱 Felemenkçe', pl: '🇵🇱 Lehçe', ja: '🇯🇵 Japonca',
+  ko: '🇰🇷 Korece', zh: '🇨🇳 Çince', az: '🇦🇿 Azerice', sv: '🇸🇪 İsveççe',
+  no: '🇳🇴 Norveççe', da: '🇩🇰 Danca', fi: '🇫🇮 Fince', el: '🇬🇷 Yunanca',
+  cs: '🇨🇿 Çekçe', ro: '🇷🇴 Rumence', hu: '🇭🇺 Macarca', bg: '🇧🇬 Bulgarca',
+  hr: '🇭🇷 Hırvatça', sr: '🇷🇸 Sırpça', uk: '🇺🇦 Ukraynaca', fa: '🇮🇷 Farsça',
+  hi: '🇮🇳 Hintçe', he: '🇮🇱 İbranice', id: '🇮🇩 Endonezce', vi: '🇻🇳 Vietnamca',
+};
+
+const STREAM_SUB_SOURCES = new Set(['stream', 'fansub', 'dl_embed', 'sinemacc', 'fhd_embed', 'hfnl_embed', 'diziyou_net', 'dylove', 'filmmodu', 'ddizimag', 'hls_filemoon']);
+
+export function normalizeClientSubLang(rawLang, rawLabel = '') {
+  const clean = (v) => String(v || '').replace(/İ/g, 'i').replace(/I/g, 'i').trim().toLowerCase();
+  const l = clean(rawLang);
+  const lbl = clean(rawLabel);
+  if (CLIENT_SUB_LANG_MAP[l]) return CLIENT_SUB_LANG_MAP[l];
+  const base = l.split(/[-_\s]/)[0];
+  if (CLIENT_SUB_LANG_MAP[base]) return CLIENT_SUB_LANG_MAP[base];
+  if (/(?:türk|turk)/i.test(lbl)) return 'tr';
+  if (/(?:ingiliz|english|\beng\b)/i.test(lbl)) return 'en';
+  return base ? base.slice(0, 6) : 'tr';
+}
+
+function isStreamSyncedSub(t) {
+  return Boolean(t && (t.synced || STREAM_SUB_SOURCES.has(t.source) || String(t.id || '').startsWith('stream-') || String(t.id || '').includes('-hls')));
+}
+
+function buildCleanSubLabel(t, idxInLang, totalInLang) {
+  if (t.source === 'local' || t.source === 'youtube-native' || /Şarkı Sözleri/i.test(String(t.label || ''))) {
+    return t.label || 'Altyazı';
+  }
+  const code = normalizeClientSubLang(t.lang, t.label);
+  const base = CLIENT_SUB_LABELS[code] || `🌐 ${code.toUpperCase()}`;
+  const rawLbl = String(t.label || '').trim();
+  const parenM = rawLbl.match(/\(([^)]+)\)\s*$/);
+  const existingNote = parenM ? parenM[1].trim() : '';
+  const isCleanNote = existingNote && !/^(?:eng|tur|pob|por|fre|spa|ger|ita|rus|ara|nor|swe|cze|hun|hrv|ron|fin|dan|ell|nld|pol)$/i.test(existingNote);
+  if (isCleanNote) {
+    return `${base} (${existingNote})`;
+  }
+  if (totalInLang > 1) {
+    const tag = isStreamSyncedSub(t) ? `Kaynak ${idxInLang}` : `Seçenek ${idxInLang}`;
+    return `${base} (${tag})`;
+  }
+  if (isStreamSyncedSub(t)) return base;
+  return (code === 'tr' || code === 'en') ? `${base} (OpenSubtitles)` : base;
+}
+
+const _CL_TR_WORDS = new Set([
+  'bir', 'bu', 've', 'de', 'da', 'ne', 'ben', 'sen', 'biz', 'ama', 'için', 'değil', 'var', 'yok',
+  'evet', 'hayır', 'gibi', 'daha', 'çok', 'neden', 'burada', 'şimdi', 'tamam', 'şey', 'beni',
+  'seni', 'onu', 'bana', 'sana', 'olan', 'olarak', 'nasıl', 'kadar', 'sonra', 'önce', 'bunu',
+  'onun', 'benim', 'senin', 'bizim', 'lütfen', 'hadi', 'sadece', 'her', 'hiç', 'bile', 'öyle',
+]);
+const _CL_EN_WORDS = new Set([
+  'the', 'and', 'you', 'that', 'this', 'with', 'what', 'have', 'they', 'from', 'are', 'was',
+  'for', 'not', 'but', 'your', 'just', 'know', 'here', 'there', 'she', 'him', 'her', 'about',
+  'don', 'can', 'will', 'all', 'one', 'out', 'get', 'who', 'how', 'why', 'now', 'come', 'back',
+  'been', 'were', 'would', 'could', 'should', 'their', 'them', 'into', 'then', 'when', 'where',
+]);
+
+export function detectCuesLang(cues) {
+  if (!Array.isArray(cues) || cues.length < 6) return '';
+  const sample = cues.slice(0, 140).map((c) => c.text || '').join(' ').slice(0, 6500);
+  const words = sample.toLowerCase().match(/[a-zçğıöşü]+/gi) || [];
+  if (words.length < 18) return '';
+  let trW = 0;
+  let enW = 0;
+  for (let i = 0; i < words.length; i += 1) {
+    const w = words[i].toLowerCase();
+    if (_CL_TR_WORDS.has(w)) trW += 1;
+    if (_CL_EN_WORDS.has(w)) enW += 1;
+  }
+  const trChars = (sample.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length;
+  const nonTrExt = (sample.match(/[ñáéíóúãõäëïßàèìòùčřžšěůłńśźżåæø]/gi) || []).length;
+  const cyrOrAra = (sample.match(/[\u0400-\u04FF\u0600-\u06FF\u3040-\u30FF\u4E00-\u9FFF\uAC00-\uD7AF]/g) || []).length;
+  if (cyrOrAra > 20 || nonTrExt > trChars * 1.5 + 12) return '';
+  if (trW >= 8 && trChars >= 10 && trW >= enW * 2) return 'tr';
+  if (enW >= 14 && trChars <= 3 && enW >= trW * 2.5) return 'en';
+  return '';
+}
+
+function decodeSubtitleArrayBuffer(buf) {
+  const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+  const sampleLen = Math.min(u8.length, 64);
+  let oddZero = 0;
+  let evenZero = 0;
+  for (let bi = 0; bi + 1 < sampleLen; bi += 2) {
+    if (u8[bi] === 0) evenZero += 1;
+    if (u8[bi + 1] === 0) oddZero += 1;
+  }
+  const pairCount = Math.floor(sampleLen / 2);
+  if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) return new TextDecoder('utf-16le').decode(u8);
+  if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) return new TextDecoder('utf-16be').decode(u8);
+  if (pairCount >= 4 && oddZero >= Math.ceil(pairCount * 0.5) && evenZero === 0) return new TextDecoder('utf-16le').decode(u8);
+  if (pairCount >= 4 && evenZero >= Math.ceil(pairCount * 0.5) && oddZero === 0) return new TextDecoder('utf-16be').decode(u8);
+  const utf8Str = new TextDecoder('utf-8', { fatal: false }).decode(u8);
+  const replCount = (utf8Str.match(/\uFFFD/g) || []).length;
+  if (replCount === 0) return utf8Str;
+  let winStr = utf8Str;
+  try { winStr = new TextDecoder('windows-1254', { fatal: false }).decode(u8); } catch (_) {}
+  const utf8TrChars = (utf8Str.match(/[çğıöşüÇĞİÖŞÜ]/g) || []).length;
+  const winMojibake = (winStr.match(/Ä±|Ä°|ÄŸ|Äž|Ã§|Ã‡|Ã¶|Ã–|Ã¼|Ãœ|ÅŸ|Åž/g) || []).length;
+  if (utf8TrChars >= 6 && winMojibake >= Math.max(4, replCount * 2)) {
+    return utf8Str.replace(/\uFFFD/g, '');
+  }
+  return winStr;
 }
 
 export class SubtitleDubController {
@@ -393,22 +526,81 @@ export class SubtitleDubController {
   }
 
   _dedupeSubtitleTrackIds(tracks) {
-    const seenIds = new Set();
     const seenUrls = new Set();
-    const out = [];
+    const normalized = [];
+    const normSubUrlKey = (u) => {
+      const s = String(u || '').trim();
+      if (!s) return '';
+      if (s.includes('/api/rave/subtitle.vtt')) {
+        try {
+          const uo = new URL(s, typeof location !== 'undefined' ? location.origin : 'https://watchlivo.online');
+          const inner = uo.searchParams.get('url');
+          if (inner) return inner.trim();
+        } catch (_) {}
+      }
+      return s;
+    };
     for (const raw of (Array.isArray(tracks) ? tracks : [])) {
       if (!raw || (!raw.url && raw.source !== 'youtube-native')) continue;
-      if (raw.url && seenUrls.has(raw.url)) continue;
-      if (raw.url) seenUrls.add(raw.url);
-      let baseId = String(raw.id || raw.lang || 'sub').trim() || 'sub';
+      const uk = normSubUrlKey(raw.url);
+      if (uk && seenUrls.has(uk)) continue;
+      if (uk) seenUrls.add(uk);
+      const lang = raw.source === 'local' ? (raw.lang || 'tr') : normalizeClientSubLang(raw.lang, raw.label);
+      normalized.push({ ...raw, lang });
+    }
+    const rankTrack = (t) => {
+      if (t.source === 'local') return 0;
+      const synced = isStreamSyncedSub(t) ? 0 : 1;
+      if (t.lang === 'tr') return 10 + synced;
+      if (t.lang === 'en') return 20 + synced;
+      return 30 + synced;
+    };
+    normalized.sort((a, b) => rankTrack(a) - rankTrack(b));
+
+    const capped = [];
+    const langUsed = {};
+    let otherLangs = 0;
+    for (const t of normalized) {
+      if (t.source === 'local' || t.source === 'youtube-native') {
+        capped.push(t);
+        continue;
+      }
+      const cap = t.lang === 'tr' ? 5 : (t.lang === 'en' ? 3 : 1);
+      const cur = langUsed[t.lang] || 0;
+      if (cur >= cap) continue;
+      if (t.lang !== 'tr' && t.lang !== 'en') {
+        if (otherLangs >= 6) continue;
+        otherLangs += 1;
+      }
+      langUsed[t.lang] = cur + 1;
+      capped.push(t);
+    }
+
+    const totalByLang = {};
+    for (const t of capped) {
+      if (t.source !== 'local') totalByLang[t.lang] = (totalByLang[t.lang] || 0) + 1;
+    }
+    const idxByLang = {};
+    const seenIds = new Set();
+    const seenLabels = new Map();
+    const out = [];
+    for (const t of capped) {
+      const idxInLang = t.source === 'local' ? 1 : ((idxByLang[t.lang] = (idxByLang[t.lang] || 0) + 1));
+      const totalInLang = totalByLang[t.lang] || 1;
+      let baseId = String(t.id || t.lang || 'sub').trim() || 'sub';
+      if (baseId.startsWith('sub-') && t.lang) baseId = `stream-${t.lang}`;
       let nextId = baseId;
-      let idx = 2;
+      let suffixN = 2;
       while (seenIds.has(nextId)) {
-        nextId = `${baseId}-${idx}`;
-        idx += 1;
+        nextId = `${baseId}-${suffixN}`;
+        suffixN += 1;
       }
       seenIds.add(nextId);
-      out.push({ ...raw, id: nextId });
+      let label = buildCleanSubLabel(t, idxInLang, totalInLang);
+      const lblCount = (seenLabels.get(label) || 0) + 1;
+      seenLabels.set(label, lblCount);
+      if (lblCount > 1) label = `${label} #${lblCount}`;
+      out.push({ ...t, id: nextId, label });
     }
     return out;
   }
@@ -456,7 +648,7 @@ export class SubtitleDubController {
           title: (media.title || '').split(' — ')[0],
           season: String(media.season || 1),
           episode: String(media.episode || 1),
-          _v: '20261029V8',
+          _v: '20261119v225',
         };
         if (!media.tmdbId && baseUrl) queryParams.url = baseUrl;
         const qs = new URLSearchParams(queryParams);
@@ -467,16 +659,7 @@ export class SubtitleDubController {
           if (this._destroyed || this._mediaSeq !== seq) return;
           if (Array.isArray(data.subtitleTracks) && data.subtitleTracks.length) {
             const existing = Array.isArray(this.subtitleTracks) ? this.subtitleTracks : [];
-            const seenUrls = new Set(existing.map((t) => t.url));
-            const merged = [...existing];
-            for (const incoming of data.subtitleTracks) {
-              if (!incoming || !incoming.url || seenUrls.has(incoming.url)) continue;
-              seenUrls.add(incoming.url);
-              const langCnt = merged.filter((x) => x.lang === incoming.lang).length;
-              const nextId = langCnt === 0 ? incoming.lang : `${incoming.lang}-${langCnt + 1}`;
-              merged.push({ ...incoming, id: nextId });
-            }
-            this.subtitleTracks = this._dedupeSubtitleTrackIds(merged);
+            this.subtitleTracks = this._dedupeSubtitleTrackIds([...existing, ...data.subtitleTracks]);
             if (this.media) this.media.subtitleTracks = this.subtitleTracks;
           }
           if (Array.isArray(data.audioTracks) && data.audioTracks.length && !hasInitialAudio) {
@@ -730,12 +913,10 @@ export class SubtitleDubController {
         clearTimeout(tid);
         if (dResp.ok) {
           const buf = await dResp.arrayBuffer();
-          let dText = new TextDecoder('utf-8').decode(buf);
-          if (dText.includes('\uFFFD')) {
-            try { dText = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
-          }
+          const dText = decodeSubtitleArrayBuffer(buf);
           const dCues = parseVtt(dText);
           if (Array.isArray(dCues) && dCues.length >= 10) {
+            this._verifyTrackLangFromCues(track, dCues, '');
             this.cuesCache.set(cacheKey, { vtt: dText, cues: dCues, failedAt: 0 });
             return dCues;
           }
@@ -753,8 +934,10 @@ export class SubtitleDubController {
           this.cuesCache.set(cacheKey, { vtt: '', cues: [], failedAt: Date.now() });
           return [];
         }
+        const headerLang = String(r.headers?.get?.('X-Watchlivo-Sub-Lang') || '').trim().toLowerCase();
         const vtt = await r.text();
         const cues = parseVtt(vtt);
+        if (cues.length) this._verifyTrackLangFromCues(track, cues, headerLang);
         this.cuesCache.set(cacheKey, { vtt, cues, failedAt: cues.length ? 0 : Date.now() });
         return cues;
       } catch (e) {
@@ -763,6 +946,20 @@ export class SubtitleDubController {
       }
     }
     return [];
+  }
+
+  _verifyTrackLangFromCues(track, cues, serverHint = '') {
+    if (!track || track.source === 'local' || track.source === 'youtube-native') return;
+    const detected = (serverHint === 'tr' || serverHint === 'en') ? serverHint : detectCuesLang(cues);
+    if (!detected) return;
+    track._detectedLang = detected;
+    const claimed = normalizeClientSubLang(track.lang, track.label);
+    if (detected !== claimed) {
+      track.lang = detected;
+      const base = CLIENT_SUB_LABELS[detected] || `🌐 ${detected.toUpperCase()}`;
+      track.label = `${base} (Doğrulandı)`;
+      this.adapter?.events?.onTracksChanged?.();
+    }
   }
 
   _isNativeSubView(v) {
@@ -912,9 +1109,12 @@ export class SubtitleDubController {
       this.adapter.events.onTracksChanged?.();
       return null;
     }
-    const streamTrack = this.subtitleTracks.find((t) => (t.id === cleanId || t.lang === cleanId || (cleanId === 'tr' && String(t.lang || '').startsWith('tr'))) && (t.source === 'stream' || t.source === 'fansub' || String(t.id || '').includes('-hls')));
-    let track = (cleanId !== 'off' && streamTrack)
-      || this.subtitleTracks.find((t) => t.id === cleanId)
+    const exactIdTrack = this.subtitleTracks.find((t) => t.id === cleanId);
+    const streamTrack = this.subtitleTracks.find((t) => (t.id === cleanId || t.lang === cleanId || (cleanId === 'tr' && String(t.lang || '').startsWith('tr'))) && isStreamSyncedSub(t));
+    const desiredLang = isInit ? normalizeClientSubLang(cleanId) : '';
+    let track = (!isInit && exactIdTrack)
+      || (cleanId !== 'off' && streamTrack)
+      || exactIdTrack
       || this.subtitleTracks.find((t) => t.lang === cleanId)
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith(cleanId))
       || this.subtitleTracks.find((t) => (t.lang || '').toLowerCase().startsWith('tr'))
@@ -932,10 +1132,7 @@ export class SubtitleDubController {
       this.adapter.events.onTracksChanged?.();
       return null;
     }
-    if (!isInit) {
-      const persistLang = String(track.lang || '').toLowerCase().trim() || (cleanId.startsWith('sub-') ? 'tr' : cleanId);
-      try { localStorage.setItem('vortex_sub_lang', persistLang); } catch (e) { /* ignore */ }
-    }
+    const targetLangForFallback = desiredLang || track.lang;
     const seq = this._mediaSeq;
     this._loadingSubTrack = true;
     try {
@@ -953,25 +1150,38 @@ export class SubtitleDubController {
         this.adapter.events.onTracksChanged?.();
         return track;
       }
-      const isStreamEmbeddedFansub = track.source === 'fansub' || track.source === 'stream' || String(track.id || '').includes('-hls');
+      const isStreamEmbeddedFansub = isStreamSyncedSub(track);
+      const wrongAutoLang = Boolean(isInit && targetLangForFallback && track._detectedLang && track._detectedLang !== targetLangForFallback);
       const isForcedOrTruncated = track.source === 'local'
         ? false
-        : (isStreamEmbeddedFansub
-          ? (cues.length < 20)
-          : (cues.length < 35 || (isInit && cues.length < 45 && getSpan(cues) < minEnd)));
-      if (isForcedOrTruncated || cues.length === 0) {
-        const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === track.lang);
+        : (isInit
+          ? (isStreamEmbeddedFansub
+            ? (cues.length < 20)
+            : (cues.length < 35 || (cues.length < 45 && getSpan(cues) < minEnd)))
+          : false);
+      if (wrongAutoLang || isForcedOrTruncated || cues.length === 0) {
+        const alts = this.subtitleTracks.filter((t) => t.id !== track.id && t.lang === targetLangForFallback);
         for (const alt of alts) {
           const altCues = await this._loadCuesForTrack(alt);
           if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
+          if (isInit && alt._detectedLang && targetLangForFallback && alt._detectedLang !== targetLangForFallback) continue;
           const curSpan = getSpan(cues);
           const altSpan = getSpan(altCues);
+          if (wrongAutoLang && altCues.length >= 20) {
+            track = alt;
+            cues = altCues;
+            break;
+          }
           if ((altCues.length >= 60 && altSpan >= minEnd) || (altCues.length > cues.length && altSpan > curSpan) || (cues.length === 0 && altCues.length > 0)) {
             track = alt;
             cues = altCues;
             if (cues.length >= 60 && altSpan >= minEnd) break;
           }
         }
+      }
+      if (!isInit) {
+        const persistLang = String(track.lang || '').toLowerCase().trim() || (cleanId.startsWith('sub-') ? 'tr' : cleanId);
+        try { localStorage.setItem('vortex_sub_lang', persistLang); } catch (e) { /* ignore */ }
       }
       if (this._destroyed || this._mediaSeq !== seq || this._subTrackSeq !== myTrackSeq) return null;
       this.selectedSubId = track.id;
@@ -992,32 +1202,10 @@ export class SubtitleDubController {
     if (!file) return null;
     try {
       const buf = await file.arrayBuffer();
-      const u8 = new Uint8Array(buf);
-      let text = '';
-      const sampleLen = Math.min(u8.length, 64);
-      let oddZero = 0;
-      let evenZero = 0;
-      for (let bi = 0; bi + 1 < sampleLen; bi += 2) {
-        if (u8[bi] === 0) evenZero += 1;
-        if (u8[bi + 1] === 0) oddZero += 1;
-      }
-      const pairCount = Math.floor(sampleLen / 2);
-      if (u8.length >= 2 && u8[0] === 0xFF && u8[1] === 0xFE) {
-        text = new TextDecoder('utf-16le').decode(buf);
-      } else if (u8.length >= 2 && u8[0] === 0xFE && u8[1] === 0xFF) {
-        text = new TextDecoder('utf-16be').decode(buf);
-      } else if (pairCount >= 4 && oddZero >= Math.ceil(pairCount * 0.5) && evenZero === 0) {
-        text = new TextDecoder('utf-16le').decode(buf);
-      } else if (pairCount >= 4 && evenZero >= Math.ceil(pairCount * 0.5) && oddZero === 0) {
-        text = new TextDecoder('utf-16be').decode(buf);
-      } else {
-        text = new TextDecoder('utf-8').decode(buf);
-        if (text.includes('\uFFFD')) {
-          try { text = new TextDecoder('windows-1254').decode(buf); } catch (_) {}
-        }
-      }
+      const text = decodeSubtitleArrayBuffer(buf);
       const cues = parseVtt(text);
       if (!cues.length) return null;
+      const detLocalLang = detectCuesLang(cues) || 'tr';
       const customUrl = `local://sub/${Date.now()}-${encodeURIComponent(file.name)}`;
       const vttLines = ['WEBVTT', ''];
       cues.forEach((c, idx) => {
@@ -1034,7 +1222,7 @@ export class SubtitleDubController {
       this.cuesCache.set(customUrl, { vtt: vttStr, cues });
       const customTrack = {
         id: `local-${Date.now()}`,
-        lang: 'tr',
+        lang: detLocalLang,
         label: `📁 ${file.name.slice(0, 28)}`,
         url: customUrl,
         source: 'local',

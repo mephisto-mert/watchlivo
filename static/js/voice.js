@@ -1,7 +1,7 @@
 // Voice, Camera & P2P DataChannel mesh with perfect negotiation + HTTPS Voice Relay fallback.
-import { toast } from './ui.js?v=20261119_v224';
-import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v224';
-import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v224';
+import { toast } from './ui.js?v=20261119_v225';
+import { applyStreamBoost, releaseStreamBoost, closeSharedAudioContext } from './players/audio-gain.js?v=20261119_v225';
+import { acquireMicStreamSafe, prepareAudioSessionForMic, downsampleFloat32, encodeWavBytes, uint8ToBase64 } from './voice-note.js?v=20261119_v225';
 
 const ICE = [
   { urls: 'stun:stun.l.google.com:19302' },
@@ -721,7 +721,7 @@ export class Voice {
           if (!pkt || typeof pkt !== 'object') return;
           pkt.fromCid = id;
           const evType = pkt.event?.type;
-          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'speaking', 'cam_state', 'poll_sync', 'room_state', 'room_closed'].includes(evType)) return;
+          if (!evType || !['sync', 'chat', 'typing', 'reaction', 'soundfx', 'break_request'].includes(evType)) return;
           this.onP2pData?.(pkt);
         } catch (e) { /* ignore */ }
       };
