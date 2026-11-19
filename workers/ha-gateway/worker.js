@@ -593,10 +593,27 @@ export default {
       }
 
       // 3. Direct zero-egress offload via Service Binding (0ms RPC) for APK/IPA, stream-proxy, and edge-fetch
+      const isIpaDownload =
+        safePath === "/download/ipa" ||
+        /^\/download\/Watchlivo.*\.ipa$/i.test(safePath);
+      if (isIpaDownload && env.ASSETS) {
+        try {
+          const ipaAsset = await env.ASSETS.fetch(new Request("https://assets.local/static/Watchlivo.ipa"));
+          if (ipaAsset.ok) {
+            const h = new Headers(ipaAsset.headers);
+            h.set("Content-Type", "application/octet-stream");
+            h.set("Content-Disposition", 'attachment; filename="Watchlivo.ipa"');
+            h.set("Cache-Control", "no-store");
+            h.set("X-Watchlivo-Origin", "cf-ha-assets-ipa");
+            for (const [k, v] of Object.entries(EDGE_SECURITY_HEADERS)) h.set(k, v);
+            return new Response(request.method === "HEAD" ? null : ipaAsset.body, { status: 200, headers: h });
+          }
+        } catch {}
+      }
       const isBinaryDownload =
         safePath === "/download/apk" ||
-        safePath === "/download/ipa" ||
-        /^\/download\/Watchlivo.*\.(apk|ipa)$/i.test(safePath);
+        isIpaDownload ||
+        /^\/download\/Watchlivo.*\.apk$/i.test(safePath);
       const isEdgeFetchPath = safePath === "/api/rave/edge-fetch";
       const isStreamProxyPath =
         safePath === "/api/rave/stream-proxy" ||
